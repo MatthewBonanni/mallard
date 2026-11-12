@@ -30,6 +30,7 @@
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
+#include "run_status.h"
 #include "units.h"
 
 namespace {
@@ -79,22 +80,22 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         init(input_in);
         r.setup_done = true;
     } catch (const InputError & e) {
-        r.error(check_code::INPUT, (options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
+        r.error(diagnostic_code::INPUT, (options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
     } catch (const std::exception & e) {
-        r.error(check_code::SETUP, error_text(e));
+        r.error(diagnostic_code::SETUP, error_text(e));
     }
     for (const Diagnostic & key : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
-        r.error(check_code::KEY_UNUSED, describe(key));
+        r.error(diagnostic_code::KEY_UNUSED, describe(key));
     }
-    for (const auto & finding : deprecated_keys) r.warning(check_code::KEY_DEPRECATED, input_upgrade::advice(finding));
+    for (const auto & finding : deprecated_keys) r.warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     const ResolvedInput resolved = resolve_input(input);
     if (r.setup_done) r.resolved = resolved.toml;
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(resolved);
-        if (!file) r.error(check_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
+        if (!file) r.error(diagnostic_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
     if (!r.setup_done || !mesh) return r;
 
@@ -111,13 +112,33 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     return r;
 }
 
+std::string Solver::setup_check() {
+    CheckReport r;
+    CheckOptions options;
+    options.n_worst = 3;
+    check_resolution(r);
+    check_mesh_quality(r, options, {});
+    r.integrator = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
+    r.cfl_limit = cfl_limit(time_integrator->get_type());
+    r.dt_limit = use_cfl ? "CFL" : "fixed";
+    if (use_cfl) r.cfl = static_cast<double>(cfl);
+    check_settings(r);
+    const MemoryUsage m = memory_usage();
+    const auto largest =
+        comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total}, comm::Op::MAX);
+    json::Object memory;
+    memory.add_known("host", largest[0]).add_known("host_peak", largest[1]);
+    memory.add_known("device", largest[2]).add_known("device_total", largest[3]);
+    return check_summary(r).raw("memory", memory.str()).str();
+}
+
 void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {
     const MeshQuality quality = mesh_quality(*mesh);
     r.quality = summarize(*mesh, quality, options.n_worst);
     r.has_quality = true;
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
         if (r.quality[m].n_over_limit == 0) continue;
-        r.warning(check_code::QUALITY[m], logging::count(r.quality[m].n_over_limit) + " cells with " +
+        r.warning(diagnostic_code::QUALITY[m], logging::count(r.quality[m].n_over_limit) + " cells with " +
                                               MeshQuality::NAMES[m] + " above " +
                                               logging::real(MeshQuality::LIMITS[m]) + ", the worst " +
                                               logging::format("%.3g", r.quality[m].max) + " at " +
@@ -169,7 +190,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, c
             r.stencil_file = stencils::write(table, *mesh, cell_owners(), options.mesh_fields + "_stencils.h5");
         }
     } catch (const std::exception & e) {
-        r.error(check_code::MESH_FIELDS, error_text(e));
+        r.error(diagnostic_code::MESH_FIELDS, error_text(e));
     }
 }
 
@@ -333,14 +354,14 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes = static_cast<uint64_t>(scale * static_cast<double>(r.bytes));
         r.target_bytes_peak = static_cast<uint64_t>(scale * static_cast<double>(r.bytes_peak));
     } else {
-        r.error(check_code::RANKS, "--ranks " + std::to_string(r.target_ranks) + " in a check on " +
+        r.error(diagnostic_code::RANKS, "--ranks " + std::to_string(r.target_ranks) + " in a check on " +
                                        std::to_string(r.ranks) + " ranks: run the check serially or on " +
                                        std::to_string(r.target_ranks) + " ranks");
         r.target_ranks = r.ranks;
         return;
     }
     if (r.device_capacity > 0 && r.target_bytes_peak > r.device_capacity) {
-        r.error(check_code::MEMORY_DEVICE, "estimated peak of " + bytes(double(r.target_bytes_peak)) +
+        r.error(diagnostic_code::MEMORY_DEVICE, "estimated peak of " + bytes(double(r.target_bytes_peak)) +
                                                " per rank on " + std::to_string(r.target_ranks) +
                                                " ranks exceeds the device's " + bytes(double(r.device_capacity)) +
                                                ": run on more ranks or GPUs, or on a coarser mesh");
@@ -382,7 +403,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     const std::string per = r.sizing_name + "'s " + bytes(double(r.sizing_memory)) + " per " +
                             (r.sizing_gpu ? "GPU" : "rank");
     if (!(n_max >= 1.0)) {
-        r.warning(check_code::SIZING_FIXED, "the memory that does not scale with the cells does not fit in " + per +
+        r.warning(diagnostic_code::SIZING_FIXED, "the memory that does not scale with the cells does not fit in " + per +
                                                 ": size the run for a larger memory (--memory)");
         return;
     }
@@ -410,7 +431,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
     for (int tries = 0; !fits(part); tries++) {
         if (tries == 16 || uint64_t(n) >= max_ranks) {
-            r.warning(check_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n)) +
+            r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n)) +
                                                     " parts fits in " + per +
                                                     ": size the run for a larger memory (--memory) or coarsen the mesh");
             return;
@@ -492,7 +513,7 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
 
 void Solver::check_settings(CheckReport & r) const {
     if (r.cfl > r.cfl_limit) {
-        r.warning(check_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
+        r.warning(diagnostic_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
                                                          "limit of %s for smooth flow: lower run.cfl (or run.dt)",
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
     }
@@ -814,7 +835,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
             const Box b = region::bounds(*region);
             bool outside = false;
             for (size_t i = 0; i < N_DIM; i++) outside = outside || b[1][i] < domain[0][i] || b[0][i] > domain[1][i];
-            r.error(outside ? check_code::REGION_OUTSIDE : check_code::REGION_EMPTY,
+            r.error(outside ? diagnostic_code::REGION_OUTSIDE : diagnostic_code::REGION_EMPTY,
                     "region " + label + (outside ? " lies outside the domain" : " covers no cell of the mesh") +
                         ": it spans " + box_text(b) + " m, the domain " + box_text(domain) +
                         " m: move or resize it (--view shows both)");

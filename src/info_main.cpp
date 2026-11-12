@@ -34,6 +34,7 @@
 #include "output_reader.h"
 #include "provenance.h"
 #include "region_input.h"
+#include "run_page.h"
 #include "snapshot_block.h"
 
 namespace fs = std::filesystem;
@@ -374,71 +375,6 @@ void print_contents(const output::Contents & c) {
     print_snapshot_block(c);
 }
 
-std::string zones_json(const std::vector<std::pair<std::string, uint64_t>> & list) {
-    json::Object o;
-    for (const auto & [name, n] : list) o.add(name, n);
-    return o.str();
-}
-
-std::string strings_json(const std::vector<std::string> & list) {
-    std::string out = "[";
-    for (const auto & s : list) out += (out.size() > 1 ? "," : "") + json::quote(s);
-    return out + "]";
-}
-
-std::string contents_json(const output::Contents & c) {
-    json::Object o;
-    o.add("path", c.path).add("kind", std::string(output::kind_name(c.kind))).add("format", c.format);
-    o.raw("version", c.version >= 0 ? std::to_string(c.version) : "null");
-    o.raw("dim", c.dim ? std::to_string(c.dim) : "null");
-    o.raw("precision", c.real_size == 8 ? "\"double\"" : c.real_size == 4 ? "\"single\"" : "null");
-    o.add("compressed", c.compressed).add("global_order", c.global_order);
-    const output::MeshSummary & m = c.mesh;
-    json::Object mesh;
-    mesh.add("cells", m.n_cells).add("points", m.n_points).add("faces", m.n_faces).add("boundary_faces", m.n_boundary_faces);
-    mesh.raw("cell_types", zones_json(m.cell_types));
-    if (m.has_bounds) {
-        std::string box = "[";
-        for (size_t i = 0; i < 3; i++) box += std::string(i ? "," : "") + "[" + json::number(m.lo[i]) + "," + json::number(m.hi[i]) + "]";
-        mesh.raw("bounds", box + "]");
-    } else {
-        mesh.raw("bounds", "null");
-    }
-    mesh.raw("boundary_zones", zones_json(m.boundary_zones)).raw("cell_zones", zones_json(m.cell_zones));
-    mesh.raw("file", c.mesh_file.empty() ? "null" : json::quote(c.mesh_file));
-    o.raw("mesh", mesh.str());
-    std::string snapshots = "[";
-    for (const auto & s : c.snapshots) {
-        json::Object e;
-        e.add("t", s.t).raw("step", s.step >= 0 ? std::to_string(s.step) : "null").add("file", s.file).add("index", s.index);
-        e.raw("run_id", s.run_id.empty() ? "null" : json::quote(s.run_id));
-        e.raw("snapshot", s.has_block ? s.block.json() : "null");
-        snapshots += (snapshots.size() > 1 ? "," : "") + e.str();
-    }
-    o.raw("snapshots", snapshots + "]");
-    std::string fields = "[";
-    for (const auto & f : c.fields) {
-        json::Object e;
-        e.add("name", f.name).add("components", f.components).add("units", f.units).add("long_name", f.long_name);
-        e.add("location", f.location).add("min", f.min).add("max", f.max);
-        fields += (fields.size() > 1 ? "," : "") + e.str();
-    }
-    o.raw("fields", fields + "]");
-    o.raw("species", strings_json(c.species()));
-    if (c.kind == output::Kind::restart) {
-        std::vector<std::string> arrays;
-        for (const auto & a : c.restart.arrays) arrays.push_back(a.first);
-        o.raw("restart", json::Object()
-                             .add_numbers("attributes", c.restart.attributes)
-                             .raw("arrays", strings_json(arrays))
-                             .add("boundary_faces", c.restart.n_faces)
-                             .str());
-    }
-    o.raw("run", parsed_run(c).is_null() ? "null" : c.run);
-    o.raw("notes", strings_json(c.notes));
-    return o.str();
-}
-
 /** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */
 struct RecordedFile {
     uint64_t bytes = 0;
@@ -546,7 +482,23 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
     return problems;
 }
 
+/** @brief Writes DIR/report.html from DIR/mallard.jsonl. */
+int run_report(const std::string & dir) {
+    const fs::path log = fs::path(dir) / "mallard.jsonl";
+    if (!fs::exists(log)) {
+        std::cerr << "mallard info: " << dir << " has no mallard.jsonl, which --html builds the run report from "
+                  << "([output] run_log = \"\" writes none; the run's own report.html, [output] report, does not "
+                     "need it).\n";
+        return 1;
+    }
+    const std::string page = (fs::path(dir) / "report.html").string();
+    run_page::write(page, run_page::from_file(log.string()).html());
+    std::cout << "Wrote " << page << "\n";
+    return 0;
+}
+
 int run_directory(const std::string & dir, const cli::Args & args) {
+    if (args.has("--html")) return run_report(dir);
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
@@ -571,7 +523,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
             o.raw("outcome", "null");
         }
         std::string list = "[";
-        for (const auto & c : files) list += (list.size() > 1 ? "," : "") + contents_json(c);
+        for (const auto & c : files) list += (list.size() > 1 ? "," : "") + output::to_json(c);
         o.raw("files", list + "]");
         std::string bad = "[";
         for (const auto & [f, e] : errors) bad += (bad.size() > 1 ? "," : "") + json::Object().add("path", f).add("error", e).str();
@@ -598,24 +550,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         if (const json::Value * restart = s.find("restart"); restart && !s.find("restart_of")) {
             item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
-        if (record.end.type == json::Value::Type::OBJECT) {
-            const json::Value & e = record.end;
-            const json::Value * wall = e.find("wall");
-            // Run logs before 0.10 give only the reason
-            const json::Value * outcome = e.find("outcome");
-            item("Ended", (outcome ? outcome->string + ": " : "") + text(e.find("reason")));
-            item("Last step", text(e.find("step")));
-            for (const auto & [key, name] : {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
-                if (const json::Value * f = e.find(key)) {
-                    item(name, text(f->find("path")) + ", step " + text(f->find("step")) + ", t = " + text(f->find("t")) + " s");
-                }
-            }
-            item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
-            item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
-        } else {
-            item("Ended", "no end record: still running, or killed (SIGKILL, a lost node)");
-            item("Last step", text(record.last.find("step")) + ", of the last record");
-        }
+    }
+    if (record.found) {
+        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
     logging::section("Output files", count(files.size()) + " files");
     std::vector<std::vector<std::string>> rows;
@@ -733,7 +670,7 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
                                      std::filesystem::path(path).filename().string());
     }
     if (args.value_or("--format", "text") == "json") {
-        std::string out = contents_json(c);
+        std::string out = output::to_json(c);
         out.pop_back();
         std::string files;
         for (const std::string & f : view) files += (files.empty() ? "" : ",") + json::quote(f);
@@ -769,11 +706,14 @@ int info_main(const cli::Args & args) {
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
+        if (args.has("--html")) {
+            return cli::usage_error(*cli::command("info"), "--html takes a run directory, not " + path);
+        }
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
         if (args.value_or("--format", "text") == "json") {
-            std::cout << contents_json(c) << "\n";
+            std::cout << output::to_json(c) << "\n";
         } else {
             print_contents(c);
         }

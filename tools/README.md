@@ -12,7 +12,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the readers), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/plane_average.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
 | [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
@@ -23,6 +23,8 @@ The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; th
 python3 -m venv .venv
 .venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
+
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -184,7 +186,7 @@ python examples/channel_wmles/wmles_channel.py analyze input.toml forces_bottom.
 
 For `examples/channel_wmles`. `init` writes `channel_init.py`'s field with a temperature profile and the matching density
 for supersonic channels. `analyze` gives $Re_\tau$, $C_f$, $B_q$, the centerline temperature and $U^+$ from the force monitors (with
-the heat-flux column of modeled walls) and a `plane_average.py` profile, against Lee & Moser (downloaded on first use) or
+the heat-flux column of modeled walls) and a `mallard post average --homogeneous` profile, against Lee & Moser (downloaded on first use) or
 Trettel & Larsson.
 
 ### `tile_restart.py`: repeat a periodic flow along x
@@ -263,9 +265,19 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 
 Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes (`format = "xdmf"`); these scripts read each of them.
 
-### `mallard`: readers
+### `mallard`: the Python package
 
-A small Python package over Mallard's output, used by every script below:
+`tools/mallard` is the [Python package](../docs/guide/python.md) (`pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
+
+```python
+import mallard
+
+f = mallard.open("solut/flow.vtkhdf.series")
+p = f.read_all("P")                           # (snapshots, cells)
+g = f.geometry()                              # points, connectivity, offsets, VTK types
+```
+
+Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h5py alone, for the scripts below, which run without the library:
 
 ```python
 import sys; sys.path.insert(0, "tools")
@@ -334,17 +346,6 @@ Several cases side by side, synchronized in normalized time t / t_end, from a JS
 
 ![Double Mach reflection, 2D Riemann problem, detonation, Taylor-Green vortex and sphere wake in one animation](../docs/images/hero.gif)
 
-### `plane_average.py`: profiles from running statistics
-
-```sh
-python tools/post/plane_average.py solut/flow_000100.vtkhdf --average x z --out profile.csv
-```
-
-Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-aligned quad or hex mesh over homogeneous directions as a function of the others, e.g. a channel's profiles in y (stretched meshes too), adding the dispersive part to the covariances. Reads VTKHDF, VTU or PVTU, writes a CSV; in Python, `plane_average(centers, volumes, fields, "xz")` does the same on arrays. The [channel LES tutorial](../docs/tutorials/channel_les.md) draws these profiles from it:
-
-![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
-![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
-
 ### `insitu_statistics.py`: spectra, correlations and phase averages
 
 ```sh
@@ -392,9 +393,9 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`sphere_re300`](../examples/sphere_re300) | `make_sphere_re300_mesh.py` | `plot_sphere_re300.py`: Strouhal number, drag and lift | `animate_sphere_re300.py` |
 | [`taylor_green_3d`](../examples/taylor_green_3d) | | `plot_taylor_green.py`: kinetic energy and dissipation rate against the spectral DNS | `animate_taylor_green.py` |
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |
-| [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `plane_average.py`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
-| [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `plane_average.py`, `plot_channel.py` | |
-| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
+| [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `mallard post average`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
+| [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `mallard post average`, `plot_channel.py` | |
+| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `mallard post average`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
 | [`cbc_les`](../examples/cbc_les) | `cbc_les.py` (initial field, rescaling) | `cbc_les.py`: spectra against Comte-Bellot & Corrsin, dissipation budget | |
 | [`volvo_bluff_body`](../examples/volvo_bluff_body) | `make_volvo_mesh.py`, `volvo.py probes` | `volvo.py profiles`, `plot`, `budget`: against the experiment | `volvo.py slice`, `animate`, `render` |
 | [`flame_turbulence`](../examples/flame_turbulence) | `flame_turbulence.py hit`, `init` | `flame_turbulence.py analyze`, `figure`; `tfles_apriori.py` | `render_flame_turbulence.py` |
@@ -417,7 +418,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
-| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
+| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard`'s h5py readers that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `dev/check_support_matrix.py` | Fails if a test or build job of the GitHub workflows is missing from the [support matrix](../docs/guide/support.md) or the [supported-platforms table](../docs/installation.md#supported-platforms), or either names a job no workflow has; the first job of `ci.yml` runs it |
@@ -425,6 +426,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `dev/apt_install.sh PACKAGE...` | `apt-get update` and `install` for the CI jobs, with a time limit per try and three tries (later ones off the Azure mirror) |
 | `dev/check_spelling.py` | Fails on British spellings in tracked text files (Mallard uses American spelling everywhere), except names fixed by other formats or published titles; the first job of `ci.yml` runs it |
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
+| `docs/run_report.py` | The sample run report of the user guide, `docs/images/guide/run_report_sample.html`: a short 2D shock run with integrals and forces, its report rebuilt by `mallard info DIR --html` from its run record with the host and directory replaced by placeholders (`--mallard build/src/mallard`; also run by `make_figures.py --mallard`) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
 | `docs/case_view.py` | The case view figures alone: the images `mallard check --view` draws of a 2D duct and (`--mallard3d`) a 3D channel |
 | `docs/geometry.py` | The figures of the [geometry guide](../docs/guide/geometry.md): schematics of the region primitives, booleans, transforms and signed distance, and from one-step runs the volume fractions on a Cartesian and an O-grid, the probe samples, and the convergence of cell-average and point probe values |
@@ -433,6 +435,8 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/cli.py --mallard build/src/mallard [--check]` | The help pages of the [command line](../docs/guide/cli.md) page, from running `mallard <command> --help` for every command `mallard --help` lists; `CliTest.UserDocsShowEveryHelpPage` fails when they are out of date; standard library only |
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/feature_matrix.py [--check]` | The [feature matrix](../docs/guide/features.md): each pair of features marked validated, verified, implemented, rejected or untested, from the input guards in `src/`, the example cards' `validation` entries, `docs/verification/results.json`, `test/features.toml` and the support matrix; `--check` fails on a stale page or an inconsistent record (first job of `ci.yml`); standard library only |
+| `docs/python_api.py [--check]` | The [Python API](../docs/guide/python_api.md) reference, from the package's docstrings (read with `ast`, without importing it); `--check` fails on a stale page (first job of `ci.yml`); standard library only |
+| `docs/python.py --mallard build/src/mallard` | The figure of the [Python](../docs/guide/python.md) page, drawn with the package from the Sod example (a build with HDF5; `make_figures.py` runs it) |
 | `docs/used_in.py [--check]` | The "Used in" line of each feature section of the user guide, from the example inputs; `--check` fails on stale lines (first job of `ci.yml`); standard library only |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |

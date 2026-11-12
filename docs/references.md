@@ -129,6 +129,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the central (KEEP) flux of `convective_flux = "hybrid"` (`riemann::KEEP`).
 - <a id="jameson-2008"></a>A. Jameson, Formulation of kinetic energy preserving conservative schemes for gas dynamics and direct numerical simulation of one-dimensional viscous compressible flow in a shock tube using entropy and kinetic energy preserving schemes, *J. Sci. Comput.* 34, 188–208 (2008). [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
   Used in: the condition on the momentum flux under which the central flux changes the kinetic energy only by the pressure work (tested in `test/les_test.cpp`).
+- <a id="subbareddy-candler-2009"></a>P. K. Subbareddy and G. V. Candler, A fully discrete, kinetic energy consistent finite-volume scheme for compressible flows, *J. Comput. Phys.* 228, 1347–1364 (2009). [doi:10.1016/j.jcp.2008.10.026](https://doi.org/10.1016/j.jcp.2008.10.026)
+  Used in: `[numerics.hybrid] central = "cell_averages"`, a kinetic-energy-consistent central flux on the cell values with upwind dissipation from the reconstructed states.
+- <a id="modesti-pirozzoli-2017"></a>D. Modesti and S. Pirozzoli, A low-dissipative solver for turbulent compressible flows on unstructured meshes, with OpenFOAM implementation, *Comput. Fluids* 152, 14–23 (2017). [doi:10.1016/j.compfluid.2017.04.012](https://doi.org/10.1016/j.compfluid.2017.04.012)
+  Used in: `[numerics.hybrid] central = "cell_averages"` (an energy-preserving flux on the cell values, diffusion only where a sensor fires).
 - <a id="ducros-1999"></a>F. Ducros, V. Ferrand, F. Nicoud, C. Weber, D. Darracq, C. Gacherieu and T. Poinsot, Large-eddy simulation of the shock/turbulence interaction, *J. Comput. Phys.* 152, 517–549 (1999). [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
@@ -320,6 +324,12 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the `Q_CRITERION` output field (`src/solver/derived_fields.h`).
 - <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
   Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
+- <a id="bilger-starner-kee-1990"></a>R. W. Bilger, S. H. Stårner and R. J. Kee, On reduced mechanisms for methane-air combustion in nonpremixed flames, *Combust. Flame* 80, 135–149 (1990). [doi:10.1016/0010-2180(90)90122-8](https://doi.org/10.1016/0010-2180%2890%2990122-8)
+  Used in: the `MIXTURE_FRACTION` output field, Bilger's element-based mixture fraction (`src/solver/derived_fields.cpp`).
+- <a id="yamashita-shimada-takeno-1996"></a>H. Yamashita, M. Shimada and T. Takeno, A numerical study on flame stability at the transition point of jet diffusion flames, *Proc. Combust. Inst.* 26, 27–34 (1996). [doi:10.1016/S0082-0784(96)80196-2](https://doi.org/10.1016/S0082-0784%2896%2980196-2)
+  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`).
+- <a id="peters-2000"></a>N. Peters, *Turbulent Combustion*, Cambridge University Press (2000). [doi:10.1017/CBO9780511612701](https://doi.org/10.1017/CBO9780511612701)
+  Used in: the `SCALAR_DISSIPATION` output field, χ = 2 D \|∇Z\|² of the mixture fraction (`src/solver/derived_fields.cpp`).
 
 ## Grid convergence and discretization error
 
@@ -331,6 +341,19 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the procedure of `mallard post convergence` (eqs. 1–7: the representative cell size, the observed order by fixed-point iteration, the extrapolated value, the approximate and extrapolated relative errors, the fine-grid GCI; oscillatory convergence when e32 / e21 < 0); its Table 1 is a test (`test/post_convergence_test.cpp`).
 - <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
   Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
+
+## Statistics of time series
+
+- <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)
+  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/statistical_convergence.h`).
+- <a id="hoad-2010"></a>K. Hoad, S. Robinson and R. Davies, Automating warm-up length estimation, *J. Oper. Res. Soc.* 61, 1389–1403 (2010). [doi:10.1057/jors.2009.87](https://doi.org/10.1057/jors.2009.87)
+  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/statistical_convergence.h`).
+- <a id="schmeiser-1982"></a>B. Schmeiser, Batch size effects in the analysis of simulation output, *Oper. Res.* 30, 556–568 (1982). [doi:10.1287/opre.30.3.556](https://doi.org/10.1287/opre.30.3.556)
+  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/statistical_convergence.h`).
+- <a id="madras-sokal-1988"></a>N. Madras and A. D. Sokal, The pivot algorithm: a highly efficient Monte Carlo method for the self-avoiding walk, *J. Stat. Phys.* 50, 109–186 (1988). [doi:10.1007/BF01022990](https://doi.org/10.1007/BF01022990)
+  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/statistical_convergence.h`).
+- <a id="abramowitz-stegun-1964"></a>M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, National Bureau of Standards (1964), 26.7.3–4.
+  Used in: Student's t distribution for integer degrees of freedom (`src/solver/statistical_convergence.cpp`).
 
 ## Validation cases and reference data
 
@@ -366,6 +389,11 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="liu-zheng-sung-1998"></a>C. Liu, X. Zheng and C. H. Sung, Preconditioned multigrid methods for unsteady incompressible flows, *J. Comput. Phys.* 139, 35–57 (1998). [doi:10.1006/jcph.1997.5859](https://doi.org/10.1006/jcph.1997.5859)
 - <a id="park-kwon-choi-1998"></a>J. Park, K. Kwon and H. Choi, Numerical solutions of flow past a circular cylinder at Reynolds numbers up to 160, *KSME Int. J.* 12, 1200–1205 (1998). [doi:10.1007/BF02942594](https://doi.org/10.1007/BF02942594)
   Used in: `examples/cylinder` (Strouhal number, drag and lift at Re = 100).
+- <a id="dennis-chang-1970"></a>S. C. R. Dennis and G.-Z. Chang, Numerical solutions for steady flow past a circular cylinder at Reynolds numbers up to 100, *J. Fluid Mech.* 42, 471–489 (1970). [doi:10.1017/S0022112070001428](https://doi.org/10.1017/S0022112070001428)
+- <a id="fornberg-1980"></a>B. Fornberg, A numerical study of steady viscous flow past a circular cylinder, *J. Fluid Mech.* 98, 819–855 (1980). [doi:10.1017/S0022112080000419](https://doi.org/10.1017/S0022112080000419)
+- <a id="coutanceau-bouard-1977"></a>M. Coutanceau and R. Bouard, Experimental determination of the main features of the viscous flow in the wake of a circular cylinder in uniform translation. Part 1. Steady flow, *J. Fluid Mech.* 79, 231–256 (1977). [doi:10.1017/S0022112077000135](https://doi.org/10.1017/S0022112077000135)
+- <a id="taira-colonius-2007"></a>K. Taira and T. Colonius, The immersed boundary method: a projection approach, *J. Comput. Phys.* 225, 2118–2137 (2007). [doi:10.1016/j.jcp.2007.03.005](https://doi.org/10.1016/j.jcp.2007.03.005)
+  Used in (these four): the [from-run-to-figure tutorial](tutorials/post_processing.md) (the drag coefficient, recirculation length and separation angle of the steady wake at Re = 40).
 - <a id="johnson-patel-1999"></a>T. A. Johnson and V. C. Patel, Flow past a sphere up to a Reynolds number of 300, *J. Fluid Mech.* 378, 19–70 (1999). [doi:10.1017/S0022112098003206](https://doi.org/10.1017/S0022112098003206)
 - <a id="tomboulides-1993"></a>A. G. Tomboulides, S. A. Orszag and G. E. Karniadakis, Direct and large-eddy simulation of the flow past a sphere, in *Engineering Turbulence Modelling and Experiments 2*, Elsevier, 273–282 (1993). [doi:10.1016/B978-0-444-89802-9.50030-7](https://doi.org/10.1016/B978-0-444-89802-9.50030-7)
 - <a id="tomboulides-orszag-2000"></a>A. G. Tomboulides and S. A. Orszag, Numerical investigation of transitional and weak turbulent flow past a sphere, *J. Fluid Mech.* 416, 45–73 (2000). [doi:10.1017/S0022112000008880](https://doi.org/10.1017/S0022112000008880)

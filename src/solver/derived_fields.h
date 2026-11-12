@@ -1,8 +1,8 @@
 /**
  * @file derived_fields.h
- * @brief Derived output fields of a flow state (MACH, Q_CRITERION, LAMBDA2,
- *        SCHLIEREN) from its cell values and gradients, for the in-run
- *        writers and for any path that holds a loaded state.
+ * @brief Derived output fields of a flow state (derived_catalog.h) from its
+ *        cell values and gradients, for the in-run writers and mallard post
+ *        derive, which runs them on a state read from a file.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -15,14 +15,15 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
+#include "derived_catalog.h"
+#include "gradient.h"
+#include "input.h"
+#include "physics.h"
+#include "thermo.h"
+
+class MixtureModel;
 
 namespace derived {
-
-/** @brief The derived fields, in the order of their columns. */
-enum Field : uint8_t { MACH, Q_CRITERION, LAMBDA2, SCHLIEREN, N_FIELDS };
-
-/** @brief Output names of the derived fields, indexed by Field. */
-inline constexpr const char * NAMES[N_FIELDS] = {"MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"};
 
 /**
  * @brief A velocity gradient as a 3x3 tensor, a[k][i] = d u_k / d x_i. A 2D
@@ -124,34 +125,160 @@ rtype lambda2(const Tensor & g) {
            Kokkos::fmin(ev[0], Kokkos::fmin(ev[1], ev[2]));
 }
 
-/** @brief Which derived fields are computed, and the output column of each. */
-struct Selection {
-    int32_t column[N_FIELDS] = {-1, -1, -1, -1};
-    uint32_t n_columns = 0;
+/** @brief The divergence of the velocity, the trace of its gradient a (with the hoop strain of axisymmetric runs). */
+KOKKOS_INLINE_FUNCTION
+rtype dilatation(const Tensor & g) { return g.a[0][0] + g.a[1][1] + g.a[2][2]; }
 
+/** @brief The vorticity w = curl u of the velocity gradient a[k][i] = d u_k / d x_i. */
+KOKKOS_INLINE_FUNCTION
+void vorticity(const Tensor & g, rtype w[3]) {
+    w[0] = g.a[2][1] - g.a[1][2];
+    w[1] = g.a[0][2] - g.a[2][0];
+    w[2] = g.a[1][0] - g.a[0][1];
+}
+
+/** @brief Enstrophy |w|^2 / 2 of the velocity gradient a. */
+KOKKOS_INLINE_FUNCTION
+rtype enstrophy(const Tensor & g) {
+    rtype w[3];
+    vorticity(g, w);
+    return 0.5_r * (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+}
+
+/** @brief Strain-rate magnitude |S| = sqrt(2 S_ij S_ij), S the symmetric part of the velocity gradient a. */
+KOKKOS_INLINE_FUNCTION
+rtype strain_rate(const Tensor & g) {
+    rtype ss = 0.0;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            const rtype s = 0.5_r * (g.a[i][j] + g.a[j][i]);
+            ss += s * s;
+        }
+    }
+    return Kokkos::sqrt(2.0_r * ss);
+}
+
+/**
+ * @brief Takeno flame index grad Y_F . grad Y_O / (|grad Y_F| |grad Y_O|):
+ *        +1 where fuel and oxidizer gradients align (premixed), -1 where
+ *        they oppose (non-premixed), 0 where either vanishes.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype flame_index(const rtype * g_fuel, const rtype * g_oxidizer) {
+    rtype dot = 0.0, ff = 0.0, oo = 0.0;
+    FOR_I_DIM {
+        dot += g_fuel[i] * g_oxidizer[i];
+        ff += g_fuel[i] * g_fuel[i];
+        oo += g_oxidizer[i] * g_oxidizer[i];
+    }
+    const rtype norm = Kokkos::sqrt(ff) * Kokkos::sqrt(oo);
+    return norm > 0.0_r ? dot / norm : 0.0_r;
+}
+
+/** @brief Which derived fields are computed, the output column of each, and what they need together. */
+struct Selection {
+    int32_t column[N_FIELDS];
+    uint32_t n_columns = 0;
+    uint16_t needs = 0;  ///< need:: bits of the fields selected
+
+    Selection() {
+        for (int32_t & c : column) c = -1;
+    }
     /** @brief Compute field f, in the next column. */
     void add(Field f) {
-        if (column[f] < 0) column[f] = static_cast<int32_t>(n_columns++);
+        if (column[f] >= 0) return;
+        column[f] = static_cast<int32_t>(n_columns++);
+        needs = static_cast<uint16_t>(needs | FIELDS[f].needs);
     }
     /** @brief Whether any field is computed. */
     bool any() const { return n_columns > 0; }
+    /** @brief Whether the selected fields need all of the need:: bits n. */
+    bool need(uint16_t n) const { return (needs & n) != 0; }
 };
 
-/** @brief The cell values a derived field is computed from. */
-struct Inputs {
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;                  ///< rho, u, p of each cell
-    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;   ///< d W_k / d x_i
-    rtype gamma = 1.4_r;                                      ///< ratio of specific heats, without cell_gamma
-    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;   ///< mixtures: each cell's (frozen) gamma
-    Kokkos::View<rtype *[N_DIM]> radius_coords;               ///< axisymmetric runs: cell centers, radius second
+/** @brief The slots of the mass-fraction combinations whose gradients FLAME_INDEX and SCALAR_DISSIPATION read. */
+enum Scalar : uint8_t { FUEL, OXIDIZER, Z, N_SCALARS };
+
+/**
+ * @brief What the fields take from the input, beyond the state: the reference
+ *        of CP, the perfect gas's entropy datum, and for mixtures the streams
+ *        of the mixture fraction, the flame index's species and the progress
+ *        variable. Read once at setup by from_input.
+ */
+struct Settings {
+    // Perfect gas: ENTROPY = cp ln(T / T_ref) - R ln(p / p_ref), zero at [physics] p_ref, T_ref
+    rtype cp = 0.0, R = 0.0, T_ref = 1.0, p_ref = 1.0;
+    // CP = (p - p_inf) / q_inf, of [output] reference
+    bool reference = false;
+    rtype p_inf = 0.0, q_inf = 1.0;
+    // Mixtures: weights (slot, species) of the Scalar combinations of mass fractions; Z adds z_offset
+    Kokkos::View<rtype **, Kokkos::LayoutRight> scalar_weights;
+    bool streams = false;
+    rtype z_offset = 0.0;
+    int32_t fuel_species = -1, oxidizer_species = -1;
+    // PROGRESS_VARIABLE: sum of progress_weights Y (species), or (T - T_unburnt) / (T_burnt - T_unburnt)
+    enum class Progress : uint8_t { NONE, SPECIES, TEMPERATURE } progress = Progress::NONE;
+    Kokkos::View<rtype *> progress_weights;
+    rtype T_unburnt = 0.0, T_burnt = 1.0;
+    bool mixture = false, viscous = false;
+
+    /**
+     * @brief From [output] reference, [output.mixture] and, for a perfect gas,
+     *        [physics] p_ref and T_ref; mixture is null for a perfect gas.
+     */
+    static Settings from_input(const Input & input, const Euler & physics, const MixtureModel * mixture,
+                               bool viscous);
+
+    /** @brief Whether this case can compute field f. */
+    bool available(Field f) const;
+    /**
+     * @brief Throws the InputError of a [[write_data]] request for field f that
+     *        this case cannot compute: what it needs and how to give it.
+     */
+    void require(Field f, const Input & input) const;
+};
+
+/** @brief Scratch of the mass-fraction gradients (allocated if the selection needs them). */
+struct Workspace {
+    Kokkos::View<rtype **, Kokkos::LayoutRight> values;      ///< (cell, Scalar)
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  ///< (cell, Scalar, dimension)
+
+    Workspace() = default;
+    /** @brief Allocated for n_cells cells. */
+    explicit Workspace(uint32_t n_cells);
 };
 
 /**
- * @brief The selected fields of cells [0, n_cells) into the columns of out.
- *        MACH = |u| / sqrt(gamma p / rho), Q_CRITERION and LAMBDA2 of the
- *        velocity gradient, SCHLIEREN = |grad rho|.
+ * @brief The Scalar combinations of each cell's mass fractions Y (cells
+ *        [0, n_cells), owned and halo) and their gradients in the owned cells
+ *        [0, n_owned), with the stencil and weights of the least-squares cell
+ *        gradient: the boundary ghost takes the prescribed composition bc_Y of
+ *        inlet_state conditions, the cell's own elsewhere.
  */
-void compute(const Selection & selection, const Inputs & inputs, uint32_t n_cells, Kokkos::View<rtype **> out);
+void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Kokkos::LayoutRight> & Y,
+                      const LSQVertexGradientFunctor & stencil, const Kokkos::View<rtype **, Kokkos::LayoutRight> & bc_Y,
+                      uint32_t n_cells, uint32_t n_owned, Workspace & workspace);
+
+/** @brief The cell values a derived field is computed from. */
+struct Inputs {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W{};                ///< rho, u, p of each cell
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients{}; ///< d W_k / d x_i
+    rtype gamma = 1.4_r;                                      ///< ratio of specific heats, without cell_gamma
+    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma{}; ///< mixtures: each cell's (frozen) gamma
+    Kokkos::View<rtype *[N_DIM]> radius_coords{};             ///< axisymmetric runs: cell centers, radius second
+    Kokkos::View<rtype *[N_PRIMITIVE]> primitives{};          ///< u, p, T, h of each cell
+    Kokkos::View<rtype **, Kokkos::LayoutRight> Y{};          ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
+    chemistry::ThermoTable<> thermo{};                        ///< mixtures: species thermodynamics
+    Kokkos::View<rtype *[3]> transport{};                     ///< viscous mixtures: (cell, [mu, lambda, -])
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients{};  ///< Workspace::gradients
+};
+
+/**
+ * @brief The selected fields of cells [0, n_cells) into the columns of out,
+ *        as docs/guide/output.md#derived-fields defines them.
+ */
+void compute(const Selection & selection, const Settings & settings, const Inputs & inputs, uint32_t n_cells,
+             Kokkos::View<rtype **> out);
 
 } // namespace derived
 

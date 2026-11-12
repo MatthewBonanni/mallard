@@ -29,6 +29,7 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
+    conditional_statistics_test.cpp
     probes_test.cpp
     region_snapshots_test.cpp
     probe_reference_test.cpp
@@ -40,6 +41,7 @@ set(MALLARD_TEST_SOURCES
     check_test.cpp
     stencils_test.cpp
     run_report_test.cpp
+    run_page_test.cpp
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
@@ -49,6 +51,8 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     output_reader_test.cpp
     post_extract_test.cpp
+    post_derive_test.cpp
+    post_average_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
@@ -57,6 +61,7 @@ set(MALLARD_TEST_SOURCES
     invariance_test.cpp
     inlet_test.cpp
     step_queue_test.cpp
+    statistical_convergence_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

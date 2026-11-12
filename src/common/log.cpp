@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "json.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -269,20 +270,28 @@ bool written_pending() { return !written_since.empty(); }
 
 void set_verbose(const bool on) { verbose = on; }
 
-void warning(std::string_view message) {
+std::string diagnostic(const bool is_error, std::string_view code, std::string_view message, const bool color) {
+    return paint(std::string(is_error ? "error " : "warning ") + std::string(code) + ":", is_error ? Style::RED : Style::YELLOW,
+                 color) +
+           " " + std::string(message) + "\n  " + paint(diagnostic_code::docs(code), Style::DIM, color);
+}
+
+void warning(std::string_view code, std::string_view message) {
     if (!comm::is_root()) return;
     close_phase();
     std::cout << std::flush;
-    std::cerr << paint("warning:", Style::YELLOW, color_stderr()) << " " << message << std::endl;
-    run_log::write(json::Object().add("type", "warning").add("message", message));
+    std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
+    run_log::write(json::Object().add("type", "warning").add("code", std::string(code)).add("message", message).add(
+        "docs", diagnostic_code::docs(code)));
 }
 
-void error(std::string_view message) {
+void error(std::string_view code, std::string_view message) {
     close_phase();
     std::cout << std::flush;
     std::string prefix = comm::size() > 1 ? format("[rank %d] ", comm::rank()) : "";
-    std::cerr << prefix << paint("error:", Style::RED, color_stderr()) << " " << message << std::endl;
-    run_log::write(json::Object().add("type", "error").add("message", message));
+    std::cerr << prefix << diagnostic(true, code, message, color_stderr()) << std::endl;
+    run_log::write(json::Object().add("type", "error").add("code", std::string(code)).add("message", message).add(
+        "docs", diagnostic_code::docs(code)));
 }
 
 std::string count(uint64_t n) {

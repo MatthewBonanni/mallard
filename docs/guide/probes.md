@@ -132,7 +132,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
 | `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
 | `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
-| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
+| `CF`, `CP` | Skin friction and pressure coefficients of `reference` (the probe's, else `[output] reference`) |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
 | `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain |
@@ -162,6 +162,16 @@ to zero:
 
 ![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
 ![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
+
+### In the run record and report
+
+Each progress row of the [run record](output.md#run-record-mallardjsonl)
+holds each probe's latest reductions, and a one-point probe's latest values,
+with the step and time of its last write; the start record gives their units.
+These are the values [triggers](running.md#triggers) read, and
+[`report.html`](output.md#run-report-reporthtml) plots them, a group per
+probe. The record keeps the first 64 over every probe, in the order of
+`[[probes]]`; the probe's own files hold all of them at every write.
 
 ### Accuracy and pitfalls
 

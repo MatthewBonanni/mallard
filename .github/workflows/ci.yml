@@ -206,15 +206,15 @@ jobs:
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "gate": true},
-            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "gate": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "shards": 2, "gate": true},
+            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "shards": 4, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true, "gate": true},
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true, "gate": true},
             {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3", "gate": true},
             {"name": "clang-22", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "hdf5": true},
-            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "gate": true},
+            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "shards": 2, "gate": true},
             {"name": "gcc-15-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "os": "ubuntu-26.04-arm"},
             {"name": "mpi-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "os": "ubuntu-26.04-arm"},
             {"name": "gcc-16-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "cgns": true, "container": "gcc:16.2.0", "cmake": "4.2.3", "os": "ubuntu-26.04-arm"},
@@ -231,9 +231,15 @@ jobs:
             # The gate's MPI jobs leave the whole suite on one rank to the jobs without MPI
             backends=$(jq -c 'map(select(.gate) | .full = false)' <<< "$backends")
           fi
+          # A backend with shards runs as that many jobs, <name>-<i>of<n>, each building and
+          # running every n-th test of each suite run (googletest's sharding); names and -f only
+          # stay per backend, and the jobs share the backend's compiler cache
+          backends=$(jq -c 'map(if .shards then . as $b | range(1; $b.shards + 1)
+                                  | $b + {shard: ., job: "\($b.name)-\(.)of\($b.shards)"}
+                                else . + {job: .name} end)' <<< "$backends")
           echo "any=$(jq 'length > 0' <<< "$backends")" >> "$GITHUB_OUTPUT"
           echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
-          sh tools/dev/ci_status.sh queued $(jq -r '.[].name' <<< "$backends")
+          sh tools/dev/ci_status.sh queued $(jq -r '.[].job' <<< "$backends")
 
   build-and-test:
     needs: matrix
@@ -244,7 +250,7 @@ jobs:
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.matrix.outputs.backends) }}
-    name: ${{ matrix.backend.name }}
+    name: ${{ matrix.backend.job }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -253,8 +259,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: ${{ matrix.backend.name }}
+          STATUS_NAME: ${{ matrix.backend.job }}
         run: sh tools/dev/ci_status.sh running
+      # Read by googletest in every suite run below; mpirun's ranks inherit it
+      - name: Shard the suite
+        if: matrix.backend.shard
+        env:
+          SHARD: ${{ matrix.backend.shard }}
+          SHARDS: ${{ matrix.backend.shards }}
+        run: printf 'GTEST_TOTAL_SHARDS=%s\nGTEST_SHARD_INDEX=%s\n' "$SHARDS" "$((SHARD - 1))" >> "$GITHUB_ENV"
       - name: Install MPI
         timeout-minutes: 25
         if: matrix.backend.mpi
@@ -297,12 +310,14 @@ jobs:
           curl -fsSL "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
             tar -xz -C /opt
           echo "/opt/cmake-$VERSION-linux-$(uname -m)/bin" >> "$GITHUB_PATH"
+      # Branches restore main's latest cache. The name ends with a slash: a bare prefix
+      # (ccache-mpi-) also matched other backends' caches (ccache-mpi-3d-...)
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.backend.name }}-${{ github.sha }}
-          restore-keys: ccache-${{ matrix.backend.name }}-
+          key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
+          restore-keys: ccache/${{ matrix.backend.name }}/
       - name: Configure
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -310,20 +325,27 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON ${{ matrix.backend.flags }}
+      # The statistics count this build only. On main, the cache it saves keeps only what this
+      # build used (a hit renews an entry), so it holds one tree and stays small
       - name: Build
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CCACHE_MAXSIZE: 500M
+          CCACHE_MAXSIZE: 1G
         run: |
           cmake --version | head -1
+          ccache -z > /dev/null
+          start=$(date +%s)
           cmake --build build -j $(getconf _NPROCESSORS_ONLN) -- -k
           ccache --show-stats
+          if [ "$GITHUB_REF" = refs/heads/main ]; then
+            ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
+          fi
       - name: Save compiler cache
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && (!matrix.backend.shard || matrix.backend.shard == 1)
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ matrix.backend.name }}-${{ github.sha }}
+          key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
       - name: Test
         if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
@@ -345,6 +367,13 @@ jobs:
         run: |
           python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
           python3 tools/dev/check_output_units.py build/src/mallard
+      - name: Python package
+        if: matrix.backend.name == 'openmp'
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          python3 -m pip install -q --break-system-packages ./tools pytest
+          PATH="$PWD/build/src:$PATH" python3 -m pytest -q test/python
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
@@ -376,7 +405,7 @@ jobs:
           mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests"
       # Every rank in the report, and no warning about a sensible placement
       - name: Rank report (MPI)
-        if: matrix.backend.name == 'mpi'
+        if: matrix.backend.name == 'mpi' && (!matrix.backend.shard || matrix.backend.shard == 1)
         run: |
           dir=$(mktemp -d)
           sed -e 's/^t_stop = .*/n_steps = 2/' -e '/^\[\[write_data\]\]/,$d' examples/sod/input.toml > "$dir/input.toml"
@@ -396,7 +425,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: ${{ matrix.backend.name }}
+          STATUS_NAME: ${{ matrix.backend.job }}
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
@@ -426,32 +455,39 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python packages
-        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg
+        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg ./tools
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tutorials-${{ github.sha }}
-          restore-keys: ccache-tutorials-
-      # With HDF5, so that the tutorials and templates write the default VTKHDF output
+          key: ccache/tutorials/${{ github.sha }}
+          restore-keys: ccache/tutorials/
+      # With HDF5, so that the tutorials and templates write the default VTKHDF output, and
+      # the Python package's library, which the post-processing tutorial reads it with
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
-          CCACHE_MAXSIZE: 500M
+          CCACHE_MAXSIZE: 1G
         run: |
+          ccache -z > /dev/null
+          start=$(date +%s)
           for dim in 2 3; do
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
               -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target mallard
+            cmake --build build-$dim -j $(nproc) --target mallard MallardReader
           done
+          ccache --show-stats
+          if [ "$GITHUB_REF" = refs/heads/main ]; then
+            ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
+          fi
       - name: Save compiler cache
         if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tutorials-${{ github.sha }}
+          key: ccache/tutorials/${{ github.sha }}
       # Both dimensions in one install, run through the mallard front end
       - name: Install (2D and 3D)
         run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
