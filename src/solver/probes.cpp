@@ -1522,6 +1522,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             reduction_columns.emplace_back(reduction_name(r) + "_" + v, r == Reduction::INTEGRAL ? d.times(measure) : d);
         }
     }
+    for (const auto & [name, dimension] : reduction_columns) p.reduction_dimensions.push_back(dimension);
     const char * point_label = boundary ? "face" : cut ? "cell" : "point";
     if (!snapshot && entry.contains("spectra")) {
         if (p.average) {
@@ -1892,6 +1893,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
         if (p.time_interval > 0.0_r) p.n_written = probe_clock::written_after(p.n_written, p.time_interval, p.time_tol(), t);
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) return;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1953,6 +1955,36 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        dimensions.insert(dimensions.end(), p.reduction_dimensions.begin(), p.reduction_dimensions.end());
+        if (p.point_value) {
+            for (const auto & v : p.variables) dimensions.push_back(field_units::describe(v).dimension);
+        }
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {

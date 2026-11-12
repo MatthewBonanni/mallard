@@ -173,7 +173,12 @@ class PhaseAverage {
  *            cov_ab += a (d_a (b_new - mean_b,new) - cov_ab),
  *        so each output field is the current average itself. Restart files
  *        carry the averages and the weights, so a restarted run continues them
- *        bitwise. [statistics.spectra] adds spectra and two-point correlations
+ *        bitwise. With a batch duration T_b, the samples also fall in batches
+ *        of T_b from the start of the averages (a sample in the batch that
+ *        holds its time), each averaged the same way; when a sample opens a
+ *        batch, the last one's averages join the mean and the sum of squared
+ *        deviations of the batch values (batch_means.h), which give the
+ *        confidence intervals CI_<average>. [statistics.spectra] adds spectra and two-point correlations
  *        along homogeneous directions (Spectra), [statistics.phase] phase
  *        averages (PhaseAverage).
  */
@@ -186,6 +191,17 @@ class Statistics {
             rtype t_start;
             rtype a;
             uint64_t n_samples;
+        };
+        /** @brief The batches' clock, in device memory: the current batch's weight and index from origin (the start
+         *         of the averages), the closed batches, the last sample's weight in its batch a, and whether it closed
+         *         the last one. */
+        struct BatchClock {
+            rtype weight;
+            rtype origin;
+            rtype a;
+            uint64_t n_closed;
+            uint64_t index;
+            uint32_t close;
         };
 
         /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
@@ -220,8 +236,13 @@ class Statistics {
         /** @brief Add the means' sample at the device's time *t. */
         void sample_means(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
 
-        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
+        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., CI_ of each with batches, PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
+        /** @brief What restart files carry: the averages, the batch state BATCH_<average>, BATCH_AVG_<average>, BATCH_M2_<average> and the phases. */
+        std::vector<std::string> restart_variables() const;
+        /** @brief Whether the averages have confidence intervals by batches. */
+        bool batches_enabled() const { return batch > 0.0_r; }
+        uint64_t batches() const { return host_batch_clock().n_closed; }
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
 
@@ -256,6 +277,8 @@ class Statistics {
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */
         const auto & host_means() const { return h_mean; }
         const auto & host_covariances() const { return h_cov; }
+        /** @brief Host copy of the half widths: (cell, average), the means' then the covariances'. */
+        const auto & host_intervals() const { return h_ci; }
 
     private:
         std::vector<std::string> fields;
@@ -274,12 +297,22 @@ class Statistics {
         Kokkos::View<Clock> clock;
         Kokkos::View<rtype> t_sample;
 
+        // Batches: (cell, average) of the current batch, and the mean and m2 of the closed ones
+        rtype batch = 0.0;  // duration; 0: none
+        double confidence = 0.95;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft> batch_value, batch_avg, batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_batch_value, h_batch_avg, h_batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_ci;
+        Kokkos::View<BatchClock> batch_clock;
+
         Spectra spectra;
         PhaseAverage phase;
 
         void start_means(rtype t);
         Clock host_clock() const;
         void set_clock(const Clock & k);
+        BatchClock host_batch_clock() const;
+        void set_batch_clock(const BatchClock & b);
 };
 
 /**

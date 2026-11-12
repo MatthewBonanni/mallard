@@ -5763,6 +5763,12 @@
    "examples/turbulent_inflow_duct/input.toml"
   ]
  },
+ "statistics.convergence": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "statistics.fields": {
   "default": "[]",
   "dims": [

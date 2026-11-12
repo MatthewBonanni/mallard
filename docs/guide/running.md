@@ -76,6 +76,7 @@ front:
 | `[[forces]]` | `forces_<zone>_<column>`, e.g. `forces_cylinder_Fx_pressure`, `forces_wall_Q` |
 | `[[probes]]` reductions | `<probe>_<reduction>_<variable>`, e.g. `combustor_max_T`, `inlet_integral_MASS_FLUX` |
 | `[[probes]]` of one point | `<probe>_<variable>`, e.g. `outlet_T` |
+| [`[statistics.convergence]`](statistics.md#convergence-statisticsconvergence) | `convergence_<column>`, e.g. `convergence_stationary`, `convergence_converged`, `convergence_integrals_kinetic_energy_ci` |
 
 Characters other than letters, digits and `_` in these names become `_`.
 A misspelled name is an input error (also of `mallard check`) that lists
