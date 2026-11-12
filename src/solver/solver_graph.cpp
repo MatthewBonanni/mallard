@@ -441,24 +441,40 @@ void Solver::device_step_body() {
     // Before the samples and probes, so that a step a trigger fires at is the host's alone
     if (triggers_on_device()) evaluate_triggers();
     if (statistics_on_device()) {
-        // The samples of steps the device goes on from, as after_step takes them
+        // The samples of steps the device goes on from, as after_step takes them: each part by its own interval
+        // and t_start, as Statistics::due
         const Kokkos::View<const Statistics::Clock> clock = statistics.device_clock();
+        const Kokkos::View<const Spectra::Clock> spectra_clock = statistics.get_spectra().device_clock();
+        const Kokkos::View<const PhaseAverage::Clock> phase_clock = statistics.get_phase().device_clock();
         const Kokkos::View<uint32_t *> due = statistics_due;
-        const uint64_t every = statistics.sampling_interval();
-        const bool triggered = statistics.phases_triggered();
+        const bool means = statistics.means_enabled(), spectra = statistics.get_spectra().enabled(),
+                   phases = statistics.get_phase().enabled(), triggered = statistics.phases_triggered();
+        const bool staged_spectra = spectra && !statistics.get_spectra().averaged();
+        const uint64_t every = statistics.sampling_interval(), spectra_every = statistics.get_spectra().sampling_interval(),
+                       phase_every = statistics.get_phase().sampling_interval();
         Kokkos::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
-            const bool on = L.active && L.advanced && L.step % every == 0;
-            due(0) = on && s(T) > clock().t_start;
+            const bool on = L.active && L.advanced;
+            due(0) = means && on && L.step % every == 0 && s(T) > clock().t_start;
+            due(1) = spectra && on && L.step % spectra_every == 0 && s(T) > spectra_clock().t_start;
             // Phases of a trigger signal follow it before t_start too
-            due(1) = on && (triggered || s(T) > clock().t_start);
+            due(2) = phases && on && L.step % phase_every == 0 && (triggered || s(T) > phase_clock().t_start);
+            records((L.seq - 1) % n_records).spectra = staged_spectra && due(1);
         });
-        device_if(&statistics_due.data()[0], [&] {
-            update_primitives();
-            statistics.sample_device(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
-        });
-        if (statistics.get_phase().enabled()) {
+        if (means) {
+            device_if(&statistics_due.data()[0], [&] {
+                update_primitives();
+                statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
+        if (spectra) {
             device_if(&statistics_due.data()[1], [&] {
+                update_primitives();
+                statistics.sample_spectra(step_scalars.data() + T, cell_sampler(), &step_loop.data()->seq);
+            });
+        }
+        if (phases) {
+            device_if(&statistics_due.data()[2], [&] {
                 update_primitives();
                 statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
             });
@@ -470,9 +486,9 @@ void Solver::device_step_body() {
             const uint64_t entry_every = entry.sampling_interval();
             Kokkos::parallel_for("conditional_due", 1, KOKKOS_LAMBDA(const int) {
                 const step_queue::Loop & L = loop();
-                due(2 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
+                due(3 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
             });
-            device_if(&statistics_due.data()[2 + i], [&] {
+            device_if(&statistics_due.data()[3 + i], [&] {
                 update_primitives();
                 statistics.sample_conditional(i, step_scalars.data() + T, cell_sampler(), mesh->n_owned());
             });
@@ -656,6 +672,7 @@ void Solver::step_prologue() {
         record.outcome = step_queue::INACTIVE;
         record.reasons = 0;
         record.progress = 0;
+        record.spectra = 0;
     });
 }
 
@@ -741,7 +758,8 @@ void Solver::begin_device_steps() {
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
     if (statistics_on_device()) {
-        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 2 + statistics.get_conditional().size());
+        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 3 + statistics.get_conditional().size());
+        statistics.stage_spectra(n_records);
     }
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
     if (triggers_on_device()) {

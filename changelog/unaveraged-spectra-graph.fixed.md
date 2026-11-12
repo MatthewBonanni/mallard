@@ -1,0 +1,1 @@
+- On GPUs, `[statistics.spectra]` and `[statistics.phase]` with an `interval` or `t_start` of their own were sampled in the step graph at `[statistics]`' interval and from its `t_start`; each is now sampled at its own, as without the step graph. Runs whose statistics the host samples stop the step queue at each part's own interval too.
