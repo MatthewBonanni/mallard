@@ -1,0 +1,85 @@
+name: Test coverage map
+
+# After each push to main, the coverage map of the test suite (tools/dev/test_coverage.py):
+# for each test of the 2D and 3D suites, the files it depends on, uploaded as the artifact
+# test-coverage. A dispatch of ci.yml can then rerun only the tests a change can affect
+# (its gtest_filter input). One run at a time; a newer push replaces a waiting one.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'CITATION.cff'
+      - 'LICENSE'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  coverage:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Clang, MPI and HDF5
+        timeout-minutes: 25
+        run: >
+          sh tools/dev/apt_install.sh
+          clang-22 llvm-22 libopenmpi-dev openmpi-bin libtbb-dev libhdf5-openmpi-dev ccache
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/coverage/${{ github.sha }}
+          restore-keys: ccache/coverage/
+      # The mpi backend's configuration, with Clang's source-based coverage
+      - name: Build (2D and 3D)
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 2G
+        run: |
+          ccache -z > /dev/null
+          start=$(date +%s)
+          for dim in 2 3; do
+            cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22 \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CXX_FLAGS="-fprofile-instr-generate -fcoverage-mapping" \
+              -DCMAKE_EXE_LINKER_FLAGS=-fprofile-instr-generate \
+              -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON \
+              -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON -DMallard_DIM=$dim
+            cmake --build build-$dim -j "$(nproc)"
+          done
+          ccache --show-stats
+          ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
+      - name: Save compiler cache
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/coverage/${{ github.sha }}
+      # Each test in its own process; the MPI tests also on 3 ranks, as the MPI jobs run them
+      - name: Map the tests to the files they depend on
+        env:
+          MALLARD_TEST_TIMEOUT: 600
+        run: |
+          mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
+          for dim in 2 3; do
+            python3 tools/dev/test_coverage.py run --build build-$dim --dim $dim --out map-$dim.json \
+              --jobs "$(nproc)" --launcher "mpirun -n 1" --ranks 3 --rank-pattern "$mpi_tests" \
+              --llvm-cov llvm-cov-22 --llvm-profdata llvm-profdata-22
+          done
+          python3 tools/dev/test_coverage.py merge --out test-coverage.json.gz map-2.json map-3.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-coverage
+          path: test-coverage.json.gz
+          retention-days: 30
