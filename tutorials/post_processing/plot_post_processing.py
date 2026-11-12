@@ -3,15 +3,17 @@
 
     python plot_post_processing.py RUN_DIR... [--out DIR]
 
-Each RUN_DIR holds a run of input.toml on one mesh, post-processed with
-mallard post extract: the probes of probes.toml in extract/ and the snapshot
-of Q_CRITERION in extract/wake_q.vtkhdf.series. Prints, for each run, its
-cells, the drag coefficient from [[forces]] and from the momentum flowing
-out through the circle of radius 5, the separation angle and the length of
-the recirculation; then runs mallard post convergence on the runs. Writes the
-figures post_processing_wall (wall pressure and skin friction against the
-angle, and U_X along the wake axis), post_processing_field (U_X and the
-Q-criterion of the finest run) and post_processing_convergence (the drag
+Each RUN_DIR holds a run of input.toml on one mesh, post-processed: the
+probes of probes.toml by mallard post extract in extract/, the averages of
+its last snapshots by mallard post average in average/, and in the finest
+run the Q-criterion by mallard post derive in derived/. Prints, for each run,
+its cells, the drag coefficient from [[forces]] and from the momentum flowing
+out through the circle of radius 5, the separation angle, the length of the
+recirculation and the largest RMS of U_X over the averaged snapshots; then
+runs mallard post convergence on the runs. Writes the figures
+post_processing_wall (wall pressure and skin friction against the angle, and
+U_X along the wake axis), post_processing_field (U_X, the Q-criterion and the
+RMS of U_X of the finest run) and post_processing_convergence (the drag
 coefficient's history and its convergence with the mesh).
 """
 import argparse
@@ -25,7 +27,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "common"))
 import mallard  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.collections import PolyCollection  # noqa: E402
-from matplotlib.colors import Normalize  # noqa: E402
+from matplotlib.colors import LogNorm, Normalize  # noqa: E402
 from tutfig import render  # noqa: E402
 
 U, D = 0.2, 1.0
@@ -80,6 +82,9 @@ class Run:
         contour = mallard.open(os.path.join(path, "extract", "probe_contour_reductions.csv"))
         self.cd_contour = -contour.read("integral_MOMENTUM_FLUX_X")[0] / Q
 
+        average = mallard.open(os.path.join(path, "average", "average.vtkhdf.series"))
+        self.rms = average.read("RMS_U_X") / U
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -89,10 +94,10 @@ def main():
     runs = sorted((Run(p) for p in args.runs), key=lambda r: r.cells)
     fine = runs[-1]
 
-    print(f"{'run':8} {'cells':>7} {'C_D':>7} {'C_D circle':>10} {'L / D':>6} {'separation':>10}")
+    print(f"{'run':8} {'cells':>7} {'C_D':>7} {'C_D circle':>10} {'L / D':>6} {'separation':>10} {'RMS U_X / U':>11}")
     for r in runs:
         print(f"{r.name:8} {r.cells:7,} {r.cd[-1]:7.4f} {r.cd_contour:10.4f} {r.length:6.3f} "
-              f"{r.separation:9.2f}°")
+              f"{r.separation:9.2f}° {r.rms.max():11.2e}")
     for name, (lo, hi) in REFERENCES.items():
         print(f"reference {name}: {lo} to {hi}")
 
@@ -102,7 +107,7 @@ def main():
         for q in study["quantities"]:
             print(f"{q['name']}: {q['verdict']}")
 
-    q_snap = mallard.open(os.path.join(fine.path, "extract", "wake_q.vtkhdf.series"))
+    q_snap = mallard.open(os.path.join(fine.path, "derived", "derived.vtkhdf.series"))
     u_snap = mallard.open(os.path.join(fine.path, "solut", "wake.vtkhdf.series"))
     polys = cells(u_snap)
     centers = u_snap.geometry().vertex_averages()
@@ -133,9 +138,10 @@ def main():
         return fig
 
     def field(th):
-        fig, (ax, bx) = plt.subplots(1, 2, figsize=(11, 3.4), sharey=True)
+        fig, (ax, bx, cx) = plt.subplots(1, 3, figsize=(15, 3.4), sharey=True)
         for a, values, cmap, norm, label in ((ax, ux, "viridis", Normalize(-0.2, 1.3), "U_X / U"),
-                                             (bx, qc, "PuOr_r", Normalize(-0.1, 0.1), "Q D² / U²")):
+                                             (bx, qc, "PuOr_r", Normalize(-0.1, 0.1), "Q D² / U²"),
+                                             (cx, fine.rms, "magma", LogNorm(1e-4, 1e-1), "RMS of U_X / U")):
             pc = PolyCollection(polys, array=values, cmap=cmap, norm=norm, edgecolors="none", antialiased=False,
                                 rasterized=True)
             a.add_collection(pc)
@@ -150,8 +156,9 @@ def main():
         ax.tricontour(centers[near, 0], centers[near, 1], ux[near], levels=[0], colors=[th["surface"]],
                       linewidths=1.2)
         ax.set_ylabel("y / D")
-        ax.set_title(f"{fine.name}: U_X, the recirculation (U_X < 0) outlined", fontsize=11)
-        bx.set_title("Q-criterion, from mallard post extract", fontsize=11)
+        ax.set_title(f"{fine.name}: U_X, the recirculation outlined", fontsize=11)
+        bx.set_title("Q-criterion: mallard post derive", fontsize=11)
+        cx.set_title("RMS of U_X: mallard post average", fontsize=11)
         return fig
 
     def convergence(th):

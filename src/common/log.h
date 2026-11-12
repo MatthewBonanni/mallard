@@ -131,6 +131,8 @@ std::string diagnostic(bool is_error, std::string_view code, std::string_view me
 
 /// 1234567 -> "1,234,567".
 std::string count(uint64_t n);
+/// 1, "file" -> "1 file"; 1234, "file" -> "1,234 files".
+std::string count(uint64_t n, std::string_view noun);
 /// Wall-clock duration: "850 us" ("850 µs" in a UTF-8 locale), "12.3 ms", "4.56 s", "12m 03s", "2h 05m".
 std::string duration(double seconds);
 /// Value with an SI suffix and 3 significant digits: "16.3M", "1.20k".

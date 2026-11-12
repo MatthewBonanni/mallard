@@ -158,7 +158,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
         if (zones.size() != 2) {
             throw InputError({.key = key + ".zones",
                               .line = line_of(entry, "zones"),
-                              .message = "lists " + std::to_string(zones.size()) + " zones",
+                              .message = "lists " + logging::count(zones.size(), "zone"),
                               .fix = "Name the two zones the pair joins: zones = [\"A\", \"B\"]",
                               .docs = "docs/guide/meshes.md#periodic-boundaries"});
         }
@@ -190,7 +190,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
             if (t.size() != N_DIM) {
                 throw InputError({.key = key + ".translation",
                                   .line = line_of(entry, "translation"),
-                                  .message = "has " + std::to_string(t.size()) + " components",
+                                  .message = "has " + logging::count(t.size(), "component"),
                                   .fix = "Give " + std::to_string(N_DIM) + " components, one per direction",
                                   .docs = "docs/guide/meshes.md#periodic-boundaries"});
             }
