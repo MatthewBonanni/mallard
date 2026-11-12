@@ -124,6 +124,10 @@ other fields.
 | statistics | `MEAN_<A>` | `A's` | time average of A | [statistics] fields with A, or [[probes]] averaging A | write_data, probes |
 |  | `COV_<A>_<B>` | `A's times B's` | covariance of A and B | [statistics] products with A*B | write_data, probes |
 |  | `PHASE_<bin>_<A>` | `A's` | phase average of A in a bin | [statistics.phase] | write_data, probes |
+|  | `RMS_<A>` | `A's` | root mean square fluctuation of A | mallard post average, of A with its variance | write_data, probes |
+|  | `FAVRE_MEAN_<A>` | `A's` | Favre (density-weighted) time average of A | mallard post average --favre | write_data, probes |
+|  | `FAVRE_COV_<A>_<B>` | `A's times B's` | Favre covariance of A and B | mallard post average --favre, of A*B | write_data, probes |
+|  | `CI_<average>` | `the average's` | confidence interval half width of an average | [statistics] batch, of a MEAN_ or COV_ average | write_data, probes |
 | surface probes | `MASS_FLUX` | `kg m-2 s-1` | normal mass flux | [[probes]] on a surface or boundary zone | probes |
 |  | `ENTHALPY_FLUX` | `kg s-3` | normal total enthalpy flux | [[probes]] on a surface or boundary zone | probes |
 |  | `TAU_W` | `kg m-1 s-2` | wall shear stress magnitude | [[probes]] on a wall zone | probes |
