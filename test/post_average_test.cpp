@@ -366,5 +366,7 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSn
     std::vector<std::string> words = restarts(run);
     words.insert(words.end(), {"--region", dense, "--homogeneous", "x", "-o", fresh_dir("solution_homogeneous")});
     EXPECT_EQ(average(words, &errors), 2);
-    if (comm::is_root()) EXPECT_NE(errors.find("defined by the solution"), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("defined by the solution"), std::string::npos) << errors;
+    }
 }
