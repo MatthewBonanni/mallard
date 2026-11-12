@@ -64,8 +64,8 @@ struct Elements {
  */
 Elements elements(const Mesh & mesh, const Region & region);
 
-/** @brief The levels of a region's conditions in each local cell: SolutionLevels::levels() on the host. */
-using Levels = Kokkos::View<const double **[N_DIM + 1], Kokkos::HostSpace>;
+/** @brief The levels of a region's conditions in each local cell: SolutionLevels::levels() mirrored on the host. */
+using Levels = Kokkos::View<const double **[N_DIM + 1], Kokkos::DefaultExecutionSpace::array_layout, Kokkos::HostSpace>;
 
 /**
  * @brief The elements of a region defined by the solution, with its

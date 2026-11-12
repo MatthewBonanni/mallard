@@ -134,10 +134,14 @@ struct Cause {
 /** @brief The likely causes, most likely first (always at least one). */
 std::vector<Cause> rank_causes(const Evidence & e);
 
-/** @brief The report as text: what and where, the causes, the evidence, how to reproduce it. */
-std::string text(const Evidence & e, const std::vector<Cause> & causes);
+/**
+ * @brief The report as text: what and where, the causes, the evidence, the progress rows before the failure and how
+ *        to reproduce it, as report:: sections and tables with the case's units.
+ * @param color ANSI styles, for a terminal
+ */
+std::string text(const Evidence & e, const std::vector<Cause> & causes, bool color = false);
 
-/** @brief The report as a JSON object (also the run record's divergence record). */
+/** @brief The report as a JSON object (also the run record's divergence record), with the units of its values. */
 json::Object record(const Evidence & e, const std::vector<Cause> & causes);
 
 } // namespace divergence

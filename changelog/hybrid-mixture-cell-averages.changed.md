@@ -1,0 +1,1 @@
+- Gas mixtures with TENO and `convective_flux = "hybrid"` default to `[numerics.hybrid] central = "cell_averages"`, as a single gas does; set `central = "reconstructed"` for the former flux (#801).

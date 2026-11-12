@@ -129,6 +129,7 @@ struct RunEnd {
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
+struct CentralStates;
 
 /** @brief Whether some [[write_data]] of the input writes the variable. */
 bool writes_variable(const Input & input, const std::string & name);
@@ -694,6 +695,8 @@ class Solver {
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
+        std::string setup_check();
         void init_run_parameters();
         void init_output(region::Regions & regions);
         /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
@@ -759,6 +762,10 @@ class Solver {
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> force_columns(bool modeled) const;
+        /** @brief The units of the progress records' quantities, for the start record (udunits; "1": none). */
+        std::string progress_units() const;
         /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
         Dimension measure_dimension() const;
         template <typename F>
@@ -882,6 +889,7 @@ class Solver {
 
         template <typename T_riemann_solver>
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
+        CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
         void launch_flux_functor();
         /**
@@ -943,7 +951,8 @@ class Solver {
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
         bool input_from_file = false;  // init(file) has recorded the input's provenance
-        bool run_log_on = false;       // [output] run_log is set
+        bool run_log_on = false;       // the run's records are built: [output] run_log or report is set
+        std::string setup_check_json;  // the start record's check, when run_log_on
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
@@ -979,6 +988,7 @@ class Solver {
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
+        CentralFlux hybrid_central = CentralFlux::RECONSTRUCTED;  // [numerics.hybrid] central
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
         Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V

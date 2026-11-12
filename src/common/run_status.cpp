@@ -75,11 +75,17 @@ json::Object RunStatus::record() const {
         .add_known("memory_device", memory.device)
         .add_known("memory_device_total", memory.device_total)
         .add_numbers("monitors", monitors);
-    for (const auto & monitor : monitored) {
+    auto object = [](const MonitorValues & monitor) {
         json::Object values;
         values.add("step", monitor.step).add("t", monitor.t);
         for (const auto & [name, value] : monitor.values) values.add(name, value);
-        r.raw(monitor.name, values.str());
+        return values.str();
+    };
+    for (const auto & monitor : monitored) r.raw(monitor.name, object(monitor));
+    if (!probes.empty()) {
+        json::Object by_probe;
+        for (const auto & probe : probes) by_probe.raw(probe.name, object(probe));
+        r.raw("probes", by_probe.str());
     }
     if (!health.empty()) r.raw("health", health.record().str());
     return r;
