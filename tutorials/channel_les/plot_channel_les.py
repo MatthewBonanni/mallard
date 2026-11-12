@@ -2,12 +2,13 @@
 """Figures of the channel LES tutorial.
 
     python plot_channel_les.py mesh channel.msh [--out DIR]
-    python plot_channel_les.py results RUN_DIR [--t-start 100] [--retau 180] [--out DIR]
+    python plot_channel_les.py results RUN_DIR [--t-start 100] [--retau 180] [--mallard PATH] [--out DIR]
 
 mesh: the box with its boundary zones and the cells of a cross-section
 (channel_geometry, channel_mesh).
 results: RUN_DIR holds a run of input.toml. Averages the last statistics
-snapshot (series stats/channel) over x and z, folds the two halves, takes the
+snapshot (series stats/channel) over x and z with mallard post average
+--statistics (RUN_DIR/profile.csv), folds the two halves, takes the
 wall shear from the viscous x-forces on both walls averaged from --t-start
 on, and compares with the DNS of Moser, Kim & Mansour (1999), downloaded on
 first use: prints Re_tau, Cf and the profile peaks and draws
@@ -18,6 +19,7 @@ Reynolds stresses in wall units).
 """
 import argparse
 import os
+import subprocess
 import sys
 
 import numpy as np
@@ -28,7 +30,6 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "post"))
 import matplotlib.pyplot as plt  # noqa: E402
 import snapshots  # noqa: E402
 from matplotlib.collections import PolyCollection  # noqa: E402
-from plane_average import plane_average, read_cells  # noqa: E402
 from plot_channel import MKM_RE_TAU, mkm, read_forces, read_profile  # noqa: E402
 from tutfig import label_box, render  # noqa: E402
 
@@ -96,13 +97,11 @@ def mesh(args):
 def results(args):
     run = args.path
     ref = mkm(os.path.expanduser("~/.cache/mallard/mkm"), args.retau)
-    stats = snapshots.last(os.path.join(run, "stats", "channel"))
-    centers, volumes, fields = read_cells(stats)
-    kept, coords, counts, columns = plane_average(centers, volumes, fields, "xz")
+    stats = os.path.abspath(snapshots.last(os.path.join(run, "stats", "channel")))
+    # Where the run ran, so that the mesh file its input names resolves
+    subprocess.run([args.mallard, "post", "average", stats, "--latest", "--statistics", "--homogeneous", "x,z",
+                    "--name", "profile", "-o", "."], cwd=run, check=True, stdout=subprocess.DEVNULL)
     profile = os.path.join(run, "profile.csv")
-    names = list(columns)
-    np.savetxt(profile, np.column_stack([coords[:, 0], counts] + [columns[k] for k in names]), delimiter=",",
-               header=",".join(["y", "cells"] + names), comments="")
     t, F = read_forces([os.path.join(run, "forces_bottom.csv"), os.path.join(run, "forces_top.csv")])
     tau = F / (2 * LX * LZ)
     win = t >= args.t_start
@@ -245,6 +244,7 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--t-start", type=float, default=100.0, help="start of the averaging window (h/U_b)")
     ap.add_argument("--retau", type=int, default=180, choices=sorted(MKM_RE_TAU))
+    ap.add_argument("--mallard", default="mallard", help="the mallard executable (default: mallard on PATH)")
     ap.add_argument("--out", help="output directory (default: docs/images/tutorials)")
     args = ap.parse_args()
     mesh(args) if args.what == "mesh" else results(args)

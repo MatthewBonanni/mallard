@@ -15,6 +15,9 @@
 
 #include "build_info.h"
 #include "cli.h"
+#include "commands.h"
+#include "field_units.h"
+#include "json.h"
 
 namespace cli {
 
@@ -23,7 +26,8 @@ namespace {
 /**
  * What completes an option's value or a positional argument, from its placeholder
  * ("FILE|latest", "[DIRECTORY]"): lowercase alternatives are literal words; files,
- * directories and templates are kinds, written "@files[:GLOB]", "@dirs", "@templates".
+ * directories, templates, input keys and comma-separated output fields are kinds, written
+ * "@files[:GLOB]", "@dirs", "@templates", "@keys", "@fields".
  */
 using Values = std::vector<std::string>;
 
@@ -45,6 +49,9 @@ struct Node {
 
 /** @brief File types an option's file always is, whatever the command. */
 constexpr std::pair<std::string_view, std::string_view> FILE_GLOBS[] = {{"-i", "*.toml"}, {"--restart", "*.restart"}};
+
+/** @brief The options whose value is a list of output fields, whatever the command. */
+constexpr std::string_view FIELD_LISTS[] = {"--fields"};
 
 bool literal(std::string_view word) {
     return !word.empty() && std::all_of(word.begin(), word.end(), [](char c) {
@@ -72,6 +79,7 @@ Values values_of(std::string_view spec, std::string_view option = {}) {
     if (s.ends_with(']')) s.pop_back();
     if (s.starts_with('=')) s = s.substr(1);
     Values v;
+    if (std::find(std::begin(FIELD_LISTS), std::end(FIELD_LISTS), option) != std::end(FIELD_LISTS)) return {"@fields"};
     for (const std::string & alt : split(s, '|')) {
         if (literal(alt)) {
             v.push_back(alt);
@@ -79,6 +87,9 @@ Values values_of(std::string_view spec, std::string_view option = {}) {
             v.push_back("@dirs");
         } else if (alt == "TEMPLATE") {
             v.push_back("@templates");
+        } else if (alt == "SECTION") {
+            // mallard list keys also takes its input file in place of the section
+            v.insert(v.end(), {"@keys", "@files:*.toml"});
         } else if (alt == "FILE" || alt == "INPUT" || alt.starts_with("FILE_")) {
             std::string token = "@files";
             for (const auto & [name, glob] : FILE_GLOBS) {
@@ -196,7 +207,33 @@ std::string option_word(const Flag & f, const std::string & name) { return f.att
 
 std::string header() {
     return "# Completion for mallard " + mallard_version() + ", made by `mallard completion` from " +
-           "its command table.\n";
+           "its command table and its key and field catalogs.\n";
+}
+
+/** @brief The sections and keys of the key catalog, without the patterns (regions.<name>); none if it is not found. */
+std::vector<std::string> catalog_keys() {
+    json::Value catalog;
+    try {
+        catalog = general_key_catalog();
+    } catch (const std::exception &) {
+        return {};
+    }
+    std::vector<std::string> out;
+    for (const std::string & key : catalog.keys()) {
+        const std::string section = key.substr(0, key.find('.'));
+        if (std::find(out.begin(), out.end(), section) == out.end()) out.push_back(section);
+        if (key.find('<') == std::string::npos && key != section) out.push_back(key);
+    }
+    return out;
+}
+
+/** @brief The fields of the field catalog, without the patterns (Y_<s>, MEAN_<A>). */
+std::vector<std::string> catalog_fields() {
+    std::vector<std::string> out;
+    for (const CatalogField & f : field_units::catalog()) {
+        if (f.name.find('<') == std::string::npos) out.push_back(f.name);
+    }
+    return out;
 }
 
 /** @brief Shell case entries "<cmd> <option>" -> spec, specific commands first, then the global options. */
@@ -276,6 +313,10 @@ std::string bash() {
         s << "        " << pattern(key) << ") REPLY=" << quote(spec) << " ;;\n";
     }
     s << "        *) return 1 ;;\n    esac\n}\n\n";
+    s << "_mallard_catalog() {\n    case $1 in\n";
+    s << "        keys) REPLY=" << quote(join(catalog_keys())) << " ;;\n";
+    s << "        fields) REPLY=" << quote(join(catalog_fields())) << " ;;\n";
+    s << "    esac\n}\n\n";
     s << R"SH(_mallard_add() {
     local IFS=' ' token words='' tokens
     read -ra tokens <<< "$1"
@@ -285,6 +326,12 @@ std::string bash() {
             @files) COMPREPLY+=($(compgen -f -- "$2")) ;;
             @files:*) COMPREPLY+=($(compgen -d -- "$2") $(compgen -f -X "!${token#@files:}" -- "$2")) ;;
             @dirs) COMPREPLY+=($(compgen -d -- "$2")) ;;
+            @keys) _mallard_catalog keys; words+=" $REPLY" ;;
+            @fields)
+                # The item after the last comma, the ones before it kept
+                _mallard_catalog fields
+                COMPREPLY+=($(IFS=' '; compgen -W "$REPLY" -P "${2%"${2##*,}"}" -- "${2##*,}"))
+                compopt -o nospace 2>/dev/null ;;
             @templates) COMPREPLY+=($(compgen -W "$("${COMP_WORDS[0]}" new 2>/dev/null | )SH"
       << TEMPLATES << R"SH()" -- "$2")) ;;
             *) words+=" $token" ;;
@@ -404,6 +451,10 @@ std::string zsh() {
         s << "        (" << pattern(key) << ") reply=(" << quoted(spec) << ") ;;\n";
     }
     s << "        (*) return 1 ;;\n    esac\n}\n\n";
+    s << "_mallard_catalog() {\n    case $1 in\n";
+    s << "        (keys) reply=(" << quoted(join(catalog_keys())) << ") ;;\n";
+    s << "        (fields) reply=(" << quoted(join(catalog_fields())) << ") ;;\n";
+    s << "    esac\n}\n\n";
     s << R"SH(_mallard_add() {
     local token
     local -a lits
@@ -412,6 +463,8 @@ std::string zsh() {
             (@files) _files ;;
             (@files:*) _files -g "${token#@files:}" ;;
             (@dirs) _files -/ ;;
+            (@keys) _mallard_catalog keys; lits+=("${reply[@]}") ;;
+            (@fields) _mallard_catalog fields; compset -P '*,'; compadd -q -S , -a reply ;;
             (@templates) lits+=(${(f)"$(${(Q)words[1]} new 2>/dev/null | )SH"
       << TEMPLATES << R"SH()"}) ;;
             (*) lits+=("$token") ;;
@@ -487,6 +540,10 @@ std::string fish_args(const Values & v, bool & files) {
             out += " -a '(__fish_complete_directories)'";
         } else if (t == "@templates") {
             out += " -a '(__mallard_templates)'";
+        } else if (t == "@keys") {
+            out += " -a '(__mallard_catalog keys)'";
+        } else if (t == "@fields") {
+            out += " -a '(__mallard_list fields)'";
         } else {
             words.push_back(t);
         }
@@ -512,6 +569,14 @@ std::string fish() {
     for (const auto & [key, spec] : value_entries(all)) keys.push_back(fish_quote(key));
     for (const auto & [key, spec] : global_value_entries()) keys.push_back(fish_quote(key));
     s << "        case " << join(keys) << "\n            return 0\n    end\n    return 1\nend\n\n";
+    s << "function __mallard_catalog\n    switch $argv[1]\n";
+    for (const auto & [kind, words] : {std::pair{"keys", catalog_keys()}, std::pair{"fields", catalog_fields()}}) {
+        if (words.empty()) continue;
+        std::vector<std::string> quoted_words;
+        for (const std::string & w : words) quoted_words.push_back(fish_quote(w));
+        s << "        case " << kind << "\n            printf '%s\\n' " << join(quoted_words) << "\n";
+    }
+    s << "    end\nend\n\n";
     s << R"SH(# The command the words before the cursor name, then how many positional arguments follow it
 function __mallard_state
     set -l tokens (commandline -xpc 2>/dev/null; or commandline -opc)
@@ -550,6 +615,15 @@ function __mallard_arg
     test "$state[1]" = "$argv[1]"; or return 1
     test "$state[2]" = "$argv[2]"; and return 0
     test (count $argv) -ge 3; and test "$state[2]" -ge "$argv[2]"
+end
+
+# Catalog $argv[1] as the item after the last comma of a list, the ones before it kept
+function __mallard_list
+    set -l token (commandline -ct)
+    set -l head (string replace -r -- '^-[^=]*=' '' "$token" | string replace -r -- '[^,]*$' '')
+    for w in (__mallard_catalog $argv[1])
+        printf '%s%s\n' "$head" $w
+    end
 end
 
 function __mallard_templates

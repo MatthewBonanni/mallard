@@ -368,25 +368,30 @@ void DataWriter::select_subset(const std::vector<uint32_t> & cells, const std::v
     vtu_mesh.clear();
 }
 
-std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
-                                 : format == DataFormat::HDF5   ? "_*.h5"
-                                 : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
-                                                                : "_*.vtu");
+OutputSummary DataWriter::summary() const {
+    const std::string file = prefix + (format == DataFormat::RESTART  ? "_*.restart"
+                                       : format == DataFormat::HDF5   ? "_*.h5"
+                                       : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
+                                                                      : "_*.vtu");
+    std::vector<std::string> parts;
     if (subset) {
-        text += " (" + region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset) + " cells") + ")";
+        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset) + " cells"));
     }
     if (compression == Compression::ZLIB) {
-        text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
+        parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");
     }
-    text += interval > 0 ? " every " + logging::count(interval) + " steps"
-                         : " every " + units::with(logging::real(double(time_interval)), "s") + " of simulated time";
     if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
-        text += ": " + names;
+        parts.push_back(names);
     }
-    return {FORMAT_NAMES.at(format), text};
+    std::string contents;
+    for (const std::string & part : parts) contents += (contents.empty() ? "" : "; ") + part;
+    return {.kind = FORMAT_NAMES.at(format),
+            .file = file,
+            .steps = interval,
+            .seconds = interval > 0 ? 0.0 : double(time_interval),
+            .contents = contents};
 }
 
 std::string DataWriter::index_file() const {

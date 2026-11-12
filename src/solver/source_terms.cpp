@@ -293,7 +293,8 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             } else if (moves) {
                 text << ", moving";
             } else {
-                text << ", measure " << logging::real(integral);
+                m_summary.quantity(label + " region " + (N_DIM == 2 ? "area" : "volume"), logging::real(integral),
+                                   units::column(N_DIM == 2 ? "m^2" : "m^3"), "the region's part of the mesh");
             }
             if (n_parts > 1) text << ", each of " << n_parts << " copies";
             region_text = text.str();
@@ -325,7 +326,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         for (const auto & v : values) text += (text.empty() ? "" : ", ") + std::get<2>(v);
         text += total ? " (integrated totals)" : " (per unit volume)";
         text += kinds.empty() ? ", steady" : ", of " + kinds;
-        m_summary.emplace_back("Source " + label, text + "; " + region_text);
+        m_summary.setting("Source " + label, text + "; " + region_text);
     }
 
     std::vector<const kexpr::Program *> pointers;

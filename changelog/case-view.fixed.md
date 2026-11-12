@@ -1,0 +1,1 @@
+- The case view's `.vtm` (builds without HDF5) escapes the quotes in block names such as `probes[name = "p"].region`, which made it unreadable.

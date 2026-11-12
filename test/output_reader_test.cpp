@@ -10,6 +10,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -193,6 +194,74 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheSameValuesAndUnits) {
     if (N_DIM == 2) {
         for (size_t c = 0; c < run.rho.size(); c++) EXPECT_EQ(velocity[3 * c + 2], 0.0);
     }
+}
+
+TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    const auto mesh = run.solver.get_mesh();
+    // Vertex averages of the box's cells, which are their centroids, in the global order
+    std::vector<double> centroids(3 * run.rho.size(), 0.0);
+    // Both from the rtype coordinates of the unit box, which the files hold as rtype values
+    const double rounding = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        for (size_t i = 0; i < N_DIM; i++) centroids[3 * run.global[c] + i] = double(mesh->h_cell_coords(c, i));
+    }
+    std::vector<std::string> files = snapshot_files(run.dir, "000004");
+    files.push_back(run.dir + "/flow.pvd");
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/flow.xmf", run.dir + "/series.vtkhdf"});
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        const output::Geometry g = output::read_geometry(file, file.snapshots.size() - 1);
+        ASSERT_EQ(g.types.size(), run.rho.size()) << name;
+        ASSERT_EQ(g.offsets.size(), run.rho.size() + 1) << name;
+        EXPECT_EQ(g.offsets.back(), g.connectivity.size()) << name;
+        std::vector<double> mine(3 * run.rho.size(), 0.0);
+        for (size_t c = 0; c < g.types.size(); c++) {
+            EXPECT_EQ(g.types[c], N_DIM == 2 ? 9 : 12) << name << " " << c;
+            const uint64_t n = g.offsets[c + 1] - g.offsets[c];
+            for (uint64_t k = g.offsets[c]; k < g.offsets[c + 1]; k++) {
+                for (size_t i = 0; i < 3; i++) mine[3 * c + i] += g.points[3 * g.connectivity[k] + i] / double(n);
+            }
+        }
+        mine = run.in_global_order(file, mine, 3);
+        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], rounding) << name << " " << i;
+    }
+}
+
+TEST(OutputReaderTest, ReadAllHoldsEverySnapshot) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    std::vector<std::string> files = {run.dir + "/flow.pvd", run.dir + "/probe_csv.csv", run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/series.vtkhdf", run.dir + "/probe_hdf5.h5"});
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        std::vector<double> each;
+        for (size_t k = 0; k < file.snapshots.size(); k++) {
+            const std::vector<double> v = output::read(file, "RHO", k);
+            each.insert(each.end(), v.begin(), v.end());
+        }
+        EXPECT_EQ(output::read_all(file, "RHO"), each) << name;
+    }
+}
+
+TEST(OutputReaderTest, ProbeFilesHoldTheirSamplePoints) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    std::vector<std::string> files = {run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/probe_hdf5.h5", run.dir + "/probe_vtkhdf.vtkhdf"});
+    const std::array<double, 3> start = {0.13, 0.27, 0.41}, end = {0.88, 0.62, 0.55};
+    for (const std::string & name : files) {
+        const output::Geometry g = output::read_geometry(output::open(name), 0);
+        ASSERT_EQ(g.points.size(), 18u) << name;
+        for (size_t p = 0; p < 6; p++) {
+            for (size_t i = 0; i < N_DIM; i++) {
+                EXPECT_NEAR(g.points[3 * p + i], start[i] + (end[i] - start[i]) * double(p) / 5.0, 1e-12) << name;
+            }
+        }
+    }
+    EXPECT_THROW(output::read_geometry(output::open(run.dir + "/restart_000004.restart"), 0), std::runtime_error);
+    EXPECT_THROW(output::read_geometry(output::open(run.dir + "/probe_csv.csv"), 0), std::runtime_error);
 }
 
 TEST(OutputReaderTest, SeriesIndexesListEverySnapshotOfTheirFiles) {
