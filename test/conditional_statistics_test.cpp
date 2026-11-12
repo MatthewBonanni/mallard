@@ -226,10 +226,10 @@ TEST(ConditionalStatisticsTest, SamplesAreWeightedByTheTimeSinceThePreviousOne) 
     solver.run();
     const auto r = solver.get_statistics().get_conditional()[0].result();
     EXPECT_EQ(r.samples, 3u);  // steps 2, 4, 6
-    EXPECT_DOUBLE_EQ(r.t_first, 0.015);
-    EXPECT_DOUBLE_EQ(r.t_last, 0.06);
+    EXPECT_DOUBLE_EQ(r.t_first, double(rtype(0.015)));
+    EXPECT_NEAR(r.t_last, 0.06, roundoff(1e-16));
     const double volume = 1.0;
-    EXPECT_NEAR(r.total, volume * (0.06 - 0.015), 1e-14);
+    EXPECT_NEAR(r.total, volume * (0.06 - 0.015), roundoff(1e-14));
     EXPECT_NEAR(r.weight[2], r.total, 1e-14);
     EXPECT_NEAR(r.pdf[2], 4.0, 1e-12);
     EXPECT_NEAR(r.mean[2], 1.0, 1e-14);

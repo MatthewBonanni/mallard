@@ -50,9 +50,10 @@ struct Profile {
  * @brief Averages columns over the directions of averaged ("xz": over x and z) as functions of
  *        the others. Cells whose centers agree in every kept direction, to rtol of that
  *        direction's extent, form a row; each weighs weights[c] (its volume, times its fraction
- *        of a region), and a Favre column weights[c] density[c]. Collective; the profile is
- *        complete on rank 0 only. Throws std::runtime_error naming the option for a direction
- *        this build does not have, or none left.
+ *        of a region), and a Favre column weights[c] density[c]. The sums over a row are exact
+ *        (fixed point), so the profile does not depend on the cells' numbering or the ranks.
+ *        Collective; the profile is complete on rank 0 only. Throws std::runtime_error naming
+ *        the option for a direction this build does not have, or none left.
  */
 Profile average(const std::vector<std::array<double, N_DIM>> & centers, const std::vector<double> & weights,
                 const std::vector<double> & density, const std::vector<Column> & columns,
