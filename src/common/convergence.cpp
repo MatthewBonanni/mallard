@@ -130,4 +130,79 @@ double fitted_order(const std::vector<double> & h, const std::vector<double> & e
     return (n * sxy - sx * sy) / d;
 }
 
+namespace {
+
+/** @brief Largest order the reference fits search: far above any scheme's. */
+constexpr double MAX_ORDER = 64.0;
+
+/** @brief ln(h^p - h_ref^p), scaled by h so that large orders do not underflow. */
+double log_difference(const double h, const double h_ref, const double p) {
+    return p * std::log(h) + std::log1p(-std::pow(h_ref / h, p));
+}
+
+/** @brief Sum of squared residuals of ln e = ln C + ln(h^p - h_ref^p), C at its best for p. */
+double residual(const std::vector<double> & h, const std::vector<double> & e, const double h_ref, const double p) {
+    std::vector<double> r;
+    double mean = 0.0;
+    for (size_t i = 0; i < h.size(); i++) {
+        r.push_back(std::log(e[i]) - log_difference(h[i], h_ref, p));
+        mean += r.back();
+    }
+    mean /= static_cast<double>(r.size());
+    double sum = 0.0;
+    for (const double x : r) sum += (x - mean) * (x - mean);
+    return sum;
+}
+
+} // namespace
+
+double reference_order(const double h_coarse, const double h_fine, const double h_ref, const double e_coarse,
+                       const double e_fine) {
+    if (!(h_coarse > h_fine && h_fine > h_ref && h_ref > 0.0 && e_coarse > 0.0 && e_fine > 0.0)) return NaN;
+    // ln((hc^p - hr^p) / (hf^p - hr^p)) increases with p, from ln(ln(hc/hr) / ln(hf/hr)) at p = 0
+    const double target = std::log(e_coarse / e_fine);
+    const auto g = [&](const double p) {
+        return log_difference(h_coarse, h_ref, p) - log_difference(h_fine, h_ref, p) - target;
+    };
+    double lo = 1e-9, hi = MAX_ORDER;
+    if (!(g(lo) < 0.0) || !(g(hi) > 0.0)) return NaN;
+    for (int i = 0; i < 200 && hi - lo > 1e-13 * hi; i++) {
+        const double mid = 0.5 * (lo + hi);
+        (g(mid) < 0.0 ? lo : hi) = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
+double fitted_reference_order(const std::vector<double> & h, const std::vector<double> & e, const double h_ref) {
+    std::vector<double> hp, ep;
+    for (size_t i = 0; i < h.size() && i < e.size(); i++) {
+        if (!(e[i] > 0.0) || !(h[i] > h_ref) || !(h_ref > 0.0)) continue;
+        hp.push_back(h[i]);
+        ep.push_back(e[i]);
+    }
+    if (hp.size() < 2) return NaN;
+    if (hp.size() == 2) {
+        return hp[0] > hp[1] ? reference_order(hp[0], hp[1], h_ref, ep[0], ep[1])
+                             : reference_order(hp[1], hp[0], h_ref, ep[1], ep[0]);
+    }
+    // A scan for the basin of the least residual, then golden-section search in it
+    constexpr double STEP = 0.05;
+    double best = STEP;
+    for (double p = STEP; p <= MAX_ORDER; p += STEP) {
+        if (residual(hp, ep, h_ref, p) < residual(hp, ep, h_ref, best)) best = p;
+    }
+    double a = std::max(best - STEP, 1e-9), b = best + STEP;
+    const double ratio = 0.5 * (std::sqrt(5.0) - 1.0);
+    for (int i = 0; i < 200 && b - a > 1e-12 * b; i++) {
+        const double x1 = b - ratio * (b - a), x2 = a + ratio * (b - a);
+        if (residual(hp, ep, h_ref, x1) < residual(hp, ep, h_ref, x2)) {
+            b = x2;
+        } else {
+            a = x1;
+        }
+    }
+    const double p = 0.5 * (a + b);
+    return p < MAX_ORDER - STEP ? p : NaN;
+}
+
 } // namespace convergence

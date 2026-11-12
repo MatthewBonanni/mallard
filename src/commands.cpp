@@ -224,10 +224,11 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
      "not uniform, or time-step studies. Default: (1 / cells)^(1/dim) from each run's cell count."},
     {"--field", "", "NAME",
      "Instead of quantities, the L1, L2 and Linf errors of this field of each run's last snapshot (NAME[k] for "
-     "a component of a vector) against --exact. Needs --exact."},
+     "a component of a vector) against --exact, or without it against the finest run's, remapped "
+     "conservatively onto each coarser run's cells (three or more runs)."},
     {"--exact", "", "EXPR",
      "The exact solution of --field, an expression of x, y, z and t, averaged over each cell (quadrature exact "
-     "to degree 6) at the snapshot's time."},
+     "to degree 6) at the snapshot's time. Default: the finest run is the reference."},
     {"--format", "", "text|json",
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
@@ -763,7 +764,7 @@ constexpr Command COMMANDS[] = {
                    "resolutions",
         .synopsis = "mallard post convergence RUN_DIR RUN_DIR [RUN_DIR...] [--quantity NAMES] [--time T | --average "
                     "T0:T1]\n"
-                    "mallard post convergence RUN_DIR|FILE... --field NAME --exact EXPR",
+                    "mallard post convergence RUN_DIR|FILE... --field NAME [--exact EXPR]",
         .description =
             "Estimates the discretization error of a case from runs of it at several resolutions: for each "
             "quantity, the order of accuracy the runs show, the value extrapolated to zero cell size and the fine "
@@ -780,14 +781,16 @@ constexpr Command COMMANDS[] = {
             "\n"
             "Three runs give an observed order; more give one per three successive runs, which agree once the "
             "runs are in the asymptotic range. Two runs assume the design order with a factor of safety of 3, a "
-            "warning. With --field and --exact the report is the error norms of a field against an exact solution "
-            "and their observed orders; then FILE can also be a snapshot or restart file of the whole mesh.",
+            "warning. With --field the report is the error norms of a field against an exact solution (--exact), "
+            "or against the finest run, and their observed orders; then FILE can also be a snapshot or restart file "
+            "of the whole mesh.",
         .options = CONVERGENCE_OPTIONS,
         .arguments = CONVERGENCE_ARGUMENTS,
         .examples = "$ mallard post convergence coarse medium fine          # every force, integral and probe\n"
                     "$ mallard post convergence coarse medium fine --quantity forces_cylinder:F_x\n"
                     "$ mallard post convergence n32 n64 n128 --average 10:20 --quantity F_x,F_y\n"
                     "$ mallard post convergence n16 n32 n64 --field RHO --exact '1 + 0.2 * sin(2 * pi * (x - t))'\n"
+                    "$ mallard post convergence n16 n32 n64 n128 --field RHO\n"
                     "$ mallard post convergence coarse fine --order 2 --format json",
         .exit_status = "0  no errors (there may be warnings: oscillating, two runs, an order far from the design's)\n"
                        "1  a quantity diverges, a run cannot be read, or the runs are not of one case\n"

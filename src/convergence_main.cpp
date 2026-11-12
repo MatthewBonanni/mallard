@@ -2,8 +2,8 @@
  * @file convergence_main.cpp
  * @brief `mallard post convergence`: the observed order of accuracy, the Richardson-extrapolated value and the
  *        grid convergence index of quantities of runs at several resolutions, and error norms of a field
- *        against an exact solution. Runs are told apart by what they record (run ids, cell counts), never by
- *        their files' names.
+ *        against an exact solution or the finest run. Runs are told apart by what they record (run ids, cell
+ *        counts), never by their files' names.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -51,6 +51,10 @@ const char * const NAME = "mallard post convergence";
 
 /** @brief Quadrature degree of the cell averages of --exact: errors of order h^7, below a sixth-order scheme's. */
 constexpr uint32_t EXACT_DEGREE = 6;
+
+/** @brief Degree of the finest run's polynomials remapped onto the coarser runs without --exact: errors of order
+ *         h_fine^6, below a sixth-order scheme's, and none where the coarser cells are unions of finer ones. */
+constexpr uint8_t REFERENCE_DEGREE = remap::MAX_DEGREE;
 
 /** @brief A quantity at most this fraction of its table's largest column on every run is zero to round-off. */
 constexpr double ZERO = 1e-12;
@@ -495,15 +499,18 @@ bool selects(const std::string & request, const std::string & quantity) {
 }
 
 // ---------------------------------------------------------------------------
-// Error norms of a field against an exact solution
+// Error norms of a field against an exact solution or the finest run
 
 struct Norms {
     double l1 = 0.0, l2 = 0.0, linf = 0.0;
     double t = 0.0;
 };
 
-/** @brief The mesh a run's block records (its [mesh] and [[periodic]]), its files as they resolve from the run's directory. */
-std::shared_ptr<Mesh> recorded_mesh(const Run & run) {
+/**
+ * @brief The mesh a run's block records (its [mesh] and [[periodic]]), its files as they resolve from the run's
+ *        directory, with the halo layers of remap polynomials of this degree.
+ */
+std::shared_ptr<Mesh> recorded_mesh(const Run & run, const uint8_t degree = 0) {
     const std::string text = recorded_input(run);
     if (text.empty()) throw std::runtime_error(run.arg + ": its run block records no input, so no mesh");
     const Input recorded = parse_input_string(text, run.arg + " (its run block)");
@@ -526,7 +533,7 @@ std::shared_ptr<Mesh> recorded_mesh(const Run & run) {
         std::streambuf * saved;
         ~Restore() { std::cout.rdbuf(saved); }
     } restore{saved};
-    return remap::source_mesh(setup, 0);
+    return remap::source_mesh(setup, degree);
 }
 
 /** @brief The field name and component of "NAME" or "NAME[k]". */
@@ -539,11 +546,16 @@ std::pair<std::string, uint32_t> field_component(const std::string & text) {
     return {text.substr(0, open), static_cast<uint32_t>(k)};
 }
 
-/** @brief The error norms of a run's field against the cell averages of the exact solution at its snapshot's time. */
-Norms exact_norms(const Run & run, const std::string & field_text, const Expression & exact, const Selection & sel,
-                  std::vector<std::string> & notes) {
+/** @brief The values of one component of a run's field, in global cell order, at the snapshot of the study. */
+struct FieldValues {
+    std::vector<double> values;
+    double t = 0.0;
+    std::string file;
+};
+
+/** @brief The latest (or that of --time) of the whole-mesh snapshots of a run holding the field. */
+FieldValues field_values(const Run & run, const std::string & field_text, const Selection & sel) {
     const auto [field, component] = field_component(field_text);
-    // The snapshot: the latest (or that of --time) of the whole-mesh snapshots holding the field
     output::Contents best;
     size_t best_index = 0;
     bool found = false;
@@ -583,21 +595,50 @@ Norms exact_norms(const Run & run, const std::string & field_text, const Express
     if (f.components > 1 && field_text.find('[') == std::string::npos) {
         throw UsageError(field + " is a vector: give one component, as " + field + "[0]");
     }
-    const std::vector<double> values = output::read(best, field, best_index);
-    const std::shared_ptr<Mesh> mesh = recorded_mesh(run);
-    const uint64_t n = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
-    if (n * f.components != values.size()) {
+    const std::vector<double> all = output::read(best, field, best_index);
+    FieldValues out;
+    out.values.resize(all.size() / f.components);
+    for (size_t c = 0; c < out.values.size(); c++) out.values[c] = all[c * f.components + component];
+    out.t = best.snapshots[best_index].t;
+    out.file = best.snapshots[best_index].file;
+    return out;
+}
+
+bool recorded_axisymmetric(const Run & run) {
+    const Input recorded = parse_input_string(recorded_input(run), run.arg + " (its run block)");
+    return find_value_or<bool>(recorded, "physics", "axisymmetric", false);
+}
+
+void check_cells(const Run & run, const Mesh & mesh, const FieldValues & f) {
+    const uint64_t n = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_cells;
+    if (n != f.values.size()) {
         throw std::runtime_error(run.arg + ": its recorded mesh has " + count(n) + " cells, its snapshot " +
-                                 count(values.size() / f.components));
+                                 count(f.values.size()));
     }
-    bool axisymmetric = false;
-    {
-        const std::string text = recorded_input(run);
-        const Input recorded = parse_input_string(text, run.arg + " (its run block)");
-        axisymmetric = find_value_or<bool>(recorded, "physics", "axisymmetric", false);
-    }
+}
+
+/** @brief Adds a cell's difference d, of measure (weighted by r = y in axisymmetric runs) weight, to the norms. */
+void accumulate(Norms & norms, double & measure, const double d, const double weight) {
+    norms.l1 += d * weight;
+    norms.l2 += d * d * weight;
+    norms.linf = std::max(norms.linf, d);
+    measure += weight;
+}
+
+void finish(Norms & norms, const double measure) {
+    norms.l1 /= measure;
+    norms.l2 = std::sqrt(norms.l2 / measure);
+}
+
+/** @brief The error norms of a run's field against the cell averages of the exact solution at its snapshot's time. */
+Norms exact_norms(const Run & run, const std::string & field_text, const Expression & exact, const Selection & sel,
+                  std::vector<std::string> & notes) {
+    const FieldValues f = field_values(run, field_text, sel);
+    const std::shared_ptr<Mesh> mesh = recorded_mesh(run);
+    check_cells(run, *mesh, f);
+    const bool axisymmetric = recorded_axisymmetric(run);
     Norms norms;
-    norms.t = best.snapshots[best_index].t;
+    norms.t = f.t;
     const overlap::Rule & rule = overlap::simplex_rule(EXACT_DEGREE + (axisymmetric ? 1u : 0u));
     double measure = 0.0;
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
@@ -613,16 +654,11 @@ Norms exact_norms(const Run & run, const std::string & field_text, const Express
                 weight += v * rule.weights[q] * r;
             }
         }
-        const double d = std::abs(values[mesh->h_global_cell(c) * f.components + component] - integral / weight);
-        norms.l1 += d * weight;
-        norms.l2 += d * d * weight;
-        norms.linf = std::max(norms.linf, d);
-        measure += weight;
+        accumulate(norms, measure, std::abs(f.values[mesh->h_global_cell(c)] - integral / weight), weight);
     }
-    norms.l1 /= measure;
-    norms.l2 = std::sqrt(norms.l2 / measure);
-    notes.push_back(run.arg + ": " + field + " of " + best.snapshots[best_index].file + " at t = " + number(norms.t) +
-                    " s");
+    finish(norms, measure);
+    notes.push_back(run.arg + ": " + field_component(field_text).first + " of " + f.file + " at t = " +
+                    number(norms.t) + " s");
     return norms;
 }
 
@@ -658,12 +694,70 @@ struct Study {
     double zero = ZERO;                         ///< of the coarsest precision of the runs
     double round_off = convergence::ROUND_OFF;  ///< of the coarsest precision of the runs
     std::vector<QuantityResult> quantities;
-    std::string field, exact;
+    std::string field, exact;  ///< exact empty: errors against the finest run
     std::vector<NormResult> norms;
     Status runs_status = Status::NONE;
     std::vector<std::string> run_notes, notes;
     Status status = Status::NONE;
 };
+
+/**
+ * @brief The error norms of the field of every run but the finest against the finest run's, remapped
+ *        conservatively onto its cells, coarse to fine.
+ */
+std::vector<Norms> finest_norms(Study & study, const Selection & sel) {
+    const Run & finest = study.runs.back();
+    const FieldValues reference = field_values(finest, study.field, sel);
+    const std::shared_ptr<Mesh> fine_mesh = recorded_mesh(finest, REFERENCE_DEGREE);
+    check_cells(finest, *fine_mesh, reference);
+    const std::string field = field_component(study.field).first;
+    remap::Options options;
+    options.degree = REFERENCE_DEGREE;
+    options.limit = false;
+    options.axisymmetric = recorded_axisymmetric(finest);
+    const overlap::Rule & rule = overlap::simplex_rule(options.axisymmetric ? 1u : 0u);
+    std::vector<Norms> out;
+    for (size_t i = 0; i + 1 < study.runs.size(); i++) {
+        const Run & run = study.runs[i];
+        const FieldValues f = field_values(run, study.field, sel);
+        const std::shared_ptr<Mesh> mesh = recorded_mesh(run);
+        check_cells(run, *mesh, f);
+        if (!same_time(f.t, reference.t, sel.same)) {
+            study.runs_status = report::worse(study.runs_status, Status::WARNING);
+            study.run_notes.push_back(run.arg + "'s snapshot is at t = " + number(f.t) + " s and the finest run's at " +
+                                      number(reference.t) + " s: compare them at one time with --time");
+        }
+        remap::Report report;
+        const std::vector<double> on_run =
+            remap::remap_global(fine_mesh, {reference.values}, {-1}, options, *mesh, report)[0];
+        if (report.n_partial > 0 || report.n_nearest > 0) {
+            study.runs_status = report::worse(study.runs_status, Status::WARNING);
+            study.run_notes.push_back(finest.arg + "'s mesh covers " + count(report.n_partial + report.n_nearest) +
+                                      " of " + run.arg + "'s cells only in part or not at all: the runs' domains differ");
+        }
+        Norms norms;
+        norms.t = f.t;
+        double measure = 0.0;
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            const overlap::Region region = overlap::region(overlap::cell_nodes(*mesh, c));
+            double weight = 0.0;
+            for (const overlap::Simplex & s : region.simplices) {
+                const double v = overlap::volume(s);
+                for (size_t q = 0; q < rule.points.size(); q++) {
+                    weight += v * rule.weights[q] * (options.axisymmetric ? overlap::map(s, rule.points[q])[1] : 1.0);
+                }
+            }
+            const uint64_t g = mesh->h_global_cell(c);
+            accumulate(norms, measure, std::abs(f.values[g] - on_run[g]), weight);
+        }
+        finish(norms, measure);
+        study.notes.push_back(run.arg + ": " + field + " of " + f.file + " at t = " + number(f.t) + " s");
+        out.push_back(norms);
+    }
+    study.notes.push_back(finest.arg + ": " + field + " of " + reference.file + " at t = " + number(reference.t) +
+                          " s, the reference");
+    return out;
+}
 
 std::string units_text(const std::string & units) {
     if (units.empty()) return "not recorded";
@@ -747,9 +841,16 @@ void norm_verdict(NormResult & r, const Study & study) {
         r.verdict = "the error does not decrease from the next-finest grid to the finest";
         return;
     }
+    if (!std::isfinite(p)) {
+        r.status = Status::ERROR;
+        r.verdict = "no positive order fits the errors against the finest grid: refine further";
+        return;
+    }
     r.status = Status::OK;
-    r.verdict = "order " + order_text(p) + " on the finest pair" + design;
-    if (r.errors.size() > 2) r.verdict += ", " + order_text(r.fitted) + " fitted over every grid";
+    r.verdict = "order " + order_text(p) + (study.exact.empty() ? " from the two runs next to the finest" : " on the finest pair") + design;
+    if (r.errors.size() > 2) {
+        r.verdict += ", " + order_text(r.fitted) + (study.exact.empty() ? " fitted over every run but the finest" : " fitted over every grid");
+    }
     if (std::isfinite(study.design) && std::abs(p - study.design) > ORDER_SLACK) {
         r.status = Status::WARNING;
         r.verdict += "; more than " + short_number(ORDER_SLACK) + " from the design order";
@@ -817,10 +918,15 @@ report::Text study_text(const Study & s, const bool color) {
     if (!s.norms.empty()) {
         Status worst = Status::NONE;
         for (const auto & r : s.norms) worst = report::worse(worst, r.status);
-        text.section("Error of " + s.field + " against the exact solution", worst);
-        text.note(s.field + " = " + s.exact + ", cell averages");
+        const bool finest = s.exact.empty();
+        text.section("Error of " + s.field + (finest ? " against the finest run" : " against the exact solution"), worst);
+        if (finest) {
+            text.note(s.field + " of " + s.runs.back().arg + ", remapped onto each coarser run's cells");
+        } else {
+            text.note(s.field + " = " + s.exact + ", cell averages");
+        }
         std::vector<report::Column> header = {"norm"};
-        for (size_t i = 0; i < s.runs.size(); i++) header.emplace_back(count(s.runs[i].cells) + " cells");
+        for (size_t i = 0; i < s.norms[0].errors.size(); i++) header.emplace_back(count(s.runs[i].cells) + " cells");
         header.emplace_back("orders");
         rows.clear();
         for (const NormResult & r : s.norms) {
@@ -910,7 +1016,12 @@ std::string study_json(const Study & s, const int exit_status) {
                                                          .add("verdict", r.verdict)
                                                          .str();
         }
-        o.raw("field", json::Object().add("name", s.field).add("exact", s.exact).raw("norms", norms + "]").str());
+        o.raw("field", json::Object()
+                           .add("name", s.field)
+                           .raw("exact", s.exact.empty() ? "null" : json::quote(s.exact))
+                           .add("reference", std::string(s.exact.empty() ? "finest" : "exact"))
+                           .raw("norms", norms + "]")
+                           .str());
     } else {
         o.raw("field", "null");
     }
@@ -924,9 +1035,9 @@ int convergence_study(const cli::Args & args) {
     const std::string fmt = args.value_or("--format", "text");
     if (fmt != "text" && fmt != "json") throw UsageError("--format takes text or json, not " + fmt);
     if (args.positional.size() < 2) throw UsageError("give two or more runs, at different resolutions");
-    if (args.has("--field") && !args.has("--exact")) {
-        throw UsageError("--field needs --exact: norms against the finest grid, without an exact solution, are "
-                         "planned but not here yet");
+    if (args.has("--field") && !args.has("--exact") && args.positional.size() < 3) {
+        throw UsageError("--field without --exact needs three or more runs: the finest is the reference, and the "
+                         "order follows from the errors of the others");
     }
     if (args.has("--exact") && !args.has("--field")) throw UsageError("--exact needs --field, the field it is of");
     if (args.has("--time") && args.has("--average")) throw UsageError("--time and --average both choose the values; give one");
@@ -967,7 +1078,7 @@ int convergence_study(const cli::Args & args) {
             study.runs.push_back(open_directory(a));
         } else if (!args.has("--field")) {
             throw UsageError(a + " is a file: give run directories (their tables hold the quantities), or "
-                                 "snapshots with --field and --exact");
+                                 "snapshots with --field");
         } else {
             study.runs.push_back(open_file(a));
         }
@@ -1036,10 +1147,15 @@ int convergence_study(const cli::Args & args) {
         study.field = args.value_or("--field", "");
         if (study.field.find(',') != std::string::npos) throw UsageError("--field takes one field, with its --exact");
         field_component(study.field);
-        study.exact = args.value_or("--exact", "");
-        const Expression exact("--exact", study.exact);
         std::vector<Norms> norms;
-        for (const Run & r : study.runs) norms.push_back(exact_norms(r, study.field, exact, sel, study.notes));
+        if (args.has("--exact")) {
+            study.exact = args.value_or("--exact", "");
+            const Expression exact("--exact", study.exact);
+            for (const Run & r : study.runs) norms.push_back(exact_norms(r, study.field, exact, sel, study.notes));
+        } else {
+            norms = finest_norms(study, sel);
+        }
+        const double h_ref = study.exact.empty() ? study.runs.back().h : convergence::NaN;
         for (const char * name : {"L1", "L2", "Linf"}) {
             NormResult r;
             r.name = name;
@@ -1048,9 +1164,13 @@ int convergence_study(const cli::Args & args) {
                 const Norms & n = norms[i];
                 r.errors.push_back(r.name == "L1" ? n.l1 : r.name == "L2" ? n.l2 : n.linf);
                 h.push_back(study.runs[i].h);
-                if (i > 0) r.orders.push_back(convergence::pair_order(h[i - 1], h[i], r.errors[i - 1], r.errors[i]));
+                if (i == 0) continue;
+                r.orders.push_back(std::isfinite(h_ref)
+                                       ? convergence::reference_order(h[i - 1], h[i], h_ref, r.errors[i - 1], r.errors[i])
+                                       : convergence::pair_order(h[i - 1], h[i], r.errors[i - 1], r.errors[i]));
             }
-            r.fitted = convergence::fitted_order(h, r.errors);
+            r.fitted = std::isfinite(h_ref) ? convergence::fitted_reference_order(h, r.errors, h_ref)
+                                            : convergence::fitted_order(h, r.errors);
             norm_verdict(r, study);
             study.norms.push_back(r);
         }
@@ -1115,7 +1235,7 @@ int convergence_study(const cli::Args & args) {
                 "no quantity is in every run" +
                 std::string(sel.kind == Selection::Kind::final ? "" : " at the times chosen") +
                 ": the runs' directories hold no forces, integrals or probe tables of their runs ([[forces]], "
-                "[integrals], [[probes]]); for a field, give --field and --exact");
+                "[integrals], [[probes]]); for a field, give --field");
         }
         if (sel.kind == Selection::Kind::final) {
             double lo = std::numeric_limits<double>::infinity(), hi = -lo;

@@ -112,6 +112,16 @@ class Source {
 };
 
 /**
+ * @brief Cell averages [variable][global cell] in source's global cell order, remapped onto target's owned
+ *        cells (collective): [variable][global cell] in target's global cell order, zero where another rank
+ *        owns the cell.
+ */
+std::vector<std::vector<double>> remap_global(std::shared_ptr<const Mesh> source,
+                                              const std::vector<std::vector<double>> & values,
+                                              const std::vector<int> & groups, const Options & options,
+                                              const Mesh & target, Report & report);
+
+/**
  * @brief The restart file named by [initialize] file, on the source mesh of
  *        [initialize.mesh] (and [[initialize.periodic]], else the run's
  *        [[periodic]]), remapped to every local cell of target: variables,

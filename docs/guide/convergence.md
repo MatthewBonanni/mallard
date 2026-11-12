@@ -182,8 +182,52 @@ successive runs is $p = \ln(e_\text{coarse}/e_\text{fine}) / \ln(h_\text{coarse}
 with three or more runs, the least-squares slope over all of them is also reported.
 An error that grows from the next-finest run to the finest is an error status.
 
-Norms against the finest run, for cases without an exact solution, are planned;
-`--field` without `--exact` is a usage error for now.
+## Errors against the finest run
+
+Without an exact solution, leave out `--exact`: the finest run is the reference,
+and each coarser run's error is its difference from it:
+
+```bash
+mallard post convergence n16 n32 n64 n128 --field RHO
+```
+
+The finest run's field is remapped conservatively onto each coarser run's cells
+([remap](../design/remap.md)): its cells' polynomials of degree 5, unlimited,
+are integrated exactly over their intersections with the coarser cells. Where the
+coarser cells are unions of finer ones, as in a uniform refinement of a structured
+mesh, the result is the average of the finer cells, exactly; otherwise its error
+is of order $h_\text{fine}^6$, below that of a sixth-order scheme. The norms are
+those above, over the coarser run's cells, and the snapshot of each run is chosen
+as above. Snapshots at different times, or meshes of different domains, are a
+warning.
+
+The finest run has an error too, so the errors don't follow $C h^p$. When the
+error of every run is $C h^p g(x)$, the difference of a coarser run from the
+finest is $C (h^p - h_\text{fine}^p) g(x)$, and the order of each pair of
+successive coarser runs is the $p$ that solves
+
+$$
+\frac{e_\text{coarse}}{e_\text{fine}} = \frac{h_\text{coarse}^p - h_\text{ref}^p}{h_\text{fine}^p - h_\text{ref}^p}
+$$
+
+with $h_\text{ref}$ the finest run's size. With four or more runs, the $p$ and $C$
+that fit $\ln e = \ln C + \ln(h^p - h_\text{ref}^p)$ best over every coarser run
+are also reported. Errors that shrink more slowly than any positive order allows
+are an error status. This needs three or more runs: two errors for one order.
+
+The density wave of the next section, with a fourth run on 128² cells, gives the
+orders the exact solution gives for the same runs (2.12 and 2.03 in L1):
+
+```text
+$ mallard post convergence n16 n32 n64 n128 --field RHO
+...
+== Error of RHO against the finest run ================================================= ok
+  RHO of n128, remapped onto each coarser run's cells
+  status  norm  256 cells  1,024 cells  4,096 cells  orders
+  ok      L1    0.0004397  9.639e-05    1.881e-05    2.13, 2.04
+  ok      L2    0.000522   0.0001115    2.153e-05    2.17, 2.06
+  ok      Linf  0.0009919  0.0002075    3.909e-05    2.20, 2.11
+```
 
 ## Reading the report
 
@@ -271,7 +315,9 @@ The runs table lists each run's cells and its size relative to the finest. The
 run, the estimate of the finest three runs (`order`, `r21`, `r32`, `R`,
 `extrapolated`, `e_a`, `e_ext`, `gci`, `safety_factor`), the estimate of every
 three successive runs, its status, its verdict, and whether it is `extracted`
-from the runs' snapshots.
+from the runs' snapshots. With `--field`, `field` holds each norm's errors and
+orders, and its `reference`: `"exact"`, with the expression in `exact`, or
+`"finest"`, with `exact` null and one error per run but the finest.
 
 The exit status is 0 without errors (warnings included), 1 if a quantity or error
 diverges or the runs cannot be read or compared, and 2 for a usage error.

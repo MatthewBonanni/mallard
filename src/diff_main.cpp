@@ -417,9 +417,9 @@ std::map<std::string, std::vector<double>> remap_fields(Side & a, Side & b, cons
         if (!f.problem.empty()) continue;
         const std::vector<double> v = output::read(b.c, f.name, b.snapshot);
         for (uint32_t k = 0; k < f.components; k++) {
-            std::vector<double> local(b.mesh->n_cells);
-            for (uint32_t c = 0; c < b.mesh->n_cells; c++) local[c] = v[b.mesh->h_global_cell(c) * f.components + k];
-            values.push_back(std::move(local));
+            std::vector<double> component(v.size() / f.components);
+            for (size_t c = 0; c < component.size(); c++) component[c] = v[c * f.components + k];
+            values.push_back(std::move(component));
             groups.push_back(f.name == "RHO" || f.name.starts_with("RHOY_") ? 0 : -1);
             out.names.push_back(f.components > 1 ? f.name + "[" + std::to_string(k) + "]" : f.name);
         }
@@ -428,8 +428,7 @@ std::map<std::string, std::vector<double>> remap_fields(Side & a, Side & b, cons
     remap::Options options;
     options.degree = REMAP_DEGREE;
     options.axisymmetric = a.mesh->axisymmetric;
-    const remap::Source source(b.mesh, values, groups, options);
-    const std::vector<std::vector<double>> on_a = source.to(*a.mesh, a.mesh->n_owned(), out.report);
+    const std::vector<std::vector<double>> on_a = remap::remap_global(b.mesh, values, groups, options, *a.mesh, out.report);
     for (size_t v = 0; v < out.names.size() && v < out.report.source_total.size(); v++) {
         const double scale = std::max(out.report.source_magnitude[v], std::numeric_limits<double>::min());
         out.kept = std::max(out.kept, std::abs(out.report.target_total[v] - out.report.source_total[v]) / scale);
@@ -440,7 +439,7 @@ std::map<std::string, std::vector<double>> remap_fields(Side & a, Side & b, cons
         std::vector<double> & r = remapped[name];
         r.assign(a.local.size() * n, 0.0);
         for (uint32_t k = 0; k < n; k++, v++) {
-            for (uint32_t c = 0; c < a.mesh->n_owned(); c++) r[a.mesh->h_global_cell(c) * n + k] = on_a[v][c];
+            for (size_t c = 0; c < a.local.size(); c++) r[c * n + k] = on_a[v][c];
         }
     }
     return remapped;

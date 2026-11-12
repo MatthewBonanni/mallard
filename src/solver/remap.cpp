@@ -600,6 +600,24 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     return out;
 }
 
+std::vector<std::vector<double>> remap_global(std::shared_ptr<const Mesh> source,
+                                              const std::vector<std::vector<double>> & values,
+                                              const std::vector<int> & groups, const Options & options,
+                                              const Mesh & target, Report & report) {
+    std::vector<std::vector<double>> local(values.size(), std::vector<double>(source->n_cells));
+    for (size_t v = 0; v < values.size(); v++) {
+        for (uint32_t c = 0; c < source->n_cells; c++) local[v][c] = values[v][source->h_global_cell(c)];
+    }
+    const Source field(source, local, groups, options);
+    const std::vector<std::vector<double>> on_target = field.to(target, target.n_owned(), report);
+    const uint64_t n = target.n_global_cells > 0 ? target.n_global_cells : target.n_cells;
+    std::vector<std::vector<double>> out(on_target.size(), std::vector<double>(n, 0.0));
+    for (size_t v = 0; v < on_target.size(); v++) {
+        for (uint32_t c = 0; c < target.n_owned(); c++) out[v][target.h_global_cell(c)] = on_target[v][c];
+    }
+    return out;
+}
+
 RestartData remap_restart(const Input & input, const Mesh & target, bool axisymmetric, Report & report) {
     const Input & init = input.at("initialize");
     if (!init.contains("file")) throw InputError("initialize: type = \"remap\" needs file, the source restart file.");
