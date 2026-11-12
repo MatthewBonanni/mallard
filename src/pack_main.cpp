@@ -405,7 +405,7 @@ int pack(const cli::Args & args) {
         total += e.packed.bytes;
         by_role[e.role]++;
     }
-    logging::section("Packed " + out_path, count(entries.size() + 1) + " files");
+    logging::section("Packed " + out_path, count(entries.size() + 1, "file"));
     item("Run", text(run.start.find("run_id")));
     item("Case", count(by_role["input"] + by_role["mesh"] + by_role["read"]) + " files: the input, mesh and files "
                  "the run read");
@@ -503,7 +503,7 @@ int verify(const cli::Args & args) {
         problems.push_back({RUN_RECORD, "missing: the run's start record"});
     }
 
-    logging::section("Archive " + path, count(members.size()) + " files");
+    logging::section("Archive " + path, count(members.size(), "file"));
     item("Run", text(m.find("run_id")));
     item("Packed", text(m.find("created")) + ", by Mallard " + text(m.find("mallard")));
     item("Files", count(m["files"].array.size()) + " in the manifest, size and SHA-256 checked");

@@ -465,6 +465,11 @@ TEST(CliTest, InfoOfARunDirectorySummarizesItsOutcomeHealthCostAndWarnings) {
     EXPECT_TRUE(has_row(r.out, {"steps", "2", "steps", "this run's"})) << r.out;
     EXPECT_TRUE(heading("Warnings", "WARN")) << r.out;
     EXPECT_TRUE(has_row(r.out, {"- a recorded warning"})) << r.out;
+    std::istringstream lines(r.out);
+    std::string line, previous = "";
+    for (bool first = true; std::getline(lines, line); first = false, previous = line) {
+        if (!first && line.starts_with("== ")) EXPECT_EQ(previous, "") << line << "\n" << r.out;
+    }
 }
 
 TEST(CliTest, InfoOfARunDirectoryChecksItsFilesAgainstTheirRecords) {

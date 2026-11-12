@@ -271,7 +271,7 @@ constexpr size_t SNAPSHOT_ROWS = 12;
 
 void print_snapshots(const output::Contents & c) {
     const size_t n = c.snapshots.size();
-    logging::section("Snapshots", count(n) + " snapshots");
+    logging::section("Snapshots", count(n, "snapshot"));
     bool steps = false;
     for (const auto & s : c.snapshots) steps = steps || s.step >= 0;
     std::vector<std::vector<std::string>> rows;
@@ -613,9 +613,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         }
     }
     if (record.found) {
-        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
+        std::cout << "\n" << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
-    logging::section("Output files", count(files.size()) + " files");
+    logging::section("Output files", count(files.size(), "file"));
     std::vector<std::vector<std::string>> rows;
     for (const auto & c : files) {
         const bool timed = !c.snapshots.empty() && c.kind != output::Kind::mesh;

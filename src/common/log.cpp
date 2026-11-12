@@ -305,6 +305,10 @@ std::string count(uint64_t n) {
     return out;
 }
 
+std::string count(uint64_t n, std::string_view noun) {
+    return count(n) + " " + std::string(noun) + (n == 1 ? "" : "s");
+}
+
 std::string duration(double s) {
     if (!std::isfinite(s) || s < 0.0) return "--";
     if (s < 0.9995e-3) return sig3(s * 1.0e6) + " " + micro() + "s";

@@ -600,7 +600,7 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
     logging::table({"#", "t [s]", "step", "file"}, rows);
     if (!first.step_recorded) logging::line("  *: position in the files, which record no step.");
 
-    logging::section("Written", count(written.size()) + " files");
+    logging::section("Written", count(written.size(), "file"));
     rows.clear();
     for (const Written & w : written) {
         const output::Contents & c = w.contents;
