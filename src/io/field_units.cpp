@@ -8,6 +8,7 @@
 #include "field_units.h"
 
 #include "common_typedef.h"
+#include "derived_catalog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -63,10 +64,6 @@ const Entry NAMED[] = {
     {"T", dim::temperature, "temperature", PRIMITIVE, ""},
     {"H", dim::velocity_squared, "specific enthalpy", PRIMITIVE, ""},
     {"CFL", dim::none, "local CFL number", DERIVED, ""},
-    {"MACH", dim::none, "Mach number", DERIVED, ""},
-    {"Q_CRITERION", dim::rate.times(dim::rate), "Q-criterion", DERIVED, ""},
-    {"LAMBDA2", dim::rate.times(dim::rate), "lambda2 vortex criterion", DERIVED, ""},
-    {"SCHLIEREN", dim::of(1, -4, 0), "density gradient magnitude", DERIVED, ""},
     {"P_MAX", dim::pressure, "largest pressure seen", DERIVED, ""},
     {"TENO_SIGMA", dim::none, "TENO troubled-cell indicator", DERIVED, "face_reconstruction type = \"TENO\""},
     {"MU", dim::dynamic_viscosity, "dynamic viscosity", TRANSPORT, "a mixture with navier_stokes"},
@@ -88,7 +85,6 @@ const Entry NAMED[] = {
     {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux", SURFACE, SURFACES},
     {"TAU_W", dim::pressure, "wall shear stress magnitude", SURFACE, WALLS},
     {"CF", dim::none, "skin friction coefficient", SURFACE, WALLS},
-    {"CP", dim::none, "pressure coefficient", SURFACE, WALLS},
     {"Q_W", dim::heat_flux, "wall heat flux into the fluid", SURFACE, WALLS},
     {"U_TAU", dim::velocity, "friction velocity", SURFACE, WALLS},
     {"Y_PLUS", dim::none, "first-cell y+", SURFACE, WALLS},
@@ -137,6 +133,9 @@ const Entry SPECIES[] = {
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }
 
 std::optional<FieldDescription> find_base(const std::string & name) {
+    for (const auto & d : derived::FIELDS) {
+        if (name == d.name) return FieldDescription{d.dimension, d.long_name, "", ""};
+    }
     for (const auto & e : NAMED) {
         if (name == e.name) return FieldDescription{e.dimension, e.long_name, "", e.non_si_units};
     }
@@ -158,9 +157,13 @@ std::optional<FieldDescription> find_base(const std::string & name) {
     return std::nullopt;
 }
 
-/** @brief A scalar that statistics sample: a conservative, a primitive, Y_<species> or RHOY_<species>. */
+/**
+ * @brief A scalar that statistics sample: a conservative, a primitive, Y_<species>,
+ *        RHOY_<species> or a derived field.
+ */
 std::optional<FieldDescription> find_sampled_scalar(const std::string & name) {
-    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5);
+    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5) ||
+                   derived::find(name.c_str()) != derived::N_FIELDS;
     for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
@@ -193,14 +196,26 @@ std::optional<FieldDescription> find(const std::string & name) {
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
-    if (starts_with(name, "COV_")) {
+    if (starts_with(name, "FAVRE_MEAN_")) {
+        auto of = find_sampled(name.substr(11));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "Favre (density-weighted) time average of " + of->long_name, "", ""};
+    }
+    if (starts_with(name, "RMS_")) {
+        auto of = find_sampled(name.substr(4));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "root mean square fluctuation of " + of->long_name, "", ""};
+    }
+    for (const char * prefix : {"COV_", "FAVRE_COV_"}) {
+        if (!starts_with(name, prefix)) continue;
         // COV_<A>_<B> of two sampled scalars: the first split whose halves are both (names hold underscores)
-        const std::string pair = name.substr(4);
+        const std::string pair = name.substr(std::string(prefix).size());
+        const std::string what = prefix[0] == 'F' ? "Favre covariance of " : "covariance of ";
         for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
             const auto a = find_sampled_scalar(pair.substr(0, at)), b = find_sampled_scalar(pair.substr(at + 1));
             if (a && b) {
-                return FieldDescription{a->dimension.times(b->dimension),
-                                        "covariance of " + a->long_name + " and " + b->long_name, "", ""};
+                return FieldDescription{a->dimension.times(b->dimension), what + a->long_name + " and " + b->long_name,
+                                        "", ""};
             }
         }
         return std::nullopt;
@@ -229,6 +244,9 @@ size_t group_rank(const std::string & group) {
 }
 
 std::string group(const std::string & name) {
+    for (const auto & d : derived::FIELDS) {
+        if (name == d.name) return d.group;
+    }
     for (const auto & e : NAMED) {
         if (name == e.name) return e.group;
     }
@@ -243,7 +261,7 @@ std::string group(const std::string & name) {
     }
     if (starts_with(name, "SOURCE_")) return "sources";
     if (starts_with(name, "STENCIL_")) return STENCILS;
-    for (const char * prefix : {"MEAN_", "COV_", "PHASE_"}) {
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
     return "";
@@ -255,6 +273,7 @@ std::vector<CatalogField> catalog() {
         const std::string units = e.non_si_units[0] ? e.non_si_units : e.dimension.udunits();
         out.push_back({name, units, long_name, e.group, e.needs});
     };
+    for (const auto & d : derived::FIELDS) out.push_back({d.name, d.dimension.udunits(), d.long_name, d.group, d.needs_text});
     for (const auto & e : NAMED) add(e.name, e, e.long_name);
     for (const auto & e : VECTORS) {
         if (find_base(e.name)->long_name == e.long_name) add(e.name, e, e.long_name + std::string(" (vector)"));
@@ -265,11 +284,16 @@ std::vector<CatalogField> catalog() {
         {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
+        {"RMS_<A>", dim::none, "", "statistics", "mallard post average, of A with its variance"},
+        {"FAVRE_MEAN_<A>", dim::none, "", "statistics", "mallard post average --favre"},
+        {"FAVRE_COV_<A>_<B>", dim::none, "", "statistics", "mallard post average --favre, of A*B"},
         {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
-                                 "phase average of A in a bin", "membership in the stencils of cell id"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "1"};
+                                 "phase average of A in a bin", "root mean square fluctuation of A",
+                                 "Favre (density-weighted) time average of A", "Favre covariance of A and B",
+                                 "membership in the stencils of cell id"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

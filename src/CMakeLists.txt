@@ -102,6 +102,8 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/spectra.cpp
     solver/statistics.cpp
+    solver/favre_average.cpp
+    common/homogeneous_average.cpp
     io/archive.cpp
     io/compression.cpp
     io/field_units.cpp

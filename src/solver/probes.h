@@ -82,6 +82,12 @@ struct ProbeReference {
 namespace probe {
 
 /**
+ * @brief The reference state {rho, u = [...], p} of the table ref (at key, for
+ *        errors): of CF and CP of probes, and of the derived field CP.
+ */
+ProbeReference read_reference(const Input & ref, const std::string & key);
+
+/**
  * @brief What a region key of [[write_data]] gives: the whole mesh
  *        (`"domain"`), a filled region, boundary zones, another region of
  *        lower dimension (sampled at its elements), or a probe type as a

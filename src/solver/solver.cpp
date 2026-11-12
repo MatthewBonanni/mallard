@@ -243,7 +243,7 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh, is_distributed() && halo.uses_nccl());
+        statistics.init(input, species_names, *mesh, derived_selection, is_distributed() && halo.uses_nccl());
         init_rhs_split();
         used_regions = std::make_unique<region::Regions>(input, *mesh);
         init_sources(*used_regions);
@@ -1829,14 +1829,23 @@ void Solver::allocate_memory() {
         vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 1 : 3);
         h_vortex_fields = Kokkos::create_mirror_view(vortex_fields);
     }
+    derived_settings = derived::Settings::from_input(input, physics, mixture_model.get(), is_viscous());
     derived_selection = {};
     for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
-        if (writes_variable(input, derived::NAMES[f])) derived_selection.add(static_cast<derived::Field>(f));
+        const auto field = static_cast<derived::Field>(f);
+        if (!writes_variable(input, derived::FIELDS[f].name)) continue;
+        derived_settings.require(field, input);
+        derived_selection.add(field);
+    }
+    for (const derived::Field field : Statistics::derived_fields(input)) {
+        derived_settings.require(field, input);
+        derived_selection.add(field);
     }
     if (derived_selection.any()) {
         derived_fields = Kokkos::View<rtype **>("derived_fields", mesh->n_cells, derived_selection.n_columns);
         h_derived_fields = Kokkos::create_mirror_view(derived_fields);
     }
+    if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) derived_workspace = derived::Workspace(mesh->n_cells);
     if (is_viscous() || vortex_output || derived_selection.any()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
@@ -2062,8 +2071,8 @@ void Solver::register_data() {
     }
     for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
         if (derived_selection.column[f] < 0) continue;
-        data.push_back(Data(derived::NAMES[f], Kokkos::subview(h_derived_fields, Kokkos::ALL(),
-                                                               static_cast<uint32_t>(derived_selection.column[f]))));
+        data.push_back(Data(derived::FIELDS[f].name, Kokkos::subview(h_derived_fields, Kokkos::ALL(),
+                                                                     static_cast<uint32_t>(derived_selection.column[f]))));
     }
     for (size_t k = 0; k < mesh_field_names.size(); k++) {
         data.push_back(Data(mesh_field_names[k], Kokkos::subview(h_mesh_fields, Kokkos::ALL(), k)));
@@ -2073,13 +2082,16 @@ void Solver::register_data() {
         h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
         data.push_back(Data("TENO_SIGMA", h_teno_sigma));
     }
+    if (output_data) output_data(*mesh, data);
 }
 
 std::vector<std::string> Solver::output_fields() const {
     std::vector<std::string> names;
     for (const auto & d : data) names.push_back(d.name());
     std::vector<std::string> on_request = {"P_MAX"};
-    for (const char * name : derived::NAMES) on_request.emplace_back(name);
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (derived_settings.available(static_cast<derived::Field>(f))) on_request.emplace_back(derived::FIELDS[f].name);
+    }
     for (const char * name : MeshQuality::FIELDS) on_request.emplace_back(name);
     for (const char * name : stencils::FIELDS) on_request.emplace_back(name);
     if constexpr (N_DIM == 2) {
@@ -2287,10 +2299,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     check_fields();
     // Steps on the device update p_max themselves
     if (p_max.is_allocated() && !on_device) update_p_max();
-    if (statistics.due(step, t)) {
-        update_primitives();
-        statistics.sample(step, t, cell_sampler(), mesh->n_owned());
-    }
+    if (statistics.due(step, t)) sample_statistics();
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
     Kokkos::Timer output_timer;
@@ -2752,6 +2761,23 @@ void Solver::write_output_of_state(bool next) {
     write_data(true);
     write_probes();
     for (auto & writer : data_writers) writer->finish();
+}
+
+void Solver::sample_statistics() {
+    if (statistics.samples_derived()) {
+        update_velocity_gradients();
+        update_derived_fields();
+    } else {
+        update_primitives();
+    }
+    statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+}
+
+CellSampler Solver::sample_statistics_of_state(bool next) {
+    if (next) apply_output_state(state_reader(*mesh));
+    sample_statistics();
+    statistics.copy_device_to_host();
+    return cell_sampler();
 }
 
 void Solver::write_probes() {
@@ -3343,10 +3369,26 @@ void Solver::update_vortex_fields() {
 }
 
 void Solver::update_derived_fields() {
-    derived::Inputs inputs{W_cells, viscous_gradients, physics.get_gamma(), {},
-                           axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
-    if (is_mixture()) inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
-    derived::compute(derived_selection, inputs, mesh->n_owned(), derived_fields);
+    derived::Inputs inputs{.W = W_cells,
+                           .gradients = viscous_gradients,
+                           .gamma = physics.get_gamma(),
+                           .radius_coords = axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
+                           .primitives = primitives};
+    if (is_mixture()) {
+        inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        inputs.Y = cell_scalars;
+        inputs.thermo = mixture.thermo;
+        if (derived_selection.need(derived::need::VISCOUS)) {
+            update_transport();
+            inputs.transport = cell_transport;
+        }
+        if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) {
+            derived::scalar_gradients(derived_settings, cell_scalars, viscous_gradient, boundary_data.bc_Y,
+                                      mesh->n_cells, mesh->n_owned(), derived_workspace);
+            inputs.scalar_gradients = derived_workspace.gradients;
+        }
+    }
+    derived::compute(derived_selection, derived_settings, inputs, mesh->n_owned(), derived_fields);
 }
 
 void Solver::write_integrals() {

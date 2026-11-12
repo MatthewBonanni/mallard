@@ -43,6 +43,7 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 void Solver::init_solution() {
     if (state_reader) {
         apply_output_state(state_reader(*mesh));
+        statistics.start(statistics.sampling_start());
         initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
         return;
     }
@@ -184,7 +185,8 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
         triggers.restore(restart.attributes);
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
     }
-    statistics.restore(restart, file, t);
+    // States read for post-processing never continue the averages they hold
+    if (!state_reader) statistics.restore(restart, file, t);
     probes.restore_averages(restart, file, t, statistics.resets());
     probes.restore_spectra(restart, file, statistics.resets());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
@@ -201,7 +203,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
 void Solver::apply_output_state(RestartData state) {
     const std::vector<std::string> expected = restart_variables();
     const auto has = [&](const std::string & name) { return state.find(name) != nullptr; };
-    const auto optional = [](const std::string & name) { return name == "T_SEED" || name == "CHEM_H" || name == "P_MAX"; };
+    const auto optional = [](const std::string & name) {
+        return name == "T_SEED" || name == "CHEM_H" || name == "P_MAX" || name.starts_with("MEAN_") ||
+               name.starts_with("COV_") || name.starts_with("PHASE_");
+    };
     const bool conservative = std::all_of(expected.begin(), expected.end(),
                                           [&](const std::string & name) { return optional(name) || has(name); });
     RestartData out;

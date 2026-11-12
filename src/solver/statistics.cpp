@@ -25,8 +25,12 @@
 #include "log.h"
 
 int32_t CellSampler::code(const std::string & name, const std::vector<std::string> & species_names,
-                          const std::string & key) {
+                          const std::string & key, const derived::Selection * derived) {
     if (name == "RHO") return RHO;
+    if (derived) {
+        const derived::Field f = derived::find(name.c_str());
+        if (f != derived::N_FIELDS && derived->column[f] >= 0) return FIRST_DERIVED + derived->column[f];
+    }
     for (size_t i = 0; i < N_PRIMITIVE; i++) {
         if (PRIMITIVE_NAMES[i] == name) return FIRST_PRIMITIVE + static_cast<int32_t>(i);
     }
@@ -45,6 +49,7 @@ int32_t CellSampler::code(const std::string & name, const std::vector<std::strin
         known.push_back("Y_<species>");
         known.push_back("RHOY_<species>");
     }
+    if (derived) known.push_back("a derived field (mallard list fields)");
     throw InputError({.key = key, .message = "unknown variable \"" + name + "\"", .valid = known, .suggestion = suggestion});
 }
 
@@ -63,8 +68,25 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
+std::vector<derived::Field> Statistics::derived_fields(const Input & input) {
+    std::vector<derived::Field> out;
+    if (!input.contains("statistics")) return out;
+    const Input & table = input.at("statistics");
+    std::vector<std::string> names = find_value_or<std::vector<std::string>>(table, "fields", {});
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
+        const size_t star = product.find('*');
+        names.push_back(product.substr(0, star));
+        if (star != std::string::npos) names.push_back(product.substr(star + 1));
+    }
+    for (const auto & name : names) {
+        const derived::Field f = derived::find(name.c_str());
+        if (f != derived::N_FIELDS && std::find(out.begin(), out.end(), f) == out.end()) out.push_back(f);
+    }
+    return out;
+}
+
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                      const bool use_nccl) {
+                      const derived::Selection & derived, const bool use_nccl) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
     interval = find_value_or<uint64_t>(table, "interval", 1);
@@ -109,7 +131,8 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     const uint32_t n_cells = mesh.n_cells;
 
     std::vector<int32_t> h_codes;
-    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, "statistics"));
+    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, "statistics", &derived));
+    derived_sampled = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t c) { return c >= CellSampler::FIRST_DERIVED; });
     codes = to_device(h_codes, "statistics_codes");
     pairs = Kokkos::View<uint32_t *[2]>("statistics_pairs", products.size());
     auto h_pairs = Kokkos::create_mirror_view(pairs);

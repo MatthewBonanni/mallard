@@ -35,11 +35,11 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
@@ -719,7 +719,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -934,8 +934,8 @@ changing it.
 
 | Key | Description |
 |---|---|
-| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE` and, for mixtures, `Y_<species>` and `RHOY_<species>` |
-| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, for mixtures `Y_<species>` and `RHOY_<species>`, and the [derived fields](guide/output.md#derived-fields) of the derived and mixture groups of `mallard list fields` (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...), computed at each sample as `[[write_data]]` writes them, with the `[output]` input they need |
+| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`, `"P*MACH"`) whose covariance to keep; their means are kept too |
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
@@ -949,8 +949,11 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
-`tools/post/plane_average.py` averages them further over homogeneous directions
-(e.g. over x and z of a channel, as a function of y). `fields` and
+`mallard post average --statistics --homogeneous x,z` averages them further
+over homogeneous directions (e.g. over x and z of a channel, as a function of
+y), and `mallard post average` computes the same averages from saved
+snapshots of a run without them
+([guide](guide/statistics.md#averages-of-saved-snapshots-mallard-post-average)). `fields` and
 `products` may be left out when `[statistics.spectra]` or
 `[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
 `[statistics]` unless they set their own, and `reset` applies to them too.
@@ -1048,7 +1051,7 @@ ranks. A probe that is not due costs nothing.
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
-| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
+| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP`. Default: `[output] reference` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
@@ -1638,7 +1641,18 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
+| `reference` | `{rho, u = [...], p}`: the free stream of the [derived field](guide/output.md#derived-fields) `CP`, and the default `reference` of every `[[probes]]` entry's `CF` and `CP` (a probe's own replaces it). Default none: `CP` is then an error that asks for it |
 | `write_stencils` | Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the setup ([layout](guide/output.md#mesh-and-stencil-fields)); `""` writes none. Needs HDF5. Default `""` |
+
+### `[output.mixture]`
+
+Gas mixtures: what the [mixture fields](guide/output.md#mixture-fields) `MIXTURE_FRACTION`, `PROGRESS_VARIABLE`, `FLAME_INDEX` and `SCALAR_DISSIPATION` are relative to. Every key is optional; a field whose input is missing is an error that names the key.
+
+| Key | Description |
+|---|---|
+| `fuel`, `oxidizer` | The two streams of Bilger's mixture fraction, both or neither: a composition (`{X = {CH4 = 1}}`, `{Y = {...}}`, numbers) or the name of a `[[boundaries]]` entry whose uniform `X` or `Y` they take (`"fuel_inlet"`) |
+| `fuel_species`, `oxidizer_species` | The species of the flame index. Default: with the streams, the most abundant species of the fuel stream with C or H, and of the oxidizer stream with O and neither C nor H (`CH4` and `O2` of methane and air) |
+| `progress` | `{species = [...], burnt = ...}`: c = the sum of the species' mass fractions divided by `burnt` (default 1: the raw sum); or `{T_unburnt = ..., T_burnt = ...}`: c = (T - T_unburnt) / (T_burnt - T_unburnt) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 

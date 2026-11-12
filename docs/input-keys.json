@@ -3718,6 +3718,20 @@
   "set_in": [],
   "type": "integer"
  },
+ "output.mixture": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "output.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "output.run_log": {
   "default": "\"mallard.jsonl\"",
   "dims": [

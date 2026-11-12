@@ -12,7 +12,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/plane_average.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
 | [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
@@ -186,7 +186,7 @@ python examples/channel_wmles/wmles_channel.py analyze input.toml forces_bottom.
 
 For `examples/channel_wmles`. `init` writes `channel_init.py`'s field with a temperature profile and the matching density
 for supersonic channels. `analyze` gives $Re_\tau$, $C_f$, $B_q$, the centerline temperature and $U^+$ from the force monitors (with
-the heat-flux column of modeled walls) and a `plane_average.py` profile, against Lee & Moser (downloaded on first use) or
+the heat-flux column of modeled walls) and a `mallard post average --homogeneous` profile, against Lee & Moser (downloaded on first use) or
 Trettel & Larsson.
 
 ### `tile_restart.py`: repeat a periodic flow along x
@@ -346,17 +346,6 @@ Several cases side by side, synchronized in normalized time t / t_end, from a JS
 
 ![Double Mach reflection, 2D Riemann problem, detonation, Taylor-Green vortex and sphere wake in one animation](../docs/images/hero.gif)
 
-### `plane_average.py`: profiles from running statistics
-
-```sh
-python tools/post/plane_average.py solut/flow_000100.vtkhdf --average x z --out profile.csv
-```
-
-Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-aligned quad or hex mesh over homogeneous directions as a function of the others, e.g. a channel's profiles in y (stretched meshes too), adding the dispersive part to the covariances. Reads VTKHDF, VTU or PVTU, writes a CSV; in Python, `plane_average(centers, volumes, fields, "xz")` does the same on arrays. The [channel LES tutorial](../docs/tutorials/channel_les.md) draws these profiles from it:
-
-![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
-![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
-
 ### `insitu_statistics.py`: spectra, correlations and phase averages
 
 ```sh
@@ -404,9 +393,9 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`sphere_re300`](../examples/sphere_re300) | `make_sphere_re300_mesh.py` | `plot_sphere_re300.py`: Strouhal number, drag and lift | `animate_sphere_re300.py` |
 | [`taylor_green_3d`](../examples/taylor_green_3d) | | `plot_taylor_green.py`: kinetic energy and dissipation rate against the spectral DNS | `animate_taylor_green.py` |
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |
-| [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `plane_average.py`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
-| [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `plane_average.py`, `plot_channel.py` | |
-| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `plane_average.py`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
+| [`channel_retau180`](../examples/channel_retau180) | `channel_init.py` | `mallard post average`, `plot_channel.py`: profiles in wall units against Moser, Kim & Mansour | `animate_channel.py` |
+| [`channel_inflow_retau180`](../examples/channel_inflow_retau180) | `tile_restart.py` | `mallard post average`, `plot_channel.py` | |
+| [`channel_wmles`](../examples/channel_wmles) | `wmles_channel.py init` | `mallard post average`, `wmles_channel.py analyze`: C<sub>f</sub>, Re<sub>τ</sub>, B<sub>q</sub>, T<sub>c</sub> against Lee & Moser and Trettel & Larsson | |
 | [`cbc_les`](../examples/cbc_les) | `cbc_les.py` (initial field, rescaling) | `cbc_les.py`: spectra against Comte-Bellot & Corrsin, dissipation budget | |
 | [`volvo_bluff_body`](../examples/volvo_bluff_body) | `make_volvo_mesh.py`, `volvo.py probes` | `volvo.py profiles`, `plot`, `budget`: against the experiment | `volvo.py slice`, `animate`, `render` |
 | [`flame_turbulence`](../examples/flame_turbulence) | `flame_turbulence.py hit`, `init` | `flame_turbulence.py analyze`, `figure`; `tfles_apriori.py` | `render_flame_turbulence.py` |

@@ -49,6 +49,8 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     output_reader_test.cpp
     post_extract_test.cpp
+    post_derive_test.cpp
+    post_average_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
