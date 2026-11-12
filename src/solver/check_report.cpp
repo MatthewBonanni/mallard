@@ -186,14 +186,13 @@ void regions_section(report::Text & text, const CheckReport & r) {
         static const char * kinds[4] = {"points", "curve", "surface", ""};
         const std::string kind = g.dimension == N_DIM ? "filled" : kinds[g.dimension];
         const std::string made = g.of_mesh                 ? "the mesh's"
-                                 : g.solution              ? "the solution, during the run"
+                                 : g.solution              ? "the initial solution"
                                  : g.dimension == N_DIM    ? "cell fractions"
                                  : g.exact                 ? "exact"
                                                            : "extracted, resolution " + std::to_string(g.resolution);
         const Status row = g.cells > 0 || g.solution ? Status::OK : Status::ERROR;
         s = report::worse(s, row);
-        rows.push_back({row, {g.name, kind, g.solution ? "-" : logging::real(g.measure), measure_units(g),
-                              g.solution ? "-" : count(g.cells), made}});
+        rows.push_back({row, {g.name, kind, logging::real(g.measure), measure_units(g), count(g.cells), made}});
     }
     text.section("Regions", s);
     text.note("The mesh's own (the domain, its boundary and cell zones) and every region the case uses; cells: the "

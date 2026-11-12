@@ -283,7 +283,11 @@ constexpr Option AVERAGE_OPTIONS[] = {
     {"--region", "", "REGION",
      "Average over a region only: a name of the input's [regions] or of the mesh, or an inline TOML table, as "
      "[[write_data]] region takes it; with --homogeneous, a region of the mesh's dimension, its cells weighted "
-     "by the fraction of them in it. Default: the whole mesh."},
+     "by the fraction of them in it. A region defined by the solution (where, isosurface, or a boolean of "
+     "them) is placed on each snapshot's state, and the time averages of the integrals, means, covariances and "
+     "Favre averages over it are written to OUTPUT/NAME_reductions.csv instead of a snapshot, or with "
+     "--homogeneous their profile, each cell weighted by the time average of its measure in it. Default: the "
+     "whole mesh."},
     {"--reference", "", "TABLE",
      "The [output] reference of CP, as an inline TOML table, in place of the input's, as for mallard post "
      "derive. Default: the input's."},
@@ -1057,8 +1061,11 @@ constexpr Command COMMANDS[] = {
         .description =
             "Prints a script that makes the shell complete mallard's commands, their options and the values those "
             "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
-            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
-            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "run directories for mallard ctl and its requests, sections and keys of the key catalog for mallard "
+            "list keys, output fields of the field catalog for --fields, each item after a comma too. It is made "
+            "from the same table as the help pages and from the catalogs mallard list keys and mallard list fields "
+            "print, so it knows every command, key and field of this build; templates come from mallard new when "
+            "completing.\n"
             "\n"
             "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "

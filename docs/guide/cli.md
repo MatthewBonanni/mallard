@@ -37,8 +37,10 @@ A few things hold for every command:
 Tab completes `mallard`'s commands, their options and the values those take: input
 files after `-i`, `latest` and `*.restart` files after `--restart`, template names
 after `mallard new`, run directories and requests after `mallard ctl`, `2` or `3`
-after `--dim`. An install puts the scripts where bash (with the bash-completion
-package), zsh and fish look under its prefix:
+after `--dim`, sections and keys (`numerics.riemann_solver`) after `mallard list
+keys`, and output fields after `--fields`, each item of the comma-separated list
+(`--fields RHO,U,<Tab>`). An install puts the scripts where bash (with the
+bash-completion package), zsh and fish look under its prefix:
 
 | Shell | Installed as | Found without setup when |
 |---|---|---|
@@ -56,8 +58,9 @@ mallard completion fish | source      # ~/.config/fish/config.fish
 ```
 
 The containers load the bash completion in every interactive shell. The script is
-made from the same table as the help pages, so it completes exactly the commands of
-the `mallard` that printed it; reload it after updating Mallard.
+made from the same table as the help pages and from the catalogs `mallard list keys`
+and `mallard list fields` print, so it completes exactly the commands, keys and
+fields of the `mallard` that printed it; reload it after updating Mallard.
 
 How the commands are laid out, and which are planned:
 [design notes](../design/cli.md).
@@ -1132,7 +1135,14 @@ Options:
                          [regions] or of the mesh, or an inline TOML table, as
                          [[write_data]] region takes it; with --homogeneous, a
                          region of the mesh's dimension, its cells weighted by
-                         the fraction of them in it. Default: the whole mesh.
+                         the fraction of them in it. A region defined by the
+                         solution (where, isosurface, or a boolean of them) is
+                         placed on each snapshot's state, and the time averages
+                         of the integrals, means, covariances and Favre averages
+                         over it are written to OUTPUT/NAME_reductions.csv
+                         instead of a snapshot, or with --homogeneous their
+                         profile, each cell weighted by the time average of its
+                         measure in it. Default: the whole mesh.
   --reference TABLE      The [output] reference of CP, as an inline TOML table,
                          in place of the input's, as for mallard post derive.
                          Default: the input's.
@@ -1369,8 +1379,11 @@ Usage: mallard completion bash|zsh|fish
 Prints a script that makes the shell complete mallard's commands, their options
 and the values those take: input files for -i, latest and restart files for
 --restart, template names for mallard new, run directories for mallard ctl and
-its requests. It is made from the same table as the help pages, so it knows
-every command of this build; templates come from mallard new when completing.
+its requests, sections and keys of the key catalog for mallard list keys, output
+fields of the field catalog for --fields, each item after a comma too. It is
+made from the same table as the help pages and from the catalogs mallard list
+keys and mallard list fields print, so it knows every command, key and field of
+this build; templates come from mallard new when completing.
 
 An install (cmake --install, Spack, the containers) puts the scripts where the
 shells look: share/bash-completion/completions/mallard,
