@@ -5,7 +5,14 @@ name: CI
 # The run sets the commit status `CI` on the branch's head commit (pending, then success
 # or failure, linking to the run) and a status per job, `CI / <job>`, as it is queued,
 # runs and ends (tools/dev/ci_status.sh), linking to its log. main requires `CI` to merge,
-# so a new push needs a new run. main runs on every push.
+# so a new push needs a new run.
+#
+# Two tiers. A branch runs the gate: the x86-64 suites of each backend, precision and
+# dimension, GCC 16 and Clang 23, and the CUDA, HIP and SYCL builds when it changes device
+# code. main runs everything after each merge (one run at a time: pushes that arrive while
+# it runs are tested together next): arm64, macOS, every compiler and CUDA version, Spack,
+# the tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs
+# everything on a branch.
 on:
   push:
     branches: [main]
@@ -17,6 +24,10 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
     inputs:
+      full:
+        description: Run everything main runs, not only the gate
+        type: boolean
+        default: false
       device:
         description: Run the device builds (CUDA, HIP, SYCL) even without device-code changes
         type: boolean
@@ -32,6 +43,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: write
   statuses: write
   pull-requests: read
 
@@ -61,29 +73,18 @@ jobs:
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: changelog
         run: sh tools/dev/ci_status.sh running
-      - name: Check workflow triggers
-        run: |
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
-          python3 tools/dev/check_workflow_triggers.py
       - name: Check the job names of the only input
         if: inputs.only
         env:
           ONLY: ${{ inputs.only }}
         run: python3 tools/dev/check_ci_only.py "$ONLY"
-      - name: Check that the support matrix names every CI job
-        run: python3 tools/dev/check_support_matrix.py
-      - name: Check for British spellings
-        run: python3 tools/dev/check_spelling.py
-      - name: Check the documented input defaults against the key catalog
-        run: python3 tools/dev/input_catalog.py docs
-      - name: Check that the TOML snippets of the docs parse
-        run: python3 tools/dev/check_doc_toml.py
-      - name: Check the "Used in" lines of the user guide
-        run: python3 tools/docs/used_in.py --check
-      - name: Check the feature matrix
-        run: python3 tools/docs/feature_matrix.py --check
-      - name: Check the Python API reference against the package's docstrings
-        run: python3 tools/docs/python_api.py --check
+      # The checks that need no build (also before asking for a run: tools/dev/precheck.sh)
+      - name: Check the sources without a build
+        env:
+          PRECHECK_SKIP_CHANGELOG: 1
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
+          sh tools/dev/precheck.sh
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -104,12 +105,14 @@ jobs:
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # Whether the changes touch device code (tools/dev/device_changes.sh); the CUDA, HIP and SYCL
-  # builds run only then (CUDA also on main)
+  # builds run only then (CUDA also on main). Also the tier: full on main and with -f full=true.
   device:
     runs-on: ubuntu-26.04
     outputs:
       changed: ${{ steps.check.outputs.changed }}
       code: ${{ steps.check.outputs.code }}
+      full: ${{ steps.check.outputs.full }}
+      cuda: ${{ steps.check.outputs.cuda }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,7 +126,16 @@ jobs:
       - id: check
         env:
           BEFORE: ${{ github.event.before }}
+          FULL: ${{ github.event_name == 'push' || inputs.full }}
         run: |
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          cuda='[
+            {"name": "cuda-13.5", "cuda": "13.5.0", "os": "ubuntu-26.04", "arch": "-DKokkos_ARCH_AMPERE80=ON", "gate": true},
+            {"name": "cuda-13.4", "cuda": "13.4.3", "os": "ubuntu-26.04", "arch": "-DKokkos_ARCH_AMPERE80=ON"},
+            {"name": "cuda-13.5-arm64", "cuda": "13.5.0", "os": "ubuntu-26.04-arm", "arch": "-DKokkos_ARCH_HOPPER90=ON"}
+          ]'
+          if [ "$FULL" != true ]; then cuda=$(jq 'map(select(.gate))' <<< "$cuda"); fi
+          echo "cuda=$(jq -c . <<< "$cuda")" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
           elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
           else base=$(git merge-base origin/main HEAD); fi
@@ -139,18 +151,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CODE: ${{ steps.check.outputs.code }}
           CHANGED: ${{ steps.check.outputs.changed }}
+          FULL: ${{ steps.check.outputs.full }}
+          CUDA: ${{ steps.check.outputs.cuda }}
           FORCE_DEVICE: ${{ inputs.device }}
           ONLY: ${{ inputs.only }}
         run: |
-          want() { [ -z "$ONLY" ] || case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
+          # The full tier's jobs, or the ones -f only names
+          named() { case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
+          want() { [ -z "$ONLY" ] || named "$1"; }
+          extra() { if [ -n "$ONLY" ]; then named "$1"; else [ "$FULL" = true ]; fi; }
           names=""
           if [ "$CODE" = true ]; then
-            if want tutorials; then names="tutorials"; fi
-            if want fuzz; then names="$names fuzz-2d"; fi
-            if want spack; then names="$names ubi8-spack ubi9-spack"; fi
+            if extra tutorials; then names="tutorials"; fi
+            if extra fuzz; then names="$names fuzz-2d"; fi
+            if extra spack; then names="$names ubi8-spack ubi9-spack"; fi
           fi
           if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
-            names="$names cuda-13.5-2d cuda-13.5-3d cuda-13.4-2d cuda-13.4-3d cuda-13.5-arm64-2d cuda-13.5-arm64-3d"
+            for t in $(jq -r '.[].name' <<< "$CUDA"); do names="$names $t-2d $t-3d"; done
           fi
           if { [ "$CHANGED" = true ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names hip-2d hip-3d sycl-2d sycl-3d"
@@ -166,10 +183,10 @@ jobs:
 
   # Every supported Linux compiler (GCC 15 and 16, Clang 22 and 23) on x86-64 and arm64,
   # each running its suite: the default GCC 15 runs the OpenMP, MPI, single-precision, 3D
-  # and (main only) serial builds on x86-64, and each backend variant also runs once on
+  # and serial builds on x86-64, and each backend variant also runs once on
   # arm64 with one of the compilers. macOS runs the 2D and 3D suites with Apple Clang and
   # the 2D suite with Homebrew's GCC. The GCC 16 jobs build with CMake 4.2.3, the oldest
-  # supported; the others with the runners' CMake.
+  # supported; the others with the runners' CMake. Branches run the jobs marked gate.
   matrix:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true'
@@ -183,21 +200,21 @@ jobs:
           sparse-checkout: tools
       - id: pick
         env:
-          ALL: ${{ github.ref == 'refs/heads/main' }}
+          FULL: ${{ needs.device.outputs.full }}
           ONLY: ${{ inputs.only }}
           GH_TOKEN: ${{ github.token }}
         run: |
           backends='[
-            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true},
-            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
-            {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
-            {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
-            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
-            {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
-            {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3"},
+            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "gate": true},
+            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "gate": true},
+            {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
+            {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true},
+            {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true, "gate": true},
+            {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true, "gate": true},
+            {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3", "gate": true},
             {"name": "clang-22", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "hdf5": true},
-            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23"},
+            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "gate": true},
             {"name": "gcc-15-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "os": "ubuntu-26.04-arm"},
             {"name": "mpi-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "os": "ubuntu-26.04-arm"},
             {"name": "gcc-16-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "cgns": true, "container": "gcc:16.2.0", "cmake": "4.2.3", "os": "ubuntu-26.04-arm"},
@@ -207,9 +224,12 @@ jobs:
             {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-26"},
             {"name": "macos-gcc", "flags": "-DKokkos_ENABLE_THREADS=ON -DCMAKE_C_COMPILER=gcc-16 -DCMAKE_CXX_COMPILER=g++-16", "os": "macos-26", "packages": "gcc"}
           ]'
-          if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
+          # -f only names the jobs whatever their tier; otherwise the gate, or everything
           if [ -n "$ONLY" ]; then
             backends=$(jq -c --arg only ",$ONLY," 'map(select(.name as $n | $only | contains("," + $n + ",")))' <<< "$backends")
+          elif [ "$FULL" != true ]; then
+            # The gate's MPI jobs leave the whole suite on one rank to the jobs without MPI
+            backends=$(jq -c 'map(select(.gate) | .full = false)' <<< "$backends")
           fi
           echo "any=$(jq 'length > 0' <<< "$backends")" >> "$GITHUB_OUTPUT"
           echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
@@ -390,7 +410,9 @@ jobs:
   # ranks and their post-processing scripts, so they keep working
   tutorials:
     needs: [changelog, device]
-    if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',tutorials,'))
+    if: >-
+      needs.device.outputs.code == 'true' && (inputs.only && contains(format(',{0},', inputs.only), ',tutorials,')
+      || !inputs.only && needs.device.outputs.full == 'true')
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
@@ -490,10 +512,8 @@ jobs:
       fail-fast: false
       matrix:
         dim: [2, 3]
-        toolchain:
-          - {name: cuda-13.5, cuda: 13.5.0, os: ubuntu-26.04, arch: -DKokkos_ARCH_AMPERE80=ON}
-          - {name: cuda-13.4, cuda: 13.4.3, os: ubuntu-26.04, arch: -DKokkos_ARCH_AMPERE80=ON}
-          - {name: cuda-13.5-arm64, cuda: 13.5.0, os: ubuntu-26.04-arm, arch: -DKokkos_ARCH_HOPPER90=ON}
+        # CUDA 13.5 on x86-64 in the gate; also 13.4 and arm64 in the full tier (the device job)
+        toolchain: ${{ fromJSON(needs.device.outputs.cuda) }}
     name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
     # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
@@ -645,7 +665,9 @@ jobs:
   # refuses root.
   spack:
     needs: [changelog, device]
-    if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',spack,'))
+    if: >-
+      needs.device.outputs.code == 'true' && (inputs.only && contains(format(',{0},', inputs.only), ',spack,')
+      || !inputs.only && needs.device.outputs.full == 'true')
     runs-on: ubuntu-26.04
     container: registry.access.redhat.com/${{ matrix.image }}
     strategy:
@@ -740,7 +762,9 @@ jobs:
   # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
   fuzz:
     needs: [changelog, device]
-    if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',fuzz,'))
+    if: >-
+      needs.device.outputs.code == 'true' && (inputs.only && contains(format(',{0},', inputs.only), ',fuzz,')
+      || !inputs.only && needs.device.outputs.full == 'true')
     permissions:
       contents: read
       actions: read
@@ -748,7 +772,9 @@ jobs:
     uses: ./.github/workflows/fuzz.yml
 
   # Sets the commit status `CI` that main requires: success when every job passed or was
-  # skipped for a reason (device builds without device code), failure otherwise.
+  # skipped for a reason (device builds without device code), failure otherwise. After a
+  # merge, a failure opens an issue labeled ci-main (or adds the run to the open one), and
+  # the next success closes it.
   result:
     name: CI result
     if: always()
@@ -777,4 +803,19 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
             -f description="Jobs: $RESULTS${ONLY:+ (only $ONLY)}" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Job results: $RESULTS"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            failed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI result") | "- [\(.name)](\(.html_url))"')
+            open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label ci-main --json number -q '.[0].number')
+            if [ "$state" != success ]; then
+              gh label create ci-main -R "$GITHUB_REPOSITORY" --color B60205 \
+                --description "main fails CI after a merge" 2> /dev/null || true
+              body=$(printf 'CI fails on main at %s ([run](%s)):\n\n%s\n' "$GITHUB_SHA" "$run" "$failed")
+              if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
+              else gh issue create -R "$GITHUB_REPOSITORY" --title "CI fails on main" --label ci-main --body "$body"; fi
+            elif [ -n "$open" ]; then
+              gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
+            fi
+          fi
           [ "$state" = success ]
