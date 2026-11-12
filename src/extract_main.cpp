@@ -455,7 +455,7 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
     const bool distributed = mesh.n_global_cells > 0;
     const uint64_t n_global = distributed ? mesh.n_global_cells : mesh.n_cells;
     const auto wrong_mesh = [&](uint64_t n) {
-        return std::runtime_error("has " + count(n) + " cells, but the case's mesh has " +
+        return std::runtime_error("has " + count(n, "cell") + ", but the case's mesh has " +
                                   count(n_global) + ": give the input of the run that wrote it (-i)");
     };
     if (c.kind == output::Kind::restart) {

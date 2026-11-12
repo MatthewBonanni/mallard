@@ -400,14 +400,15 @@ RestartAttributes Statistics::attributes() const {
 std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
     std::vector<std::pair<std::string, std::string>> items;
     if (means_enabled()) {
-        std::string text = "every " + logging::count(interval) + " steps from t = " + units::with(logging::real(double(t_start)), "s") + ": ";
+        std::string text = "every " + logging::count(interval, "step") + " from t = " +
+                           units::with(logging::real(double(t_start)), "s") + ": ";
         for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + std::string("MEAN_") + fields[i];
         for (const auto & [i, j] : products) text += ", COV_" + fields[i] + "_" + fields[j];
         if (batches_enabled()) {
             text += logging::format("; %g%% intervals by batches of ", 100.0 * confidence) +
                     units::with(logging::real(double(batch)), "s");
         }
-        if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
+        if (n_samples > 0) text += " (" + logging::count(n_samples, "sample") + " so far)";
         items.emplace_back("statistics", text);
     }
     if (spectra.enabled()) items.emplace_back("spectra", spectra.summary());
@@ -616,7 +617,7 @@ RestartAttributes PhaseAverage::attributes() const {
 }
 
 std::string PhaseAverage::summary() const {
-    std::string text = logging::count(bins) + " bins every " + logging::count(interval) + " steps from t = " +
+    std::string text = logging::count(bins, "bin") + " every " + logging::count(interval, "step") + " from t = " +
                        units::with(logging::real(double(t_start)), "s") + ", ";
     if (trigger_cell == NO_TRIGGER) {
         text += "period " + units::with(logging::real(period), "s");
@@ -627,7 +628,7 @@ std::string PhaseAverage::summary() const {
     }
     text += ": ";
     for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + fields[i];
-    if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
+    if (n_samples > 0) text += " (" + logging::count(n_samples, "sample") + " so far)";
     return text;
 }
 

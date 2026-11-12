@@ -389,7 +389,7 @@ void find_mesh(Side & s, const std::string & mesh_file) {
     }
     const uint64_t n = s.mesh->n_global_cells > 0 ? s.mesh->n_global_cells : s.mesh->n_cells;
     if (n != s.c.mesh.n_cells) {
-        s.no_mesh = "its mesh (" + s.mesh_from + ") has " + count(n) + " cells, the file " + count(s.c.mesh.n_cells);
+        s.no_mesh = "its mesh (" + s.mesh_from + ") has " + count(n, "cell") + ", the file " + count(s.c.mesh.n_cells);
         s.mesh.reset();
         s.mesh_from.clear();
         return;
@@ -482,7 +482,7 @@ ArrayResult compare_array(const std::string & name, const std::vector<double> & 
     r.name = name;
     if (a.size() != b.size()) {
         r.s = Status::beyond;
-        r.problem = count(a.size()) + " values in A, " + count(b.size()) + " in B";
+        r.problem = count(a.size(), "value") + " in A, " + count(b.size()) + " in B";
         return r;
     }
     r.stats = compare(a, b, 1);
@@ -562,7 +562,7 @@ RestartResult compare_restart(const Side & a, const Side & b, const Tolerance & 
             r.faces.name = "face records";
             r.faces.s = Status::beyond;
             r.faces.problem = fa.first.size() == fb.first.size() ? "of different faces"
-                                                                 : count(fa.first.size()) + " faces in A, " +
+                                                                 : count(fa.first.size(), "face") + " in A, " +
                                                                        count(fb.first.size()) + " in B";
         } else {
             r.faces.name = "face records";
@@ -601,7 +601,7 @@ size_t pick_snapshot(const output::Contents & c, const Selection & pick, const c
     }
     if (pick.value == "last") return n - 1;
     if (pick.number >= static_cast<double>(n)) {
-        throw Trouble(file + " has " + count(n) + " snapshots, so no snapshot " + pick.value + " (they count from 0)");
+        throw Trouble(file + " has " + count(n, "snapshot") + ", so no snapshot " + pick.value + " (they count from 0)");
     }
     return static_cast<size_t>(pick.number);
 }
@@ -735,7 +735,7 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         const std::vector<double> va = output::read(a.c, f.name, a.snapshot);
         const std::vector<double> vb = remap ? remapped.at(f.name) : output::read(b.c, f.name, b.snapshot);
         if (va.size() != vb.size()) {
-            throw Trouble(f.name + " has " + count(va.size() / f.components) + " values in A and " +
+            throw Trouble(f.name + " has " + count(va.size() / f.components, "value") + " in A and " +
                           count(vb.size() / f.components) + " in B; --remap compares cell values on different meshes");
         }
         f.stats = compare(va, vb, f.components);
@@ -824,11 +824,11 @@ std::string side_text(const Side & s) {
 }
 
 std::string how_text(const Comparison & r, const Side & a) {
-    const std::string n = count(a.c.mesh.n_cells);
-    if (r.how == "remap") return "B remapped onto A's mesh (" + n + " cells), then cell by cell";
+    const std::string n = count(a.c.mesh.n_cells, "cell");
+    if (r.how == "remap") return "B remapped onto A's mesh (" + n + "), then cell by cell";
     if (a.c.kind == output::Kind::table) return "row by row";
-    if (a.c.kind == output::Kind::probe) return "sample by sample (" + count(a.c.mesh.n_points) + " points)";
-    if (r.how == "same_mesh") return "cell by cell, in the mesh's global cell order (" + n + " cells)";
+    if (a.c.kind == output::Kind::probe) return "sample by sample (" + count(a.c.mesh.n_points, "point") + ")";
+    if (r.how == "same_mesh") return "cell by cell, in the mesh's global cell order (" + n + ")";
     return "value by value, in the files' order";
 }
 

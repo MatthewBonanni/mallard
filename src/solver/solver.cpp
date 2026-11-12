@@ -229,7 +229,7 @@ void Solver::setup_from_input() {
     });
     timed_phase("numerics", [&] { init_numerics(); });
     while (halo_too_shallow()) {
-        timed_phase("halo rebuild (" + std::to_string(halo_layers) + " layers)", [&] {
+        timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
             init_numerics();
@@ -529,8 +529,8 @@ void Solver::init_mesh() {
             counts[1]++;
         }
         const auto total = comm::allreduce(std::array<uint64_t, 2>{counts[0], counts[1]}, comm::Op::SUM);
-        std::string text = logging::count(total[0]) + " boundary faces";
-        if (N_DIM == 3) text += " (" + logging::count(total[1]) + " curved faces)";
+        std::string text = logging::count(total[0], "boundary face");
+        if (N_DIM == 3) text += " (" + logging::count(total[1], "curved face") + ")";
         uint64_t n_high_order = 0;
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
         if (n_high_order > 0) text += ", high-order faces from the mesh file";
@@ -757,7 +757,7 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
     }
     std::string text;
     for (const auto & [zone, n] : faces) {
-        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n) + " faces)";
+        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n, "face") + ")";
     }
     return text;
 }
@@ -1146,7 +1146,7 @@ void Solver::init_sources(region::Regions & regions) {
         if (g.size() != N_DIM) {
             throw InputError({.key = "source.gravity",
                               .line = line_of(source, "gravity"),
-                              .message = "has " + std::to_string(g.size()) + " components, but this build is " +
+                              .message = "has " + logging::count(g.size(), "component") + ", but this build is " +
                                          std::to_string(N_DIM) + "D",
                               .fix = N_DIM == 3 ? "Write gravity = [gx, gy, gz]" : "Write gravity = [gx, gy]"});
         }
@@ -1163,7 +1163,7 @@ void Solver::init_sources(region::Regions & regions) {
         if (m.size() != N_DIM) {
             throw InputError({.key = "source.mass_flow",
                               .line = line_of(source, "mass_flow"),
-                              .message = "has " + std::to_string(m.size()) + " components, but this build is " +
+                              .message = "has " + logging::count(m.size(), "component") + ", but this build is " +
                                          std::to_string(N_DIM) + "D",
                               .fix = N_DIM == 3 ? "Write mass_flow = [mx, my, mz]" : "Write mass_flow = [mx, my]"});
         }
@@ -2615,7 +2615,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     if (pasr_on) logging::items(pasr.summary());
     if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+        logging::item("Chemistry", logging::count(uint64_t(kinetics.n_reactions), "reaction") + ", " +
                                        (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
                                        (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
                                        real(chemistry_options.integrator.rtol) + ", atol " +
@@ -2628,24 +2628,22 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
 
     logging::section("Boundaries");
     for (const CheckBoundary & b : boundary_summary) {
-        logging::item(b.zone, b.condition + ", " + logging::count(b.faces) + " faces" +
+        logging::item(b.zone, b.condition + ", " + logging::count(b.faces, "face") +
                                   (b.details.empty() ? "" : ", " + b.details));
         if (!b.turbulence.empty()) logging::item(b.zone + " turbulence", b.turbulence);
     }
 
     logging::section("Output");
-    logging::item("Progress", "every " + logging::count(check_interval) + " steps");
+    logging::item("Progress", "every " + logging::count(check_interval, "step"));
     for (const auto & writer : data_writers) {
         const auto [kind, text] = writer->summary();
         logging::item(kind, text);
     }
     for (const auto & monitor : force_monitors) {
-        logging::item("forces", monitor.file + " (" + monitor.zone + ") every " + logging::count(monitor.interval) +
-                                    " steps");
+        logging::item("forces", monitor.file + " (" + monitor.zone + ") every " + logging::count(monitor.interval, "step"));
     }
     if (integral_monitor.interval > 0) {
-        logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
-                                       " steps");
+        logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval, "step"));
     }
     logging::items(statistics.summary());
     logging::items(probes.summary());

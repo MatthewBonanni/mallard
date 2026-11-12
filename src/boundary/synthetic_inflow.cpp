@@ -269,8 +269,8 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
             }
         }
         if (row.size() != header.size()) {
-            throw InputError(key + ": " + file + ": a row has " + std::to_string(row.size()) + " values for " +
-                             std::to_string(header.size()) + " columns.");
+            throw InputError(key + ": " + file + ": a row has " + logging::count(row.size(), "value") + " for " +
+                             logging::count(header.size(), "column") + ".");
         }
         if (!coordinate.empty() && !(row[0] > coordinate.back())) {
             throw InputError(key + ": " + file + ": the coordinate must increase from row to row.");

@@ -182,8 +182,8 @@ void print_snapshot_block(const output::Contents & c) {
     item("Solver precision", b.solver_precision.empty() ? "-" : b.solver_precision);
     if (b.averaged) {
         item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
-                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
-                                  " samples");
+                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples), "sample")
+                                                   : std::string("- samples")));
     }
 }
 
@@ -336,7 +336,7 @@ void print_restart(const output::Contents & c) {
         logging::section("Restart arrays");
         std::vector<std::vector<std::string>> rows;
         for (const auto & [name, values] : r.arrays) rows.push_back({name, count(values.size())});
-        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces) + " faces"});
+        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces, "face")});
         logging::table({"array", "values"}, rows);
     }
 }
@@ -534,7 +534,7 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
         if (error) {
             problems.emplace_back(path, "missing: removed or moved since the run wrote it");
         } else if (uint64_t(size) != recorded.bytes) {
-            problems.emplace_back(path, count(uint64_t(size)) + " bytes, the run wrote " + count(recorded.bytes) +
+            problems.emplace_back(path, count(uint64_t(size), "byte") + ", the run wrote " + count(recorded.bytes) +
                                             ": changed or cut short since");
         } else if (verify && !recorded.sha256.empty() && provenance::sha256_file(file.string()) != recorded.sha256) {
             problems.emplace_back(path, "its contents differ from what the run wrote (SHA-256)");

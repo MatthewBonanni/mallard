@@ -87,10 +87,6 @@ std::pair<std::string, std::string> time_parts(const double s) {
 
 std::string steps(const double n) { return n >= 1000.0 ? count(static_cast<uint64_t>(std::llround(n))) : g4(n); }
 
-std::string plural(const uint64_t n, const std::string & noun) {
-    return count(n) + " " + noun + (n == 1 ? "" : "s");
-}
-
 template <size_t N>
 std::string point(const std::array<double, N> & x) {
     std::string text = "(";
@@ -100,8 +96,8 @@ std::string point(const std::array<double, N> & x) {
 
 std::string result_line(const CheckReport & r) {
     const size_t n_errors = r.errors().size(), n_warnings = r.warnings().size();
-    return std::string("Result: ") + report::status_word(r.status()) + ", " + plural(n_errors, "error") + " and " +
-           plural(n_warnings, "warning") + (n_errors > 0 ? " (exit status 1)" : " (exit status 0)");
+    return std::string("Result: ") + report::status_word(r.status()) + ", " + count(n_errors, "error") + " and " +
+           count(n_warnings, "warning") + (n_errors > 0 ? " (exit status 1)" : " (exit status 0)");
 }
 
 size_t n_of(const CheckReport & r, const std::string & code) {
@@ -119,7 +115,7 @@ void overview(report::Text & text, const CheckReport & r) {
         text.line("Input: none, so the report covers the environment only (mallard check input.toml adds the case)");
     } else {
         text.line("Input: " + (r.input_file.empty() ? std::string("the input") : r.input_file) +
-                  (r.setup_done ? ", set up on " + plural(uint64_t(r.ranks), "rank")
+                  (r.setup_done ? ", set up on " + count(uint64_t(r.ranks), "rank")
                                 : ": the setup stopped on an error, so the report covers what it got to"));
     }
     text.line("Units: SI (m, s, kg, K) wherever a column or a value names none; bytes with decimal prefixes "
@@ -137,11 +133,11 @@ void input_section(report::Text & text, const CheckReport & r) {
                                              : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
-                     n_unused ? plural(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
+                     n_unused ? count(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
                               : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
-                     n_deprecated ? plural(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
+                     n_deprecated ? count(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
     Status s = setup;
     for (const Row & row : rows) s = report::worse(s, row.status);
     text.section("Input", s);
@@ -150,7 +146,7 @@ void input_section(report::Text & text, const CheckReport & r) {
 
 void boundaries_section(report::Text & text, const CheckReport & r) {
     text.section("Boundaries", Status::OK);
-    text.note("Every boundary face has a condition: " + plural(r.boundaries.size(), "zone") +
+    text.note("Every boundary face has a condition: " + count(r.boundaries.size(), "zone") +
               " (periodic zones are paired, not listed).");
     if (r.boundaries.empty()) return;
     std::vector<Row> rows;
@@ -362,8 +358,8 @@ void sizing_section(report::Text & text, const CheckReport & r) {
         } else {
             rows.push_back({Status::OK,
                             {"fewest " + units, std::to_string(r.min_ranks), units, "",
-                             "largest part " + count(r.min_owned) + " owned + " + count(r.min_halo) +
-                                 " halo cells, predicted peak " + bytes(double(r.min_peak)) +
+                             "largest part " + count(r.min_owned) + " owned + " + count(r.min_halo, "halo cell") +
+                                 ", predicted peak " + bytes(double(r.min_peak)) +
                                  (r.min_partitioned ? " (from the partitioner)" : " (halo as in this check)")}});
             if (r.halo_ranks > r.min_ranks) {
                 rows.push_back({Status::NONE,
@@ -383,7 +379,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
                 const auto [wall, wall_units] = time_parts(double(r.n_cells) / (n * r.throughput * r.dt));
                 rows.push_back({Status::NONE,
                                 {"wall time per unit simulated time", wall, wall_units, "",
-                                 "on " + plural(uint64_t(n), unit) + " at " + logging::si(r.throughput) +
+                                 "on " + count(uint64_t(n), unit) + " at " + logging::si(r.throughput) +
                                      " cells/s each"}});
             }
         }
@@ -403,9 +399,9 @@ void cost_section(report::Text & text, const CheckReport & r) {
         return;
     }
     const std::string hours = r.device_memory ? "GPU-hours" : "rank-hours";
-    text.note("On " + plural(uint64_t(r.target_ranks), "rank") + " at " + logging::si(r.throughput) +
+    text.note("On " + count(uint64_t(r.target_ranks), "rank") + " at " + logging::si(r.throughput) +
               " cells/s per rank (" +
-              (r.throughput_measured ? "measured over " + plural(r.steps_timed, "step") : std::string("--throughput")) +
+              (r.throughput_measured ? "measured over " + count(r.steps_timed, "step") : std::string("--throughput")) +
               "), at the initial time step; " + hours + ": ranks times wall hours.");
     std::vector<Row> rows;
     auto row = [&](const std::string & period, const double time) {
@@ -504,8 +500,8 @@ void environment_section(report::Text & text, const CheckReport & r) {
          {"Kokkos", block_value(build, "kokkos") + ", " + block_value(build, "backend") + " (host " +
                         block_value(build, "host_backend") + ")"}},
         {Status::OK,
-         {"MPI", mpi ? version_or(deps, "mpi", "built") + "; " + plural(uint64_t(e.ranks.size()), "rank") + " on " +
-                           plural(uint64_t(e.hosts), "host") + ", up to " + std::to_string(e.ranks_per_host) +
+         {"MPI", mpi ? version_or(deps, "mpi", "built") + "; " + count(uint64_t(e.ranks.size()), "rank") + " on " +
+                           count(uint64_t(e.hosts), "host") + ", up to " + std::to_string(e.ranks_per_host) +
                            " per host"
                      : "not built"}},
         {status_of({diagnostic_code::ENV_GPU_AWARE_MPI, diagnostic_code::ENV_HOST_STAGING}),
@@ -548,7 +544,7 @@ void environment_section(report::Text & text, const CheckReport & r) {
                           !openmp ? "-" : p.omp_bind ? "bound" : "free"}});
     }
     text.table({"rank", "host", "device", "GPU", "CPUs", "threads", "binding"}, ranks, false);
-    if (e.ranks.size() > MAX_RANKS) text.note("... and " + plural(e.ranks.size() - MAX_RANKS, "more rank"));
+    if (e.ranks.size() > MAX_RANKS) text.note("... and " + count(e.ranks.size() - MAX_RANKS, "more rank"));
 }
 
 std::string environment_json(const CheckEnvironment & e) {

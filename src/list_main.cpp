@@ -100,7 +100,7 @@ int format_error(const cli::Args & args, const char * command) {
     return cli::usage_error(*cli::command(command), "--format takes text or json, not " + f);
 }
 
-std::string count_text(size_t n) { return std::to_string(n) + (n == 1 ? " field" : " fields"); }
+std::string count_text(size_t n) { return logging::count(n, "field"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
                        const std::string & group, const std::string & needs) {
@@ -364,7 +364,7 @@ int list_keys_main(const cli::Args & args) {
         rows.push_back(row);
         if (i + 1 == keys.size() || section_of(keys[i + 1]) != section_of(keys[i])) {
             logging::section((per_case ? input_file + ": [" : "Keys: [") + section_of(keys[i]) + "]",
-                             std::to_string(rows.size()) + (rows.size() == 1 ? " key" : " keys"));
+                             logging::count(rows.size(), "key"));
             if (per_case) {
                 logging::table({"key", "set", "type", "units", "default", "values"}, rows);
             } else {

@@ -2440,10 +2440,9 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
-        const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
         std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
-                           logging::count(n) + unit +
-                           (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
+                           logging::count(n, cells ? "cell" : "point") +
+                           (p.interval > 0 ? " every " + logging::count(p.interval, "step")
                                            : " every " + units::with(logging::real(double(p.time_interval)), "s") + " of simulated time") +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;

@@ -25,6 +25,7 @@
 #include "field_units.h"
 #include "file_format.h"
 #include "json.h"
+#include "log.h"
 #include "mesh_block.h"
 #include "provenance.h"
 #ifdef Mallard_HAS_HDF5
@@ -1390,7 +1391,8 @@ Contents open(const std::string & path) {
 std::vector<double> read(const Contents & file, const std::string & field, size_t snapshot) {
     if (!file.field(field)) fail(file.path, "has no field " + field);
     if (snapshot >= file.snapshots.size()) {
-        fail(file.path, "has " + std::to_string(file.snapshots.size()) + " snapshots, not " + std::to_string(snapshot + 1));
+        fail(file.path,
+             "has " + logging::count(file.snapshots.size(), "snapshot") + ", not " + std::to_string(snapshot + 1));
     }
     const Snapshot & s = file.snapshots[snapshot];
     switch (file.kind) {

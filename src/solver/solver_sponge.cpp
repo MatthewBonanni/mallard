@@ -124,8 +124,8 @@ void Solver::init_sponges(region::Regions & regions) {
     Kokkos::deep_copy(sponge_strength, h_strength);
     Kokkos::deep_copy(sponge_target, h_target);
     if (max_strength > 0.0) sponge_dt_max = static_cast<rtype>(1.0 / max_strength);
-    source_summary.emplace_back("Sponges", std::to_string(sponges.size()) + ", " + logging::count(n_cells) +
-                                               " cells, max strength " +
+    source_summary.emplace_back("Sponges", std::to_string(sponges.size()) + ", " + logging::count(n_cells, "cell") +
+                                               ", max strength " +
                                                units::with(logging::real(max_strength), "1/s"));
 }
 

@@ -135,7 +135,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, c
     r.has_quality = true;
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
         if (r.quality[m].n_over_limit == 0) continue;
-        r.warning(diagnostic_code::QUALITY[m], logging::count(r.quality[m].n_over_limit) + " cells with " +
+        r.warning(diagnostic_code::QUALITY[m], logging::count(r.quality[m].n_over_limit, "cell") + " with " +
                                               MeshQuality::NAMES[m] + " above " +
                                               logging::real(MeshQuality::LIMITS[m]) + ", the worst " +
                                               logging::format("%.3g", r.quality[m].max) + " at " +
@@ -352,7 +352,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes_peak = static_cast<uint64_t>(scale * static_cast<double>(r.bytes_peak));
     } else {
         r.error(diagnostic_code::RANKS, "--ranks " + std::to_string(r.target_ranks) + " in a check on " +
-                                       std::to_string(r.ranks) + " ranks: run the check serially or on " +
+                                       logging::count(uint64_t(r.ranks), "rank") + ": run the check serially or on " +
                                        std::to_string(r.target_ranks) + " ranks");
         r.target_ranks = r.ranks;
         return;
@@ -428,8 +428,8 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
     for (int tries = 0; !fits(part); tries++) {
         if (tries == 16 || uint64_t(n) >= max_ranks) {
-            r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n)) +
-                                                    " parts fits in " + per +
+            r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n), "part") +
+                                                    " fits in " + per +
                                                     ": size the run for a larger memory (--memory) or coarsen the mesh");
             return;
         }

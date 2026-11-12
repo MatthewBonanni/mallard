@@ -112,6 +112,12 @@ TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
     EXPECT_EQ(logging::take_written(), "");
 }
 
+TEST(RunReport, ACountOfOneTakesTheSingular) {
+    EXPECT_EQ(logging::count(1, "cell"), "1 cell");
+    EXPECT_EQ(logging::count(0, "cell"), "0 cells");
+    EXPECT_EQ(logging::count(1234, "boundary face"), "1,234 boundary faces");
+}
+
 // Guards the summary's and the health section's tables, units and what they leave out
 TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D run (points with two coordinates)";

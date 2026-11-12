@@ -127,8 +127,8 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
 
     logging::items(model.summary());
     logging::items({
-        {"Benchmark", std::to_string(n_cells) + " cells from " + std::to_string(n_samples) + " trajectory states (" +
-                          std::to_string(n_igniting) + " igniting cells)"},
+        {"Benchmark", logging::count(n_cells, "cell") + " from " + logging::count(n_samples, "trajectory state") + " (" +
+                          logging::count(n_igniting, "igniting cell") + ")"},
         {"Execution", (cells.lanes() == 1 ? std::string("one thread per cell")
                                            : std::to_string(cells.threads()) + " x " + std::to_string(cells.lanes()) +
                                                  " lanes per cell" +

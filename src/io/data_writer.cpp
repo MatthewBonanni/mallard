@@ -364,11 +364,11 @@ std::pair<std::string, std::string> DataWriter::summary() const {
                                  : format == DataFormat::HDF5   ? "_*.h5"
                                  : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
                                                                 : "_*.vtu");
-    if (subset) text += " (" + region_name + ", " + logging::count(n_subset) + " cells)";
+    if (subset) text += " (" + region_name + ", " + logging::count(n_subset, "cell") + ")";
     if (compression == Compression::ZLIB) {
         text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
     }
-    text += interval > 0 ? " every " + logging::count(interval) + " steps"
+    text += interval > 0 ? " every " + logging::count(interval, "step")
                          : " every " + units::with(logging::real(double(time_interval)), "s") + " of simulated time";
     if (format != DataFormat::RESTART) {
         std::string names;
