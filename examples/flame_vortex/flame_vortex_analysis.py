@@ -239,9 +239,9 @@ def plot(results, out):
     axs[2].set_xlabel("t S_L / delta_L")
     axs[2].set_ylabel("weakest burning along the front, q_min")
     axs[2].axhline(0.1, color="#888", ls=":")
-    axs[1].legend(fontsize=8)
+    axs[2].legend(fontsize=8, loc="center left", bbox_to_anchor=(1.02, 0.5))
     fig.tight_layout()
-    fig.savefig(out, dpi=130)
+    fig.savefig(out, dpi=130, bbox_inches="tight")
 
 
 if __name__ == "__main__":
