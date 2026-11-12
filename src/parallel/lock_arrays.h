@@ -26,7 +26,7 @@
  * inside a stream capture, that copy fails and invalidates the capture without
  * an error until cudaStreamEndCapture, and the unit's pointers are never set.
  * Each unit that includes this header registers its own copy, which
- * copy_all() makes, checked, before a capture.
+ * copy_all() makes, checked, before a capture, after Kokkos's own.
  */
 namespace lock_arrays {
 
@@ -37,6 +37,8 @@ bool register_unit(UnitCopy copy);
 
 namespace {
 cudaError_t copy_unit() {
+    // Spends Kokkos's own copy at the unit's first launch, which would otherwise come inside the capture
+    desul::ensure_cuda_lock_arrays_on_device();
     cudaError_t err = cudaMemcpyToSymbol(desul::Impl::CUDA_SPACE_ATOMIC_LOCKS_DEVICE,
                                          &desul::Impl::CUDA_SPACE_ATOMIC_LOCKS_DEVICE_h, sizeof(int32_t *));
     if (err == cudaSuccess) {
