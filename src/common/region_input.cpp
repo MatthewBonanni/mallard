@@ -258,7 +258,31 @@ Dimension field_dimension(const std::string & field) {
     if (field == "P") return dim::pressure;
     if (field == "RHO") return dim::density;
     if (field.rfind("U_", 0) == 0 && field.size() == 3) return dim::velocity;
+    if (field == "H") return dim::velocity_squared;
+    if (field.rfind("VORTICITY", 0) == 0) return dim::rate;
+    if (field == "Q_CRITERION") return dim::rate.times(dim::rate);
     return dim::none;
+}
+
+/** @brief Whether the expression text names any of CONDITION_GRADIENT_FIELDS. */
+bool names_gradient_field(const std::string & text) {
+    for (size_t i = 0; i < text.size();) {
+        const auto word = [&](size_t k) {
+            return k < text.size() && (std::isalnum(static_cast<unsigned char>(text[k])) || text[k] == '_');
+        };
+        if (!word(i)) {
+            i++;
+            continue;
+        }
+        size_t j = i;
+        while (word(j)) j++;
+        const std::string name = text.substr(i, j - i);
+        for (const std::string & g : CONDITION_GRADIENT_FIELDS) {
+            if (name == g) return true;
+        }
+        i = j;
+    }
+    return false;
 }
 
 class Parser {
@@ -1687,6 +1711,30 @@ void require_full_dimension(const Region & region, const Input & value, const st
     fail(where, line_of(value), "needs " + dimension_name(N_DIM) + ", but " + what + " is " +
                                     dimension_name(region.dimension()),
          fix, "docs/guide/geometry.md#who-uses-what");
+}
+
+bool conditions_read_gradients(const Input & input) {
+    if (input.is_array()) {
+        for (const Input & v : input.as_array()) {
+            if (conditions_read_gradients(v)) return true;
+        }
+        return false;
+    }
+    if (!input.is_table()) return false;
+    const auto & t = input.as_table().entries();
+    const auto text = [&](const char * key) {
+        const auto it = t.find(key);
+        return it != t.end() && it->second.is_string() ? it->second.as_string() : std::string();
+    };
+    const std::string type = text("type");
+    if ((type == "where" && names_gradient_field(text("condition"))) ||
+        (type == "isosurface" && names_gradient_field(text("field")))) {
+        return true;
+    }
+    for (const auto & [key, v] : t) {
+        if (conditions_read_gradients(v)) return true;
+    }
+    return false;
 }
 
 void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what) {

@@ -36,7 +36,9 @@ namespace region {
  *        node with it (across periodic boundaries, their images).
  *        A condition's cell fractions and isosurfaces are cut from this
  *        linear reconstruction, exact for a linear level. Halo cells get
- *        their value and no gradient.
+ *        their value and no gradient. Fields of the velocity gradient
+ *        (CONDITION_GRADIENT_FIELDS) take it from a first fit of the same
+ *        kind, in every cell with all its vertex neighbors (Mesh::n_complete).
  */
 class SolutionLevels {
     public:
@@ -56,7 +58,8 @@ class SolutionLevels {
         uint32_t size() const { return n_conditions; }
 
     private:
-        uint32_t n_cells = 0, n_owned = 0, n_conditions = 0, n_species = 0;
+        uint32_t n_cells = 0, n_owned = 0, n_complete = 0, n_conditions = 0, n_species = 0;
+        bool axisymmetric = false;
         std::vector<kexpr::Program> programs;
         kexpr::ProgramTable<> table;
         CellFields fields;
@@ -66,6 +69,7 @@ class SolutionLevels {
         PeriodicMaps periodic;
         Kokkos::View<rtype> host_time;
         Kokkos::View<double **[N_DIM + 1]> m_levels;
+        Kokkos::View<rtype *[N_DIM][N_DIM]> velocity_gradients;  // (cell, k, i) = d u_k / d x_i, if read
 };
 
 /**

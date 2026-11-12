@@ -28,6 +28,7 @@
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
+#include "region_motion.h"
 
 namespace {
 
@@ -104,6 +105,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
+    // Regions defined by the solution are placed on the initial one
+    update_cell_W();
     check_regions(r, options);
     return r;
 }
@@ -518,7 +521,8 @@ struct OnMesh {
     case_view::Block block;
 };
 
-OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool measures) {
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool measures,
+               const std::shared_ptr<const region::SolutionLevels> & levels = nullptr, const double t = 0.0) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -531,7 +535,15 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
         }
     };
     if (region.dimension() == N_DIM) {
-        const std::vector<double> f = region::cell_fractions(mesh, region);
+        std::vector<double> f;
+        if (levels) {
+            const region::MovingFractions moving(mesh, region, levels);
+            moving.update(t);
+            const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), moving.fractions());
+            f.assign(h.data(), h.data() + h.extent(0));
+        } else {
+            f = region::cell_fractions(mesh, region);
+        }
         if (measures) {
             m.own = region::measures(region, mesh.axisymmetric);
             m.in = region::measures_in_domain(mesh, region, f);
@@ -555,7 +567,13 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
             fraction.values.push_back(f[c]);
         }
     } else {
-        const region::Elements e = region::elements(mesh, region);
+        region::Elements e;
+        if (levels) {
+            levels->update(t);
+            e = region::elements(mesh, region, Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), levels->levels()));
+        } else {
+            e = region::elements(mesh, region);
+        }
         m.exact = e.exact;
         std::vector<uint32_t> cells(e.cell);
         std::sort(cells.begin(), cells.end());
@@ -615,13 +633,14 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
         if (region->solution()) {
-            CheckRegion g;
-            g.name = label;
-            g.dimension = region->dimension();
-            g.per_radian = mesh->axisymmetric && g.dimension == N_DIM;
-            g.measure = std::numeric_limits<double>::quiet_NaN();
+            const auto levels =
+                std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
+            OnMesh m = on_mesh(*mesh, *region, block_name(label), false, levels, static_cast<double>(t));
+            CheckRegion g = entry(label, *region, m, false);
+            g.resolution = 0;
             g.solution = true;
             r.regions.push_back(g);
+            blocks.push_back(std::move(m.block));
             continue;
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM);
