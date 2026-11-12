@@ -30,6 +30,7 @@
 #include "mesh_quality.h"
 #include "output_reader.h"
 #include "provenance.h"
+#include "run_page.h"
 #include "snapshot_block.h"
 
 namespace fs = std::filesystem;
@@ -573,7 +574,23 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
     return problems;
 }
 
+/** @brief Writes DIR/report.html from DIR/mallard.jsonl. */
+int run_report(const std::string & dir) {
+    const fs::path log = fs::path(dir) / "mallard.jsonl";
+    if (!fs::exists(log)) {
+        std::cerr << "mallard info: " << dir << " has no mallard.jsonl, which --html builds the run report from "
+                  << "([output] run_log = \"\" writes none; the run's own report.html, [output] report, does not "
+                     "need it).\n";
+        return 1;
+    }
+    const std::string page = (fs::path(dir) / "report.html").string();
+    run_page::write(page, run_page::from_file(log.string()).html());
+    std::cout << "Wrote " << page << "\n";
+    return 0;
+}
+
 int run_directory(const std::string & dir, const cli::Args & args) {
+    if (args.has("--html")) return run_report(dir);
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
@@ -625,24 +642,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         if (const json::Value * restart = s.find("restart"); restart && !s.find("restart_of")) {
             item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
-        if (record.end.type == json::Value::Type::OBJECT) {
-            const json::Value & e = record.end;
-            const json::Value * wall = e.find("wall");
-            // Run logs before 0.10 give only the reason
-            const json::Value * outcome = e.find("outcome");
-            item("Ended", (outcome ? outcome->string + ": " : "") + text(e.find("reason")));
-            item("Last step", text(e.find("step")));
-            for (const auto & [key, name] : {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
-                if (const json::Value * f = e.find(key)) {
-                    item(name, text(f->find("path")) + ", step " + text(f->find("step")) + ", t = " + text(f->find("t")) + " s");
-                }
-            }
-            item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
-            item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
-        } else {
-            item("Ended", "no end record: still running, or killed (SIGKILL, a lost node)");
-            item("Last step", text(record.last.find("step")) + ", of the last record");
-        }
+    }
+    if (record.found) {
+        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
     logging::section("Output files", count(files.size()) + " files");
     std::vector<std::vector<std::string>> rows;
@@ -784,6 +786,9 @@ int info_main(const cli::Args & args) {
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
+        if (args.has("--html")) {
+            return cli::usage_error(*cli::command("info"), "--html takes a run directory, not " + path);
+        }
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
