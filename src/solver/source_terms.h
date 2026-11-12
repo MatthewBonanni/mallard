@@ -145,10 +145,11 @@ class SourceTerms {
         SourceTerms & operator=(const SourceTerms &) = delete;
         ~SourceTerms();
 
-    private:
+        // Public because nvcc rejects device lambdas in non-public member functions
         /** @brief The weights of moving regions at the time on the device, and their integrals. */
         void move(const Kokkos::View<rtype> & time);
 
+    private:
         struct Moving {
             std::unique_ptr<region::MovingFractions> fractions;
             uint32_t row = 0;
