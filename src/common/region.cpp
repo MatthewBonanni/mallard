@@ -263,15 +263,18 @@ struct HostCone {
     const Mesh & mesh;
     uint32_t c;
 
-    double operator()(const uint32_t k, const double * p, double * x) const {
-        const curved::Geometry & geometry = *mesh.curved_geometry;
-        const uint32_t f = mesh.h_face_of_cell(c, k);
-        double xi[2] = {0.0, 0.0};
-        const double j = geometry.face_coordinates(f, p, xi);
-        curved::Vec3 y, dx[3];
-        const double dv = geometry.cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
-        for (size_t i = 0; i < 3; i++) x[i] = y[i];
-        return dv * j;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t k, const double * p, double * x) const {
+        KOKKOS_IF_ON_HOST((
+            const curved::Geometry & geometry = *mesh.curved_geometry;
+            const uint32_t f = mesh.h_face_of_cell(c, k);
+            double xi[2] = {0.0, 0.0};
+            const double j = geometry.face_coordinates(f, p, xi);
+            curved::Vec3 y, dx[3];
+            const double dv = geometry.cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
+            for (size_t i = 0; i < 3; i++) x[i] = y[i];
+            return dv * j;
+        ))
+        KOKKOS_IF_ON_DEVICE(((void)k; (void)p; (void)x; Kokkos::abort("HostCone is host-only"); return 0.0;))
     }
 };
 
