@@ -1218,12 +1218,12 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
         throw cannot_write("the restart file", filename);
     }
     int32_t failed = 0;
-    const auto check = [&failed](int code) { failed = failed || code != MPI_SUCCESS; };
-    check(MPI_File_set_size(fh, 0));
+    const auto check = [&failed](bool ok) { failed = failed || !ok; };
+    check(MPI_File_set_size(fh, 0) == MPI_SUCCESS);
     const std::vector<char> header =
         restart_header(n_global, step, double(t), names, attributes, ordered.total, 0, arrays);
     if (comm::is_root()) {
-        check(MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE));
+        check(comm::write_at(fh, 0, header.data(), header.size(), MPI_BYTE));
     }
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
@@ -1232,33 +1232,27 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
     for (uint32_t i = 0; i < n_owned; i++) {
         displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[owned_by_id[i]] * sizeof(rtype));
     }
-    MPI_Datatype file_type;
-    MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
-    MPI_Type_commit(&file_type);
     std::vector<rtype> values(n_owned);
     for (size_t v = 0; v < fields.size(); v++) {
         for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(owned_by_id[i], 0);
-        MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
-                          MPI_INFO_NULL);
-        check(MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE));
+        check(comm::write_all_hindexed(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), values.data(),
+                                       displacements.data(), n_owned, real_type));
     }
-    MPI_Type_free(&file_type);
     // Each rank's faces are a contiguous run of the keys and of the values
     const MPI_Offset faces_at = header_size + MPI_Offset(fields.size() * n_global * sizeof(rtype));
     MPI_File_set_view(fh, 0, MPI_BYTE, MPI_BYTE, "native", MPI_INFO_NULL);
-    check(MPI_File_write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
-                                static_cast<int>(ordered.part.keys.size()), MPI_UINT64_T, MPI_STATUS_IGNORE));
-    check(MPI_File_write_at_all(fh,
-                                faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
-                                ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
-                                MPI_STATUS_IGNORE));
+    check(comm::write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
+                             ordered.part.keys.size(), MPI_UINT64_T));
+    check(comm::write_at_all(fh,
+                             faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
+                             ordered.part.values.data(), ordered.part.values.size(), real_type));
     if (comm::is_root()) {
         const std::vector<char> trailer = restart_trailers(snapshot.json());
-        check(MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
-                                trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE));
+        check(comm::write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
+                             trailer.data(), trailer.size(), MPI_BYTE));
     }
-    check(MPI_File_sync(fh));
-    check(MPI_File_close(&fh));
+    check(MPI_File_sync(fh) == MPI_SUCCESS);
+    check(MPI_File_close(&fh) == MPI_SUCCESS);
     if (comm::allreduce(failed, comm::Op::MAX)) throw cannot_write("the restart file", filename);
     if (comm::is_root()) n_bytes += file_bytes(filename);
     t_writing += seconds_since(start);

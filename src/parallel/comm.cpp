@@ -333,6 +333,7 @@ template std::vector<int32_t> allgatherv(const std::vector<int32_t> &);
 template std::vector<uint64_t> allgatherv(const std::vector<uint64_t> &);
 template std::vector<double> allgatherv(const std::vector<double> &);
 template std::vector<float> allgatherv(const std::vector<float> &);
+template std::vector<char> gatherv(const std::vector<char> &);
 template std::vector<uint64_t> gatherv(const std::vector<uint64_t> &);
 template std::vector<double> gatherv(const std::vector<double> &);
 template std::vector<float> gatherv(const std::vector<float> &);
