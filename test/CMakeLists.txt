@@ -40,6 +40,7 @@ set(MALLARD_TEST_SOURCES
     check_test.cpp
     stencils_test.cpp
     run_report_test.cpp
+    run_page_test.cpp
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
@@ -58,6 +59,7 @@ set(MALLARD_TEST_SOURCES
     invariance_test.cpp
     inlet_test.cpp
     step_queue_test.cpp
+    statistical_convergence_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

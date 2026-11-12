@@ -3718,19 +3718,14 @@
   "set_in": [],
   "type": "integer"
  },
- "output.mixture": {
+ "output.report": {
+  "default": "\"report.html\"",
   "dims": [
    2,
    3
   ],
-  "set_in": []
- },
- "output.reference": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
+  "set_in": [],
+  "type": "string"
  },
  "output.run_log": {
   "default": "\"mallard.jsonl\"",
@@ -5776,6 +5771,12 @@
    "examples/channel_wmles/tl_m3.0.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ]
+ },
+ "statistics.convergence": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "statistics.fields": {
   "default": "[]",

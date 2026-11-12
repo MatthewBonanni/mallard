@@ -477,7 +477,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]
-       mallard info RUN_DIR [--format text|json] [--input] [--verify]
+       mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
 kind, format and format version; the mesh (cells, points, cell types, bounds,
@@ -499,12 +499,16 @@ Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
 does.
 
-RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
-every output file in it and one level down, one table row each (the snapshots of
-a series as their index). Each file the run log records as written is checked
-against its record: missing, or a size (with --verify, a SHA-256) other than the
-one recorded, is reported. A file still named NAME.partial is one whose write
-did not finish.
+RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
+the same records as its report.html, its outcome, health (lowest values,
+repairs, conservation), cost and warnings, each with a status; then every output
+file in it and one level down, one table row each (the snapshots of a series as
+their index). Each file the run log records as written is checked against its
+record: missing, or a size (with --verify, a SHA-256) other than the one
+recorded, is reported. A file still named NAME.partial is one whose write did
+not finish. With --html, writes the run report instead: a page of the run's
+outcome, identity, configuration, health, monitors, cost and output, built from
+mallard.jsonl alone.
 
 Options:
   --format text|json    text: sections and tables, with the units of every
@@ -524,6 +528,10 @@ Options:
   --verify              Run directories: also check each file's contents against
                         the SHA-256 its output record holds, not only its size;
                         reads every file once. Default: sizes only.
+  --html                Run directories: write RUN_DIR/report.html, the run
+                        report, from RUN_DIR/mallard.jsonl, the page the run
+                        writes itself: for a run still going, killed, or of a
+                        Mallard before 0.10. Default: off.
   --kokkos-*            Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                         rank) or --kokkos-device-id=1 (the GPU; by default each
                         rank gets its own).
@@ -535,10 +543,11 @@ Examples:
   $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
   $ mallard info wing.msh --mesh-fields wing
   $ mallard info runs/cylinder
+  $ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html
 
 Exit status:
   0  the file was read
-  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, or --input finds no run block
+  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, --input finds no run block, or --html no mallard.jsonl
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info

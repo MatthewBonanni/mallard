@@ -24,6 +24,7 @@
 #include "cli.h"
 #include "commands.h"
 #include "derived_catalog.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "input_upgrade.h"
 #include "json.h"
@@ -305,7 +306,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         throw UsageError(std::string(args.has("--reductions") ? "--reductions" : "--sampling") + " applies to --region");
     }
     if (!averaged.empty() && comm::is_root()) {
-        logging::warning("not extracted: the probes " + list_text(averaged) + ", which average in time over the "
+        logging::warning(diagnostic_code::EXTRACT_AVERAGED, "not extracted: the probes " + list_text(averaged) + ", which average in time over the "
                          "run's steps");
     }
     if (!others && probes.empty()) {
@@ -668,7 +669,7 @@ int extract(const cli::Args & args, const bool derive) {
         input = parse_input_string(text, files[0].path + " (its run block)");
     }
     for (const auto & finding : input_upgrade::apply(input)) {
-        if (comm::is_root()) logging::warning(input_upgrade::advice(finding));
+        if (comm::is_root()) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
     const Plan plan = derive ? prepare_derive(input, args, dir) : prepare(input, args, dir);
 
@@ -701,7 +702,7 @@ int extract(const cli::Args & args, const bool derive) {
     const auto hash = [](const std::string & block) { return provenance::find_string(block, "mesh", "sha256"); };
     const std::string then = hash(files[0].run), now = hash(provenance::json());
     if (comm::is_root() && !then.empty() && !now.empty() && then != now) {
-        logging::warning(files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
+        logging::warning(diagnostic_code::MESH_DIFFERS, files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
                          "differs) with as many cells: check that the case's mesh is the run's.");
     }
     for (current = 0; current < selected.size(); current++) {
