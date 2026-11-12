@@ -657,7 +657,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list keys [SECTION] [INPUT] [--format text|json]
 
-Without an input file, lists the key catalog docs/input-keys.json: every key the
+Without an input file, lists the key catalog docs/input-keys/: every key the
 examples and tutorials read, by table, with its type, units (of a number with a
 physical dimension), default (or required) and accepted values; (2D) or (3D)
 marks a key only that dimension reads.
