@@ -40,7 +40,8 @@ Runs are identified by what they record, never by their names. Each directory's
 run record (`mallard.jsonl`, [Output](output.md#run-record-mallardjsonl)) gives:
 
 - the runs' ids, so a table counts only rows written by this run or by the runs
-  it was restarted from;
+  it was restarted from, and rows `mallard post extract` wrote from their
+  snapshots;
 - its cell count `N`, from the progress records;
 - its dimension `d` and resolved input, from its [run block](output.md#run-block).
 
@@ -59,6 +60,24 @@ they did. For an unsteady case, pick one time with `--time T` or average over a
 window with `--average T0:T1`. A row is at `T` when its time is within $10^{-9}$ of
 it, relative, and in the window when it is within $10^{-12}$ of its ends; for runs
 in single precision, both are $1.2 \times 10^{-5}$ (see below).
+
+A probe added after the runs (a separation point, a recirculation length, a flux
+through a contour) enters the study once [`mallard post extract`](probes.md#probes-of-existing-output)
+has evaluated it on each run's snapshots into the run's directory:
+
+```bash
+for run in coarse medium fine; do
+    (cd $run && mallard post extract restart_*.restart --probe wall)
+done
+mallard post convergence coarse medium fine --quantity extract/probe_wall_reductions
+```
+
+The table `extract/probe_wall_reductions.csv` was written by the extraction, not by
+the run, but its run block lists the snapshots it read with the run id, step and
+time each records ([run block `files`](output.md#run-block)). A row counts when
+it is of a snapshot of one of the run's parts, so a table extracted from another
+run's snapshots is not the run's. The report names the tables that came from an
+extraction, and `--format json` marks their quantities `"extracted": true`.
 
 ## The method
 
@@ -251,7 +270,8 @@ The runs table lists each run's cells and its size relative to the finest. The
 (`schema` `"mallard-convergence"`): the runs, and for each quantity its values per
 run, the estimate of the finest three runs (`order`, `r21`, `r32`, `R`,
 `extrapolated`, `e_a`, `e_ext`, `gci`, `safety_factor`), the estimate of every
-three successive runs, its status and its verdict.
+three successive runs, its status, its verdict, and whether it is `extracted`
+from the runs' snapshots.
 
 The exit status is 0 without errors (warnings included), 1 if a quantity or error
 diverges or the runs cannot be read or compared, and 2 for a usage error.
