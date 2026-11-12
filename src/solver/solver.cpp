@@ -1450,18 +1450,12 @@ void Solver::init_numerics() {
     static const std::map<std::string, CentralFlux> central_fluxes = {
         {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
     // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
-    const std::string central = find_value_or<std::string>(hybrid_input, "central",
-                                                           teno && !is_mixture() ? "cell_averages" : "reconstructed");
+    const std::string central =
+        find_value_or<std::string>(hybrid_input, "central", teno ? "cell_averages" : "reconstructed");
     if (!central_fluxes.contains(central)) {
         throw not_accepted(hybrid_input, "numerics.hybrid.central", central, {"cell_averages", "reconstructed"});
     }
     hybrid_central = central_fluxes.at(central);
-    if (hybrid_central == CentralFlux::CELL_AVERAGES && is_mixture()) {
-        throw InputError({.key = "numerics.hybrid.central",
-                          .line = line_of(hybrid_input, "central"),
-                          .message = "\"cell_averages\" is not available for mixtures yet",
-                          .fix = "Use central = \"reconstructed\" (the default for mixtures)"});
-    }
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError({.key = "numerics.hybrid",
                           .line = line_of(hybrid_input),
@@ -2493,7 +2487,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         report_health(locals, values);
         status.health = run_health.last;
     }
-    if (run_log_on) {
+    if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
@@ -2504,7 +2498,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
         status.probes = probes.recorded();
-        run_log::write(status.record());
+        run_log::write_progress(status.record());
     }
 
     step_last_check = step;

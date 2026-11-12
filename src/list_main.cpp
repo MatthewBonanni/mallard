@@ -26,6 +26,7 @@
 #include "json.h"
 #include "log.h"
 #include "solver/solver.h"
+#include "diagnostic_code.h"
 
 namespace {
 
@@ -65,7 +66,7 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
 }
 
 int report_errors(const CaseFields & c) {
-    for (const auto & e : c.errors) std::cerr << "mallard list: " << e << "\n";
+    for (const auto & e : c.errors) logging::error(diagnostic_code::LIST, "mallard list: " + e);
     return 1;
 }
 
@@ -321,7 +322,7 @@ int list_keys_main(const cli::Args & args) {
         try {
             catalog = general_catalog();
         } catch (const std::exception & e) {
-            std::cerr << "mallard list keys: " << e.what() << "\n";
+            logging::error(diagnostic_code::LIST, std::string("mallard list keys: ") + e.what());
             return 1;
         }
     } else {

@@ -448,6 +448,15 @@ goes to the run record. Errors go to stderr from any rank. Colors are off when
 the output is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces
 them, e.g. under `mpirun`).
 
+For live monitoring and plotting, `mallard -i input.toml --log-format jsonl`
+prints on stdout only the run record's `progress` records, one JSON object per
+line at each progress row, exactly as `mallard.jsonl` has them, even when
+`[output] run_log` is off; the text above goes to stderr:
+
+```sh
+mallard -i input.toml --log-format jsonl | jq --unbuffered '[.step, .t, .monitors.min_rho]'
+```
+
 ### Run record: `mallard.jsonl`
 
 Next to the terminal output, rank 0 writes `mallard.jsonl` (`[output] run_log`):

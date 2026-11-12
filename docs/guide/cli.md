@@ -18,8 +18,10 @@ mallard -i input.toml --restart latest  # after a stop: resume from the newest r
 A few things hold for every command:
 
 - **Exit status:** 0 on success, 1 on failure and 2 on a usage error (an unknown
-  option or command, a missing argument), which prints one line naming the
-  command's `--help`. A run stopped on request exits with 3.
+  option or command, a missing argument), which names the command's `--help`.
+  A run stopped on request exits with 3.
+- **Errors and warnings** go to stderr with a stable code and the docs that
+  explain it (`error E-USAGE: ...`, [Warnings and errors](running.md#warnings-and-errors)).
 - **Dimension:** `mallard` runs `mallard2d` or `mallard3d`, whichever the case
   needs, by its mesh; `--dim 2|3`, before or after the command, states it.
 - **Parallel runs:** start `mallard` under `mpirun` (or `srun`); Kokkos options
@@ -129,21 +131,26 @@ Commands:
     mallard --version         Print the version
 
 Options:
-  -i FILE                The input file (TOML). Required.
-  --restart FILE|latest  Start from this restart file: replaces the input's
-                         [initialize] with type = "restart". latest: the newest
-                         complete restart file of the input's restart writers
-                         (of the run that started last, then of the highest
-                         step), or [initialize] if there is none. Default: as
-                         [initialize] says.
-  --verbose              A line for every file written, between the progress
-                         rows. Default: the progress table's written column
-                         counts them, and mallard.jsonl and the summary name
-                         them.
-  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
-                         per rank) or --kokkos-device-id=1 (the GPU; by default
-                         each rank gets its own).
-  -h, --help             Show this page.
+  -i FILE                  The input file (TOML). Required.
+  --restart FILE|latest    Start from this restart file: replaces the input's
+                           [initialize] with type = "restart". latest: the
+                           newest complete restart file of the input's restart
+                           writers (of the run that started last, then of the
+                           highest step), or [initialize] if there is none.
+                           Default: as [initialize] says.
+  --verbose                A line for every file written, between the progress
+                           rows. Default: the progress table's written column
+                           counts them, and mallard.jsonl and the summary name
+                           them.
+  --log-format text|jsonl  text: the setup, the progress table and the summary
+                           on stdout; jsonl: on stdout only the run record's
+                           progress records, one JSON object per line as
+                           mallard.jsonl has them, for live monitoring and
+                           plotting, and the text on stderr. Default: text.
+  --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                           per rank) or --kokkos-device-id=1 (the GPU; by
+                           default each rank gets its own).
+  -h, --help               Show this page.
 
 Options of mallard before any command:
   --dim 2|3  --dim 2 runs mallard2d, --dim 3 mallard3d, for any command.
