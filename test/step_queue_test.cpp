@@ -555,9 +555,10 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
 
 TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
     // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
-    // evaluates a trigger on them between those rows, where the host updates them
+    // evaluates a trigger on them between those rows, where the host updates them. MSER-5 finds both
+    // signals stationary at step 57 in 2D, at step 117 in 3D
     Case c;
-    c.run = "n_steps = 80\ncfl = 0.5\n";
+    c.run = "n_steps = 200\ncfl = 0.5\n";
     c.extra = "check_interval = 1000\n" + RESTARTS +
               "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
               "point = " + point_of("0.6", "0.5", "0.2") + "\n"
@@ -567,7 +568,7 @@ TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
               "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("convergence_triggers", c);
-    EXPECT_LT(o.step, 80u);
+    EXPECT_LT(o.step, 200u);
     EXPECT_EQ(o.step % 3, 0u);
 }
 
