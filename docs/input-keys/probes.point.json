@@ -1,0 +1,9 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/pulsed_jet/input.toml"
+ ]
+}
