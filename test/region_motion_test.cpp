@@ -19,6 +19,7 @@
 #include <numbers>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "device_comm.h"
@@ -126,11 +127,21 @@ double solution_measure(const Mesh & mesh, const std::string & table, const regi
         moving.update(0.0);
         return integral(mesh, host(moving));
     }
-    levels->update(0.0);
-    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), levels->levels());
     double total = 0.0;
-    for (const double m : region::elements(mesh, r, h).measure) total += m;
+    for (const double m : region::elements(mesh, r, region::CrossedLevels(mesh, r, levels).update(0.0)).measure) total += m;
     return total;
+}
+
+/** @brief The levels of a region's conditions in every owned cell, on the host. */
+region::Levels owned_levels(const Mesh & mesh, const region::SolutionLevels & levels) {
+    levels.update(0.0);
+    region::Levels out;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) out.cells.push_back(c);
+    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), levels.levels());
+    Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> values("levels", h.extent(0), h.extent(1));
+    Kokkos::deep_copy(values, h);
+    out.values = values;
+    return out;
 }
 
 // Device lambdas live in free functions: nvcc rejects them in TEST bodies, which are private members
@@ -331,6 +342,40 @@ TEST(RegionMotionTest, ConditionVolumesAndIsosurfaceAreasConvergeAtSecondOrder) 
     }
     EXPECT_LT(volume_errors.back(), 0.01 * volume);
     EXPECT_LT(area_errors.back(), 0.01 * area);
+}
+
+TEST(RegionMotionTest, SurfacesOfTheSolutionAreCutFromTheLevelsOfTheCellsTheyMayCross) {
+    // p = 1 + r^2; the isosurface p = 1.09 (r = 0.3), alone and clipped by a plane, then a plane clipped by a condition
+    const auto mesh = simplex_mesh(N_DIM == 2 ? 20 : 8);
+    const auto fields = gas_with_pressure(*mesh, [](const double * x) {
+        double r2 = 0.0;
+        for (int d = 0; d < N_DIM; d++) r2 += (x[d] - 0.5) * (x[d] - 0.5);
+        return 1.0 + r2;
+    });
+    const std::string where = "{type = \"where\", condition = \"P < 1.09\"}";
+    const std::string right_half = "{type = \"implicit\", f = \"x - 0.5\"}";
+    const std::vector<std::pair<std::string, bool>> cases = {
+        {"{type = \"isosurface\", field = \"P\", value = 1.09}", false},
+        {"{type = \"boundary\", of = {type = \"intersection\", regions = [" + where + ", " + right_half + "]}}", true},
+    };
+    for (const auto & [table, every] : cases) {
+        const region::Region r = read(table);
+        const auto levels = std::make_shared<const region::SolutionLevels>(*mesh, r.conditions(), std::vector<std::string>{}, fields);
+        const region::Levels crossed = region::CrossedLevels(*mesh, r, levels).update(0.0);
+        if (every) {
+            EXPECT_EQ(crossed.cells.size(), mesh->n_owned()) << table;
+        } else {
+            EXPECT_GT(crossed.cells.size(), 0u) << table;
+            EXPECT_LT(crossed.cells.size(), mesh->n_owned() / 2) << table;
+        }
+        const region::Elements a = region::elements(*mesh, r, crossed), b = region::elements(*mesh, r, owned_levels(*mesh, *levels));
+        ASSERT_GT(b.size(), 0u) << table;
+        EXPECT_EQ(a.cell, b.cell) << table;
+        EXPECT_EQ(a.measure, b.measure) << table;
+        EXPECT_EQ(a.quad_points, b.quad_points) << table;
+        EXPECT_EQ(a.quad_weights, b.quad_weights) << table;
+        EXPECT_EQ(a.vertices, b.vertices) << table;
+    }
 }
 
 TEST(RegionMotionTest, DeviceSumsAreTheExactSums) {

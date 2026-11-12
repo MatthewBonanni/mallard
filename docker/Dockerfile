@@ -9,7 +9,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY . /src
 ARG JOBS
-RUN JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_KAMINPAR=ON
+RUN JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_PYTHON_INSTALL_DIR=/usr/lib/python3/dist-packages
 
 FROM ubuntu:26.04
 LABEL org.opencontainers.image.title="Mallard" \
@@ -24,6 +24,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # Mallard's executables only, not the bundled Kokkos's tools
 COPY --from=build /opt/mallard/bin/mallard* /opt/mallard/bin/
 COPY --from=build /opt/mallard/share /opt/mallard/share
+# The Python package mallard in the image's Python, and the reader library it loads
+COPY --from=build /opt/mallard/lib/libmallard* /opt/mallard/lib/
+COPY --from=build /usr/lib/python3/dist-packages/mallard /usr/lib/python3/dist-packages/mallard
 # Tab completion of mallard in interactive shells
 RUN echo '[ -r /opt/mallard/share/bash-completion/completions/mallard ] && . /opt/mallard/share/bash-completion/completions/mallard' \
         >> /etc/bash.bashrc

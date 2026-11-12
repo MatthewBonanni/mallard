@@ -369,6 +369,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
   ok      right   curve   1        m      240      the mesh's
   ok      top     curve   4        m      960      the mesh's
   Case view (every region and zone, for ParaView): view/case.vtm
+  Case view images: view/case-light.svg, view/case-dark.svg
 
 == Mesh quality ========================================================================= ok
   Over every cell; a cell above the limit is questionable.
@@ -518,7 +519,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `regions`, `case_view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's file |
+| `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
@@ -634,6 +635,55 @@ whether the input sets each key), and a section keeps one table or key path:
 mallard list keys numerics                  # every [numerics] key there is
 mallard list keys write_data input.toml     # the [[write_data]] keys this case reads
 ```
+
+### The case view
+
+`--view view` draws the case before it runs, so that a misplaced region, a
+boundary with the wrong condition or a mesh in millimeters read as meters shows
+at a glance. It writes, without running the case:
+
+- `view/case-light.svg` and `view/case-dark.svg`: the annotated image, drawn by
+  Mallard itself (no renderer, no ParaView). Every boundary zone is colored by
+  the type of its condition and labeled with its name, its condition and the
+  values the input sets, in their units (`left: inlet_mass_flow, T = 300.0 K,
+  mdot = 0.2 kg/s`); every region, probe, snapshot region and periodic pair
+  by its name. A legend, the axes, a scale bar and the domain's extent with its
+  units complete it. In 2D, the mesh's edges are drawn up to 10,000 cells. In
+  3D, an isometric view sits over three orthographic ones (x-y, x-z, z-y);
+  surfaces are drawn as their outlines, sharp edges and silhouettes over
+  translucent faces, and only the isometric view is labeled. Boundary zones
+  curved by [curved boundaries](meshes.md#curved-boundaries) are drawn on
+  their curved geometry, in the ParaView file too.
+- `view/case.vtkhdf` (builds without HDF5: `view/case.vtm` with its `.vtu`
+  files) for ParaView 5.12 or later: one named block each for the mesh's cells
+  (`domain`), every boundary zone and cell zone, every region the case uses
+  (as [Checking regions](geometry.md#checking-regions) describes), every probe
+  on points, lines or surfaces of its own, and every periodic pair (each face
+  with `side` 0, its image on the partner zone with `side` 1).
+
+```bash
+mallard check input.toml --view view
+mallard info mesh.msh --view view   # the mesh alone: its cells, zones and periodic pairs
+```
+
+![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-light.svg#gh-light-mode-only)
+![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-dark.svg#gh-dark-mode-only)
+
+![The case view of a 3D channel periodic across its span: an isometric view labeled, over three orthographic views](../images/guide/case-view-3d-light.svg#gh-light-mode-only)
+![The case view of a 3D channel periodic across its span: an isometric view labeled, over three orthographic views](../images/guide/case-view-3d-dark.svg#gh-dark-mode-only)
+
+Pitfalls:
+
+- Filled regions show their own boundary clipped to the domain: exact for
+  shapes, else extracted below the cell size. The run acts on the fraction of
+  each cell inside, so a region thinner than the cells still acts on the cells
+  it crosses; one that crosses none is `E-REGION-EMPTY` or `E-REGION-OUTSIDE`.
+- A zone split by `where` between conditions is labeled with each of them and
+  colored by the first.
+- Values given as expressions are shown as written, with the units they are
+  in; a nondimensional case shows no units.
+
+Figures: [`tools/docs/case_view.py`](../../tools/docs/case_view.py).
 
 ## The resolved input
 

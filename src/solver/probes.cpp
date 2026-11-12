@@ -1375,15 +1375,18 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
         host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
         host_values = Kokkos::create_mirror_view(values);
     }
-    Kokkos::deep_copy(host_values, values);
+    // The first rows: the samples (a moving region's covered cells, of all its owned ones)
+    const auto rows = Kokkos::make_pair(size_t(0), size_t(cells.extent(0)));
+    Kokkos::deep_copy(Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
     const auto & h = host_values;
     for (const auto & [column, data] : columns) {
         for (size_t i = 0; i < host_cells.size(); i++) h(i, column) = (*data)[host_cells[i]];
     }
     const size_t n_vars = values.extent(1);
+    const size_t n_local = cells.extent(0) * n_vars;
     std::vector<double> all;
     if (distributed) {
-        std::vector<double> local(h.size());
+        std::vector<double> local(n_local);
         for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h.data()[i]);
         all = comm::gatherv(local);
         if (!comm::is_root()) {
@@ -1391,7 +1394,7 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
             return;
         }
     }
-    out.resize(distributed ? all.size() : h.size());
+    out.resize(distributed ? all.size() : n_local);
     for (uint64_t p = 0; p < n_global; p++) {
         const size_t row = gathered_row[p] * n_vars;
         for (size_t v = 0; v < n_vars; v++) {
@@ -1417,6 +1420,15 @@ ProbeReference read_reference(const Input & ref, const std::string & key) {
     out.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
     out.p = find_real(ref, "p", dim::pressure);
     return out;
+}
+
+bool samples(const std::string & name, const std::vector<std::string> & species_names) {
+    try {
+        variable_code(name, species_names, "");
+        return true;
+    } catch (const InputError &) {
+        return false;
+    }
 }
 
 namespace {
@@ -1801,7 +1813,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         auto iso = std::make_shared<Probe::Isosurface>();
         iso->mesh = &mesh;
         iso->region = std::make_shared<region::Region>(elements->with_root(elements->root(), elements->copies()));
-        iso->levels = std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields);
+        iso->levels = std::make_shared<region::CrossedLevels>(
+            mesh, *iso->region,
+            std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields));
+        iso->extraction = std::make_shared<region::Extraction>(mesh, *iso->region);
         iso->n_evaluated = static_cast<uint32_t>(h_codes.size());
         p.isosurface = std::move(iso);
         p.geometry.dim = static_cast<uint8_t>(elements->dimension());
@@ -1813,27 +1828,21 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         const region::Region & r = *region;
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (r.dimension() == N_DIM && (r.moving() || r.solution())) {
-            // Every owned cell, weighed by f V at each write
+            // The owned cells it covers, with their f V, selected at each write
             std::vector<double> weights(mesh.n_owned(), 0.0);
             auto motion = std::make_shared<Probe::Motion>();
             std::shared_ptr<const region::SolutionLevels> levels;
             if (r.solution()) {
                 levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
             }
+            motion->mesh = &mesh;
             motion->fractions = std::make_shared<region::MovingFractions>(mesh, r, levels);
             motion->distributed = mesh.n_global_cells > 0;
-            std::vector<uint64_t> global;
-            for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-                weights[c] = double(mesh.h_cell_measure(c));
-                motion->cells.push_back(c);
-                motion->volumes.push_back(weights[c]);
-                global.push_back(mesh.h_global_cell(c));
-            }
-            if (motion->distributed) global = comm::allgatherv(global);
-            motion->order.resize(global.size());
-            for (size_t i = 0; i < global.size(); i++) motion->order[i] = i;
-            std::sort(motion->order.begin(), motion->order.end(),
-                      [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+            motion->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = double(mesh.h_cell_measure(c));
+            motion->volumes = to_device(weights, "probe_motion_volumes");
+            motion->covered = Kokkos::View<uint32_t *>("probe_motion_cells", mesh.n_owned());
+            motion->weights = Kokkos::View<double *>("probe_motion_weights", mesh.n_owned());
             select_region(p, mesh, r, weights, n_evaluated);
             p.motion = std::move(motion);
             // Its own measures hold while it keeps its shape; the part in the domain is the measure of each write
@@ -1918,7 +1927,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             auto iso = std::make_shared<Probe::Isosurface>();
             iso->mesh = &mesh;
             iso->region = std::make_shared<region::Region>(r.with_root(r.root(), r.copies()));
-            iso->levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
+            iso->levels = std::make_shared<region::CrossedLevels>(
+                mesh, *iso->region, std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields));
+            iso->extraction = std::make_shared<region::Extraction>(mesh, *iso->region);
             iso->n_evaluated = n_evaluated;
             iso->per_cell = p.sampling == Sampling::CELL && !normals && !p.gradients;
             iso->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
@@ -2412,6 +2423,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) continue;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -2484,6 +2496,33 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const auto & [name, dimension] : p.monitored) dimensions.push_back(dimension);
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {
@@ -2594,6 +2633,41 @@ void accumulate(std::vector<double> & mean, const std::vector<double> & x, doubl
     for (size_t i = 0; i < x.size(); i++) mean[i] += a * (x[i] - mean[i]);
 }
 
+/**
+ * @brief accumulate over the union of the cells covered so far and those of a sample (both sorted), each absent
+ *        one counting as zero: the means of every cell of the mesh, without the cells never covered; with
+ *        n_products, also of the products per cell.
+ */
+void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_weights, std::vector<double> & mean_values,
+                      std::vector<double> & mean_products, const std::vector<uint64_t> & x_cells,
+                      const std::vector<double> & x_weights, const std::vector<double> & x_values,
+                      const std::vector<double> & x_products, size_t n_cols, size_t n_products, double a) {
+    std::vector<uint64_t> all;
+    std::vector<double> weights, values, products;
+    all.reserve(cells.size() + x_cells.size());
+    size_t i = 0, j = 0;
+    while (i < cells.size() || j < x_cells.size()) {
+        const bool old = i < cells.size() && (j == x_cells.size() || cells[i] <= x_cells[j]);
+        const bool sampled = j < x_cells.size() && (i == cells.size() || x_cells[j] <= cells[i]);
+        all.push_back(old ? cells[i] : x_cells[j]);
+        auto mean = [&](double m, double x) { return m + a * (x - m); };
+        weights.push_back(mean(old ? mean_weights[i] : 0.0, sampled ? x_weights[j] : 0.0));
+        for (size_t v = 0; v < n_cols; v++) {
+            values.push_back(mean(old ? mean_values[i * n_cols + v] : 0.0, sampled ? x_values[j * n_cols + v] : 0.0));
+        }
+        for (size_t k = 0; k < n_products; k++) {
+            products.push_back(mean(old ? mean_products[i * n_products + k] : 0.0,
+                                    sampled ? x_products[j * n_products + k] : 0.0));
+        }
+        i += old ? 1 : 0;
+        j += sampled ? 1 : 0;
+    }
+    cells = std::move(all);
+    mean_weights = std::move(weights);
+    mean_values = std::move(values);
+    mean_products = std::move(products);
+}
+
 } // namespace
 
 bool Probes::averages_due(uint64_t step, rtype t) const {
@@ -2629,21 +2703,16 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;
         if (distributed && !comm::is_root()) continue;
-        if (!p.products.empty()) accumulate(p.mean_products, p.product_sums(quad), w / p.average_weight);
-        if (p.motion) {
-            const size_t n_cols = p.n_evaluated();
-            for (size_t i = 0; i < p.geometry.quad_weights.size(); i++) {
-                for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] *= p.geometry.quad_weights[i];
-            }
-            accumulate(p.mean_weights, p.geometry.quad_weights, w / p.average_weight);
-        } else if (p.isosurface) {
-            std::vector<double> sums, weights;
-            p.cell_sums(quad, sums, weights);
-            quad = std::move(sums);
-            accumulate(p.mean_weights, weights, w / p.average_weight);
-        }
         accumulate(p.mean_nodes, nodes, w / p.average_weight);
-        accumulate(p.mean_quadrature, quad, w / p.average_weight);
+        if (p.cell_means()) {
+            std::vector<uint64_t> cells;
+            std::vector<double> sums, weights;
+            p.cell_sums(quad, cells, sums, weights);
+            accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, p.mean_products, cells, weights, sums,
+                             p.product_sums(quad, cells), p.n_evaluated(), p.products.size(), w / p.average_weight);
+        } else {
+            accumulate(p.mean_quadrature, quad, w / p.average_weight);
+        }
     }
 }
 
@@ -2656,6 +2725,7 @@ void Probes::start_averages(rtype t) {
         p->mean_nodes.clear();
         p->mean_quadrature.clear();
         p->mean_weights.clear();
+        p->mean_cells.clear();
         p->mean_products.clear();
     }
 }
@@ -2665,6 +2735,7 @@ void Probes::average_products(const std::string & name, const std::vector<std::v
         Probe & p = *pp;
         if (p.name != name || p.snapshot) continue;
         if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
+        if (p.average_samples > 0) throw std::logic_error("probe " + name + ": products added after its first sample");
         p.products.clear();
         for (const auto & factors : products) {
             std::vector<uint32_t> columns;
@@ -2690,9 +2761,17 @@ Probes::CellAverages Probes::cell_averages(const std::string & name) const {
         out.measure = measure_name(p.geometry);
         out.measure_dimension = geometry_field("measure", p.geometry).dimension;
         out.n_columns = p.n_evaluated();
-        out.weights = p.mean_weights;
-        out.values = p.mean_quadrature;
-        out.products = p.mean_products;
+        const size_t n_cells = p.n_mean_cells(), n_products = p.products.size();
+        out.weights.assign(n_cells, 0.0);
+        out.values.assign(n_cells * out.n_columns, 0.0);
+        out.products.assign(n_cells * n_products, 0.0);
+        for (size_t i = 0; i < p.mean_cells.size(); i++) {
+            const size_t c = p.mean_cells[i];
+            out.weights[c] = p.mean_weights[i];
+            const size_t n = out.n_columns;
+            for (size_t v = 0; v < n; v++) out.values[c * n + v] = p.mean_quadrature[i * n + v];
+            for (size_t k = 0; k < n_products; k++) out.products[c * n_products + k] = p.mean_products[i * n_products + k];
+        }
         return out;
     }
     throw std::runtime_error("no [[probes]] named " + name);
@@ -2713,13 +2792,22 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         const std::vector<double> * nodes = restart.array(name + "_NODES");
         const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
         const std::vector<double> * weights = restart.array(name + "_WEIGHTS");
+        const std::vector<double> * cells = restart.array(name + "_CELLS");
+        std::vector<uint64_t> mean_cells;
+        bool cells_valid = true;
+        for (size_t i = 0; cells && i < cells->size() && cells_valid; i++) {
+            const double c = (*cells)[i];
+            cells_valid = c >= 0.0 && c < static_cast<double>(p.n_mean_cells()) && c == std::floor(c) &&
+                          (mean_cells.empty() || static_cast<uint64_t>(c) > mean_cells.back());
+            if (cells_valid) mean_cells.push_back(static_cast<uint64_t>(c));
+        }
         const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
-        const uint64_t n_quad = p.isosurface         ? p.n_mean_cells() * p.n_evaluated()
+        const uint64_t n_quad = p.cell_means()           ? mean_cells.size() * p.n_evaluated()
                                 : p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated()
                                                          : 0;
-        const uint64_t n_weights = p.cell_means() ? p.n_mean_cells() : 0;
+        const uint64_t n_weights = p.cell_means() ? mean_cells.size() : 0;
         if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad ||
-            (weights ? weights->size() : 0) != n_weights) {
+            (weights ? weights->size() : 0) != n_weights || !cells_valid || (!p.cell_means() && cells)) {
             throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
                              " holds the averages of other samples or variables; set statistics.reset = true "
                              "to start them afresh.");
@@ -2727,6 +2815,7 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         if (nodes) p.mean_nodes = *nodes;
         if (quad) p.mean_quadrature = *quad;
         if (weights) p.mean_weights = *weights;
+        p.mean_cells = std::move(mean_cells);
         p.average_weight = *w;
         p.average_t_last = *t_last;
         p.average_samples = static_cast<uint64_t>(*n);
@@ -2770,6 +2859,7 @@ RestartArrays Probes::arrays() const {
         add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
         add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
         add(AVERAGE_PREFIX + p->name + "_WEIGHTS", p->mean_weights);
+        add(AVERAGE_PREFIX + p->name + "_CELLS", std::vector<double>(p->mean_cells.begin(), p->mean_cells.end()));
     }
     for (const auto & p : probes) {
         if (!p->spectra) continue;
@@ -2950,10 +3040,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     std::array<int64_t, 4> cells_before = {0, 0, 0, 0}, ids_before = {0, 0, 0, 0};
     h5::Handle top(H5Gopen2(h5file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
     if (changing) {
-        auto sum = [&](hid_t group, const char * name) {
+        auto sum = [&](hid_t group, const char * dataset) {
             int64_t total = 0;
             if (k > 0) {
-                for (const int64_t c : h5::read_rows<int64_t>(group, name, 0, k, 1, H5P_DEFAULT)) total += c;
+                for (const int64_t c : h5::read_rows<int64_t>(group, dataset, 0, k, 1, H5P_DEFAULT)) total += c;
             }
             return total;
         };
@@ -3040,51 +3130,109 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
     write_pvd_file(file, series);
 }
 
+namespace {
+
+/** @brief The cells c with w = f(c) V(c) > 0, in order, into the first of cells, with w into weights; their count. */
+uint32_t covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<const double *> & volumes,
+                       const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights) {
+    uint32_t n = 0;
+    Kokkos::parallel_scan("probe_covered_cells", static_cast<uint32_t>(volumes.extent(0)),
+                          KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
+        const double w = f(c) * volumes(c);
+        if (!(w > 0.0)) return;
+        if (final) {
+            cells(k) = c;
+            weights(k) = w;
+        }
+        k++;
+    }, n);
+    return n;
+}
+
+} // namespace
+
 void Probes::Probe::move(const double t) {
     motion->fractions->update(t);
-    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), motion->fractions->fractions());
-    std::vector<double> local(motion->cells.size());
-    for (size_t i = 0; i < local.size(); i++) local[i] = f(motion->cells[i]) * motion->volumes[i];
-    if (motion->distributed) local = comm::allgatherv(local);
-    geometry.quad_weights.clear();
-    for (const size_t i : motion->order) {
-        if (comm::is_root() || !motion->distributed) geometry.quad_weights.push_back(local[i]);
+    const uint32_t n = covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights);
+    const auto rows = Kokkos::make_pair(uint32_t(0), n);
+    quadrature.cells = Kokkos::subview(motion->covered, rows);
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), quadrature.cells);
+    const auto h_weights =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->weights, rows));
+    quadrature.host_cells.assign(h_cells.data(), h_cells.data() + n);
+    std::vector<double> local;  // global cell, f V
+    local.reserve(2 * size_t(n));
+    for (uint32_t i = 0; i < n; i++) {
+        local.push_back(double(motion->mesh->h_global_cell(h_cells(i))));
+        local.push_back(h_weights(i));
     }
+    const std::vector<double> all = motion->distributed ? comm::gatherv(local) : local;
+    quadrature.n_global = motion->distributed ? comm::allreduce(uint64_t(n), comm::Op::SUM) : n;
+    geometry.quad_weights.clear();
+    motion->cells.clear();
+    quadrature.gathered_row.clear();
+    if (motion->distributed && !comm::is_root()) return;
+    std::vector<uint64_t> order(all.size() / 2);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(),
+              [&all](const uint64_t a, const uint64_t b) { return all[2 * a] < all[2 * b]; });
+    for (const uint64_t i : order) {
+        motion->cells.push_back(static_cast<uint64_t>(all[2 * i]));
+        geometry.quad_weights.push_back(all[2 * i + 1]);
+    }
+    quadrature.gathered_row = std::move(order);
 }
 
 void Probes::Probe::extract(const double t) {
     const Isosurface & iso = *isosurface;
-    iso.levels->update(t);
-    const auto levels = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), iso.levels->levels());
+    const region::Levels levels = iso.levels->update(t);
     if (snapshot) {
-        select_snapshot_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels),
-                                 iso.region->dimension(), iso.region->summary(), iso.n_evaluated);
+        select_snapshot_elements(*this, *iso.mesh, iso.extraction->elements(levels), iso.region->dimension(),
+                                 iso.region->summary(), iso.n_evaluated);
         return;
     }
-    select_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels), iso.region->dimension(),
+    select_elements(*this, *iso.mesh, iso.extraction->elements(levels), iso.region->dimension(),
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
 
-void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<double> & sums,
-                              std::vector<double> & weights) const {
+void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells,
+                              std::vector<double> & sums, std::vector<double> & weights) const {
     const size_t n_cols = n_evaluated();
-    sums.assign(isosurface->n_cells * n_cols, 0.0);
-    weights.assign(isosurface->n_cells, 0.0);
-    if (quad.empty()) return;
-    for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
-        const uint64_t c = isosurface->quad_cells[i];
+    const size_t n_q = quad.empty() ? 0 : geometry.quad_weights.size();
+    cells.clear();
+    sums.clear();
+    weights.clear();
+    if (motion) {
+        // One sample per covered cell, in global cell order
+        for (size_t i = 0; i < n_q; i++) {
+            const double w = geometry.quad_weights[i];
+            cells.push_back(motion->cells[i]);
+            weights.push_back(w);
+            for (size_t v = 0; v < n_cols; v++) sums.push_back(quad[i * n_cols + v] * w);
+        }
+        return;
+    }
+    cells.assign(isosurface->quad_cells.begin(), isosurface->quad_cells.begin() + static_cast<std::ptrdiff_t>(n_q));
+    std::sort(cells.begin(), cells.end());
+    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+    sums.assign(cells.size() * n_cols, 0.0);
+    weights.assign(cells.size(), 0.0);
+    for (size_t i = 0; i < n_q; i++) {
+        const size_t c = static_cast<size_t>(std::lower_bound(cells.begin(), cells.end(), isosurface->quad_cells[i]) -
+                                             cells.begin());
         const double w = geometry.quad_weights[i];
         weights[c] += w;
         for (size_t v = 0; v < n_cols; v++) sums[c * n_cols + v] += w * quad[i * n_cols + v];
     }
 }
 
-std::vector<double> Probes::Probe::product_sums(const std::vector<double> & quad) const {
+std::vector<double> Probes::Probe::product_sums(const std::vector<double> & quad, const std::vector<uint64_t> & cells) const {
     const size_t n_cols = n_evaluated(), n = products.size();
-    std::vector<double> sums(n_mean_cells() * n, 0.0);
-    if (quad.empty()) return sums;
+    std::vector<double> sums(cells.size() * n, 0.0);
+    if (quad.empty() || n == 0) return sums;
     for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
-        const uint64_t c = motion ? i : isosurface->quad_cells[i];
+        const uint64_t cell = motion ? motion->cells[i] : isosurface->quad_cells[i];
+        const size_t c = static_cast<size_t>(std::lower_bound(cells.begin(), cells.end(), cell) - cells.begin());
         for (size_t k = 0; k < n; k++) {
             double x = geometry.quad_weights[i];
             for (const uint32_t v : products[k]) x *= quad[i * n_cols + v];
@@ -3205,8 +3353,8 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t) const {
     row.flush();
 }
 
-std::vector<std::pair<std::string, std::string>> Probes::summary() const {
-    std::vector<std::pair<std::string, std::string>> items;
+std::vector<OutputSummary> Probes::summary() const {
+    std::vector<OutputSummary> items;
     for (const auto & pp : probes) {
         const Probe & p = *pp;
         std::string vars;
@@ -3214,11 +3362,9 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
         const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
-        const std::string extent = p.solution ? std::string(", from the solution,")
+        const std::string extent = p.solution ? std::string(" from the solution")
                                               : (p.from_region ? " over " : " of ") + logging::count(n) + unit;
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + extent +
-                           (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
-                                           : " every " + units::with(logging::real(double(p.time_interval)), "s") + " of simulated time") +
+        std::string text = p.geometry.type + extent +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {
@@ -3231,9 +3377,54 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
             const std::string & a = p.spectra->samples_file(), & b = p.spectra->reductions_file();
             text += a + (!a.empty() && !b.empty() ? " and " : "") + b;
         }
-        items.emplace_back(p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name, text);
+        items.push_back({.kind = p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name,
+                         .file = p.write_samples ? p.file : p.reductions_file,
+                         .steps = p.interval,
+                         .seconds = p.interval > 0 ? 0.0 : double(p.time_interval),
+                         .contents = text});
     }
     return items;
+}
+
+std::vector<case_view::Block> Probes::view_blocks() const {
+    std::vector<case_view::Block> blocks;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.from_region || p.snapshot) continue;
+        const probe::Geometry & g = p.geometry;
+        case_view::Block b;
+        b.name = "probes[name = \"" + p.name + "\"]";
+        b.kind = case_view::Kind::PROBE;
+        b.label = b.name + ": " + g.type + ", " + logging::count(g.nodes.size()) +
+                  (g.nodes.size() == 1 ? " point" : " points");
+        if (comm::is_root()) {
+            auto at = [](const probe::Point & q) {
+                std::array<double, 3> x = {0.0, 0.0, 0.0};
+                for (size_t i = 0; i < N_DIM; i++) x[i] = q[i];
+                return x;
+            };
+            const std::vector<probe::Point> & corners = g.vertices.empty() ? g.nodes : g.vertices;
+            if (g.polygon_offsets.size() > 1) {
+                for (size_t k = 0; k + 1 < g.polygon_offsets.size(); k++) {
+                    std::vector<std::array<double, 3>> v;
+                    for (uint64_t j = g.polygon_offsets[k]; j < g.polygon_offsets[k + 1]; j++) {
+                        v.push_back(at(corners[g.polygon_vertices[j]]));
+                    }
+                    b.add_cell(v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+                }
+            } else if (!g.polylines.empty()) {
+                for (const auto & line : g.polylines) {
+                    for (size_t k = 0; k + 1 < line.size(); k++) {
+                        b.add_cell(case_view::LINE, {at(g.nodes[line[k]]), at(g.nodes[line[k + 1]])});
+                    }
+                }
+            } else {
+                for (const probe::Point & q : g.nodes) b.add_cell(case_view::VERTEX, {at(q)});
+            }
+        }
+        blocks.push_back(std::move(b));
+    }
+    return blocks;
 }
 
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {

@@ -249,6 +249,7 @@ TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
     EXPECT_EQ(extract({run + "/restart_000002.restart", "-i", dir + "/input.toml", "-o", dir + "/out"}, &errors), 1);
     if (comm::is_root()) {
         EXPECT_NE(errors.find(" cells, but the case's mesh has "), std::string::npos) << errors;
+        EXPECT_NE(errors.find("docs/guide/running.md#e-extract"), std::string::npos) << errors;
     }
     EXPECT_TRUE(!fs::exists(dir + "/out/probe_line.csv") || rows(dir + "/out/probe_line.csv").empty());
 }
