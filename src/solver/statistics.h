@@ -261,14 +261,17 @@ class Statistics {
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
         /**
          * @brief Every sample can be taken in a step graph (unaveraged spectra are written at each sample; derived
-         *        fields, HRR and conditional statistics are the host's).
+         *        fields and HRR are the host's).
          */
         bool samples_on_device() const {
-            return enabled() && (!spectra.enabled() || spectra.averaged()) && conditional.empty() && !derived_sampled &&
-                   !chemistry_sampled;
+            return enabled() && (!spectra.enabled() || spectra.averaged()) && !derived_sampled && !chemistry_sampled;
         }
         /** @brief The means' and spectra's sample at the device's time *t (device only, capturable). */
         void sample_device(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief Conditional entry i's sample at the device's time *t, which its own clock decides (capturable). */
+        void sample_conditional(size_t i, const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
+            conditional[i].sample_at(t, sampler, n_owned);
+        }
         /** @brief The phases' sample at the device's time *t, which their own clock decides (capturable). */
         void sample_phases(const rtype * t, const CellSampler & sampler, uint32_t n_owned) { phase.sample(t, sampler, n_owned); }
         bool phases_triggered() const { return phase.enabled() && phase.triggered(); }
