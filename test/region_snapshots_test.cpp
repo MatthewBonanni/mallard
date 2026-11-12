@@ -496,7 +496,7 @@ TEST(RegionSnapshotsTest, RegionsThatMoveOrFollowTheSolutionWriteTheCellsTheyCov
     std::string writers = "[regions]\nwhere = " + where + "\nmoving = " + moving + "\n[[write_data]]\nprefix = \"" + dir +
                           "/v\"\nformat = \"vtu\"\nregions = [\"where\", \"moving\"]\n" + variables;
 #ifdef Mallard_HAS_HDF5
-    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nregion = \"where\"\n" + variables +
+    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nseries = false\nregion = \"where\"\n" + variables +
                "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"vtkhdf\"\nseries = true\nregion = \"where\"\n" +
                variables;
 #endif
@@ -673,7 +673,7 @@ TEST(RegionSnapshotsTest, RegionsOfTheSolutionDoNotDependOnTheRankCount) {
 #ifdef Mallard_HAS_HDF5
     if (comm::size() > 1 && !have_parallel_hdf5()) return;
     expect_vtkhdf_output_matches_serial(input, fields + "series = true\n" + dense, dir + "/series", {""});
-    expect_vtkhdf_output_matches_serial(input, fields + dense, dir + "/files", {"_000000", "_000002", "_000004"});
+    expect_vtkhdf_output_matches_serial(input, fields + "series = false\n" + dense, dir + "/files", {"_000000", "_000002", "_000004"});
     expect_vtkhdf_output_matches_serial(input, fields + front, dir + "/front", {""});
 #endif
 }

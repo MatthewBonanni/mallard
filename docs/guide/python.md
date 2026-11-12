@@ -73,7 +73,7 @@ mallard new sod sod && cd sod && mallard -i input.toml
 import mallard
 
 f = mallard.open("solut/sod.vtkhdf")
-f                  # <mallard.File solut/sod.vtkhdf: snapshot, VTKHDF series index (VTKHDF snapshots), 11 snapshots>
+f                  # <mallard.File solut/sod.vtkhdf: snapshot, VTKHDF, 11 snapshots>
 list(f.fields)     # ['P', 'RHO', 'T', 'U_X']
 f.fields["RHO"]    # Field(name='RHO', components=1, units='kg m-3', long_name='density', location='cell')
 f.times            # array([0.  , 0.02, 0.04, ..., 0.2 ])
