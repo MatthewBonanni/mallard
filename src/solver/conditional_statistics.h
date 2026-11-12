@@ -116,13 +116,15 @@ class ConditionalStatistics {
             double t_last;
             double w;        // the last sample's weight
             uint64_t n;
+            double t_start;  // samples are due after it, as due() has it
         };
+        /** @brief The clock in device memory, for a step graph's due(). */
+        Kokkos::View<const Clock> device_clock() const { return clock; }
+        uint64_t sampling_interval() const { return interval; }
 
     private:
         Clock host_clock() const;
         void set_clock(const Clock & k);
-        void reduce(const Kokkos::View<double *> & values, bool max) const;
-        void reduce(const Kokkos::View<int64_t *> & values) const;
 
         std::vector<std::string> on, fields;
         std::vector<int32_t> h_codes;  // on, then fields

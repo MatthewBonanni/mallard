@@ -900,7 +900,7 @@ class Solver {
         Kokkos::View<double *> monitor_results;  // columns of every monitor
         Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
-        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means and spectra, the phases]
+        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means and spectra, the phases, each conditional entry]
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)

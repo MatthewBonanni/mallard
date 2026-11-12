@@ -466,6 +466,37 @@ TEST(StepQueueTest, BatchMeansAreSampledWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("batch_means", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, ConditionalStatisticsAreSampledWithoutStoppingTheDevice) {
+    // Entries with [statistics]' clock, their own interval and t_start, a joint PDF, and one started by a trigger
+    // between restarts; the files and restarts carry their accumulators and clocks
+    const std::string restarts = "check_interval = 1000\n"
+                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
+    const std::string entries =
+        "[[statistics.conditional]]\non = \"RHO\"\nbins = 8\nrange = [0.7, 1.3]\nfields = [\"P\", \"U_X\"]\n"
+        "file = \"{dir}/conditional_rho.csv\"\n"
+        "[[statistics.conditional]]\non = [\"RHO\", \"P\"]\nbins = [6, 4]\nrange = [[0.6, 1.4], [0.8, 1.2]]\n"
+        "fields = [\"T\"]\nweight = \"mass\"\ninterval = 3\nt_start = 0.05\nfile = \"{dir}/conditional_joint.csv\"\n";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = restarts + "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\"]\n" + entries;
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("conditional", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"conditional_rho.csv", "conditional_joint.csv"}) {
+            ASSERT_TRUE(o.files.count(file)) << file;
+            EXPECT_FALSE(o.files.at(file).empty()) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = restarts;
+    EXPECT_EQ(run_case("conditional", c, 3).queued, run_case("bare", bare, 3).queued);
+
+    Case alone = c;
+    alone.extra = restarts + "[statistics]\ninterval = 2\n" + entries +
+                  "[[triggers]]\nname = \"begin\"\nwhen = \"step >= 12\"\ndo = \"start statistics\"\n";
+    expect_queue_invariant("conditional_alone", alone);
+}
+
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     Case c;
     c.run = "n_steps = 20\ncfl = 0.5\n";
