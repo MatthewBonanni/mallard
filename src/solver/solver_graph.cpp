@@ -40,8 +40,9 @@
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests]
-constexpr int N_REDUCE = 1 + run_control::N_REQUESTS;
+// step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests,
+// -wall], the posted values from index 1 on
+constexpr int N_REDUCE = Solver::N_STEP_REDUCE, N_POSTED = N_REDUCE - 1, WALL = N_REDUCE - 1;
 constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), T_HALF = DT_SCALES + int(N_DT_SCALES),
               HALF_SCALES = T_HALF + 1, HALF_DT = HALF_SCALES + int(DT), N_STEP_SCALARS = HALF_SCALES + int(N_DT_SCALES);
 using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
@@ -289,6 +290,8 @@ void Solver::record_stage_time(const rtype c) {
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
 
 const rtype * Solver::step_time_device() const { return step_scalars.data() + T; }
+
+const rtype * Solver::step_wall_device() const { return step_reduce.data() + WALL; }
 
 template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
@@ -713,8 +716,8 @@ bool Solver::conditional_nodes_work() {
 void Solver::begin_device_steps() {
     dt_reduce_slot();
     step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
-    step_requests = Kokkos::View<rtype *>("step_requests", run_control::N_REQUESTS);
-    requests_posted = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_requests_posted", run_control::N_REQUESTS);
+    step_requests = Kokkos::View<rtype *>("step_requests", N_POSTED);
+    requests_posted = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_requests_posted", N_POSTED);
     step_loop = Kokkos::View<step_queue::Loop>("step_loop");
     const uint32_t n_records = static_cast<uint32_t>(std::max<uint64_t>(step_queue_depth, 1));
     step_records = Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace>("step_records", n_records);
@@ -858,6 +861,9 @@ void Solver::post_requests() {
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
     const int pending = run_control::pending();
     for (int k = 0; k < run_control::N_REQUESTS; k++) requests_posted(k) = (pending >> k) & 1 ? rtype(-1) : rtype(0);
+    // Rank 0's wall time, as the host's triggers read it: the reduction's minimum of its negative
+    requests_posted(WALL - 1) = !is_distributed() || comm::is_root() ? static_cast<rtype>(-timer.seconds())
+                                                                     : std::numeric_limits<rtype>::max();
 }
 
 void Solver::launch_device_step() {

@@ -3197,7 +3197,7 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
 }
 
 Kokkos::View<rtype> Solver::dt_reduce_slot() {
-    if (!step_reduce.is_allocated()) step_reduce = Kokkos::View<rtype *>("step_reduce", 1 + run_control::N_REQUESTS);
+    if (!step_reduce.is_allocated()) step_reduce = Kokkos::View<rtype *>("step_reduce", N_STEP_REDUCE);
     return Kokkos::View<rtype>(step_reduce.data());
 }
 

@@ -24,7 +24,8 @@
    condition and broadcasts one byte per trigger; every rank then advances
    the same state machines with the same `t`. Undistributed runs evaluate
    locally. A run without triggers does nothing new: no evaluation, no
-   message.
+   message. Conditions evaluated on the device read rank 0's `wall` from
+   the step's time-step reduction instead.
 4. **State machine.** A trigger is armed until it fires; it fires once its
    condition has held for `for` seconds of simulated time, counted from the
    step it last turned true (a lapse restarts the clock, the hysteresis

@@ -445,15 +445,16 @@ host decides as before.
 
 The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
 Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
-time-step reduction reads, as before. The step body sits under a conditional IF node on a device flag: after
+time-step reduction reads, as before, with minus rank 0's wall time (the other ranks post the largest value),
+which the reduction's minimum gives every rank for the triggers that read `wall`. The step body sits under a conditional IF node on a device flag: after
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers stop the device at every step (triggers read probe values and the wall time on the
-host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
+Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
+the host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
 expressions' errors on the host, or follow the half step the host completes). Outputs stop the device at
 their steps.
 
