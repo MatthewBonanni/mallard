@@ -18,6 +18,7 @@ import yaml
 NOT_TESTS = {
     "ci.yml": {"changelog", "device", "matrix", "result"},
     "release.yml": {"meta", "publish"},
+    "batch.yml": {"stamp"},
 }
 SKIPPED_WORKFLOWS = {"pages.yml"}
 REFERENCE = re.compile(r"`([\w-]+\.ya?ml/[\w.-]+)`")

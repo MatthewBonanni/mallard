@@ -24,6 +24,7 @@
 
 #include "chemistry_benchmark.h"
 #include "commands.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "kinetics.h"
 #include "log.h"
@@ -152,7 +153,8 @@ void benchmark(const Input & input) {
     if (!out) throw InputError("cannot write benchmark.output = \"" + output + "\".");
     const ChemistryBenchmark b = run_chemistry_benchmark(input);
     out << "mechanism,species,reactions,threads,lanes,shared,cells,igniting,dt,active,seconds,cells_per_second,"
-           "mean_substeps,max_substeps,histogram\n";
+           "mean_substeps,max_substeps,histogram\n"
+           "# units: 1,1,1,1,1,B,1,1,s,1,s,s-1,1,1,1\n";
     for (const ChemistryBenchmarkStep & step : b.steps) {
         out << b.mechanism << "," << b.species << "," << b.reactions << "," << b.threads << "," << b.lanes << ","
             << b.shared_bytes << "," << b.cells << "," << b.igniting << "," << step.dt << "," << step.active << ","
@@ -181,10 +183,10 @@ int reactor_main(const cli::Args & args) {
             run(input_file);
         }
     } catch (const InputError & e) {
-        logging::error(input_file + ": " + e.what());
+        logging::error(e.code, input_file + ": " + e.what());
         return 1;
     } catch (const std::exception & e) {
-        logging::error(e.what());
+        logging::error(diagnostic_code::RUN, e.what());
         return 1;
     }
     return 0;

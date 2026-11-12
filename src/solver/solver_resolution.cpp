@@ -156,7 +156,7 @@ CheckFields Solver::check_resolution(CheckReport & r) {
                                              g3(thickened_flame.n_res) + " cells (les.combustion.n_res)"),
                "<= " + real(TFLES_THICKENING), r.tfles_thickening_max <= TFLES_THICKENING);
         if (r.tfles_thickening_max > TFLES_THICKENING) {
-            r.warning(check_code::TFLES_THICKENING,
+            r.warning(diagnostic_code::TFLES_THICKENING,
                       format("TFLES thickens the flame up to F = %.3g (n_res Delta / delta_L): above %.0f the flame's "
                              "response to turbulence is unreliable; refine the mesh or lower les.combustion.n_res",
                              r.tfles_thickening_max, TFLES_THICKENING));
@@ -423,7 +423,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
                      "exchange_distance, or exchange_cells wall-cell heights");
         }
         if (resolved && r.y_plus_max > WALL_Y_PLUS) {
-            r.warning(check_code::WALL_Y_PLUS,
+            r.warning(diagnostic_code::WALL_Y_PLUS,
                       format("first cells at y+ up to %.3g (at %s m; u_tau from %s): %s needs y+ <= %.0f at the "
                              "first cell centers: place them at most %s m from the wall, or model the walls "
                              "(wall_model)",
@@ -435,11 +435,11 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
                 N_DIM == 3 ? format("x+ %.3g and z+ %.3g", r.x_plus_max, r.z_plus_max) : format("x+ %.3g", r.x_plus_max);
             const std::string targets =
                 N_DIM == 3 ? format("x+ <= %.0f and z+ <= %.0f", x_max, z_max) : format("x+ <= %.0f", x_max);
-            r.warning(check_code::WALL_SPACING, "wall cells up to " + spacings + " (along the flow and across it): " +
+            r.warning(diagnostic_code::WALL_SPACING, "wall cells up to " + spacings + " (along the flow and across it): " +
                                                     regime + " needs " + targets + ": refine the mesh along the walls");
         }
         if (with_model && exchange[0] < LOG_LAYER_Y_PLUS) {
-            r.warning(check_code::WALL_MODEL_EXCHANGE,
+            r.warning(diagnostic_code::WALL_MODEL_EXCHANGE,
                       format("the wall model's exchange points reach down to y+ %.3g (u_tau from %s), below the log "
                              "layer (y+ >= %.0f) its law assumes: raise exchange_distance or exchange_cells",
                              exchange[0], u_tau_basis.c_str(), LOG_LAYER_Y_PLUS));
@@ -482,7 +482,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
                  "lambda over the mean cell size");
     }
     if (!les_on && r.delta_over_eta > DNS_DELTA_OVER_ETA) {
-        r.warning(check_code::DNS_ETA,
+        r.warning(diagnostic_code::DNS_ETA,
                   format("DNS: cells of %.3g eta on average (eta %s m from %s): resolving the dissipation needs about "
                          "%.0f eta or less: refine to cells of %s m, or model the small scales with LES ([les])",
                          r.delta_over_eta, g3(r.eta).c_str(), eps_source.c_str(), DNS_DELTA_OVER_ETA,

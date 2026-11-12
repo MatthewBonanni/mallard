@@ -27,6 +27,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
@@ -458,10 +459,11 @@ void Probes::region_measures(Probe & p, const Mesh & mesh, const region::Region 
     const double share = std::max(0.0, 1.0 - in.volume / own.volume);
     if (share <= CLIPPED_SHARE + own.tolerance) return;
     p.clipped = json::Object().add(std::string(volume) + "_fraction", share).str();
-    logging::warning(key + ": " + logging::real(100.0 * share) + "% of its " + volume +
-                     " lies outside the domain, and the probe covers only its part inside (" +
-                     units::with(logging::real(in.volume), volume_units(mesh.axisymmetric)) + " of " +
-                     units::with(logging::real(own.volume), volume_units(mesh.axisymmetric)) + ").");
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::real(100.0 * share) + "% of its " + volume +
+                         " lies outside the domain, and the probe covers only its part inside (" +
+                         units::with(logging::real(in.volume), volume_units(mesh.axisymmetric)) + " of " +
+                         units::with(logging::real(own.volume), volume_units(mesh.axisymmetric)) + ").");
 }
 
 void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
@@ -881,8 +883,9 @@ std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const s
         k = e + 1;
     }
     if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN) + " more runs";
-    logging::warning(key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
-                     " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
+                         " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
     g = probe::clip(g, keep, keep_quad);
     return clipped.str();
 }
@@ -2177,6 +2180,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                      [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
     p.point_value = !p.snapshot && (!p.from_region || p.resampled) && p.nodes.n_global == 1 &&
                     (p.write_samples || extrema || p.quadrature.n_global == 0);
+    p.monitored = reduction_columns;
+    if (p.point_value) {
+        for (const auto & v : p.variables) p.monitored.emplace_back(v, field_units::describe(v).dimension);
+    }
     probes.push_back(std::move(probe_ptr));
 }
 
@@ -2390,6 +2397,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
+            p.last_step = step;
+            p.last_t = double(t);
             p.last.clear();
             if (!p.reductions.empty()) p.reduce(nodes, quad);
             if (p.point_value) {
@@ -2471,6 +2480,34 @@ std::vector<double> Probes::values() const {
     }
     return values;
 
+}
+
+std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> Probes::recorded_columns() const {
+    std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        all.emplace_back(p->name, std::vector<std::pair<std::string, Dimension>>(p->monitored.begin(),
+                                                                                 p->monitored.begin() + long(n)));
+        left -= n;
+    }
+    return all;
+}
+
+std::vector<MonitorValues> Probes::recorded() const {
+    std::vector<MonitorValues> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        left -= n;
+        if (p->last.size() != p->monitored.size()) continue;
+        MonitorValues m{p->name, p->last_step, p->last_t, {}};
+        for (size_t i = 0; i < n; i++) m.values.emplace_back(p->monitored[i].first, p->last[i]);
+        all.push_back(std::move(m));
+    }
+    return all;
 }
 
 void Probes::Probe::write_spectra(uint64_t step, rtype t) {
