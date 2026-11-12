@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "read_only.h"
 
 namespace teno {
 
@@ -143,15 +144,15 @@ struct PackedStencils {
         uint8_t shift;
 
         KOKKOS_INLINE_FUNCTION
-        int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
+        int32_t cell(const uint32_t s) const { return load_read_only(cells_ + (s << shift)); }
 
         KOKKOS_INLINE_FUNCTION
-        int32_t face(const uint32_t s) const { return faces_[s << shift]; }
+        int32_t face(const uint32_t s) const { return load_read_only(faces_ + (s << shift)); }
 
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
         KOKKOS_INLINE_FUNCTION
-        rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(pinv_[(s * WIDTH + l) << shift]); }
+        rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(load_read_only(pinv_ + ((s * WIDTH + l) << shift))); }
     };
     using Row = RowT<rtype>;
 
