@@ -12,6 +12,7 @@
 #include "data_writer.h"
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -182,7 +183,7 @@ void DataWriter::init(const Input & input,
         format = DataFormat::VTU;
         static bool told = false;
         if (!told && comm::is_root()) {
-            logging::warning(std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
+            logging::warning(diagnostic_code::FORMAT_VTU, std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
                                          "with ") +
                              (have_hdf5() ? "parallel HDF5 on several ranks" : "HDF5 (Mallard_ENABLE_HDF5=ON)") +
                              "; set format = \"vtu\" to silence this.");
@@ -771,7 +772,7 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     n_snapshots = static_cast<uint64_t>(*n_before);
     while (snapshot_exists(n_snapshots)) n_snapshots++;
     if (comm::is_root()) {
-        logging::warning(index_file() + " lists " + std::to_string(history.size()) + " of the " +
+        logging::warning(diagnostic_code::SNAPSHOT_INDEX, index_file() + " lists " + std::to_string(history.size()) + " of the " +
                          std::to_string(static_cast<uint64_t>(*n_before)) +
                          " snapshots up to the restart time; numbering continues at " + std::to_string(n_snapshots));
     }

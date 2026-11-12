@@ -16,9 +16,9 @@
 # Numerics. Sigma model, hybrid KEEP / HLLC flux, MUSCL without limiter: the
 # model removes the energy at the cutoff (integrals.csv, budget = true:
 # numerical dissipation 1-2% of the total, against 46-84% with HLLC
-# everywhere). TENO with the hybrid flux is not recommended: at 32^3 its
-# stencil selection fed energy into the resolved field (numerical
-# dissipation -22%).
+# everywhere). TENO5 with the hybrid flux (KEEP on the cell values) gives
+# the same spectra at ten times the cost; with HLLC it is limited by the
+# scheme (0.19 / 0.22 at 128^3). docs/design/les.md, section 4.4.
 #
 # Results (log10 RMS deviation of the spectrum for k <= 2/3 k_c, and the
 # resolved energy over the measured energy up to k_c, at stations 2 / 3):
