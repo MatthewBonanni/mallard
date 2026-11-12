@@ -634,7 +634,7 @@ TEST(FieldUnitsTest, FieldsFromTheInputAloneAreThoseOfTheSetup) {
     const std::vector<std::string> cases = {
         gas + "[numerics]\npreset = \"robust\"\n",
         gas + "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n[[sources]]\nrhoE = \"1.0 + x\"\n"
-              "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*RHO\"]\n"
+              "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*RHO\"]\nbatch = 1.0e-3\n"
               "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.01\n",
         mixture + "transport = \"mixture_averaged\"\nsoret = true\n[radiation]\n[[sources]]\nrhoE = \"1.0\"\n",
         mixture + "[chemistry]\n" + les + "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1.25e-2\ns_L = 2.0\n"
@@ -653,7 +653,8 @@ TEST(FieldUnitsTest, FieldsFromTheInputAloneAreThoseOfTheSetup) {
         every.insert(every.end(), listed.begin(), listed.end());
     }
     // The fields each feature adds are among those compared
-    for (const char * name : {"TENO_SIGMA", "SOURCE_RHOE", "SOURCE_RHOY_H2", "MEAN_P", "COV_U_X_RHO", "PHASE_2_U_Y",
+    for (const char * name : {"TENO_SIGMA", "SOURCE_RHOE", "SOURCE_RHOY_H2", "MEAN_P", "COV_U_X_RHO", "CI_MEAN_P",
+                              "BATCH_M2_COV_U_X_RHO", "PHASE_2_U_Y",
                               "DT_H2", "QRAD", "OMEGA_OH", "MU_T", "TF_OMEGA", "PASR_KAPPA"}) {
         EXPECT_NE(std::find(every.begin(), every.end(), name), every.end()) << name;
     }
