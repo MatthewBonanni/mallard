@@ -1,0 +1,1 @@
+- `mallard -i input.toml --log-format jsonl` prints the run record's progress records on stdout, one JSON object per line at each progress row, for live monitoring and plotting, also with `[output] run_log` off; the text goes to stderr (#827).

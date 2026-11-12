@@ -168,6 +168,30 @@ class Geometry {
          */
         void cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vector<double> & w) const;
 
+        /**
+         * @brief Reference coordinates xi of face f at box coordinates p, and
+         *        the determinant of d xi / d p. The box is box_of(f): 2D
+         *        [-1, 1]; quadrilaterals [-1, 1]^2; triangles [0, 1]^2, collapsed
+         *        as xi = (p0, p1 (1 - p0)).
+         */
+        double face_coordinates(uint32_t f, const double * p, double * xi) const;
+        void box_of(uint32_t f, std::array<double, 2> & lo, std::array<double, 2> & hi) const;
+
+        /**
+         * @brief Cone k of cell c, from the cell's vertex average o over its
+         *        face k: x = o + t (F(xi) - o) for t in [0, 1], in the cell's
+         *        frame, with its derivatives (dx[j] along xi_j for j < N_DIM - 1,
+         *        dx[N_DIM - 1] along t). Returns the volume (2D: area) per unit
+         *        xi and t; the cones of a cell tile it, as cell_rule's do.
+         */
+        double cone_eval(uint32_t c, uint32_t k, const double * xi, double t, Vec3 & x, Vec3 * dx) const;
+
+        /** @brief Whether cell c holds x, to tol relative to its size: in one of its cones. */
+        bool contains(uint32_t c, const Vec3 & x, double tol) const;
+
+        /** @brief A box around cell c, its curved faces included. */
+        void bounds(uint32_t c, Vec3 & lo, Vec3 & hi) const;
+
     private:
         struct Edge {
             int32_t shape = -1;

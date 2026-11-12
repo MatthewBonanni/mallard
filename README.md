@@ -31,7 +31,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Compressible Euler and Navier-Stokes
 - Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
 - Detailed transport, Soret diffusion, optically thin radiation
-- Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions)
+- Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions); arrays of copies, regions that move with `t`, regions that wrap across periodic boundaries, and regions defined by the solution (where a condition such as `T > 1500` holds, or an isosurface)
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux
@@ -51,7 +51,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
-- `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields, `mallard post average` for its means, RMS, Reynolds and Favre covariances, plane averages, PDFs and conditional statistics, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions, `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`); tab completion for bash, zsh and fish
+- `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, an annotated image and a ParaView file of the domain, boundaries and regions (`--view`), `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields, `mallard post average` for its means, RMS, Reynolds and Favre covariances, plane averages, PDFs and conditional statistics, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions, `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`); tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](docs/images/guide/run_report_sample.html))
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try

@@ -6,7 +6,9 @@ add_library(MallardCore STATIC
     common/region.cpp
     common/region_input.cpp
     common/region_mesh.cpp
+    common/region_motion.cpp
     io/case_view.cpp
+    io/case_image.cpp
     common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp
@@ -52,6 +54,7 @@ add_library(MallardCore STATIC
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
     numerics/overlap.cpp
+    numerics/cut_quadrature.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
@@ -73,6 +76,7 @@ add_library(MallardCore STATIC
     solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
+    solver/probe_cells.cpp
     solver/probe_geometry.cpp
     solver/probe_surface.cpp
     solver/probe_spectra.cpp
@@ -119,6 +123,7 @@ add_library(MallardCore STATIC
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
+    parallel/device_sums.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp

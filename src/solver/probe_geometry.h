@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,18 @@ struct Transform {
     static Transform read(const Input & entry, const std::string & key);
 };
 
+/** @brief A smooth piece of a curve, x(s) and its derivative for s in [0, 1], in the curve's direction. */
+struct CurvePiece {
+    std::function<Vec3(double)> x, dx;
+    bool straight = false;
+};
+
+/** @brief A curve sampled on the cells it crosses (n_points = "cells"): its pieces, end to end. */
+struct Curve {
+    std::vector<CurvePiece> pieces;
+    bool closed = false;
+};
+
 /**
  * @brief Where a probe samples. nodes are the points written out; quadrature
  *        points with weights (length elements of curves, 1 for points)
@@ -69,6 +82,7 @@ struct Geometry {
     std::vector<Point> vertices;
     std::vector<uint64_t> polygon_offsets;  // polygons + 1
     std::vector<uint32_t> polygon_vertices;
+    std::vector<Curve> curves;  // n_points = "cells": the curves, not yet sampled (no nodes)
 };
 
 /** @brief A resampled surface's geometry: its grid's nodes with normals, quadrilaterals and Gauss points. */
@@ -76,6 +90,13 @@ Geometry grid_geometry(const region::Grid & grid);
 
 /** @brief The geometry of a [[probes]] entry (key names it in errors). */
 Geometry make_geometry(const Input & entry, const std::string & key);
+
+/**
+ * @brief The part of g with the nodes and quadrature points kept (1 in keep,
+ *        keep_quad): curves split where nodes are dropped (a closed one
+ *        opens there), polygons kept whose nodes all are.
+ */
+Geometry clip(const Geometry & g, const std::vector<uint8_t> & keep, const std::vector<uint8_t> & keep_quad);
 
 /** @brief Points of a text file: rows of N_DIM coordinates split by commas or blanks; '#' starts a comment. */
 std::vector<Point> read_points(const std::string & file, const std::string & key);

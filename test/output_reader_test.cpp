@@ -13,6 +13,8 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -21,6 +23,9 @@
 
 #include "comm.h"
 #include "compression.h"
+#ifdef Mallard_HAS_HDF5
+#include "hdf5_util.h"
+#endif
 #include "data_paths.h"
 #include "mesh_block.h"
 #include "json.h"
@@ -333,6 +338,74 @@ TEST(OutputReaderTest, EverySnapshotFormatRecordsItsStepTimeAndRun) {
             EXPECT_EQ(file.snapshots[i].run_id, run_id) << name << " " << i;
         }
     }
+}
+
+TEST(OutputReaderTest, TimeAndPhaseMeansOfTheUnknownsAreCellAverages) {
+    for (const char * name : {"RHO", "RHOU_Y", "RHOE", "RHOY_O2", "MEAN_RHOU_X", "PHASE_03_RHO", "REGION_FRACTION"}) {
+        EXPECT_EQ(snapshot_block::value_kind(name), snapshot_block::value::CELL_AVERAGE) << name;
+    }
+    for (const char * name : {"P", "U_X", "T", "Y_O2", "MEAN_P", "PHASE_03_U_X", "COV_RHO_U_X"}) {
+        EXPECT_EQ(snapshot_block::value_kind(name), snapshot_block::value::CELL_STATE) << name;
+    }
+}
+
+TEST(OutputReaderTest, EverySnapshotFormatRecordsWhetherItsValuesAreCellAverages) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    auto value = [](const output::Contents & file, const std::string & field) {
+        const snapshot_block::Field * f = file.snapshots.back().block.field(field);
+        return f ? f->value : "not recorded";
+    };
+    std::vector<std::string> files = snapshot_files(run.dir, "000004");
+    files.push_back(run.dir + "/near_000004.vtu");
+    files.push_back(run.dir + "/restart_000004.restart");
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        ASSERT_TRUE(file.snapshots.back().has_block) << name;
+        EXPECT_EQ(value(file, "RHO"), "cell_average") << name;
+        EXPECT_TRUE(file.snapshots.back().block.reconstruction.method.empty()) << name;
+        if (name.ends_with(".restart")) {
+            EXPECT_EQ(value(file, "RHOE"), "cell_average") << name;
+        } else if (name.find("near_") != std::string::npos) {
+            EXPECT_EQ(value(file, "REGION_FRACTION"), "cell_average") << name;
+        } else {
+            EXPECT_EQ(value(file, "P"), "cell_state") << name;
+            EXPECT_EQ(value(file, "U"), "cell_state") << name;
+        }
+    }
+    // Probes sample the cell holding each point here (sampling = "cell")
+    std::vector<std::string> probes = {run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) probes.push_back(run.dir + "/probe_vtkhdf.vtkhdf");
+    for (const std::string & name : probes) {
+        const output::Contents file = output::open(name);
+        ASSERT_TRUE(file.snapshots.back().has_block) << name;
+        EXPECT_EQ(value(file, "RHO"), "cell_average") << name;
+        EXPECT_EQ(value(file, "U_X"), "cell_state") << name;
+    }
+#ifdef Mallard_HAS_HDF5
+    const std::string mean = N_DIM == 2 ? "area: mean" : "volume: mean";
+    const std::vector<std::pair<std::string, std::string>> datasets = {
+        {"/flow_000004.vtkhdf", "VTKHDF/CellData/"}, {"/series.vtkhdf", "VTKHDF/CellData/"},
+        {"/flow_000004.h5", "fields/"}, {"/probe_hdf5.h5", "fields/"}, {"/probe_vtkhdf.vtkhdf", "VTKHDF/PointData/"}};
+    for (const auto & [file_name, group] : datasets) {
+        const std::string path = run.dir + file_name;
+        h5::Handle file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + path);
+        h5::Handle rho(H5Dopen2(file, (group + "RHO").c_str(), H5P_DEFAULT), H5Dclose, "opening RHO");
+        EXPECT_EQ(h5::read_string_attribute(rho, "cell_methods"), mean) << path;
+        const std::string other = file_name.starts_with("/probe") ? "U_X" : "P";
+        h5::Handle state(H5Dopen2(file, (group + other).c_str(), H5P_DEFAULT), H5Dclose, "opening " + other);
+        EXPECT_LE(H5Aexists(state, "cell_methods"), 0) << path << " " << other;
+    }
+    std::ifstream xmf(run.dir + "/flow_000004.xmf");
+    const std::string text((std::istreambuf_iterator<char>(xmf)), std::istreambuf_iterator<char>());
+    const std::string tag = "<Information Name=\"cell_methods\" Value=\"" + mean + "\"/>";
+    const size_t rho = text.find("<Attribute Name=\"RHO\"");
+    ASSERT_NE(rho, std::string::npos) << text;
+    const size_t at = text.find(tag);
+    EXPECT_GT(at, rho) << text;
+    EXPECT_LT(at, text.find("</Attribute>", rho)) << text;
+    EXPECT_EQ(text.find("cell_methods", at + tag.size()), std::string::npos) << text;
+#endif
 }
 
 TEST(OutputReaderTest, SnapshotsOfMallard091AreReadWithTheStatedFallback) {

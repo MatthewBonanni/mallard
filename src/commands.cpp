@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -34,6 +36,10 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--log-format", "", "text|jsonl",
+     "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
+     "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
+     "and the text on stderr. Default: text."},
     KOKKOS,
 };
 
@@ -81,9 +87,12 @@ constexpr Option CHECK_OPTIONS[] = {
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
     {"--view", "", "DIR",
-     "Write the case view to DIR/case.vtkhdf for ParaView: every region the case uses (filled regions as their "
-     "cells with their fractions, surfaces and curves with their normals or tangents and measures) and every "
-     "boundary zone, one block each (builds without HDF5: DIR/case.vtm). Default: none."},
+     "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
+     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
     KOKKOS,
 };
 
@@ -120,6 +129,10 @@ constexpr Option INFO_OPTIONS[] = {
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --mesh-fields does; the stencil fields need the case, from mallard check. "
      "Default: none."},
+    {"--view", "", "DIR",
+     "Mesh files: write the case view of the mesh alone (its cells, boundary and cell zones and periodic "
+     "pairs) to DIR, as mallard check --view does: DIR/case.vtkhdf (DIR/case.vtm without HDF5), "
+     "DIR/case-light.svg and DIR/case-dark.svg. Default: none."},
     {"--quality", "", "PREFIX", "Deprecated: --mesh-fields PREFIX."},
     {"--verify", "", "",
      "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
@@ -383,7 +396,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
@@ -616,7 +631,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -627,7 +642,7 @@ constexpr Command COMMANDS[] = {
         .name = "info",
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
-        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]\n"
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX] [--view DIR]\n"
                     "mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
@@ -659,6 +674,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info solut/restart_001000.restart --format json\n"
                     "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --mesh-fields wing\n"
+                    "$ mallard info wing.msh --view view   # view/case-light.svg: the zones, labeled\n"
                     "$ mallard info runs/cylinder\n"
                     "$ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html",
         .exit_status = "0  the file was read\n"
