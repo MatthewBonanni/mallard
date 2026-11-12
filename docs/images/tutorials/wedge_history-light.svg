@@ -610,49 +610,49 @@ L 491.154375 202.464
    </g>
    <g id="legend_1">
     <g id="line2d_32">
-     <path d="M 312.227812 15.88 
-L 322.227812 15.88 
-L 332.227812 15.88 
+     <path d="M 404.410625 111.509506 
+L 414.410625 111.509506 
+L 424.410625 111.509506 
 " style="fill: none; stroke: #2f6db5; stroke-width: 1.8; stroke-linecap: square"/>
     </g>
     <g id="text_16">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="340.227812" y="19.38" transform="rotate(-0 340.227812 19.38)">t = 1.0 ms</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="115.009506" transform="rotate(-0 432.410625 115.009506)">t = 1.0 ms</text>
     </g>
     <g id="line2d_33">
-     <path d="M 312.227812 30.079219 
-L 322.227812 30.079219 
-L 332.227812 30.079219 
+     <path d="M 404.410625 125.708725 
+L 414.410625 125.708725 
+L 424.410625 125.708725 
 " style="fill: none; stroke: #d9730d; stroke-width: 1.8; stroke-linecap: square"/>
     </g>
     <g id="text_17">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="340.227812" y="33.579219" transform="rotate(-0 340.227812 33.579219)">t = 2.0 ms</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="129.208725" transform="rotate(-0 432.410625 129.208725)">t = 2.0 ms</text>
     </g>
     <g id="line2d_34">
-     <path d="M 312.227812 44.278437 
-L 322.227812 44.278437 
-L 332.227812 44.278437 
+     <path d="M 404.410625 139.907944 
+L 414.410625 139.907944 
+L 424.410625 139.907944 
 " style="fill: none; stroke: #12655f; stroke-width: 1.8; stroke-linecap: square"/>
     </g>
     <g id="text_18">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="340.227812" y="47.778437" transform="rotate(-0 340.227812 47.778437)">t = 3.0 ms</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="143.407944" transform="rotate(-0 432.410625 143.407944)">t = 3.0 ms</text>
     </g>
     <g id="line2d_35">
-     <path d="M 404.410625 15.88 
-L 414.410625 15.88 
-L 424.410625 15.88 
+     <path d="M 404.410625 154.107162 
+L 414.410625 154.107162 
+L 424.410625 154.107162 
 " style="fill: none; stroke: #7b3f6e; stroke-width: 1.8; stroke-linecap: square"/>
     </g>
     <g id="text_19">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="19.38" transform="rotate(-0 432.410625 19.38)">t = 4.0 ms</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="157.607162" transform="rotate(-0 432.410625 157.607162)">t = 4.0 ms</text>
     </g>
     <g id="line2d_36">
-     <path d="M 404.410625 30.079219 
-L 414.410625 30.079219 
-L 424.410625 30.079219 
+     <path d="M 404.410625 168.306381 
+L 414.410625 168.306381 
+L 424.410625 168.306381 
 " style="fill: none; stroke: #b58900; stroke-width: 1.8; stroke-linecap: square"/>
     </g>
     <g id="text_20">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="33.579219" transform="rotate(-0 432.410625 33.579219)">t = 20.0 ms</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #1f1a1d" x="432.410625" y="171.806381" transform="rotate(-0 432.410625 171.806381)">t = 20.0 ms</text>
     </g>
    </g>
   </g>
