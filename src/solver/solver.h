@@ -677,6 +677,8 @@ class Solver {
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
+        std::string setup_check();
         void init_run_parameters();
         void init_output(region::Regions & regions);
         /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
@@ -927,6 +929,7 @@ class Solver {
         uint64_t n_progress_rows = 0;
         bool input_from_file = false;  // init(file) has recorded the input's provenance
         bool run_log_on = false;       // the run's records are built: [output] run_log or report is set
+        std::string setup_check_json;  // the start record's check, when run_log_on
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;

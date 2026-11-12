@@ -254,6 +254,8 @@ void Solver::setup_from_input() {
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
+    setup_check_json.clear();
+    if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
     if (!check_only) used_regions.reset();
     // glibc keeps what the setup freed in its arenas; hand it back to the system
@@ -305,6 +307,7 @@ void Solver::write_provenance() {
         .raw("placement", provenance::placement())
         .raw("setup_phases", setup_phases.str())
         .raw("units", progress_units());
+    if (!setup_check_json.empty()) start.raw("check", setup_check_json);
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
         json::Object restart;
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));

@@ -74,6 +74,16 @@ struct Outputs {
     std::string last_path;
 };
 
+/** @brief A part of the check a run records at setup: a table, or a table of quantities, with its status. */
+struct CheckPart {
+    CheckPart(std::string title_in, std::string note_in) : title(std::move(title_in)), note(std::move(note_in)) {}
+    std::string title, note;
+    report::Status status = report::Status::OK;
+    bool quantities = false;  // rows of quantity, value, units, target and basis; else under the header
+    std::vector<report::Column> header;
+    std::vector<report::Row> rows;
+};
+
 class Page {
     public:
         /** @brief Adds the next record of the run log. */
@@ -93,6 +103,8 @@ class Page {
         void progress(const json::Value & r);
         /** @brief The run's status: by its outcome (none without an end record), a warning with warnings. */
         report::Status status() const;
+        /** @brief The start record's check, part by part, with the largest CFL number of the progress rows. */
+        std::vector<CheckPart> check() const;
         Series & series(const std::string & group, const std::string & name, const std::string & unit);
         /** @brief The unit the start record gives a progress record quantity (of an object of it; "": at the top). */
         std::string unit(const std::string & group, const std::string & name) const;

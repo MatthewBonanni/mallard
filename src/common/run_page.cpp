@@ -508,6 +508,126 @@ report::Status Page::status() const {
     return s == Status::OK && (warnings.n || errors.n) ? Status::WARNING : s;
 }
 
+std::vector<CheckPart> Page::check() const {
+    using report::Row;
+    using report::Status;
+    using Kind = report::Column::Kind;
+    std::vector<CheckPart> out;
+    const json::Value * c = start.find("check");
+    if (!c || c->type != Type::OBJECT) return out;
+    auto g3 = [](const json::Value * v) {
+        return v && v->type == Type::NUMBER ? format("%.3g", v->number) : std::string("-");
+    };
+    auto point = [](const json::Value * x) {
+        std::string text = "(";
+        if (x && x->type == Type::ARRAY) {
+            for (size_t i = 0; i < x->array.size(); i++) text += (i ? ", " : "") + format("%.4g", x->array[i].number);
+        }
+        return text + ") m";
+    };
+
+    if (const json::Value * q = c->find("mesh_quality"); q && q->type == Type::OBJECT) {
+        CheckPart part{"Mesh quality",
+                       "Over every cell, as mallard check measures it; a cell above the limit is questionable. Worst: "
+                       "the cell with the largest value, by its global id and center."};
+        part.header = {"metric", {"units", Kind::UNITS}, {"max", Kind::VALUE}, {"mean", Kind::VALUE},
+                       {"limit", Kind::VALUE}, "cells over limit", "worst"};
+        for (size_t i = 0; i < q->names.size(); i++) {
+            const json::Value & m = q->members[i];
+            const std::string name = str(m.find("name"));
+            const Status row = number_of(m.find("above_limit")) > 0.0 ? Status::WARNING : Status::OK;
+            part.status = report::worse(part.status, row);
+            std::string worst = "-";
+            if (const json::Value * w = m.find("worst"); w && w->type == Type::ARRAY && !w->array.empty()) {
+                const json::Value & cell = w->array.front();
+                worst = "cell " + text_of(cell.find("cell")) + " at " + point(cell.find("x"));
+            }
+            part.rows.push_back({row, {name, str(m.find("units")), g3(m.find("max")), g3(m.find("mean")),
+                                       text_of(m.find("limit")), text_of(m.find("above_limit")), worst}});
+        }
+        out.push_back(std::move(part));
+    }
+
+    if (const json::Value * ts = c->find("time_step"); ts && ts->type == Type::OBJECT) {
+        CheckPart part{"Time step", "The CFL number against the time integrator's stability limit for smooth "
+                                    "flow: the requested one, and the largest at any progress row so far."};
+        part.quantities = true;
+        const std::string integrator = str(ts->find("integrator"));
+        const json::Value * limit = ts->find("cfl_limit");
+        const bool limited = limit && limit->type == Type::NUMBER;
+        const std::string target = limited ? "<= " + format("%.4g", limit->number) : "";
+        const std::string basis = limited ? integrator + "'s stability limit for smooth flow"
+                                          : "no limit known for " + integrator;
+        auto row = [&](const std::string & quantity, const double cfl, const std::string & what) {
+            const Status s = !limited ? Status::NONE : cfl > limit->number ? Status::WARNING : Status::OK;
+            part.status = report::worse(part.status, s);
+            part.rows.push_back({s, {quantity, format("%.3g", cfl), "dimensionless", target, what}});
+        };
+        if (const json::Value * cfl = ts->find("cfl"); cfl && cfl->type == Type::NUMBER) {
+            row("CFL number, run.cfl", cfl->number, basis);
+        }
+        if (const auto it = by_key.find("Time step\ncfl"); it != by_key.end() && all[it->second].rows() > 0) {
+            row("CFL number, largest so far", all[it->second].largest(),
+                "over " + logging::count(all[it->second].rows()) + " progress rows; " + basis);
+        }
+        if (!part.rows.empty()) out.push_back(std::move(part));
+    }
+
+    if (const json::Value * res = c->find("resolution"); res && res->type == Type::OBJECT && !res->names.empty()) {
+        CheckPart part{"Resolution", "Estimates from the initial state against the targets of the case's regime "
+                                     "(DNS, or LES with [les]), as mallard check makes them; value -: not "
+                                     "estimated, for the reason its basis gives."};
+        part.quantities = true;
+        for (size_t i = 0; i < res->names.size(); i++) {
+            const json::Value & e = res->members[i];
+            const std::string name = str(e.find("status"));
+            const Status s = name == "ok" ? Status::OK : name == "warning" ? Status::WARNING
+                             : name == "error"                             ? Status::ERROR
+                                                                           : Status::NONE;
+            part.status = report::worse(part.status, s);
+            const json::Value * v = e.find("value");
+            const bool known = v && v->type == Type::NUMBER;
+            const json::Value * x = e.find("x");
+            part.rows.push_back({s, {str(e.find("quantity")), known ? format("%.3g", v->number) : "-",
+                                     known ? str(e.find("units")) : "", str(e.find("target")),
+                                     str(e.find("basis")) + (x && x->type == Type::ARRAY ? ", at " + point(x) : "")}});
+        }
+        out.push_back(std::move(part));
+    }
+
+    if (const json::Value * m = c->find("memory"); m && m->type == Type::OBJECT) {
+        CheckPart part{"Memory", "After setup, of the rank that uses the most."};
+        part.quantities = true;
+        part.status = Status::NONE;
+        auto megabytes = [&](const char * key, const std::string & quantity, const std::string & basis) {
+            if (const json::Value * b = m->find(key); b && b->type == Type::NUMBER) {
+                part.rows.push_back({Status::NONE, {quantity, format("%.3g", b->number / 1e6), "MB", "", basis}});
+            }
+        };
+        megabytes("host", "host memory", "resident set of the process");
+        megabytes("host_peak", "host memory, peak", "during setup");
+        const json::Value * total = m->find("device_total");
+        megabytes("device", "device memory in use",
+                  total && total->type == Type::NUMBER && total->number > 0.0
+                      ? format("%.0f%% of the device's ", 100.0 * number_of(m->find("device")) / total->number) +
+                            logging::si(total->number) + "B"
+                      : "");
+        if (!part.rows.empty()) out.push_back(std::move(part));
+    }
+
+    if (const json::Value * d = c->find("diagnostics"); d && d->type == Type::ARRAY && !d->array.empty()) {
+        CheckPart part{"Diagnostics", "The check's warnings, with their codes."};
+        part.header = {"code", "message, then the docs that explain it"};
+        for (const json::Value & e : d->array) {
+            const Status s = str(e.find("severity")) == "error" ? Status::ERROR : Status::WARNING;
+            part.status = report::worse(part.status, s);
+            part.rows.push_back({s, {str(e.find("code")), str(e.find("message")) + "\n" + str(e.find("docs"))}});
+        }
+        out.push_back(std::move(part));
+    }
+    return out;
+}
+
 std::string Page::text(const bool color) const {
     using report::Column;
     using report::Row;
@@ -603,6 +723,22 @@ std::string Page::text(const bool color) const {
         }
     }
 
+    const std::vector<CheckPart> checks = check();
+    if (!checks.empty()) {
+        Status worst = Status::OK;
+        for (const CheckPart & part : checks) worst = report::worse(worst, part.status);
+        text.section("Check at setup", worst);
+        for (size_t i = 0; i < checks.size(); i++) {
+            if (i) text.blank();
+            text.note(checks[i].title + ": " + checks[i].note);
+            if (checks[i].quantities) {
+                text.quantities(checks[i].rows);
+            } else {
+                text.table(checks[i].header, checks[i].rows);
+            }
+        }
+    }
+
     text.section("Cost");
     std::vector<Row> cost;
     auto quantity = [&](const std::string & name, const std::string & value, const std::string & unit,
@@ -687,7 +823,7 @@ std::string Page::html() const {
          escape(input_file.empty() ? std::string("Mallard run") : input_file) +
          (run_id.empty() ? std::string() : " &middot; run " + escape(run_id)) + "</p></header>\n";
     h += "<nav><a href=\"#outcome\">Outcome</a><a href=\"#run\">Run</a><a href=\"#configuration\">Configuration</a>"
-         "<a href=\"#health\">Health</a><a href=\"#monitors\">Monitors</a><a href=\"#cost\">Cost</a>"
+         "<a href=\"#check\">Check</a><a href=\"#health\">Health</a><a href=\"#monitors\">Monitors</a><a href=\"#cost\">Cost</a>"
          "<a href=\"#output\">Output</a>";
     if (events.n) h += "<a href=\"#events\">Events</a>";
     if (divergence.type == Type::OBJECT) h += "<a href=\"#divergence\">Divergence</a>";
@@ -802,6 +938,44 @@ std::string Page::html() const {
         h += "<p class=\"note\">The run block records no resolved input (runs before Mallard 0.9.1).</p>";
     }
     h += "</section>\n";
+
+    // Check at setup
+    if (const std::vector<CheckPart> checks = check(); !checks.empty()) {
+        report::Status worst = report::Status::OK;
+        for (const CheckPart & part : checks) worst = report::worse(worst, part.status);
+        h += "<section id=\"check\"><h2>Check at setup " +
+             status_span(report::status_name(worst), report::status_word(worst)) +
+             "</h2>\n<p class=\"note\">What the setup measured of the mesh and the case, in the terms of "
+             "<code>mallard check</code>, which also estimates the memory and cost of other partitions.</p>\n";
+        for (const CheckPart & part : checks) {
+            h += "<h3>" + escape(part.title) +
+                 (part.status == report::Status::NONE
+                      ? std::string()
+                      : " " + status_span(report::status_name(part.status), report::status_word(part.status))) +
+                 "</h3><p class=\"note\">" + escape(part.note) + "</p>";
+            std::vector<std::string> names = {"status"};
+            if (part.quantities) {
+                names.insert(names.end(), {"quantity", "value", "units", "target", "basis"});
+            } else {
+                for (const report::Column & column : part.header) names.push_back(column.name);
+            }
+            h += head(names);
+            for (const report::Row & row : part.rows) {
+                h += "<tr><td>" + status_span(report::status_name(row.status), report::status_word(row.status)) +
+                     "</td>";
+                for (const std::string & text : row.cells) {
+                    std::string shown_text = escape(text);
+                    for (size_t at = 0; (at = shown_text.find('\n', at)) != std::string::npos;) {
+                        shown_text.replace(at, 1, "<br>");
+                    }
+                    h += "<td>" + shown_text + "</td>";
+                }
+                h += "</tr>";
+            }
+            h += TABLE_END;
+        }
+        h += "</section>\n";
+    }
 
     // Health
     h += "<section id=\"health\"><h2>Health</h2>\n";
