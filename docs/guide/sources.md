@@ -12,7 +12,12 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
-*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:*
+[`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -28,7 +33,10 @@ gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 mass_flow = [1.0, 0.0, 0.0]
 ```
 
-*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:*
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 A periodic channel has no inlet to fix its flow rate. `mass_flow` adds the
 uniform body force that keeps the volume-averaged momentum at the given value,
@@ -42,7 +50,8 @@ rounding; the energy gains the force's work.
 gravity = [0.0, -9.81]
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe).
+*Used in:*
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe).
 
 Pitfall: the scheme is not exactly well balanced. A hydrostatic atmosphere
 carries spurious velocities of about 1e-4 of the sound speed on a 32 x 32
@@ -172,7 +181,9 @@ p = 1.0
 T = 1.0
 ```
 
-*Used in:* [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
+*Used in:*
+[`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
 
 `[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
 species), damping the solution toward a reference state where the strength is

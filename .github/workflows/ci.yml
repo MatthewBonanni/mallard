@@ -657,9 +657,14 @@ jobs:
                    printf '%s\n' \"\${COMPREPLY[@]}\"" | grep -qx cylinder
       - name: Run the tutorials
         run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
-      # docs/input-keys.json is what setup reads from the examples and tutorials
+      # docs/input-keys/ is what setup reads from the examples and tutorials
       - name: Check the key catalog
-        run: python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+        run: |
+          python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+          n=$(ls docs/input-keys | wc -l)
+          test $(ls ${{ runner.temp }}/mallard/share/mallard/docs/input-keys | wc -l) -eq $n
+          test $(${{ runner.temp }}/mallard/bin/mallard list keys --format json |
+                 python3 -c 'import json, sys; print(len(json.load(sys.stdin)["keys"]))') -eq $n
       # Every case template (mallard new --quick)
       - name: Run the case templates
         run: templates/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/templates
@@ -980,8 +985,8 @@ jobs:
 
   # Sets the commit status `CI` that main requires: success when every job passed or was
   # skipped for a reason (device builds without device code), failure otherwise. After a
-  # merge, a failure opens an issue labeled ci-main (or adds the run to the open one), and
-  # the next success closes it.
+  # merge, a failed job (not a run cancelled by a newer push) opens an issue labeled ci-main
+  # (or adds the run to the open one), and the next success closes it.
   result:
     name: CI result
     if: always()
@@ -1022,7 +1027,7 @@ jobs:
             failed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
               --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI result") | "- [\(.name)](\(.html_url))"')
             open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label ci-main --json number -q '.[0].number')
-            if [ "$state" != success ]; then
+            if [ -n "$failed" ]; then
               gh label create ci-main -R "$GITHUB_REPOSITORY" --color B60205 \
                 --description "main fails CI after a merge" 2> /dev/null || true
               body=$(printf 'CI fails on main at %s ([run](%s)):\n\n%s\n' "$GITHUB_SHA" "$run" "$failed")

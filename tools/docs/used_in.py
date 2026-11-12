@@ -5,10 +5,11 @@ examples whose input files use the feature, found by reading them.
     python tools/docs/used_in.py --check   exit 1 if a line is out of date
 
 Each section of RULES names a guide page and heading, and a test of a parsed input
-file. The line is the first one starting with "*Used in:*" in that section; it
+file. The line is the first paragraph starting with "*Used in:*" in that section; it
 lists up to five examples in the order of examples/README.md, linked to their cards
 on the website's Examples page, or the rule's fallback text when no example uses the
-feature.
+feature. Each example is on a line of its own, so that changes to different examples
+of a line touch different lines.
 """
 import re
 import sys
@@ -144,8 +145,8 @@ def line(test, fallback, cases):
     if not names:
         return f"*Used in:* {fallback or 'no example yet'}."
     links = [f"[`{n}`]({CARDS}#{n.replace('_', '-')})" for n in names[:MAX]]
-    more = f" and {len(names) - MAX} more" if len(names) > MAX else ""
-    return "*Used in:* " + ", ".join(links) + more + "."
+    more = f"\nand {len(names) - MAX} more" if len(names) > MAX else ""
+    return "*Used in:*\n" + ",\n".join(links) + more + "."
 
 
 def section_end(text, start, level):
@@ -168,7 +169,7 @@ def update(check):
         text = path.read_text()
         start = text.index(heading + "\n")
         end = section_end(text, start, len(heading.split(" ")[0]))
-        m = re.compile(r"^\*Used in:\*.*$", re.M).search(text, start, end)
+        m = re.compile(r"^\*Used in:\*.*(?:\n.+)*", re.M).search(text, start, end)
         if not m:
             sys.exit(f"{page}: no *Used in:* line under {heading!r}")
         new = line(test, fallback, cases)
