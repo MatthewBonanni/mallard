@@ -1,0 +1,32 @@
+{
+ "default": "\"perfect\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/autoignition_2d/input.toml",
+  "examples/detonation_1d/input.toml",
+  "examples/detonation_2d/input.toml",
+  "examples/detonation_3d/input.toml",
+  "examples/detonation_3d/input_2d.toml",
+  "examples/flame_2d/input.toml",
+  "examples/flame_2d/unity/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/flame_turbulence/input.toml",
+  "examples/flame_turbulence/les.toml",
+  "examples/flame_vortex/input.toml",
+  "examples/flame_vortex_quenching/input.toml",
+  "examples/premixed_flame/ch4/input.toml",
+  "examples/premixed_flame/input.toml",
+  "examples/reactive_shock_tube/input.toml",
+  "examples/shock_bubble_3d/input.toml",
+  "examples/triple_flame/input.toml",
+  "examples/triple_flame/thick/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "mixture",
+  "perfect"
+ ]
+}

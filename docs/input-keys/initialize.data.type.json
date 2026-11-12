@@ -1,0 +1,12 @@
+{
+ "default": "\"table\"",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "string",
+ "values": [
+  "points",
+  "table"
+ ]
+}
