@@ -32,9 +32,13 @@
 #include "mesh.h"
 #include "physics.h"
 #include "boundary.h"
+#include "case_view.h"
+#include "cell_fields.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
+#include "common_io.h"
 #include "probe_surface.h"
+#include "snapshot_block.h"
 #include "data.h"
 #include "statistics.h"
 #include "wall_exchange.h"
@@ -42,6 +46,11 @@
 namespace region {
 class Region;
 class Regions;
+class MovingFractions;
+class CrossedLevels;
+class SolutionLevels;
+class Extraction;
+struct Elements;
 }
 struct ProbeFluxes;
 
@@ -82,6 +91,19 @@ struct ProbeReference {
 namespace probe {
 
 /**
+ * @brief The reference state {rho, u = [...], p} of the table ref (at key, for
+ *        errors): of CF and CP of probes, and of the derived field CP.
+ */
+ProbeReference read_reference(const Input & ref, const std::string & key);
+
+/**
+ * @brief Whether [[probes]] fields take a field of a case with these species
+ *        (a cell field statistics samples, or a boundary field); the averages of
+ *        [statistics] are the other fields it takes.
+ */
+bool samples(const std::string & name, const std::vector<std::string> & species_names);
+
+/**
  * @brief What a region key of [[write_data]] gives: the whole mesh
  *        (`"domain"`), a filled region, boundary zones, another region of
  *        lower dimension (sampled at its elements), or a probe type as a
@@ -118,6 +140,35 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
  *        A probe with `spectra` keeps a history of its samples (or reductions)
  *        on rank 0 and writes their time spectra (ProbeSpectra).
  */
+/**
+ * @brief The clock of a probe written by time: due at its n-th write once t is at least due_time, after which it
+ *        has written written_after outputs. One function for the host and the step graph, each product and sum
+ *        rounded on its own, so that their decisions are the same bit for bit.
+ */
+namespace probe_clock {
+
+/** @brief n time_interval - tol, tol the round-off allowance of the interval. */
+KOKKOS_INLINE_FUNCTION rtype due_time(const uint64_t n, const rtype time_interval, const rtype tol) {
+    volatile rtype at = static_cast<rtype>(n) * time_interval;
+    return at - tol;
+}
+
+KOKKOS_INLINE_FUNCTION rtype next_time(const uint64_t n, const rtype time_interval) {
+    return static_cast<rtype>(n) * time_interval;
+}
+
+/** @brief The outputs written once the one due at time t is: every n with n time_interval <= t + tol. */
+KOKKOS_INLINE_FUNCTION uint64_t written_after(uint64_t n, const rtype time_interval, const rtype tol, const rtype t) {
+    volatile rtype end = t + tol;
+    for (;;) {
+        volatile rtype at = static_cast<rtype>(n) * time_interval;
+        if (!(at <= end)) return n;
+        n++;
+    }
+}
+
+} // namespace probe_clock
+
 class Probes {
     public:
         /**
@@ -157,6 +208,26 @@ class Probes {
         std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
         /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
         void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
+        /**
+         * @brief Time averages of an averaging probe of a moving region or of a surface or curve of the
+         *        solution, per cell of the mesh in global order (rank 0): of the weight w of the cell's
+         *        samples (f V, or the sum of its quadrature weights), of w q for each evaluated variable q,
+         *        and of w times each product of average_products.
+         */
+        struct CellAverages {
+            std::string measure;  // the region's measure: length, area or volume
+            Dimension measure_dimension;
+            size_t n_columns = 0;           // of values: the variables, in the order of fields
+            std::vector<double> weights;    // (cell)
+            std::vector<double> values;     // (cell, variable)
+            std::vector<double> products;   // (cell, product)
+        };
+        /**
+         * @brief Also averages w times each product of the probe's variables (fields), per cell, from its first
+         *        sample on (before which it is called). Restart files do not carry them.
+         */
+        void average_products(const std::string & name, const std::vector<std::vector<std::string>> & products);
+        CellAverages cell_averages(const std::string & name) const;
         /** @brief Start the time averages afresh at time t (the first sample weighted from max(t, t_start)). */
         void start_averages(rtype t);
         /** @brief Continue the time averages of a restart file, or start them afresh if it holds none (or with reset). */
@@ -199,10 +270,37 @@ class Probes {
                                bool force = false) const;
         bool transport_due(uint64_t step, rtype t) const;
         bool any_gradients() const;
-        /** @brief Earliest output time of the time-based probes (infinity if none). */
-        rtype next_time() const;
+        /** @brief Earliest output time of the time-based probes (infinity if none); with unstaged, of those the step
+         *         graph does not evaluate. */
+        rtype next_time(bool unstaged = false) const;
         /** @brief Writes the probes, or the snapshots, due; with force, every snapshot not yet written at this step. */
         void write(uint64_t step, rtype t, const ProbeFields & fields, bool snapshots = false, bool force = false);
+
+        size_t size() const { return probes.size(); }
+        /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
+         *         fields only. */
+        bool can_stage(size_t k) const;
+        /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
+        void stage(size_t k, uint64_t n_records);
+        /** @brief When a staged probe is due, as the host decides it (time_interval 0: by step). */
+        struct StagedClock {
+            uint64_t interval = 0;
+            rtype time_interval = 0.0;
+            rtype tol = 0.0;        // the round-off allowance of time_interval
+            uint64_t n_written = 0;
+            uint32_t average = 0;   // samples for its time averages every average_interval steps after average_start
+        };
+        StagedClock staged_clock(size_t k) const;
+        uint64_t get_average_interval() const { return average_interval; }
+        rtype get_average_start() const { return average_start; }
+        /** @brief Adds staged averaging probe k's samples at (step, t) from record slot `slot` (collective). */
+        void sample_staged_average(size_t k, uint64_t step, rtype t, uint64_t slot);
+        /** @brief As average_needs, of the staged probes. */
+        std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
+        /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory. */
+        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
+        /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
+        void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
         /** @brief Changes the step interval of the probe of that name; an error message, or empty. */
         std::string set_interval(const std::string & name, uint64_t steps, bool snapshot = false);
@@ -213,6 +311,15 @@ class Probes {
         std::vector<std::string> value_names() const;
         /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
         std::vector<double> values() const;
+        /** @brief Step of each monitored value's latest write (NO_VALUE before it), as value_names(); on every rank. */
+        std::vector<uint64_t> value_steps() const;
+        /** @brief Index of the probe each monitored value comes from, as value_names(). */
+        std::vector<size_t> value_probes() const;
+        /** @brief Whether a probe wrote monitored values at this step. */
+        bool wrote_values(uint64_t step) const;
+        /** @brief Dimension of each monitored value, as value_names(). */
+        std::vector<Dimension> value_dimensions() const;
+        static constexpr uint64_t NO_VALUE = UINT64_MAX;
 
         /** @brief Monitored values the run record keeps per progress row, at most, over every probe. */
         static constexpr size_t RECORDED = 64;
@@ -221,7 +328,13 @@ class Probes {
         /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
         std::vector<MonitorValues> recorded() const;
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them, one per probe. */
+        std::vector<OutputSummary> summary() const;
+        /**
+         * @brief The case view's blocks of the probes on geometries of their own (not regions, which the
+         *        view has already): their points, polylines or polygons, on rank 0 (empty elsewhere).
+         */
+        std::vector<case_view::Block> view_blocks() const;
         std::vector<std::string> files() const;
         /**
          * @brief Rank 0 adds the run block of a run starting at step to the files written so
@@ -237,6 +350,20 @@ class Probes {
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
 
+        /** @brief Where a located sample is read: its cell (global id) and the cell's centroid. */
+        struct Location {
+            uint64_t cell = 0;
+            probe::Point centroid{};
+        };
+
+        /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
+        void set_reconstruction(const FaceReconstruction * r);
+        /** @brief The cell fields that regions defined by the solution read (before init). */
+        void set_cell_fields(const region::CellFields & f) { cell_fields = f; }
+        /** @brief Wall seconds spent placing regions defined by the solution, so far, and whether any probe has one. */
+        double region_seconds() const { return m_region_seconds; }
+        bool any_solution() const;
+
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
             uint64_t n_global = 0;
@@ -251,6 +378,7 @@ class Probes {
             Kokkos::View<rtype *[N_DIM]> normals;
             Kokkos::View<uint32_t *> faces;
             Kokkos::View<rtype *> distance;
+            bool located = false;                   // by locate: points of the geometry
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
@@ -258,6 +386,8 @@ class Probes {
             Kokkos::View<uint32_t *> unique_cells;  // cells of the inside samples, once each
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
+            // Staged probes: values of each record slot, (slot, local sample * variables)
+            Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
 
             /** @brief Locate points (the same on every rank) in the owned cells. */
             void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
@@ -272,8 +402,17 @@ class Probes {
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                           const ProbeReference & reference, bool gradients, bool diffusive = false);
-            /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
-            void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
+            /**
+             * @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. From
+             *        values, or a record slot's staged values.
+             */
+            void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
+            void allocate_staging(uint64_t n_records);
+            /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
+            void copy_to_staging(const uint64_t * seq) const;
+            const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
+            /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
+            std::vector<Location> locations(const Mesh & mesh) const;
 
             private:
                 // Reused across writes: fresh pages for every write cost page faults
@@ -283,6 +422,13 @@ class Probes {
         };
 
     private:
+        /**
+         * @brief Drop the samples of g outside the mesh, with a warning, and
+         *        return what was dropped as JSON ("" if none); throws if g is
+         *        point or points probes with any outside, or nothing is left.
+         */
+        static std::string clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const std::string & key, size_t line);
+
         struct Probe {
             std::string name;
             std::string file;
@@ -296,6 +442,13 @@ class Probes {
             bool write_samples = true;
             std::vector<Reduction> reductions;
             std::vector<std::string> variables;  // written
+            std::vector<std::string> value_kinds; // snapshot_block::value of each written variable
+            snapshot_block::Reconstruction reconstruction;  // of the point values
+            std::vector<Location> locations;     // rank 0: of each located sample (node), in sample order
+            std::string clipped;                 // JSON of the samples dropped outside the mesh, or empty
+            std::string measures;                // filled regions: JSON of their own measures and in the domain
+            /** @brief The probe sampling block: method, variables, and where each located sample is read. */
+            std::string sampling_json() const;
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
@@ -306,15 +459,21 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values
+            // gathered node and quadrature values; kept per cell (cell_means), for the cells covered so far
+            // (mean_cells, sorted): moving regions, the means of f V q and of f V; isosurfaces, the means of
+            // the sums of w q and of w over each cell's quadrature points
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
-            std::vector<double> mean_nodes, mean_quadrature;
+            std::vector<double> mean_nodes, mean_quadrature, mean_weights;
+            std::vector<uint64_t> mean_cells;
+            std::vector<std::vector<uint32_t>> products;  // average_products: columns of each
+            std::vector<double> mean_products;            // (mean_cells, product)
             ProbeReference reference;
-            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
+            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V of the cells covered, by global cell
             bool from_region = false;
             bool resampled = false;  // a surface region on an n_points grid
             bool snapshot = false;   // of a [[write_data]] entry
+            bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
@@ -331,26 +490,93 @@ class Probes {
             std::string last_file;                               // vtp, vtkhdf: the file written last
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
+            uint64_t step_last_value = NO_VALUE;           // of the latest values, on every rank
             std::vector<std::pair<std::string, Dimension>> monitored;  // what last holds, with its dimensions
             uint64_t last_step = 0;
             double last_t = 0.0;
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
+            std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
+            /**
+             * @brief A moving filled region: its fractions, the measures of the owned cells, and at each move the
+             *        owned cells it covers (f V > 0, the first of covered) with their f V.
+             */
+            struct Motion {
+                const Mesh * mesh = nullptr;
+                std::shared_ptr<region::MovingFractions> fractions;
+                Kokkos::View<double *> volumes;
+                Kokkos::View<uint32_t *> covered;
+                Kokkos::View<double *> weights;
+                uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
+                std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
+                bool distributed = false;
+            };
+            std::shared_ptr<Motion> motion;
+            bool solution = false;  // its region follows the solution (ProbeFields::W must be current)
+            /** @brief An isosurface (or another surface or curve of the solution): extracted at each write. */
+            struct Isosurface {
+                const Mesh * mesh = nullptr;
+                std::shared_ptr<region::Region> region;
+                std::shared_ptr<region::CrossedLevels> levels;
+                std::shared_ptr<region::Extraction> extraction;  // of region on mesh
+                uint32_t n_evaluated = 0;
+                bool per_cell = false;
+                uint64_t n_cells = 0;              // of the mesh, which its averages are kept per
+                std::vector<uint64_t> quad_cells;  // rank 0: the global cell of each gathered quadrature point
+            };
+            std::shared_ptr<Isosurface> isosurface;
+            /**
+             * @brief A moving region at time t: its samples, the owned cells it covers, and (rank 0) their
+             *        weights f V in global cell order (collective).
+             */
+            void move(double t);
+            /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
+            void extract(double t);
+            /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
+            bool cell_means() const { return average && (motion || isosurface); }
+            /** @brief The cells its time averages may cover (cell_means): those of the mesh. */
+            uint64_t n_mean_cells() const { return motion ? motion->n_cells : isosurface ? isosurface->n_cells : 0; }
+            /**
+             * @brief Rank 0 of time averages kept per cell: the weights and values of the cells, mean w q /
+             *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).
+             */
+            void mean_fields(std::vector<double> & quad);
+            /**
+             * @brief Rank 0 of time averages kept per cell: the cells its latest samples cover (sorted), with
+             *        their sums of w q and of w.
+             */
+            void cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells, std::vector<double> & sums,
+                           std::vector<double> & weights) const;
+            /** @brief Rank 0 of time averages kept per cell: the sums of w times each of products over cell_sums' cells. */
+            std::vector<double> product_sums(const std::vector<double> & quad, const std::vector<uint64_t> & cells) const;
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
             rtype due_time() const;
+            rtype time_tol() const { return precision_tol<rtype>(1e-9, 1e-5) * time_interval; }
             bool due_or_forced(uint64_t step, rtype t, bool force) const {
                 return due(step, t) || (force && snapshot && step != step_last);
             }
             uint64_t n_evaluated() const { return codes.extent(0); }
             bool samples_nodes() const;
             bool samples_quadrature() const;
-            /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
-            void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
+            /**
+             * @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values.
+             *        With a record slot, the slot's staged values instead.
+             */
+            void sample(const ProbeFields * fields, std::vector<double> & nodes, std::vector<double> & quad,
+                        int64_t slot = -1);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
+            /** @brief The snapshot block entry of written variable v (no units). */
+            snapshot_block::Field field_of(size_t v) const {
+                snapshot_block::Field f;
+                f.name = variables[v];
+                f.value = value_kinds[v];
+                return f;
+            }
             /** @brief The snapshot block of the samples at (step, t), written now for reason. */
-            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
+            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason,
+                                              uint64_t sampled_every) const;
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
@@ -362,26 +588,47 @@ class Probes {
             void write_reductions(uint64_t step, rtype t) const;
             void write_spectra(uint64_t step, rtype t);
         };
+        /** @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all). */
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data);
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
+        static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
+                                             const std::string & summary, uint32_t n_variables);
         /**
          * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                                   const std::vector<double> & cell_weights, uint32_t n_variables);
+        /**
+         * @brief A filled region probe's measures: its own and of its part in
+         *        the domain, with a warning and p.clipped where part of it is
+         *        outside. Collective. quadrature_volume: the part in the domain from a quadrature (rank 0), not f V.
+         */
+        static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
+                                    const std::vector<double> & f, const std::string & key,
+                                    const double * quadrature_volume = nullptr);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);
+        static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
+                                    const std::string & summary, uint32_t n_variables, bool per_cell);
+
+        /** @brief Adds probe p's samples to its time averages (collective): sampled with fields, or from a slot. */
+        void sample_average(Probe & p, rtype t, const ProbeFields * fields, int64_t slot);
+        /** @brief Writes probe p if due (or forced): sampled with fields, or from a record slot's staged values. */
+        void write_probe(Probe & p, uint64_t step, rtype t, const ProbeFields * fields, bool force, int64_t slot);
 
         std::vector<std::unique_ptr<Probe>> probes;
+        snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
         std::vector<std::string> statistics_variables;
         uint64_t average_interval = 1;
         rtype average_start = 0.0;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together
+        region::CellFields cell_fields;
+        double m_region_seconds = 0.0;
 };
 
 #endif // PROBES_H

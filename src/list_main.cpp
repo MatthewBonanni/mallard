@@ -21,11 +21,15 @@
 #include "cli.h"
 #include "comm.h"
 #include "commands.h"
+#include "derived_catalog.h"
+#include "diagnostic_code.h"
 #include "field_units.h"
 #include "input.h"
 #include "json.h"
 #include "log.h"
+#include "mesh_quality.h"
 #include "solver/solver.h"
+#include "stencils.h"
 
 namespace {
 
@@ -77,7 +81,7 @@ CaseFields set_up_keys(const std::string & input_file, const cli::Args & args) {
 }
 
 int report_errors(const CaseFields & c) {
-    for (const auto & e : c.errors) std::cerr << "mallard list: " << e << "\n";
+    for (const auto & e : c.errors) logging::error(diagnostic_code::LIST, "mallard list: " + e);
     return 1;
 }
 
@@ -101,6 +105,49 @@ std::vector<CatalogField> missing(const std::vector<std::string> & fields) {
     return out;
 }
 
+/**
+ * @brief Where a field (or a pattern, <s> for a species) can be had: written by [[write_data]], sampled by
+ *        [[probes]] or averaged by [statistics], as each of them decides, and derived by mallard post derive.
+ */
+std::vector<std::string> available(const std::string & pattern, const std::string & group,
+                                   std::vector<std::string> species) {
+    std::string name = pattern;
+    if (const size_t at = name.find("<s>"); at != std::string::npos) {
+        if (species.empty()) species = {"S"};
+        name.replace(at, 3, species[0]);
+    }
+    const auto either = [&](auto && takes) { return takes(name) || takes(name + "_X"); };
+    std::vector<std::string> out;
+    const auto in = [&](const auto & names) { return std::find(names.begin(), names.end(), name) != names.end(); };
+    const bool mesh_field = group == "mesh quality" || group == "stencils";
+    if (group != "surface probes" && name != "DIVERGED" &&
+        (!mesh_field || in(MeshQuality::FIELDS) || in(stencils::FIELDS))) {
+        out.emplace_back("write_data");
+    }
+    if (group == "statistics" ? name.rfind("SOURCE_", 0) != 0
+                              : either([&](const std::string & n) { return probe::samples(n, species); })) {
+        out.emplace_back("probes");
+    }
+    if (either([&](const std::string & n) {
+            try {
+                CellSampler::code(n, species, "");
+                return true;
+            } catch (const InputError &) {
+                return false;
+            }
+        })) {
+        out.emplace_back("statistics");
+    }
+    if (derived::find(name.c_str()) != derived::N_FIELDS) out.emplace_back("post derive");
+    return out;
+}
+
+std::string joined(const std::vector<std::string> & words) {
+    std::string out;
+    for (const std::string & w : words) out += (out.empty() ? "" : ", ") + w;
+    return out.empty() ? "-" : out;
+}
+
 std::string units_text(const std::string & units) { return units == "1" ? "dimensionless" : units; }
 
 bool json_format(const cli::Args & args) { return args.value_or("--format", "text") == "json"; }
@@ -112,14 +159,28 @@ int format_error(const cli::Args & args, const char * command) {
     return cli::usage_error(*cli::command(command), "--format takes text or json, not " + f);
 }
 
-std::string count_text(size_t n) { return std::to_string(n) + (n == 1 ? " field" : " fields"); }
+std::string count_text(size_t n) { return logging::count(n, "field"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
-                       const std::string & group, const std::string & needs) {
+                       const std::string & group, const std::string & needs, bool post_derive,
+                       const std::vector<std::string> & species) {
     json::Object o;
     o.add("name", name).add("units", units).add("long_name", long_name).add("group", group);
     if (!needs.empty()) o.add("needs", needs);
+    if (post_derive) o.add("post_derive", true);
+    std::string where = "[";
+    for (const std::string & w : available(name, group, species)) where += (where.size() > 1 ? "," : "") + json::quote(w);
+    o.raw("available", where + "]");
     return o.str();
+}
+
+/** @brief The line naming the fields of names that mallard post derive writes, or "" if none. */
+std::string post_derive_text(const std::vector<std::string> & names) {
+    std::string list;
+    for (const std::string & name : names) {
+        if (field_units::post_derive(name)) list += (list.empty() ? "" : ", ") + name;
+    }
+    return list.empty() ? "" : "mallard post derive writes, from snapshots and restart files: " + list + ".\n";
 }
 
 template <typename T, typename F>
@@ -135,7 +196,7 @@ int list_catalog(const cli::Args & args) {
         std::cout << json::Object()
                          .raw("input", "null")
                          .raw("fields", json_array(catalog, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs);
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive, {});
                               }))
                          .str()
                   << "\n";
@@ -144,14 +205,17 @@ int list_catalog(const cli::Args & args) {
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < catalog.size(); i++) {
         const CatalogField & f = catalog[i];
-        rows.push_back({f.name, units_text(f.units), f.long_name, f.needs.empty() ? "every case" : f.needs});
+        rows.push_back({f.name, units_text(f.units), f.long_name, f.needs.empty() ? "every case" : f.needs,
+                        joined(available(f.name, f.group, {}))});
         if (i + 1 == catalog.size() || catalog[i + 1].group != f.group) {
             logging::section("Fields: " + f.group, count_text(rows.size()));
-            logging::table({"field", "units", "description", "needs"}, rows);
+            logging::table({"field", "units", "description", "needs", "available in"}, rows);
             rows.clear();
         }
     }
-    std::cout << "\nmallard list fields input.toml lists the fields of one case.\n";
+    std::vector<std::string> names;
+    for (const CatalogField & f : catalog) names.push_back(f.name);
+    std::cout << "\n" << post_derive_text(names) << "mallard list fields input.toml lists the fields of one case.\n";
     return 0;
 }
 
@@ -171,12 +235,14 @@ int list_fields_main(const cli::Args & args) {
         std::cout << json::Object()
                          .add("input", input_file)
                          .add("dim", N_DIM)
-                         .raw("fields", json_array(c.fields, [](const std::string & name) {
+                         .raw("fields", json_array(c.fields, [&](const std::string & name) {
                                   const FieldDescription d = field_units::describe(name);
-                                  return field_json(name, d.units(), d.long_name, field_units::group(name), "");
+                                  return field_json(name, d.units(), d.long_name, field_units::group(name), "",
+                                                    field_units::post_derive(name), c.species);
                               }))
-                         .raw("missing", json_array(absent, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs);
+                         .raw("missing", json_array(absent, [&](const CatalogField & f) {
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive,
+                                                    c.species);
                               }))
                          .str()
                   << "\n";
@@ -190,10 +256,10 @@ int list_fields_main(const cli::Args & args) {
     for (size_t i = 0; i < fields.size(); i++) {
         const FieldDescription d = field_units::describe(fields[i]);
         const std::string g = field_units::group(fields[i]);
-        rows.push_back({fields[i], units_text(d.units()), d.long_name});
+        rows.push_back({fields[i], units_text(d.units()), d.long_name, joined(available(fields[i], g, c.species))});
         if (i + 1 == fields.size() || field_units::group(fields[i + 1]) != g) {
             logging::section(input_file + ": " + g, count_text(rows.size()));
-            logging::table({"field", "units", "description"}, rows);
+            logging::table({"field", "units", "description", "available in"}, rows);
             rows.clear();
         }
     }
@@ -202,7 +268,8 @@ int list_fields_main(const cli::Args & args) {
         for (const CatalogField & f : absent) rows.push_back({f.name, units_text(f.units), f.needs});
         logging::table({"field", "units", "needs"}, rows);
     }
-    std::cout << "\nVectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
+    std::cout << "\n" << post_derive_text(fields)
+              << "Vectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
                  "(Y_*).\n";
     return 0;
 }
@@ -236,10 +303,7 @@ int list_species_main(const cli::Args & args) {
 
 int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
-namespace {
-
-/** @brief The key catalog of every example and tutorial, as tools/dev/input_catalog.py merges it. */
-json::Value general_catalog() {
+json::Value general_key_catalog() {
     for (const std::filesystem::path & dir : data_dirs()) {
         std::ifstream in(dir / "docs" / "input-keys.json");
         if (!in) continue;
@@ -250,6 +314,8 @@ json::Value general_catalog() {
     throw std::runtime_error("the key catalog docs/input-keys.json is in none of Mallard's data directories (set "
                              "MALLARD_DATA_DIR to the source tree, or to the install tree's share/mallard)");
 }
+
+namespace {
 
 std::string section_of(const std::string & key) { return key.substr(0, key.find('.')); }
 
@@ -331,9 +397,9 @@ int list_keys_main(const cli::Args & args) {
     json::Value catalog;
     if (input_file.empty()) {
         try {
-            catalog = general_catalog();
+            catalog = general_key_catalog();
         } catch (const std::exception & e) {
-            std::cerr << "mallard list keys: " << e.what() << "\n";
+            logging::error(diagnostic_code::LIST, std::string("mallard list keys: ") + e.what());
             return 1;
         }
     } else {
@@ -376,7 +442,7 @@ int list_keys_main(const cli::Args & args) {
         rows.push_back(row);
         if (i + 1 == keys.size() || section_of(keys[i + 1]) != section_of(keys[i])) {
             logging::section((per_case ? input_file + ": [" : "Keys: [") + section_of(keys[i]) + "]",
-                             std::to_string(rows.size()) + (rows.size() == 1 ? " key" : " keys"));
+                             logging::count(rows.size(), "key"));
             if (per_case) {
                 logging::table({"key", "set", "type", "units", "default", "values"}, rows);
             } else {

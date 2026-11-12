@@ -65,8 +65,13 @@ class Spectra {
         void set_start(rtype t) { t_start = t; }
         bool averaged() const { return average; }
 
-        /** @brief Take the sample of time t (collective); unaveraged spectra are written at once. */
-        void sample(uint64_t step, rtype t, const CellSampler & sampler);
+        /**
+         * @brief Take the sample of the device's time *t_device, t on the host (collective); unaveraged spectra are
+         *        written at once.
+         */
+        void sample(uint64_t step, rtype t, const rtype * t_device, const CellSampler & sampler);
+        /** @brief Add the averaged sample at the device's time *t (collective; device only, capturable). */
+        void sample_device(const rtype * t, const CellSampler & sampler);
 
         /** @brief Start afresh at time t. */
         void start(rtype t);
@@ -78,13 +83,20 @@ class Spectra {
         /** @brief Rank 0 writes the current averages to the output file. */
         void write(uint64_t step, rtype t, const std::string & reason) const;
 
-        std::string summary() const;
-        uint64_t samples() const { return n_samples; }
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
+        uint64_t samples() const {
+            pull();
+            return n_samples;
+        }
 
         /** @brief Number of positions (cells of the inhomogeneous directions, row-major in axis order). */
         uint32_t n_positions() const { return n_pos; }
         /** @brief Mean of field f at position pos. */
-        double mean(uint32_t pos, uint32_t f) const { return acc_mean[size_t(pos) * fields.size() + f]; }
+        double mean(uint32_t pos, uint32_t f) const {
+            pull();
+            return acc_mean[size_t(pos) * fields.size() + f];
+        }
         /** @brief One-sided spectrum E_ab(n), n = 0..N_h / 2, of pair p along homogeneous direction h (index into directions). */
         std::vector<double> spectrum(uint32_t pos, uint32_t p, uint32_t h) const;
         /** @brief Correlation <a'(x) b'(x + r e_h)> at r = m L_h / N_h, m = 0..N_h - 1. */
@@ -113,7 +125,9 @@ class Spectra {
         void sum_planes(const Layout & layout);
 
     private:
-        void accumulate(double w);
+        /** @brief The averages and their clock from the device into the host's copies. */
+        void pull() const;
+        void push();
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
         void write_file(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
         bool homogeneous(size_t axis) const;
@@ -153,11 +167,21 @@ class Spectra {
         Kokkos::View<double *> gathered;      // partial of every rank, in rank order
         std::vector<uint64_t> partial_counts;  // values of partial per rank
 
-        std::vector<double> acc_spec, acc_mean, acc_shell;
-        std::vector<double> smp_spec, smp_mean, smp_shell;
-        double weight = 0.0;
-        rtype t_last = 0.0;
-        uint64_t n_samples = 0;
+        /** @brief The averages' clock in device memory: weights from t_last, and the last sample's weight a. */
+        struct Clock {
+            double weight;
+            double a;
+            rtype t_last;
+            uint64_t n_samples;
+        };
+        Kokkos::View<Clock> clock;
+        Kokkos::View<double *> d_spec, d_mean, d_shell;  // the averages (or the last sample, unaveraged)
+        Kokkos::View<double *> s_spec, s_mean, s_shell;  // the sample
+        // Host copies (pull)
+        mutable std::vector<double> acc_spec, acc_mean, acc_shell;
+        mutable double weight = 0.0;
+        mutable rtype t_last = 0.0;
+        mutable uint64_t n_samples = 0;
 };
 
 #endif // SPECTRA_H

@@ -20,16 +20,19 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "cell_fields.h"
 #include "common.h"
 #include "exact_sums.h"
 #include "kexpr.h"
 #include "input.h"
 #include "log.h"
+#include "report.h"
 #include "mesh.h"
 #include "state.h"
 
 namespace region {
 class Regions;
+class MovingFractions;
 }
 
 namespace sources {
@@ -38,21 +41,14 @@ namespace sources {
 enum Variable : uint16_t {
     X = 0, Y = 1, Z = 2, TIME = 3, RHO = 4, U_X = 5, U_Y = 6, U_Z = 7, P = 8, TEMPERATURE = 9,
     MEAN_RHO = 10, MEAN_RHOU_X = 11, MEAN_RHOU_Y = 12, MEAN_RHOU_Z = 13, MEAN_RHOE = 14, MEAN_KE = 15,
-    N_FIXED = 16,  // then Y_<k>, then X_<k>
+    COPY = 16,
+    N_FIXED = 17,  // then Y_<k>, then X_<k>
 };
 
 /** @brief Domain averages: rho, rho u, rho E, rho |u|^2 / 2. */
 constexpr int N_MEANS = 6;
 
-/** @brief What the expressions read in each cell: W = [rho, u, p], and for mixtures the mass fractions. */
-struct CellFields {
-    Kokkos::View<rtype *[N_DIM]> coords;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
-    Kokkos::View<rtype **, Kokkos::LayoutRight> Y;  // (cell, k), mixtures
-    Kokkos::View<double *> inv_W;                   // kmol/kg, mixtures
-    double R = 0.0;                                 // single gas: gas constant
-    double R_universal = 0.0;                       // mixtures: J/(kmol K)
-};
+using CellFields = region::CellFields;
 
 /** @brief Values of the variables in one cell, read on demand. */
 struct CellVariables {
@@ -61,6 +57,7 @@ struct CellVariables {
     double t;
     const double * means;
     uint32_t n_species;
+    double copy = 0.0;
 
     KOKKOS_INLINE_FUNCTION double mixture_sum() const {
         double s = 0.0;
@@ -78,7 +75,8 @@ struct CellVariables {
             const double R = n_species > 0 ? f.R_universal * mixture_sum() : f.R;
             return double(f.W(c, N_DIM + 1)) / (double(f.W(c, 0)) * R);
         }
-        if (i < N_FIXED) return means[i - MEAN_RHO];
+        if (i < COPY) return means[i - MEAN_RHO];
+        if (i == COPY) return copy;
         const uint32_t k = i - N_FIXED;
         if (k < n_species) return double(f.Y(c, k));
         const uint32_t j = k - n_species;
@@ -92,6 +90,8 @@ struct Term {
     uint32_t column = 0;       // < N_CONSERVATIVE: flow; else species column - N_CONSERVATIVE
     int32_t weights = -1;      // row of the cell fractions, -1 for none
     double scale = 1.0;        // 1 / (integral of the fraction) for totals, else 1
+    int32_t integral = -1;     // totals over moving regions: their integral's index, which replaces scale
+    double copy = 0.0;         // the index of the region's copy
 };
 
 /**
@@ -106,7 +106,7 @@ class SourceTerms {
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
          * @param regions The regions of the run, on mesh.
-         * @param use_nccl Whether domain averages sum over the ranks with NCCL (comm::allreduce_device).
+         * @param use_nccl Whether domain averages and moving regions' totals sum over the ranks with NCCL.
          */
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
                     const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions,
@@ -119,7 +119,7 @@ class SourceTerms {
         bool time_dependent() const { return m_time; }
         /** @brief Whether some expression reads a domain average (a global sum per stage). */
         bool uses_means() const { return m_means; }
-        const logging::Items & summary() const { return m_summary; }
+        const report::Summary & summary() const { return m_summary; }
 
         /**
          * @brief Add the sources to rhs: the flow block integrated over the
@@ -142,9 +142,26 @@ class SourceTerms {
          */
         void check_loops() const;
 
+        SourceTerms(const SourceTerms &) = delete;
+        SourceTerms & operator=(const SourceTerms &) = delete;
+        ~SourceTerms();
+
+        // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief The weights of moving regions at the time on the device, and their integrals. */
+        void move(const Kokkos::View<rtype> & time);
+
     private:
         /** @brief The tables of the input that hold source terms, and where each is ("source", "sources[0]"). */
         static std::vector<std::pair<const Input *, std::string>> tables_of(const Input & input);
+        struct Moving {
+            std::unique_ptr<region::MovingFractions> fractions;
+            uint32_t row = 0;
+            int32_t integral = -1;
+        };
+        std::vector<Moving> moving;
+        ExactSums integral_sums;
+        Kokkos::View<double **, Kokkos::LayoutLeft> integrands;  // (cell, integral): fraction times measure
+
         std::shared_ptr<Mesh> mesh;
         CellFields fields;
         uint32_t n_species = 0;
@@ -156,8 +173,8 @@ class SourceTerms {
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)
         Kokkos::View<double *> means;
         Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
-        ExactSums<N_MEANS + 1> mean_sums;
-        logging::Items m_summary;
+        ExactSums mean_sums;
+        report::Summary m_summary;
 
 };
 

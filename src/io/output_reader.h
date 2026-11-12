@@ -106,6 +106,8 @@ struct Contents {
      *        the file has none. Blocks of version 2 and before were named "provenance".
      */
     std::string run;
+    /** @brief Probe files: the probe sampling block (JSON) of the last run, how and where it samples; else empty. */
+    std::string sampling;
     RestartHeader restart;        ///< restart files: the header
     std::vector<std::string> notes;  ///< what a reader of the file should know (no units, newer provenance, ...)
 
@@ -148,6 +150,31 @@ Contents mesh_contents(const std::string & path, const MeshBlock & block);
  * @throws std::runtime_error if the file has no such field or snapshot
  */
 std::vector<double> read(const Contents & file, const std::string & field, size_t snapshot);
+
+/**
+ * @brief Values of a field at every snapshot, one snapshot after the other:
+ *        read() of each, but a table's column and a probe file's samples in
+ *        one read.
+ */
+std::vector<double> read_all(const Contents & file, const std::string & field);
+
+/** @brief The points and cells values of a file are on, in the file's order. */
+struct Geometry {
+    std::vector<double> points;           ///< x, y, z of each point (z zero in 2D)
+    std::vector<uint64_t> offsets{0};     ///< cell i's points are connectivity[offsets[i], offsets[i + 1])
+    std::vector<uint64_t> connectivity;
+    std::vector<uint8_t> types;           ///< VTK cell types; no cells for the sample points of probe HDF5 files
+};
+
+/**
+ * @brief The geometry of a file at a snapshot: the cells of snapshots and
+ *        mesh files, the points and cells of probe files.
+ * @throws std::runtime_error for restart files and tables, which hold none
+ */
+Geometry read_geometry(const Contents & file, size_t snapshot);
+
+/** @brief What open() found, as the JSON object mallard info --format json prints. */
+std::string to_json(const Contents & file);
 
 /** @brief Sets each field's min and max at a snapshot (reads every value). */
 void read_ranges(Contents & file, size_t snapshot);

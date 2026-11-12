@@ -16,7 +16,9 @@
 #include "region.h"
 #include "region_mesh.h"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -91,6 +93,7 @@ struct Piece {
     std::function<Vec3(double)> x, dx;
     std::vector<double> s;
     bool closed = false;
+    bool straight = false;
 };
 
 std::vector<double> linspace(double a, double b, uint64_t n) {
@@ -113,7 +116,20 @@ Vec3 curve_normal(const Vec3 & t, bool backward) {
  *        points per element (exact for polynomials of degree 5 along straight
  *        elements).
  */
-void add_curve(Geometry & g, const std::vector<Piece> & pieces, const Transform & T) {
+void add_curve(Geometry & g, const std::vector<Piece> & pieces, const Transform & T, const bool native) {
+    if (native) {
+        // Each piece over its whole parameter range, as s in [0, 1] along the curve
+        Curve curve;
+        for (const Piece & piece : pieces) {
+            const double a = piece.s.front(), b = piece.s.back();
+            curve.pieces.push_back({[x = piece.x, T, a, b](double s) { return T.point(x(a + s * (b - a))); },
+                                    [dx = piece.dx, T, a, b](double s) { return mul(b - a, T.vector(dx(a + s * (b - a)))); },
+                                    piece.straight});
+        }
+        curve.closed = pieces.size() == 1 && pieces[0].closed;
+        g.curves.push_back(std::move(curve));
+        return;
+    }
     static const double XI[3] = {-std::sqrt(0.6), 0.0, std::sqrt(0.6)};
     static const double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
     std::vector<uint32_t> line;
@@ -152,7 +168,8 @@ void add_curve(Geometry & g, const std::vector<Piece> & pieces, const Transform 
 
 Piece segment(const Vec3 & a, const Vec3 & b, uint64_t n) {
     const Vec3 d = sub(b, a);
-    return Piece{[a, d](double s) { return add(a, mul(s, d)); }, [d](double) { return d; }, linspace(0.0, 1.0, n)};
+    return Piece{[a, d](double s) { return add(a, mul(s, d)); }, [d](double) { return d; }, linspace(0.0, 1.0, n), false,
+                 true};
 }
 
 /**
@@ -273,6 +290,65 @@ Geometry grid_geometry(const region::Grid & grid) {
     Geometry g;
     add_grid_nodes(g, grid);
     return g;
+}
+
+Geometry clip(const Geometry & g, const std::vector<uint8_t> & keep, const std::vector<uint8_t> & keep_quad) {
+    constexpr uint32_t DROPPED = std::numeric_limits<uint32_t>::max();
+    Geometry c;
+    c.dim = g.dim;
+    c.type = g.type;
+    c.revolved = g.revolved;
+    std::vector<uint32_t> index(g.nodes.size(), DROPPED);
+    for (size_t i = 0; i < g.nodes.size(); i++) {
+        if (!keep[i]) continue;
+        index[i] = static_cast<uint32_t>(c.nodes.size());
+        c.nodes.push_back(g.nodes[i]);
+        if (!g.arc_length.empty()) c.arc_length.push_back(g.arc_length[i]);
+        if (!g.normals.empty()) c.normals.push_back(g.normals[i]);
+        if (!g.node_weights.empty()) c.node_weights.push_back(g.node_weights[i]);
+    }
+    for (const auto & line : g.polylines) {
+        const bool closed = line.size() > 2 && line.front() == line.back();
+        std::vector<uint32_t> order = line;
+        const auto dropped = std::find_if(line.begin(), line.end(), [&](uint32_t k) { return index[k] == DROPPED; });
+        if (closed && dropped != line.end()) {
+            order.assign(dropped, line.end() - 1);
+            order.insert(order.end(), line.begin(), dropped + 1);
+        }
+        std::vector<uint32_t> run;
+        for (size_t k = 0; k <= order.size(); k++) {
+            if (k < order.size() && index[order[k]] != DROPPED) {
+                run.push_back(index[order[k]]);
+                continue;
+            }
+            if (run.size() >= 2) c.polylines.push_back(run);
+            run.clear();
+        }
+    }
+    for (size_t i = 0; i < g.quad_points.size(); i++) {
+        if (!keep_quad[i]) continue;
+        c.quad_points.push_back(g.quad_points[i]);
+        c.quad_weights.push_back(g.quad_weights[i]);
+        if (!g.quad_normals.empty()) c.quad_normals.push_back(g.quad_normals[i]);
+    }
+    if (!g.polygon_offsets.empty()) {
+        c.vertices = g.vertices;
+        c.polygon_offsets.push_back(0);
+        for (size_t k = 0; k + 1 < g.polygon_offsets.size(); k++) {
+            const auto first = g.polygon_vertices.begin() + static_cast<std::ptrdiff_t>(g.polygon_offsets[k]);
+            const auto last = g.polygon_vertices.begin() + static_cast<std::ptrdiff_t>(g.polygon_offsets[k + 1]);
+            // With vertices, polygon k is sample k; without, its vertices are nodes
+            if (!g.vertices.empty()) {
+                if (!keep[k]) continue;
+                c.polygon_vertices.insert(c.polygon_vertices.end(), first, last);
+            } else {
+                if (std::any_of(first, last, [&](uint32_t v) { return index[v] == DROPPED; })) continue;
+                for (auto v = first; v != last; ++v) c.polygon_vertices.push_back(index[*v]);
+            }
+            c.polygon_offsets.push_back(c.polygon_vertices.size());
+        }
+    }
+    return c;
 }
 
 Vec3 Transform::point(const Vec3 & x) const { return add(vector(x), t); }
@@ -401,6 +477,24 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
     const Transform T = Transform::read(entry, key);
     Geometry g;
     g.type = type;
+    // Curves: n_points samples, or one per cell they cross (only the ends of each piece's parameters here)
+    bool native = false;
+    auto count = [&](const uint64_t min) -> uint64_t {
+        if (entry.contains("n_points") && entry.at("n_points").is_string()) {
+            const std::string n = find_value<std::string>(entry, "n_points");
+            if (n != "cells") {
+                throw InputError(Diagnostic{.key = key + ".n_points",
+                                            .line = line_of(entry, "n_points"),
+                                            .message = "= \"" + n + "\" is not a number of points or \"cells\"",
+                                            .fix = "Give a number, e.g. n_points = 100, or n_points = \"cells\" for "
+                                                   "one sample per cell the curve crosses",
+                                            .docs = "docs/guide/probes.md#curves-on-their-cells"});
+            }
+            native = true;
+            return 2;
+        }
+        return read_count(entry, "n_points", key, min);
+    };
     auto add_points = [&](const std::vector<Vec3> & points) {
         g.dim = 0;
         for (const auto & x : points) {
@@ -431,9 +525,8 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         add_points(points);
     } else if (type == "line") {
         g.dim = 1;
-        add_curve(g, {segment(read_vector(entry, "start", key), read_vector(entry, "end", key),
-                              read_count(entry, "n_points", key, 2))},
-                  T);
+        const Piece piece = segment(read_vector(entry, "start", key), read_vector(entry, "end", key), count(2));
+        add_curve(g, {piece}, T, native);
     } else if (type == "polyline") {
         g.dim = 1;
         if (!entry.contains("vertices") || !entry.at("vertices").is_array() ||
@@ -445,10 +538,10 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         for (size_t i = 0; i < list.size(); i++) {
             v.push_back(as_vector(list[i], key + ".vertices[" + std::to_string(i) + "]"));
         }
-        const uint64_t n = read_count(entry, "n_points", key, 2);
+        const uint64_t n = count(2);
         std::vector<Piece> pieces;
         for (size_t i = 0; i + 1 < v.size(); i++) pieces.push_back(segment(v[i], v[i + 1], n));
-        add_curve(g, pieces, T);
+        add_curve(g, pieces, T, native);
     } else if (type == "circle" || type == "arc") {
         g.dim = 1;
         const Vec3 c = read_vector(entry, "center", key);
@@ -459,8 +552,8 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
                     [r, e1, e2](double a) { return add(mul(-r * std::sin(a), e1), mul(r * std::cos(a), e2)); },
                     {}};
         if (type == "circle") {
-            const uint64_t n = read_count(entry, "n_points", key, 3);
-            piece.s = linspace(0.0, 2.0 * std::numbers::pi, n + 1);
+            const uint64_t n = count(3);
+            piece.s = linspace(0.0, 2.0 * std::numbers::pi, native ? 2 : n + 1);
             piece.closed = true;
         } else {
             const Input & angles = entry.contains("angles") ? entry.at("angles") : Input();
@@ -470,9 +563,9 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
             const double a0 = as_double(angles.as_array()[0], key + ".angles", dim::angle_degrees) * DEG;
             const double a1 = as_double(angles.as_array()[1], key + ".angles", dim::angle_degrees) * DEG;
             if (a0 == a1) throw InputError(key + ".angles must differ.");
-            piece.s = linspace(a0, a1, read_count(entry, "n_points", key, 2));
+            piece.s = linspace(a0, a1, count(2));
         }
-        add_curve(g, {piece}, T);
+        add_curve(g, {piece}, T, native);
     } else if (type == "curve") {
         g.dim = 1;
         std::vector<std::shared_ptr<ParameterExpression>> f;
@@ -499,8 +592,8 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
                         for (size_t d = 0; d < f.size(); d++) x[d] = f[d]->derivative(s);
                         return x;
                     },
-                    linspace(s0, s1, read_count(entry, "n_points", key, 2))};
-        add_curve(g, {piece}, T);
+                    linspace(s0, s1, count(2))};
+        add_curve(g, {piece}, T, native);
     } else if (N_DIM == 3 && type == "surface") {
         add_grid_nodes(g, parametric_grid(entry, key, T));
     } else if (type == "sphere" || type == "cylinder" || type == "cone" || type == "rectangle" || type == "disk") {

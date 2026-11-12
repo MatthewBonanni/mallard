@@ -125,10 +125,10 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
-    logging::items(model.summary());
+    logging::items(model.summary().settings);
     logging::items({
-        {"Benchmark", std::to_string(n_cells) + " cells from " + std::to_string(n_samples) + " trajectory states (" +
-                          std::to_string(n_igniting) + " igniting cells)"},
+        {"Benchmark", logging::count(n_cells, "cell") + " from " + logging::count(n_samples, "trajectory state") + " (" +
+                          logging::count(n_igniting, "igniting cell") + ")"},
         {"Execution", (cells.lanes() == 1 ? std::string("one thread per cell")
                                            : std::to_string(cells.threads()) + " x " + std::to_string(cells.lanes()) +
                                                  " lanes per cell" +
