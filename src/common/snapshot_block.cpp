@@ -191,7 +191,10 @@ std::string cell_methods(const Field & field) {
 }
 
 bool is_averaged(const std::string & name) {
-    return name.starts_with("MEAN_") || name.starts_with("COV_") || name.starts_with("PHASE_");
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_"}) {
+        if (name.starts_with(prefix)) return true;
+    }
+    return false;
 }
 
 Block make(uint64_t step, double t, const std::string & reason, const std::string & format, int64_t format_version,
