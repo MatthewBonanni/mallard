@@ -4,12 +4,13 @@ tube with each reconstruction (through a line probe), MPI partitions, a
 mallard reactor ignition, a sector against the full annulus (rotational
 periodicity), the mesh-import fixtures as Mallard reads them
 (through mallard mesh convert, which needs h5py and an HDF5 and CGNS build), a
-remap from quadrilaterals to triangles, the mesh quality from mallard check, and the
-conditional statistics of an igniting mixing layer.
+remap from quadrilaterals to triangles, the mesh quality from mallard check, the
+conditional statistics of an igniting mixing layer, the halo layers of one rank, and a
+grid-convergence study through mallard post convergence.
 
     python tools/docs/runs.py --mallard build/src/mallard [--mpirun mpirun] [names...]
 
-Partitions need an MPI build.
+Partitions and halos need an MPI build.
 """
 import argparse
 import csv
@@ -661,6 +662,220 @@ def conditional(P, args):
     return fig
 
 
+# ------------------------------------------------------------------- halo
+
+HALO_RANKS = 3
+
+
+@functools.cache
+def halo_data(args):
+    """Owned cells of every rank and Mallard's halo depth, for MUSCL and TENO order 5."""
+    work = Path(tempfile.mkdtemp())
+    cases = []
+    for name, numerics in (("MUSCL", 'type = "MUSCL"'), ("TENO", 'type = "TENO"\norder = 5')):
+        bcs = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in ("left", "right", "top", "bottom"))
+        toml = f"""
+[run]
+n_steps = 1
+cfl = 0.5
+[mesh]
+type = "cartesian_tri"
+Nx = 36
+Ny = 18
+Lx = 2.0
+Ly = 1.0
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+{bcs}
+[numerics.face_reconstruction]
+{numerics}
+[[write_data]]
+prefix = "{name}"
+format = "vtu"
+interval = 1
+fields = ["RHO"]
+{PHYSICS}"""
+        (work / "in.toml").write_text(toml)
+        out = subprocess.run([args.mpirun, "-n", str(HALO_RANKS), "--oversubscribe", str(args.mallard), "-i", "in.toml",
+                              "--kokkos-num-threads=1"], cwd=work, check=True, capture_output=True, text=True).stdout
+        quantity = {}
+        for line in out.splitlines():
+            for key in ("halo layers", "halo cells", "halo layer-1 cells"):
+                if line.strip().startswith(key + " "):
+                    quantity[key] = int(line.split()[len(key.split())].replace(",", ""))
+        ranks = [polygons(work / f"{name}_000000_p{r:04d}.vtu")[0] for r in range(HALO_RANKS)]
+        cases.append((name, quantity, ranks))
+    return cases
+
+
+def halo_layers(ranks, rank, depth):
+    """Vertex-neighbor layers around a rank's owned cells, as design/mpi.md builds the halo."""
+    cells = [c for polys in ranks for c in polys]
+    owner = np.concatenate([np.full(len(polys), r) for r, polys in enumerate(ranks)])
+    by_node = {}
+    for c, poly in enumerate(cells):
+        for p in np.round(poly, 9):
+            by_node.setdefault(tuple(p), []).append(c)
+    neighbors = [set() for _ in cells]
+    for around in by_node.values():
+        for c in around:
+            neighbors[c].update(around)
+    layer = {c: 0 for c in np.flatnonzero(owner == rank)}
+    front = list(layer)
+    for k in range(1, depth + 1):
+        reached = []
+        for c in front:
+            for n in neighbors[c]:
+                if n not in layer:
+                    layer[n] = k
+                    reached.append(n)
+        front = reached
+    return cells, owner, layer
+
+
+def halo(P, args):
+    cases = halo_data(args)
+    fig, axes = plt.subplots(2, 1, figsize=(7.6, 8.0), gridspec_kw=dict(hspace=0.22))
+    for (name, quantity, ranks), ax in zip(cases, axes):
+        depth = quantity["halo layers"]
+        counts = [halo_layers(ranks, r, depth)[2] for r in range(HALO_RANKS)]
+        halo_cells = [sum(1 for v in c.values() if v > 0) for c in counts]
+        layer1 = [sum(1 for v in c.values() if v == 1) for c in counts]
+        assert max(halo_cells) == quantity["halo cells"] and max(layer1) == quantity["halo layer-1 cells"], \
+            (name, halo_cells, layer1, quantity)
+        cells, owner, layer = halo_layers(ranks, 1, depth)
+        ax.add_collection(PolyCollection(cells, facecolors="none", edgecolors=P["mesh"], linewidths=0.4,
+                                         rasterized=True))
+        ax.add_collection(PolyCollection([cells[c] for c, k in layer.items() if k == 0], facecolors=P["teal"],
+                                         alpha=0.55, edgecolors=P["bg"], linewidths=0.4, rasterized=True))
+        for k in range(1, depth + 1):
+            ax.add_collection(PolyCollection([cells[c] for c, v in layer.items() if v == k], facecolors=P["flame"],
+                                             alpha=0.75 * (1 - 0.8 * (k - 1) / max(depth - 1, 1)) + 0.1,
+                                             edgecolors=P["bg"], linewidths=0.4, rasterized=True))
+        bare(ax)
+        ax.set_xlim(0, 2)
+        ax.set_ylim(0, 1)
+        what = "1 layer" if depth == 1 else f"{depth} layers"
+        recon = 'type = "MUSCL"' if name == "MUSCL" else 'type = "TENO", order = 5'
+        ax.set_title(f"{recon}: halo of {what}, {quantity['halo cells']} cells", fontsize=12)
+    handles = [Polygon([[0, 0]], facecolor=P["teal"], alpha=0.55, label="owned by rank 1"),
+               Polygon([[0, 0]], facecolor=P["flame"], alpha=0.85, label="halo layer 1"),
+               Polygon([[0, 0]], facecolor=P["flame"], alpha=0.25, label="deeper halo layers")]
+    fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.06), ncol=3, fontsize=11.5)
+    return fig
+
+
+# --------------------------------------------------------- grid convergence
+
+CONVERGENCE_EXACT = "1 + 0.2 * sin(2 * pi * (x - t)) * sin(2 * pi * (y - 0.5 * t))"
+
+
+@functools.cache
+def convergence_data(args):
+    """The density wave of docs/guide/convergence.md on 16^2, 32^2 and 64^2 cells, through mallard post convergence."""
+    import json
+    work = Path(tempfile.mkdtemp())
+    for n in (16, 32, 64):
+        (work / f"n{n}").mkdir()
+        run(args.mallard, f"""
+[run]
+t_stop = 0.05
+cfl = 0.5
+[mesh]
+type = "cartesian"
+Nx = {n}
+Ny = {n}
+[[periodic]]
+zones = ["left", "right"]
+[[periodic]]
+zones = ["bottom", "top"]
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)"
+u = ["1.0", "0.5"]
+p = "1.0"
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+[integrals]
+interval = 1
+[[write_data]]
+prefix = "restart"
+format = "restart"
+time_interval = 0.05
+{PHYSICS}""", work / f"n{n}")
+    report = {}
+    for key, extra in (("quantity", ["--quantity", "density_squared"]), ("field", ["--field", "RHO", "--exact", CONVERGENCE_EXACT])):
+        out = subprocess.run([str(args.mallard), "post", "convergence", "n16", "n32", "n64", *extra, "--format", "json"],
+                             cwd=work, capture_output=True, text=True, check=True).stdout
+        report[key] = json.loads(out)
+    return report
+
+
+def grid_convergence(P, args):
+    report = convergence_data(args)
+    q = report["quantity"]["quantities"][0]
+    e = q["estimate"]
+    h = np.array([r["h"] for r in report["quantity"]["runs"]])
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(10.6, 4.3), gridspec_kw=dict(wspace=0.38))
+
+    p = e["order"]
+    x = (h / h.min()) ** p
+    phi, ext = np.array(q["values"]), e["extrapolated"]
+    band = e["gci"] * phi[-1]
+    inset = ax.inset_axes([0.4, 0.55, 0.58, 0.42])
+    for a, big in ((ax, True), (inset, False)):
+        a.axhline(1.01, color=P["muted"], lw=1.0, ls=(0, (4, 2)), zorder=0)
+        a.plot([0, x[0]], [ext, phi[0]], color=P["teal"], lw=1.0, ls=":")
+        a.errorbar([1.0], [phi[-1]], yerr=[[band], [band]], color=P["teal"], capsize=4, lw=1.2, zorder=2)
+        a.plot(x, phi, "o", color=P["teal"], ms=6, zorder=3)
+        a.plot([0], [ext], "o", mfc=P["bg"], mec=P["teal"], mew=1.5, ms=7, zorder=3, clip_on=False)
+        a.ticklabel_format(axis="y", useOffset=False)
+    for xi, yi, run_name in zip(x[:2], phi[:2], ("16²", "32²")):
+        figstyle.label(ax, xi + 0.6, yi, run_name, P, size=11, ha="left")
+    figstyle.label(ax, 2.2, 1.01, "exact, 1.01", P, color=P["muted"], size=11, ha="left", va="bottom")
+    ax.indicate_inset_zoom(inset, edgecolor=P["muted"])
+    ax.set_xlim(0, x.max() * 1.15)
+    ax.set_ylim(phi[0] - 3e-5, 1.01 + 2.6e-4)
+    ax.set_xlabel(rf"$(h/h_1)^p$, observed $p$ = {p:.2f}")
+    ax.set_ylabel(r"$\int\rho^2\,\mathrm{d}V$")
+    ax.set_title("density_squared: extrapolation and GCI", fontsize=13)
+    inset.set_xlim(-0.15, 1.9)
+    inset.set_ylim(phi[-1] - 1.5 * band, 1.01 + 1.2 * band)
+    inset.set_facecolor(P["bg"])
+    inset.tick_params(labelsize=9.5)
+    inset.set_xticks([0, 1])
+    inset.set_yticks([])
+    figstyle.label(inset, 1.15, phi[-1], f"64², GCI {100 * e['gci']:.5f}%", P, color=P["teal"], size=10.5, ha="left")
+    figstyle.label(inset, 0.12, ext - 0.25 * band, rf"$\phi_\mathrm{{ext}}$", P, color=P["teal"], size=11, ha="left",
+                   va="top")
+    for side in ("top", "right"):
+        inset.spines[side].set_visible(True)
+
+    norms = report["field"]["field"]["norms"]
+    cells = np.array([r["cells"] for r in report["field"]["runs"]])
+    colors = {"L1": P["teal"], "L2": P["blue"], "Linf": P["plum"]}
+    for n in norms:
+        bx.loglog(cells, n["errors"], "o-", color=colors[n["norm"]], ms=6)
+        shift = {"L1": 0.85, "L2": 1.18, "Linf": 1.0}[n["norm"]]
+        figstyle.label(bx, cells[-1] * 1.15, n["errors"][-1] * shift, n["norm"].replace("inf", r"$_\infty$").replace("L1", "L$_1$")
+                       .replace("L2", "L$_2$"), P, color=colors[n["norm"]], size=11.5, ha="left")
+    ref = cells.astype(float)
+    bx.loglog(ref, 0.6 * norms[0]["errors"][0] * (ref / ref[0]) ** -1.0, color=P["muted"], lw=1.0, ls=":")
+    figstyle.label(bx, ref[1], 0.6 * norms[0]["errors"][0] * (ref[1] / ref[0]) ** -1.0 * 0.55, "order 2", P,
+                   color=P["muted"], size=10.5, rotation=-28)
+    bx.set_xticks(cells, [f"{c:,}" for c in cells])
+    bx.minorticks_off()
+    bx.set_xlim(cells[0] / 1.4, cells[-1] * 2.0)
+    bx.set_xlabel("cells")
+    bx.set_ylabel("error of RHO")
+    bx.set_title("Error against the exact solution", fontsize=13)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -675,7 +890,8 @@ class Args(tuple):
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
            "ignition": ignition, "mesh_import": mesh_import, "mesh_transform": mesh_transform,
            "remap-supermesh": remap_supermesh, "remap-fields": remap_fields, "mesh_quality": mesh_quality,
-           "rotational_sector": rotational_sector, "conditional": conditional}
+           "rotational_sector": rotational_sector, "conditional": conditional, "halo": halo,
+           "grid_convergence": grid_convergence}
 
 
 def main():
