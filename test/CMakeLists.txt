@@ -29,6 +29,7 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
+    conditional_statistics_test.cpp
     probes_test.cpp
     region_snapshots_test.cpp
     probe_reference_test.cpp
@@ -50,6 +51,8 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     output_reader_test.cpp
     post_extract_test.cpp
+    post_derive_test.cpp
+    post_average_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp

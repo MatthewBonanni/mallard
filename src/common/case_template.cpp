@@ -504,10 +504,15 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     const fs::path source = m.root / t.source;
     const fs::path tools = m.root / "tools";
 
-    // {data} in a command is the directory of the templates (tutorial scripts run from there)
+    const fs::path front_end = executable_path().parent_path() / "mallard";
+    const fs::path mallard_path = fs::exists(front_end) ? front_end : executable_path();
+    // In a command, {data} is the directory of the templates (tutorial scripts run from there), {mallard} this mallard
     const auto expand = [&](const std::vector<std::string> & commands) {
         std::vector<std::string> out;
-        for (const auto & c : commands) out.push_back(replace_all(c, "{data}", "\"" + m.root.string() + "\""));
+        for (const auto & c : commands) {
+            out.push_back(replace_all(replace_all(c, "{data}", "\"" + m.root.string() + "\""), "{mallard}",
+                                      "\"" + mallard_path.string() + "\""));
+        }
         return out;
     };
     const auto mesh = expand(quick && !t.quick_mesh.empty() ? t.quick_mesh : t.mesh);
@@ -597,9 +602,7 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
                                                 init, init_packages), true);
         written.emplace_back("init.sh", "generates the initial state, " + t.init_creates);
     }
-    const fs::path front_end = executable_path().parent_path() / "mallard";
-    write_file(dir / "run.sh", run_script(t, fs::exists(front_end) ? front_end : executable_path(), !mesh.empty(),
-                                          !init.empty()), true);
+    write_file(dir / "run.sh", run_script(t, mallard_path, !mesh.empty(), !init.empty()), true);
     written.emplace_back("run.sh", "runs it: ./run.sh [-t threads] [-n MPI ranks]");
     if (!post.empty()) {
         const std::string last =

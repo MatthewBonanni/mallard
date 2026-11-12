@@ -116,6 +116,12 @@ Commands:
   Post
     mallard post extract      Probes, region integrals and snapshots of existing
                               output, as the run would have written them
+    mallard post derive       Derived fields of existing output (MACH, P0,
+                              Q_CRITERION, ...), as the run would have written
+                              them
+    mallard post average      Means, RMS, covariances, PDFs and conditional
+                              statistics over saved snapshots, as [statistics]
+                              keeps them
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -823,12 +829,18 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard post <command> [options]
 
-Commands on a run's output: probes, integrals and snapshots of it, and the grid
-convergence of several runs.
+Commands on a run's output: probes, integrals, snapshots, derived fields and
+averages of it, and the grid convergence of several runs.
 
 Commands:
   mallard post extract        Probes, region integrals and snapshots of existing
                               output, as the run would have written them
+  mallard post derive         Derived fields of existing output (MACH, P0,
+                              Q_CRITERION, ...), as the run would have written
+                              them
+  mallard post average        Means, RMS, covariances, PDFs and conditional
+                              statistics over saved snapshots, as [statistics]
+                              keeps them
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -930,6 +942,213 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-extract
+```
+
+### mallard post derive
+
+```text
+Usage: mallard post derive FILE... --fields LIST [-i input.toml] [--with-state] [-o DIR]
+       mallard post derive FILE... --fields CP --reference TABLE
+       mallard post derive FILE... --fields MIXTURE_FRACTION --mixture TABLE
+
+Sets up the case of a restart file, snapshot or series and writes snapshots of
+derived fields of its stored state, without rerunning, so the fields need not be
+chosen before a long run. It runs the run's own code, with its reconstruction
+and gradients: a field is what [[write_data]] would have written at that step,
+the same values for restart files and snapshots of the conservative variables,
+the same to rounding for snapshots of RHO, U and P. --fields takes the fields of
+the derived and mixture groups of mallard list fields; those that need input the
+run did not give (the reference of CP, the streams of MIXTURE_FRACTION) take it
+from --reference and --mixture.
+
+FILE, the case and the choice of snapshots are as for mallard post extract: the
+case comes from -i, else from FILE's run block, and its mesh must be the file's;
+--steps, --times, --every and --latest choose the snapshots by the steps and
+times the files record. The snapshots go to the output directory, so a run's
+files are never overwritten. Under mpirun -n N the fields are computed on N
+ranks.
+
+Options:
+  --fields LIST          The derived fields to write, separated by commas
+                         (MACH,P0,Q_CRITERION), as mallard list fields lists
+                         them in its derived and mixture groups. Required.
+  -i FILE                The input file of the case: its mesh, physics, numerics
+                         and [output] reference and mixture. Default: the input
+                         in the run block of FILE (Mallard 0.10 and later record
+                         it resolved).
+  --reference TABLE      The [output] reference of CP, as an inline TOML table
+                         ('{rho = 1.2, u = [30, 0], p = 101325}'), in place of
+                         the input's. Default: the input's.
+  --mixture TABLE        The [output.mixture] table of the mixture fields,
+                         inline ('{fuel = "fuel_inlet", oxidizer = {X = {O2 = 1,
+                         N2 = 3.76}}}'), in place of the input's. Default: the
+                         input's.
+  --with-state           Also write RHO, U, P and T in each snapshot, so that it
+                         stands alone.
+  --region REGION        Write the fields on a region only: a name of the
+                         input's [regions] or of the mesh, or an inline TOML
+                         table, as [[write_data]] region takes it. Default: the
+                         whole mesh.
+  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME_<step>.vtkhdf
+                         with a .vtkhdf.series, or .vtu files with a .pvd index.
+                         Default: vtkhdf, or vtu in builds without HDF5.
+  --name NAME            The name of the snapshots: NAME_<step>.vtkhdf. Default:
+                         derived.
+  --steps LIST           Derive the snapshots of these steps, separated by
+                         commas (--steps 100,200). Default: every snapshot.
+  --times T|T1:T2        Derive the snapshot nearest to simulated time T, or
+                         every one with T1 <= t <= T2, in seconds. Default:
+                         every snapshot.
+  --every N              Derive every Nth of the snapshots selected, starting
+                         with the first. Default: 1.
+  --latest               Derive only the last snapshot selected.
+  -o, --output DIR       The directory the snapshots go to. Default: derived.
+  --format text|json     text: sections and tables; json: the same as one JSON
+                         object, for scripts. Default: text.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
+
+Examples:
+  $ mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION
+  $ mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state
+  $ mallard post derive solut/flow.vtkhdf.series --fields CP \
+        --reference '{rho = 1.2, u = [30, 0], p = 101325}'
+  $ mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \
+        --mixture '{fuel = "fuel_inlet", oxidizer = "air_inlet"}'
+
+Exit status:
+  0  every snapshot was derived
+  1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the file is not of its mesh
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-derive
+```
+
+### mallard post average
+
+```text
+Usage: mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]
+       mallard post average FILE... --homogeneous DIRS [--region REGION]
+       mallard post average FILE... --conditional TABLE
+       mallard post average FILE --statistics --homogeneous DIRS
+
+Sets up the case of a series of restart files or snapshots and averages their
+states in time, for runs without [statistics]: per cell, the means MEAN_<a> and
+covariances COV_<a>_<b> that [statistics] keeps, by its own code, RMS_<a> (the
+square root of a variance) and with --favre the Favre means and covariances.
+Each snapshot weighs the time since the previous one, as a run's samples do, so
+restart files at the run's sampling steps, with --t-start at its t_start, give
+the run's averages bit for bit. --fields takes what [statistics] fields takes,
+derived fields included (mallard list fields), and in reacting runs HRR and
+OMEGA_<species>. --conditional adds the PDFs and conditional statistics of
+[[statistics.conditional]], such as conditional means on the mixture fraction,
+written as CSV.
+
+The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a
+run writes its [statistics]. --homogeneous averages them further over directions
+in which the flow is statistically uniform and writes a CSV profile (the kept
+coordinates, n_cells, then the columns), which synthetic inflow profile reads;
+--statistics does that to the [statistics] fields one snapshot already holds.
+The states are read one at a time, so memory does not grow with the number of
+snapshots.
+
+FILE, the case and the choice of snapshots are as for mallard post extract: the
+case comes from -i, else from FILE's run block, and its mesh must be the file's;
+the snapshots' steps and times are those the files record, in increasing time.
+Under mpirun -n N the cells are split over N ranks.
+
+Options:
+  --fields LIST          The variables to average, separated by commas, as
+                         [statistics] fields takes them, derived fields included
+                         (RHO,U_X,P,MACH). Default: RHO, U_X, U_Y, U_Z (3D), P
+                         and T.
+  --products LIST        The covariances to keep, as pairs A*B separated by
+                         commas (U_X*U_Y,P*U_X), or none; a variable not in
+                         --fields is averaged too. Default: the variance of
+                         every field and the covariances of the velocity
+                         components (the Reynolds stresses).
+  --favre                Also Favre (density-weighted) means FAVRE_MEAN_<a> and
+                         covariances FAVRE_COV_<a>_<b> of the fields and
+                         products other than RHO, exactly, the triple
+                         correlations included; adds RHO to the fields.
+  --t-start T            Where the averaging window starts, in s: the first
+                         snapshot weighs the time since then (each other, the
+                         time since the previous one). The run's [statistics]
+                         t_start reproduces its averages. Default: as long
+                         before the first snapshot as the second is after it, so
+                         that evenly spaced snapshots weigh the same.
+  --homogeneous DIRS     Also average over these directions, separated by commas
+                         (x,z: profiles in y of a channel), weighted by cell
+                         volume, and write a CSV profile, OUTPUT/NAME.csv,
+                         instead of a snapshot. Covariances include the
+                         dispersive part, the spatial variation of the time
+                         means. Default: none.
+  --conditional TABLE    Also the PDF of one or two variables and conditional
+                         means and variances of fields on them, as an inline
+                         TOML table or an array of them, as
+                         [[statistics.conditional]] takes them ({on =
+                         "MIXTURE_FRACTION", fields = ["T", "HRR"]}), written to
+                         OUTPUT/conditional_<on>.csv unless the table gives a
+                         file. Without --fields and --products, only these.
+                         Default: none.
+  --statistics           Average over --homogeneous directions the [statistics]
+                         fields (MEAN_, COV_) that one snapshot of FILE holds,
+                         instead of averaging its states in time.
+  --rtol R               With --homogeneous: cells share a row where their
+                         centers agree to R times the mesh's extent in each kept
+                         direction. Default: 1e-6.
+  --region REGION        Average over a region only: a name of the input's
+                         [regions] or of the mesh, or an inline TOML table, as
+                         [[write_data]] region takes it; with --homogeneous, a
+                         region of the mesh's dimension, its cells weighted by
+                         the fraction of them in it. Default: the whole mesh.
+  --reference TABLE      The [output] reference of CP, as an inline TOML table,
+                         in place of the input's, as for mallard post derive.
+                         Default: the input's.
+  --mixture TABLE        The [output.mixture] table of the mixture fields,
+                         inline, in place of the input's, as for mallard post
+                         derive. Default: the input's.
+  -i FILE                The input file of the case: its mesh, physics and
+                         numerics. Default: the input in the run block of FILE
+                         (Mallard 0.10 and later record it resolved).
+  --snapshot vtkhdf|vtu  The format of the snapshot of the averages:
+                         OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or a
+                         .vtu file with a .pvd index. Default: vtkhdf, or vtu in
+                         builds without HDF5.
+  --name NAME            The name of the output: NAME_<step>.vtkhdf, or
+                         NAME.csv. Default: average.
+  --steps LIST           Average the snapshots of these steps, separated by
+                         commas (--steps 100,200). Default: every snapshot.
+  --times T|T1:T2        Average the snapshot nearest to simulated time T, or
+                         every one with T1 <= t <= T2, in seconds. Default:
+                         every snapshot.
+  --every N              Average every Nth of the snapshots selected, starting
+                         with the first. Default: 1.
+  --latest               Only the last snapshot selected (with --statistics).
+  -o, --output DIR       The directory the output goes to. Default: average.
+  --format text|json     text: sections and tables; json: the same as one JSON
+                         object, for scripts. Default: text.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
+
+Examples:
+  $ mallard post average solut/restart_*.restart --t-start 40
+  $ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre
+  $ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z
+  $ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z
+  $ mallard post average solut/flame.vtkhdf.series --conditional \
+        '{on = "MIXTURE_FRACTION", fields = ["T", "HRR"], weight = "mass"}'
+
+Exit status:
+  0  the averages were written
+  1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the file is not of its mesh
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-average
 ```
 
 ### mallard post convergence
