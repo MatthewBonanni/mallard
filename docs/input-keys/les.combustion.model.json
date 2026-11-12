@@ -1,0 +1,10 @@
+{
+ "default": "\"\"",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/flame_turbulence/les.toml"
+ ],
+ "type": "string"
+}
