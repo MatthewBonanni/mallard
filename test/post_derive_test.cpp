@@ -161,3 +161,38 @@ TEST(PostDeriveTest, FieldsThatNeedInputTheRunLacksSayHowToGiveIt) {
     const output::Contents derived = output::open(out + "/derived.pvd");
     for (const double cp : output::read(derived, "CP", 0)) EXPECT_NEAR(cp, 0.5, 1e-3);
 }
+
+TEST(PostDeriveTest, TheRunsTenoCacheIsReadFromTheRunsDirectory) {
+    // cache_file is relative to the run's working directory; derived from elsewhere, it is still the run's file
+    struct InDirectory {
+        fs::path previous = fs::current_path();
+        explicit InDirectory(const fs::path & dir) { fs::current_path(dir); }
+        ~InDirectory() { fs::current_path(previous); }
+    };
+    const auto caches_in = [](const std::string & dir) {
+        size_t n = 0;
+        for (const auto & entry : fs::directory_iterator(dir)) n += entry.path().filename().string().starts_with("teno.cache");
+        return n;
+    };
+    const std::string run = fresh_dir("cache_run"), elsewhere = fresh_dir("cache_elsewhere");
+    if (comm::is_root()) {
+        fs::create_directories(run);
+        fs::create_directories(elsewhere);
+    }
+    comm::barrier();
+    {
+        const InDirectory in(run);
+        Solver solver;
+        solver.init(parse_toml(case_input(run, "cache_file = \"teno.cache\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\n"
+                                               "p_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n",
+                                          "rho = \"1.0\"\np = \"1.0\"\n", "", "\"MACH\"")));
+        solver.run();
+    }
+    comm::barrier();
+    ASSERT_GT(caches_in(run), 0u);
+    {
+        const InDirectory in(elsewhere);
+        ASSERT_EQ(derive({run + "/restart_000004.restart", "--fields", "Q_CRITERION", "-o", "derived"}), 0);
+    }
+    EXPECT_EQ(caches_in(elsewhere), 0u);
+}
