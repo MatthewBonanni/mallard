@@ -64,9 +64,9 @@ Why each, and what it passes (each check runs in the test suite,
 - **`les`** (second order) leaves the dissipation to the viscosity and the SGS model: on a
   viscous 2D Taylor–Green vortex at Mach 0.1 (16² cells) the kinetic energy
   decays at the exact viscous rate to 0.02%, against 8% too fast with
-  `second_order`. TENO with the central flux feeds energy into the resolved field,
+  `second_order`. TENO with the hybrid flux gives the same result at ten times the cost,
   hence the unlimited MUSCL states
-  ([LES design](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot-corrsin-1971)).
+  ([LES design](../design/les.md#44-central-flux-for-teno-689)).
   These are the keys of `cbc_les` and `channel_les`, within 0.7–1.6% of the
   DNS ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les)).
 - **`reacting`** (second order): the scheme of the validated flames and detonations
