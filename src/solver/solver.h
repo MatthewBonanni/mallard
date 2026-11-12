@@ -742,6 +742,10 @@ class Solver {
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> force_columns(bool modeled) const;
+        /** @brief The units of the progress records' quantities, for the start record (udunits; "1": none). */
+        std::string progress_units() const;
         /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
         Dimension measure_dimension() const;
         template <typename F>
@@ -922,7 +926,7 @@ class Solver {
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
         bool input_from_file = false;  // init(file) has recorded the input's provenance
-        bool run_log_on = false;       // [output] run_log is set
+        bool run_log_on = false;       // the run's records are built: [output] run_log or report is set
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;

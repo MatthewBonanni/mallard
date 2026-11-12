@@ -164,7 +164,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     // The first record names the format, the run and what it restarted from, and holds the run block
     const Value & start = records.front();
     EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "run_id", "restart_of", "provenance",
-                                                     "placement", "setup_phases"}));
+                                                     "placement", "setup_phases", "units"}));
     EXPECT_EQ(start["run_id"].string, provenance::run_id());
     EXPECT_TRUE(start["restart_of"].is_null());
     EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));

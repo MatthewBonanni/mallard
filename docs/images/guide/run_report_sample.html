@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Mallard">
+<title>Run report: input.toml</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfbfa;--fg:#1d1f21;--dim:#5f6368;--line:#d9dadc;--panel:#ffffff;
+--accent:#2a6fdb;--band:rgba(42,111,219,.18);--ok:#1e7d3a;--warn:#a05a00;--error:#b3261e;--code:#f2f3f4}
+@media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e6e7e8;--dim:#9aa0a6;--line:#33373c;--panel:#1d2024;
+--accent:#7aa7f0;--band:rgba(122,167,240,.22);--ok:#6cc487;--warn:#e0a24a;--error:#f28b82;--code:#23272b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1060px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6em;margin:0 0 4px}
+h2{font-size:1.25em;margin:36px 0 10px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+h3{font-size:1.02em;margin:20px 0 6px}
+.sub,.note,figcaption,.readout{color:var(--dim)}.note{font-size:.92em}
+nav{margin:14px 0;font-size:.92em}nav a{margin-right:14px;color:var(--accent);text-decoration:none}
+.banner{border:1px solid var(--line);border-left:6px solid var(--dim);background:var(--panel);padding:12px 16px;
+margin:16px 0;border-radius:4px}
+.banner.ok{border-left-color:var(--ok)}.banner.warning{border-left-color:var(--warn)}
+.banner.error{border-left-color:var(--error)}
+.banner strong{font-size:1.1em}
+.status{font-weight:600;font-size:.85em;letter-spacing:.03em}
+.status.ok{color:var(--ok)}.status.warning{color:var(--warn)}.status.error{color:var(--error)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;margin:6px 0 10px;font-size:.92em}
+th,td{text-align:left;padding:3px 12px 3px 0;vertical-align:top;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:500}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.kv th{width:12em}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
+pre{background:var(--code);padding:10px;overflow-x:auto;border-radius:4px}
+.plots{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px}
+figcaption{font-size:.9em;margin-bottom:2px}.readout{font-size:.8em;min-height:1.3em}
+svg{width:100%;height:auto;display:block}
+svg .grid{stroke:var(--line);stroke-width:1}svg .frame{fill:none;stroke:var(--line)}
+svg .tick{fill:var(--dim);font-size:11px}svg .axis{fill:var(--fg);font-size:12px}
+svg .line{fill:none;stroke:var(--accent);stroke-width:1.6}
+svg .band{fill:var(--band);stroke:none}svg .cursor{stroke:var(--dim);stroke-dasharray:3 3}
+details summary{cursor:pointer;color:var(--accent)}
+@media print{nav,.plots,#plots-nojs{display:none}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Run report</h1><p class="sub">input.toml &middot; run 8b866ed4-bbb2-4eef-b3ba-a8569459f88f</p></header>
+<nav><a href="#outcome">Outcome</a><a href="#run">Run</a><a href="#configuration">Configuration</a><a href="#health">Health</a><a href="#monitors">Monitors</a><a href="#cost">Cost</a><a href="#output">Output</a></nav>
+<section id="outcome"><div class="banner ok"><strong>finished (n_steps)</strong> at step 120, t = 0.390077 s<p>n_steps = 120 reached</p><div class="scroll"><table class="kv"><tr><th>Last snapshot</th><td>solut/flow_000120.vtu, step 120, t = 0.390077</td></tr><tr><th>Last restart</th><td>solut/restart_000120.restart, step 120, t = 0.390077</td></tr><tr><th>Wall time</th><td>56.6 ms</td></tr><tr><th>Warnings</th><td>none</td></tr></table></div>
+</div></section>
+<section id="run"><h2>Run</h2>
+<div class="scroll"><table class="kv"><tr><th>Run id</th><td>8b866ed4-bbb2-4eef-b3ba-a8569459f88f</td></tr><tr><th>Started</th><td>2026-11-10T18:49:19Z</td></tr><tr><th>Mallard</th><td>v0.9.1-49-g571db1d2-dirty (571db1d20b11), uncommitted changes</td></tr><tr><th>Build</th><td>2D, double, Threads</td></tr><tr><th>Ranks</th><td>1 on 1 host(s)</td></tr><tr><th>Host</th><td>workstation</td></tr><tr><th>Device</th><td>Apple M4 Pro</td></tr><tr><th>Directory</th><td>/home/user/run_report_sample</td></tr><tr><th>Input</th><td>input.toml, SHA-256 32522809af0096db62e63cd435aead192f5d21c15e9cdce66f90db6e93ae477e</td></tr><tr><th>Mesh</th><td>cartesian_tri</td></tr><tr><th>Cells</th><td>1,536</td></tr></table></div>
+</section>
+<section id="configuration"><h2>Configuration</h2>
+<div class="scroll"><table class="kv"><tr><th>Physics</th><td>euler</td></tr><tr><th>Units</th><td>SI</td></tr><tr><th>Ratio of specific heats</th><td>1.4</td></tr><tr><th>Gas</th><td>perfect</td></tr><tr><th>Mesh</th><td>cartesian_tri</td></tr><tr><th>Reconstruction</th><td>MUSCL</td></tr><tr><th>Riemann solver</th><td>HLLC</td></tr><tr><th>Time integrator</th><td>SSPRK3</td></tr><tr><th>CFL</th><td>0.5</td></tr><tr><th>Steps</th><td>120</td></tr><tr><th>Initial state</th><td>analytical</td></tr></table></div>
+<h3>Boundaries</h3><div class="scroll"><table><tr><th>zone</th><th>type</th></tr><tr><td>left</td><td>outlet_extrapolation</td></tr><tr><td>right</td><td>outlet_extrapolation</td></tr><tr><td>top</td><td>symmetry</td></tr><tr><td>bottom</td><td>wall_adiabatic</td></tr></table></div>
+<details><summary>The resolved input: every key the run read, defaults filled in</summary><pre>[[boundaries]]
+name = &quot;left&quot;
+type = &quot;outlet_extrapolation&quot;
+
+[[boundaries]]
+name = &quot;right&quot;
+type = &quot;outlet_extrapolation&quot;
+
+[[boundaries]]
+name = &quot;top&quot;
+type = &quot;symmetry&quot;
+
+[[boundaries]]
+name = &quot;bottom&quot;
+type = &quot;wall_adiabatic&quot;
+
+[[forces]]
+file = &quot;forces_bottom.csv&quot;
+interval = 5
+zone = &quot;bottom&quot;
+
+[initialize]
+n_subdivisions = 4
+p = &quot;x &lt; 0.4 ? 2.0 : 1.0&quot;
+rho = &quot;1.0 + (x &lt; 0.4 ? 1.0 : 0.0)&quot;
+type = &quot;analytical&quot;
+u = [&quot;0.2&quot;, &quot;0.1&quot;]
+
+[integrals]
+budget = false
+file = &quot;integrals.csv&quot;
+interval = 5
+
+[mesh]
+Lx = 1.0
+Ly = 1.0
+Nx = 32
+Ny = 24
+cell_order = &quot;auto&quot;
+curved_geometry = true
+type = &quot;cartesian_tri&quot;
+
+[numerics]
+check_nan = false
+convective_flux = &quot;riemann&quot;
+double_flux = false
+low_mach_cutoff = 0.1
+riemann_solver = &quot;HLLC&quot;
+time_integrator = &quot;SSPRK3&quot;
+
+[numerics.face_reconstruction]
+limiter = &quot;venkatakrishnan&quot;
+type = &quot;MUSCL&quot;
+venkatakrishnan_K = 5.0
+
+[output]
+async = true
+check_interval = 5
+divergence_report = &quot;divergence_report&quot;
+health = true
+io_threads = 1
+report = &quot;report.html&quot;
+run_log = &quot;mallard.jsonl&quot;
+
+[physics]
+T_ref = 1.0
+axisymmetric = false
+gamma = 1.4
+gas = &quot;perfect&quot;
+p_ref = 1.0
+rho_ref = 1.0
+type = &quot;euler&quot;
+units = &quot;SI&quot;
+
+[run]
+cfl = 0.5
+control_file_interval = 0
+control_socket = true
+cuda_graphs = true
+keep_last_good = true
+n_steps = 120
+t_stop = -1.0
+t_wall_stop = -1.0
+
+[[write_data]]
+compression = &quot;none&quot;
+format = &quot;restart&quot;
+interval = 60
+prefix = &quot;solut/restart&quot;
+
+[[write_data]]
+compression = &quot;none&quot;
+format = &quot;vtu&quot;
+interval = 60
+prefix = &quot;solut/flow&quot;
+variables = [&quot;RHO&quot;, &quot;P&quot;]
+</pre></details>
+</section>
+<section id="health"><h2>Health</h2>
+<h3>Lowest values</h3><p class="note">The lowest density, pressure and temperature over the cells at any progress row so far, with the step and the cell center where each occurred. A value falling toward zero is the usual first sign of a run about to fail.</p><div class="scroll"><table><tr><th>quantity</th><th>value</th><th>units</th><th>step</th><th>at</th></tr><tr><td>rho</td><td class="num">0.908895</td><td>kg m-3</td><td class="num">100</td><td>(0.958333, 0.305556, 0)</td></tr><tr><td>p</td><td class="num">0.874912</td><td>kg m-1 s-2</td><td class="num">100</td><td>(0.958333, 0.305556, 0)</td></tr><tr><td>T</td><td class="num">0.85765</td><td>K</td><td class="num">15</td><td>(0.395833, 0.0138889, 0)</td></tr></table></div>
+<h3>Activity</h3><p class="note">How much of the domain the shock-capturing numerics act on, at the last progress row: over the whole domain and on the ranks with the least and the most of it. Very different ranks mean an unbalanced load, since those cells cost more; in a serial run the three columns match.</p><div class="scroll"><table><tr><th>activity</th><th>what is counted</th><th>whole domain [%]</th><th>least loaded rank [%]</th><th>most loaded rank [%]</th></tr><tr><td>limited_cells</td><td>cells where the MUSCL limiter cuts the reconstructed gradient (smallest limiter below 0.9): shocks and steep gradients</td><td class="num">3.71</td><td class="num">3.71</td><td class="num">3.71</td></tr></table></div>
+<h3>Conservation</h3><p class="note">The conservation ledger: the change of each total over the run that the boundary fluxes, sources and repairs do not explain, relative to the total's scale. A healthy run keeps it at round-off; Mallard warns above 1e5 machine epsilons, and a value near that is a bug to report, not a setting to tune.</p><div class="scroll"><table><tr><th>total</th><th>unexplained change [-]</th><th>note</th></tr><tr><td>mass</td><td class="num">-1.3e-15</td><td></td></tr><tr><td>momentum_x</td><td class="num">-5.5e-16</td><td></td></tr><tr><td>momentum_y</td><td class="num">-2.3e-16</td><td></td></tr><tr><td>energy</td><td class="num">5.9e-15</td><td></td></tr></table></div>
+<h3>Warnings</h3><p><span class="status ok">ok</span> None.</p></section>
+<section id="monitors"><h2>Monitors</h2>
+<p class="note">The quantities of every progress row against simulated time. A long run's rows are combined in up to 512 points per plot: the line goes through the last value of each point's rows, the shaded band spans their least and largest, so a short spike still shows. Hover over a plot to read its values.</p>
+<p id="plots-nojs" class="note">The plots need JavaScript; the table of last values below does not.</p>
+<h3>Time step</h3><p class="note">The time step and the CFL number it was taken at.</p><div class="plots" id="plots-0"></div>
+<h3>Extremes over the cells</h3><p class="note">The lowest and highest values over the cells at each progress row: what fails first in a run that diverges.</p><div class="plots" id="plots-1"></div>
+<h3>Throughput and memory</h3><p class="note">The cost of each step and the memory in use.</p><div class="plots" id="plots-2"></div>
+<h3>Integrals over the domain</h3><p class="note">The [integrals] over the domain, as integrals.csv records them; per unit depth in 2D.</p><div class="plots" id="plots-3"></div>
+<h3>Conservation</h3><p class="note">The conservation ledger's unexplained change of each total, relative to its scale (see Health).</p><div class="plots" id="plots-4"></div>
+<h3>Forces on bottom</h3><p class="note">The force on the zone's walls, from the pressure and the viscous stress, as its [[forces]] file records it; per unit depth in 2D.</p><div class="plots" id="plots-5"></div>
+<h3>Last values</h3><p class="note">Each plotted quantity's value at the last progress row, and its least and largest over the run.</p><div class="scroll"><table><tr><th>group</th><th>quantity</th><th>what it is</th><th>units</th><th>last</th><th>least</th><th>largest</th><th>rows</th></tr><tr><td>Time step</td><td>dt</td><td>time step</td><td>s</td><td class="num">0.00318735</td><td class="num">0.00318735</td><td class="num">0.00395605</td><td class="num">25</td></tr><tr><td>Time step</td><td>cfl</td><td>CFL number: the time step over the largest stable one</td><td>-</td><td class="num">0.5</td><td class="num">0.5</td><td class="num">0.5</td><td class="num">25</td></tr><tr><td>Extremes over the cells</td><td>min_rho</td><td>lowest density over the cells</td><td>kg m-3</td><td class="num">1.07076</td><td class="num">0.908895</td><td class="num">1.07076</td><td class="num">25</td></tr><tr><td>Extremes over the cells</td><td>min_p</td><td>lowest pressure over the cells</td><td>kg m-1 s-2</td><td class="num">1.11015</td><td class="num">0.874912</td><td class="num">1.11015</td><td class="num">25</td></tr><tr><td>Extremes over the cells</td><td>max_mach</td><td>highest Mach number over the cells</td><td>-</td><td class="num">0.459268</td><td class="num">0.188982</td><td class="num">0.461948</td><td class="num">25</td></tr><tr><td>Throughput and memory</td><td>memory_host</td><td>host memory of the largest rank</td><td>B</td><td class="num">1.70721e+07</td><td class="num">1.42049e+07</td><td class="num">1.70721e+07</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>kinetic_energy</td><td>kinetic energy, integral of rho |u|^2 / 2</td><td>kg m s-2</td><td class="num">0.161307</td><td class="num">0.0349985</td><td class="num">0.161307</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>enstrophy</td><td>enstrophy, integral of rho |omega|^2 / 2</td><td>kg m-1 s-2</td><td class="num">0.036419</td><td class="num">0.000871822</td><td class="num">0.0738038</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>dilatation_squared</td><td>integral of (div u)^2</td><td>m2 s-2</td><td class="num">0.455019</td><td class="num">0.455019</td><td class="num">2.44444</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>pressure_dilatation</td><td>pressure-dilatation work, integral of p div u</td><td>kg m s-3</td><td class="num">0.396228</td><td class="num">-0.00076253</td><td class="num">0.396228</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>velocity_squared</td><td>integral of |u|^2</td><td>m4 s-2</td><td class="num">0.223385</td><td class="num">0.05</td><td class="num">0.223385</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>vorticity_squared</td><td>integral of |omega|^2</td><td>m2 s-2</td><td class="num">0.0587022</td><td class="num">0.00124552</td><td class="num">0.101328</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>density_squared</td><td>integral of rho^2</td><td>kg2 m-4</td><td class="num">2.22487</td><td class="num">2.19561</td><td class="num">2.22994</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>temperature</td><td>integral of T</td><td>m2 K</td><td class="num">0.992186</td><td class="num">0.992186</td><td class="num">1.00005</td><td class="num">25</td></tr><tr><td>Integrals over the domain</td><td>temperature_squared</td><td>integral of T^2</td><td>m2 K2</td><td class="num">0.993633</td><td class="num">0.993633</td><td class="num">1.00024</td><td class="num">25</td></tr><tr><td>Conservation</td><td>mass</td><td>unexplained change of the mass total, relative to its scale</td><td>-</td><td class="num">-1.28017e-15</td><td class="num">-3.75047e-15</td><td class="num">0</td><td class="num">25</td></tr><tr><td>Conservation</td><td>momentum_x</td><td>unexplained change of the momentum_x total, relative to its scale</td><td>-</td><td class="num">-5.49838e-16</td><td class="num">-5.80532e-16</td><td class="num">0</td><td class="num">25</td></tr><tr><td>Conservation</td><td>momentum_y</td><td>unexplained change of the momentum_y total, relative to its scale</td><td>-</td><td class="num">-2.33681e-16</td><td class="num">-2.85337e-16</td><td class="num">0</td><td class="num">25</td></tr><tr><td>Conservation</td><td>energy</td><td>unexplained change of the energy total, relative to its scale</td><td>-</td><td class="num">5.88009e-15</td><td class="num">0</td><td class="num">7.58578e-15</td><td class="num">25</td></tr><tr><td>Throughput and memory</td><td>wall_per_step</td><td>wall time per time step</td><td>s</td><td class="num">0.000326175</td><td class="num">0.00030325</td><td class="num">0.000475833</td><td class="num">24</td></tr><tr><td>Throughput and memory</td><td>cells_per_second</td><td>throughput: cell updates per second of time stepping</td><td>s-1</td><td class="num">4.70913e+06</td><td class="num">3.22802e+06</td><td class="num">5.06513e+06</td><td class="num">24</td></tr><tr><td>Forces on bottom</td><td>Fx_pressure</td><td>pressure force along x</td><td>kg s-2</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">24</td></tr><tr><td>Forces on bottom</td><td>Fy_pressure</td><td>pressure force along y</td><td>kg s-2</td><td class="num">-1.28351</td><td class="num">-1.28804</td><td class="num">-1.23799</td><td class="num">24</td></tr><tr><td>Forces on bottom</td><td>Fx_viscous</td><td>viscous force along x</td><td>kg s-2</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">24</td></tr><tr><td>Forces on bottom</td><td>Fy_viscous</td><td>viscous force along y</td><td>kg s-2</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">24</td></tr></table></div>
+</section>
+<section id="cost"><h2>Cost</h2>
+<div class="scroll"><table class="kv"><tr><th>Wall time</th><td>56.6 ms</td></tr><tr><th>Setup</th><td>4.96 ms (8.8%)</td></tr><tr><th>Time stepping</th><td>41.5 ms (73.4%)</td></tr><tr><th>Diagnostics</th><td>2.40 ms (4.2%)</td></tr><tr><th>Output</th><td>4.37 ms (7.7%)</td></tr><tr><th>Steps</th><td>120</td></tr><tr><th>Throughput</th><td>4.44e+06 cells/s</td></tr></table></div>
+<div class="scroll"><table class="kv"><tr><th>Host memory, peak</th><td>17.1MB</td></tr></table></div>
+</section>
+<section id="output"><h2>Output</h2>
+<p class="note">The output index of the run record: every snapshot completely written, by writer. <code>mallard info DIR</code> checks the files against it.</p><div class="scroll"><table><tr><th>writer (kind)</th><th>snapshots</th><th>first step</th><th>last step</th><th>size</th><th>last</th></tr><tr><td>solut/flow (vtu)</td><td class="num">3</td><td class="num">0</td><td class="num">120</td><td class="num">303kB</td><td>solut/flow_000120.vtu</td></tr><tr><td>solut/restart (restart)</td><td class="num">3</td><td class="num">0</td><td class="num">120</td><td class="num">161kB</td><td>solut/restart_000120.restart</td></tr></table></div>
+<h3>Latest</h3><div class="scroll"><table><tr><th>step</th><th>t</th><th>kind</th><th>reason</th><th>size</th><th>path</th></tr><tr><td class="num">120</td><td class="num">0.390077</td><td>vtu</td><td>interval</td><td class="num">101kB</td><td>solut/flow_000120.vtu</td></tr><tr><td class="num">60</td><td class="num">0.19673</td><td>vtu</td><td>interval</td><td class="num">101kB</td><td>solut/flow_000060.vtu</td></tr><tr><td class="num">120</td><td class="num">0.390077</td><td>restart</td><td>interval</td><td class="num">53.8kB</td><td>solut/restart_000120.restart</td></tr><tr><td class="num">60</td><td class="num">0.19673</td><td>restart</td><td>interval</td><td class="num">53.8kB</td><td>solut/restart_000060.restart</td></tr><tr><td class="num">0</td><td class="num">0</td><td>vtu</td><td>start</td><td class="num">101kB</td><td>solut/flow_000000.vtu</td></tr><tr><td class="num">0</td><td class="num">0</td><td>restart</td><td>start</td><td class="num">53.8kB</td><td>solut/restart_000000.restart</td></tr></table></div>
+</section>
+<script type="application/json" id="mallard-series">{"groups":[{"title":"Time step","series":[{"name":"dt","unit":"s","label":"dt [s]","title":"time step","axis":0,"y":[0.003956,0.0034336,0.0033149,0.003242,0.0032396,0.0032229,0.0032341,0.0032323,0.0032326,0.0032274,0.0032265,0.0032312,0.0032251,0.003228,0.003224,0.0032242,0.0032254,0.0032204,0.0032222,0.0032237,0.003224,0.0032241,0.0032188,0.0032191,0.0031874]},{"name":"cfl","unit":"-","label":"cfl [-]","title":"CFL number: the time step over the largest stable one","axis":0,"y":[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]}]},{"title":"Extremes over the cells","series":[{"name":"min_rho","unit":"kg m-3","label":"min_rho [kg m-3]","title":"lowest density over the cells","axis":0,"y":[1,0.94218,0.91997,0.91305,0.91366,0.9143,0.91281,0.91274,0.91332,0.91136,0.91118,0.91086,0.91029,0.91136,0.90965,0.90942,0.90962,0.90906,0.91055,0.90916,0.90889,0.91043,0.916,0.95251,1.0708]},{"name":"min_p","unit":"kg m-1 s-2","label":"min_p [kg m-1 s-2]","title":"lowest pressure over the cells","axis":0,"y":[1,0.92128,0.89121,0.88183,0.88255,0.8824,0.88035,0.87993,0.88102,0.87831,0.87808,0.87761,0.87668,0.87813,0.87597,0.87565,0.87588,0.87504,0.87705,0.87529,0.87491,0.87694,0.88459,0.93655,1.1101]},{"name":"max_mach","unit":"-","label":"max_mach [-]","title":"highest Mach number over the cells","axis":0,"y":[0.18898,0.4194,0.46195,0.44151,0.45353,0.45794,0.45936,0.4563,0.45328,0.45738,0.45652,0.45373,0.4548,0.45554,0.45508,0.45336,0.45521,0.45526,0.45405,0.45427,0.45542,0.45538,0.45412,0.45287,0.45927]}]},{"title":"Throughput and memory","series":[{"name":"memory_host","unit":"B","label":"memory_host [B]","title":"host memory of the largest rank","axis":0,"y":[1.4205e+07,1.5892e+07,1.5942e+07,1.6024e+07,1.6056e+07,1.6105e+07,1.6155e+07,1.6187e+07,1.622e+07,1.6253e+07,1.6269e+07,1.6286e+07,1.6433e+07,1.64e+07,1.64e+07,1.64e+07,1.64e+07,1.6433e+07,1.645e+07,1.645e+07,1.645e+07,1.645e+07,1.645e+07,1.645e+07,1.7072e+07]},{"name":"wall_per_step","unit":"s","label":"wall_per_step [s]","title":"wall time per time step","axis":1,"y":[0.00042719,0.00036067,0.00047583,0.00030855,0.00037712,0.00034692,0.00033452,0.00031316,0.00035388,0.00030491,0.00030325,0.00031191,0.0003098,0.0003966,0.00032122,0.00036038,0.00032823,0.00030388,0.00032673,0.00036564,0.0003712,0.00033684,0.00033634,0.00032618]},{"name":"cells_per_second","unit":"s-1","label":"cells_per_second [s-1]","title":"throughput: cell updates per second of time stepping","axis":1,"y":[3.5956e+06,4.2588e+06,3.228e+06,4.9781e+06,4.073e+06,4.4275e+06,4.5917e+06,4.9049e+06,4.3405e+06,5.0376e+06,5.0651e+06,4.9245e+06,4.958e+06,3.8729e+06,4.7818e+06,4.2622e+06,4.6796e+06,5.0547e+06,4.7011e+06,4.2008e+06,4.1379e+06,4.56e+06,4.5668e+06,4.7091e+06]}]},{"title":"Integrals over the domain","series":[{"name":"kinetic_energy","unit":"kg m s-2","label":"kinetic_energy [kg m s-2]","title":"kinetic energy, integral of rho |u|^2 / 2","axis":0,"y":[0.034998,0.040257,0.045676,0.05102,0.056332,0.061625,0.066936,0.07225,0.07757,0.082896,0.08822,0.093545,0.098867,0.10419,0.10952,0.11484,0.12016,0.12548,0.13081,0.13613,0.14147,0.14683,0.15219,0.15733,0.16131]},{"name":"enstrophy","unit":"kg m-1 s-2","label":"enstrophy [kg m-1 s-2]","title":"enstrophy, integral of rho |omega|^2 / 2","axis":0,"y":[0.00087182,0.073804,0.02576,0.018925,0.01192,0.010746,0.011465,0.011929,0.011062,0.0098015,0.0092942,0.0098367,0.010553,0.010526,0.0099408,0.0096944,0.010085,0.010639,0.010778,0.010508,0.010465,0.010822,0.013788,0.041051,0.036419]},{"name":"dilatation_squared","unit":"m2 s-2","label":"dilatation_squared [m2 s-2]","title":"integral of (div u)^2","axis":0,"y":[0.53466,1.9015,2.4444,2.3108,2.2421,2.1774,2.1232,2.075,2.0352,2,1.9677,1.9403,1.9169,1.8961,1.8769,1.8585,1.8418,1.8279,1.8148,1.8017,1.7909,1.785,1.6224,0.90603,0.45502]},{"name":"pressure_dilatation","unit":"kg m s-3","label":"pressure_dilatation [kg m s-3]","title":"pressure-dilatation work, integral of p div u","axis":0,"y":[-0.00076253,0.12294,0.11967,0.12208,0.12341,0.12248,0.12137,0.12121,0.12174,0.1222,0.12238,0.1226,0.12254,0.1226,0.12263,0.1228,0.12316,0.12436,0.12711,0.12954,0.12497,0.11372,0.13536,0.26233,0.39623]},{"name":"velocity_squared","unit":"m4 s-2","label":"velocity_squared [m4 s-2]","title":"integral of |u|^2","axis":0,"y":[0.05,0.057227,0.064665,0.072012,0.079299,0.086565,0.093859,0.10116,0.10846,0.11578,0.12309,0.13041,0.13773,0.14505,0.15236,0.15968,0.167,0.17431,0.18163,0.18895,0.19628,0.20365,0.21102,0.21808,0.22338]},{"name":"vorticity_squared","unit":"m2 s-2","label":"vorticity_squared [m2 s-2]","title":"integral of |omega|^2","axis":0,"y":[0.0012455,0.10133,0.037828,0.027585,0.018159,0.01637,0.017877,0.019034,0.017808,0.015709,0.014789,0.015728,0.01705,0.017105,0.016117,0.015648,0.016314,0.017303,0.017562,0.017064,0.016996,0.01766,0.022687,0.068417,0.058702]},{"name":"density_squared","unit":"kg2 m-4","label":"density_squared [kg2 m-4]","title":"integral of rho^2","axis":0,"y":[2.1956,2.1991,2.2005,2.2017,2.2031,2.2045,2.2059,2.2073,2.2088,2.2103,2.2118,2.2133,2.2147,2.2162,2.2177,2.2193,2.2208,2.2223,2.2237,2.2249,2.226,2.2275,2.2294,2.2299,2.2249]},{"name":"temperature","unit":"m2 K","label":"temperature [m2 K]","title":"integral of T","axis":0,"y":[1,1.0001,0.99981,0.99955,0.99928,0.99901,0.99874,0.99846,0.99819,0.99791,0.99763,0.99736,0.99708,0.99681,0.99653,0.99626,0.99599,0.99571,0.99544,0.99515,0.99485,0.99461,0.99439,0.99382,0.99219]},{"name":"temperature_squared","unit":"m2 K2","label":"temperature_squared [m2 K2]","title":"integral of T^2","axis":0,"y":[1,1.0002,1.0001,1,0.99988,0.99974,0.99959,0.99944,0.9993,0.99915,0.999,0.99885,0.99871,0.99857,0.99842,0.99828,0.99814,0.99801,0.99786,0.99769,0.99751,0.99742,0.99739,0.99664,0.99363]}]},{"title":"Conservation","series":[{"name":"mass","unit":"-","label":"mass [-]","title":"unexplained change of the mass total, relative to its scale","axis":0,"y":[0,-1.1862e-15,-2.654e-15,-3.0372e-15,-2.9848e-15,-2.1184e-15,-2.6413e-15,-2.6402e-15,-2.7314e-15,-2.4365e-15,-1.8063e-15,-3.155e-15,-3.7505e-15,-2.6935e-15,-2.102e-15,-1.8674e-15,-2.0926e-15,-3.0889e-15,-3.7337e-15,-2.9757e-15,-2.6236e-15,-2.7501e-15,-2.6871e-15,-2.626e-15,-1.2802e-15]},{"name":"momentum_x","unit":"-","label":"momentum_x [-]","title":"unexplained change of the momentum_x total, relative to its scale","axis":0,"y":[0,-4.3099e-16,-5.1882e-16,-5.7711e-16,-5.3581e-16,-5.0265e-16,-5.6757e-16,-5.4949e-16,-5.2052e-16,-5.0289e-16,-5.4435e-16,-4.3168e-16,-4.3667e-16,-4.3437e-16,-5.6892e-16,-4.8716e-16,-4.1336e-16,-4.9632e-16,-4.3735e-16,-5.1936e-16,-4.4692e-16,-3.6126e-16,-5.8053e-16,-5.7802e-16,-5.4984e-16]},{"name":"momentum_y","unit":"-","label":"momentum_y [-]","title":"unexplained change of the momentum_y total, relative to its scale","axis":0,"y":[0,-2.5487e-16,-2.7766e-16,-2.8282e-16,-2.8215e-16,-2.8534e-16,-2.4432e-16,-2.5419e-16,-2.5097e-16,-2.3296e-16,-2.5746e-16,-2.4511e-16,-2.4017e-16,-2.2805e-16,-2.5205e-16,-2.4716e-16,-2.4944e-16,-2.517e-16,-2.5394e-16,-2.4915e-16,-2.5488e-16,-2.4316e-16,-2.4534e-16,-2.4428e-16,-2.3368e-16]},{"name":"energy","unit":"-","label":"energy [-]","title":"unexplained change of the energy total, relative to its scale","axis":0,"y":[0,7.5858e-15,6.2742e-15,5.3921e-15,5.7487e-15,6.1417e-15,6.3358e-15,7.2175e-15,5.7795e-15,6.2723e-15,6.9976e-15,6.3429e-15,6.716e-15,5.6558e-15,6.4566e-15,5.9876e-15,5.8647e-15,6.5013e-15,6.2145e-15,6.4326e-15,5.3299e-15,5.4384e-15,5.4797e-15,5.7448e-15,5.8801e-15]}]},{"title":"Forces on bottom","series":[{"name":"Fx_pressure","unit":"kg s-2","label":"Fx_pressure [kg s-2]","title":"pressure force along x","axis":1,"y":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},{"name":"Fy_pressure","unit":"kg s-2","label":"Fy_pressure [kg s-2]","title":"pressure force along y","axis":1,"y":[-1.288,-1.2479,-1.238,-1.2426,-1.249,-1.2522,-1.2533,-1.2546,-1.2567,-1.2589,-1.261,-1.2631,-1.2652,-1.2673,-1.2693,-1.2713,-1.2733,-1.2755,-1.2775,-1.2793,-1.2811,-1.283,-1.2844,-1.2835]},{"name":"Fx_viscous","unit":"kg s-2","label":"Fx_viscous [kg s-2]","title":"viscous force along x","axis":1,"y":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},{"name":"Fy_viscous","unit":"kg s-2","label":"Fy_viscous [kg s-2]","title":"viscous force along y","axis":1,"y":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}],"xlabel":"t [s]","axes":[{"t":[0,0.0183609,0.0350115,0.0513917,0.0675948,0.0837185,0.0998641,0.116013,0.132159,0.148313,0.164455,0.180597,0.19673,0.212862,0.228988,0.245112,0.261236,0.27735,0.293472,0.309584,0.325696,0.341809,0.357915,0.374029,0.390077],"step":[0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,120]},{"t":[0.0183609,0.0350115,0.0513917,0.0675948,0.0837185,0.0998641,0.116013,0.132159,0.148313,0.164455,0.180597,0.19673,0.212862,0.228988,0.245112,0.261236,0.27735,0.293472,0.309584,0.325696,0.341809,0.357915,0.374029,0.390077],"step":[5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,120]}]}</script>
+<script>// The plots of a Mallard run report: one SVG per series of the embedded data, drawn in the browser.
+// Each series is a line through the last value of each bucket of progress rows and, where a bucket holds more
+// than one row, a band between their least and largest values.
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var W = 460, H = 230, L = 62, R = 12, T = 26, B = 40;
+
+  function el(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function fmt(v) {
+    if (v === null || !isFinite(v)) return "-";
+    var a = Math.abs(v);
+    if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
+    return String(Number(v.toPrecision(4)));
+  }
+
+  function ticks(lo, hi, n) {
+    if (!(hi > lo)) return [lo];
+    var step = Math.pow(10, Math.floor(Math.log10((hi - lo) / n)));
+    var err = (hi - lo) / n / step;
+    step *= err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1;
+    var out = [];
+    for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * step; v += step) out.push(Math.abs(v) < 1e-12 * step ? 0 : v);
+    return out;
+  }
+
+  function finite(a) { return a.filter(function (v) { return v !== null && isFinite(v); }); }
+
+  function plot(s, parent) {
+    var lo = s.lo || s.y, hi = s.hi || s.y;
+    var ys = finite(lo.concat(hi)), ts = finite(s.t);
+    if (!ys.length || !ts.length) return;
+    var ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
+    var log = ymin > 0 && ymax / ymin > 1e3;
+    var f = log ? Math.log10 : function (v) { return v; };
+    var a = f(ymin), b = f(ymax);
+    if (a === b) { var d = a === 0 ? 1 : Math.abs(a) * 0.05; a -= d; b += d; }
+    var t0 = Math.min.apply(null, ts), t1 = Math.max.apply(null, ts);
+    if (t0 === t1) t1 = t0 + 1;
+    var X = function (t) { return L + (t - t0) / (t1 - t0) * (W - L - R); };
+    var Y = function (v) { return T + (b - f(v)) / (b - a) * (H - T - B); };
+
+    var fig = document.createElement("figure");
+    var cap = document.createElement("figcaption");
+    cap.textContent = (s.title || s.name) + (log ? " (log scale)" : "");
+    fig.appendChild(cap);
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": cap.textContent + ": " + s.label }, fig);
+    var yt = log ? ticks(Math.ceil(a), Math.floor(b), 4) : ticks(a, b, 4);
+    yt.forEach(function (v) {
+      var y = T + (b - v) / (b - a) * (H - T - B);
+      el("line", { x1: L, x2: W - R, y1: y, y2: y, "class": "grid" }, svg);
+      el("text", { x: L - 6, y: y + 4, "class": "tick", "text-anchor": "end" }, svg).textContent = fmt(log ? Math.pow(10, v) : v);
+    });
+    ticks(t0, t1, 4).forEach(function (v) {
+      var x = X(v);
+      el("line", { x1: x, x2: x, y1: T, y2: H - B, "class": "grid" }, svg);
+      el("text", { x: x, y: H - B + 15, "class": "tick", "text-anchor": "middle" }, svg).textContent = fmt(v);
+    });
+    el("text", { x: (L + W - R) / 2, y: H - 6, "class": "axis", "text-anchor": "middle" }, svg).textContent = s.xlabel;
+    el("text", { x: 4, y: 14, "class": "axis", "text-anchor": "start" }, svg).textContent = s.label;
+    el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, "class": "frame" }, svg);
+
+    var ok = function (i) { return s.t[i] !== null && lo[i] !== null && hi[i] !== null && (!log || lo[i] > 0); };
+    if (s.lo) {
+      var top = [], bottom = [];
+      for (var i = 0; i < s.t.length; i++) {
+        if (!ok(i)) continue;
+        top.push(X(s.t[i]).toFixed(1) + "," + Y(hi[i]).toFixed(1));
+        bottom.unshift(X(s.t[i]).toFixed(1) + "," + Y(lo[i]).toFixed(1));
+      }
+      el("polygon", { points: top.concat(bottom).join(" "), "class": "band" }, svg);
+    }
+    var pts = [];
+    for (var j = 0; j < s.t.length; j++) {
+      if (s.t[j] !== null && s.y[j] !== null && (!log || s.y[j] > 0)) pts.push(X(s.t[j]).toFixed(1) + "," + Y(s.y[j]).toFixed(1));
+    }
+    el("polyline", { points: pts.join(" "), "class": "line" }, svg);
+
+    var cursor = el("line", { y1: T, y2: H - B, "class": "cursor", visibility: "hidden" }, svg);
+    var readout = document.createElement("div");
+    readout.className = "readout";
+    readout.textContent = " ";
+    fig.appendChild(readout);
+    svg.addEventListener("mousemove", function (ev) {
+      var r = svg.getBoundingClientRect();
+      var t = t0 + ((ev.clientX - r.left) / r.width * W - L) / (W - L - R) * (t1 - t0);
+      var best = -1, dist = Infinity;
+      for (var k = 0; k < s.t.length; k++) {
+        if (s.t[k] === null) continue;
+        var dd = Math.abs(s.t[k] - t);
+        if (dd < dist) { dist = dd; best = k; }
+      }
+      if (best < 0) return;
+      cursor.setAttribute("x1", X(s.t[best]));
+      cursor.setAttribute("x2", X(s.t[best]));
+      cursor.setAttribute("visibility", "visible");
+      var text = "step " + s.step[best] + ", t = " + fmt(s.t[best]) + ": " + fmt(s.y[best]);
+      if (s.lo && lo[best] !== hi[best]) text += " (" + fmt(lo[best]) + " to " + fmt(hi[best]) + " over the bucket)";
+      readout.textContent = text;
+    });
+    svg.addEventListener("mouseleave", function () {
+      cursor.setAttribute("visibility", "hidden");
+      readout.textContent = " ";
+    });
+    parent.appendChild(fig);
+  }
+
+  var node = document.getElementById("mallard-series");
+  if (!node) return;
+  var data = JSON.parse(node.textContent);
+  data.groups.forEach(function (g, i) {
+    var parent = document.getElementById("plots-" + i);
+    if (!parent) return;
+    g.series.forEach(function (s) {
+      var axis = data.axes[s.axis];
+      s.t = axis.t;
+      s.step = axis.step;
+      s.xlabel = data.xlabel;
+      plot(s, parent);
+    });
+  });
+  var note = document.getElementById("plots-nojs");
+  if (note) note.hidden = true;
+})();
+</script>
+</main>
+</body>
+</html>
