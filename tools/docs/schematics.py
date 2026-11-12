@@ -1,6 +1,7 @@
 """Schematic figures of the user guide: mesh types, stretching, periodic
 seams, curved faces, axisymmetry, boundary conditions, splitting, the
-thickened flame, sponges, viscosity laws, cell averages and time-step limits.
+thickened flame, sponges, viscosity laws, cell averages, time-step limits and
+the steps enqueued ahead of the GPU.
 Everything is computed from the formulas the guide states."""
 import math
 
@@ -511,6 +512,62 @@ def cfl_limits(P):
     return fig
 
 
+def step_queue(P):
+    """Host and GPU timelines of the steps with an output at step 5 (docs/guide/parallel.md); not to scale."""
+    step, record, output, gap, noop, end = 1.0, 0.12, 1.4, 0.35, 0.14, 12.6
+    fig, axes = plt.subplots(2, 1, figsize=(10.4, 3.8), sharex=True, gridspec_kw=dict(hspace=0.6))
+
+    def box(ax, x0, w, y, color, text=None, alpha=0.3, hatch=None):
+        w = min(w, end - x0)
+        if w <= 0:
+            return
+        ax.add_patch(Rectangle((x0, y - 0.3), w, 0.6, facecolor="none" if hatch else color,
+                               alpha=1.0 if hatch else alpha, edgecolor=color, lw=1.0, hatch=hatch))
+        if text and w > 0.5:
+            label(ax, x0 + w / 2, y, text, P, size=10.5)
+
+    ax = axes[0]
+    t = 0.0
+    for k in range(1, 6):
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+    box(ax, t, noop, 0, P["muted"], hatch="////")
+    box(ax, t + noop, noop, 0, P["muted"], hatch="////")
+    label(ax, t + noop, -0.4, "6, 7: nothing", P, color=P["muted"], size=9.5, va="top")
+    box(ax, t + record, output, 1, P["flame"], "output")
+    t += record + output
+    k = 6
+    while t < end:
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+        k += 1
+    ax.set_title("step_queue = 3: the GPU runs ahead of the host (CUDA graphs)", fontsize=12, loc="left")
+
+    ax = axes[1]
+    t, k = 0.0, 1
+    while t < end:
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+        if k == 5:
+            box(ax, t + record, output, 1, P["flame"], "output")
+            t += output
+        t += gap
+        k += 1
+    ax.set_title("one step at a time: the host decides every step", fontsize=12, loc="left")
+    for ax in axes:
+        ax.set_yticks([0, 1], ["GPU", "host"])
+        ax.set_ylim(-0.95, 1.45)
+        ax.set_xlim(0, end)
+        ax.tick_params(axis="y", length=0)
+        ax.spines["left"].set_visible(False)
+    axes[1].set_xlabel("wall time")
+    axes[1].set_xticks([])
+    return fig
+
+
 FIGURES = {
     "mesh_types_2d": mesh_types_2d,
     "mesh_types_3d": mesh_types_3d,
@@ -528,6 +585,7 @@ FIGURES = {
     "viscosity": viscosity,
     "subdivisions": subdivisions,
     "cfl_limits": cfl_limits,
+    "step_queue": step_queue,
 }
 
 
