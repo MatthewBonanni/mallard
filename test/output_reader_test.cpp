@@ -197,6 +197,8 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
     const auto mesh = run.solver.get_mesh();
     // Vertex averages of the box's cells, which are their centroids, in the global order
     std::vector<double> centroids(3 * run.rho.size(), 0.0);
+    // Both from the rtype coordinates of the unit box, which the files hold as rtype values
+    const double rounding = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         for (size_t i = 0; i < N_DIM; i++) centroids[3 * run.global[c] + i] = double(mesh->h_cell_coords(c, i));
     }
@@ -218,7 +220,7 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
             }
         }
         mine = run.in_global_order(file, mine, 3);
-        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], 1e-12) << name << " " << i;
+        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], rounding) << name << " " << i;
     }
 }
 
