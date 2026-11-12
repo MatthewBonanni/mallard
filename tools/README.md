@@ -272,7 +272,7 @@ Mallard writes VTKHDF files that ParaView opens (`PREFIX.vtkhdf` holds the serie
 ```python
 import mallard
 
-f = mallard.open("solut/flow.vtkhdf.series")
+f = mallard.open("solut/flow.vtkhdf")
 p = f.read_all("P")                           # (snapshots, cells)
 g = f.geometry()                              # points, connectivity, offsets, VTK types
 ```

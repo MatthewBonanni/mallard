@@ -234,9 +234,9 @@ constexpr Option DERIVE_OPTIONS[] = {
      "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
      "table, as [[write_data]] region takes it. Default: the whole mesh."},
     {"--snapshot", "", "vtkhdf|vtu",
-     "The format of the snapshots: OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or .vtu files with a .pvd "
-     "index. Default: vtkhdf, or vtu in builds without HDF5."},
-    {"--name", "", "NAME", "The name of the snapshots: NAME_<step>.vtkhdf. Default: derived."},
+     "The format of the snapshots: OUTPUT/NAME.vtkhdf, every snapshot in one file, or .vtu files with a "
+     ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
     {"--steps", "", "LIST",
      "Derive the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
     {"--times", "", "T|T1:T2",
@@ -298,9 +298,9 @@ constexpr Option AVERAGE_OPTIONS[] = {
      "The input file of the case: its mesh, physics and numerics. Default: the input in the run block of FILE "
      "(Mallard 0.10 and later record it resolved)."},
     {"--snapshot", "", "vtkhdf|vtu",
-     "The format of the snapshot of the averages: OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or a .vtu "
-     "file with a .pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
-    {"--name", "", "NAME", "The name of the output: NAME_<step>.vtkhdf, or NAME.csv. Default: average."},
+     "The format of the snapshot of the averages: OUTPUT/NAME.vtkhdf, or a .vtu file with a .pvd index. "
+     "Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the output: NAME.vtkhdf, or NAME.csv. Default: average."},
     {"--steps", "", "LIST",
      "Average the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
     {"--times", "", "T|T1:T2",
@@ -897,11 +897,11 @@ constexpr Command COMMANDS[] = {
             "ranks.",
         .options = DERIVE_OPTIONS,
         .arguments = FILES_ARGUMENTS,
-        .examples = "$ mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION\n"
+        .examples = "$ mallard post derive solut/flow.vtkhdf --fields MACH,P0,Q_CRITERION\n"
                     "$ mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state\n"
-                    "$ mallard post derive solut/flow.vtkhdf.series --fields CP \\\n"
+                    "$ mallard post derive solut/flow.vtkhdf --fields CP \\\n"
                     "      --reference '{rho = 1.2, u = [30, 0], p = 101325}'\n"
-                    "$ mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \\\n"
+                    "$ mallard post derive solut/flame.vtkhdf --fields MIXTURE_FRACTION,FLAME_INDEX \\\n"
                     "      --mixture '{fuel = \"fuel_inlet\", oxidizer = \"air_inlet\"}'",
         .exit_status = "0  every snapshot was derived\n"
                        "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
@@ -929,7 +929,7 @@ constexpr Command COMMANDS[] = {
             "in reacting runs HRR and OMEGA_<species>. --conditional adds the PDFs and conditional statistics of "
             "[[statistics.conditional]], such as conditional means on the mixture fraction, written as CSV.\n"
             "\n"
-            "The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a run writes its "
+            "The averages are a snapshot of the last step, OUTPUT/NAME.vtkhdf, as a run writes its "
             "[statistics]. --homogeneous averages them further over directions in which the flow is statistically "
             "uniform and writes a CSV profile (the kept coordinates, n_cells, then the columns), which synthetic "
             "inflow profile reads; --statistics does that to the [statistics] fields one snapshot already holds. "
@@ -941,10 +941,10 @@ constexpr Command COMMANDS[] = {
         .options = AVERAGE_OPTIONS,
         .arguments = FILES_ARGUMENTS,
         .examples = "$ mallard post average solut/restart_*.restart --t-start 40\n"
-                    "$ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre\n"
-                    "$ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
-                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z\n"
-                    "$ mallard post average solut/flame.vtkhdf.series --conditional \\\n"
+                    "$ mallard post average solut/flow.vtkhdf --times 40:80 --favre\n"
+                    "$ mallard post average solut/flow.vtkhdf --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
+                    "$ mallard post average stats/channel.vtkhdf --latest --statistics --homogeneous x,z\n"
+                    "$ mallard post average solut/flame.vtkhdf --conditional \\\n"
                     "      '{on = \"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"], weight = \"mass\"}'",
         .exit_status = "0  the averages were written\n"
                        "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "

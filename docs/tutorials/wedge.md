@@ -93,7 +93,7 @@ python3 $MALLARD/tools/post/plot_vtu.py solut/wedge.vtkhdf pressure.png --var P 
 ```
 
 and the [Python package](../guide/python.md) reads them into numpy arrays for your own analysis
-(`mallard.open("solut/wedge.vtkhdf.series").read("P")`).
+(`mallard.open("solut/wedge.vtkhdf").read("P")`).
 
 **The probe.** `probe_line.csv` holds the pressure on the line x = 1.5 m every 10 steps, one row per
 point and time (`step,t,point,x,y,P`). It shows how the shock forms: by t = 4 ms it has reached its

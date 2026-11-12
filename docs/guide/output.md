@@ -267,14 +267,14 @@ itself records (`CFL`, `TENO_SIGMA`, `P_MAX`) it does not write; `mallard list
 fields` names the fields it writes:
 
 ```
-mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION
+mallard post derive solut/flow.vtkhdf --fields MACH,P0,Q_CRITERION
 mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state
-mallard post derive solut/flow.vtkhdf.series --fields CP --reference '{rho = 1.2, u = [30, 0], p = 101325}'
-mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \
+mallard post derive solut/flow.vtkhdf --fields CP --reference '{rho = 1.2, u = [30, 0], p = 101325}'
+mallard post derive solut/flame.vtkhdf --fields MIXTURE_FRACTION,FLAME_INDEX \
     --mixture '{fuel = "fuel_inlet", oxidizer = "air_inlet"}'
 ```
 
-The snapshots go to `derived/derived_<step>.vtkhdf` (`-o`, `--name`; `.vtu`
+The snapshots go to `derived/derived.vtkhdf` (`-o`, `--name`; `.vtu`
 without HDF5), with only the fields asked for unless `--with-state` adds
 `RHO`, `U`, `P` and `T`. The case's `[output] reference` and
 `[output.mixture]` come from the run's input; `--reference` and `--mixture`

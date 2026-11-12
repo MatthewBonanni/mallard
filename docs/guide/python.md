@@ -12,7 +12,7 @@ itself. Its only dependency is numpy.
 ```python
 import mallard
 
-f = mallard.open("solut/sod.vtkhdf.series")
+f = mallard.open("solut/sod.vtkhdf")
 rho = f.read_all("RHO")                       # (11, 800): every snapshot
 x = f.geometry().vertex_averages()[:, 0]      # where each cell is
 ```
@@ -72,8 +72,8 @@ mallard new sod sod && cd sod && mallard -i input.toml
 ```python
 import mallard
 
-f = mallard.open("solut/sod.vtkhdf.series")
-f                  # <mallard.File solut/sod.vtkhdf.series: snapshot, VTKHDF series index (VTKHDF snapshots), 11 snapshots>
+f = mallard.open("solut/sod.vtkhdf")
+f                  # <mallard.File solut/sod.vtkhdf: snapshot, VTKHDF series index (VTKHDF snapshots), 11 snapshots>
 list(f.fields)     # ['P', 'RHO', 'T', 'U_X']
 f.fields["RHO"]    # Field(name='RHO', components=1, units='kg m-3', long_name='density', location='cell')
 f.times            # array([0.  , 0.02, 0.04, ..., 0.2 ])
@@ -158,7 +158,7 @@ columns.
 
 | Files | `kind` | What `read` gives |
 |---|---|---|
-| `PREFIX.vtkhdf.series`, `PREFIX.vtkhdf` (`series = true`), `PREFIX_<step>.vtkhdf` | `snapshot` | Cell values of each snapshot |
+| `PREFIX.vtkhdf`, `PREFIX.vtkhdf.series` and `PREFIX_<step>.vtkhdf` (`series = false`) | `snapshot` | Cell values of each snapshot |
 | `PREFIX.pvd` and `.pvtu`, `.vtu` | `snapshot` | Cell values; a `.pvtu`'s pieces one after the other |
 | `PREFIX.xmf` (XDMF output), `PREFIX_<step>.h5` | `snapshot` | Cell values; the geometry from `PREFIX_mesh.h5` |
 | Region and boundary snapshots (`region =` in `[[write_data]]`) | `snapshot` | The region's cells, in their own order |
@@ -206,7 +206,7 @@ v = wake.read_all("U_Y")                                # (n_times,)
 box = mallard.open("probe_box_reductions.csv")
 mass = box.read_all("integral_RHO")                     # the mass in the control volume
 
-stats = mallard.open("solut/box.vtkhdf.series")         # the box's cells at the end
+stats = mallard.open("solut/box.vtkhdf")                # the box's cells at the end
 mean_u = stats.read("MEAN_U_X")
 uu = stats.read("COV_U_X_U_X")
 stats.snapshots[-1].block["statistics"]                 # {'average_start': 60.0, 'average_end': 200.0, 'samples': ...}
@@ -245,12 +245,12 @@ as `mallard COMMAND --help` lists them: `fields=["RHO", "P"]` is
 `--fields RHO,P`, `latest=True` is `--latest`, `input="case.toml"` is `-i case.toml`.
 
 ```python
-report = mallard.info("solut/sod.vtkhdf.series")          # as mallard.open(...).contents, with min and max
+report = mallard.info("solut/sod.vtkhdf")                 # as mallard.open(...).contents, with min and max
 
-d = mallard.diff("a/solut/flow_000400.vtkhdf", "b/solut/flow_000400.vtkhdf")
+d = mallard.diff("a/solut/flow.vtkhdf", "b/solut/flow.vtkhdf")
 d["result"], [(f["name"], f["relative"]["linf"]) for f in d["fields"]]
 
-out = mallard.post.extract("solut/flow.vtkhdf.series", region="domain", fields=["RHO"],
+out = mallard.post.extract("solut/flow.vtkhdf", region="domain", fields=["RHO"],
                            reductions=["integral"], latest=True, output="extract")
 mallard.open(out["written"][0]["path"])                  # the file it wrote
 

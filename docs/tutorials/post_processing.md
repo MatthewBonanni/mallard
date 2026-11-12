@@ -137,7 +137,7 @@ mallard info medium
 == Output files =================================================================== 2 files
   file                      kind      times  first t [s]  last t [s]  last step  fields  format
   forces_cylinder.csv       table     1,030  0.190063414  199.92089   20600      6       CSV
-  solut/wake.vtkhdf.series  snapshot  5      0            200         20609      3       VTKHDF series index (VTKHDF snapshots)
+  solut/wake.vtkhdf  snapshot  5      0            200         20609      3       VTKHDF series index (VTKHDF snapshots)
 
 == Files against the run record ======================= 5 recorded as written, size checked
   Recorded files     all present, as written
@@ -150,7 +150,7 @@ On a file, it reports what the file holds: its mesh, times and steps, fields wit
 [run block](../guide/output.md#run-block) of the run that wrote it, the same in every file of the run:
 
 ```bash
-mallard info medium/solut/wake.vtkhdf.series
+mallard info medium/solut/wake.vtkhdf
 ```
 
 ```text
@@ -203,7 +203,7 @@ rounding for snapshots of `RHO`, `U` and `P`, as here):
 ```bash
 for mesh in coarse medium fine; do
     (cd $mesh && cat input.toml $MALLARD/tutorials/post_processing/probes.toml > measure.toml &&
-     mallard post extract solut/wake.vtkhdf.series -i measure.toml)
+     mallard post extract solut/wake.vtkhdf -i measure.toml)
 done
 ```
 
@@ -251,14 +251,14 @@ positive where rotation dominates strain, the enstrophy, and the pressure coeffi
 state the run never gave (`--reference` gives it), of the fine run's last snapshot:
 
 ```bash
-cd fine && mallard post derive solut/wake.vtkhdf.series --latest --fields Q_CRITERION,ENSTROPHY,CP \
+cd fine && mallard post derive solut/wake.vtkhdf --latest --fields Q_CRITERION,ENSTROPHY,CP \
     --reference '{rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}' && cd ..
 ```
 
 ```text
 == Derive =================================================================================
-  File               solut/wake.vtkhdf.series (VTKHDF series index (VTKHDF snapshots))
-  Case               the resolved input in the run block of solut/wake.vtkhdf.series
+  File               solut/wake.vtkhdf (VTKHDF series index (VTKHDF snapshots))
+  Case               the resolved input in the run block of solut/wake.vtkhdf
   Snapshots          1 of 5, t = 200 s
   Output             derived
 
@@ -268,10 +268,10 @@ cd fine && mallard post derive solut/wake.vtkhdf.series --latest --fields Q_CRIT
 
 == Written ======================================================================== 1 files
   file                           kind      times  first t [s]  last t [s]  fields  format
-  derived/derived.vtkhdf.series  snapshot  1      200          200         3       VTKHDF series index (VTKHDF snapshots)
+  derived/derived.vtkhdf  snapshot  1      200          200         3       VTKHDF series index (VTKHDF snapshots)
 ```
 
-The snapshot, `fine/derived/derived.vtkhdf.series`, opens in ParaView or Python like the run's own;
+The snapshot, `fine/derived/derived.vtkhdf`, opens in ParaView or Python like the run's own;
 `--with-state` adds `RHO`, `U`, `P` and `T` to it, so that it stands alone. `mallard list fields input.toml`
 lists the fields there are, in its derived group.
 
@@ -283,14 +283,14 @@ flow, the RMS over the last snapshots measures how much the flow still changes. 
 
 ```bash
 for mesh in coarse medium fine; do
-    (cd $mesh && mallard post average solut/wake.vtkhdf.series --times 100:200 --fields U_X,U_Y,P)
+    (cd $mesh && mallard post average solut/wake.vtkhdf --times 100:200 --fields U_X,U_Y,P)
 done
 ```
 
 ```text
 == Average ================================================================================
-  File               solut/wake.vtkhdf.series (VTKHDF series index (VTKHDF snapshots))
-  Case               the resolved input in the run block of solut/wake.vtkhdf.series
+  File               solut/wake.vtkhdf (VTKHDF series index (VTKHDF snapshots))
+  Case               the resolved input in the run block of solut/wake.vtkhdf
   Snapshots          3 of 5, t = 100 to 200 s
   Window             50 to 200 s; each snapshot weighs the time since the previous one (the first: since as long before it as the second is after it)
   Fields             U_X, U_Y, P
@@ -304,12 +304,12 @@ done
   2  200    41181  50          wake_000004.vtkhdf
 
 == Written ======================================================================== 2 files
-  average/average.vtkhdf.series
+  average/average.vtkhdf
   average/average_041181.vtkhdf
 ```
 
 The snapshots are chosen by the times they record, and each weighs the time since the one before it (the
-first as much as the second, so the window starts at t = 50). The averages go to `average/average.vtkhdf.series`. In the fine run, the RMS of U_X stays below 1.4% of U in
+first as much as the second, so the window starts at t = 50). The averages go to `average/average.vtkhdf`. In the fine run, the RMS of U_X stays below 1.4% of U in
 the near wake (x < 4.5 D, [the figure of section 7](#7-figures-the-python-package)) but reaches 7.9% of U
 at x ≈ 16 D, where the flow is still adjusting from its initial state: the forces on the cylinder have
 settled (section 7), the wake far behind it has not quite. For an unsteady flow, the same command gives
@@ -378,11 +378,11 @@ cd = (forces.read_all("Fx_pressure") + forces.read_all("Fx_viscous")) / 0.02   #
 wall = mallard.open("fine/extract/probe_wall.csv")
 x, y, cf = wall.read("x"), wall.read("y"), wall.read("CF")                   # the last snapshot's samples
 
-q = mallard.open("fine/derived/derived.vtkhdf.series")
+q = mallard.open("fine/derived/derived.vtkhdf")
 cells = q.geometry()                                                          # points, connectivity, VTK types
-rms = mallard.open("fine/average/average.vtkhdf.series").read("RMS_U_X")     # one value per cell
+rms = mallard.open("fine/average/average.vtkhdf").read("RMS_U_X")     # one value per cell
 
-mallard.command("post", "average", "solut/wake.vtkhdf.series", times="100:200", fields=["U_X", "U_Y", "P"],
+mallard.command("post", "average", "solut/wake.vtkhdf", times="100:200", fields=["U_X", "U_Y", "P"],
                 cwd="fine")                                                   # any command, by its options
 
 study = mallard.post.convergence(["coarse", "medium", "fine"], quantity=["Fx_pressure", "Fx_viscous"])

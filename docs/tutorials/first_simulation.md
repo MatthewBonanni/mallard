@@ -87,7 +87,7 @@ PATH=$PWD/../../build/src:$PATH ../../.venv/bin/python
 
 ```python
 import mallard
-f = mallard.open("solut/sod.pvd")          # solut/sod.vtkhdf.series in a build with HDF5
+f = mallard.open("solut/sod.pvd")          # solut/sod.vtkhdf in a build with HDF5
 rho = f.read_all("RHO")                    # (11, 800): every snapshot, every cell
 x = f.geometry().vertex_averages()[:, 0]   # where each cell is
 ```

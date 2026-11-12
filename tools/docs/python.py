@@ -27,7 +27,7 @@ def sod(mallard_exe):
     subprocess.run([mallard_exe, "new", "sod", str(work / "sod")], check=True, stdout=subprocess.DEVNULL)
     subprocess.run([mallard_exe, "-i", "input.toml", "--kokkos-num-threads=2"], cwd=work / "sod", check=True,
                    stdout=subprocess.DEVNULL)
-    f = mallard.open(work / "sod" / "solut" / "sod.vtkhdf.series")
+    f = mallard.open(work / "sod" / "solut" / "sod.vtkhdf")
     centers = f.geometry().vertex_averages()
     row = np.flatnonzero(centers[:, 1] < centers[:, 1].min() + 1e-9)  # the bottom row of cells
     row = row[np.argsort(centers[row, 0])]
