@@ -1,0 +1,10 @@
+{
+ "default": "false",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/source_regions/input.toml"
+ ],
+ "type": "bool"
+}

@@ -1,0 +1,31 @@
+{
+ "default": "\"venkatakrishnan\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/cbc_les/input.toml",
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_retau180/input.toml",
+  "examples/channel_wmles/lm2000.toml",
+  "examples/channel_wmles/lm5200.toml",
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/detonation_1d/input.toml",
+  "examples/flame_turbulence/hit.toml",
+  "examples/flame_turbulence/input.toml",
+  "examples/flame_turbulence/les.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/wedge/input.toml",
+  "tutorials/wedge/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "barth_jespersen",
+  "none",
+  "venkatakrishnan"
+ ]
+}
