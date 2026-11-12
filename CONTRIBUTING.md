@@ -176,7 +176,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
-  x86-64. Each job also shows on the PR as its own status, `CI / <job>`.
+  x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
+  suites are split across several jobs (`CI / mpi-3d-1of4`, ...), each running a share of
+  the tests, so a test must not depend on another having run in the same process, and a
+  test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
 - **`main` runs everything after each merge**: every supported compiler on x86-64 and
   arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and case
