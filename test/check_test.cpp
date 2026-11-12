@@ -686,6 +686,42 @@ TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
     }
 }
 
+TEST(CheckRegions, RegionsOfTheSolutionAreMeasuredOnTheInitialSolution) {
+    // u = (x, 0) on the 2 x 1 box (x 0.25), first order: MACH = x / sqrt(1.4) and Q = -1/2, so both regions
+    // are x < 0.55, across five of the 16 columns of cells, and the isosurface the line (plane) x = 0.55;
+    // MACH within the cell averages' pressure, rho E averaged with the kinetic energy of the linear u
+    const std::string extra = "[regions]\nslow = {type = \"where\", condition = \"MACH * sqrt(1.4) < 0.55\"}\n"
+                              "strained = {type = \"where\", condition = \"Q_CRITERION * x > -0.275\"}\n"
+                              "level = {type = \"isosurface\", field = \"MACH\", value = 0.46483484010068415}\n";
+    std::string probes;
+    for (const char * name : {"slow", "strained", "level"}) {
+        probes += std::string("[[probes]]\nname = \"") + name + "\"\nfields = [\"P\"]\nregion = \"" + name + "\"\n";
+    }
+    auto report = [&](const bool distributed) {
+        Solver solver;
+        solver.set_distributed(distributed);
+        return solver.check(parse_input_string(box("x", "t_stop = 0.5\ncfl = 0.8\n", extra + probes)), CheckOptions{});
+    };
+    const CheckReport r = report(true);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    std::map<std::string, CheckRegion> regions;
+    for (const CheckRegion & g : r.regions) regions[g.name] = g;
+    const double depth = N_DIM == 2 ? 1.0 : 0.25;
+    for (const char * name : {"slow", "strained"}) {
+        EXPECT_TRUE(regions.at(name).solution) << name;
+        EXPECT_NEAR(regions.at(name).measure, 0.55 * depth, (name == std::string("slow") ? 2e-4 : 1e-12) * depth) << name;
+        EXPECT_EQ(regions.at(name).cells, N_DIM == 2 ? 40u : 80u) << name;
+    }
+    EXPECT_NEAR(regions.at("level").measure, depth, 1e-12);
+    EXPECT_EQ(regions.at("level").cells, N_DIM == 2 ? 8u : 16u);
+    const CheckReport serial = report(false);
+    ASSERT_EQ(serial.regions.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(serial.regions[i].cells, r.regions[i].cells) << r.regions[i].name;
+        EXPECT_DOUBLE_EQ(serial.regions[i].measure, r.regions[i].measure) << r.regions[i].name;
+    }
+}
+
 TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
     const std::string far = N_DIM == 2 ? "{type = \"rectangle\", center = [5, 5], size = [1, 2]}"
                                        : "{type = \"box\", center = [5, 5, 5], size = [1, 2, 1]}";

@@ -640,7 +640,29 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
     return out;
 }
 
+/** @brief The tables of a TENO whose setup options are set before init(). */
+template <typename F>
+std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order, F && options) {
+    TENO teno;
+    teno.set_mesh(mesh);
+    teno.set_boundaries(bd);
+    options(teno);
+    teno.init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    return teno_tables(teno);
+}
+
 } // namespace
+
+TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
+    // Triangles with mirror images at the walls: small batches split the cells
+    // differently, and the host setup is the fallback for cells whose search
+    // outgrows the device's scratch
+    auto mesh = make_mesh("cartesian_tri", 12, 10);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
+    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
+    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+}
 
 TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
     // An interior node, and a node of the bottom symmetry wall moved along it
