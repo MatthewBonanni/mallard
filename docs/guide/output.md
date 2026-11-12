@@ -74,7 +74,7 @@ fields = ["P", "T"]
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
 | [Mesh and stencils](#mesh-and-stencil-fields) | `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`; `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` |
-| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `CI_MEAN_<A>`, `CI_COV_<A>_<B>`, `CI_*` (with `batch`); `PHASE_<bin>_<A>`, `PHASE_*` |
 
 ### Derived fields
 
@@ -698,7 +698,7 @@ columns, column_units = read_csv("forces_cylinder.csv")
 These are the attributes xarray and netCDF tools look for, readable as
 they are. Units are written in SI base units (`kg m-1 s-2`, not `Pa`), so that
 derived fields compose: `MEAN_<A>` and `PHASE_<bin>_<A>` have the units of
-`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), and `SOURCE_<A>`
+`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), `CI_<average>` those of the average, and `SOURCE_<A>`
 those of `A` per second.
 
 | Field | Units | Field | Units |
