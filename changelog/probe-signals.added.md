@@ -1,0 +1,1 @@
+- The run record's progress records hold each probe's latest reductions and one-point values (`probes`, the first 64 over every probe), with their units in the start record; `report.html` plots them, a group per probe (#716).

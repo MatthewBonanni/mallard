@@ -119,6 +119,9 @@ Commands:
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
+  Share
+    mallard pack              One archive that reproduces a run, with a manifest
+                              of hashes
   Maintain
     mallard test              Run the unit and regression tests
     mallard completion        Print the shell completion script for bash, zsh or
@@ -471,7 +474,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]
-       mallard info RUN_DIR [--format text|json] [--input] [--verify]
+       mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
 kind, format and format version; the mesh (cells, points, cell types, bounds,
@@ -493,12 +496,16 @@ Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
 does.
 
-RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
-every output file in it and one level down, one table row each (the snapshots of
-a series as their index). Each file the run log records as written is checked
-against its record: missing, or a size (with --verify, a SHA-256) other than the
-one recorded, is reported. A file still named NAME.partial is one whose write
-did not finish.
+RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
+the same records as its report.html, its outcome, health (lowest values,
+repairs, conservation), cost and warnings, each with a status; then every output
+file in it and one level down, one table row each (the snapshots of a series as
+their index). Each file the run log records as written is checked against its
+record: missing, or a size (with --verify, a SHA-256) other than the one
+recorded, is reported. A file still named NAME.partial is one whose write did
+not finish. With --html, writes the run report instead: a page of the run's
+outcome, identity, configuration, health, monitors, cost and output, built from
+mallard.jsonl alone.
 
 Options:
   --format text|json    text: sections and tables, with the units of every
@@ -518,6 +525,10 @@ Options:
   --verify              Run directories: also check each file's contents against
                         the SHA-256 its output record holds, not only its size;
                         reads every file once. Default: sizes only.
+  --html                Run directories: write RUN_DIR/report.html, the run
+                        report, from RUN_DIR/mallard.jsonl, the page the run
+                        writes itself: for a run still going, killed, or of a
+                        Mallard before 0.10. Default: off.
   --kokkos-*            Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                         rank) or --kokkos-device-id=1 (the GPU; by default each
                         rank gets its own).
@@ -529,10 +540,11 @@ Examples:
   $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
   $ mallard info wing.msh --mesh-fields wing
   $ mallard info runs/cylinder
+  $ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html
 
 Exit status:
   0  the file was read
-  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, or --input finds no run block
+  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, --input finds no run block, or --html no mallard.jsonl
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
@@ -998,6 +1010,69 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-convergence
+```
+
+### mallard pack
+
+```text
+Usage: mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]
+       mallard pack --verify FILE
+
+Packs the last run of a run directory into one tar archive, for a paper's
+supplement or a bug report: what it needs to run again and what it wrote. What
+goes in comes from its run record (mallard.jsonl, Mallard 0.10 and later), never
+from file names: the input as the run read it (from its run block) and the
+resolved input, the mesh file (a generated mesh is made again from the input),
+every other file it read (mechanisms, tables, profiles, probe points, the
+restart file or remap source it started from), its start record (the run block:
+code, build, where and how it ran), its run record, and the outputs
+--with-outputs asks for, as its output records and resolved input name them.
+Each file is checked against the SHA-256 the run recorded of it, so a file
+changed since the run read or wrote it is refused.
+
+The archive holds one directory, named as the archive: manifest.json (each file
+with its role, size and SHA-256, and the command that reruns the run), run.json
+(the start record), resolved.toml, case/ (the input, mesh and files read, laid
+out as they were around the run directory, so the input's relative paths hold)
+and output/ (the outputs, by their paths in the run directory). Unpacked
+anywhere with tar -xf, the rerun command of the manifest, in its directory,
+reproduces the run: bit for bit on the same build and rank count. A file the
+input names by an absolute path is packed too, under absolute/, but the rerun
+reads it from that path.
+
+--verify checks an archive: every file against its manifest, and the input, mesh
+and files read against the run block's own hashes. The archive is
+gzip-compressed in builds with zlib (Mallard_ENABLE_ZLIB), else plain tar; any
+tar reads both.
+
+Options:
+  -o, --output FILE         The archive: .tar.gz (gzip-compressed, in builds
+                            with zlib) or .tar. Default: the run directory's
+                            name with .tar.gz (.tar in builds without zlib), in
+                            the current directory.
+  --with-outputs small|all|none
+                            The run's outputs to pack besides its run record:
+                            small, its forces, integrals and probes (CSV files,
+                            probe snapshots, spectra); all, also its snapshots
+                            and restart files; none. Default: small.
+  --verify                  Check the archive FILE instead: every file against
+                            the size and SHA-256 its manifest records, no file
+                            missing or added, and the input, mesh and files read
+                            against the SHA-256 the run recorded.
+  -h, --help                Show this page.
+
+Examples:
+  $ mallard pack runs/cylinder                         # cylinder.tar.gz
+  $ mallard pack runs/cylinder -o cylinder_re100.tar.gz --with-outputs all
+  $ mallard pack --verify cylinder.tar.gz
+  $ tar -xf cylinder.tar.gz && cd cylinder/case && mallard -i input.toml
+
+Exit status:
+  0  the archive was written, or every file of it checks
+  1  the run record or a file cannot be read, a file differs from the run's record of it, or (--verify) a file is missing, added or differs
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-pack
 ```
 
 ### mallard test
