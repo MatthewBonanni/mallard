@@ -13,6 +13,8 @@
 
 #include "build_info.h"
 #include "input.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -162,7 +164,7 @@ void print_docs(std::ostream & out, const std::string & url) { out << "\nDocumen
 int family_main(const Family & family, const std::vector<std::string> & rest) {
     const std::string name = "mallard " + std::string(family.name);
     if (!rest.empty() && std::none_of(rest.begin(), rest.end(), [](const std::string & a) { return is_help(a); })) {
-        std::cerr << name << ": unknown command " << rest[0] << " (see " << name << " --help)\n";
+        logging::error(diagnostic_code::USAGE, name + ": unknown command " + rest[0] + " (see " + name + " --help)");
         return 2;
     }
     print_help(rest.empty() ? std::cerr : std::cout, family);
@@ -290,7 +292,7 @@ void print_help(std::ostream & out, const Family & family) {
 
 int usage_error(const Command & command, const std::string & message) {
     const std::string name = title(command);
-    std::cerr << name << ": " << message << " (see " << name << " --help)\n";
+    logging::error(diagnostic_code::USAGE, name + ": " + message + " (see " + name + " --help)");
     return 2;
 }
 
@@ -309,10 +311,11 @@ int main(int argc, char ** argv) {
         }
         const std::string near = suggest_value(args[0], names);
         if (!near.empty()) {
-            std::cerr << "mallard: unknown command " << args[0] << " (did you mean " << near << "?)\n";
+            logging::error(diagnostic_code::USAGE, "mallard: unknown command " + args[0] + " (did you mean " + near + "?)");
         } else {
-            std::cerr << "mallard: unknown command " << args[0] << "; to run an input file, give it with -i: mallard -i "
-                      << args[0] << " (see mallard --help)\n";
+            logging::error(diagnostic_code::USAGE, "mallard: unknown command " + args[0] +
+                                                       "; to run an input file, give it with -i: mallard -i " + args[0] +
+                                                       " (see mallard --help)");
         }
         return 2;
     }

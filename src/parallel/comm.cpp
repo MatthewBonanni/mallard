@@ -60,6 +60,14 @@ MPI_Comm messages() {
     return messages_comm;
 }
 
+/** @brief Whether MPI is initialized and not finalized: the front end reports errors before it starts. */
+bool started() {
+    int initialized = 0, finalized = 0;
+    MPI_Initialized(&initialized);
+    MPI_Finalized(&finalized);
+    return initialized && !finalized;
+}
+
 } // namespace
 
 Session::Session(int & argc, char **& argv) {
@@ -85,13 +93,13 @@ MPI_Comm world() { return MPI_COMM_WORLD; }
 
 int rank() {
     int r = 0;
-    MPI_Comm_rank(MPI_COMM_WORLD, &r);
+    if (started()) MPI_Comm_rank(MPI_COMM_WORLD, &r);
     return r;
 }
 
 int size() {
     int s = 1;
-    MPI_Comm_size(MPI_COMM_WORLD, &s);
+    if (started()) MPI_Comm_size(MPI_COMM_WORLD, &s);
     return s;
 }
 
