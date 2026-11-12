@@ -303,7 +303,8 @@ void Solver::write_provenance() {
         .raw("restart_of", provenance::restart_of())
         .raw("provenance", provenance::json())
         .raw("placement", provenance::placement())
-        .raw("setup_phases", setup_phases.str());
+        .raw("setup_phases", setup_phases.str())
+        .raw("units", progress_units());
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
         json::Object restart;
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
@@ -1608,19 +1609,11 @@ void Solver::init_output(region::Regions & regions) {
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
                 if (!monitor.out->good()) throw cannot_write("the forces file", file);
                 if (!resume) {
-                    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
-                    const Dimension area = measure_dimension().times(dim::length, -1);
                     std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
-                    for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM {
-                            *monitor.out << ",F" << "xyz"[i] << "_" << kind;
-                            units.push_back(dim::pressure.times(area));
-                        }
-                    }
-                    if (monitor.modeled) {
-                        *monitor.out << ",Q";
-                        units.push_back(dim::heat_flux.times(area));
+                    for (const auto & [name, dimension] : force_columns(monitor.modeled)) {
+                        *monitor.out << "," << name;
+                        units.push_back(dimension);
                     }
                     *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
@@ -1668,12 +1661,13 @@ void Solver::init_output(region::Regions & regions) {
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
-    run_log_on = !run_log_file.empty() && output_files_enabled();
+    const std::string report_file = find_value_or<std::string>(input, "output", "report", "report.html");
+    run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
-        run_log::open(run_log_file, resume);
+        run_log::open(run_log_file, resume, report_file);
     } else {
         run_log::close();
     }
@@ -1808,6 +1802,41 @@ std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const 
     if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
     if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
     return columns;
+}
+
+std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool modeled) const {
+    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+    const Dimension area = measure_dimension().times(dim::length, -1);
+    std::vector<std::pair<std::string, Dimension>> columns;
+    for (const char * kind : {"pressure", "viscous"}) {
+        FOR_I_DIM columns.emplace_back(std::string("F") + "xyz"[i] + "_" + kind, dim::pressure.times(area));
+    }
+    if (modeled) columns.emplace_back("Q", dim::heat_flux.times(area));
+    return columns;
+}
+
+std::string Solver::progress_units() const {
+    const bool si = units::system() == units::System::SI;
+    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
+    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+        json::Object o;
+        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        return o.str();
+    };
+    json::Object u;
+    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
+    for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
+        u.add(memory, "B");
+    }
+    u.raw("monitors", object({{"min_rho", dim::density}, {"min_p", dim::pressure}, {"max_mach", dim::none},
+                              {"troubled_cells", dim::none}, {"min_T", dim::temperature},
+                              {"max_T", dim::temperature}, {"max_sum_Y_error", dim::none},
+                              {"reacting_cells", dim::none}, {"max_chemistry_cost", dim::none}}));
+    u.raw("margins", object({{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}));
+    if (integral_monitor.interval > 0) u.raw("integrals", object(integral_columns()));
+    for (const auto & monitor : force_monitors) u.raw("forces_" + monitor.zone, object(force_columns(monitor.modeled)));
+    return u.str();
 }
 
 void Solver::allocate_memory() {
@@ -3231,11 +3260,8 @@ void Solver::write_forces() {
         if (step % monitor.interval != 0) continue;
         const auto F = calc_force(monitor.faces);
         monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
-        for (size_t i = 0; i < 2 * N_DIM; i++) {
-            monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
-                                             double(F[i]));
-        }
-        if (monitor.modeled) monitor.last.values.emplace_back("Q", double(F[2 * N_DIM]));
+        const auto columns = force_columns(monitor.modeled);
+        for (size_t i = 0; i < columns.size(); i++) monitor.last.values.emplace_back(columns[i].first, double(F[i]));
         if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t;
         for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];

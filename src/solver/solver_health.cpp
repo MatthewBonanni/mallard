@@ -85,7 +85,7 @@ struct MarginsFunctor {
     }
 };
 
-/** @brief Over owned cells: TENO-troubled cells, cells whose MUSCL limiter is active, and the sum of upwind fractions. */
+/** @brief Over owned cells: TENO-troubled cells, cells the MUSCL limiter cuts, the sum of upwind fractions. */
 struct ActivityFunctor {
     Kokkos::View<rtype *> sigma;
     rtype sigma_threshold;
@@ -107,7 +107,7 @@ struct ActivityFunctor {
         if (limiters.extent(0) > 0) {
             rtype phi = 1.0_r;
             FOR_I_CONSERVATIVE phi = Kokkos::fmin(phi, limiters(c, i));
-            if (phi < 1.0_r) a.v[1] += 1.0;
+            if (phi < rtype(health::LIMITED_BELOW)) a.v[1] += 1.0;
         }
         if (upwind.extent(0) > 0) a.v[2] += static_cast<double>(upwind(c));
     }
