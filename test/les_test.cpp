@@ -831,6 +831,62 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     EXPECT_GT(double(u.pressure_work - u.convective), 1e-3 * std::abs(double(u.pressure_work)));
 }
 
+namespace {
+
+/** @brief The convective kinetic-energy rate and the pressure work of a TENO box with the given [numerics.hybrid], and their scale. */
+std::array<double, 3> central_budget(const std::string & hybrid) {
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    // One step first: on the initial field the reconstructed states' faces cancel in the sum
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 1\ncfl = 0.5\n");
+    // A threshold of 1 never selects the Riemann solver
+    auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n" + hybrid);
+    solver->run();
+    solver->copy_device_to_host();
+    double scale = 0.0;
+    for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+        scale += double(std::abs(solver->h_conservatives(c, 1)) * solver->get_mesh()->h_cell_measure(c));
+    }
+    return {double(solver->kinetic_energy_budget().convective), pressure_work(*solver, 1.4),
+            comm::allreduce(scale, comm::Op::SUM)};
+}
+
+} // namespace
+
+TEST(HybridFlux, TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    const auto [convective, work, scale] = central_budget("");
+    EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    const auto [reconstructed, work_r, scale_r] = central_budget("central = \"reconstructed\"\n");
+    EXPECT_GT(std::abs(reconstructed - work_r), 1e-3 * scale_r);
+}
+
+TEST(HybridFlux, CellAverageCentralFluxConservesMassMomentumAndEnergy) {
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 10\ncfl = 0.5\n");
+    auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n");
+    auto totals = [&] {
+        solver->copy_device_to_host();
+        std::array<double, N_CONSERVATIVE> t{};
+        for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE t[i] += double(solver->h_conservatives(c, i) * solver->get_mesh()->h_cell_measure(c));
+        }
+        return comm::allreduce(t, comm::Op::SUM);
+    };
+    const auto before = totals();
+    solver->run();
+    const auto after = totals();
+    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], precision_tol<double>(1e-12, 1e-5) * (std::abs(before[i]) + before[0]));
+}
+
+TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
+    const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 0\ncfl = 0.5\n");
+    EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"cell_averages\"\n"), InputError);
+    EXPECT_THROW(make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
+                             "[numerics.hybrid]\ncentral = \"keep\"\n"),
+                 InputError);
+}
+
 #if Mallard_DIM == 2
 
 namespace {

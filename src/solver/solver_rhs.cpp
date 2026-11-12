@@ -572,7 +572,11 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
                                                     physics.gamma,
                                                     low_mach_cutoff,
                                                     cell_upwind,
-                                                    face_reconstruction->face_quad_normals};
+                                                    face_reconstruction->face_quad_normals,
+                                                    hybrid_central,
+                                                    W_cells,
+                                                    mesh->periodic_maps(),
+                                                    mesh->face_shift};
 }
 
 template <typename T_riemann_solver>
