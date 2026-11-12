@@ -205,7 +205,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           backends='[
-            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON -DMallard_ENABLE_PYTHON=ON", "cgns": true, "full": true, "gate": true},
+            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "shards": 2, "gate": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "shards": 4, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
@@ -475,7 +475,7 @@ jobs:
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
-              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_PYTHON=ON -DMallard_DIM=$dim
+              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
             cmake --build build-$dim -j $(nproc) --target mallard MallardReader
           done
           ccache --show-stats
