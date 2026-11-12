@@ -119,6 +119,13 @@ class Spectra {
             std::vector<uint64_t> send_counts, recv_counts;  // in elements, per rank
         };
         using Complex = Kokkos::complex<rtype>;
+        /** @brief The averages' clock in device memory: weights from t_last, and the last sample's weight a. */
+        struct Clock {
+            double weight;
+            double a;
+            rtype t_last;
+            uint64_t n_samples;
+        };
 
         void move(const Route & route, uint32_t width, const rtype * src, rtype * dst) const;
         void fft(const Layout & layout, size_t axis);
@@ -167,13 +174,6 @@ class Spectra {
         Kokkos::View<double *> gathered;      // partial of every rank, in rank order
         std::vector<uint64_t> partial_counts;  // values of partial per rank
 
-        /** @brief The averages' clock in device memory: weights from t_last, and the last sample's weight a. */
-        struct Clock {
-            double weight;
-            double a;
-            rtype t_last;
-            uint64_t n_samples;
-        };
         Kokkos::View<Clock> clock;
         Kokkos::View<double *> d_spec, d_mean, d_shell;  // the averages (or the last sample, unaveraged)
         Kokkos::View<double *> s_spec, s_mean, s_shell;  // the sample
