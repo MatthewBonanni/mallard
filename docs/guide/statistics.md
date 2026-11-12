@@ -87,7 +87,7 @@ with the series. The result is one snapshot at the last step,
 | `--t-start` | as long before the first snapshot as the second is after it | Where the first snapshot's weight starts |
 | `--homogeneous` | none | Also average over these directions (`x,z`): a CSV profile instead of a snapshot |
 | `--statistics` | off | Average over `--homogeneous` the `[statistics]` fields one snapshot holds |
-| `--region` | the whole mesh | Average over a region only: as `[[write_data]]` `region`; with `--homogeneous`, a filled region, cells weighted by their fraction in it; a region defined by the solution: its integrals and means (below) |
+| `--region` | the whole mesh | Average over a region only: as `[[write_data]]` `region`; with `--homogeneous`, a filled region, cells weighted by their fraction in it; a region defined by the solution: its integrals, means, covariances and profiles (below) |
 | `--reference`, `--mixture` | the input's | `[output]` `reference` and `mixture` of derived fields, as for [`post derive`](output.md#derived-fields-after-the-run) |
 
 The full list is under `mallard post average --help` and in the
@@ -123,23 +123,34 @@ reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
 
 **Regions defined by the solution.** With a `--region` that follows the
 solution ([Regions defined by the solution](geometry.md#regions-defined-by-the-solution)),
-a `where` region or an isosurface, the region is placed on each snapshot's
-own state, as `mallard post extract` places it, and the result is the time
-average of the fields over it, as a `[[probes]]` entry with `average = true`
-writes it: `average/average_reductions.csv`, with the time-weighted mean
-measure of the region, the time-weighted means of the integrals of the fields
-over it (`integral_MEAN_<a>`) and their ratio (`mean_MEAN_<a>`, the mean
-integral over the mean measure). A snapshot where the region is empty counts
-with zero measure.
+a `where` region, an isosurface, or a boolean of one with other regions
+(`domain`, a cell zone, a primitive), the region is placed on each snapshot's
+own state, as `mallard post extract` places it, and the averages are over the
+region in space and time together: `average/average_reductions.csv` holds
+
+- the time-weighted mean measure of the region;
+- `integral_MEAN_<a>`, the time-weighted mean of the integral of each field
+  over it, and `integral_MEAN_<a>_<b>` of each product of `--products`;
+- `mean_MEAN_<a>`, the mean integral over the mean measure, and the
+  covariances of these means, `COV_<a>_<b>` (mean integral of `a b` over the
+  mean measure, less the product of the means), with `RMS_<a>`;
+- with `--favre`, `FAVRE_MEAN_<a>`, the mean integral of `RHO a` over the mean
+  integral of `RHO`, and `FAVRE_COV_<a>_<b>` likewise.
+
+A snapshot where the region is empty counts with zero measure.
 
 ```sh
-mallard post average solut/restart_*.restart --fields RHO,T \
+mallard post average solut/restart_*.restart --fields RHO,T --favre \
     --region '{type = "where", condition = "T > 1500"}'
 ```
 
-It takes the fields only: `--products`, `--favre`, `--homogeneous` and
-`--snapshot` are errors with such a region
-([#851](https://github.com/MatthewBonanni/mallard/issues/851)).
+With `--homogeneous`, a filled region gives a profile of the same averages per
+row: each cell weighs the time average of its measure in the region, so a
+row's `MEAN_<a>` is the time average of the integral of `a` over the region's
+cells in that row over the time average of their measure (a conditional
+average), and its `n_cells` counts the cells the region reached in some
+snapshot. `--snapshot` is an error with such a region: its averages are
+integrals, not fields on cells.
 
 - Snapshots of `RHO`, `U` and `P` give the run's averages to their stored
   precision; restart files and snapshots of the conservative variables, bit for bit.

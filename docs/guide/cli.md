@@ -1081,11 +1081,13 @@ Options:
                          [[write_data]] region takes it; with --homogeneous, a
                          region of the mesh's dimension, its cells weighted by
                          the fraction of them in it. A region defined by the
-                         solution (where, isosurface) is placed on each
-                         snapshot's state, and the time averages of the
-                         integrals and means of the fields over it are written
-                         to OUTPUT/NAME_reductions.csv instead of a snapshot.
-                         Default: the whole mesh.
+                         solution (where, isosurface, or a boolean of them) is
+                         placed on each snapshot's state, and the time averages
+                         of the integrals, means, covariances and Favre averages
+                         over it are written to OUTPUT/NAME_reductions.csv
+                         instead of a snapshot, or with --homogeneous their
+                         profile, each cell weighted by the time average of its
+                         measure in it. Default: the whole mesh.
   --reference TABLE      The [output] reference of CP, as an inline TOML table,
                          in place of the input's, as for mallard post derive.
                          Default: the input's.

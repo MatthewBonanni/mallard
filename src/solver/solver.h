@@ -611,6 +611,7 @@ class Solver {
 
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
+        Probes & get_probes() { return probes; }
         uint64_t get_step() const { return step; }
         /** @brief Steps launched as a captured CUDA graph so far. */
         uint64_t get_graph_steps() const { return graph_steps; }

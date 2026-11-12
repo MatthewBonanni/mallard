@@ -168,6 +168,26 @@ class Probes {
         std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
         /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
         void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
+        /**
+         * @brief Time averages of an averaging probe of a moving region or of a surface or curve of the
+         *        solution, per cell of the mesh in global order (rank 0): of the weight w of the cell's
+         *        samples (f V, or the sum of its quadrature weights), of w q for each evaluated variable q,
+         *        and of w times each product of average_products.
+         */
+        struct CellAverages {
+            std::string measure;  // the region's measure: length, area or volume
+            Dimension measure_dimension;
+            size_t n_columns = 0;           // of values: the variables, in the order of fields
+            std::vector<double> weights;    // (cell)
+            std::vector<double> values;     // (cell, variable)
+            std::vector<double> products;   // (cell, product)
+        };
+        /**
+         * @brief Also averages w times each product of the probe's variables (fields), per cell, from its next
+         *        sample on. Restart files do not carry them.
+         */
+        void average_products(const std::string & name, const std::vector<std::vector<std::string>> & products);
+        CellAverages cell_averages(const std::string & name) const;
         /** @brief Start the time averages afresh at time t (the first sample weighted from max(t, t_start)). */
         void start_averages(rtype t);
         /** @brief Continue the time averages of a restart file, or start them afresh if it holds none (or with reset). */
@@ -346,6 +366,8 @@ class Probes {
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
             std::vector<double> mean_nodes, mean_quadrature, mean_weights;
+            std::vector<std::vector<uint32_t>> products;  // average_products: columns of each
+            std::vector<double> mean_products;            // (cell, product)
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
@@ -404,6 +426,8 @@ class Probes {
              *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).
              */
             void mean_fields(std::vector<double> & quad);
+            /** @brief Rank 0 of time averages kept per cell: the sums of w times each of products per cell. */
+            std::vector<double> product_sums(const std::vector<double> & quad) const;
             /** @brief Rank 0 of a time-averaged isosurface: the sums of w q and of w per cell of its latest extraction. */
             void cell_sums(const std::vector<double> & quad, std::vector<double> & sums, std::vector<double> & weights) const;
 

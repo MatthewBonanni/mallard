@@ -2592,6 +2592,7 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;
         if (distributed && !comm::is_root()) continue;
+        if (!p.products.empty()) accumulate(p.mean_products, p.product_sums(quad), w / p.average_weight);
         if (p.motion) {
             const size_t n_cols = p.n_evaluated();
             for (size_t i = 0; i < p.geometry.quad_weights.size(); i++) {
@@ -2618,7 +2619,46 @@ void Probes::start_averages(rtype t) {
         p->mean_nodes.clear();
         p->mean_quadrature.clear();
         p->mean_weights.clear();
+        p->mean_products.clear();
     }
+}
+
+void Probes::average_products(const std::string & name, const std::vector<std::vector<std::string>> & products) {
+    for (auto & pp : probes) {
+        Probe & p = *pp;
+        if (p.name != name || p.snapshot) continue;
+        if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
+        p.products.clear();
+        for (const auto & factors : products) {
+            std::vector<uint32_t> columns;
+            for (const std::string & f : factors) {
+                const auto it = std::find(p.variables.begin(), p.variables.end(), "MEAN_" + f);
+                if (it == p.variables.end()) throw std::runtime_error("probe " + name + " does not sample " + f);
+                columns.push_back(static_cast<uint32_t>(it - p.variables.begin()));
+            }
+            p.products.push_back(std::move(columns));
+        }
+        p.mean_products.clear();
+        return;
+    }
+    throw std::runtime_error("no [[probes]] named " + name);
+}
+
+Probes::CellAverages Probes::cell_averages(const std::string & name) const {
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.name != name || p.snapshot) continue;
+        if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
+        CellAverages out;
+        out.measure = measure_name(p.geometry);
+        out.measure_dimension = geometry_field("measure", p.geometry).dimension;
+        out.n_columns = p.n_evaluated();
+        out.weights = p.mean_weights;
+        out.values = p.mean_quadrature;
+        out.products = p.mean_products;
+        return out;
+    }
+    throw std::runtime_error("no [[probes]] named " + name);
 }
 
 void Probes::restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset) {
@@ -3000,6 +3040,21 @@ void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<doub
         weights[c] += w;
         for (size_t v = 0; v < n_cols; v++) sums[c * n_cols + v] += w * quad[i * n_cols + v];
     }
+}
+
+std::vector<double> Probes::Probe::product_sums(const std::vector<double> & quad) const {
+    const size_t n_cols = n_evaluated(), n = products.size();
+    std::vector<double> sums(n_mean_cells() * n, 0.0);
+    if (quad.empty()) return sums;
+    for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
+        const uint64_t c = motion ? i : isosurface->quad_cells[i];
+        for (size_t k = 0; k < n; k++) {
+            double x = geometry.quad_weights[i];
+            for (const uint32_t v : products[k]) x *= quad[i * n_cols + v];
+            sums[c * n + k] += x;
+        }
+    }
+    return sums;
 }
 
 void Probes::Probe::mean_fields(std::vector<double> & quad) {
