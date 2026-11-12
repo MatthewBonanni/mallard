@@ -25,5 +25,5 @@ tutorials/ci.sh install/bin/mallard /tmp/tutorials
 
 Python packages: `pip install -r tutorials/requirements.txt -e tools` (which also
 installs the `gmsh` command and the [Python package](../docs/guide/python.md), whose
-library needs a build with `-DMallard_ENABLE_PYTHON=ON`). The figure scripts write light and dark SVGs to
+library a build makes by default). The figure scripts write light and dark SVGs to
 `docs/images/tutorials/`, or to the directory given with `--out`.

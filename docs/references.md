@@ -129,6 +129,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the central (KEEP) flux of `convective_flux = "hybrid"` (`riemann::KEEP`).
 - <a id="jameson-2008"></a>A. Jameson, Formulation of kinetic energy preserving conservative schemes for gas dynamics and direct numerical simulation of one-dimensional viscous compressible flow in a shock tube using entropy and kinetic energy preserving schemes, *J. Sci. Comput.* 34, 188–208 (2008). [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
   Used in: the condition on the momentum flux under which the central flux changes the kinetic energy only by the pressure work (tested in `test/les_test.cpp`).
+- <a id="subbareddy-candler-2009"></a>P. K. Subbareddy and G. V. Candler, A fully discrete, kinetic energy consistent finite-volume scheme for compressible flows, *J. Comput. Phys.* 228, 1347–1364 (2009). [doi:10.1016/j.jcp.2008.10.026](https://doi.org/10.1016/j.jcp.2008.10.026)
+  Used in: `[numerics.hybrid] central = "cell_averages"`, a kinetic-energy-consistent central flux on the cell values with upwind dissipation from the reconstructed states.
+- <a id="modesti-pirozzoli-2017"></a>D. Modesti and S. Pirozzoli, A low-dissipative solver for turbulent compressible flows on unstructured meshes, with OpenFOAM implementation, *Comput. Fluids* 152, 14–23 (2017). [doi:10.1016/j.compfluid.2017.04.012](https://doi.org/10.1016/j.compfluid.2017.04.012)
+  Used in: `[numerics.hybrid] central = "cell_averages"` (an energy-preserving flux on the cell values, diffusion only where a sensor fires).
 - <a id="ducros-1999"></a>F. Ducros, V. Ferrand, F. Nicoud, C. Weber, D. Darracq, C. Gacherieu and T. Poinsot, Large-eddy simulation of the shock/turbulence interaction, *J. Comput. Phys.* 152, 517–549 (1999). [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
@@ -337,6 +341,19 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the procedure of `mallard post convergence` (eqs. 1–7: the representative cell size, the observed order by fixed-point iteration, the extrapolated value, the approximate and extrapolated relative errors, the fine-grid GCI; oscillatory convergence when e32 / e21 < 0); its Table 1 is a test (`test/post_convergence_test.cpp`).
 - <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
   Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
+
+## Statistics of time series
+
+- <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)
+  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/statistical_convergence.h`).
+- <a id="hoad-2010"></a>K. Hoad, S. Robinson and R. Davies, Automating warm-up length estimation, *J. Oper. Res. Soc.* 61, 1389–1403 (2010). [doi:10.1057/jors.2009.87](https://doi.org/10.1057/jors.2009.87)
+  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/statistical_convergence.h`).
+- <a id="schmeiser-1982"></a>B. Schmeiser, Batch size effects in the analysis of simulation output, *Oper. Res.* 30, 556–568 (1982). [doi:10.1287/opre.30.3.556](https://doi.org/10.1287/opre.30.3.556)
+  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/statistical_convergence.h`).
+- <a id="madras-sokal-1988"></a>N. Madras and A. D. Sokal, The pivot algorithm: a highly efficient Monte Carlo method for the self-avoiding walk, *J. Stat. Phys.* 50, 109–186 (1988). [doi:10.1007/BF01022990](https://doi.org/10.1007/BF01022990)
+  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/statistical_convergence.h`).
+- <a id="abramowitz-stegun-1964"></a>M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, National Bureau of Standards (1964), 26.7.3–4.
+  Used in: Student's t distribution for integer degrees of freedom (`src/solver/statistical_convergence.cpp`).
 
 ## Validation cases and reference data
 

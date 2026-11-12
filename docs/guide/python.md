@@ -21,20 +21,23 @@ Every function and class: [Python API](python_api.md).
 
 ## Installing
 
-The package is `tools/mallard` of the Mallard repository (`share/mallard/tools/mallard`
-of an install; its distribution name, for pip, is `mallard-python`), and its library comes with a build with `-DMallard_ENABLE_PYTHON=ON`:
+Every installer installs the package with Mallard, so `import mallard` works
+after its usual command:
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON \
-      -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_PYTHON=ON
-cmake --build build -j
-```
+| Installer | Command | Opt out |
+|---|---|---|
+| [Container](../installation.md#container) | `docker run --rm -v "$PWD:/work" ghcr.io/matthewbonanni/mallard python3 script.py` | |
+| [Spack](../installation.md#spack) | `spack install mallard && spack load mallard` | `~python` |
+| [From source](../installation.md#from-source) | `cmake --install build`, then `pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
 
-The build writes `build/src/libmallard2d.so` (`.dylib` on macOS) next to
-`build/src/mallard`; `cmake --install build --prefix PREFIX` installs it in
-`PREFIX/lib`. A build with `-DMallard_DIM=3` gives `libmallard3d`; either reads
-the output of both dimensions. Then install the package into your Python
-environment, with [uv](https://docs.astral.sh/uv/) or pip:
+The package is `tools/mallard` of the Mallard repository
+(`share/mallard/tools/mallard` of an install; its distribution name, for pip,
+is `mallard-python`). A build writes its library,
+`build/src/libmallard2d.so` (`.dylib` on macOS), next to `build/src/mallard`,
+and `cmake --install` installs it in `PREFIX/lib`; a build with
+`-DMallard_DIM=3` gives `libmallard3d`, and either reads the output of both
+dimensions. From a build or an install, add the package to a Python
+environment with [uv](https://docs.astral.sh/uv/) or pip:
 
 ```bash
 uv venv && uv pip install -e tools        # in the repository; or: pip install -e tools
@@ -42,9 +45,11 @@ uv pip install PREFIX/share/mallard/tools  # from an install
 ```
 
 `-e` (editable) keeps the package in the repository, so it follows `git pull`.
-The package looks for the `mallard` executable on `PATH` and for its library
-next to it (or in `../lib`); two environment variables say where they are
-otherwise:
+`-DMallard_PYTHON_INSTALL_DIR=DIR` makes `cmake --install` also copy the
+package into `DIR`, a `site-packages` directory of your Python (the containers
+and Spack install it this way). The package looks for the `mallard` executable
+on `PATH` and for its library next to it (or in `../lib`); two environment
+variables say where they are otherwise:
 
 | Variable | Default | What |
 |---|---|---|

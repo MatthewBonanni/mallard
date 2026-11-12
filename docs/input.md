@@ -32,7 +32,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
@@ -53,7 +53,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
 constants, tolerances, ...) is dimensionless. `statistics.phase.level` has the dimension of its
-`variable` (`P`: pressure, `T`: temperature, `U_X`: velocity, ...).
+`variable` (`P`: pressure, `T`: temperature, `U_X`: velocity, ...), and `statistics.conditional.range` those of the variables of `on`.
 
 ## Checking an input
 
@@ -791,6 +791,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 |---|---|
 | `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
 | `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
+| `central` | The central flux's states: `cell_averages`, KEEP on the two cells' values, which changes the kinetic energy by exactly the pressure work on interior faces (second order where the sensor is off; the reconstructed states still feed the Riemann part); or `reconstructed`, KEEP on the reconstructed face states, which conserves kinetic energy only to the reconstruction's accuracy and can add it. Default `cell_averages` with TENO (with TENO's states the central flux adds kinetic energy), `reconstructed` with MUSCL and first order (the `les` preset's; with no viscosity or SGS model to remove energy, MUSCL's states add it too, so Euler runs set `cell_averages`). With a gas mixture, `cell_averages` takes each cell's `gamma` and `e0` (with `double_flux`, the cell's frozen ones). [Design](design/les.md#44-central-flux-for-teno-689) |
 
 ### `[numerics.face_reconstruction]`
 
@@ -934,11 +935,25 @@ changing it.
 
 | Key | Description |
 |---|---|
-| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, for mixtures `Y_<species>` and `RHOY_<species>`, and the [derived fields](guide/output.md#derived-fields) of the derived and mixture groups of `mallard list fields` (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...), computed at each sample as `[[write_data]]` writes them, with the `[output]` input they need |
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, for mixtures `Y_<species>` and `RHOY_<species>`, with `[chemistry]` the heat release rate `HRR` and the mass production rates `OMEGA_<species>` (evaluated at each sample from the state), and the [derived fields](guide/output.md#derived-fields) of the derived and mixture groups of `mallard list fields` (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...), computed at each sample as `[[write_data]]` writes them, with the `[output]` input they need |
 | `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`, `"P*MACH"`) whose covariance to keep; their means are kept too |
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+| `batch` | Confidence intervals of the averages by batch means: the duration of a batch (time), at least 10 integrated autocorrelation times; default none (no intervals) |
+| `confidence` | Confidence of those intervals, default 0.95 (with `batch`) |
+
+With `batch`, the samples also fall in consecutive batches of that duration
+from the start of the averages (a sample in the batch that holds its time);
+each batch keeps its own averages, and when a sample opens a batch, the last
+one's averages join the mean and the sum of squared deviations of the batch
+values (Welford). `CI_MEAN_<A>` and `CI_COV_<A>_<B>` are the half widths
+`t s / sqrt(n)` of the intervals over the `n` closed batches (Student's t with
+`n - 1` degrees of freedom; NaN before two). Memory: three more device arrays
+per average (the current batch and the two batch sums), four times what the
+averages take, and on the host also the half widths; restart files carry
+the batch state as `BATCH_<average>`, `BATCH_AVG_<average>` and
+`BATCH_M2_<average>`.
 
 The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
 `COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a
@@ -954,9 +969,9 @@ over homogeneous directions (e.g. over x and z of a channel, as a function of
 y), and `mallard post average` computes the same averages from saved
 snapshots of a run without them
 ([guide](guide/statistics.md#averages-of-saved-snapshots-mallard-post-average)). `fields` and
-`products` may be left out when `[statistics.spectra]` or
-`[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
-`[statistics]` unless they set their own, and `reset` applies to them too.
+`products` may be left out when `[statistics.spectra]`,
+`[statistics.phase]` or `[[statistics.conditional]]` is given, or a probe with `average = true`; these take
+`interval` and `t_start` from `[statistics]` unless they set their own, and `reset` applies to them too.
 Probes may list the averages as variables (`MEAN_P`, ...), and probes with
 `average = true` sample on the schedule of `interval` and `t_start`
 ([time averages](#probes)).
@@ -1030,6 +1045,74 @@ weights and the trigger state.
 | `period`, `t_reference` | A fixed period, phase 0 at `t_reference` (default 0), or |
 | `probe`, `variable`, `level` | The trigger point `[x, y(, z)]`, its variable and the level of its upward crossings (default 0) |
 | `interval`, `t_start` | Sampling, default those of `[statistics]` |
+
+### `[[statistics.conditional]]`
+
+PDFs of one variable, joint PDFs of two, and the conditional means and
+variances of fields on them, e.g. on the mixture fraction or the progress
+variable of a flame ([guide](guide/statistics.md#conditional-statistics-and-pdfs-statisticsconditional)).
+Each sample adds every owned cell, weighted by its volume (or mass) times its
+fraction in `region` and the time since the previous sample, to the bin of its
+values of `on`; cells outside the ranges count in the total weight only. The
+per-bin sums of a sample are exact (fixed point of two 64-bit integer limbs,
+reduced over the ranks with NCCL in NCCL runs, else MPI), so the results are
+the same bit for bit on any number of ranks, and every rank holds them.
+
+| Key | Description |
+|---|---|
+| `on` | One variable (a PDF) or an array of two (a joint PDF): any of the `[statistics]` fields. Required |
+| `bins` | Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to 65536 and at most 1048576 in all (default 50) |
+| `range` | `[low, high]` of the variable (`[[low, high], [low, high]]` for two), in its units; default `[0.0, 1.0]` for `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`, required for other variables. The upper end falls in the last bin |
+| `fields` | Variables whose conditional mean and variance to keep: any of the `[statistics]` fields (default none: the PDF only) |
+| `weight` | `"volume"` (default) or `"mass"`: density-weighted (Favre) PDFs and moments |
+| `region` | A region of the mesh's dimension, its name, or a region of the mesh: each cell weighted by its fraction in it (default the whole mesh) |
+| `file` | Output CSV file, default `conditional_<on>.csv` (`conditional_<on>_<on>.csv` for two variables); entries need files of their own |
+| `interval`, `t_start` | Sampling, default those of `[statistics]` |
+
+The file, written with the other output (`[[write_data]]`) and at the end,
+holds the run and snapshot comment lines (the averaging window and samples), a
+`# conditional` comment line (the variables, bins, ranges, weighting, region
+and `outside`, the fraction of the total weight outside the ranges), the
+header and a units line, then a row per bin, the second variable's bins
+fastest: the bin centers, `PDF` (the bin's weight over the total weight and
+the bin's width: per unit of each variable), and per field `MEAN_<f>`,
+`COV_<f>_<f>` (the conditional variance) and `RMS_<f>`, `nan` in bins no
+cell reached. Restart files (format version 6) carry each entry's weights,
+means and sums of squared deviations by its position in the list; one holding
+an entry of other variables, bins or fields there is an error unless
+`statistics.reset = true`. `mallard post average --conditional` computes them
+from saved snapshots.
+
+### `[statistics.convergence]`
+
+The end of the initial transient and confidence intervals of monitored values
+([guide](guide/statistics.md#convergence-statisticsconvergence)): each listed
+value gets a sample each time its monitor writes it. MSER-5 on each signal
+finds where its transient ends, again each time its series has grown by 5%;
+the run is stationary once an end in the first half of the series has been
+accepted for every signal, from the latest of the latest accepted ends
+(`t_stationary`, which can move later as the series grow). From then on, the samples after `t_stationary` and after
+the start of the `[statistics]` averages give the mean and the variance
+(of `(x - mean)^2`) with confidence intervals by non-overlapping batch means
+and Student's t, the integrated autocorrelation time `tau` (samples, Sokal's
+window `M >= 5 tau`) and `n_eff = samples / tau`. Converged: stationary, every
+half width within `tolerance` of the mean (and `variance_tolerance` of the
+variance) and every batch at least `10 tau` long. Triggers read the values as
+`convergence_stationary`, `convergence_t_stationary`, `convergence_converged`
+and `convergence_<signal>_{mean, ci, variance, variance_ci, tau, n_eff,
+samples}` (NaN before the run is stationary); restart files carry the
+histories (reset with `statistics.reset`). Runs on the host, on every rank,
+only when a signal has a new sample.
+
+| Key | Description |
+|---|---|
+| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, `<probe>_<variable>`. Required |
+| `confidence` | Confidence of the intervals, default 0.95 |
+| `batches` | Batches of the batch means (at least 2), default 20 |
+| `tolerance` | Relative half width of every mean at which the run is converged (adds `converged`), default none |
+| `variance_tolerance` | Also of every variance (needs `tolerance`), default none |
+| `min_samples` | Samples of a signal before MSER-5 is tried (at least 10), default 100 |
+| `file` | Output CSV (`step, t` and the values, with units), default `convergence.csv` |
 
 ## `[[probes]]`
 
@@ -1357,7 +1440,7 @@ step ([Triggers](guide/running.md#triggers)).
 
 | Key | Description |
 |---|---|
-| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>` and, for probes of one point, `<probe>_<variable>`; true when not 0. Required |
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
 | `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |

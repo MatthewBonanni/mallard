@@ -77,6 +77,12 @@ interval = 5
 zone = "bottom"
 interval = 5
 
+[[probes]]
+name = "station"
+point = [0.7, 0.5]
+fields = ["RHO", "P"]
+interval = 5
+
 [[write_data]]
 prefix = "solut/restart"
 format = "restart"
@@ -86,7 +92,7 @@ interval = 60
 prefix = "solut/flow"
 format = "vtu"
 interval = 60
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 """
 
 

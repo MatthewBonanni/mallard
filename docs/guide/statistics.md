@@ -2,10 +2,12 @@
 
 Mallard accumulates statistics during the run, on the device, from every
 `interval`-th step: per-cell time averages and covariances, spectra and
-two-point correlations along homogeneous directions, and phase averages over a
-periodic cycle. Per-cell averages are fields of the
-[snapshots](output.md#solution-snapshots-write_data), spectra a CSV file; restart
-files carry the running averages, so a continued run keeps averaging.
+two-point correlations along homogeneous directions, phase averages over a
+periodic cycle, and PDFs and conditional statistics (for flames: conditional
+means on the mixture fraction or the progress variable). Per-cell averages are
+fields of the [snapshots](output.md#solution-snapshots-write_data), spectra and
+conditional statistics CSV files; restart files carry the running averages, so a
+continued run keeps averaging.
 
 ## Time averages: `[statistics]`
 
@@ -17,7 +19,7 @@ t_start = 40.0
 interval = 10
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 2 more.
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence) and 4 more.
 
 `[statistics]` keeps running time averages and covariances per cell, on the
 device, without communication: bitwise the same on any number of ranks, and
@@ -25,7 +27,7 @@ carried across restarts.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>`, and the [derived fields](output.md#derived-fields) (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...: the derived and mixture groups of `mallard list fields`) |
+| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>`, with `[chemistry]` the heat release rate `HRR` and the production rates `OMEGA_<s>`, and the [derived fields](output.md#derived-fields) (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...: the derived and mixture groups of `mallard list fields`) |
 | `products` | none | Pairs `"A*B"` whose covariance to keep |
 | `t_start` | 0 | Start averaging after this time; or let a [trigger](running.md#triggers) start them (`do = "start statistics"`) once a condition holds |
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
@@ -42,6 +44,35 @@ state and its gradients, exactly as `[[write_data]]` writes it, so its mean is
 the mean of the field, not the field of the mean state; a field that needs
 input (the `reference` of `CP`, the streams of `MIXTURE_FRACTION`) takes it
 from `[output]` as when written. Sampling one costs a gradient evaluation.
+
+### Confidence intervals
+
+```toml
+[statistics]
+fields = ["U_X", "P"]
+products = ["U_X*U_X"]
+batch = 2.0          # >= 10 integrated autocorrelation times
+```
+
+With `batch`, every cell also gets the half width of a confidence interval
+on each of its averages, `CI_MEAN_<A>` and `CI_COV_<A>_<B>` (write them with
+`variables = ["CI_*"]`): the samples fall in consecutive batches of that
+duration, each batch is averaged on its own, and the spread of the batch
+averages gives the interval (batch means, Student's t over the closed
+batches; NaN before two have closed). This is what
+[`[statistics.convergence]`](#convergence-statisticsconvergence) does for
+monitored values, cell by cell.
+
+- The batches must be long compared with the flow's correlation time, or
+  the intervals come out too narrow: at least 10 times the integrated
+  autocorrelation time `tau` that `[statistics.convergence]` reports for a
+  representative signal (in samples of that signal: multiply by its
+  sampling period). Fewer, longer batches are safe; 10 to 30 closed batches
+  give useful intervals.
+- Costs four times the device memory of the averages (three more arrays
+  per average) and a little more work per sample; no communication.
+- `confidence` (default 0.95) sets the confidence. Restart files carry the
+  batches, so a continued run continues them bitwise.
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
@@ -201,9 +232,168 @@ level by a variable at a probe point.
 - `examples/cylinder` phase-averages
   its vortex street this way.
 
+## Conditional statistics and PDFs: `[[statistics.conditional]]`
+
+```toml
+[[statistics.conditional]]
+on = "MIXTURE_FRACTION"          # two variables, ["MIXTURE_FRACTION", "T"], for a joint PDF
+bins = 50
+fields = ["T", "HRR", "Y_OH"]    # their conditional means and variances
+weight = "mass"                  # density-weighted (Favre); default "volume"
+```
+
+*Used in:* [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
+Use these for flame DNS and LES: the PDF of the mixture fraction (Bilger) or
+of the progress variable, joint PDFs of two variables, and the mean and
+variance of any field conditioned on them, such as the temperature, the heat
+release rate or a radical against the mixture fraction, the quantities flamelet
+and conditional moment closure models are built from and compared with. The
+conditioning variables and the fields are any of the `[statistics]` fields:
+`MIXTURE_FRACTION` and `PROGRESS_VARIABLE` take their streams from
+[`[output.mixture]`](output.md#derived-fields) (`fuel` and `oxidizer`, or `progress`),
+and `HRR` and `OMEGA_<s>` need `[chemistry]`. Each entry writes one CSV
+file with the other output.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `on` | none | The variable of a PDF, or two variables of a joint PDF |
+| `bins` | 50 | Equal bins of each range: one count, or one per variable |
+| `range` | `[0.0, 1.0]` for `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`, else none | `[low, high]` in the variable's units, `[[low, high], [low, high]]` for two |
+| `fields` | none | Variables whose conditional mean and variance to keep |
+| `weight` | `"volume"` | `"volume"`, or `"mass"` for density-weighted (Favre) statistics |
+| `region` | the whole mesh | A filled [region](geometry.md#regions) (or its name): cells weighted by their fraction in it |
+| `file` | `conditional_<on>.csv` | The output file (`conditional_<on>_<on>.csv` for two variables) |
+| `interval`, `t_start` | `[statistics]`'s | Sampling |
+
+Each sample adds every cell, weighted by its volume (or mass) times the time
+since the previous sample, to the bin of its value of `on`. The file has a row
+per bin (for two variables, the second fastest): the bin centers, `PDF` (per
+unit of each variable, integrating to one over the whole sample), and for each
+field `MEAN_<f>`, `COV_<f>_<f>` (the conditional variance) and `RMS_<f>`; a
+comment line records the bins, the weighting and the fraction of the weight
+outside the ranges.
+
+- Samples outside the ranges count in the total only: the PDF then
+  integrates to one minus that fraction, which the file records. Widen the
+  range of a variable that leaves it (a temperature, a scalar dissipation rate).
+- A bin no cell reached holds `nan` means; fewer bins give smoother means in
+  short averages.
+- Bins are of the cell values (cell averages): resolve the flame, or the PDF
+  of an under-resolved front is that of its smeared profile.
+- The sums are exact (fixed point), so the results are the same bit for bit
+  on any number of ranks, and restart files continue them bitwise. They hold
+  each entry by its position in the list: a restart file whose entry there has
+  other variables, bins or fields is an error unless `statistics.reset = true`.
+- `mallard post average --conditional` computes the same files from saved
+  snapshots of a run without them; from restart files of the run's sampling
+  steps, they are the run's to the digit (below).
+
+`[[statistics.conditional]]` may stand alone in `[statistics]`, without
+`fields` and `products`.
+
+```bash
+mallard post average solut/flame.vtkhdf.series --conditional \
+    '{on = "MIXTURE_FRACTION", fields = ["T", "HRR"], weight = "mass"}'
+```
+
+![Conditional mean temperature and heat release rate against the mixture fraction, with the PDF of the mixture fraction, in an igniting hydrogen mixing layer](../images/guide/conditional-light.svg#gh-light-mode-only)
+![Conditional mean temperature and heat release rate against the mixture fraction, with the PDF of the mixture fraction, in an igniting hydrogen mixing layer](../images/guide/conditional-dark.svg#gh-dark-mode-only)
+
+*Density-weighted conditional means of the temperature (with one RMS either
+side) and of the heat release rate against the mixture fraction, and the PDF of
+the mixture fraction, in a layer of hydrogen in nitrogen igniting in hot air,
+averaged over 0.1 to 0.3 ms: heat is released lean of the stoichiometric
+mixture fraction (0.51), where the mixture is hottest
+(`tools/docs/runs.py conditional`).*
+
+## Convergence: `[statistics.convergence]`
+
+```toml
+[statistics]
+fields = ["U_X", "U_Y", "U_Z", "P"]
+products = ["U_X*U_X", "U_X*U_Y"]
+interval = 10
+
+[statistics.convergence]
+signals = ["wall_integral_TAU_WALL_X", "integrals_kinetic_energy"]
+tolerance = 0.01                    # converged at +-1% of the means
+
+[[triggers]]
+name = "developed"
+when = "convergence_stationary"     # the initial transient has ended
+do = "start statistics"
+
+[[triggers]]
+name = "converged"
+when = "convergence_converged"      # every interval within the tolerance
+do = "stop"
+```
+
+*Used in:* [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence).
+
+Answers two questions every averaging run asks: when has the initial
+transient ended, and how close are the averages to their long-time values?
+It follows monitored values, those [triggers](running.md#triggers) read
+(`[integrals]`, `[[forces]]`, reductions of `[[probes]]` and probes of one
+point, with the same names), one sample each time the monitor writes one.
+
+- **End of the transient**: MSER-5 (White 1997) on each signal: the start
+  that minimizes the standard error of the mean of what remains, over the
+  first half of the series; a minimum at the end of that half means the
+  signal still drifts. MSER-5 runs again each time a signal's series has
+  grown by 5%. Once it has accepted a start for every signal, the run is
+  *stationary* (and stays so), from the latest start, `t_stationary`. A
+  longer series can show that a slow transient lasted longer: each accepted
+  start replaces the previous one, and `t_stationary` moves with it.
+- **Confidence intervals** on the mean and on the variance of each signal, of
+  the samples after `t_stationary` (and, once the `[statistics]` averages
+  run, after their start, so the intervals are those of the samples the
+  averages cover): non-overlapping batch means (Schmeiser 1982) with
+  Student's t, which account for the samples' correlation in time; the
+  variance is the mean of `(x - mean)^2`.
+- **Integrated autocorrelation time** `tau` (in samples, by Sokal's automatic
+  window) and the effective sample size `n_eff = samples / tau`: how many
+  independent samples the run holds.
+- **Converged** (with `tolerance`): stationary, every interval within
+  `tolerance` times the mean (and `variance_tolerance` times the variance),
+  and every batch at least 10 `tau` long, so the batch means are nearly
+  independent and the intervals trustworthy.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `signals` | none | Monitored values, named as in [triggers](running.md#triggers) |
+| `confidence` | 0.95 | Confidence of the intervals |
+| `batches` | 20 | Batches of the batch means (10 to 30 is usual) |
+| `tolerance` | none | Converged when every mean's half width is within this fraction of the mean |
+| `variance_tolerance` | none | And every variance's within this fraction of the variance |
+| `min_samples` | 100 | Samples of a signal before MSER-5 is tried |
+| `file` | `convergence.csv` | Output CSV, a row each time a signal has a new sample |
+
+The values, a row of `file` and the monitor `convergence` of the run record,
+are `stationary` (0 or 1), `t_stationary`, `converged` (with `tolerance`) and,
+per signal, `<signal>_mean`, `_ci` (the half width), `_variance`,
+`_variance_ci`, `_tau`, `_n_eff` and `_samples`; they are NaN before the run
+is stationary. Triggers read them as `convergence_<value>`, e.g.
+`convergence_stationary`, `convergence_integrals_kinetic_energy_ci`: start
+the statistics or stop the run with them, as above, or with a tolerance of
+your own (`convergence_forces_cylinder_Fy_pressure_ci < 1e-3` for a mean near
+zero, where a relative tolerance means nothing). Restart files carry the
+histories, so a continued run keeps them.
+
+- Pick signals that settle with the statistics you want: a wall shear stress
+  integral for a channel, a force for a bluff body. Integrals over the whole
+  domain converge faster than any point; a point probe is the strict test.
+- Samples equally spaced in time (a probe's `time_interval`) are best: a
+  sample is a sample, whatever time separates it from the last.
+- The statistics start when the trigger fires, after the transient has been
+  detected, not at `t_stationary`: what came before was not kept.
+- Costs nothing on the device: the analysis runs on the host each time a
+  signal has a new sample, on every rank alike.
+
 ## See also
 
-- [Input reference: `[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase)
+- [Input reference: `[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[statistics.conditional]]`](../input.md#statisticsconditional)
 - [Large-eddy simulation](les.md): turbulent inflow and the dissipation budget
 - [Probes and monitors](probes.md): samples and reductions of the instantaneous solution
 - [Units](output.md#units) of `MEAN_`, `COV_`, `RMS_`, `FAVRE_` and `PHASE_` fields and of spectra

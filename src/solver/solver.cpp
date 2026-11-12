@@ -11,6 +11,7 @@
 
 #include "solver.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -127,7 +128,7 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
             std::vector<std::string> skipped;
             const std::string run_log = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
             const FoundRestart found = newest_restart(prefixes, skipped, run_log);
-            for (const std::string & reason : skipped) logging::warning(reason + " Skipped by --restart latest.");
+            for (const std::string & reason : skipped) logging::warning(diagnostic_code::RESTART_SKIPPED, reason + " Skipped by --restart latest.");
             file = found.file;
             if (!file.empty()) {
                 logging::line("--restart latest: " + file + " (step " + std::to_string(found.step) + ", t = " +
@@ -170,7 +171,7 @@ int Solver::init(const Input & input_in) {
     input_from_file = false;
     deprecated_keys = input_upgrade::apply(input);
     if (!check_only) {
-        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+        for (const auto & finding : deprecated_keys) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
     try {
@@ -188,8 +189,10 @@ int Solver::init(const Input & input_in) {
         if (!unused.empty()) {
             std::string list;
             for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            throw InputError("keys that are unknown or unused with these settings (mallard check lists them all):" +
+            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
                              list);
+            error.code = diagnostic_code::KEY_UNUSED;
+            throw error;
         }
     }
     const ResolvedInput resolved = resolve_input(input);
@@ -243,9 +246,13 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh, derived_selection, is_distributed() && halo.uses_nccl());
         init_rhs_split();
         used_regions = std::make_unique<region::Regions>(input, *mesh);
+        statistics.init(input, species_names, *mesh, derived_selection,
+                        {.chemistry = reacting,
+                         .regions = used_regions.get(),
+                         .distributed = is_distributed(),
+                         .nccl = halo.uses_nccl()});
         init_sources(*used_regions);
         init_sponges(*used_regions);
         init_mesh_fields();
@@ -254,6 +261,8 @@ void Solver::setup_from_input() {
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
+    setup_check_json.clear();
+    if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
     if (!check_only) used_regions.reset();
     // glibc keeps what the setup freed in its arenas; hand it back to the system
@@ -305,6 +314,7 @@ void Solver::write_provenance() {
         .raw("placement", provenance::placement())
         .raw("setup_phases", setup_phases.str())
         .raw("units", progress_units());
+    if (!setup_check_json.empty()) start.raw("check", setup_check_json);
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
         json::Object restart;
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
@@ -1458,6 +1468,15 @@ void Solver::init_numerics() {
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
+    static const std::map<std::string, CentralFlux> central_fluxes = {
+        {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
+    // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
+    const std::string central =
+        find_value_or<std::string>(hybrid_input, "central", teno ? "cell_averages" : "reconstructed");
+    if (!central_fluxes.contains(central)) {
+        throw not_accepted(hybrid_input, "numerics.hybrid.central", central, {"cell_averages", "reconstructed"});
+    }
+    hybrid_central = central_fluxes.at(central);
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError({.key = "numerics.hybrid",
                           .line = line_of(hybrid_input),
@@ -1836,6 +1855,9 @@ std::string Solver::progress_units() const {
     u.raw("margins", object({{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}));
     if (integral_monitor.interval > 0) u.raw("integrals", object(integral_columns()));
     for (const auto & monitor : force_monitors) u.raw("forces_" + monitor.zone, object(force_columns(monitor.modeled)));
+    json::Object by_probe;
+    for (const auto & [name, columns] : probes.recorded_columns()) by_probe.raw(name, object(columns));
+    if (!by_probe.empty()) u.raw("probes", by_probe.str());
     return u.str();
 }
 
@@ -2140,7 +2162,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
-    for (const auto & name : statistics.variables()) names.push_back(name);
+    for (const auto & name : statistics.restart_variables()) names.push_back(name);
     return names;
 }
 
@@ -2235,6 +2257,7 @@ int Solver::run_loop() {
             const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
+            update_convergence();
             t_wall_output += output_timer.seconds();
         }
         print_progress();
@@ -2336,6 +2359,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     write_integrals();
     // Probes first, so that triggers read this step's values and restarts carry their state
     write_probes();
+    update_convergence();
     act_on_triggers();
     write_data();
     if (checkpoint_requested) write_checkpoint();
@@ -2504,7 +2528,9 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
             if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+        if (!convergence.last().name.empty()) status.monitored.push_back(convergence.last());
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
+        status.probes = probes.recorded();
         run_log::write(status.record());
     }
 
@@ -2559,7 +2585,10 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        logging::item("Convective flux", "hybrid: KEEP central, Riemann solver where the compression sensor exceeds " +
+        logging::item("Convective flux", std::string("hybrid: KEEP central on the ") +
+                                             (hybrid_central == CentralFlux::CELL_AVERAGES ? "cell values"
+                                                                                            : "reconstructed states") +
+                                             ", Riemann solver where the compression sensor exceeds " +
                                              real(double(hybrid_threshold)) + " (upwind floor " +
                                              real(double(hybrid_floor)) + ")");
     }
@@ -2626,6 +2655,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
     logging::items(statistics.summary());
     logging::items(probes.summary());
+    logging::items(convergence.summary());
     logging::items(triggers.summary());
 }
 
@@ -2680,6 +2710,7 @@ void Solver::print_summary(const RunEnd & end) const {
     }
     for (const auto & monitor : force_monitors) s.files.push_back({"forces", 0, monitor.file});
     if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
+    if (convergence.enabled()) s.files.push_back({"convergence", 0, convergence.file_name()});
     for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
     report::Text text(logging::color_stdout());
     summary_section(text, s);
@@ -2745,6 +2776,7 @@ RestartAttributes Solver::restart_attributes() const {
         if (!name.empty()) attributes.emplace_back(name, static_cast<double>(writer->snapshots_written()));
     }
     for (const auto & a : triggers.attributes()) attributes.push_back(a);
+    for (const auto & a : convergence.attributes()) attributes.push_back(a);
     return attributes;
 }
 
@@ -2799,6 +2831,7 @@ void Solver::sample_statistics() {
     } else {
         update_primitives();
     }
+    if (statistics.samples_chemistry()) update_heat_release_rate();
     statistics.sample(step, t, cell_sampler(), mesh->n_owned());
 }
 
@@ -2839,6 +2872,7 @@ void Solver::sample_probe_averages() {
 RestartArrays Solver::restart_arrays() const {
     RestartArrays arrays = statistics.arrays();
     for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
+    for (auto && a : convergence.arrays()) arrays.push_back(std::move(a));
     return arrays;
 }
 
@@ -3354,12 +3388,14 @@ void Solver::update_velocity_gradients() {
 void Solver::update_cell_W() {
     halo.exchange(state());
     update_boundary_states(t);
+    if (is_mixture()) {
+        update_cell_states_and_primitives();
+        return;
+    }
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
-        update_cell_states(state(), false);
-    } else Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);

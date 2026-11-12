@@ -24,7 +24,7 @@ python3 -m venv .venv
 .venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy, and a build with `-DMallard_ENABLE_PYTHON=ON`: `.venv/bin/pip install -e tools`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -435,7 +435,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/feature_matrix.py [--check]` | The [feature matrix](../docs/guide/features.md): each pair of features marked validated, verified, implemented, rejected or untested, from the input guards in `src/`, the example cards' `validation` entries, `docs/verification/results.json`, `test/features.toml` and the support matrix; `--check` fails on a stale page or an inconsistent record (first job of `ci.yml`); standard library only |
 | `docs/python_api.py [--check]` | The [Python API](../docs/guide/python_api.md) reference, from the package's docstrings (read with `ast`, without importing it); `--check` fails on a stale page (first job of `ci.yml`); standard library only |
-| `docs/python.py --mallard build/src/mallard` | The figure of the [Python](../docs/guide/python.md) page, drawn with the package from the Sod example (a build with `-DMallard_ENABLE_PYTHON=ON`; `make_figures.py` runs it) |
+| `docs/python.py --mallard build/src/mallard` | The figure of the [Python](../docs/guide/python.md) page, drawn with the package from the Sod example (a build with HDF5; `make_figures.py` runs it) |
 | `docs/used_in.py [--check]` | The "Used in" line of each feature section of the user guide, from the example inputs; `--check` fails on stale lines (first job of `ci.yml`); standard library only |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |

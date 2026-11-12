@@ -123,8 +123,9 @@ Commands:
     mallard post derive       Derived fields of existing output (MACH, P0,
                               Q_CRITERION, ...), as the run would have written
                               them
-    mallard post average      Means, RMS, Reynolds and Favre covariances over
-                              saved snapshots, as [statistics] keeps them
+    mallard post average      Means, RMS, covariances, PDFs and conditional
+                              statistics over saved snapshots, as [statistics]
+                              keeps them
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -586,12 +587,16 @@ Usage: mallard list fields [INPUT] [--format text|json]
 
 Without an input file, lists every field the [[write_data]], [[probes]] and
 [statistics] fields take, by group, with its units, its description and what a
-case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).
+case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>, ...). Its
+"available in" column says where each one can be had: written by [[write_data]],
+sampled by [[probes]], averaged by [statistics], or derived after the run by
+mallard post derive.
 
 With an input file, sets the case up as mallard check does (reading its mesh,
 writing nothing) and lists exactly the fields [[write_data]] fields accept for
-it: its species, its physics, chemistry, LES and statistics, and its dimension;
-then the common fields it does not have, with what they need.
+it: its species, its physics, chemistry, LES and statistics, and its dimension,
+with where each one can be had; then the common fields it does not have, with
+what they need.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),
@@ -841,8 +846,9 @@ Commands:
   mallard post derive         Derived fields of existing output (MACH, P0,
                               Q_CRITERION, ...), as the run would have written
                               them
-  mallard post average        Means, RMS, Reynolds and Favre covariances over
-                              saved snapshots, as [statistics] keeps them
+  mallard post average        Means, RMS, covariances, PDFs and conditional
+                              statistics over saved snapshots, as [statistics]
+                              keeps them
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -1033,6 +1039,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]
        mallard post average FILE... --homogeneous DIRS [--region REGION]
+       mallard post average FILE... --conditional TABLE
        mallard post average FILE --statistics --homogeneous DIRS
 
 Sets up the case of a series of restart files or snapshots and averages their
@@ -1042,7 +1049,10 @@ square root of a variance) and with --favre the Favre means and covariances.
 Each snapshot weighs the time since the previous one, as a run's samples do, so
 restart files at the run's sampling steps, with --t-start at its t_start, give
 the run's averages bit for bit. --fields takes what [statistics] fields takes,
-derived fields included (mallard list fields).
+derived fields included (mallard list fields), and in reacting runs HRR and
+OMEGA_<species>. --conditional adds the PDFs and conditional statistics of
+[[statistics.conditional]], such as conditional means on the mixture fraction,
+written as CSV.
 
 The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a
 run writes its [statistics]. --homogeneous averages them further over directions
@@ -1083,6 +1093,14 @@ Options:
                          instead of a snapshot. Covariances include the
                          dispersive part, the spatial variation of the time
                          means. Default: none.
+  --conditional TABLE    Also the PDF of one or two variables and conditional
+                         means and variances of fields on them, as an inline
+                         TOML table or an array of them, as
+                         [[statistics.conditional]] takes them ({on =
+                         "MIXTURE_FRACTION", fields = ["T", "HRR"]}), written to
+                         OUTPUT/conditional_<on>.csv unless the table gives a
+                         file. Without --fields and --products, only these.
+                         Default: none.
   --statistics           Average over --homogeneous directions the [statistics]
                          fields (MEAN_, COV_) that one snapshot of FILE holds,
                          instead of averaging its states in time.
@@ -1130,6 +1148,8 @@ Examples:
   $ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre
   $ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z
   $ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z
+  $ mallard post average solut/flame.vtkhdf.series --conditional \
+        '{on = "MIXTURE_FRACTION", fields = ["T", "HRR"], weight = "mass"}'
 
 Exit status:
   0  the averages were written

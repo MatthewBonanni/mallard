@@ -16,6 +16,7 @@ add_library(MallardCore STATIC
     common/case_template.cpp
     common/growing_buffer.cpp
     common/json.cpp
+    common/diagnostic_code.cpp
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
@@ -65,8 +66,10 @@ add_library(MallardCore STATIC
     physics/physics.cpp
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
+    solver/conditional_statistics.cpp
     solver/chemistry_benchmark.cpp
     solver/conservation_ledger.cpp
+    solver/statistical_convergence.cpp
     solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
