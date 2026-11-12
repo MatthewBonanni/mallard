@@ -11,6 +11,9 @@
 #include "cli.h"
 
 struct CheckReport;
+namespace json {
+struct Value;
+}
 
 /** @brief `mallard -i input.toml`: runs a case. */
 int run_main(const cli::Args & args);
@@ -43,6 +46,12 @@ int list_species_main(const cli::Args & args);
 /** @brief `mallard list keys [SECTION] [INPUT]`: the input keys there are, or those of a case. */
 int list_keys_main(const cli::Args & args);
 
+/**
+ * @brief The key catalog of every example and tutorial (docs/input-keys.json, as tools/dev/input_catalog.py merges
+ *        it), from Mallard's data directories. @throws std::runtime_error if none has it
+ */
+json::Value general_key_catalog();
+
 /** @brief `mallard list templates`: the case templates of mallard new. */
 int list_templates_main(const cli::Args & args);
 
@@ -55,11 +64,22 @@ int extract_main(const cli::Args & args);
 /** @brief The work of `mallard post extract`, with MPI and Kokkos started (tests call it). */
 int post_extract(const cli::Args & args);
 
+/** @brief `mallard post derive FILE...`: snapshots of derived fields of existing output. */
+int derive_main(const cli::Args & args);
+
+/** @brief The work of `mallard post derive`, with MPI and Kokkos started (tests call it). */
+int post_derive(const cli::Args & args);
 /** @brief `mallard post convergence RUN...`: observed order, Richardson extrapolation and GCI. */
 int convergence_main(const cli::Args & args);
 
 /** @brief The work of `mallard post convergence`, with Kokkos started (tests call it). */
 int post_convergence(const cli::Args & args);
+
+/** @brief `mallard post average FILE...`: statistics over saved snapshots. */
+int average_main(const cli::Args & args);
+
+/** @brief The work of `mallard post average`, with MPI and Kokkos started (tests call it). */
+int post_average(const cli::Args & args);
 
 /** @brief `mallard pack RUN_DIR`: one archive that reproduces a run; `--verify ARCHIVE` checks one. */
 int pack_main(const cli::Args & args);

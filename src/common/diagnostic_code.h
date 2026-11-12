@@ -1,6 +1,6 @@
 /**
  * @file diagnostic_code.h
- * @brief The codes of every warning and error Mallard reports, from mallard check and from runs: stable, errors
+ * @brief The codes of every warning and error Mallard reports, from mallard check, runs and the other commands: stable, errors
  *        "E-" and warnings "W-", each explained in the docs at the anchor docs() gives.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -64,6 +64,21 @@ inline constexpr const char * RUN_REPORT = "W-RUN-REPORT";
 inline constexpr const char * EXTRACT_AVERAGED = "W-EXTRACT-AVERAGED";
 inline constexpr const char * PACK_RERUN = "W-PACK-RERUN";
 
+// The other commands
+inline constexpr const char * USAGE = "E-USAGE";            // an unknown command or option, a missing or bad argument
+inline constexpr const char * DIMENSION = "E-DIMENSION";    // the front end cannot pick mallard2d or mallard3d
+inline constexpr const char * EXECUTABLE = "E-EXECUTABLE";  // a solver or test suite missing or not runnable
+inline constexpr const char * ONE_RANK = "E-ONE-RANK";      // a single-rank command under mpirun
+inline constexpr const char * INFO = "E-INFO";
+inline constexpr const char * LIST = "E-LIST";
+inline constexpr const char * DIFF = "E-DIFF";
+inline constexpr const char * MESH_CONVERT = "E-MESH-CONVERT";
+inline constexpr const char * INPUT_UPGRADE = "E-INPUT-UPGRADE";
+inline constexpr const char * EXTRACT = "E-EXTRACT";
+inline constexpr const char * CONVERGENCE = "E-CONVERGENCE";
+inline constexpr const char * PACK = "E-PACK";
+inline constexpr const char * OPTION_DEPRECATED = "W-OPTION-DEPRECATED";
+
 /** @brief A code and the page that explains it, at the anchor of its lowercase name. */
 struct Entry {
     const char * code;
@@ -74,7 +89,7 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 44> ALL = {{
+inline constexpr std::array<Entry, 57> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
     {REGION_OUTSIDE, CHECK_PAGE}, {PROBE_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
@@ -88,6 +103,9 @@ inline constexpr std::array<Entry, 44> ALL = {{
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
     {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
     {PACK_RERUN, RUN_PAGE},
+    {USAGE, RUN_PAGE}, {DIMENSION, RUN_PAGE}, {EXECUTABLE, RUN_PAGE}, {ONE_RANK, RUN_PAGE}, {INFO, RUN_PAGE},
+    {LIST, RUN_PAGE}, {DIFF, RUN_PAGE}, {MESH_CONVERT, RUN_PAGE}, {INPUT_UPGRADE, RUN_PAGE}, {EXTRACT, RUN_PAGE},
+    {CONVERGENCE, RUN_PAGE}, {PACK, RUN_PAGE}, {OPTION_DEPRECATED, RUN_PAGE},
 }};
 
 /** @brief The warning of each mesh-quality metric, in MeshQuality's order. */

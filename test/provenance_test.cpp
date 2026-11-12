@@ -429,6 +429,45 @@ TEST(ProvenanceTest, RecordsTheFilesTheRunRead) {
     std::filesystem::remove_all(dir);
 }
 
+// mallard -i ... --log-format jsonl: a progress record per progress row, one JSON object per line, also without
+// mallard.jsonl and report.html
+TEST(RunLogTest, ProgressRecordsStreamOneObjectPerLine) {
+    const std::string dir = (scratch_dir() / "mallard_run_log_stream").string();
+    const std::string input = dir + "/input.toml";
+    if (comm::is_root()) {
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        std::string text = box(dir, 4, UNIFORM, false);
+        const std::string run_log = "run_log = \"" + dir + "/run.jsonl\"\n";
+        text.replace(text.find(run_log), run_log.size(), "run_log = \"\"\nreport = \"\"\n");
+        std::ofstream(input) << text;
+    }
+    comm::barrier();
+    std::ostringstream stream;
+    run_log::stream_progress(&stream);
+    {
+        Solver solver;
+        solver.init(input);
+        solver.run();
+    }
+    run_log::stream_progress(nullptr);
+    comm::barrier();
+    if (!comm::is_root()) {
+        EXPECT_EQ(stream.str(), "");
+        return;
+    }
+    EXPECT_FALSE(std::filesystem::exists(dir + "/run.jsonl"));
+    std::vector<double> steps;
+    std::istringstream in(stream.str());
+    for (std::string line; std::getline(in, line);) {
+        const Value record = json::parse(line);
+        EXPECT_EQ(record["type"].string, "progress") << line;
+        EXPECT_TRUE(record["monitors"].has("min_rho")) << line;
+        steps.push_back(record["step"].number);
+    }
+    EXPECT_EQ(steps, (std::vector<double>{0, 2, 4}));
+}
+
 TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
     const std::string dir = (scratch_dir() / "mallard_run_log_resume").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
