@@ -1,0 +1,5 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "3d"
+demonstrates = ["prism boundary layer", "unsteady wake", "wall forces"]
+validation = [{anchor = "sphere-re300", regime = "unsteady sphere wake at Re = 300 and Mach 0.2, against published forces and Strouhal numbers"}]

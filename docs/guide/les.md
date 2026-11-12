@@ -14,8 +14,8 @@ parts that work together:
    reactor (PaSR).
 
 Turbulent inflow comes from [synthetic turbulence at characteristic
-inlets](boundary_conditions.md#synthetic-turbulence), and statistics from
-[running averages and probes](output.md#statistics).
+inlets](boundary_conditions.md#synthetic-turbulence-turbulence), and statistics from
+[running averages](statistics.md) and [probes](probes.md).
 
 ## A minimal LES
 
@@ -28,24 +28,30 @@ type = "navier_stokes"     # LES needs navier_stokes
 model = "sigma"            # the default in 3D
 
 [numerics]
-riemann_solver = "HLLC"
-convective_flux = "hybrid" # central where smooth, HLLC at shocks
-
-[numerics.face_reconstruction]
-type = "TENO"
-order = 5
+preset = "les"             # hybrid flux: central where smooth, HLLC at
+                           # shocks; unlimited MUSCL states; CFL 0.8
 
 [integrals]
 budget = true              # model vs numerical dissipation in integrals.csv
 ```
 
-This is the setup of the `channel_les` and `cbc_les` examples: the channel at
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
+The `les` [preset](numerics.md#presets), second order (MUSCL), is the setup of the `channel_les`
+and `cbc_les` examples: the channel at
 Re<sub>τ</sub> = 395 and 590 lands within 0.7% and 1.6% of the DNS
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-channel)),
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-channel)),
 decaying grid turbulence within the measured spectra
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-cbc)).
 
 ## Subgrid-scale models: `[les]`
+
+```toml
+[les]
+model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
+```
+
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 | `model` | Eddy viscosity vanishes for | Use |
 |---|---|---|
@@ -61,6 +67,7 @@ decaying grid turbulence within the measured spectra
 | `Pr_t`, `Sc_t` | 0.9, 0.9 | Turbulent Prandtl and Schmidt numbers |
 | `filter_width` | `scotti` (3D), `volume` (2D) | `scotti` corrects `V^(1/3)` for anisotropic cells; `volume` is `V^(1/d)` |
 | `dynamic` | `false` | Constant from the global dynamic procedure (Germano/Lilly), once per step; written to `integrals.csv` as `les_C` |
+| `gradients` | `least_squares` | (TENO) `reconstruction`: the models' velocity gradients from TENO's central polynomials in its smooth cells; [below](#gradients-of-the-reconstruction) |
 
 Pitfalls:
 
@@ -72,18 +79,61 @@ Pitfalls:
   runs (not `axisymmetric`). Wall faces keep their molecular fluxes.
 - Output `MU_T` (the eddy viscosity) to see where the model acts.
 
+### Gradients of the reconstruction
+
+The models compute the eddy viscosity from the resolved velocity gradient. By
+default that is the least-squares gradient on the face neighbors, second
+order, which reads the smallest resolved scales as almost uniform: on the
+coarse meshes of decaying isotropic turbulence it halves Sigma's eddy
+viscosity, and the flow keeps too much energy near the cutoff. With TENO,
+`gradients = "reconstruction"` takes the gradient of TENO's central polynomial
+instead (exact for polynomials of degree `order - 1`), in the cells TENO finds
+smooth; troubled cells and the viscous fluxes keep the least-squares one.
+
+```toml
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[les]
+model = "sigma"
+gradients = "reconstruction"
+```
+
+The reconstruction computes the gradients in its own pass over the stencil,
+for about 7% more time per step with TENO5 in 3D. The key is experimental: it
+improves decaying isotropic turbulence at $32^3$ but makes it worse at $64^3$,
+where the least-squares gradient's lower eddy viscosity is closer to what the
+flow needs. PaSR's mixing time and the
+thickened flame's efficiency take the eddy viscosity, so they follow. With
+MUSCL or first order, the key is an error (their gradient is the least-squares
+one already). What it does to decaying isotropic turbulence, and why:
+[theory](../theory/les.md#resolution-of-the-reconstructions-and-the-models-gradients)
+and [design notes](../design/les.md#31-order-aware-models-660).
+
 ## Low-dissipation flux and the budget
+
+```toml
+[numerics]
+convective_flux = "hybrid"
+
+[integrals]
+budget = true      # the model's, the scheme's and molecular dissipation
+```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 Upwind Riemann solvers dissipate kinetic energy at the grid scale, the very
 scales the SGS model is meant to handle. `convective_flux = "hybrid"` uses the
 kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the
-reconstructed states and blends in the Riemann solver only where a Ducros
+reconstructed states (the cells' values with TENO) and blends in the Riemann solver only where a Ducros
 shock sensor (restricted to compressions) fires:
 
 | `[numerics.hybrid]` key | Default | Meaning |
 |---|---|---|
 | `sensor_threshold` | 0.65 | Sensor value above which a compressing cell is a shock (1 disables the Riemann solver) |
 | `upwind_floor` | 0 | Upwind fraction everywhere else; 0.05 damps grid-scale noise on very irregular meshes |
+| `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy, and so do MUSCL's with no viscosity or model to remove it (Euler: set `cell_averages`) ([design](../design/les.md#44-central-flux-for-teno-689)) |
 
 `[integrals] budget = true` adds the kinetic-energy budget to
 `integrals.csv`: `-ke_rate_viscous` (molecular), `-ke_rate_sgs` (model) and
@@ -97,6 +147,18 @@ times the Riemann solver's), and `hybrid` does not combine with
 
 ## Thickened flames: `[les.combustion]`
 
+```toml
+[les.combustion]          # examples/flame_turbulence/les.toml: stoichiometric H2/air
+model = "tfles"
+delta_L = 3.3013976e-4    # laminar thermal thickness [m], from Cantera
+s_L = 2.3323744           # laminar flame speed [m/s]
+T_unburnt = 300.0
+T_burnt = 2384.28
+# n_res = 5               # cells across the thickened flame (default)
+```
+
+*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+
 Premixed flames are thinner than LES cells. The dynamically thickened flame
 model (TFLES; Colin et al. 2000, Légier et al. 2002) multiplies diffusivities
 by `E F` and reaction rates by `E / F` inside the flame, so it spans `n_res`
@@ -107,16 +169,6 @@ a test filter removes, so there is no model constant. A sensor `Ω` confines it 
 
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-light.svg#gh-light-mode-only)
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-dark.svg#gh-dark-mode-only)
-
-```toml
-[les.combustion]          # examples/flame_turbulence/les.toml: stoichiometric H2/air
-model = "tfles"
-delta_L = 3.3013976e-4    # laminar thermal thickness [m], from Cantera
-s_L = 2.3323744           # laminar flame speed [m/s]
-T_unburnt = 300.0
-T_burnt = 2384.28
-# n_res = 5               # cells across the thickened flame (default)
-```
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -131,7 +183,7 @@ T_burnt = 2384.28
 
 Output: `TF_F`, `TF_E`, `TF_OMEGA`, and `tf_beta` in the integrals file. Validated on a premixed H2/air flame in
 decaying turbulence against its DNS
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
 The dynamic efficiency keeps the turbulent flame speed within 8% of two DNS
 at cells of 0.4–1.6 `delta_L`. Pitfalls: `beta`, `subgrid_velocity` and `C_u`
 are input errors with `dynamic` (they belong to `charlette`); with
@@ -140,13 +192,56 @@ are input errors with `dynamic` (they belong to `charlette`); with
 
 ### PaSR (experimental)
 
+```toml
+[les.combustion]
+model = "pasr"
+```
+
+*Used in:* no example yet.
+
 `model = "pasr"`: the partially stirred reactor (Sabelnikov & Fureby 2013) for
 non-premixed and partially premixed flames. No thickening; each cell's rates
 are scaled by its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`,
 `tau_mix = C_mix Delta^2 / (nu + nu_t)` (key `C_mix`, default 1; output
 `PASR_KAPPA`). It corrects the right way at moderate filter widths and
 overcorrects on coarse meshes; validated on one case only
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-pasr)).
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-pasr)).
+
+## Wall models: `wall_model`
+
+```toml
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 1.0
+wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
+```
+
+*Used in:* [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+
+Wall-modeled LES resolves only the outer layer: a wall gets its shear stress
+and heat flux from a model fed by the LES state at an exchange point a height
+`h` above each wall face, so the first cell need not be at y<sup>+</sup> ~ 1.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `model` | `gfm` | `gfm`: Griffin, Fu & Moin (2023), inverse velocity transformation + generalized Reynolds analogy (isothermal and adiabatic walls); `equilibrium`: equilibrium ODE model (any wall) |
+| `exchange_distance` / `exchange_cells` | (one required) | `h`, absolute or in wall-cell heights |
+| `edge_distance` | (required by `gfm`) | Where the edge velocity and temperature are sampled: a channel's half-height, the boundary-layer thickness |
+| `kappa`, `A_plus`, `Pr_t`, `s` | 0.41, 17, 0.9, 1.14 | Model constants |
+
+Pitfalls:
+
+- **Exchange height.** Use `h` of at least about 3 cells and within the inner
+  layer (0.1–0.3 of the boundary-layer thickness): the first cells' state is
+  under-resolved (Kawai & Larsson's log-layer mismatch).
+- **Partitions.** Exchange and edge points must be on the rank that owns the
+  wall face or in its halo; the halo deepens until they are, which is costly
+  when a partition boundary runs parallel to a wall within `h` (or
+  `edge_distance`) of it.
+- Single gases only (mixtures after isothermal mixture walls), not
+  `axisymmetric`. `[[forces]]` of modeled zones report the modeled stress
+  and add a column `Q`, the heat flux into the fluid.
 
 ## Examples
 
@@ -154,11 +249,12 @@ overcorrects on coarse meshes; validated on one case only
 |---|---|
 | `cbc_les` | Decaying isotropic turbulence, Sigma + hybrid flux, 32³ to 128³ |
 | `channel_les` | Wall-resolved channel at Re<sub>τ</sub> = 395 and 590 |
+| `channel_wmles` | Wall-modeled channels: Re<sub>τ</sub> = 2000, 5200 and supersonic isothermal walls (M<sub>b</sub> = 1.7, 3.0) |
 | `volvo_bluff_body` | Bluff-body combustor with synthetic inflow and NSCBC outlet |
 | `flame_turbulence` | Premixed flame in turbulence: DNS and TFLES |
 
 ## See also
 
 - [Input reference: `[les]`](../input.md#les), [`[les.combustion]`](../input.md#lescombustion), [`[numerics.hybrid]`](../input.md#numericshybrid)
-- [Validation: large-eddy simulation](https://matthewbonanni.github.io/mallard/validation/#les)
-- Design notes: [large-eddy simulation](../design/les.md)
+- [Benchmarks: large-eddy simulation](https://matthewbonanni.github.io/mallard/validation/#les)
+- Design notes: [large-eddy simulation](../design/les.md), [wall models](../design/wall_model.md)

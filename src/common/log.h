@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "common_io.h"
+
 #if defined(__GNUC__) || defined(__clang__)
 #define MALLARD_PRINTF(fmt, args) __attribute__((format(printf, fmt, args)))
 #else
@@ -42,6 +44,8 @@ std::string format(const char * fmt, ...) MALLARD_PRINTF(1, 2);
  * @brief Wraps text in an ANSI style when stdout gets color, else returns it unchanged.
  */
 std::string style(std::string_view text, Style s);
+/** @brief As style, with color when on whatever stdout is (text rendered for later, or for a test). */
+std::string style(std::string_view text, Style s, bool on);
 
 /**
  * @brief Whether to color stdout (stderr): a terminal, NO_COLOR unset and not under an MPI
@@ -67,6 +71,12 @@ void item(std::string_view key, std::string_view value);
 void items(const Items & list);
 
 /**
+ * @brief Columns under a section: a header row, then one row per entry, each column as wide
+ *        as its widest cell.
+ */
+void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows);
+
+/**
  * @brief Starts a line naming a setup phase; end_phase() completes it with the elapsed time.
  *        Anything printed in between first ends the open line.
  */
@@ -74,24 +84,54 @@ void begin_phase(std::string_view name);
 void end_phase(double seconds);
 
 /**
- * @brief One-line event during the run (e.g. a file written), led by the step and time
- *        so it lines up with the progress table.
+ * @brief An event during the run that is not a file written (a checkpoint or stop requested, a setting
+ *        changed, a divergence): a remark line between the progress rows, "  >> step 1200, t = 0.012 s:
+ *        stop: STOP file"; also an event record of the run log, with the fields given as (key, JSON text)
+        after its own.
  */
-void event(uint64_t step, double t, std::string_view kind, std::string_view text);
+void event(uint64_t step, double t, std::string_view kind, std::string_view text,
+           const std::vector<std::pair<std::string, std::string>> & fields = {});
 
 /**
- * @brief Warning on stderr from rank 0, for conditions every rank sees alike.
+ * @brief A file completely written during the run: an output record of the run log, which indexes every
+ *        file the run writes (path, kind, step, time, reason, run id, the writer: a [[write_data]] prefix or
+ *        a probe's file, and each file's size and SHA-256; a file with no record was not completely
+ *        written), counted for the progress table's written column (take_written), and a remark line too
+ *        when verbose.
  */
-void warning(std::string_view message);
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer, const std::vector<WrittenFile> & files);
+/** @brief written() of the one file at path, written on the main thread: sized and hashed now. */
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer);
+
+/** @brief The files written since the last call, by kind in the order first written: "16 vtu, 1 restart". */
+std::string take_written();
+/** @brief Whether files were written since the last take_written. */
+bool written_pending();
+
+/** @brief Remark lines for every file written (mallard -i ... --verbose). */
+void set_verbose(bool on);
 
 /**
- * @brief Error on stderr from the calling rank, prefixed with the rank in parallel runs.
+ * @brief Warning on stderr from rank 0, for conditions every rank sees alike: "warning W-CODE: message" and the
+ *        docs that explain the code (diagnostic_code::docs); also a record of the run log.
+ * @param code one of diagnostic_code::ALL
  */
-void error(std::string_view message);
+void warning(std::string_view code, std::string_view message);
+
+/**
+ * @brief Error on stderr from the calling rank, as warning, prefixed with the rank in parallel runs; also a record
+ *        of the run log (rank 0).
+ */
+void error(std::string_view code, std::string_view message);
+
+/** @brief The text warning and error print: "warning W-CODE: message" and the docs line, with or without color. */
+std::string diagnostic(bool is_error, std::string_view code, std::string_view message, bool color);
 
 /// 1234567 -> "1,234,567".
 std::string count(uint64_t n);
-/// Wall-clock duration: "850 us", "12.3 ms", "4.56 s", "12m 03s", "2h 05m".
+/// Wall-clock duration: "850 us" ("850 µs" in a UTF-8 locale), "12.3 ms", "4.56 s", "12m 03s", "2h 05m".
 std::string duration(double seconds);
 /// Value with an SI suffix and 3 significant digits: "16.3M", "1.20k".
 std::string si(double value);

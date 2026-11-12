@@ -1,0 +1,5 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "2d"
+demonstrates = ["finite-rate chemistry", "Strang splitting", "grid convergence"]
+validation = [{anchor = "reactive-shock-tube", regime = "shock-induced ignition turning into a detonation in H2/O2/Ar, under grid refinement"}]

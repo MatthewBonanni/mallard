@@ -1,0 +1,741 @@
+/**
+ * @file provenance.cpp
+ * @brief Provenance implementation.
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ */
+
+#include "provenance.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <random>
+#include <sstream>
+#include <type_traits>
+#include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <Kokkos_Core.hpp>
+#ifdef Mallard_HAS_HDF5
+#include <hdf5.h>
+#endif
+#ifdef Mallard_HAS_CGNS
+#include <cgnslib.h>
+#endif
+#ifdef Mallard_HAS_ZLIB
+#include <zlib.h>
+#endif
+#ifdef Mallard_HAS_NCCL
+#include <nccl.h>
+#endif
+
+#include "binding.h"
+#include "build_info.h"
+#include "comm.h"
+#include "common_typedef.h"
+#include "git_version.h"
+#include "input.h"
+#include "json.h"
+#include "log.h"
+#include "sha256_hw.h"
+#include "version.h"
+
+namespace provenance {
+
+namespace {
+
+uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+
+void compress_portable(std::array<uint32_t, 8> & h, const uint8_t * data) {
+    static constexpr std::array<uint32_t, 64> K = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    std::array<uint32_t, 64> w{};
+    for (size_t i = 0; i < 16; i++) {
+        w[i] = uint32_t(data[4 * i]) << 24 | uint32_t(data[4 * i + 1]) << 16 |
+               uint32_t(data[4 * i + 2]) << 8 | uint32_t(data[4 * i + 3]);
+    }
+    for (size_t i = 16; i < 64; i++) {
+        const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    std::array<uint32_t, 8> v = h;
+    for (size_t i = 0; i < 64; i++) {
+        const uint32_t s1 = rotr(v[4], 6) ^ rotr(v[4], 11) ^ rotr(v[4], 25);
+        const uint32_t ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
+        const uint32_t t1 = v[7] + s1 + ch + K[i] + w[i];
+        const uint32_t s0 = rotr(v[0], 2) ^ rotr(v[0], 13) ^ rotr(v[0], 22);
+        const uint32_t maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+        const uint32_t t2 = s0 + maj;
+        v = {t1 + t2, v[0], v[1], v[2], v[3] + t1, v[4], v[5], v[6]};
+    }
+    for (size_t i = 0; i < 8; i++) h[i] += v[i];
+}
+
+bool hash_stream(Sha256 & sha, const std::filesystem::path & path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in.good()) return false;
+    std::vector<char> buffer(size_t(1) << 20);
+    while (in) {
+        in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        sha.update(buffer.data(), static_cast<size_t>(in.gcount()));
+    }
+    return in.eof();
+}
+
+std::string build_block() {
+#ifdef Mallard_USE_DOUBLE
+    const char * precision = "double";
+#else
+    const char * precision = "single";
+#endif
+#ifdef Mallard_HAS_MPI
+    constexpr bool mpi = true;
+#else
+    constexpr bool mpi = false;
+#endif
+#ifdef Mallard_GPU_AWARE_MPI
+    constexpr bool gpu_aware_mpi = true;
+#else
+    constexpr bool gpu_aware_mpi = false;
+#endif
+#ifdef Mallard_HAS_NCCL
+    constexpr bool nccl = true;
+#else
+    constexpr bool nccl = false;
+#endif
+#ifdef Mallard_HAS_HDF5
+    constexpr bool hdf5 = true;
+#else
+    constexpr bool hdf5 = false;
+#endif
+#if defined(Mallard_HAS_HDF5) && defined(H5_HAVE_PARALLEL)
+    constexpr bool hdf5_parallel = true;
+#else
+    constexpr bool hdf5_parallel = false;
+#endif
+#ifdef Mallard_HAS_KAMINPAR
+    constexpr bool kaminpar = true;
+#else
+    constexpr bool kaminpar = false;
+#endif
+#ifdef Mallard_SPECIES_LAYOUT_LEFT
+    const char * species_layout = "left";
+#else
+    const char * species_layout = "right";
+#endif
+    json::Object b;
+    b.add("dim", N_DIM)
+        .add("precision", precision)
+        .add("build_type", MALLARD_BUILD_TYPE)
+        .add("compiler", MALLARD_COMPILER)
+        .add("cxx_flags", MALLARD_CXX_FLAGS)
+        .add("kokkos", logging::format("%d.%d.%d", KOKKOS_VERSION / 10000, KOKKOS_VERSION / 100 % 100,
+                                       KOKKOS_VERSION % 100))
+        .add("backend", std::string(Kokkos::DefaultExecutionSpace::name()))
+        .add("host_backend", std::string(Kokkos::DefaultHostExecutionSpace::name()))
+        .add("mpi", mpi)
+        .add("gpu_aware_mpi", gpu_aware_mpi)
+        .add("nccl", nccl)
+        .add("hdf5", hdf5)
+        .add("hdf5_parallel", hdf5_parallel)
+        .add("kaminpar", kaminpar)
+        .add("species_layout", species_layout);
+    return b.str();
+}
+
+std::string version_or_null(const std::string & v) { return v.empty() ? "null" : json::quote(v); }
+
+std::string dependencies_block() {
+    json::Object d;
+    d.add("compiler", MALLARD_COMPILER)
+        .add("kokkos", logging::format("%d.%d.%d", KOKKOS_VERSION / 10000, KOKKOS_VERSION / 100 % 100,
+                                       KOKKOS_VERSION % 100));
+    std::string mpi;
+#ifdef Mallard_HAS_MPI
+    char library[MPI_MAX_LIBRARY_VERSION_STRING] = {};
+    int length = 0, major = 0, minor = 0;
+    MPI_Get_library_version(library, &length);
+    MPI_Get_version(&major, &minor);
+    mpi = std::string(library, static_cast<size_t>(length));
+    while (!mpi.empty() && (mpi.back() == '\n' || mpi.back() == ' ' || mpi.back() == '\0')) mpi.pop_back();
+    mpi = mpi.substr(0, mpi.find('\n')) + logging::format(" (MPI %d.%d)", major, minor);
+#endif
+    d.raw("mpi", version_or_null(mpi));
+    std::string hdf5;
+#ifdef Mallard_HAS_HDF5
+    unsigned h_major = 0, h_minor = 0, h_release = 0;
+    if (H5get_libversion(&h_major, &h_minor, &h_release) >= 0) hdf5 = logging::format("%u.%u.%u", h_major, h_minor, h_release);
+#endif
+    d.raw("hdf5", version_or_null(hdf5));
+    std::string cgns;
+#ifdef Mallard_HAS_CGNS
+    cgns = logging::format("%d.%d.%d", CGNS_VERSION / 1000, CGNS_VERSION / 100 % 10, CGNS_VERSION / 10 % 10);
+#endif
+    d.raw("cgns", version_or_null(cgns));
+    std::string zlib;
+#ifdef Mallard_HAS_ZLIB
+    zlib = zlibVersion();
+#endif
+    d.raw("zlib", version_or_null(zlib));
+    std::string nccl;
+#ifdef Mallard_HAS_NCCL
+    int nccl_version = 0;
+    if (ncclGetVersion(&nccl_version) == ncclSuccess) nccl = std::to_string(nccl_version);
+#endif
+    d.raw("nccl", version_or_null(nccl));
+    std::string runtime, driver;
+#if defined(KOKKOS_ENABLE_CUDA)
+    int r = 0, v = 0;
+    if (cudaRuntimeGetVersion(&r) == cudaSuccess) runtime = logging::format("CUDA %d.%d", r / 1000, r % 1000 / 10);
+    if (cudaDriverGetVersion(&v) == cudaSuccess) driver = logging::format("CUDA %d.%d", v / 1000, v % 1000 / 10);
+#elif defined(KOKKOS_ENABLE_HIP)
+    int r = 0, v = 0;
+    if (hipRuntimeGetVersion(&r) == hipSuccess) runtime = "HIP " + std::to_string(r);
+    if (hipDriverGetVersion(&v) == hipSuccess) driver = "HIP " + std::to_string(v);
+#endif
+    d.raw("gpu_runtime", version_or_null(runtime)).raw("gpu_driver", version_or_null(driver));
+    return d.str();
+}
+
+std::string code_block() {
+    const std::string sha = MALLARD_GIT_SHA;
+    json::Object c;
+    c.add("version", mallard_version());
+    if (sha.empty()) {
+        c.raw("git_sha", "null").raw("git_dirty", "null");
+    } else {
+        c.add("git_sha", sha).add("git_dirty", bool(MALLARD_GIT_DIRTY));
+    }
+    return c.str();
+}
+
+/** @brief A file the run read: hashed (small), by the identity it carries (from a run), or by size and time. */
+struct ReadFile {
+    enum class How { HASHED, IDENTITY, SIZE } how = How::HASHED;
+    std::string kind, path;
+    std::string run_id, directory, run_log;  // IDENTITY: of the run that wrote it
+    std::uint64_t step = 0;
+    double t = 0.0;
+
+    static ReadFile of(How how, const std::string & kind, const std::string & path) {
+        ReadFile f;
+        f.how = how;
+        f.kind = kind;
+        f.path = path;
+        return f;
+    }
+};
+
+struct State {
+    std::string run;    // JSON object, or empty
+    std::string run_id;
+    std::string restart_of = "null";  // JSON object or null
+    bool has_input = false;
+    std::vector<ReadFile> reads;  // this rank's
+    std::string files;  // JSON array, or empty
+    std::string input_file, input_text, resolved;
+    std::string mesh;   // JSON object, or empty
+    std::string preset; // JSON object or null, or empty
+    std::string text;   // the block
+    std::string placement = "[]";  // JSON array, one object per rank
+    int n_hosts = 1;
+};
+
+State & state() {
+    static State s;
+    return s;
+}
+
+void rebuild() {
+    State & s = state();
+    static const std::string code = code_block();
+    static const std::string build = build_block();
+    json::Object p;
+    static const std::string dependencies = dependencies_block();
+    p.add("schema", SCHEMA).add("version", VERSION).raw("mallard", code).raw("build", build)
+        .raw("dependencies", dependencies);
+    if (!s.run.empty()) {
+        std::string run = s.run;
+        run.pop_back();
+        p.raw("run", run + ",\"restart_of\":" + s.restart_of + "}");
+    }
+    if (s.has_input) {
+        json::Object i;
+        if (s.input_file.empty()) {
+            i.raw("file", "null");
+        } else {
+            i.add("file", s.input_file);
+        }
+        i.add("sha256", sha256(s.input_text)).add("text", s.input_text);
+        if (!s.resolved.empty()) i.add("resolved", s.resolved);
+        p.raw("input", i.str());
+    }
+    if (!s.mesh.empty()) p.raw("mesh", s.mesh);
+    if (!s.files.empty()) p.raw("files", s.files);
+    if (!s.preset.empty()) p.raw("preset", s.preset);
+    s.text = p.str();
+}
+
+constexpr std::string_view NAME = "mallard-run";
+constexpr std::string_view LEGACY_NAME = "provenance";
+constexpr std::string_view XML_CLOSE = " -->";
+constexpr std::string_view DASH = "-\\u002d";
+
+/** @brief A version 4 UUID from the system's random device. */
+std::string random_uuid() {
+    std::random_device device;
+    std::array<uint8_t, 16> bytes{};
+    for (size_t i = 0; i < bytes.size(); i += 4) {
+        const uint32_t word = device();
+        for (size_t k = 0; k < 4; k++) bytes[i + k] = static_cast<uint8_t>(word >> (8 * k));
+    }
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0f) | 0x40);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3f) | 0x80);
+    const char * digits = "0123456789abcdef";
+    std::string out;
+    for (size_t i = 0; i < bytes.size(); i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) out += '-';
+        out += digits[bytes[i] >> 4];
+        out += digits[bytes[i] & 0xf];
+    }
+    return out;
+}
+
+} // namespace
+
+void Sha256::update(const char * data, size_t n) {
+    const auto * bytes = reinterpret_cast<const uint8_t *>(data);
+    length += n;
+    if (fill > 0) {
+        const size_t take = std::min(n, block.size() - fill);
+        std::copy_n(bytes, take, block.data() + fill);
+        fill += take;
+        bytes += take;
+        n -= take;
+        if (fill < block.size()) return;
+        compress(block.data(), 1);
+        fill = 0;
+    }
+    const size_t whole = n / 64;
+    if (whole > 0) compress(bytes, whole);
+    std::copy_n(bytes + 64 * whole, n % 64, block.data());
+    fill = n % 64;
+}
+
+std::string Sha256::hex() {
+    const uint64_t bits = length * 8;
+    std::array<char, 72> tail{};
+    tail[0] = static_cast<char>(0x80);
+    const size_t pad = (fill < 56 ? 56 : 120) - fill;
+    for (size_t i = 0; i < 8; i++) tail[pad + i] = static_cast<char>((bits >> (56 - 8 * i)) & 0xff);
+    update(tail.data(), pad + 8);
+    std::string out;
+    const char * digits = "0123456789abcdef";
+    for (const uint32_t word : h) {
+        for (int i = 28; i >= 0; i -= 4) out += digits[(word >> i) & 0xf];
+    }
+    return out;
+}
+
+void Sha256::compress(const uint8_t * data, size_t n) {
+    if (sha256_hw::enabled()) {
+        sha256_hw::blocks(h.data(), data, n);
+        return;
+    }
+    for (; n > 0; n--, data += 64) compress_portable(h, data);
+}
+
+std::string sha256(std::string_view data) {
+    Sha256 sha;
+    sha.update(data.data(), data.size());
+    return sha.hex();
+}
+
+std::string sha256_file(const std::string & path) {
+    namespace fs = std::filesystem;
+    Sha256 sha;
+    std::error_code error;
+    if (fs::is_directory(path, error)) {
+        std::vector<fs::path> files;
+        for (const auto & entry : fs::recursive_directory_iterator(path, error)) {
+            if (entry.is_regular_file()) files.push_back(fs::relative(entry.path(), path));
+        }
+        if (error) return "";
+        std::sort(files.begin(), files.end());
+        for (const auto & file : files) {
+            const std::string name = file.generic_string();
+            sha.update(name.c_str(), name.size() + 1);
+            if (!hash_stream(sha, fs::path(path) / file)) return "";
+        }
+        return sha.hex();
+    }
+    return hash_stream(sha, path) ? sha.hex() : "";
+}
+
+void start_run() {
+    State & s = state();
+    s = State{};
+    char host[256] = {};
+    gethostname(host, sizeof(host) - 1);
+    char started[32] = {};
+    const std::time_t now = std::time(nullptr);
+    std::strftime(started, sizeof(started), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
+    std::error_code error;
+    const std::string directory = std::filesystem::current_path(error).string();
+    s.run_id = random_uuid();
+    s.run = json::Object()
+                .add("run_id", s.run_id)
+                .add("start_time", started)
+                .add("ranks", comm::size())
+                .add("host", host)
+                .add("device", device_name())
+                .add("directory", directory)
+                .str();
+    rebuild();
+}
+
+void set_placement() {
+    const binding::Placement p = binding::this_placement();
+    const auto numbers = [](const std::vector<int> & v) {
+        std::string out = "[";
+        for (size_t i = 0; i < v.size(); i++) out += (i ? "," : "") + std::to_string(v[i]);
+        return out + "]";
+    };
+    const auto known = [](int value) { return value < 0 ? std::string("null") : std::to_string(value); };
+    json::Object me;
+    me.add("rank", p.rank).add("host", p.host).add("threads", p.threads);
+    me.raw("cpus", p.cpus.empty() ? "null" : json::quote(binding::format_cpu_list(p.cpus)))
+        .raw("cpu_numa", numbers(p.cpu_numa))
+        .add("omp_bind", p.omp_bind)
+        .raw("gpu", p.gpu.empty() ? "null" : json::quote(p.gpu))
+        .raw("gpu_uuid", p.gpu_uuid.empty() ? "null" : json::quote(p.gpu_uuid))
+        .raw("gpu_index", known(p.gpu_index))
+        .raw("gpu_numa", known(p.gpu_numa));
+    const std::vector<std::string> all = comm::allgather(me.str());
+    std::vector<std::string> hosts = comm::allgather(p.host);
+    std::sort(hosts.begin(), hosts.end());
+    State & s = state();
+    s.placement = "[";
+    for (const auto & r : all) s.placement += (s.placement.size() > 1 ? "," : "") + r;
+    s.placement += "]";
+    s.n_hosts = static_cast<int>(std::unique(hosts.begin(), hosts.end()) - hosts.begin());
+    if (!s.run.empty()) {
+        s.run.pop_back();
+        s.run += ",\"hosts\":" + std::to_string(s.n_hosts) + "}";
+    }
+    rebuild();
+}
+
+const std::string & placement() { return state().placement; }
+
+const std::string & run_id() { return state().run_id; }
+
+void set_restart_of(const std::string & id, const std::string & file, uint64_t step) {
+    json::Object r;
+    if (id.empty()) {
+        r.raw("run_id", "null");
+    } else {
+        r.add("run_id", id);
+    }
+    state().restart_of = r.add("file", file).add("step", step).str();
+    rebuild();
+}
+
+const std::string & restart_of() { return state().restart_of; }
+
+void set_input(const std::string & file, const std::string & text) {
+    State & s = state();
+    s.has_input = true;
+    s.input_file = file;
+    s.input_text = text;
+    rebuild();
+}
+
+namespace {
+
+/** @brief Modification time of a file, UTC ("2026-11-09T18:20:31Z"), or "" if unknown. */
+std::string modified(const std::string & path) {
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0) return "";
+    char text[32] = {};
+    std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&st.st_mtime));
+    return text;
+}
+
+/** @brief The size and SHA-256 that the writing run's output record gives a file, if its run log has one. */
+std::optional<std::pair<uint64_t, std::string>> recorded(const ReadFile & f) {
+    namespace fs = std::filesystem;
+    if (f.run_id.empty() || f.directory.empty()) return std::nullopt;
+    const fs::path log = fs::path(f.directory) / f.run_log;
+    std::ifstream in(log);
+    std::error_code error;
+    const fs::path file = fs::weakly_canonical(f.path, error);
+    for (std::string line; std::getline(in, line);) {
+        if (line.find("\"type\":\"output\"") == std::string::npos) continue;
+        try {
+            const json::Value record = json::parse(line);
+            const json::Value * run_id = record.find("run_id");
+            const json::Value * files = record.find("files");
+            if (!run_id || run_id->string != f.run_id || !files) continue;
+            for (const json::Value & w : files->array) {
+                const json::Value * path = w.find("path");
+                const json::Value * sha = w.find("sha256");
+                const json::Value * bytes = w.find("bytes");
+                if (!path || !sha || !bytes) continue;
+                if (fs::weakly_canonical(fs::path(f.directory) / path->string, error) == file) {
+                    return std::make_pair(static_cast<uint64_t>(bytes->number), sha->string);
+                }
+            }
+        } catch (const std::exception &) {
+            // A line cut short by a killed run
+        }
+    }
+    return std::nullopt;
+}
+
+std::string read_file_json(const ReadFile & f) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    json::Object o;
+    o.add("kind", f.kind).add("path", f.path).add("resolved", fs::weakly_canonical(f.path, error).string());
+    const auto size = fs::file_size(f.path, error);
+    const uint64_t bytes = error ? 0 : uint64_t(size);
+    if (error) {
+        o.raw("bytes", "null");
+    } else {
+        o.add("bytes", bytes);
+    }
+    if (f.how == ReadFile::How::HASHED) {
+        const std::string hash = sha256_file(f.path);
+        if (hash.empty()) {
+            o.raw("sha256", "null");
+        } else {
+            o.add("sha256", hash);
+        }
+        return o.str();
+    }
+    if (f.how == ReadFile::How::IDENTITY) {
+        if (f.run_id.empty()) {
+            o.raw("run_id", "null");
+        } else {
+            o.add("run_id", f.run_id);
+        }
+        o.add("step", f.step).add("t", f.t);
+    }
+    const auto record = f.how == ReadFile::How::IDENTITY ? recorded(f) : std::nullopt;
+    if (record && record->first == bytes) {
+        o.add("sha256", record->second).add("sha256_from", "the output record of the run that wrote it");
+    } else {
+        o.raw("sha256", "null").add("modified", modified(f.path));
+        o.add("note", record ? "not hashed (its size differs from its output record: changed since written)"
+                             : "not hashed (no output record)");
+    }
+    return o.str();
+}
+
+} // namespace
+
+void read_file(const std::string & kind, const std::string & path) {
+    state().reads.push_back(ReadFile::of(ReadFile::How::HASHED, kind, path));
+}
+
+void read_start_file(const std::string & kind, const std::string & path, const std::string & run_block,
+                     std::uint64_t step, double t) {
+    ReadFile f = ReadFile::of(ReadFile::How::IDENTITY, kind, path);
+    f.step = step;
+    f.t = t;
+    if (!run_block.empty()) {
+        try {
+            const json::Value block = json::parse(run_block);
+            if (const json::Value * run = block.find("run")) {
+                if (const json::Value * id = run->find("run_id")) f.run_id = id->string;
+                if (const json::Value * dir = run->find("directory")) f.directory = dir->string;
+            }
+            f.run_log = "mallard.jsonl";
+            if (const json::Value * input = block.find("input"); input && input->find("resolved")) {
+                const Input resolved = parse_input_string(input->find("resolved")->string, "the resolved input");
+                f.run_log = find_value_or<std::string>(resolved, "output", "run_log", f.run_log);
+            }
+        } catch (const std::exception &) {
+            // A block this build cannot read: the file is recorded by its size and time
+        }
+    }
+    state().reads.push_back(std::move(f));
+}
+
+void read_large_file(const std::string & kind, const std::string & path) {
+    state().reads.push_back(ReadFile::of(ReadFile::How::SIZE, kind, path));
+}
+
+void set_read_files() {
+    namespace fs = std::filesystem;
+    State & s = state();
+    std::vector<ReadFile> reads = s.reads;
+    // Small files read on some ranks only; the files runs start from are read on every rank
+    std::string mine;
+    for (const ReadFile & f : s.reads) {
+        if (f.how == ReadFile::How::HASHED) mine += f.kind + "\n" + f.path + "\n";
+    }
+    const std::vector<std::string> all = comm::size() > 1 ? comm::allgather(mine) : std::vector<std::string>{};
+    if (!comm::is_root()) return;
+    for (size_t r = 1; r < all.size(); r++) {
+        std::istringstream in(all[r]);
+        for (std::string kind, path; std::getline(in, kind) && std::getline(in, path);) {
+            reads.push_back(ReadFile::of(ReadFile::How::HASHED, kind, path));
+        }
+    }
+    std::vector<std::string> seen;
+    std::string list = "[";
+    for (const ReadFile & f : reads) {
+        std::error_code error;
+        // Each snapshot of a file of several, read by its identity, counts once
+        std::string resolved = fs::weakly_canonical(f.path, error).string();
+        if (f.how == ReadFile::How::IDENTITY) resolved += "\n" + std::to_string(f.step);
+        if (std::find(seen.begin(), seen.end(), resolved) != seen.end()) continue;
+        seen.push_back(resolved);
+        list += (list.size() > 1 ? "," : "") + read_file_json(f);
+    }
+    s.files = seen.empty() ? "" : list + "]";
+    rebuild();
+}
+
+void set_resolved(const std::string & toml) {
+    state().resolved = toml;
+    rebuild();
+}
+
+void set_mesh(const std::string & type, const std::string & file, const std::string & hash) {
+    json::Object m;
+    m.add("type", type);
+    if (!file.empty()) m.add("file", file);
+    if (!hash.empty()) m.add("sha256", hash);
+    state().mesh = m.str();
+    rebuild();
+}
+
+void set_preset(const std::string & name, bool is_default,
+                const std::vector<std::tuple<std::string, std::string, bool>> & settings) {
+    if (name.empty()) {
+        state().preset = "null";
+    } else {
+        std::string list = "[";
+        for (const auto & [key, value, from_preset] : settings) {
+            if (list.size() > 1) list += ',';
+            list += json::Object().add("key", key).add("value", value).add("from_preset", from_preset).str();
+        }
+        state().preset =
+            json::Object().add("name", name).add("default", is_default).raw("settings", list + "]").str();
+    }
+    rebuild();
+}
+
+void share() {
+    State & s = state();
+    s.text = comm::broadcast(s.text);
+    s.run_id = comm::broadcast(s.run_id);
+    s.restart_of = comm::broadcast(s.restart_of);
+}
+
+const std::string & json() {
+    State & s = state();
+    if (s.text.empty()) rebuild();
+    return s.text;
+}
+
+std::string csv_comment(std::string_view name, std::string_view text) {
+    return "# " + std::string(name) + " " + std::string(text);
+}
+
+std::string csv_comment() { return csv_comment(NAME, json()); }
+
+std::string xml_comment() { return xml_comment(NAME, json()); }
+
+std::string xml_comment(std::string_view name, std::string_view text) {
+    std::string out = "<!-- " + std::string(name) + " ";
+    out.reserve(text.size() + 32);
+    for (size_t i = 0; i < text.size(); i++) {
+        if (text[i] == '-' && i + 1 < text.size() && text[i + 1] == '-') {
+            out += DASH;
+            i++;
+        } else {
+            out += text[i];
+        }
+    }
+    return out + std::string(XML_CLOSE);
+}
+
+std::string parse_comment(std::string_view text, std::string_view name) {
+    const std::string xml_open = "<!-- " + std::string(name) + " ";
+    size_t a = text.find(xml_open);
+    if (a != std::string_view::npos) {
+        a += xml_open.size();
+        const size_t b = text.find(XML_CLOSE, a);
+        if (b == std::string_view::npos) return "";
+        std::string out(text.substr(a, b - a));
+        for (size_t at = 0; (at = out.find(DASH, at)) != std::string::npos; at += 2) out.replace(at, DASH.size(), "--");
+        return out;
+    }
+    const std::vector<std::string> lines = parse_comments(text, name);
+    return lines.empty() ? "" : lines.front();
+}
+
+std::vector<std::string> parse_comments(std::string_view text, std::string_view name) {
+    const std::string open = "# " + std::string(name) + " ";
+    std::vector<std::string> out;
+    for (size_t a = text.find(open); a != std::string_view::npos; a = text.find(open, a)) {
+        const bool line_start = a == 0 || text[a - 1] == '\n';
+        a += open.size();
+        if (!line_start) continue;
+        const size_t b = text.find('\n', a);
+        std::string line(text.substr(a, b == std::string_view::npos ? std::string_view::npos : b - a));
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+std::string parse_comment(std::string_view text) {
+    const std::string out = parse_comment(text, NAME);
+    return out.empty() ? parse_comment(text, LEGACY_NAME) : out;
+}
+
+std::string find_string(std::string_view block, std::string_view object, std::string_view key) {
+    // Outside strings, "<object>":{ can only be the object's key: inside one, its quotes are escaped
+    const std::string open = json::quote(object) + ":{";
+    const std::string name = json::quote(key) + ":\"";
+    size_t i = block.find(open);
+    if (i == std::string_view::npos) return "";
+    int depth = 0;
+    for (i += open.size(); i < block.size(); i++) {
+        if (block[i] == '{') {
+            depth++;
+        } else if (block[i] == '}') {
+            if (depth-- == 0) return "";
+        } else if (block[i] == '"') {
+            const bool found = depth == 0 && block.substr(i, name.size()) == name;
+            const size_t first = found ? i + name.size() : i + 1;
+            for (i = first; i < block.size() && block[i] != '"'; i++) {
+                if (block[i] == '\\') i++;
+            }
+            if (found) return i < block.size() ? std::string(block.substr(first, i - first)) : "";
+        }
+    }
+    return "";
+}
+
+} // namespace provenance

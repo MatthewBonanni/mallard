@@ -158,6 +158,7 @@ void FaceExchange::start(const Kokkos::DefaultExecutionSpace & exec,
         return;
     }
 #endif
+    const comm::HostStaged staged;
     exec.fence("face_pack");
     rtype * send_ptr = buf.data();
     rtype * recv_ptr = recv_buffer.data();
@@ -189,6 +190,7 @@ void FaceExchange::finish(const Kokkos::DefaultExecutionSpace & exec,
                           Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
+    const comm::HostStaged staged;
     if (!nccl && MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
         throw std::runtime_error("FaceExchange: MPI_Waitall failed");
     }

@@ -19,6 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cell_order.h"
 #include "distribution.h"
 #include "mesh_block.h"
 #include "periodic.h"
@@ -82,19 +83,21 @@ class DistributedMesh {
         void distribute(const std::vector<int> & owner);
 
         /**
-         * @brief This rank's mesh: its owned cells in global order, then
-         *        halo_layers layers of vertex neighbors, each in global order.
-         *        Faces on the global boundary keep their zones; faces towards
-         *        cells not on this rank go to PARTITION_ZONE. Fills dist,
-         *        including the exchange plan (collective; after distribute()).
+         * @brief This rank's mesh: its owned cells, then halo_layers layers
+         *        of vertex neighbors, each numbered by cell_order. Faces on the
+         *        global boundary keep their zones; faces towards cells not on
+         *        this rank go to PARTITION_ZONE. Fills dist, including the
+         *        exchange plan (collective; after distribute()).
          */
-        std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist);
+        std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist,
+                                               const CellNumbering & cell_order = {});
 
     private:
         /** @brief The cells this rank holds: owned cells, then halo layers. */
         struct Cells {
             std::vector<uint64_t> gid;
             std::vector<int> owner;
+            std::vector<uint32_t> zone;  // with cell zones
             std::vector<uint8_t> layer;
             std::vector<uint64_t> node_offsets{0}, nodes;            // global node ids
             std::vector<uint32_t> boundary_offsets{0};

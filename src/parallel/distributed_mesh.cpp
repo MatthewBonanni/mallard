@@ -140,7 +140,11 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             const std::string & zone = side ? pairs[k].zone_b : pairs[k].zone_a;
             const auto it = std::find(block.zone_names.begin(), block.zone_names.end(), zone);
             if (it == block.zone_names.end()) {
-                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+                std::string names;
+                for (const auto & name : block.zone_names) names += (names.empty() ? "" : ", ") + name;
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh (zones: " +
+                                         names + "). Pair zones of the mesh in [[periodic]] zones. See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
             role[static_cast<size_t>(it - block.zone_names.begin())] = static_cast<uint32_t>(2 * k + side);
         }
@@ -195,10 +199,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         for (int64_t v : c) x = mix(x ^ uint64_t(v));
         return static_cast<size_t>(x % p);
     };
-    auto translated = [&](size_t k, PeriodicGrid::Point x) {
-        FOR_I_DIM x[i] += pairs[k].translation[i];
-        return x;
-    };
+    auto translated = [&](size_t k, const PeriodicGrid::Point & x) { return periodic_image(pairs[k], x); };
     std::vector<std::vector<uint64_t>> send(p);
     std::vector<size_t> ranks;
     for (const auto & [r, g] : zone_nodes) {
@@ -257,18 +258,21 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         for (size_t side = 0; side < 2; side++) {
             if (counts[2 * k + side] == 0) {
                 throw std::runtime_error("Periodic zone " + (side ? pairs[k].zone_b : pairs[k].zone_a) +
-                                         " is not a boundary zone of the mesh.");
+                                         " is not a boundary zone of the mesh. Pair zones of the mesh in [[periodic]] "
+                                         "zones. See docs/guide/meshes.md#periodic-boundaries.");
             }
         }
         if (counts[2 * k] != counts[2 * k + 1]) {
             throw std::runtime_error("Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + " have " +
                                      std::to_string(counts[2 * k]) + " and " + std::to_string(counts[2 * k + 1]) +
-                                     " nodes.");
+                                     " nodes, but periodic zones need matching nodes. Make the mesh periodic in "
+                                     "the generator (in Gmsh: Periodic Curve or Surface). See "
+                                     "docs/guide/meshes.md#periodic-boundaries.");
         }
     }
 
-    // Each match becomes two links (node, other, pair, sign), with x_node =
-    // x_other + sign * translation, at the ranks whose blocks hold the nodes
+    // Each match becomes two links (node, other, pair, sign): x_node is x_other
+    // mapped by the pair (sign + 1) or back (sign - 1), at the ranks holding the nodes
     std::string error;
     send.assign(p, {});
     for (uint64_t j : order) {
@@ -281,7 +285,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             error = "Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + ": node " +
                     periodic_point_string(x) + " of " + pairs[k].zone_a + " has " +
                     (n_found ? "several matches" : "no match") + " in " + pairs[k].zone_b +
-                    " after the translation " + periodic_point_string(pairs[k].translation) + ".";
+                    " after " + periodic_map_string(pairs[k]) + ".";
             continue;
         }
         const uint64_t b = b_nodes[match];
@@ -560,6 +564,7 @@ std::vector<std::array<double, N_DIM>> DistributedMesh::block_cell_centers() con
 void DistributedMesh::append_record(std::vector<uint64_t> & out, uint32_t c) const {
     out.push_back(block.first_cell + c);
     out.push_back(static_cast<uint64_t>(owner[c]));
+    if (!block.cell_zone_names.empty()) out.push_back(block.cell_zone[c]);
     out.push_back(block.cell_offsets[c + 1] - block.cell_offsets[c]);
     out.insert(out.end(), block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
                block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
@@ -588,6 +593,7 @@ void DistributedMesh::read_records(const std::vector<uint64_t> & from, uint8_t l
             if (layer > 0) halo_index.emplace(g, cells.gid.size());
             cells.gid.push_back(g);
             cells.owner.push_back(static_cast<int>(from[i++]));
+            if (!block.cell_zone_names.empty()) cells.zone.push_back(static_cast<uint32_t>(from[i++]));
             cells.layer.push_back(layer);
             const uint64_t n = from[i++];
             cells.nodes.insert(cells.nodes.end(), &from[i], &from[i] + n);
@@ -726,7 +732,7 @@ void DistributedMesh::grow_layer() {
     layers = layer;
 }
 
-std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist) {
+std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order) {
     while (layers < halo_layers) grow_layer();
     const uint32_t n_local = static_cast<uint32_t>(std::count_if(cells.layer.begin(), cells.layer.end(),
                                            [&](uint8_t l) { return l <= halo_layers; }));
@@ -776,20 +782,41 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
             classes.lattice[j] = found ? it->second.second : std::array<int8_t, 3>{0, 0, 0};
         }
     }
+    // Owned cells and each halo layer, each numbered by locality
+    std::vector<uint32_t> group_ends;
+    for (uint32_t i = 0; i < n_local; i++) {
+        if (i + 1 == n_local || cells.layer[i + 1] != cells.layer[i]) group_ends.push_back(i + 1);
+    }
+    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends);
+    const std::vector<uint32_t> & order = numbered.order;
+    std::vector<std::vector<uint32_t>> ordered_cells(n_local);
+    std::vector<int> owners(n_local);
     dist = Distribution();
     dist.halo_layers = static_cast<uint8_t>(halo_layers);
-    dist.global_cell.assign(cells.gid.begin(), cells.gid.begin() + n_local);
-    dist.layer.assign(cells.layer.begin(), cells.layer.begin() + n_local);
+    dist.global_cell.resize(n_local);
+    dist.layer.resize(n_local);
+    for (uint32_t i = 0; i < n_local; i++) {
+        ordered_cells[i] = std::move(local_cells[order[i]]);
+        owners[i] = cells.owner[order[i]];
+        dist.global_cell[i] = cells.gid[order[i]];
+        dist.layer[i] = cells.layer[order[i]];
+    }
     dist.n_owned = static_cast<uint32_t>(std::count(dist.layer.begin(), dist.layer.end(), 0));
-    plan_halo_exchange(dist, std::vector<int>(cells.owner.begin() + dist.n_owned, cells.owner.begin() + n_local));
+    plan_halo_exchange(dist, std::vector<int>(owners.begin() + dist.n_owned, owners.end()));
 
     auto mesh = std::make_shared<Mesh>();
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
+    mesh->cell_order_choice = numbered.choice;
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
     mesh->h_global_node_id = std::move(node_ids);
     mesh->n_global_nodes = node_dist.back();
-    mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE, classes);
+    mesh->init_from_connectivity(nodes, ordered_cells, boundary_faces, PARTITION_ZONE, classes);
+    if (!block.cell_zone_names.empty()) {
+        mesh->cell_zone_names = block.cell_zone_names;
+        mesh->h_cell_zone.resize(n_local);
+        for (uint32_t i = 0; i < n_local; i++) mesh->h_cell_zone[i] = cells.zone[order[i]];
+    }
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));

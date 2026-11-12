@@ -1,0 +1,5 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "3d"
+demonstrates = ["periodic box", "dissipation rate against DNS", "domain integrals"]
+validation = [{anchor = "taylor-green-vortex", regime = "transition and decay of the Taylor-Green vortex at Re = 1600, against DNS"}]

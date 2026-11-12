@@ -286,6 +286,11 @@ KOKKOS_INLINE_FUNCTION uint32_t reactor_work_size(const KineticsTable<MemorySpac
            reactor_fast_size(kinetics, sparse);
 }
 
+/** @brief A repair callback that ignores the clipping (see advance_reactor). */
+struct NoRepair {
+    KOKKOS_INLINE_FUNCTION void operator()(int, uint32_t, double) const {}
+};
+
 /**
  * @brief Advance one adiabatic constant-volume reactor over dt: integrate
  *        (Y, T), then clip negative mass fractions, renormalize, and take T
@@ -303,15 +308,21 @@ KOKKOS_INLINE_FUNCTION uint32_t reactor_work_size(const KineticsTable<MemorySpac
  *        initial density (see ConstantVolumeReactor): Y then holds the
  *        mass fractions at the end, at density rho (1 + dt sum_k g_k), and T
  *        follows from the internal energy e + dt g_e per unit initial mass.
+ * @param repair Called as repair(0, k, dY) for each species when the initial
+ *        mass fractions are clipped and renormalized (at density rho), and
+ *        repair(1, k, dY) when the final ones are (at the final density),
+ *        with dY the change the clipping made to Y_k.
  */
-template <bool Sparse = false, typename Lanes, typename MemorySpace, typename Observer = NoObserver>
+template <bool Sparse = false, typename Lanes, typename MemorySpace, typename Observer = NoObserver,
+          typename Repair = NoRepair>
 KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, const ThermoTable<MemorySpace> & thermo,
                                                         const KineticsTable<MemorySpace> & kinetics, const double rho,
                                                         const double dt, double * Y, double & T, double & h,
                                                         const ReactorOptions & options, double * work,
                                                         uint32_t * pivot, Observer && observer = Observer(),
                                                         const SparseLUPattern<MemorySpace> * sparse = nullptr,
-                                                        double * fast = nullptr, const double * forcing = nullptr) {
+                                                        double * fast = nullptr, const double * forcing = nullptr,
+                                                        const Repair & repair = Repair()) {
     const uint32_t ns = thermo.n_species, n = ns + 1;
     double * J = work;
     double * scratch = J + (Sparse ? sparse->jacobian_size() : n * n);
@@ -331,6 +342,7 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
         const double sum = lanes.sum(ns, [&](const uint32_t k) { return y[k]; });
         lanes.for_each(ns, [&](const uint32_t k) { y[k] /= sum; });
         lanes.sync();
+        lanes.for_each(ns, [&](const uint32_t k) { repair(0, k, y[k] - Y[k]); });
         T0 = thermo.T_from_e(e, MassFractions{y}, T);
     }
     lanes.single([&]() { y[ns] = T0; });
@@ -354,11 +366,12 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
         result = integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
                            static_cast<Observer &&>(observer));
     }
-    lanes.for_each(ns, [&](const uint32_t k) { y[k] = Kokkos::fmax(y[k], 0.0); });
+    const double negative_end = lanes.sum(ns, [&](const uint32_t k) { return y[k] < 0.0 ? 1.0 : 0.0; });
+    const double total = lanes.sum(ns, [&](const uint32_t k) { return Kokkos::fmax(y[k], 0.0); });
+    lanes.for_each(ns, [&](const uint32_t k) { Y[k] = Kokkos::fmax(y[k], 0.0) / total; });
     lanes.sync();
-    const double total = lanes.sum(ns, [&](const uint32_t k) { return y[k]; });
-    lanes.for_each(ns, [&](const uint32_t k) { Y[k] = y[k] / total; });
-    lanes.sync();
+    if (negative_end > 0.0) lanes.for_each(ns, [&](const uint32_t k) { repair(1, k, Y[k] - y[k]); });
+    result.clipped = negative > 0.0 || negative_end > 0.0 ? 1u : 0u;
     if (forcing) {
         const double growth = 1.0 + dt * lanes.sum(ns, [&](const uint32_t k) { return forcing[k]; });
         T = thermo.T_from_e((e + dt * forcing[ns]) / growth, MassFractions{Y}, y[ns]);

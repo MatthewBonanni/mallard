@@ -1,6 +1,6 @@
 # Time integration
 
-Mallard advances the semi-discrete equations (1) of [chapter 5](finite_volume.md#semi-discrete-equations),
+Mallard advances the semi-discrete equations (1) of [chapter 6](finite_volume.md#semi-discrete-equations),
 $\mathrm{d}\overline{\mathbf{U}}/\mathrm{d}t = \mathbf{L}(\overline{\mathbf{U}}, t)$,
 with explicit Runge-Kutta methods and a global time step from per-cell
 spectral radii. Chemistry is split from this step
@@ -14,14 +14,14 @@ $\mathbf{L}$ is evaluated at every stage (`Solver::calc_rhs`,
 `src/solver/solver_rhs.cpp`, `solver_mixture.cpp`) in this order:
 boundary states and the cell primitive variables (for mixtures, $T$ by
 Newton, eq. (4) of [chapter 2](thermodynamics_transport.md#temperature-from-the-internal-energy));
-the face reconstruction ([chapter 5](finite_volume.md#reconstruction)); the
+the face reconstruction ([chapter 6](finite_volume.md#reconstruction)); the
 shock sensor of the hybrid flux; the convective face fluxes and, for
-mixtures, the species fluxes ([chapter 6](fluxes.md)); the transport
+mixtures, the species fluxes ([chapter 7](fluxes.md)); the transport
 coefficients, the eddy viscosity and the viscous face fluxes; the sum over
 each cell's faces; the axisymmetric source, gravity, expression sources,
 mass-flow forcing and radiation, integrated over the cell; the division by
 the cell volume; and the sponge layers, as rates
-([chapter 8](boundaries_sources.md#sources)). Characteristic boundaries,
+([chapter 9](boundaries_sources.md#sources)). Characteristic boundaries,
 the dynamic SGS constant and the TFLES and PaSR fields are updated once per
 step, at its first stage.
 
@@ -64,17 +64,43 @@ step, at its first stage.
     $$
 
 - **FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
+- **SSPRK54**, the five-stage, fourth-order SSP method of
+    [Kraaijevanger 1991](../references.md#kraaijevanger-1991) and
+    [Spiteri & Ruuth 2002](../references.md#spiteri-ruuth-2002) (SSP
+    coefficient 1.508), and **RDPK3Sp35**, a five-stage, third-order method
+    with an embedded second-order error estimate for error-controlled steps
+    ([Ranocha et al. 2022](../references.md#ranocha-2022)), both in the
+    low-storage 3S\* form of [Ketcheson 2010](../references.md#ketcheson-2010).
+- **CK45**, the five-stage, fourth-order 2N-storage method of
+    [Carpenter & Kennedy 1994](../references.md#carpenter-kennedy-1994).
 
-Positivity is not enforced between stages: the face reconstructions fall
-back to first order where a face state would have a non-positive density
-or pressure ([chapter 5](finite_volume.md#reconstruction)).
+Applied to $\mathrm{d}u/\mathrm{d}t = \lambda u$, each method advances
+$u^{n+1} = R(\lambda\Delta t)\,u^n$ with a polynomial $R$; the step is
+stable where $\lvert R\rvert \le 1$. The five-stage methods reach about
+twice as far along the negative real axis as SSPRK3 and RK4, at five
+right-hand-side evaluations per step instead of three or four:
+
+![Stability regions of the six integrators in the complex plane of lambda dt, and the time error of the isentropic vortex against cfl for five of them](../images/theory/time_integrators-light.svg#gh-light-mode-only)
+![Stability regions of the six integrators in the complex plane of lambda dt, and the time error of the isentropic vortex against cfl for five of them](../images/theory/time_integrators-dark.svg#gh-dark-mode-only)
+
+*Left: regions computed from the coefficients in `src/numerics/time_integrator.cpp`
+(`tools/docs/time_integrators.py`). Right: density error of the isentropic
+vortex (40 × 40 quads, TENO5, t = 2) against RK4 at `cfl` 0.02, from
+[time integrators](../numerics/overview.md#time-integrators).*
+
+The face reconstructions fall back to first order where a face state would
+have a non-positive density or pressure
+([chapter 6](finite_volume.md#reconstruction)). Positivity of the cell
+averages is enforced only by bound-preserving TENO's flux limiter (planar
+single-gas runs, $\mathrm{CFL} \le 0.5$, SSP integrators), which bounds each
+forward-Euler stage.
 
 ## Time step
 
 With `[run] cfl`, the step is $\Delta t = \mathrm{CFL}\,\min_i\Delta t_i$
 over all cells and ranks (otherwise the fixed `dt`), further limited by the
 sponge layers to $\Delta t \le 1/\max_i\sigma_i$
-([chapter 8](boundaries_sources.md#sponge-layers)) and shortened to land
+([chapter 9](boundaries_sources.md#sponge-layers)) and shortened to land
 exactly on the end time and on output times. Each cell's step for
 $\mathrm{CFL} = 1$ comes from its convective and viscous spectral radii
 ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with $C = 4$;

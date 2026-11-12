@@ -7,12 +7,14 @@
 
 #include "build_info.h"
 
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <type_traits>
 
 #include <unistd.h>
 #ifdef __APPLE__
+#include <mach-o/dyld.h>
 #include <sys/sysctl.h>
 #endif
 
@@ -20,6 +22,7 @@
 
 #include "comm.h"
 #include "common_typedef.h"
+#include "git_version.h"
 #include "log.h"
 #include "version.h"
 
@@ -43,6 +46,8 @@ std::string cpu_model() {
     return "";
 }
 
+} // namespace
+
 std::string device_name() {
 #if defined(KOKKOS_ENABLE_CUDA)
     cudaDeviceProp prop;
@@ -57,6 +62,8 @@ std::string device_name() {
 #endif
     return cpu_model();
 }
+
+namespace {
 
 template <typename Space>
 std::string describe_space() {
@@ -142,4 +149,32 @@ void print_header(const std::string & input_file) {
         {"Input", input_file},
         {"Started", started},
     });
+}
+
+std::filesystem::path executable_path() {
+#if defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        std::error_code ec;
+        const std::filesystem::path p = std::filesystem::canonical(buffer.c_str(), ec);
+        if (!ec) return p;
+    }
+#else
+    std::error_code ec;
+    const std::filesystem::path p = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec) return p;
+#endif
+    return "mallard";
+}
+
+std::vector<std::filesystem::path> data_dirs() {
+    std::vector<std::filesystem::path> dirs;
+    if (const char * env = std::getenv("MALLARD_DATA_DIR")) dirs.emplace_back(env);
+    dirs.push_back(executable_path().parent_path().parent_path() / "share" / "mallard");
+#ifdef MALLARD_SOURCE_DIR
+    dirs.emplace_back(MALLARD_SOURCE_DIR);
+#endif
+    return dirs;
 }

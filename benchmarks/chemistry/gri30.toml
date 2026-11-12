@@ -1,6 +1,6 @@
 # Chemistry throughput, CH4/air with GRI-Mech 3.0 (53 species, 325 reactions):
 # run with
-#   MallardReactor -i gri30.toml
+#   mallard reactor -i gri30.toml
 # States sampled along the constant-volume ignition below (fresh, igniting and
 # burnt; ignition delay 1.11 ms), replicated over the cells and advanced over
 # each splitting step dt; writes gri30.csv. See README.md.

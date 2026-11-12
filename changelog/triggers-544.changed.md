@@ -1,0 +1,1 @@
+- Probe reductions are faster: each reduction loops over the samples once, without branches, and the gathered samples reuse their host buffers from write to write. On one A100 the probes_3d benchmark spends 61 ms per step on output, down from 70 ms. Results are unchanged.

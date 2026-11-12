@@ -17,6 +17,7 @@
 #include <cmath>
 #include <string>
 
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
 #include "boundary.h"
 #include "solver.h"
@@ -94,11 +95,11 @@ TEST(Boundary3DTest, HeatFluxIsStoredAfterTheVelocity) {
 }
 
 TEST(Boundary3DTest, TwoComponentVelocityIsRejected) {
-    EXPECT_THROW(parse("type = \"upt\"\nu = [1.0, 0.0]\np = 1.0\nT = 1.0\n"), std::runtime_error);
+    EXPECT_THROW(parse("type = \"inlet_state\"\nu = [1.0, 0.0]\np = 1.0\nT = 1.0\n"), std::runtime_error);
 }
 
 TEST(Boundary3DTest, UPTImposesTheInflowState) {
-    BoundaryCondition bc = parse("type = \"upt\"\nu = [0.5, 0.25, -0.125]\np = 2.0\nT = 1.5\n");
+    BoundaryCondition bc = parse("type = \"inlet_state\"\nu = [0.5, 0.25, -0.125]\np = 2.0\nT = 1.5\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
     EXPECT_NEAR(W_g[0], 2.0_r / (R_GAS * 1.5_r), roundoff(1e-12));
@@ -109,7 +110,7 @@ TEST(Boundary3DTest, UPTImposesTheInflowState) {
 }
 
 TEST(Boundary3DTest, PressureOutletImposesSubsonicBackPressureAtFixedTemperature) {
-    BoundaryCondition bc = parse("type = \"p_out\"\np = 0.6\n");
+    BoundaryCondition bc = parse("type = \"outlet_pressure\"\np = 0.6\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
     EXPECT_RTYPE_EQ(W_g[4], 0.6_r);
@@ -199,7 +200,7 @@ TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
 
 TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
     auto mesh = make_mesh_3d("cartesian", 3, 4, 5, 1.5, 1.0, 2.0);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
     auto h_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_side);
@@ -227,9 +228,9 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
     // turbulence leaving through it
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 4\nNz = 5\nLx = 1.5\nLy = 1.0\nLz = 2.0\n"
-                          "periodic = [\"y\", \"z\"]\n"));
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"));
     mesh->copy_host_to_device();
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::NSCBC_OUTLET);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_PRESSURE, 1.4_r, BoundaryCondition::NSCBC);
     auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_faces);
     auto h_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_offsets);
     auto h_dx = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_neighbor_dx);
@@ -251,8 +252,9 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
 TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
     for (const char * type : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
         auto mesh = make_mesh_3d(type, 3, 3, 3);
-        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
         auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
+        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
         uint32_t n_moved = 0;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             if (mesh->h_cells_of_face(f, 1) >= 0) continue;
@@ -269,7 +271,20 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
             ASSERT_GE(img_index, 0) << type;
             const uint32_t img = static_cast<uint32_t>(img_index);
             if (img != c) n_moved++;
-            // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell
+            // Every face of these meshes has an image face, the face translated along the normal
+            const int32_t g = h_image_face(f);
+            ASSERT_GE(g, 0) << type << " face " << f;
+            rtype L = 0.0;
+            for (int k = 0; k < 3; k++) L += (mesh->h_face_coords(static_cast<uint32_t>(g), k) - mesh->h_face_coords(f, k)) * n_in[k];
+            for (int k = 0; k < 3; k++) {
+                EXPECT_NEAR(mesh->h_face_coords(static_cast<uint32_t>(g), k), mesh->h_face_coords(f, k) + L * n_in[k], roundoff(1e-12))
+                    << type << " face " << f;
+            }
+            EXPECT_TRUE(mesh->h_cells_of_face(static_cast<uint32_t>(g), 0) == img_index ||
+                        mesh->h_cells_of_face(static_cast<uint32_t>(g), 1) == img_index) << type << " face " << f;
+            // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell,
+            // unless the cell's far side is a point (a pyramid's apex): the image face is then a cell deeper
+            if (L > 1.5_r * depth) continue;
             for (int k = 0; k < 3; k++) {
                 const rtype p = mesh->h_face_coords(f, k) + 0.75_r * depth * n_in[k];
                 rtype lo = 1e30_r, hi = -1e30_r;
@@ -302,7 +317,7 @@ double reflection_3d(const std::string & mesh, const std::string & right) {
                         "\"\nNx = 200\nNy = 2\nNz = 2\nLx = 1.0\nLy = 0.01\nLz = 0.01\n"
                         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " + pulse + "\"\nu = [\"" + pulse +
                         "\", \"0.0\", \"0.0\"]\np = \"" + p0 + " + " + pulse + "\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
                         "[[boundaries]]\nname = \"right\"\n" + right;
     for (const char * side : {"bottom", "top", "back", "front"}) {
         input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
@@ -311,6 +326,7 @@ double reflection_3d(const std::string & mesh, const std::string & right) {
              "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " + p0 + "\nT_ref = " + p0 +
              "\nrho_ref = 1.0\n[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -331,9 +347,9 @@ TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
     // With the transverse terms, on hexahedra and on tetrahedra
     for (const std::string mesh : {"cartesian", "cartesian_tet"}) {
         SCOPED_TRACE(mesh);
-        EXPECT_LT(reflection_3d(mesh, "type = \"nscbc_outlet\"\np = 0.7142857142857143\nL = 1.0\nsigma = 0.0\n"),
+        EXPECT_LT(reflection_3d(mesh, "type = \"outlet_pressure\"\np = 0.7142857142857143\nnscbc.L = 1.0\nnscbc.sigma = 0.0\n"),
                   0.03);
-        EXPECT_GT(reflection_3d(mesh, "type = \"p_out\"\np = 0.7142857142857143\n"), 0.9);
+        EXPECT_GT(reflection_3d(mesh, "type = \"outlet_pressure\"\np = 0.7142857142857143\n"), 0.9);
     }
 }
 
@@ -352,9 +368,9 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     std::string input = "[run]\nt_stop = 12.0\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 12\nNz = 12\n"
                         "Lx = 2.0\nLy = 1.0\nLz = 1.0\n[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
                         "u = [\"" + u + "\", \"" + v + "\", \"" + w + "\"]\np = \"" + p0 + "\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
-                        "\nT = " + p0 + "\nL = 1.0\n"
-                        "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " + p0 + "\nL = 12.0\n";
+                        "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
+                        "\nT = " + p0 + "\nnscbc.L = 1.0\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = " + p0 + "\nnscbc.L = 12.0\n";
     for (const char * side : {"bottom", "top", "back", "front"}) {
         input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
     }
@@ -377,4 +393,31 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still settling
     EXPECT_LT(max_speed, 0.6);
     EXPECT_LT(max_dp, 0.15);
+}
+
+TEST(Boundary3DTest, ExtrapolationKeepsAPerturbedUniformFlowOnTetrahedraWithTENO) {
+    // As BoundaryTest.ExtrapolationKeepsAPerturbedUniformFlowOnTrianglesWithTENO:
+    // image cells' averages grew the perturbation 100-fold every 1000 steps
+    const double a = precision_tol<double>(1e-10, 1e-4);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 2000\ncfl = 0.3\n"
+      << "[mesh]\ntype = \"file\"\nfilename = \"" << write_temp("tets.msh", jittered_tetrahedral_mesh(6)) << "\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+      << "u = [\"0.7\", \"" << a << " * sin(23 * x + 41 * y + 31 * z)\", \"0.0\"]\np = \"0.7142857142857143\"\n";
+    for (const char * name : {"left", "right", "bottom", "top", "back", "front"}) {
+        s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
+        v_max = std::max(v_max, std::abs(double(solver.h_conservatives(i, 2) / solver.h_conservatives(i, 0))));
+    }
+    EXPECT_LT(v_max, a);
 }

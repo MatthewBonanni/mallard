@@ -1,6 +1,7 @@
 """Schematic figures of the user guide: mesh types, stretching, periodic
 seams, curved faces, axisymmetry, boundary conditions, splitting, the
-thickened flame, sponges, viscosity laws, cell averages and time-step limits.
+thickened flame, sponges, viscosity laws, cell averages, time-step limits and
+the steps enqueued ahead of the GPU.
 Everything is computed from the formulas the guide states."""
 import math
 
@@ -133,6 +134,67 @@ def periodic(P):
     return fig
 
 
+def rotational_periodic(P):
+    sectors, n_t, n_r, r_in, r_out = 8, 6, 4, 1.0, 2.0
+    alpha = 2 * math.pi / sectors
+    dt = alpha / n_t
+    radii = np.linspace(r_in, r_out, n_r + 1)
+    turn = lambda x, y, a: (math.cos(a) * x - math.sin(a) * y, math.sin(a) * x + math.cos(a) * y)
+    fig, ax = plt.subplots(figsize=(6.6, 5.4))
+
+    def cells(t0, n, color, lw):
+        for i in range(n + 1):
+            t = t0 + i * dt
+            ax.plot([r_in * math.cos(t), r_out * math.cos(t)], [r_in * math.sin(t), r_out * math.sin(t)],
+                    color=color, lw=lw)
+        for r in radii:
+            t = t0 + np.linspace(0, n * dt, 4 * n + 1)
+            ax.plot(r * np.cos(t), r * np.sin(t), color=color, lw=lw)
+
+    cells(alpha, (sectors - 1) * n_t, P["mesh"], 0.5)
+    cells(0.0, n_t, P["line"], 0.9)
+    # The pair
+    ax.plot([r_in, r_out], [0, 0], color=P["blue"], lw=3.2, solid_capstyle="round")
+    ax.plot([r_in * math.cos(alpha), r_out * math.cos(alpha)], [r_in * math.sin(alpha), r_out * math.sin(alpha)],
+            color=P["flame"], lw=3.2, solid_capstyle="round")
+    label(ax, r_out + 0.08, -0.12, "zone A", P, color=P["blue"], ha="left", va="top")
+    label(ax, r_out * math.cos(alpha) - 0.1, r_out * math.sin(alpha) + 0.32, "zone B = R(α) A", P,
+          color=P["flame"], ha="left")
+    # Axis and angle
+    ax.plot(0, 0, marker="o", color=P["fg"], ms=5)
+    label(ax, -0.08, -0.12, "axis", P, ha="right", va="top", size=12)
+    for t in (0.0, alpha):
+        ax.plot([0, r_in * math.cos(t)], [0, r_in * math.sin(t)], color=P["muted"], lw=0.9, ls=(0, (3, 3)))
+    t = np.linspace(0, alpha, 30)
+    ax.plot(0.45 * np.cos(t), 0.45 * np.sin(t), color=P["fg"], lw=1.0)
+    label(ax, 0.52, 0.1, "α", P, ha="left", va="bottom")
+    label(ax, -0.3, 0.45, "α = 360° / N\n(here N = 8)", P, size=11, color=P["muted"])
+    arrow(ax, (2.25, 0.12), (2.25 * math.cos(alpha) + 0.05, 2.25 * math.sin(alpha) - 0.05), P, lw=1.0,
+          connectionstyle="arc3,rad=0.38")
+    label(ax, 2.45, 0.95, "R(α)", P, ha="left")
+    # A cell next to B and its copy beyond A: the velocity turns with it
+    r0, r1 = radii[2], radii[3]
+    quad = lambda t0, t1: [(r0 * math.cos(t0), r0 * math.sin(t0)), (r0 * math.cos(t1), r0 * math.sin(t1)),
+                           (r1 * math.cos(t1), r1 * math.sin(t1)), (r1 * math.cos(t0), r1 * math.sin(t0))]
+    ax.add_patch(Polygon(quad(alpha - dt, alpha), closed=True, facecolor=P["teal"], alpha=0.3, edgecolor="none"))
+    ax.add_patch(Polygon(quad(-dt, 0.0), closed=True, facecolor=P["teal"], alpha=0.12, edgecolor=P["teal"],
+                         lw=1.2, ls=(0, (3, 2))))
+    rc, tc = 0.5 * (r0 + r1), alpha - 0.5 * dt
+    cx, cy = rc * math.cos(tc), rc * math.sin(tc)
+    u = turn(0.25, 0.42, tc)
+    arrow(ax, (cx, cy), (cx + u[0], cy + u[1]), P, color=P["teal"], lw=2.0)
+    label(ax, cx + u[0] + 0.03, cy + u[1], "u", P, color=P["teal"], ha="left", va="bottom")
+    ix, iy = turn(cx, cy, -alpha)
+    v = turn(u[0], u[1], -alpha)
+    arrow(ax, (ix, iy), (ix + v[0], iy + v[1]), P, color=P["teal"], lw=2.0)
+    label(ax, ix - 0.05, iy - 0.3, "R(α)ᵀ u: the same cell\nseen from the cells next to A", P,
+          color=P["teal"], ha="left", va="top", size=11)
+    bare(ax)
+    ax.set_xlim(-2.2, 3.1)
+    ax.set_ylim(-2.15, 2.4)
+    return fig
+
+
 def curved(P):
     """Quarter of an O-grid around a circle: straight faces vs the curve, with quadrature points."""
     fig, ax = plt.subplots(figsize=(5.6, 4.0))
@@ -163,6 +225,83 @@ def curved(P):
     bare(ax)
     ax.set_xlim(-0.05, 2.9)
     ax.set_ylim(-0.05, 1.9)
+    return fig
+
+
+def _closest_point(f, x):
+    """Closest point of x on f = 0, as [[mesh.curved]] finds it: onto the level set along the gradient, then
+    along the curve toward x."""
+    def grad(y, h=1e-6):
+        return np.array([(f(y + [h, 0]) - f(y - [h, 0])) / (2 * h), (f(y + [0, h]) - f(y - [0, h])) / (2 * h)])
+    p = np.array(x, dtype=float)
+    for _ in range(60):
+        g = grad(p)
+        step = -f(p) / g.dot(g) * g
+        d = x - (p + step)
+        step += d - d.dot(g) / g.dot(g) * g
+        p = p + step
+        if np.hypot(*step) < 1e-13:
+            break
+    return p, grad(p) / np.hypot(*grad(p))
+
+
+def curved_regions(P):
+    """Coarse faces projected onto a rotated ellipse, a union of two disks and an implicit curve."""
+    c30, s30 = math.cos(math.pi / 6), math.sin(math.pi / 6)
+
+    def ellipse(y):
+        u, v = c30 * y[0] + s30 * y[1], -s30 * y[0] + c30 * y[1]
+        return math.hypot(u, 2 * v) - 1.0
+
+    def union(y):
+        return min(math.hypot(y[0] + 0.45, y[1]) - 0.7, math.hypot(y[0] - 0.45, y[1]) - 0.7)
+
+    def blob(y):
+        return math.hypot(*y) - 0.8 - 0.12 * math.cos(5 * math.atan2(y[1], y[0]))
+
+    def nodes_on(f, angles):
+        out = []
+        for t in angles:
+            lo, hi = 0.05, 2.0
+            for _ in range(80):
+                mid = 0.5 * (lo + hi)
+                lo, hi = (mid, hi) if f(mid * np.array([math.cos(t), math.sin(t)])) < 0 else (lo, mid)
+            out.append(lo * np.array([math.cos(t), math.sin(t)]))
+        return out
+
+    # The union's two creases are nodes, so no face spans one
+    crease = math.atan2(math.sqrt(0.7 ** 2 - 0.45 ** 2), 0.0)
+    panels = [
+        ("ellipse, rotated", ellipse, np.linspace(0, 2 * math.pi, 11)[:-1]),
+        ("union of two disks", union,
+         np.concatenate([np.linspace(-crease, crease, 5)[:-1], np.linspace(crease, 2 * math.pi - crease, 7)[:-1]])),
+        ("implicit", blob, np.linspace(0, 2 * math.pi, 14)[:-1] + 0.1),
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=(8.4, 3.2), gridspec_kw=dict(wspace=0.08))
+    g = np.array([-math.sqrt(3 / 5), 0.0, math.sqrt(3 / 5)])
+    for ax, (title, f, angles) in zip(axes, panels):
+        xs = np.linspace(-1.25, 1.25, 301)
+        X, Y = np.meshgrid(xs, xs)
+        F = np.vectorize(lambda a, b: f(np.array([a, b])))(X, Y)
+        ax.contourf(X, Y, F, levels=[-10, 0], colors=[P["faint"]])
+        ax.contour(X, Y, F, levels=[0], colors=[P["muted"]], linewidths=1.0, linestyles="--")
+        v = nodes_on(f, angles)
+        for k in range(len(v)):
+            a, b = v[k], v[(k + 1) % len(v)]
+            ax.plot([a[0], b[0]], [a[1], b[1]], color=P["line"], lw=1.0)
+            curve = [_closest_point(f, a + t * (b - a))[0] for t in np.linspace(0, 1, 24)]
+            ax.plot(*np.array(curve).T, color=P["teal"], lw=2.4)
+            for s in g:
+                q, n = _closest_point(f, a + 0.5 * (1 + s) * (b - a))
+                ax.plot(*q, "o", color=P["flame"], ms=3.5, zorder=5)
+                if s == 0.0:
+                    arrow(ax, q, q + 0.25 * n, P, color=P["flame"], lw=1.0, ms=7)
+        ax.plot(*np.array(v).T, "o", color=P["fg"], ms=3.0, zorder=6)
+        ax.set_title(title, fontsize=11.5, color=P["fg"])
+        ax.set_aspect("equal")
+        bare(ax)
+        ax.set_xlim(-1.3, 1.3)
+        ax.set_ylim(-1.3, 1.3)
     return fig
 
 
@@ -229,10 +368,10 @@ def characteristic(P):
             label(ax, 1.2 if side == "outlet" else 0.8, y + 0.2, text, P, size=12)
         if side == "outlet":
             note = "incoming acoustic wave\nrelaxes p toward the target:\n" + r"$K = \sigma\, c\,(1 - M^2) / L$"
-            ax.set_title("nscbc_outlet", fontsize=12, family="monospace")
+            ax.set_title("outlet_pressure + nscbc", fontsize=12, family="monospace")
         else:
             note = "incoming waves relax\nu (and T) toward the targets;\nturbulence enters here"
-            ax.set_title("nscbc_inlet", fontsize=12, family="monospace")
+            ax.set_title("inlet_state + nscbc", fontsize=12, family="monospace")
         label(ax, 1.0 if side == "outlet" else 1.0, -0.15, note, P, va="top", size=11, color=P["flame"])
         bare(ax)
         ax.set_xlim(-0.7 if side == "inlet" else -0.3, 2.7 if side == "outlet" else 2.3)
@@ -317,7 +456,7 @@ def viscosity(P):
     ax.plot(T, (T / Tr) ** 0.7, color=P["flame"], lw=2.2, label='"power_law", exponent 0.7')
     ax.set_xlabel("T [K]")
     ax.set_ylabel(r"$\mu\,/\,\mu$ at 273.15 K")
-    ax.legend(loc="upper left")
+    ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
     ax.set_xlim(150, 2500)
     ax.set_ylim(0, 4.2)
     return fig
@@ -362,14 +501,70 @@ def cfl_limits(P):
         ax.plot(v, y, "o", color=col, ms=6, label=name)
     ax.axvline(1.2, color=P["red"], lw=1.4, ls="--")
     ax.axvline(1.0, color=P["fg"], lw=1.0, ls=":")
-    label(ax, 1.205, -0.45, "largest safe: 1.2", P, color=P["red"], size=11, ha="left")
-    label(ax, 0.995, -0.45, "robust default: 1.0", P, size=11, ha="right")
+    label(ax, 1.205, -0.95, "largest safe: 1.2", P, color=P["red"], size=11, ha="left")
+    label(ax, 0.995, -0.95, "robust default: 1.0", P, size=11, ha="right")
     ax.set_yticks(range(len(cells)), cells)
     ax.invert_yaxis()
     ax.set_xlim(0.7, 1.6)
-    ax.set_ylim(4.5, -0.75)
+    ax.set_ylim(4.5, -0.5)
     ax.set_xlabel("largest stable cfl, SSPRK3 (smooth flow)")
     ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=11, handletextpad=0.2)
+    return fig
+
+
+def step_queue(P):
+    """Host and GPU timelines of the steps with an output at step 5 (docs/guide/parallel.md); not to scale."""
+    step, record, output, gap, noop, end = 1.0, 0.12, 1.4, 0.35, 0.14, 12.6
+    fig, axes = plt.subplots(2, 1, figsize=(10.4, 3.8), sharex=True, gridspec_kw=dict(hspace=0.6))
+
+    def box(ax, x0, w, y, color, text=None, alpha=0.3, hatch=None):
+        w = min(w, end - x0)
+        if w <= 0:
+            return
+        ax.add_patch(Rectangle((x0, y - 0.3), w, 0.6, facecolor="none" if hatch else color,
+                               alpha=1.0 if hatch else alpha, edgecolor=color, lw=1.0, hatch=hatch))
+        if text and w > 0.5:
+            label(ax, x0 + w / 2, y, text, P, size=10.5)
+
+    ax = axes[0]
+    t = 0.0
+    for k in range(1, 6):
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+    box(ax, t, noop, 0, P["muted"], hatch="////")
+    box(ax, t + noop, noop, 0, P["muted"], hatch="////")
+    label(ax, t + noop, -0.4, "6, 7: nothing", P, color=P["muted"], size=9.5, va="top")
+    box(ax, t + record, output, 1, P["flame"], "output")
+    t += record + output
+    k = 6
+    while t < end:
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+        k += 1
+    ax.set_title("step_queue = 3: the GPU runs ahead of the host (CUDA graphs)", fontsize=12, loc="left")
+
+    ax = axes[1]
+    t, k = 0.0, 1
+    while t < end:
+        box(ax, t, step, 0, P["teal"], str(k))
+        t += step
+        box(ax, t, record, 1, P["muted"], alpha=0.7)
+        if k == 5:
+            box(ax, t + record, output, 1, P["flame"], "output")
+            t += output
+        t += gap
+        k += 1
+    ax.set_title("one step at a time: the host decides every step", fontsize=12, loc="left")
+    for ax in axes:
+        ax.set_yticks([0, 1], ["GPU", "host"])
+        ax.set_ylim(-0.95, 1.45)
+        ax.set_xlim(0, end)
+        ax.tick_params(axis="y", length=0)
+        ax.spines["left"].set_visible(False)
+    axes[1].set_xlabel("wall time")
+    axes[1].set_xticks([])
     return fig
 
 
@@ -378,7 +573,9 @@ FIGURES = {
     "mesh_types_3d": mesh_types_3d,
     "stretching": stretching,
     "periodic": periodic,
+    "rotational_periodic": rotational_periodic,
     "curved_faces": curved,
+    "curved_regions": curved_regions,
     "axisymmetric": axisymmetric,
     "boundary_state": boundary_state,
     "characteristic": characteristic,
@@ -388,6 +585,7 @@ FIGURES = {
     "viscosity": viscosity,
     "subdivisions": subdivisions,
     "cfl_limits": cfl_limits,
+    "step_queue": step_queue,
 }
 
 

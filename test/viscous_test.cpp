@@ -17,6 +17,7 @@
 #include <string>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "solver.h"
 
 namespace {
@@ -41,8 +42,8 @@ std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.nx << "\nNy = " << c.ny << "\nLx = " << c.lx << "\nLy = 1.0\n"
       << "[initialize]\n" << c.init
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"bottom\"\n" << c.bottom
       << "[[boundaries]]\nname = \"top\"\n" << c.top
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
@@ -52,6 +53,7 @@ std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
       << "[output]\ncheck_interval = 1000000\n";
     if (!c.source.empty()) s << "[source]\n" << c.source;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
     solver->run();
     solver->update_primitives();
@@ -107,7 +109,8 @@ TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
     };
     const double e1 = error(32), e2 = error(64);
     EXPECT_LT(e2, 0.01 * 0.05);
-    EXPECT_GT(std::log2(e1 / e2), 1.8);
+    verification::expect_order({"viscous", "Stokes' first problem", verification::cells_of(GetParam()),
+                                "max velocity error", {32, 64}, {e1, e2}, 2.0, 1.8});
 }
 
 TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder) {
@@ -134,8 +137,8 @@ TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder)
         }
         return err;
     };
-    const double e1 = error(8), e2 = error(16);
-    EXPECT_GT(std::log2(e1 / e2), 1.8);
+    verification::expect_order({"viscous", "Forced channel, transmissive ends", verification::cells_of(GetParam()),
+                                "max velocity error", {8, 16}, {error(8), error(16)}, 2.0, 1.8});
 }
 
 TEST_P(ViscousMesh, ConductionBetweenIsothermalWallsIsLinear) {
@@ -176,8 +179,8 @@ TEST_P(ViscousMesh, UniformFlowIsPreservedWithViscosity) {
     c.nx = 8;
     c.ny = 8;
     c.init = "type = \"analytical\"\nrho = \"1.1\"\nu = [\"0.3\", \"-0.2\"]\np = \"0.9\"\n";
-    c.bottom = "type = \"extrapolation\"\n";
-    c.top = "type = \"extrapolation\"\n";
+    c.bottom = "type = \"outlet_extrapolation\"\n";
+    c.top = "type = \"outlet_extrapolation\"\n";
     c.run = "n_steps = 50\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
@@ -199,8 +202,8 @@ TEST(ViscousForces, CouetteWallShearMatchesMuUOverH) {
     c.run = "t_stop = 15.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto mesh = solver->get_mesh();
-    const auto top = solver->calc_force(mesh->get_face_zone("top")->faces);
-    const auto bottom = solver->calc_force(mesh->get_face_zone("bottom")->faces);
+    const auto top = solver->calc_force(device_zone_faces(*mesh, "top"));
+    const auto bottom = solver->calc_force(device_zone_faces(*mesh, "bottom"));
     EXPECT_NEAR(top[2], -0.02, 2e-4);
     EXPECT_NEAR(bottom[2], 0.02, 2e-4);
     EXPECT_NEAR(top[1], 1.0, 1e-3);

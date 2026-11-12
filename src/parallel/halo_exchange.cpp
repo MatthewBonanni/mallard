@@ -67,8 +67,9 @@ void HaloExchange::allocate_buffers(const uint32_t n_values_per_cell) {
 void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & exec) {
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
-    if (n_values != N_CONSERVATIVE + U.n_species()) allocate_buffers(N_CONSERVATIVE + U.n_species());
-    const uint32_t stride = n_values;
+    // States of different widths share the buffers, which grow to the widest: no allocation once it was exchanged
+    const uint32_t stride = N_CONSERVATIVE + U.n_species();
+    if (stride > n_values) allocate_buffers(stride);
     const uint32_t n_species = U.n_species();
     Kokkos::View<uint32_t *> s_cells = send_cells;
     Kokkos::View<rtype *> s_buf = send_buffer;
@@ -95,6 +96,7 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
         return;
     }
 #endif
+    const comm::HostStaged staged;
     exec.fence("halo_pack");
     rtype * send_ptr = s_buf.data();
     rtype * recv_ptr = recv_buffer.data();
@@ -123,11 +125,12 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
 void HaloExchange::finish(const State & U, const Kokkos::DefaultExecutionSpace & exec) {
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
+    const comm::HostStaged staged;
     if (!nccl && MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE) != MPI_SUCCESS) {
         throw std::runtime_error("HaloExchange: MPI_Waitall failed");
     }
-    const uint32_t stride = n_values;
     const uint32_t n_species = U.n_species();
+    const uint32_t stride = N_CONSERVATIVE + n_species;
     Kokkos::View<uint32_t *> r_cells = recv_cells;
     Kokkos::View<rtype *> r_buf = recv_buffer;
     StateView flow = U.flow;

@@ -16,10 +16,11 @@
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 enum class PhysicsType {
     EULER,
@@ -71,10 +72,10 @@ struct Euler {
     /**
      * @brief Construct from the [physics] table of an input file.
      */
-    static Euler from_input(const toml::value & input);
+    static Euler from_input(const Input & input);
 
     /** @brief Display lines for the run log. */
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     KOKKOS_INLINE_FUNCTION
     PhysicsType get_type() const {

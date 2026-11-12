@@ -47,7 +47,7 @@ struct ScalarFaceValues {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     ScalarView scalars;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, j, d); empty for first order
@@ -57,7 +57,10 @@ struct ScalarFaceValues {
     KOKKOS_INLINE_FUNCTION
     void offset(const uint32_t c, const uint32_t f, const uint8_t side, rtype * r) const {
         const uint8_t s = side ? face_shift(f) : 0;
-        FOR_I_DIM r[i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
+        rtype x_f[N_DIM];
+        FOR_I_DIM x_f[i] = face_coords(f, i);
+        periodic.backward(s, x_f, r);
+        FOR_I_DIM r[i] = r[i] - cell_coords(c, i);
     }
 
     /** @brief Scalar j of cell c at offset r from its centroid. */

@@ -25,9 +25,12 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
+#include "verification.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -38,8 +41,8 @@ struct CaseConfig {
     std::string recon = "FO";
     std::string limiter = "barth_jespersen";
     std::string riemann = "HLLC";
-    std::string bc_lr = "extrapolation";
-    std::string bc_tb = "extrapolation";
+    std::string bc_lr = "outlet_extrapolation";
+    std::string bc_tb = "outlet_extrapolation";
     std::string init;
     std::string run = "n_steps = 20\ncfl = 0.25\n";
 };
@@ -54,7 +57,8 @@ std::string make_input(const CaseConfig & c) {
       << "[[boundaries]]\nname = \"top\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\nlimiter = \"" << c.limiter << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << (c.recon == "MUSCL" ? "limiter = \"" + c.limiter + "\"\n" : "")
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
     return s.str();
@@ -62,6 +66,7 @@ std::string make_input(const CaseConfig & c) {
 
 std::unique_ptr<Solver> run_case(const CaseConfig & c) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(make_input(c)));
     solver->run();
     solver->update_primitives();
@@ -177,8 +182,8 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     c.recon = recon;
     c.nx = along_y ? 4 : n;
     c.ny = along_y ? n : 4;
-    c.bc_lr = along_y ? "symmetry" : "extrapolation";
-    c.bc_tb = along_y ? "extrapolation" : "symmetry";
+    c.bc_lr = along_y ? "symmetry" : "outlet_extrapolation";
+    c.bc_tb = along_y ? "outlet_extrapolation" : "symmetry";
     c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = along_y ? "y" : "x";
     c.init = "type = \"analytical\"\n"
@@ -245,6 +250,7 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuity");
     const uint32_t nx = 800, ny = 4;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(
         "[run]\nn_steps = 3\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 800\nNy = 4\nLx = 1.0\nLy = 0.005\n"
@@ -277,6 +283,66 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     }
     EXPECT_LT(max_row_diff, 1e-12);
     EXPECT_LT(max_v, 1e-12);
+}
+
+TEST(SolverRegression, BoundPreservingTENOKeepsAMach14NearVacuumPositive) {
+    // 183 cells of the cubic examples/mallard mesh around the lee of the tail,
+    // with the Mach 8 run's state at step 6840 (t = 0.0462): Mach 14 near
+    // vacuum (internal energy 2% of the total) over a slower gas at 300 times
+    // its pressure. TENO's face states within the neighbors' range drew more
+    // energy through one face than a cell's internal energy, and its pressure
+    // went negative within the first stage of the next step.
+    SKIP_IN_SINGLE_PRECISION("the near-vacuum pressures are below single precision's resolution of the energy");
+    const std::string dir = source_dir() + "/test/data/positivity/";
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(
+        "[run]\nn_steps = 1\ndt = 6.977e-6\n"
+        "[mesh]\ntype = \"file\"\nfilename = \"" + dir + "mallard_lee.msh\"\n"
+        "[initialize]\ntype = \"constant\"\nu = [8.0, 0.0]\np = 0.7142857142857143\nT = 0.7142857142857143\n"
+        "[[boundaries]]\nname = \"duck\"\ntype = \"wall_adiabatic\"\n"
+        "[[boundaries]]\nname = \"outer\"\ntype = \"outlet_extrapolation\"\n"
+        "[numerics]\nriemann_solver = \"RHLL\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\nbound_preserving = true\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 0.7142857142857143\nT_ref = 0.7142857142857143\n"
+        "rho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"));
+    auto mesh = solver->get_mesh();
+    std::ifstream in(dir + "mallard_lee.csv");
+    std::string line;
+    std::getline(in, line);
+    uint32_t n_read = 0;
+    for (; std::getline(in, line); n_read++) {
+        std::istringstream row(line);
+        double v[6];
+        for (double & x : v) {
+            std::string field;
+            std::getline(row, field, ',');
+            x = std::stod(field);
+        }
+        uint32_t nearest = 0;
+        double best = 1e300;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const double d = std::hypot(double(mesh->h_cell_coords(c, 0)) - v[0], double(mesh->h_cell_coords(c, 1)) - v[1]);
+            if (d < best) best = d, nearest = c;
+        }
+        const double rho = v[2], u = v[3], w = v[4], p = v[5];
+        solver->h_conservatives(nearest, 0) = rtype(rho);
+        solver->h_conservatives(nearest, 1) = rtype(rho * u);
+        solver->h_conservatives(nearest, 2) = rtype(rho * w);
+        solver->h_conservatives(nearest, 3) = rtype(p / 0.4 + 0.5 * rho * (u * u + w * w));
+    }
+    ASSERT_EQ(n_read, mesh->n_cells);
+    solver->copy_host_to_device();
+    solver->run();
+    solver->copy_device_to_host();
+    uint32_t inadmissible = 0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double U[4];
+        for (int i = 0; i < 4; i++) U[i] = double(solver->h_conservatives(c, i));
+        const double p = 0.4 * (U[3] - 0.5 * (U[1] * U[1] + U[2] * U[2]) / U[0]);
+        if (!(U[0] > 0.0 && p > 0.0)) inadmissible++;
+    }
+    EXPECT_EQ(inadmissible, 0u);
 }
 
 TEST(SolverRegression, MUSCLTransmissiveInflowBoundaryStaysBounded) {
@@ -343,8 +409,9 @@ TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
     // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
     const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
     const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
-    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << ", TENO " << t1 << " -> " << t2 << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 2.7);
+    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << std::endl;
+    verification::expect_order({"advection", "TENO5, SSPRK3", verification::cells_of(GetParam()),
+                                "L1 density error, pulse", {32, 64}, {t1, t2}, 3.0, 2.7});
     EXPECT_LT(t2, 0.2 * m2);
 }
 
@@ -396,8 +463,8 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
     s << "[run]\nt_stop = 0.01\ncfl = 0.25\n"
       << "[mesh]\ntype = \"wedge\"\nNx = 80\nNy = 60\nLx = 2.0\nLy = 1.5\n"
       << "[initialize]\ntype = \"constant\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 101325.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [600.0, 0.0]\np = 101325.0\nT = 300.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 101325.0\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -405,6 +472,7 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 298.15\nrho_ref = 1.225\n"
       << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();
@@ -493,8 +561,8 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
             "[mesh]\ntype = \"cartesian_tri\"\nNx = 16\nNy = 16\nLx = 1.0\nLy = 1.0\n"
             "[initialize]\ntype = \"analytical\"\n"
             "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
-            "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-            "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+            "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+            "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
             "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
             "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
             "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -509,11 +577,13 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = std::filesystem::temp_directory_path();
+    const auto dir = rank_scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);
-        const std::string cmd = "MALLARD_THREAD_TEST_OUT=" + out + " \"" + exe +
+        // Unsharded: a sharded run (GTEST_TOTAL_SHARDS) would leave the child's one test to one shard
+        const std::string cmd = "env -u GTEST_TOTAL_SHARDS -u GTEST_SHARD_INDEX MALLARD_THREAD_TEST_OUT=" + out +
+                                " \"" + exe +
                                 "\" --gtest_filter=SolverTest.ResultIsIndependentOfThreadCount --kokkos-num-threads=" +
                                 std::to_string(threads) + " > /dev/null 2>&1";
         EXPECT_EQ(std::system(cmd.c_str()), 0) << cmd;
@@ -549,7 +619,7 @@ double vortex_energy_loss(double low_mach_cutoff) {
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " << p0 << "\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
-      << "[integrals]\nfile = \"" << (std::filesystem::temp_directory_path() / "mallard_vortex.csv").string()
+      << "[integrals]\nfile = \"" << (scratch_dir() / "mallard_vortex.csv").string()
       << "\"\ninterval = 1000000\n";
     Solver solver;
     solver.init(parse_toml(s.str()));

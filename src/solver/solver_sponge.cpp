@@ -11,68 +11,82 @@
 
 #include "solver.h"
 
-#include <iomanip>
-#include <sstream>
+#include <limits>
 
 #include <Kokkos_Core.hpp>
 
 #include "characteristic.h"
 #include "input.h"
+#include "region_input.h"
 
 namespace {
 
-/** @brief An expression in x, y, z from a number or a string. */
-Expression number_or_expression(const toml::value & value, const std::string & name) {
-    if (value.is_string()) return Expression(name, value.as_string());
-    std::ostringstream text;
-    text << std::setprecision(17) << static_cast<double>(as_real(value, name));
-    return Expression(name, text.str());
+/** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
+Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
+    return Expression(name, quantity_or_expression(value, name, dimension));
 }
 
 } // namespace
 
-void Solver::init_sponges() {
+void Solver::init_sponges(region::Regions & regions) {
     sponge_cells = Kokkos::View<uint32_t *>();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
     if (!input.contains("sponges")) return;
-    const std::vector<toml::value> sponges = toml::find<std::vector<toml::value>>(input, "sponges");
+    const std::vector<Input> sponges = find_value<std::vector<Input>>(input, "sponges");
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
     std::vector<double> strength(n_owned, 0.0);
     std::vector<double> target(size_t(n_owned) * n_vars, 0.0);
     for (size_t i_s = 0; i_s < sponges.size(); i_s++) {
-        const toml::value & sponge = sponges[i_s];
+        const Input & sponge = sponges[i_s];
         const std::string where = "sponges[" + std::to_string(i_s) + "]";
         for (const char * key : {"strength", "u", "p", "T"}) {
             if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");
         }
-        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength");
+        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength", dim::rate);
         const auto & u_in = sponge.at("u").as_array();
         if (u_in.size() != N_DIM) throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components.");
         std::vector<Expression> u;
-        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]"));
-        const Expression p = number_or_expression(sponge.at("p"), where + ".p");
-        const Expression T = number_or_expression(sponge.at("T"), where + ".T");
+        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]", dim::velocity));
+        const Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
+        const Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
 
+        const std::vector<double> * fractions = nullptr;
+        if (sponge.contains("region")) {
+            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), sponge.at("region"),
+                                           where + ".region");
+            fractions = &regions.fractions(sponge.at("region"), where + ".region");
+        }
+
+        std::vector<uint32_t> candidates;
+        for (uint32_t c = 0; c < n_owned; c++) {
+            if (!fractions || (*fractions)[c] != 0.0) candidates.push_back(c);
+        }
+        const std::vector<double> sigma_candidates = evaluate_at({&sigma}, mesh->cell_coords, candidates);
         std::vector<uint32_t> cells;
         std::vector<double> sigma_cells;
-        for (uint32_t c = 0; c < n_owned; c++) {
-            const double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
+        for (size_t k = 0; k < candidates.size(); k++) {
+            const uint32_t c = candidates[k];
+            double s = sigma_candidates[k];
             if (!(s >= 0.0)) throw InputError(where + ".strength must be non-negative.");
+            if (fractions) s *= (*fractions)[c];
             if (s == 0.0) continue;
             cells.push_back(c);
             sigma_cells.push_back(s);
         }
         const std::vector<std::vector<double>> Y =
             is_mixture() ? composition_at_cells(sponge, where, cells) : std::vector<std::vector<double>>();
+        std::vector<const Expression *> state = {&p, &T};
+        FOR_I_DIM state.push_back(&u[i]);
+        const std::vector<double> state_cells = evaluate_at(state, mesh->cell_coords, cells);
         std::vector<rtype> U(n_vars);
         for (size_t j = 0; j < cells.size(); j++) {
             const uint32_t c = cells[j];
-            const auto x = Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL());
+            const double * s = state_cells.data() + j * state.size();
             rtype u_c[N_DIM];
-            FOR_I_DIM u_c[i] = static_cast<rtype>(u[i].at(x, N_DIM));
-            const double p_c = p.at(x, N_DIM), T_c = T.at(x, N_DIM);
+            FOR_I_DIM u_c[i] = static_cast<rtype>(s[2 + i]);
+            const double p_c = s[0], T_c = s[1];
             if (is_mixture()) {
                 mixture_model->conservatives(p_c, T_c, u_c, Y[j], U.data(), U.data() + N_CONSERVATIVE);
             } else {
@@ -110,8 +124,9 @@ void Solver::init_sponges() {
     Kokkos::deep_copy(sponge_strength, h_strength);
     Kokkos::deep_copy(sponge_target, h_target);
     if (max_strength > 0.0) sponge_dt_max = static_cast<rtype>(1.0 / max_strength);
-    source_summary.emplace_back("Sponges", std::to_string(sponges.size()) + ", " + logging::count(n_cells) +
-                                               " cells, max strength " + logging::real(max_strength));
+    source_summary.quantity("sponges", std::to_string(sponges.size()), "sponges", "");
+    source_summary.quantity("sponge cells", logging::count(n_cells), "cells", "");
+    source_summary.quantity("sponge strength", logging::real(max_strength), units::column("1/s"), "largest");
 }
 
 void Solver::apply_sponges(const State & solution, const State & rhs) {
@@ -139,7 +154,20 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
-    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
+    if (!inflows.empty() || !timed_inlets.empty()) {
+        if (!characteristic_time.is_allocated()) characteristic_time = Kokkos::View<rtype>("char_target_time");
+        const Kokkos::View<rtype> t_next = characteristic_time;
+        if (recording_step) {
+            const rtype * s = step_dt_device();
+            const rtype * t_step = step_time_device();
+            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = *t_step + *s; });
+        } else {
+            const rtype t_end = t + dt;
+            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = t_end; });
+        }
+        timed_inlets.fill(t_next, boundary_data.char_target_next);
+        for (auto & inflow : inflows) inflow->fill(t_next, boundary_data.char_target_next);
+    }
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,
@@ -147,7 +175,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            face_reconstruction->quadrature_face.weights,
                                            face_reconstruction->face_quad_weights,
                                            dt,
-                                           !characteristic_state_set};
+                                           !characteristic_state_set,
+                                           recording_step ? step_dt_device() : nullptr};
     Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
     characteristic_state_set = true;

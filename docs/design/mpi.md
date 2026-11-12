@@ -36,7 +36,7 @@ Setup-time communication (partitioning, migration, I/O) always uses MPI.
 ### 2. Mesh input
 
 - **Format:** an HDF5 mesh file with global arrays, global ids being row indices: node coordinates, cell connectivity (CSR of node ids; the cell type follows from the node count), boundary faces (CSR) with zone ids, and zone names (layout in `docs/input.md`). Each rank reads a contiguous block of cells, of nodes and of boundary faces, with collective parallel HDF5 I/O (independent reads when HDF5 is not parallel). Node coordinates a rank needs but did not read are fetched later from the rank that read them (section 5).
-- **Converter:** `mallard-mesh-convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
+- **Converter:** `mallard mesh convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
 - Generated meshes (`cartesian`, `wedge`, ...) are produced directly in blocks per rank, numbered as the serial generators number them.
 - A Gmsh file is read whole by every rank, which keeps only its block; meshes too large for that are converted first. Every source then goes through the same distributed path (`DistributedMesh`); only single-rank runs build the mesh directly.
 
@@ -65,8 +65,9 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 ### 6. Halo
 
 - **Local numbering:**
-  - Cells: `[owned interior | owned near partition boundary | halo layer 1 | ... | halo layer k]`. Owned cells are in Hilbert order within each group. (Implemented so far: owned cells, then each halo layer, each in global id order.)
-  - Faces: faces between owned cells, then faces between an owned and a halo cell, then faces between halo cells that reconstruction needs.
+  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`) or in global order (`"input"`); the default `"auto"` takes whichever reads fewer cache lines over the reconstruction's stencil (`performance.md`, "Cell numbering"). Serial runs number their cells the same way, the mesh's order becoming the global ids.
+  - Faces: in the order the local cells reach them, so faces of owned cells come first; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id).
+  - Nothing that results depend on follows the local numbering: faces, neighbor lists and stencils are ordered by global ids, and so are the sums that mix cells (characteristic boundaries' transverse fits, the mass-flow force, by fixed-point sums), the image-cell search and the rows of periodic translations. Restart, HDF5 and VTU files are written in global order. Measurements: `performance.md`, "Cell numbering".
   - Every cell and node keeps its global id.
 - **Depth k:** the number of vertex-neighbor layers any reconstruction needs:
 
@@ -78,7 +79,14 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 
   TENO's central-stencil gather grows layer by layer until it has enough rows. So the halo is built with a default depth, stencils are computed, and if any stencil reaches the halo frontier the halo is deepened on every rank and the setup after the mesh repeats. This keeps stencils *identical* to the serial ones, which is what makes results rank-count independent.
 - **Construction:** a distributed breadth-first search over vertex neighbors. Layer 1 comes from the node directory (section 5); for each further layer, a rank asks the directory for the cells around the nodes of its previous layer that it has not asked about, then fetches the new cells from the ranks whose blocks hold them. Deepening the halo continues the search from the existing layers rather than starting over.
-- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, sorted by global id on both sides.
+- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, both in the receiver's local order.
+
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-light.svg#gh-light-mode-only)
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-dark.svg#gh-dark-mode-only)
+
+*Rank 1 of 3 with its halo layers, from Mallard runs: `tools/docs/runs.py` repeats the
+breadth-first search above on the owned cells of every rank and checks its counts against
+the run's report.*
 
 ### 7. Time stepping
 
@@ -108,7 +116,7 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 
 ### 9. Output and restart
 
-- **Solution output:** per-rank VTU pieces plus a `.pvtu` index and the `.pvd` series to start. At scale, HDF5 with an XDMF index (one shared file per snapshot, collective writes).
+- **Solution output:** VTKHDF by default, one shared file per snapshot written with collective I/O at global offsets (rank-count independent); VTU (per-rank pieces plus a `.pvtu` index and the `.pvd` series) without parallel HDF5.
 - **Restart:** HDF5, written by global cell id, so a run can restart on a **different rank count**. This is essential for hero runs, which rarely get the same allocation twice.
 
 ### 10. Dynamic load balancing

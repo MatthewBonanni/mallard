@@ -1,0 +1,5 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "2d"
+demonstrates = ["TENO5 on shock-entropy interaction", "high-order resolution of fine waves"]
+validation = [{anchor = "shu-osher-problem", regime = "Mach 3 shock running into an entropy wave, against a fine-grid reference"}]

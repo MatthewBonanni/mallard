@@ -5,143 +5,99 @@
 ![logo_dark](./docs/images/mallard_dark.png#gh-dark-mode-only)
 ![logo_light](./docs/images/mallard_light.png#gh-light-mode-only)
 
-Mallard is a high-order unstructured finite volume solver for the compressible Euler and Navier-Stokes equations, written in C++ with [Kokkos](https://github.com/kokkos/kokkos) for performance portability.
+Mallard is a high-order unstructured finite volume solver for compressible Euler, Navier-Stokes and reacting flows, written in C++ with [Kokkos](https://github.com/kokkos/kokkos) to run on CPUs and NVIDIA and AMD GPUs.
 
 ![Mallard simulations](./docs/images/hero.gif)
 
-*Configuration 3 of the 2D Riemann problem on 4096² quadrilaterals (16.8M cells), with Kelvin-Helmholtz roll-ups along the slip lines of the jet; a cellular detonation in 2H2-O2-7Ar in a 3 cm square duct, 19.2M hexahedra in a window that follows the front, whose transverse waves sweep both directions and print their tracks on the numerical soot foils of the walls (front speed within 0.2% of the Chapman-Jouguet speed); the Taylor-Green vortex at Re = 1600 on the full periodic box at 256³ (16.8M hexahedra), whose kinetic-energy dissipation rate, traced beside it, peaks within 0.3% of the 512³ spectral DNS of the [High-Order CFD Workshop](https://cfd.ku.edu/hiocfd/); and a DNS of the autoignition of thermally stratified lean H2/air at 41 atm (T' = 15 K, after Chen et al.), burning by spontaneous ignition fronts and deflagrations ([`examples/`](examples)).*
+*A 2D Riemann problem on 16.8M quadrilaterals; a cellular detonation in 2H2-O2-7Ar on 19.2M hexahedra, front speed within 0.2% of Chapman-Jouguet; the Taylor-Green vortex at Re = 1600 on 256³ hexahedra, peak dissipation within 0.3% of the spectral DNS; autoignition of stratified lean H2/air at 41 atm ([`examples/`](examples)).*
 
 > **NOTE:** Mallard is under active development; finite-rate chemistry is new, and its GPU performance is still being tuned.
 
 ## Features
 
-**Meshes**
-- 2D (triangles, quadrilaterals) or 3D (tetrahedra, hexahedra, prisms, pyramids, mixed), chosen at build time
-- Gmsh 2.2/4.1, CGNS, Fluent, OpenFOAM polyMesh or HDF5 mesh files (`mallard-mesh-convert`), scaled, rotated and translated on read, or generated boxes
-- Periodic boundaries: generated meshes, or paired zones of mesh files
-- Axisymmetric (r-z) flows in 2D: revolved finite volumes, at design order up to the axis
-- Curved high-order boundaries: Gmsh order-2/3 boundary elements or projection onto a circle, sphere or cylinder; TENO-E orders 3-6 converge at curved walls, where straight-sided faces do not ([guide](docs/guide/meshes.md#curved-boundaries))
+**Meshes** ([guide](docs/guide/meshes.md))
+- 2D triangles and quadrilaterals; 3D tetrahedra, hexahedra, prisms, pyramids and mixed meshes
+- Gmsh, CGNS, Fluent, OpenFOAM and HDF5 files, or generated boxes and annuli
+- Translational and rotational periodicity; axisymmetric flows
+- Curved high-order boundaries
 
-**Numerics**
-- Reconstruction: first order; MUSCL with Barth-Jespersen or Venkatakrishnan limiting; [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) of orders 3 to 6, optionally bound preserving (measured orders 3-6 on triangles and quadrilaterals)
-- Riemann solvers: Rusanov, HLL, HLLC, Roe and the rotated-hybrid HLL-Roe (RHLL), carbuncle-free except at shocks at rest on cell faces, all for single gases and mixtures
-- Low-Mach correction of the upwind dissipation
-- Explicit time integration (forward Euler, SSPRK3, RK4) at a CFL number or a fixed step
+**Numerics** ([guide](docs/guide/numerics.md))
+- [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) reconstruction, orders 3 to 6, on every cell type ([what is new](docs/numerics/originality.md))
+- High order by default: on smooth flow, the error falls fast enough with refinement that TENO-E reaches an accurate answer at a fraction of a second-order scheme's cost ([measured](docs/guide/numerics.md#why-high-order))
+- Rusanov, HLL, HLLC, Roe and RHLL Riemann solvers, with low-Mach correction
+- Explicit Runge-Kutta, at a CFL number or with error-controlled steps
 
-**Physics**
-- Compressible Euler and Navier-Stokes; constant, Sutherland or power-law viscosity
-- Thermally perfect multicomponent mixtures from [Cantera](https://cantera.org) YAML files; optional double-flux scheme for interfaces
-- Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
-- Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
-- Optically thin radiation (TNF Planck-mean model)
-- Gravity and arbitrary source terms
+**Physics** ([guide](docs/guide/physics.md))
+- Compressible Euler and Navier-Stokes
+- Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
+- Detailed transport, Soret diffusion, optically thin radiation
+- Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions)
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
-- Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
-- Kinetic-energy-preserving hybrid convective flux, with the Riemann solver only at compressions, and a run-time dissipation budget that separates the model's, the scheme's and molecular dissipation
-- Thickened flame (TFLES) with dynamic thickening and a dynamic efficiency (no model constant); partially stirred reactor (PaSR) closure, experimental
-- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([guide](docs/guide/boundary_conditions.md#synthetic-turbulence))
-- Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
+- Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux
+- Thickened flames with dynamic efficiency; synthetic turbulent inflow
+- Wall models: Griffin-Fu-Moin compressible and equilibrium ODE
 
-**Boundary conditions**
-- Slip, adiabatic, isothermal and heat-flux walls, optionally moving
-- Inflow, characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
-- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
-- Zones split between conditions by expressions
+**Boundary conditions** ([guide](docs/guide/boundary_conditions.md))
+- Walls, inlets, outlets, far field and symmetry, with composable options (NSCBC, averaging, turbulence, wall models)
+- Every value a number or an expression of x, y, z and t
 
-**Performance and parallelism**
-- [Kokkos](https://github.com/kokkos/kokkos) backends: Serial, Threads, OpenMP, CUDA (NVIDIA) and HIP (AMD); double or single precision
-- MPI with multi-jagged (cuboid blocks), Hilbert-curve or graph (dKaMinPar) partitions, GPU-aware halo exchange overlapped with computation: 93% (2D) and 96% (3D) weak-scaling efficiency on 16 A100 GPUs
-- 50 million cell time steps per second on one A100 (fifth-order TENO-E, 2D Euler)
-- No rank holds the whole mesh (HDF5 or generated meshes)
-- Bitwise-identical results on any number of threads or MPI ranks; restarts bit for bit, also on a different number of ranks
-- Stiff chemistry on GPUs: a warp or wider team per cell and a sparse LU for large mechanisms, load-balanced across MPI ranks
-- The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
+**Performance** ([guide](docs/guide/performance.md))
+- CPUs (OpenMP, threads) and NVIDIA and AMD GPUs; single or double precision
+- MPI with GPU-aware or NCCL halo exchange overlapped with computation; multi-jagged, Hilbert-curve or graph partitions
+- The whole time step as one CUDA graph
+- Bitwise-identical results on any number of ranks; restarts bit for bit
 
-**Input, output and diagnostics**
-- TOML input; initial conditions, boundary states, sources and sponges as analytical expressions
-- VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
-- Running means and covariances, point and line probes, domain integrals (kinetic energy, enstrophy, ...), wall forces
-- Heat release, species production rates and detonation soot foils (`P_MAX`)
-- `MallardReactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
+**Input and output** ([guide](docs/guide/input_files.md))
+- TOML input with units (`p = "1 atm"`); every error names the key, line and fix
+- Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
+- `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions, `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`); tab completion for bash, zsh and fish
+- Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
+- A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](docs/images/guide/run_report_sample.html))
+- A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
+- VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
+- Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
 
-**Validation and testing**
-- 40 [examples](examples) against exact solutions, theory, DNS or Cantera, e.g.:
-  - Sphere wake at Re = 300: Strouhal number and drag within 3% and 2% of Johnson & Patel
-  - Compressible isotropic turbulence: enstrophy within 2.4% of the filtered DNS of Johnsen et al.
-  - CJ detonation speed within 0.01%; H2/air flame speeds within 0.81% of Cantera from φ = 0.6 to 1.4
-- Over 400 unit and regression tests: exact Riemann solutions, design order, conservation, bitwise MPI and restart reproducibility
-- CI on every code change (2D, 3D, MPI on 1-4 ranks, single precision, GCC and Clang, warnings as errors); nightly sanitizers; a GPU performance suite with per-hardware baselines, tracked by merge on the [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
+**Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
+- 40 [examples](examples), compared with exact solutions, other codes, DNS and experiments
+- Over 500 tests; a [verification manual](https://matthewbonanni.github.io/mallard/docs/verification/) of measured convergence orders
+- CPU and GPU CI before every merge; a [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
-The sources of every method and of the validation data are listed in [docs/references.md](docs/references.md).
+Every method and reference is cited in [docs/references.md](docs/references.md).
 
-## Building
+## Installing
 
-Mallard depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x), [toml11](https://github.com/ToruNiina/toml11) and [exprtk](https://github.com/ArashPartow/exprtk), all included in this repository; Kokkos and toml11 are submodules.
+| | Best for |
+|---|---|
+| Container: `ghcr.io/matthewbonanni/mallard` (CPU) or `:cuda` (NVIDIA GPUs) | Trying Mallard; workstations; GPU nodes; Kubernetes |
+| [Spack](https://spack.io): `spack install mallard` with this repository's package | Clusters: your compilers, MPI and GPUs |
+| From source with CMake | Development; every build option |
+
+Quickest, on a CPU:
 
 ```sh
-git clone --recursive https://github.com/MatthewBonanni/mallard.git
-cd mallard
+git clone --recursive https://github.com/MatthewBonanni/mallard.git && cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON
 cmake --build build -j
 ```
 
-Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver.
-
-Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
-
-For AMD GPUs, build with ROCm's Clang (ROCm 6.2 or newer, with the HIP development headers):
-
-```sh
-cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
-    -DKokkos_ENABLE_HIP=ON -DKokkos_ARCH_AMD_GFX950=ON -DKokkos_ENABLE_OPENMP=ON \
-    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++
-```
-
-`AMD_GFX950` is the MI350X/MI355X; use `AMD_GFX942` for the MI300X/MI300A or `AMD_GFX90A` for the MI250X. Instinct GPUs run 64-wide wavefronts where NVIDIA GPUs run 32-wide warps; the chemistry gives each cell a wavefront, and a team's results do not depend on its width. With MPI and dKaMinPar, also pass `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`. On a node with automatic NUMA balancing on (`/proc/sys/kernel/numa_balancing` is 1), the ROCm driver stalls a process's GPU queues for up to seconds at a time: turn it off, as AMD recommends for Instinct GPUs, or bind each rank to its GPU's NUMA node (`numactl --cpunodebind=N --membind=N`).
-
-| CMake option | Default | Description |
-|---|---|---|
-| `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
-| `Mallard_DIM` | `2` | Spatial dimension, `2` or `3` (one binary per dimension) |
-| `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
-| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N Mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard-mesh-convert`) no rank ever holds the whole mesh, while other mesh files are read whole by every rank |
-| `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
-| `Mallard_ENABLE_NCCL` | `OFF` | With MPI on NVIDIA GPUs: exchange halos with NCCL, stream-ordered with the kernels, so the host never waits for a halo (finds NCCL through `NCCL_HOME` or `NCCL_ROOT`); `[parallel] halo_exchange` chooses at run time |
-| `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner for `[parallel] partitioner = "graph"` (fetched at configure time; needs [oneTBB](https://github.com/uxlfoundation/oneTBB), found through `CMAKE_PREFIX_PATH`, e.g. built with `cmake -S oneTBB -B build -DTBB_TEST=OFF -DCMAKE_INSTALL_PREFIX=$HOME/tbb && cmake --build build -j && cmake --install build`). The default multi-jagged partitions need no library and cut box meshes at least as well. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
-| `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files and solution output (`format = "hdf5"`, with XDMF for ParaView; parallel HDF5 with MPI, when available) and the `mallard-mesh-convert` tool |
-| `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
-| `BUILD_DOCS` | `OFF` | Doxygen documentation target |
+[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option. [Supported platforms](docs/installation.md#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs. The [feature matrix](docs/guide/features.md) shows which features combine, each pair marked validated, verified, implemented, rejected or untested.
 
 ## Running
 
 ```sh
 cd examples/riemann_2d
-../../build/src/Mallard -i input.toml --kokkos-num-threads=8
+mallard -i input.toml --kokkos-num-threads=8                   # installed (container, Spack)
+../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 
-See the [tutorials](docs/tutorials/index.md) for cases taken from geometry and mesh to the comparison with reference data, [`examples/`](examples) for complete input files, the [user guide](docs/guide/input_files.md) for each topic, and [`docs/input.md`](docs/input.md) for every input option.
+`mallard list templates` shows ready-to-run templates (`mallard new cylinder` creates a case with its mesh, run and plot scripts), `mallard check input.toml` checks a case before a long run, `mallard list fields|keys input.toml` lists the output fields and input keys of a case, and `mallard ctl <run-dir> status|stop` steers it while it runs; `mallard info solut` tells what a run wrote; open the run's `report.html` first. Start with the [tutorials](docs/tutorials/index.md); see [`examples/`](examples) for complete cases, the [user guide](docs/guide/input_files.md) for each topic, [`docs/input.md`](docs/input.md) for every input key, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts, and [`tools/`](tools) for plotting and animation.
 
-## Testing
-
-```sh
-./build/test/MallardTest
-```
-
-The test suite checks mesh geometry, the Riemann solvers against an exact Riemann solver, time integrator convergence orders, gradient and limiter properties, TENO design order on triangles and quadrilaterals and on 3D tetrahedra and hexahedra (with polynomial exactness on prisms, pyramids and mixed meshes), free-stream preservation, discrete conservation, symmetry preservation, shock tubes against exact solutions, viscous flows against exact solutions (Couette, Stokes' first problem, conduction), axisymmetric well balance and design order (manufactured solution, Hagen-Poiseuille), and bit-for-bit restarts.
-
-## Postprocessing
-
-`tools/` contains Python scripts (numpy, matplotlib, scipy, imageio) for reading Mallard's VTU files, plotting profiles against exact solutions, and rendering animations:
-
-```sh
-python tools/animate.py examples/riemann_2d/solut riemann
-```
+`mallard test` runs the test suites of an install (`./build/src/mallard test` in a build tree).
 
 ## Contributing
 
-Mallard uses the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+Bug reports, questions and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing, code style (the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html), warnings as errors), how CI runs, and what a pull request includes: tests, documentation, an example and a [changelog fragment](changelog/README.md) for [CHANGELOG.md](CHANGELOG.md). Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Citing
 
@@ -151,12 +107,12 @@ If you use Mallard, please cite it ([doi:10.5281/zenodo.23112953](https://doi.or
 
 Mallard is licensed under the [Apache License, Version 2.0](LICENSE). Redistributions and derivative works must keep the attribution in [NOTICE](NOTICE). Versions 0.1.0 to 0.6.0 were released under the AGPL v3.0.
 
-Mallard includes code and data derived from [Cantera](https://cantera.org) under the BSD 3-Clause License ([licenses/Cantera-BSD-3-Clause.txt](licenses/Cantera-BSD-3-Clause.txt)).
+Mallard includes code and data derived from [Cantera](https://cantera.org) under the BSD 3-Clause License ([licenses/Cantera-BSD-3-Clause.txt](licenses/Cantera-BSD-3-Clause.txt)), and an expression language derived from [exprtk](https://www.partow.net/programming/exprtk/) under the MIT License ([licenses/exprtk-MIT.txt](licenses/exprtk-MIT.txt)).
 
 ---
 
 <p align="center">
   <img src="docs/images/mallard.gif" alt="Mach 8 flow over a mallard" width="100%">
   <br>
-  <em>Mach 8 flow over a mallard: 1.07M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
+  <em>Mach 8 flow over a mallard: 1.05M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
 </p>

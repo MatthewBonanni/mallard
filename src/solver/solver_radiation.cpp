@@ -50,18 +50,18 @@ void Solver::init_radiation() {
     radiating = false;
     if (!input.contains("radiation")) return;
     if (!is_mixture()) throw InputError("[radiation] needs physics.gas = \"mixture\".");
-    const toml::value & table = input.at("radiation");
-    const std::string model = toml::find_or<std::string>(table, "model", "optically_thin");
+    const Input & table = input.at("radiation");
+    const std::string model = find_value_or<std::string>(table, "model", "optically_thin");
     if (model != "optically_thin") {
         throw InputError("radiation.model = \"" + model + "\" is not one of: optically_thin.");
     }
-    const double T_ambient = find_double_or(table, "T_ambient", 300.0);
+    const double T_ambient = find_double_or(table, "T_ambient", dim::temperature, 300.0);
     if (!(T_ambient >= 0.0)) throw InputError("radiation.T_ambient must be >= 0.");
     const chemistry::Mechanism & mech = mixture_model->mechanism();
     std::vector<std::string> listed;
     const bool explicit_species = table.contains("species");
     if (explicit_species) {
-        listed = toml::find<std::vector<std::string>>(table, "species");
+        listed = find_value<std::vector<std::string>>(table, "species");
     } else {
         listed.assign(RADIATING_NAMES.begin(), RADIATING_NAMES.end());
     }
@@ -86,8 +86,8 @@ void Solver::init_radiation() {
     r.T_ambient4 = T_ambient * T_ambient * T_ambient * T_ambient;
     radiation = r;
     radiating = true;
-    source_summary.emplace_back("Radiation", "optically thin, Planck-mean absorption of " + present +
-                                                 " (TNF), T_ambient = " + logging::real(T_ambient) + " K");
+    source_summary.setting("Radiation", "optically thin, Planck-mean absorption of " + present + " (TNF)");
+    source_summary.quantity("radiation T_ambient", logging::real(T_ambient), units::column("K"), "ambient temperature");
 }
 
 void Solver::add_radiation(StateView rhs, SpeciesView rhoY) {

@@ -16,10 +16,11 @@
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 enum class SGSModel : uint8_t { SMAGORINSKY, WALE, VREMAN, SIGMA };
 
@@ -42,13 +43,15 @@ struct LES {
     rtype C = 1.35_r;
     rtype Pr_t = 0.9_r;
     rtype Sc_t = 0.9_r;
-    bool scotti = false;
-    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)  // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool scotti = false;   // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)
+    // The models' velocity gradients from the reconstruction's central polynomials (TENO) in its smooth cells
+    bool reconstruction_gradients = false;
 
     /** @brief The [les] table of an input (see in_input). */
-    static LES from_input(const toml::value & input);
+    static LES from_input(const Input & input);
 
-    static bool in_input(const toml::value & input) { return input.contains("les"); }
+    static bool in_input(const Input & input) { return input.contains("les"); }
 
     /**
      * @brief Scotti, Meneveau & Lilly's (1993) factor cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))
@@ -59,7 +62,7 @@ struct LES {
     /** @brief Model constant by default: Lilly's C_s, Nicoud & Ducros's C_w, Vreman's c, Nicoud et al.'s C_sigma. */
     static rtype default_constant(SGSModel model);
 
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     /** @brief D(g) of the model, the eddy viscosity for unit constant and filter width. */
     KOKKOS_INLINE_FUNCTION
@@ -78,8 +81,12 @@ struct LES {
 
     /** @brief Kinematic eddy viscosity for the gradient g[i][j] = d u_i / d x_j and filter width delta. */
     KOKKOS_INLINE_FUNCTION
-    rtype nu_t(const double g[3][3], const rtype delta) const {
-        const double c = static_cast<double>(C);
+    rtype nu_t(const double g[3][3], const rtype delta) const { return nu_t(g, delta, C); }
+
+    /** @brief nu_t with the constant C_ in place of C (the dynamic procedure's, on the device). */
+    KOKKOS_INLINE_FUNCTION
+    rtype nu_t(const double g[3][3], const rtype delta, const rtype C_) const {
+        const double c = static_cast<double>(C_);
         const double coefficient = model == SGSModel::VREMAN ? c : c * c;
         const double d = static_cast<double>(delta);
         return static_cast<rtype>(coefficient * d * d * operator_of(model, g));

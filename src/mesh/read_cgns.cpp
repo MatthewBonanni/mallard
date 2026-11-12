@@ -16,6 +16,7 @@
 #ifdef Mallard_HAS_CGNS
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <numeric>
 #include <set>
@@ -89,6 +90,7 @@ struct ZoneInfo {
     std::vector<ElementRef> elements;  // by element id - 1
     std::vector<int> face_section;     // per boundary face of this zone: its section
     std::vector<std::string> section_names;
+    std::vector<std::string> section_families;  // a section's family zone name, or empty
 };
 
 /** @brief Name of the zone a BC or section belongs to: its family's FamilyName (as Gmsh writes physical names), or the family name. */
@@ -128,9 +130,25 @@ uint64_t find_root(std::vector<uint64_t> & parent, uint64_t n) {
 
 bool have_cgns() { return true; }
 
+int cgns_dimension(const std::string & filename) {
+    CgnsFile file(filename);
+    int n_bases = 0;
+    file.check(cg_nbases(file.fn, &n_bases), "reading bases");
+    if (n_bases < 1) file.fail("no CGNSBase_t node.");
+    char base_name[33] = {};
+    int cell_dim = 0, phys_dim = 0;
+    file.check(cg_base_read(file.fn, 1, base_name, &cell_dim, &phys_dim), "reading the base");
+    return cell_dim;
+}
+
 MeshFileData read_cgns(const std::string & filename) {
     CgnsFile file(filename);
     const int fn = file.fn;
+    // Every node, element or point a count announces takes at least a byte of the file
+    const cgsize_t file_size = cgsize_t(std::filesystem::file_size(filename));
+    auto check_count = [&](cgsize_t n, const std::string & what) {
+        if (n < 0 || n > file_size) file.fail("bad " + what + " count " + std::to_string(n) + ".");
+    };
     int n_bases = 0;
     file.check(cg_nbases(fn, &n_bases), "reading bases");
     if (n_bases < 1) file.fail("no CGNSBase_t node.");
@@ -152,6 +170,8 @@ MeshFileData read_cgns(const std::string & filename) {
     MeshFileData data;
     std::vector<std::vector<uint64_t>> cell_nodes, face_nodes, face_all_nodes;  // file-wide node ids
     std::vector<int> face_zone;  // zone index of every boundary face
+    std::vector<std::pair<size_t, size_t>> cell_section;  // zone and section of every cell
+    std::vector<std::string> cell_bc;  // zone name of a cell from a boundary condition on cells (Gmsh's volume groups)
 
     for (int z = 1; z <= n_zones; z++) {
         ZoneInfo & zone = zones[size_t(z - 1)];
@@ -165,6 +185,7 @@ MeshFileData read_cgns(const std::string & filename) {
             file.fail("zone " + zone.name + " is structured; Mallard reads unstructured zones.");
         }
         zone.n_nodes = size[0];
+        check_count(zone.n_nodes, "node");
         zone.first_node = coords.size();
         coords.resize(coords.size() + size_t(zone.n_nodes), {0.0, 0.0, 0.0});
         std::vector<double> c(static_cast<size_t>(zone.n_nodes));
@@ -191,8 +212,13 @@ MeshFileData read_cgns(const std::string & filename) {
                           " holds polyhedra (NGON_n/NFACE_n); Mallard reads element-based sections (triangles, "
                           "quadrilaterals, tetrahedra, pyramids, prisms, hexahedra, and MIXED).");
             }
+            if (start < 1 || end < start || end > file_size) {
+                file.fail("section " + std::string(section_name) + " has bad element range " + std::to_string(start) +
+                          " to " + std::to_string(end) + ".");
+            }
             cgsize_t data_size = 0;
             file.check(cg_ElementDataSize(fn, B, z, s, &data_size), "reading section size");
+            check_count(data_size, "element data");
             std::vector<cgsize_t> conn(static_cast<size_t>(data_size));
             std::vector<cgsize_t> offsets;
             if (section_type == CGNS_ENUMV(MIXED)) {
@@ -206,7 +232,9 @@ MeshFileData read_cgns(const std::string & filename) {
             for (cgsize_t e = start; e <= end; e++) {
                 CGNS_ENUMT(ElementType_t) type_e = section_type;
                 if (section_type == CGNS_ENUMV(MIXED)) {
-                    pos = size_t(offsets[size_t(e - start)]);
+                    const cgsize_t offset = offsets[size_t(e - start)];
+                    if (offset < 0 || size_t(offset) >= conn.size()) file.fail("bad offsets in section " + std::string(section_name) + ".");
+                    pos = size_t(offset);
                     type_e = static_cast<CGNS_ENUMT(ElementType_t)>(conn[pos++]);
                 }
                 int npe = 0;
@@ -220,6 +248,7 @@ MeshFileData read_cgns(const std::string & filename) {
                     file.fail("has " + std::to_string(info.dim) + "D elements, but Mallard was built with Mallard_DIM = " +
                               std::to_string(N_DIM) + ".");
                 }
+                if (pos + size_t(npe) > conn.size()) file.fail("section " + std::string(section_name) + " ends early.");
                 std::vector<uint64_t> nodes(static_cast<size_t>(npe));
                 for (auto & n : nodes) {
                     const cgsize_t local = conn[pos++];
@@ -230,6 +259,7 @@ MeshFileData read_cgns(const std::string & filename) {
                 if (info.dim == N_DIM) {
                     ref = {ElementRef::CELL, uint32_t(cell_nodes.size())};
                     cell_nodes.emplace_back(nodes.begin(), nodes.begin() + info.n_corners);
+                    cell_section.emplace_back(size_t(z - 1), size_t(s - 1));
                 } else if (info.dim == BOUNDARY_DIM) {
                     ref = {ElementRef::FACE, uint32_t(face_nodes.size())};
                     face_nodes.emplace_back(nodes.begin(), nodes.begin() + info.n_corners);
@@ -266,16 +296,17 @@ MeshFileData read_cgns(const std::string & filename) {
             }
             auto donor = std::find_if(zones.begin(), zones.end(), [&](const ZoneInfo & zz) { return zz.name == donor_name; });
             if (donor == zones.end()) file.fail(what + ": unknown donor zone " + donor_name + ".");
+            check_count(n_points, "connectivity point");
             std::vector<cgsize_t> points(static_cast<size_t>(n_points)), donors(static_cast<size_t>(n_donor));
             file.check(cg_conn_read(fn, B, z, i, points.data(), sizeof(cgsize_t) == 8 ? CGNS_ENUMV(LongInteger) : CGNS_ENUMV(Integer),
                                     donors.data()),
                        "reading " + what);
             for (size_t k = 0; k < points.size(); k++) {
-                const uint64_t a = zones[size_t(z - 1)].first_node + uint64_t(points[k] - 1);
-                const uint64_t b = donor->first_node + uint64_t(donors[k] - 1);
                 if (points[k] < 1 || points[k] > zones[size_t(z - 1)].n_nodes || donors[k] < 1 || donors[k] > donor->n_nodes) {
                     file.fail(what + ": node id out of range.");
                 }
+                const uint64_t a = zones[size_t(z - 1)].first_node + uint64_t(points[k] - 1);
+                const uint64_t b = donor->first_node + uint64_t(donors[k] - 1);
                 const uint64_t ra = find_root(parent, a), rb = find_root(parent, b);
                 if (ra != rb) parent[std::max(ra, rb)] = std::min(ra, rb);
             }
@@ -300,6 +331,7 @@ MeshFileData read_cgns(const std::string & filename) {
                        "reading boundary condition");
             CGNS_ENUMT(GridLocation_t) location;
             file.check(cg_boco_gridlocation_read(fn, B, z, bc, &location), "reading boundary condition location");
+            check_count(n_points, "boundary condition point");
             std::vector<cgsize_t> points(static_cast<size_t>(n_points));
             file.check(cg_boco_read(fn, B, z, bc, points.data(), nullptr), "reading boundary condition " + std::string(bc_name));
             std::string name = bc_name, family;
@@ -308,7 +340,9 @@ MeshFileData read_cgns(const std::string & filename) {
             }
             std::vector<uint32_t> faces;
             if (ptset == CGNS_ENUMV(PointRange) || ptset == CGNS_ENUMV(ElementRange)) {
-                if (points.size() != 2) file.fail("boundary condition " + std::string(bc_name) + ": bad range.");
+                if (points.size() != 2 || points[0] < 1 || points[1] < points[0] || points[1] > file_size) {
+                    file.fail("boundary condition " + std::string(bc_name) + ": bad range.");
+                }
                 for (cgsize_t e = points[0]; e <= points[1]; e++) points.push_back(e);
                 points.erase(points.begin(), points.begin() + 2);
             } else if (ptset != CGNS_ENUMV(PointList) && ptset != CGNS_ENUMV(ElementList)) {
@@ -316,7 +350,10 @@ MeshFileData read_cgns(const std::string & filename) {
             }
             if (location == CGNS_ENUMV(Vertex)) {
                 std::set<uint64_t> vertices;
-                for (cgsize_t p : points) vertices.insert(zone.first_node + uint64_t(p - 1));
+                for (cgsize_t p : points) {
+                    if (p < 1 || p > zone.n_nodes) file.fail("boundary condition " + std::string(bc_name) + ": node id out of range.");
+                    vertices.insert(zone.first_node + uint64_t(p - 1));
+                }
                 for (size_t f = 0; f < face_nodes.size(); f++) {
                     if (face_zone[f] != z - 1) continue;
                     if (std::all_of(face_nodes[f].begin(), face_nodes[f].end(), [&](uint64_t n) { return vertices.count(n); })) {
@@ -330,16 +367,22 @@ MeshFileData read_cgns(const std::string & filename) {
                     }
                     const ElementRef & ref = zone.elements[size_t(e - 1)];
                     if (ref.kind == ElementRef::FACE) faces.push_back(ref.index);
+                    if (ref.kind == ElementRef::CELL) {
+                        if (cell_bc.size() <= ref.index) cell_bc.resize(ref.index + 1);
+                        if (cell_bc[ref.index].empty()) cell_bc[ref.index] = name;
+                    }
                 }
             }
             for (uint32_t f : faces) {
                 if (face_name[f].empty()) face_name[f] = name;
             }
         }
+        zone.section_families.assign(zone.section_names.size(), "");
         for (size_t s = 0; s < zone.section_names.size(); s++) {
             std::string family;
             if (cg_goto(fn, B, "Zone_t", z, "Elements_t", int(s + 1), "end") == CG_OK && read_famname(family)) {
                 zone.section_names[s] = family_zone_name(file, B, family);
+                zone.section_families[s] = zone.section_names[s];
             }
         }
     }
@@ -375,6 +418,14 @@ MeshFileData read_cgns(const std::string & filename) {
         return out;
     };
     for (const auto & c : cell_nodes) data.cells.push_back(renumber(c));
+    for (size_t c = 0; c < cell_section.size(); c++) {
+        const std::string & family = zones[cell_section[c].first].section_families[cell_section[c].second];
+        if (!family.empty()) {
+            data.set_cell_zone(c, family);
+        } else if (c < cell_bc.size() && !cell_bc[c].empty()) {
+            data.set_cell_zone(c, cell_bc[c]);
+        }
+    }
     for (size_t f = 0; f < face_nodes.size(); f++) {
         data.boundary_faces.push_back({renumber(face_nodes[f]), face_name[f]});
         std::vector<curved::Vec3> ho;
@@ -388,6 +439,10 @@ MeshFileData read_cgns(const std::string & filename) {
 #else
 
 bool have_cgns() { return false; }
+
+int cgns_dimension(const std::string & filename) {
+    throw std::runtime_error("Cannot read " + filename + ": Mallard was built without CGNS (-DMallard_ENABLE_CGNS=ON).");
+}
 
 MeshFileData read_cgns(const std::string & filename) {
     throw std::runtime_error("Cannot read " + filename + ": Mallard was built without CGNS (-DMallard_ENABLE_CGNS=ON).");

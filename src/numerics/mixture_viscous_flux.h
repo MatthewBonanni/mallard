@@ -83,17 +83,19 @@ struct MixtureTransportFunctor {
  * @brief Gradients of [u, T, X_1 .. X_Ns] with the weights and stencil of
  *        the viscous gradient (LSQVertexGradientFunctor). Boundary ghosts
  *        take the velocity of the ghost state W (no-slip at viscous walls),
- *        and the prescribed T and X at UPT boundaries, the cell's own
+ *        and the prescribed T and X at inlet_state boundaries, the cell's own
  *        elsewhere (adiabatic walls, symmetry, zero-gradient outflow). At the
  *        mirror image of the centroid across isothermal walls the ghost
  *        temperature is 2 T_w - T, across heat-flux walls T + 2 d q / lambda
  *        (d the distance from the centroid to the wall, q into the fluid).
+ *        ROTATIONS = false for meshes without rotational pairs (see with_rotations).
  */
+template <bool ROTATIONS>
 struct MixtureGradientFunctor {
     LSQVertexGradientFunctor stencil;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, variable, dimension)
-    Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of UPT
+    Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of inlet_state
     uint32_t n_species;
     Kokkos::View<rtype *[3]> coefficients;  // (cell, [mu, lambda, -]), for heat-flux walls
 
@@ -109,16 +111,30 @@ struct MixtureGradientFunctor {
             for (uint32_t v = 0; v < CHUNK; v++) {
                 if (v < n) q_c[v] = values(c, v0 + v);
             }
+            // Across periodic rotations the neighbors' velocities (the first chunk's first variables) turn
+            const bool rotated = ROTATIONS && v0 == 0 && f.periodic.rotated();
             for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
                 const uint32_t j = stencil.cells_of_cell(k);
                 rtype w[N_DIM];
                 FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+                rtype u_j[N_DIM] = {};
+                if (rotated) {
+                    FOR_I_DIM u_j[i] = values(j, i);
+                    f.periodic.rotate(stencil.cells_of_cell_shift(k), u_j);
+                }
                 for (uint32_t v = 0; v < CHUNK; v++) {
                     if (v >= n) continue;
-                    const rtype dq = values(j, v0 + v) - q_c[v];
+                    const rtype dq = (rotated && v < N_DIM ? u_j[v] : values(j, v0 + v)) - q_c[v];
                     FOR_I_DIM g[v][i] += w[i] * dq;
                 }
             }
+            stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+                for (uint32_t v = 0; v < CHUNK; v++) {
+                    if (v >= n) continue;
+                    const rtype dq = values(j, v0 + v) - q_c[v];
+                    FOR_I_DIM g[v][i] += stencil.weights.images(k, i) * dq;
+                }
+            });
             for (uint32_t v = 0; v < CHUNK; v++) {
                 if (v < n) FOR_I_DIM gradients(c, v0 + v, i) = g[v][i];
             }
@@ -127,7 +143,7 @@ struct MixtureGradientFunctor {
         FOR_I_CONSERVATIVE W_i[i] = f.W(c, i);
         for (uint32_t k = f.offsets_faces_of_cell(c); k < f.offsets_faces_of_cell(c + 1); k++) {
             const uint32_t i_face = f.faces_of_cell(k);
-            if (f.cells_of_face(i_face, 1) >= 0) continue;
+            if (!stencil.ghost_face(i_face)) continue;
             rtype dx[N_DIM], W_g[N_CONSERVATIVE];
             f.neighbor(c, i_face, W_i, dx, W_g);
             for (uint8_t v = 0; v < N_DIM; v++) {
@@ -151,7 +167,7 @@ struct MixtureGradientFunctor {
                 FOR_I_DIM gradients(c, N_DIM, i) += stencil.weights.faces(k, i) * dT;
                 continue;
             }
-            if (bc.type != BoundaryType::UPT) continue;
+            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic()) continue;
             for (uint32_t v = N_DIM; v < n_vars; v++) {
                 const rtype dq = bc_values(i_bc, v - N_DIM) - values(c, v);
                 FOR_I_DIM gradients(c, v, i) += stencil.weights.faces(k, i) * dq;
@@ -185,15 +201,17 @@ struct MixtureGradientFunctor {
  * the enthalpy and Soret fluxes vanish there;
  * transmissive faces take their image face's values, gradients and
  * coefficients; outflow faces and transmissive faces without an image have
- * zero normal derivatives; UPT faces take the cell's values and gradients.
+ * zero normal derivatives; inlet_state faces take the cell's values and gradients.
+ * ROTATIONS = false for meshes without rotational pairs (see with_rotations).
  */
+template <bool ROTATIONS>
 struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> normals;
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<int32_t *[2]> cells_of_face;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     BoundaryData boundaries;
     Mixture gas;
@@ -217,6 +235,8 @@ struct MixtureViscousFluxFunctor {
     /** @brief Geometry of an interior face: unit normal, centroid offset and its normal component. */
     struct Geometry {
         int32_t c0, c1;
+        uint8_t s;      // shift row of the face
+        bool rotated;   // the row turns vectors
         rtype n[N_DIM], d[N_DIM], d_n;
         rtype t;     // axisymmetric: fraction along d of the face center's projection (see ViscousFluxFunctor)
         rtype dvar;  // axisymmetric: ViscousFluxFunctor::variance_jump
@@ -231,7 +251,12 @@ struct MixtureViscousFluxFunctor {
         FOR_I_DIM n_vec[i] = normals(f, i);
         unit<N_DIM>(n_vec, g.n);
         const uint8_t s = face_shift(f);
-        FOR_I_DIM g.d[i] = (cell_coords(g.c1, i) + shifts(s, i)) - cell_coords(g.c0, i);
+        g.s = s;
+        g.rotated = ROTATIONS && periodic.rotated();
+        rtype x1[N_DIM];
+        FOR_I_DIM x1[i] = cell_coords(g.c1, i);
+        periodic.forward<ROTATIONS>(s, x1, g.d);
+        FOR_I_DIM g.d[i] = g.d[i] - cell_coords(g.c0, i);
         g.d_n = dot<N_DIM>(g.d, g.n);
         g.t = 0.5_r;
         g.dvar = 0.0_r;
@@ -242,23 +267,44 @@ struct MixtureViscousFluxFunctor {
         return g;
     }
 
+    /**
+     * @brief Variable v of cell 1 and its gradient g1, in cell 0's frame:
+     *        across a periodic rotation the velocity (v < N_DIM) and every
+     *        gradient turn.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype cell_1(const Geometry & G, const uint32_t v, rtype * g1) const {
+        FOR_I_DIM g1[i] = gradients(G.c1, v, i);
+        if (!ROTATIONS || !G.rotated) return values(G.c1, v);
+        rtype q1 = values(G.c1, v);
+        if (v < N_DIM) {
+            q1 = 0.0_r;
+            FOR_I_DIM g1[i] = 0.0_r;
+            for (uint8_t b = 0; b < N_DIM; b++) {
+                const rtype Q = periodic.rotations(G.s, v, b);
+                q1 += Q * values(G.c1, b);
+                FOR_I_DIM g1[i] += Q * gradients(G.c1, b, i);
+            }
+        }
+        periodic.rotate(G.s, g1);
+        return q1;
+    }
+
     /** @brief Value and gradient of variable v on an interior face. */
     KOKKOS_INLINE_FUNCTION
     rtype interior(const Geometry & G, const uint32_t v, rtype * g) const {
-        const rtype q0 = values(G.c0, v), q1 = values(G.c1, v);
-        FOR_I_DIM g[i] = 0.5_r * (gradients(G.c0, v, i) + gradients(G.c1, v, i));
+        rtype g1[N_DIM];
+        const rtype q0 = values(G.c0, v), q1 = cell_1(G, v, g1);
+        FOR_I_DIM g[i] = 0.5_r * (gradients(G.c0, v, i) + g1[i]);
         rtype dq = q1 - q0;
         if (axisymmetric) {
-            rtype g0[N_DIM], g1[N_DIM];
-            FOR_I_DIM {
-                g0[i] = gradients(G.c0, v, i);
-                g1[i] = gradients(G.c1, v, i);
-            }
+            rtype g0[N_DIM];
+            FOR_I_DIM g0[i] = gradients(G.c0, v, i);
             dq -= mean_offset(g0, g1, G.d, G.dvar);
         }
         const rtype correction = (dq - dot<N_DIM>(g, G.d)) / G.d_n;
         if (axisymmetric) {
-            FOR_I_DIM g[i] = gradients(G.c0, v, i) + G.t * (gradients(G.c1, v, i) - gradients(G.c0, v, i));
+            FOR_I_DIM g[i] = gradients(G.c0, v, i) + G.t * (g1[i] - gradients(G.c0, v, i));
             FOR_I_DIM g[i] += correction * G.n[i];
             return q0 + G.t * (q1 - q0);
         }
@@ -266,8 +312,38 @@ struct MixtureViscousFluxFunctor {
         return 0.5_r * (q0 + q1);
     }
 
+    /** @brief Adds face i_face's fluxes, times its area, to face_flux, the species slots and face_energy_1. */
+    struct Slots {
+        Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
+        Kokkos::View<rtype *> face_energy_1;
+        uint32_t i_face;
+
+        KOKKOS_INLINE_FUNCTION void momentum(const uint8_t i, const rtype A, const rtype tau_n) const {
+            face_flux(i_face, 1 + i) += A * tau_n;
+        }
+        KOKKOS_INLINE_FUNCTION void species(const uint32_t k, const rtype A, const double j) const {
+            slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
+        }
+        KOKKOS_INLINE_FUNCTION void energy(const rtype A, const rtype e) const {
+            face_flux(i_face, N_DIM + 1) += A * e;
+            if (face_energy_1.extent(0) > 0) face_energy_1(i_face) += A * e;
+        }
+    };
+
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i_face) const {
+    void operator()(const uint32_t i_face) const { flux(i_face, Slots{face_flux, slots, face_energy_1, i_face}); }
+
+    /**
+     * @brief The fluxes of face i_face per unit area, handed to out (see
+     *        Slots) with its area A: the traction tau . n (momentum, per
+     *        component), the species fluxes j_k . n out of cell 0 (species,
+     *        only where species diffuse), and the energy flux u . tau . n +
+     *        q - sum_k h_k j_k . n into cell 0 (energy).
+     */
+    template <typename Out>
+    KOKKOS_INLINE_FUNCTION
+    void flux(const uint32_t i_face, const Out & out) const {
         const int32_t c0 = cells_of_face(i_face, 0);
         rtype n[N_DIM], n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);
@@ -288,7 +364,7 @@ struct MixtureViscousFluxFunctor {
                 mode = Mode::NONE;
             } else if (boundaries.face_image_face(i_face) >= 0) {
                 f_src = static_cast<uint32_t>(boundaries.face_image_face(i_face));
-            } else if (bc->type == BoundaryType::UPT) {
+            } else if (bc->type == BoundaryType::INLET_STATE && !bc->is_characteristic()) {
                 mode = Mode::CELL;
             } else {
                 mode = Mode::ZERO_NORMAL;
@@ -300,6 +376,8 @@ struct MixtureViscousFluxFunctor {
             G = geometry(f_src);
         } else {
             G.c0 = G.c1 = c0;
+            G.s = 0;
+            G.rotated = false;
         }
 
         // Velocity and temperature with their gradients
@@ -348,7 +426,7 @@ struct MixtureViscousFluxFunctor {
             FOR_I_DIM q_f[i] -= u_n * n[i];
         }
         const rtype A = face_area(i_face);
-        FOR_I_DIM face_flux(i_face, 1 + i) += A * tau_n[i];
+        FOR_I_DIM out.momentum(i, A, tau_n[i]);
         rtype energy = dot<N_DIM>(q_f, tau_n);
         if (isothermal) {
             const ScalarMassFractions y{&scalars(c0, 0)};
@@ -414,12 +492,11 @@ struct MixtureViscousFluxFunctor {
                 double j = -c * dX + Y_k(k) * correction;
                 if (soret) j -= DT_k(k) * dlnT_dn;
                 enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
-                slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
+                out.species(k, A, j);
             }
             energy -= static_cast<rtype>(enthalpy);
         }
-        face_flux(i_face, N_DIM + 1) += A * energy;
-        if (face_energy_1.extent(0) > 0) face_energy_1(i_face) += A * energy;
+        out.energy(A, energy);
     }
 };
 

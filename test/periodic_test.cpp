@@ -23,21 +23,16 @@
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
 constexpr double GAMMA = 1.4;
 
-std::string periodic_list(const std::string & dirs) {
-    std::string s = "[";
-    for (size_t k = 0; k < dirs.size(); k++) s += std::string(k ? ", " : "") + "\"" + dirs[k] + "\"";
-    return s + "]";
-}
-
 std::shared_ptr<Mesh> periodic_mesh(const std::string & type, uint32_t n, const std::string & dirs, double L = 1.0) {
     std::ostringstream s;
     s << "[mesh]\ntype = \"" << type << "\"\nNx = " << n << "\nNy = " << n << "\nLx = " << L << "\nLy = " << L
-      << "\nperiodic = " << periodic_list(dirs) << "\n";
+      << "\n" << periodic_sides(dirs);
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml(s.str()));
     mesh->copy_host_to_device();
@@ -61,7 +56,7 @@ std::string make_input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.n << "\nNy = " << c.n << "\nLx = " << c.L
-      << "\nLy = " << c.L << "\nperiodic = " << periodic_list(c.dirs) << "\n"
+      << "\nLy = " << c.L << "\n" << periodic_sides(c.dirs)
       << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n"
       << c.boundaries
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n"
@@ -79,6 +74,7 @@ using PrimitiveField = std::function<void(double, double, double *)>;  // (x, y)
  */
 std::unique_ptr<Solver> start(const Case & c, const PrimitiveField & W) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(make_input(c)));
     set_cell_averages(*solver, [&](double x, double y, double, double * U) {
         double w[4];
@@ -177,7 +173,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     c.mesh = mesh;
     c.n = n;
     c.recon = recon;
-    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
+    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : recon == "MUSCL" ? "limiter = \"none\"\n" : "";
     c.integrator = "RK4";
     const double T = 0.25;
     const double h = 1.0 / n;
@@ -206,7 +202,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     return err;
 }
 
-using OrderParam = std::tuple<std::string, std::string>;  // mesh type, MUSCL or TENO<order>
+using OrderParam = std::tuple<std::string, std::string>;  // mesh type, FO, MUSCL or TENO<order>
 class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 
 } // namespace
@@ -214,16 +210,16 @@ class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 TEST_P(PeriodicAdvection2D, SmoothWaveConvergesAtDesignOrder) {
     const auto [mesh, scheme] = GetParam();
     if (scheme == "TENO6") SKIP_IN_SINGLE_PRECISION("the TENO6 error on the 32-cell mesh is at its ~3e-6 single-precision floor");
-    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : "MUSCL";
-    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : 2;
-    const double e1 = advection_error(mesh, recon, order, 16);
-    const double e2 = advection_error(mesh, recon, order, 32);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.25) << e1 << " " << e2;
+    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
+    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
+    verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error", {16, 32},
+                                {advection_error(mesh, recon, order, 16), advection_error(mesh, recon, order, 32)},
+                                double(order), order - 0.25});
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection2D,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"),
-                       ::testing::Values("MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
+                       ::testing::Values("FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
 
 namespace {
 
@@ -326,7 +322,7 @@ TEST(PeriodicSetup2D, TransmissiveImagesAreFoundAcrossTheSeam) {
     Mesh mesh;
     mesh.init_from_connectivity(nodes, cells, faces, "unassigned",
                                 std::vector<Mesh::PeriodicPair>{{"left", "right", {1.0, 0.0}}});
-    const BoundaryData bd = make_uniform_boundaries(mesh, BoundaryType::EXTRAPOLATION);
+    const BoundaryData bd = make_uniform_boundaries(mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
     uint32_t n_boundary = 0;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {

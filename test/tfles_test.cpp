@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "input.h"
 #include "pasr.h"
 #include "solver.h"
@@ -85,12 +86,12 @@ std::string uniform_box(const std::string & run, const std::string & combustion,
                         const std::string & coupling = "strang") {
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1500.0\"\n"
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\ncoupling = \"" << coupling << "\"\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"wale\"\n")
       << combustion;
     return s.str();
@@ -185,15 +186,16 @@ std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double s
     const std::string front = "(x - " + num(16 * h) + " - " + wave + ")";
     const std::string back = "(" + num(48 * h) + " - x + " + wave + ")";
     s << "[run]\nn_steps = 1\ndt = 1e-13\n[mesh]\ntype = \"cartesian\"\nNx = 64\nNy = 12\nLx = " << 64 * h
-      << "\nLy = " << 12 * h << "\n"
-      << (N_DIM == 3 ? "Nz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n");
-    if (N_DIM == 3) s << "Lz = " << 3 * h << "\n";
+      << "\nLy = " << 12 * h << "\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = " << 3 * h << "\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "");
     s << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
       << "T = \"300 + 1000 * (tanh(" << front << " / " << h << ") + tanh(" << back << " / " << h << "))\"\n"
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\n[output]\ncheck_interval = 1000000\n[les]\n" << (N_DIM == 3 ? "model = \"sigma\"\n" : "model = \"vreman\"\n")
       << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = " << h << "\ns_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2300.0\n";
     auto solver = std::make_unique<Solver>();
@@ -227,7 +229,7 @@ TEST(ThickenedFlame, DynamicEfficiencyFollowsTheResolvedWrinkling) {
                 << "cell " << c;
             flame += F > 4.9;
         }
-        EXPECT_GT(flame, 0u);
+        EXPECT_GT(comm::allreduce(flame, comm::Op::SUM), 0u);
     }
     // Only ratios of lengths enter
     auto large = corrugated_flames(2.0, 10.0);

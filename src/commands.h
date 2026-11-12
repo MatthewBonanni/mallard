@@ -1,0 +1,79 @@
+/**
+ * @file commands.h
+ * @brief Subcommands of the mallard executable that live outside the solver library.
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ */
+
+#ifndef COMMANDS_H
+#define COMMANDS_H
+
+#include "cli.h"
+
+struct CheckReport;
+namespace json {
+struct Value;
+}
+
+/** @brief `mallard -i input.toml`: runs a case. */
+int run_main(const cli::Args & args);
+
+/** @brief `mallard check input.toml`: sets up a case and reports on it. */
+int check_main(const cli::Args & args);
+
+/**
+ * @brief The Environment of `mallard check`: the build, every rank's placement and device, MPI, GPU-aware
+ *        MPI and NCCL (as the case's resolved input chooses, if any), with what to fix as the report's
+ *        diagnostics on rank 0. Collective; after Kokkos is initialized.
+ */
+void check_environment(CheckReport & report);
+
+/** @brief `mallard input resolve input.toml`: writes the input as setup uses it. */
+int resolve_main(const cli::Args & args);
+
+/** @brief `mallard reactor -i input.toml`: a 0D reactor or chemistry benchmark. */
+int reactor_main(const cli::Args & args);
+
+/** @brief `mallard info FILE|RUN_DIR`: what a file or a run directory holds. */
+int info_main(const cli::Args & args);
+
+/** @brief `mallard list fields [INPUT]`: the output fields there are, or those of a case. */
+int list_fields_main(const cli::Args & args);
+
+/** @brief `mallard list species INPUT`: the species of a case. */
+int list_species_main(const cli::Args & args);
+
+/** @brief `mallard list keys [SECTION] [INPUT]`: the input keys there are, or those of a case. */
+int list_keys_main(const cli::Args & args);
+
+/**
+ * @brief The key catalog of every example and tutorial (docs/input-keys.json, as tools/dev/input_catalog.py merges
+ *        it), from Mallard's data directories. @throws std::runtime_error if none has it
+ */
+json::Value general_key_catalog();
+
+/** @brief `mallard list templates`: the case templates of mallard new. */
+int list_templates_main(const cli::Args & args);
+
+/** @brief `mallard diff A B`: how two solutions differ, field by field. */
+int diff_main(const cli::Args & args);
+
+/** @brief `mallard post extract FILE...`: probes, regions and snapshots of existing output. */
+int extract_main(const cli::Args & args);
+
+/** @brief The work of `mallard post extract`, with MPI and Kokkos started (tests call it). */
+int post_extract(const cli::Args & args);
+
+/** @brief `mallard post convergence RUN...`: observed order, Richardson extrapolation and GCI. */
+int convergence_main(const cli::Args & args);
+
+/** @brief The work of `mallard post convergence`, with Kokkos started (tests call it). */
+int post_convergence(const cli::Args & args);
+
+/** @brief `mallard pack RUN_DIR`: one archive that reproduces a run; `--verify ARCHIVE` checks one. */
+int pack_main(const cli::Args & args);
+
+/** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
+int mesh_convert_main(const cli::Args & args);
+
+#endif // COMMANDS_H

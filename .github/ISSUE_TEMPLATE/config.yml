@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://matthewbonanni.github.io/mallard/
+    about: User guide, tutorials, theory manual and validation.
+  - name: Input reference
+    url: https://github.com/MatthewBonanni/mallard/blob/main/docs/input.md
+    about: Every input key, with its default.

@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -20,6 +21,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
@@ -207,13 +209,13 @@ std::string periodic_box(const std::string & mesh, uint32_t n, const std::string
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
     if constexpr (N_DIM == 3) {
-        s << "Nz = " << n << "\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n";
+        s << "Nz = " << n << "\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
         s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283185307179586 * (x + y + z))\"\n"
              "p = \"10.0\"\nu = [\"sin(6.283185307179586 * x) * cos(6.283185307179586 * y) * cos(6.283185307179586 * z)\", "
              "\"-cos(6.283185307179586 * x) * sin(6.283185307179586 * y) * cos(6.283185307179586 * z)\", "
              "\"0.5 * sin(6.283185307179586 * x)\"]\n";
     } else {
-        s << "periodic = [\"x\", \"y\"]\n";
+        s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
         s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283185307179586 * (x + y))\"\np = \"10.0\"\n"
              "u = [\"sin(6.283185307179586 * x) * cos(6.283185307179586 * y) + 0.3 * sin(12.566370614359172 * y + 1)\", "
              "\"-cos(6.283185307179586 * x) * sin(6.283185307179586 * y) + 0.2 * cos(12.566370614359172 * x)\"]\n";
@@ -290,7 +292,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
       << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\nfilter_width = \"volume\"\n";
     for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
         if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
-        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"extrapolation\"\n";
+        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"outlet_extrapolation\"\n";
     }
     auto solver = make_solver(s.str());
     solver->copy_device_to_host();
@@ -303,7 +305,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
     const auto & sgs = solver->get_les_coefficients();
     const double h = 0.6 / ny;
     uint32_t checked = 0;
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
         bool interior = x > 2 * h && x < 1.3 - 2 * h && y > 2 * h && y < 0.6 - 2 * h;
         if constexpr (N_DIM == 3) interior = interior && double(mesh->h_cell_coords(c, 2)) > 2 * h && double(mesh->h_cell_coords(c, 2)) < 0.45 - 2 * h;
@@ -314,7 +316,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
         EXPECT_NEAR(sgs(c, 1), 3.5 * mu_t / 0.6, precision_tol<double>(1e-9, 1e-4) * 3.5 * mu_t / 0.6);
         checked++;
     }
-    EXPECT_GT(checked, 10u);
+    EXPECT_GT(comm::allreduce(checked, comm::Op::SUM), 10u);
 }
 
 TEST(LESModels, ScottiFactorOfTheAspectRatios) {
@@ -334,7 +336,7 @@ TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
     auto input = [](const std::string & width) {
         std::ostringstream s;
         s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
-          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\nperiodic = [\"x\", \"y\", \"z\"]\n"
+          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
           << "u = [\"0.4 * sin(7.853981633974483 * y)\", \"0.3 * sin(12.566370614359172 * z)\", "
              "\"0.2 * sin(7.853981633974483 * x)\"]\n"
@@ -382,8 +384,8 @@ double dynamic_constant(const std::string & model, double length, double u0, dou
     };
     s << std::setprecision(17) << "[run]\nn_steps = 1\ncfl = 0.1\n[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\n"
       << "Lx = " << length << "\nLy = " << length << "\n"
-      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
-                     : std::string("periodic = [\"x\", \"y\"]\n"))
+      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                     : std::string("[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\n";
     if constexpr (N_DIM == 3) {
         s << "u = [\"" << component(0) << "\", \"" << component(1) << "\", \"" << component(2) << "\"]\n";
@@ -439,12 +441,142 @@ TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
         sgs -= double(coefficients(c, 0)) * phi;
         scale += std::abs(work * V);
     }
+    const auto sums = comm::allreduce(std::array<double, 4>{total, viscous, sgs, scale}, comm::Op::SUM);
+    total = sums[0];
+    viscous = sums[1];
+    sgs = sums[2];
+    scale = sums[3];
     // The three parts add up to the whole convective and diffusive rate
     EXPECT_NEAR(b.convective + b.viscous + b.sgs, total, precision_tol<double>(1e-10, 1e-4) * scale);
     // Each diffusive part is the dissipation of its own stress, -int tau : grad u dV
     EXPECT_LT(b.sgs, 0.0);
     EXPECT_NEAR(b.sgs, sgs, 0.08 * std::abs(sgs));
     EXPECT_NEAR(b.viscous, viscous, 0.08 * std::abs(viscous));
+}
+
+namespace {
+
+/**
+ * @brief A box of n^d cells with outflow boundaries and a cubic velocity field at uniform density and pressure,
+ *        TENO of order 4 (whose central polynomials hold cubics exactly) and Smagorinsky's model.
+ */
+std::string cubic_box(const uint32_t n, const std::string & les, const std::string & teno = "") {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"10.0\"\n"
+      << (N_DIM == 3 ? "u = [\"0.3 * x^3 - 0.5 * x * y^2 + 0.2 * z^2\", \"0.4 * y^3 + 0.6 * x^2 * z\", "
+                       "\"-0.2 * z^3 + 0.5 * x * y * z\"]\n"
+                     : "u = [\"0.3 * x^3 - 0.5 * x * y^2\", \"0.4 * y^3 + 0.6 * x^2 * y\"]\n");
+    for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
+        if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
+        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n" << teno
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
+      << "[output]\ncheck_interval = 1000000\n" << les;
+    return s.str();
+}
+
+Gradient cubic_gradient(const double * x) {
+    Gradient g{};
+    if constexpr (N_DIM == 3) {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.4 * x[2]};
+        g[1] = {1.2 * x[0] * x[2], 1.2 * x[1] * x[1], 0.6 * x[0] * x[0]};
+        g[2] = {0.5 * x[1] * x[2], 0.5 * x[0] * x[2], -0.6 * x[2] * x[2] + 0.5 * x[0] * x[1]};
+    } else {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.0};
+        g[1] = {1.2 * x[0] * x[1], 1.2 * x[1] * x[1] + 0.6 * x[0] * x[0], 0.0};
+    }
+    return g;
+}
+
+/** @brief Whether the cell is at least `margin` from the boundaries of [0, 1]^d, beyond the one-sided stencils. */
+bool interior(const Mesh & mesh, const uint32_t c, const double margin) {
+    FOR_I_DIM {
+        const double x = double(mesh.h_cell_coords(c, i));
+        if (x < margin || x > 1.0 - margin) return false;
+    }
+    return true;
+}
+
+const std::string SMAGORINSKY = "[les]\nmodel = \"smagorinsky\"\nC = 0.2\nfilter_width = \"volume\"\n";
+
+} // namespace
+
+TEST(LESReconstructionGradients, EddyViscosityOfACubicFieldIsExact) {
+    // TENO's central polynomials of degree 3 hold the cubic field, so their gradient at the centroid is the
+    // field's: the eddy viscosity is the model's of the exact gradient, which least squares misses at O(h^2)
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto polynomial = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(cubic_box(n, SMAGORINSKY));
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    const auto mesh = polynomial->get_mesh();
+    double worst_polynomial = 0.0, worst_least_squares = 0.0;
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const double delta = std::pow(double(mesh->h_cell_measure(c)), 1.0 / N_DIM);
+        const double exact = 0.2 * 0.2 * delta * delta * D(SGSModel::SMAGORINSKY, cubic_gradient(x));
+        worst_polynomial = std::max(worst_polynomial,
+                                    std::abs(double(polynomial->get_les_coefficients()(c, 0)) - exact) / exact);
+        worst_least_squares = std::max(worst_least_squares,
+                                       std::abs(double(least_squares->get_les_coefficients()(c, 0)) - exact) / exact);
+        checked++;
+    }
+    ASSERT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+    EXPECT_LT(comm::allreduce(worst_polynomial, comm::Op::MAX), precision_tol<double>(1e-9, 1e-4));
+    EXPECT_GT(comm::allreduce(worst_least_squares, comm::Op::MAX), 1e-3);
+}
+
+TEST(LESReconstructionGradients, RightHandSideTakesTheGradientsOfItsOwnReconstruction) {
+    // The reconstruction of each stage writes the gradients the model then uses, and they are the cubic's
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto solver = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    const auto mesh = solver->get_mesh();
+    State rhs("rhs", mesh->n_cells, 0);
+    solver->calc_rhs(solver->state(), rhs, 0.0_r);
+    const auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const Gradient exact = cubic_gradient(x);
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+            EXPECT_NEAR(double(g(c, i, j)), exact[i][j], precision_tol<double>(1e-9, 1e-4)) << c << " " << i << j;
+        }
+        checked++;
+    }
+    EXPECT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+}
+
+TEST(LESReconstructionGradients, TroubledCellsKeepTheLeastSquaresGradients) {
+    // Every cell troubled (sigma >= 0): the run is that of the least-squares gradients, bit for bit
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string run = "n_steps = 3\ncfl = 0.5\n";
+    auto with_flux = [&](const std::string & les) {
+        std::string s = periodic_box(MESH, n, les, "", run);
+        const std::string from = "type = \"MUSCL\"\nlimiter = \"none\"\n";
+        return s.replace(s.find(from), from.size(), "type = \"TENO\"\norder = 3\ntroubled_threshold = 0.0\n");
+    };
+    auto polynomial = make_solver(with_flux(LES_DEFAULT + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(with_flux(LES_DEFAULT));
+    polynomial->run();
+    least_squares->run();
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    for (uint32_t c = 0; c < polynomial->get_mesh()->n_owned(); c++) {
+        FOR_I_CONSERVATIVE EXPECT_EQ(polynomial->h_conservatives(c, i), least_squares->h_conservatives(c, i)) << c;
+    }
+}
+
+TEST(LESReconstructionGradients, NeedTENO) {
+    EXPECT_THROW(make_solver(periodic_box(MESH, 4, LES_DEFAULT + "gradients = \"reconstruction\"\n")), InputError);
+    EXPECT_THROW(make_solver(cubic_box(4, SMAGORINSKY + "gradients = \"polynomial\"\n")), InputError);
 }
 
 TEST(LESSolver, ModelDrainsResolvedKineticEnergy) {
@@ -504,7 +636,7 @@ namespace {
 
 std::string couette(const std::string & les) {
     return "[run]\nt_stop = 6.0\ncfl = 0.8\n"
-           "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 12\nLx = 0.5\nLy = 1.0\nperiodic = [\"x\"]\n"
+           "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 12\nLx = 0.5\nLy = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n"
            "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
            "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0]\n"
@@ -524,9 +656,10 @@ TEST(LESSolver, PureShearIsUnchangedByWALEAndVremanButNotBySmagorinsky) {
         les->run();
         les->copy_device_to_host();
         double diff = 0.0;
-        for (uint32_t c = 0; c < les->get_mesh()->n_cells; c++) {
+        for (uint32_t c = 0; c < les->get_mesh()->n_owned(); c++) {
             diff = std::max(diff, std::abs(double(les->h_conservatives(c, 1) - reference->h_conservatives(c, 1))));
         }
+        diff = comm::allreduce(diff, comm::Op::MAX);
         if (std::string(model) == "smagorinsky") {
             EXPECT_GT(diff, 1e-7) << model;
         } else {
@@ -543,13 +676,13 @@ std::string mixture_box(const std::string & les, const std::string & composition
     std::ostringstream s;
     // A fixed time step: the time step's diffusivity grows with nu_t / Sc_t
     s << "[run]\nn_steps = 8\ndt = 2e-7\n[mesh]\ntype = \"" << MESH << "\"\nNx = 8\nNy = 8\nLx = 0.01\nLy = 0.01\n"
-      << (N_DIM == 3 ? "Nz = 4\nLz = 0.005\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 4\nLz = 0.005\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"600 + 200 * sin(628.3185307179586 * x)\"\n"
       << "u = [\"30 * sin(628.3185307179586 * y)\", \"-20 * sin(628.3185307179586 * x)\""
       << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
       << composition
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[output]\ncheck_interval = 1000000\n" << les;
     return s.str();
 }
@@ -616,6 +749,7 @@ double pressure_work(const Solver & solver, const double gamma) {
     };
     double sum = 0.0;
     for (uint32_t f = 0; f < m->n_faces; f++) {
+        if (static_cast<uint32_t>(m->h_cells_of_face(f, 0)) >= m->n_owned()) continue;  // Another rank's face
         double u0[N_DIM], u1[N_DIM], p0, p1, n2 = 0.0, du_n = 0.0;
         state(m->h_cells_of_face(f, 0), u0, p0);
         state(m->h_cells_of_face(f, 1), u1, p1);
@@ -625,7 +759,7 @@ double pressure_work(const Solver & solver, const double gamma) {
         }
         sum += double(m->h_face_area(f)) * 0.5 * (p0 + p1) * du_n / std::sqrt(n2);
     }
-    return sum;
+    return comm::allreduce(sum, comm::Op::SUM);
 }
 
 std::string with_flux(std::string input, const std::string & numerics, const std::string & reconstruction) {
@@ -653,6 +787,7 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
     for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
         scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
     }
+    scale = comm::allreduce(scale, comm::Op::SUM);
     EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
     EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale);
     // The Riemann solver dissipates on top of it
@@ -668,13 +803,13 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     std::ostringstream s;
     const uint32_t n = N_DIM == 2 ? 16 : 8;
     s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
-      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\nperiodic = [\"y\", \"z\"]\n"
-                                                : std::string("periodic = [\"y\"]\n"))
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                                                : std::string("[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * x\"\np = \"1000.0\"\n"
       << (N_DIM == 3 ? "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * (x + z))\", "
                        "\"0.1 * sin(6.283185307179586 * y)\"]\n"
                      : "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * x)\"]\n")
-      << "[[boundaries]]\nname = \"left\"\ntype = \"p_out\"\np = 1000.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_pressure\"\np = 1000.0\n"
       << "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n"
       << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -696,6 +831,88 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     EXPECT_GT(double(u.pressure_work - u.convective), 1e-3 * std::abs(double(u.pressure_work)));
 }
 
+namespace {
+
+/** @brief The convective kinetic-energy rate and the pressure work of a TENO box with the given [numerics.hybrid], and their scale. */
+std::array<double, 3> central_budget(const std::string & hybrid) {
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    // One step first: on the initial field the reconstructed states' faces cancel in the sum
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 1\ncfl = 0.5\n");
+    // A threshold of 1 never selects the Riemann solver
+    auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n" + hybrid);
+    solver->run();
+    solver->copy_device_to_host();
+    double scale = 0.0;
+    for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+        scale += double(std::abs(solver->h_conservatives(c, 1)) * solver->get_mesh()->h_cell_measure(c));
+    }
+    return {double(solver->kinetic_energy_budget().convective), pressure_work(*solver, 1.4),
+            comm::allreduce(scale, comm::Op::SUM)};
+}
+
+} // namespace
+
+TEST(HybridFlux, TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    const auto [convective, work, scale] = central_budget("");
+    EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    const auto [reconstructed, work_r, scale_r] = central_budget("central = \"reconstructed\"\n");
+    EXPECT_GT(std::abs(reconstructed - work_r), 1e-3 * scale_r);
+}
+
+TEST(HybridFlux, CellAverageCentralFluxConservesMassMomentumAndEnergy) {
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 10\ncfl = 0.5\n");
+    auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n");
+    auto totals = [&] {
+        solver->copy_device_to_host();
+        std::array<double, N_CONSERVATIVE> t{};
+        for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE t[i] += double(solver->h_conservatives(c, i) * solver->get_mesh()->h_cell_measure(c));
+        }
+        return comm::allreduce(t, comm::Op::SUM);
+    };
+    const auto before = totals();
+    solver->run();
+    const auto after = totals();
+    FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], precision_tol<double>(1e-12, 1e-5) * (std::abs(before[i]) + before[0]));
+}
+
+TEST(HybridFlux, MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    // Each side's [gamma, e0] enters only the energy flux, so the cells' values give the single gas's identity
+    auto budget = [](const std::string & numerics, const std::string & central) {
+        std::string input = mixture_box("", STRATIFIED);
+        input.replace(input.find("[numerics]\n"), 11, "[numerics]\nconvective_flux = \"hybrid\"\n" + numerics);
+        auto solver = make_solver(input + "[numerics.hybrid]\nsensor_threshold = 1.0\n" + central);
+        solver->run();
+        // The round-off scale: the faces' pressure work, of order p |u| A each, cancels in the sum
+        double scale = 0.0;
+        for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+            scale += 1e5 * 30.0 * std::pow(double(solver->get_mesh()->h_cell_measure(c)), (N_DIM - 1.0) / N_DIM);
+        }
+        const KineticEnergyBudget b = solver->kinetic_energy_budget();
+        return std::array<double, 3>{double(b.convective), double(b.pressure_work), comm::allreduce(scale, comm::Op::SUM)};
+    };
+    for (const std::string numerics : {"", "double_flux = true\n"}) {
+        const auto [convective, work, scale] = budget(numerics, "central = \"cell_averages\"\n");
+        EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale) << numerics;
+    }
+    // The reconstructed states depart by a few percent of the net pressure work, below single precision's round-off
+    if constexpr (std::is_same_v<rtype, double>) {
+        const auto reconstructed = budget("", "");
+        EXPECT_GT(std::abs(reconstructed[0] - reconstructed[1]), 0.01 * std::abs(reconstructed[1]));
+    }
+}
+
+TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
+    const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 0\ncfl = 0.5\n");
+    EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"cell_averages\"\n"), InputError);
+    EXPECT_THROW(make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
+                             "[numerics.hybrid]\ncentral = \"keep\"\n"),
+                 InputError);
+}
+
 #if Mallard_DIM == 2
 
 namespace {
@@ -705,8 +922,8 @@ std::pair<double, double> sod(const std::string & numerics) {
     std::string input = "[run]\nt_stop = 0.2\ncfl = 0.5\n[mesh]\ntype = \"cartesian_tri\"\nNx = 200\nNy = 2\nLx = 1.0\n"
                         "Ly = 0.01\n[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\n"
                         "u = [\"0.0\", \"0.0\"]\np = \"x < 0.5 ? 1.0 : 0.1\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-                        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
                         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
                         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
                         "[numerics]\nriemann_solver = \"HLLC\"\n" + numerics +
@@ -719,14 +936,15 @@ std::pair<double, double> sod(const std::string & numerics) {
     ExactRiemann exact(1.0, 0.0, 1.0, 0.125, 0.0, 0.1, 1.4);
     const auto m = solver->get_mesh();
     double err = 0.0, vol = 0.0, rho_max = 0.0;
-    for (uint32_t c = 0; c < m->n_cells; c++) {
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
         double rho, u, p;
         exact.sample((double(m->h_cell_coords(c, 0)) - 0.5) / double(solver->get_time()), rho, u, p);
         err += std::abs(double(solver->h_conservatives(c, 0)) - rho) * double(m->h_cell_volume(c));
         vol += double(m->h_cell_volume(c));
         rho_max = std::max(rho_max, double(solver->h_conservatives(c, 0)));
     }
-    return {err / vol, rho_max};
+    const auto sums = comm::allreduce(std::array<double, 2>{err, vol}, comm::Op::SUM);
+    return {sums[0] / sums[1], comm::allreduce(rho_max, comm::Op::MAX)};
 }
 
 } // namespace

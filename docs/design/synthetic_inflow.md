@@ -1,6 +1,6 @@
 # Design: synthetic turbulent inflow
 
-Status: implemented (`[boundaries.turbulence]` of `nscbc_inlet`).
+Status: implemented (`[boundaries.turbulence]` of `inlet_state` with `nscbc`).
 
 Spatially developing DNS (jets, flames, channels, boundary layers) need
 turbulence entering through the inlet: a prescribed mean profile, Reynolds
@@ -65,7 +65,12 @@ face then:
 3. multiplies by the lower Cholesky factor `a` of the local `R_ij`
    ([Lund et al. 1998](../references.md#lund-1998)): `u' = a v`, so that
    `<u'u'^T> = a a^T = R`;
-4. adds the mean velocity.
+4. adds the mean velocity: the face's fixed mean, or, for a `u` of `t`, the
+   target that `TimedInletTargets` wrote just before at the same time from
+   the compiled expressions of `u` (on the device, inside the stage). The
+   statistics are those of `u'` alone, so they do not depend on the mean;
+   only `U_c`, which fixes the plane spacing `dt_g` and so the stateless
+   plane index `t / dt_g`, is taken from the mean at `t = 0` unless given.
 
 The grid spacing is the smallest transverse length over 6
 (`points_per_length`), and `dt_g` is the smallest streamwise length over
@@ -89,6 +94,11 @@ index alone:
 - **Cost.** Each new plane costs one random plane plus three filter passes on
   the auxiliary grid, about once per time step; the face kernel
   interpolates four points (two in 2D) per component.
+- **Step graphs.** Which planes to compute is decided on the device, from
+  the time on the device: a one-thread kernel compares the planes the time
+  needs with those already filtered and cached, and the filter kernels skip
+  the slots with nothing to do. Every launch is the same at every step, so
+  CUDA graphs capture them, and the planes are the same as without a graph.
 
 ### Zero net flux
 
@@ -104,7 +114,7 @@ fixed chunks summed in order. The result is the same on every rank and
 partition. The removed mode carries about `4 L_y L_z / A` of the normal
 Reynolds stress (`2 L_y / W` in 2D).
 
-## Injection through `nscbc_inlet`
+## Injection through `inlet_state` with `nscbc`
 
 The characteristic inlet ([nscbc.md](nscbc.md)) now takes its target
 velocity per face (`BoundaryData::char_target`), set from expressions or a
@@ -136,9 +146,9 @@ the generator has no state, so turbulent inlets restart bitwise.
 
 ## Mean profile and statistics from a precursor
 
-`u` of `nscbc_inlet` takes expressions in `x`, `y`, `z`. For turbulence,
-`reynolds_stress` takes numbers or expressions, or `profile` reads a CSV of
-plane averages as `tools/plane_average.py` writes it from a precursor's
+`u` of `inlet_state` with `nscbc` takes expressions in `x`, `y`, `z` and `t`. For turbulence,
+`reynolds_stress` takes numbers or expressions in `x`, `y`, `z`, or `profile` reads a CSV of
+plane averages as `tools/post/plane_average.py` writes it from a precursor's
 `[statistics]` (`MEAN_U_*`, `COV_U_*_U_*`), interpolated along its
 coordinate. Pivots of the Cholesky factor that round-off makes slightly
 negative (next to walls) become zero.
@@ -166,7 +176,7 @@ negative (next to walls) become zero.
 **Setup.**
 - Box `6 x 2 x 2`, periodic across, 384 x 128 x 128 hexahedra.
 - `U = 1`, `M = 0.2`, isotropic `u' = 0.1`, `L = 0.25`, `Re_L = u' L / nu = 100`.
-- MUSCL (no limiter), HLLC, SSPRK3; `nscbc_inlet` and `nscbc_outlet`, no sponge.
+- MUSCL (no limiter), HLLC, SSPRK3; `inlet_state` with `nscbc` and `outlet_pressure` with `nscbc`, no sponge.
 - Statistics over `t = 8-30` (3.7 flow-throughs), averaged over y and z.
 
 **Inlet.**
@@ -206,8 +216,8 @@ negative (next to walls) become zero.
 - Box `8 pi h x 2h x 4 pi / 3 h`, periodic in z, isothermal walls, 384 x 96 x 128 hexahedra (the mesh of the periodic channel example, repeated twice along x).
 - `Re_b = 5600`, `M_b = 0.2`. MUSCL (no limiter), HLLC, SSPRK3.
 - The inlet's `profile` holds the statistics of Mallard's periodic channel (`Re_tau = 172`). The length scales are `0.5h, 0.15h, 0.15h` for `u` and `0.1-0.2h` for `v`, `w`.
-- The flow starts from the periodic channel repeated twice along x (`tools/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
-- **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `nscbc_outlet` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
+- The flow starts from the periodic channel repeated twice along x (`tools/setup/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
+- **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `outlet_pressure` with `nscbc` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
 
 **Development.** Quantities against the precursor, smoothed over `+-0.5h`:
 

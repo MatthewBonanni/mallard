@@ -24,6 +24,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: building the TENO-E central stencil from neighbor layers sorted by centroid distance.
 - <a id="zhang-shu-2010"></a>X. Zhang and C.-W. Shu, On maximum-principle-satisfying high order schemes for scalar conservation laws, *J. Comput. Phys.* 229, 3091–3120 (2010). [doi:10.1016/j.jcp.2009.12.030](https://doi.org/10.1016/j.jcp.2009.12.030)
   Used in: the scaling limiter of `bound_preserving = true`, which scales troubled-cell polynomials toward the cell average to keep density and pressure within the neighbors' range.
+- <a id="hu-adams-shu-2013"></a>X. Y. Hu, N. A. Adams and C.-W. Shu, Positivity-preserving method for high-order conservative schemes solving compressible Euler equations, *J. Comput. Phys.* 242, 169–180 (2013). [doi:10.1016/j.jcp.2013.01.024](https://doi.org/10.1016/j.jcp.2013.01.024)
+  Used in: the positivity limiter of the convective fluxes with `bound_preserving = true`, which blends each face flux toward the Lax-Friedrichs flux of the cell averages where the update would leave a cell without positive density or pressure (`limit_flux_positivity`, `src/solver/solver_rhs.cpp`).
 
 ## Riemann solvers
 
@@ -49,7 +51,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="nishikawa-kitamura-2008"></a>H. Nishikawa and K. Kitamura, Very simple, carbuncle-free, boundary-layer-resolving, rotated-hybrid Riemann solvers, *J. Comput. Phys.* 227, 2560–2581 (2008). [doi:10.1016/j.jcp.2007.11.003](https://doi.org/10.1016/j.jcp.2007.11.003)
   Used in: `riemann_solver = "RHLL"`, the rotated hybrid of HLL and Roe.
 - <a id="kim-kim-rho-2001"></a>K. H. Kim, C. Kim and O.-H. Rho, Methods for the accurate computations of hypersonic flows: I. AUSMPW+ scheme, *J. Comput. Phys.* 174, 38–80 (2001). [doi:10.1006/jcph.2001.6873](https://doi.org/10.1006/jcph.2001.6873)
-  Used in: RHLL's pressure weight min(p_l / p_r, p_r / p_l)^3, which blends the rotated flux toward HLL across faces that carry a shock.
+  Used in: RHLL's pressure weight $\min(p_l/p_r,\, p_r/p_l)^3$, which blends the rotated flux toward HLL across faces that carry a shock.
 - <a id="quirk-1994"></a>J. J. Quirk, A contribution to the great Riemann solver debate, *Int. J. Numer. Methods Fluids* 18, 555–574 (1994). [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
   Used in: the carbuncle and odd–even decoupling tests that RHLL passes and HLLC and Roe fail (`test/solver_test.cpp`; the Shu–Osher validation).
 
@@ -91,6 +93,30 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
 - <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
   Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="moura-2015"></a>R. C. Moura, S. J. Sherwin and J. Peiró, Linear dispersion–diffusion analysis and its application to under-resolved turbulence simulations using discontinuous Galerkin spectral/hp methods, *J. Comput. Phys.* 298, 695–710 (2015). [doi:10.1016/j.jcp.2015.06.020](https://doi.org/10.1016/j.jcp.2015.06.020)
+  Used in: the effective resolution of the reconstructions (`tools/docs/effective_resolution.py`, the 1% rule).
+- <a id="pirozzoli-2006"></a>S. Pirozzoli, On the spectral properties of shock-capturing schemes, *J. Comput. Phys.* 219, 489–497 (2006). [doi:10.1016/j.jcp.2006.07.009](https://doi.org/10.1016/j.jcp.2006.07.009)
+  Used in: the modified wavenumbers of the nonlinear reconstructions (`tools/docs/effective_resolution.py`).
+- <a id="chow-moin-2003"></a>F. K. Chow and P. Moin, A further study of numerical errors in large-eddy simulations, *J. Comput. Phys.* 184, 366–380 (2003). [doi:10.1016/S0021-9991(02)00020-7](https://doi.org/10.1016/S0021-9991(02)00020-7)
+  Used in: filter-to-grid ratios and numerical errors of LES (LES design notes, section 3.1).
+- <a id="garnier-1999"></a>E. Garnier, M. Mossi, P. Sagaut, P. Comte and M. Deville, On the use of shock-capturing schemes for large-eddy simulation, *J. Comput. Phys.* 153, 273–311 (1999). [doi:10.1006/jcph.1999.6268](https://doi.org/10.1006/jcph.1999.6268)
+  Used in: explicit models on top of upwind schemes (LES design notes, section 3.1).
+- <a id="domaradzki-2003"></a>J. A. Domaradzki, Z. Xiao and P. K. Smolarkiewicz, Effective eddy viscosities in implicit large eddy simulations of turbulent flows, *Phys. Fluids* 15, 3890–3893 (2003). [doi:10.1063/1.1624610](https://doi.org/10.1063/1.1624610)
+  Used in: the spectral eddy viscosities of the numerics and the model (LES theory, design notes section 3.1).
+- <a id="chollet-1981"></a>J.-P. Chollet and M. Lesieur, Parameterization of small scales of three-dimensional isotropic turbulence utilizing spectral closures, *J. Atmos. Sci.* 38, 2747–2757 (1981). [doi:10.1175/1520-0469(1981)038<2747:POSSOT>2.0.CO;2](https://doi.org/10.1175/1520-0469(1981)038%3C2747:POSSOT%3E2.0.CO;2)
+  Used in: the target spectral eddy viscosity (LES theory, design notes section 3.1).
+- <a id="hickel-2006"></a>S. Hickel, N. A. Adams and J. A. Domaradzki, An adaptive local deconvolution method for implicit LES, *J. Comput. Phys.* 213, 413–436 (2006). [doi:10.1016/j.jcp.2005.08.017](https://doi.org/10.1016/j.jcp.2005.08.017)
+  Used in: calibrating a scheme's spectral eddy viscosity against Chollet-Lesieur (LES design notes, section 3.1).
+- <a id="banhos-2025"></a>L. Banhos and G. Matheou, Effects of discretization of Smagorinsky–Lilly subgrid scale model on large-eddy simulation of stable boundary layers, *Atmosphere* 16, 310 (2025). [doi:10.3390/atmos16030310](https://doi.org/10.3390/atmos16030310)
+  Used in: the order of the model's gradients, `[les] gradients` (LES design notes, section 3.1).
+- <a id="beck-2016"></a>A. D. Beck, D. G. Flad, C. Tonhäuser, G. Gassner and C.-D. Munz, On the influence of polynomial de-aliasing on subgrid scale models, *Flow Turbul. Combust.* 97, 475–511 (2016). [doi:10.1007/s10494-016-9704-y](https://doi.org/10.1007/s10494-016-9704-y)
+  Used in: models evaluated on the element polynomials of high-order LES, `[les] gradients` (LES design notes, section 3.1).
+- <a id="pao-1965"></a>Y.-H. Pao, Structure of turbulent velocity and scalar fields at large wavenumbers, *Phys. Fluids* 8, 1063–1075 (1965). [doi:10.1063/1.1761356](https://doi.org/10.1063/1.1761356)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="voke-1996"></a>P. R. Voke, Subgrid-scale modelling at low mesh Reynolds number, *Theor. Comput. Fluid Dyn.* 8, 131–143 (1996). [doi:10.1007/BF00312367](https://doi.org/10.1007/BF00312367)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="schranner-2015"></a>F. S. Schranner, J. A. Domaradzki, S. Hickel and N. A. Adams, Assessing the numerical dissipation rate and viscosity in numerical simulations of fluid flows, *Comput. Fluids* 114, 84–97 (2015). [doi:10.1016/j.compfluid.2015.02.011](https://doi.org/10.1016/j.compfluid.2015.02.011)
+  Used in: the local numerical dissipation tested for the model constants (LES design notes, section 3.1).
 - <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
   Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
@@ -103,6 +129,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the central (KEEP) flux of `convective_flux = "hybrid"` (`riemann::KEEP`).
 - <a id="jameson-2008"></a>A. Jameson, Formulation of kinetic energy preserving conservative schemes for gas dynamics and direct numerical simulation of one-dimensional viscous compressible flow in a shock tube using entropy and kinetic energy preserving schemes, *J. Sci. Comput.* 34, 188–208 (2008). [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
   Used in: the condition on the momentum flux under which the central flux changes the kinetic energy only by the pressure work (tested in `test/les_test.cpp`).
+- <a id="subbareddy-candler-2009"></a>P. K. Subbareddy and G. V. Candler, A fully discrete, kinetic energy consistent finite-volume scheme for compressible flows, *J. Comput. Phys.* 228, 1347–1364 (2009). [doi:10.1016/j.jcp.2008.10.026](https://doi.org/10.1016/j.jcp.2008.10.026)
+  Used in: `[numerics.hybrid] central = "cell_averages"`, a kinetic-energy-consistent central flux on the cell values with upwind dissipation from the reconstructed states.
+- <a id="modesti-pirozzoli-2017"></a>D. Modesti and S. Pirozzoli, A low-dissipative solver for turbulent compressible flows on unstructured meshes, with OpenFOAM implementation, *Comput. Fluids* 152, 14–23 (2017). [doi:10.1016/j.compfluid.2017.04.012](https://doi.org/10.1016/j.compfluid.2017.04.012)
+  Used in: `[numerics.hybrid] central = "cell_averages"` (an energy-preserving flux on the cell values, diffusion only where a sensor fires).
 - <a id="ducros-1999"></a>F. Ducros, V. Ferrand, F. Nicoud, C. Weber, D. Darracq, C. Gacherieu and T. Poinsot, Large-eddy simulation of the shock/turbulence interaction, *J. Comput. Phys.* 152, 517–549 (1999). [doi:10.1006/jcph.1999.6238](https://doi.org/10.1006/jcph.1999.6238)
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
@@ -122,16 +152,36 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
   Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
+## Wall modeling
+
+- <a id="choi-moin-2012"></a>H. Choi and P. Moin, Grid-point requirements for large eddy simulation: Chapman's estimates revisited, *Phys. Fluids* 24, 011702 (2012). [doi:10.1063/1.3676783](https://doi.org/10.1063/1.3676783)
+  Used in: the cost argument for wall-modeled LES ([Wall models](theory/wall_models.md)).
+- <a id="larsson-2016"></a>J. Larsson, S. Kawai, J. Bodart and I. Bermejo-Moreno, Large eddy simulation with modeled wall-stress: recent progress and future directions, *Mech. Eng. Rev.* 3, 15-00418 (2016). [doi:10.1299/mer.15-00418](https://doi.org/10.1299/mer.15-00418)
+- <a id="bose-park-2018"></a>S. T. Bose and G. I. Park, Wall-modeled large-eddy simulation for complex turbulent flows, *Annu. Rev. Fluid Mech.* 50, 535–561 (2018). [doi:10.1146/annurev-fluid-122316-045241](https://doi.org/10.1146/annurev-fluid-122316-045241)
+  Used in (these two): the wall-stress coupling, in which the model's stress and heat flux replace the wall's viscous flux.
+- <a id="kawai-larsson-2012"></a>S. Kawai and J. Larsson, Wall-modeling in large eddy simulation: Length scales, grid resolution, and accuracy, *Phys. Fluids* 24, 015105 (2012). [doi:10.1063/1.3678331](https://doi.org/10.1063/1.3678331)
+  Used in: the exchange point a height `h` off the wall (the log-layer mismatch); the equilibrium ODE model (`model = "equilibrium"`; `src/physics/wall_model.h`).
+- <a id="van-driest-1956"></a>E. R. van Driest, On turbulent flow near a wall, *J. Aeronaut. Sci.* 23, 1007–1011 (1956). [doi:10.2514/8.3713](https://doi.org/10.2514/8.3713)
+  Used in: the damping of the wall models' mixing length (`A_plus`).
+- <a id="griffin-2021"></a>K. P. Griffin, L. Fu and P. Moin, Velocity transformation for compressible wall-bounded turbulent flows with and without heat transfer, *Proc. Natl. Acad. Sci.* 118, e2111144118 (2021). [doi:10.1073/pnas.2111144118](https://doi.org/10.1073/pnas.2111144118)
+- <a id="griffin-2023"></a>K. P. Griffin, L. Fu and P. Moin, Near-wall model for compressible turbulent boundary layers based on an inverse velocity transformation, *J. Fluid Mech.* 970, A36 (2023). [doi:10.1017/jfm.2023.627](https://doi.org/10.1017/jfm.2023.627)
+  Used in (these two): the default wall model (`model = "gfm"`), the inverse of the 2021 transformation with the Reynolds analogy through the exchange point.
+- <a id="zhang-2014"></a>Y.-S. Zhang, W.-T. Bi, F. Hussain and Z.-S. She, A generalized Reynolds analogy for compressible wall-bounded turbulent flows, *J. Fluid Mech.* 739, 392–420 (2014). [doi:10.1017/jfm.2013.620](https://doi.org/10.1017/jfm.2013.620)
+  Used in: the temperature-velocity relation and heat flux of the `gfm` wall model (`s`).
+- <a id="lee-moser-2015"></a>M. Lee and R. D. Moser, Direct numerical simulation of turbulent channel flow up to Re<sub>τ</sub> ≈ 5200, *J. Fluid Mech.* 774, 395–415 (2015). [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)
+- <a id="trettel-larsson-2016"></a>A. Trettel and J. Larsson, Mean velocity scaling for compressible wall turbulence with heat transfer, *Phys. Fluids* 28, 026102 (2016). [doi:10.1063/1.4942022](https://doi.org/10.1063/1.4942022)
+  Used in (these two): `examples/channel_wmles`, the wall-modeled channels at Re<sub>τ</sub> = 2000 and 5200 and the isothermal supersonic channels ([design notes](design/wall_model.md#10-results)).
+
 ## Boundary conditions
 
 - <a id="sabelnikov-fureby-2013"></a>V. Sabelnikov and C. Fureby, LES combustion modeling for high Re flames using a multi-phase analogy, *Combust. Flame* 160, 83–96 (2013). [doi:10.1016/j.combustflame.2012.09.008](https://doi.org/10.1016/j.combustflame.2012.09.008)
   Used in: the partially stirred reactor (`[les.combustion] model = "pasr"`), its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`.
 - <a id="poinsot-lele-1992"></a>T. J. Poinsot and S. K. Lele, Boundary conditions for direct simulations of compressible viscous flows, *J. Comput. Phys.* 101, 104–129 (1992). [doi:10.1016/0021-9991(92)90046-2](https://doi.org/10.1016/0021-9991%2892%2990046-2)
-  Used in: the LODI relations of the characteristic boundaries (`nscbc_outlet`, `nscbc_inlet`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
+  Used in: the LODI relations of the characteristic boundaries (`outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`; `BoundaryData::characteristic_W` in `src/boundary/boundary.h`) and their viscous outflow conditions.
 - <a id="rudy-strikwerda-1980"></a>D. H. Rudy and J. C. Strikwerda, A nonreflecting outflow boundary condition for subsonic Navier-Stokes calculations, *J. Comput. Phys.* 36, 55–70 (1980). [doi:10.1016/0021-9991(80)90174-6](https://doi.org/10.1016/0021-9991%2880%2990174-6)
-  Used in: the pressure relaxation of `nscbc_outlet` and its default `sigma`.
+  Used in: the pressure relaxation of `outlet_pressure` with `nscbc` and its default `sigma`.
 - <a id="selle-nicoud-poinsot-2004"></a>L. Selle, F. Nicoud and T. Poinsot, Actual impedance of nonreflecting boundary conditions: implications for computation of resonators, *AIAA J.* 42(5), 958–964 (2004). [doi:10.2514/1.1883](https://doi.org/10.2514/1.1883)
-  Used in: the reflection coefficient of the relaxed outlet, against which the acoustic-pulse test checks `nscbc_outlet`.
+  Used in: the reflection coefficient of the relaxed outlet, against which the acoustic-pulse test checks `outlet_pressure` with `nscbc`.
 - <a id="yoo-2005"></a>C. S. Yoo, Y. Wang, A. Trouvé and H. G. Im, Characteristic boundary conditions for direct simulations of turbulent counterflow flames, *Combust. Theory Model.* 9(4), 617–646 (2005). [doi:10.1080/13647830500307378](https://doi.org/10.1080/13647830500307378)
   Used in: the transverse terms of the characteristic boundaries.
 - <a id="yoo-im-2007"></a>C. S. Yoo and H. G. Im, Characteristic boundary conditions for simulations of compressible reacting flows with multi-dimensional, viscous and reaction effects, *Combust. Theory Model.* 11(2), 259–286 (2007). [doi:10.1080/13647830600898995](https://doi.org/10.1080/13647830600898995)
@@ -139,9 +189,9 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="lodato-2008"></a>G. Lodato, P. Domingo and L. Vervisch, Three-dimensional boundary conditions for direct and large-eddy simulation of compressible viscous flows, *J. Comput. Phys.* 227, 5105–5143 (2008). [doi:10.1016/j.jcp.2008.01.038](https://doi.org/10.1016/j.jcp.2008.01.038)
   Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
 - <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
-  Used in: the default `beta` and the vortex-outflow validation of `nscbc_outlet`.
+  Used in: the default `beta` and the vortex-outflow validation of `outlet_pressure` with `nscbc`.
 - <a id="moghadam-2011"></a>M. Esmaily Moghadam, Y. Bazilevs, T.-Y. Hsia, I. E. Vignon-Clementel and A. L. Marsden, A comparison of outlet boundary treatments for prevention of backflow divergence with relevance to blood flow simulations, *Comput. Mech.* 48, 277–291 (2011). [doi:10.1007/s00466-011-0599-0](https://doi.org/10.1007/s00466-011-0599-0)
-  Used in: the backflow stabilization tried, and not adopted, for `nscbc_outlet` (docs/design/nscbc.md).
+  Used in: the backflow stabilization tried, and not adopted, for `outlet_pressure` with `nscbc` (docs/design/nscbc.md).
 - <a id="bodony-2006"></a>D. J. Bodony, Analysis of sponge zones for computational fluid mechanics, *J. Comput. Phys.* 212, 681–702 (2006). [doi:10.1016/j.jcp.2005.07.014](https://doi.org/10.1016/j.jcp.2005.07.014)
   Used in: the sponge layers (`[[sponges]]`; `src/solver/solver_sponge.cpp`).
 - <a id="mani-2012"></a>A. Mani, Analysis and optimization of numerical sponge layers as a nonreflective boundary treatment, *J. Comput. Phys.* 231, 704–716 (2012). [doi:10.1016/j.jcp.2011.10.017](https://doi.org/10.1016/j.jcp.2011.10.017)
@@ -176,6 +226,13 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="batchelor-townsend-1948"></a>G. K. Batchelor and A. A. Townsend, Decay of turbulence in the final period, *Proc. R. Soc. Lond. A* 194(1039), 527–543 (1948). [doi:10.1098/rspa.1948.0095](https://doi.org/10.1098/rspa.1948.0095)
   Used in: the final-period decay exponent, the low-Reynolds-number bound of the duct validation.
 
+- <a id="kraichnan-1970"></a>R. H. Kraichnan, Diffusion by a random velocity field, *Phys. Fluids* 13(1), 22–31 (1970). [doi:10.1063/1.1692799](https://doi.org/10.1063/1.1692799)
+  Used in: synthetic turbulence of initial states (`[initialize.turbulence]`; `src/solver/synthetic_turbulence.cpp`): a sum of Fourier modes, each normal to its wavevector, so divergence-free at every point.
+- <a id="bailly-juve-1999"></a>C. Bailly and D. Juvé, A stochastic approach to compute subsonic noise using linearized Euler's equations, AIAA Paper 99-1872, 5th AIAA/CEAS Aeroacoustics Conference (1999). [doi:10.2514/6.1999-1872](https://doi.org/10.2514/6.1999-1872)
+  Used in: the von Kármán-Pao spectrum of synthetic turbulence (`spectrum = "von_karman_pao"`) and its dissipation range.
+- <a id="pope-2000"></a>S. B. Pope, *Turbulent Flows*, Cambridge University Press (2000).
+  Used in: the integral length scale of synthetic turbulence (`length_scale`), from the energy spectrum (§6.5).
+
 ## Time integration and time step
 
 - <a id="shu-osher-1988"></a>C.-W. Shu and S. Osher, Efficient implementation of essentially non-oscillatory shock-capturing schemes, *J. Comput. Phys.* 77, 439–471 (1988). [doi:10.1016/0021-9991(88)90177-5](https://doi.org/10.1016/0021-9991%2888%2990177-5)
@@ -183,6 +240,21 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `time_integrator = "SSPRK3"` (the default; `src/numerics/time_integrator.cpp`).
 - <a id="kutta-1901"></a>W. Kutta, Beitrag zur näherungsweisen Integration totaler Differentialgleichungen, *Z. Math. Phys.* 46, 435–453 (1901).
   Used in: `time_integrator = "RK4"`, the classical fourth-order Runge–Kutta method.
+- <a id="kraaijevanger-1991"></a>J. F. B. M. Kraaijevanger, Contractivity of Runge–Kutta methods, *BIT* 31, 482–528 (1991). [doi:10.1007/BF01933264](https://doi.org/10.1007/BF01933264)
+- <a id="spiteri-ruuth-2002"></a>R. J. Spiteri and S. J. Ruuth, A new class of optimal high-order strong-stability-preserving time discretization methods, *SIAM J. Numer. Anal.* 40, 469–491 (2002). [doi:10.1137/S0036142901389025](https://doi.org/10.1137/S0036142901389025)
+  Used in: `time_integrator = "SSPRK54"`, the five-stage fourth-order SSP method (SSP coefficient 1.508), from Spiteri and Ruuth's Shu–Osher form, re-solved to 50 digits.
+- <a id="ketcheson-2008"></a>D. I. Ketcheson, Highly efficient strong stability-preserving Runge–Kutta methods with low-storage implementations, *SIAM J. Sci. Comput.* 30, 2113–2136 (2008). [doi:10.1137/07070485X](https://doi.org/10.1137/07070485X)
+- <a id="ketcheson-2010"></a>D. I. Ketcheson, Runge–Kutta methods with minimum storage implementations, *J. Comput. Phys.* 229, 1763–1773 (2010). [doi:10.1016/j.jcp.2009.11.006](https://doi.org/10.1016/j.jcp.2009.11.006)
+  Used in: the 3S* low-storage form of `SSPRK54` and `RDPK3Sp35` (`LowStorage3S` in `src/numerics/time_integrator.cpp`), here written for the deviations from U<sup>n</sup>.
+- <a id="carpenter-kennedy-1994"></a>M. H. Carpenter and C. A. Kennedy, Fourth-order 2N-storage Runge–Kutta schemes, NASA TM-109112 (1994). [NTRS 19940028444](https://ntrs.nasa.gov/citations/19940028444)
+  Used in: `time_integrator = "CK45"` (solution 3, five stages, fourth order).
+- <a id="ranocha-2022"></a>H. Ranocha, L. Dalcin, M. Parsani and D. I. Ketcheson, Optimized Runge–Kutta methods with automatic step size control for compressible computational fluid dynamics, *Commun. Appl. Math. Comput.* 4, 1191–1228 (2022). [doi:10.1007/s42967-021-00159-w](https://doi.org/10.1007/s42967-021-00159-w)
+  Used in: `time_integrator = "RDPK3Sp35"` and `[numerics.error_control]`, its PID controller and default coefficients (`src/numerics/step_control.cpp`).
+- <a id="kennedy-carpenter-lewis-2000"></a>C. A. Kennedy, M. H. Carpenter and R. M. Lewis, Low-storage, explicit Runge–Kutta schemes for the compressible Navier–Stokes equations, *Appl. Numer. Math.* 35, 177–219 (2000). [doi:10.1016/S0168-9274(99)00141-5](https://doi.org/10.1016/S0168-9274%2899%2900141-5)
+- <a id="soderlind-wang-2006"></a>G. Söderlind and L. Wang, Adaptive time-stepping and computational stability, *J. Comput. Appl. Math.* 185, 225–243 (2006). [doi:10.1016/j.cam.2005.03.008](https://doi.org/10.1016/j.cam.2005.03.008)
+  Used in: the step-ratio limiter `1 + atan(x - 1)` of the error controller.
+- <a id="ranocha-2020"></a>H. Ranocha, M. Sayyari, L. Dalcin, M. Parsani and D. I. Ketcheson, Relaxation Runge–Kutta methods: fully discrete explicit entropy-stable schemes for the compressible Euler and Navier–Stokes equations, *SIAM J. Sci. Comput.* 42, A612–A638 (2020). [doi:10.1137/19M1263480](https://doi.org/10.1137/19M1263480)
+  Not implemented yet: relaxation needs an entropy-stable spatial discretization (#288) to make the step entropy-conservative or -dissipative ([time step](numerics/overview.md#time-integrators)).
 - <a id="blazek-2015"></a>J. Blazek, *Computational Fluid Dynamics: Principles and Applications*, 3rd ed., Butterworth-Heinemann (2015). [doi:10.1016/C2013-0-19038-1](https://doi.org/10.1016/C2013-0-19038-1)
   Used in: the local time step from convective and viscous spectral radii (`Solver::calc_dt_cfl1`), and the characteristic far-field condition (`type = "farfield"`), which takes the outgoing Riemann invariant from the interior and the incoming one from the free stream.
 
@@ -207,8 +279,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="trott-2022"></a>C. R. Trott et al., Kokkos 3: Programming model extensions for the exascale era, *IEEE Trans. Parallel Distrib. Syst.* 33, 805–817 (2022). [doi:10.1109/TPDS.2021.3097283](https://doi.org/10.1109/TPDS.2021.3097283)
   Used in: all of Mallard's kernels and data ([Kokkos](https://github.com/kokkos/kokkos)).
 - <a id="geuzaine-remacle-2009"></a>C. Geuzaine and J.-F. Remacle, Gmsh: A 3-D finite element mesh generator with built-in pre- and post-processing facilities, *Int. J. Numer. Methods Eng.* 79, 1309–1331 (2009). [doi:10.1002/nme.2579](https://doi.org/10.1002/nme.2579)
-  Used in: the Gmsh 2.2 and 4.1 mesh reader, and the meshes of `tools/make_cylinder_mesh.py`, `tools/make_mallard_mesh.py` and `tools/make_sphere_re300_mesh.py`.
-- [toml11](https://github.com/ToruNiina/toml11) reads the input file; [exprtk](https://www.partow.net/programming/exprtk/) evaluates its expressions.
+  Used in: the Gmsh 2.2 and 4.1 mesh reader, and the meshes of `tools/mesh/make_cylinder_mesh.py`, `examples/mallard/make_mallard_mesh.py` and `examples/sphere_re300/make_sphere_re300_mesh.py`.
+- [toml11](https://github.com/ToruNiina/toml11) reads the input file. [exprtk](https://www.partow.net/programming/exprtk/) (A. Partow, MIT License): kexpr, Mallard's expression language, follows its syntax, operator semantics and numerics (literal conversion, integer powers), so that its values match exprtk's bitwise.
 
 ## Chemistry and multicomponent flow
 
@@ -229,7 +301,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="stewart-larson-golden-1989"></a>P. H. Stewart, C. W. Larson and D. M. Golden, Pressure and temperature dependence of reactions proceeding via a bound complex. 2. Application to 2CH3 → C2H5 + H, *Combust. Flame* 75, 25–31 (1989). [doi:10.1016/0010-2180(89)90084-9](https://doi.org/10.1016/0010-2180%2889%2990084-9)
   Used in: SRI falloff reactions.
 - <a id="hairer-wanner-1996"></a>E. Hairer and G. Wanner, *Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems*, 2nd ed., Springer (1996). [doi:10.1007/978-3-642-05221-7](https://doi.org/10.1007/978-3-642-05221-7)
-  Used in: the RODAS Rosenbrock integrator of the chemistry source and `MallardReactor`.
+  Used in: the RODAS Rosenbrock integrator of the chemistry source and `mallard reactor`.
 - <a id="strang-1968"></a>G. Strang, On the construction and comparison of difference schemes, *SIAM J. Numer. Anal.* 5, 506–517 (1968). [doi:10.1137/0705041](https://doi.org/10.1137/0705041)
   Used in: the Strang splitting of chemistry around the flow step.
 - <a id="wu-ma-ihme-2019"></a>H. Wu, P. C. Ma and M. Ihme, Efficient time-stepping techniques for simulating turbulent reactive flows with stiff chemistry, *Comput. Phys. Commun.* 243, 81–96 (2019). [doi:10.1016/j.cpc.2019.04.016](https://doi.org/10.1016/j.cpc.2019.04.016)
@@ -246,6 +318,24 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
 
+## Derived output fields
+
+- <a id="hunt-wray-moin-1988"></a>J. C. R. Hunt, A. A. Wray and P. Moin, Eddies, streams, and convergence zones in turbulent flows, Center for Turbulence Research, Proceedings of the Summer Program 1988, 193–208 (1988).
+  Used in: the `Q_CRITERION` output field (`src/solver/derived_fields.h`).
+- <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
+  Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
+
+## Grid convergence and discretization error
+
+- <a id="roache-1994"></a>P. J. Roache, Perspective: a method for uniform reporting of grid refinement studies, *J. Fluids Eng.* 116, 405–413 (1994). [doi:10.1115/1.2910291](https://doi.org/10.1115/1.2910291)
+  Used in: the grid convergence index (GCI) of `mallard post convergence` (`src/common/convergence.cpp`).
+- <a id="roache-1998"></a>P. J. Roache, *Verification and Validation in Computational Science and Engineering*, Hermosa Publishers, Albuquerque (1998).
+  Used in: the GCI's factors of safety, 1.25 with an order observed on three or more grids and 3 with two grids and an assumed order (`mallard post convergence`).
+- <a id="celik-2008"></a>I. B. Celik, U. Ghia, P. J. Roache, C. J. Freitas, H. Coleman and P. E. Raad, Procedure for estimation and reporting of uncertainty due to discretization in CFD applications, *J. Fluids Eng.* 130, 078001 (2008). [doi:10.1115/1.2960953](https://doi.org/10.1115/1.2960953)
+  Used in: the procedure of `mallard post convergence` (eqs. 1–7: the representative cell size, the observed order by fixed-point iteration, the extrapolated value, the approximate and extrapolated relative errors, the fine-grid GCI; oscillatory convergence when e32 / e21 < 0); its Table 1 is a test (`test/post_convergence_test.cpp`).
+- <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
+  Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
+
 ## Validation cases and reference data
 
 - <a id="comte-bellot-corrsin-1971"></a>G. Comte-Bellot and S. Corrsin, Simple Eulerian time correlation of full- and narrow-band velocity signals in grid-generated, 'isotropic' turbulence, *J. Fluid Mech.* 48, 273–337 (1971). [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)
@@ -256,7 +346,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="martinez-ferrer-2014"></a>P. J. Martínez Ferrer, R. Buttay, G. Lehnasch and A. Mura, A detailed verification procedure for compressible reactive multicomponent Navier–Stokes solvers, *Comput. Fluids* 89, 88–110 (2014). [doi:10.1016/j.compfluid.2013.10.014](https://doi.org/10.1016/j.compfluid.2013.10.014)
   Used in (these two): `examples/reactive_shock_tube` (the reflected-shock ignition of 2H2–O2–7Ar).
 - <a id="sdt"></a>*Shock and Detonation Toolbox* (SDToolbox), Explosion Dynamics Laboratory, California Institute of Technology, https://shepherd.caltech.edu/EDL/PublicResources/sdt/
-  Used in: the CJ speed and ZND structure of `examples/detonation_1d` (`tools/detonation_reference.py` follows its method with Cantera).
+  Used in: the CJ speed and ZND structure of `examples/detonation_1d` (`tools/setup/detonation_reference.py` follows its method with Cantera).
 - <a id="sod-1978"></a>G. A. Sod, A survey of several finite difference methods for systems of nonlinear hyperbolic conservation laws, *J. Comput. Phys.* 27, 1–31 (1978). [doi:10.1016/0021-9991(78)90023-2](https://doi.org/10.1016/0021-9991%2878%2990023-2)
   Used in: `examples/sod` and the shock-tube tests.
 - <a id="shu-osher-1989"></a>C.-W. Shu and S. Osher, Efficient implementation of essentially non-oscillatory shock-capturing schemes, II, *J. Comput. Phys.* 83, 32–78 (1989). [doi:10.1016/0021-9991(89)90222-2](https://doi.org/10.1016/0021-9991%2889%2990222-2)
@@ -275,7 +365,7 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the exact viscous solutions of the tests (Couette flow, Stokes' first problem, conduction between walls).
 - <a id="daru-tenaud-2009"></a>V. Daru and C. Tenaud, Numerical simulation of the viscous shock tube problem by using a high resolution monotonicity-preserving scheme, *Comput. Fluids* 38, 664–676 (2009). [doi:10.1016/j.compfluid.2008.06.008](https://doi.org/10.1016/j.compfluid.2008.06.008)
 - <a id="zhou-xu-liu-2018"></a>G. Zhou, K. Xu and F. Liu, Grid-converged solution and analysis of the unsteady viscous flow in a two-dimensional shock tube, *Phys. Fluids* 30, 016102 (2018). [doi:10.1063/1.4998300](https://doi.org/10.1063/1.4998300)
-  Used in: `examples/viscous_shock_tube` and the reference wall density of `tools/plot_viscous_shock_tube.py`.
+  Used in: `examples/viscous_shock_tube` and the reference wall density of `examples/viscous_shock_tube/plot_viscous_shock_tube.py`.
 - <a id="williamson-1996"></a>C. H. K. Williamson, Vortex dynamics in the cylinder wake, *Annu. Rev. Fluid Mech.* 28, 477–539 (1996). [doi:10.1146/annurev.fl.28.010196.002401](https://doi.org/10.1146/annurev.fl.28.010196.002401)
 - <a id="liu-zheng-sung-1998"></a>C. Liu, X. Zheng and C. H. Sung, Preconditioned multigrid methods for unsteady incompressible flows, *J. Comput. Phys.* 139, 35–57 (1998). [doi:10.1006/jcph.1997.5859](https://doi.org/10.1006/jcph.1997.5859)
 - <a id="park-kwon-choi-1998"></a>J. Park, K. Kwon and H. Choi, Numerical solutions of flow past a circular cylinder at Reynolds numbers up to 160, *KSME Int. J.* 12, 1200–1205 (1998). [doi:10.1007/BF02942594](https://doi.org/10.1007/BF02942594)
@@ -285,7 +375,10 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="tomboulides-orszag-2000"></a>A. G. Tomboulides and S. A. Orszag, Numerical investigation of transitional and weak turbulent flow past a sphere, *J. Fluid Mech.* 416, 45–73 (2000). [doi:10.1017/S0022112000008880](https://doi.org/10.1017/S0022112000008880)
 - <a id="kim-kim-choi-2001"></a>J. Kim, D. Kim and H. Choi, An immersed-boundary finite-volume method for simulations of flow in complex geometries, *J. Comput. Phys.* 171, 132–150 (2001). [doi:10.1006/jcph.2001.6778](https://doi.org/10.1006/jcph.2001.6778)
 - <a id="constantinescu-squires-2003"></a>G. S. Constantinescu and K. D. Squires, LES and DES investigations of turbulent flow over a sphere at Re = 10,000, *Flow Turbul. Combust.* 70, 267–298 (2003). [doi:10.1023/B:APPL.0000004937.34078.71](https://doi.org/10.1023/B:APPL.0000004937.34078.71)
-  Used in: `examples/sphere_re300` and `tools/plot_sphere_re300.py` (Strouhal number, mean drag and lift at Re = 300: Johnson & Patel, Tomboulides et al., Kim et al., and the laminar Re = 300 validation of Constantinescu & Squires; Tomboulides & Orszag describe the regime, a single-frequency shedding that keeps a plane of symmetry).
+  Used in: `examples/sphere_re300` and `examples/sphere_re300/plot_sphere_re300.py` (Strouhal number, mean drag and lift at Re = 300: Johnson & Patel, Tomboulides et al., Kim et al., and the laminar Re = 300 validation of Constantinescu & Squires; Tomboulides & Orszag describe the regime, a single-frequency shedding that keeps a plane of symmetry).
+- <a id="lamb-1932"></a>H. Lamb, *Hydrodynamics*, 6th ed., Cambridge University Press (1932), chapter V.
+- <a id="bassi-rebay-1997"></a>F. Bassi and S. Rebay, High-order accurate discontinuous finite element solution of the 2D Euler equations, *J. Comput. Phys.* 138, 251–285 (1997). [doi:10.1006/jcph.1997.5454](https://doi.org/10.1006/jcph.1997.5454)
+  Used in (these two): `examples/ellipsoid` and `examples/ellipsoid/compare_ellipsoid.py` (potential flow past a prolate spheroid: the wall pressure, from the surface speed (1 + k) times the tangential free stream; Bassi & Rebay show that flat-sided wall faces, not the order of the scheme, set the spurious entropy and drag of high-order inviscid flow past curved walls).
 - <a id="brachet-1983"></a>M. E. Brachet, D. I. Meiron, S. A. Orszag, B. G. Nickel, R. H. Morf and U. Frisch, Small-scale structure of the Taylor–Green vortex, *J. Fluid Mech.* 130, 411–452 (1983). [doi:10.1017/S0022112083001159](https://doi.org/10.1017/S0022112083001159)
 - <a id="van-rees-2011"></a>W. M. van Rees, A. Leonard, D. I. Pullin and P. Koumoutsakos, A comparison of vortex and pseudo-spectral methods for the simulation of periodic vortical flows at high Reynolds numbers, *J. Comput. Phys.* 230, 2794–2805 (2011). [doi:10.1016/j.jcp.2010.11.031](https://doi.org/10.1016/j.jcp.2010.11.031)
 - <a id="wang-2013"></a>Z. J. Wang et al., High-order CFD methods: current status and perspective, *Int. J. Numer. Methods Fluids* 72, 811–845 (2013). [doi:10.1002/fld.3767](https://doi.org/10.1002/fld.3767)
@@ -294,23 +387,23 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="lele-2012"></a>S. K. Lele, Simulations of turbulent flows with strong shocks and density variations, final report DE-FC02-06ER25787, Stanford University (2012). [doi:10.2172/1052207](https://doi.org/10.2172/1052207)
 - <a id="subramaniam-2019"></a>A. Subramaniam, M. L. Wong and S. K. Lele, A high-order weighted compact high resolution scheme with boundary closures for compressible turbulent flows with shocks, *J. Comput. Phys.* 397, 108822 (2019). [doi:10.1016/j.jcp.2019.07.021](https://doi.org/10.1016/j.jcp.2019.07.021)
 - <a id="samtaney-2001"></a>R. Samtaney, D. I. Pullin and B. Kosović, Direct numerical simulation of decaying compressible turbulence and shocklet statistics, *Phys. Fluids* 13, 1415–1430 (2001). [doi:10.1063/1.1355682](https://doi.org/10.1063/1.1355682)
-  Used in: `examples/isotropic_turbulence` and `tools/plot_isotropic_turbulence.py`: the decaying isotropic turbulence case of Johnsen et al. and their filtered 256³ reference (read from the same figure in Lele's report), the filtered 512³ DNS and spectra of Subramaniam et al. (whose appendix F gives the post-processing of both references), and the regime of Samtaney et al.; also `viscosity_model = "power_law"`.
+  Used in: `examples/isotropic_turbulence` and `examples/isotropic_turbulence/plot_isotropic_turbulence.py`: the decaying isotropic turbulence case of Johnsen et al. and their filtered 256³ reference (read from the same figure in Lele's report), the filtered 512³ DNS and spectra of Subramaniam et al. (whose appendix F gives the post-processing of both references), and the regime of Samtaney et al.; also `viscosity_model = "power_law"`.
 - <a id="ruetsch-1995"></a>G. R. Ruetsch, L. Vervisch and A. Liñán, Effects of heat release on triple flames, *Phys. Fluids* 7, 1447–1454 (1995). [doi:10.1063/1.868531](https://doi.org/10.1063/1.868531)
 - <a id="veynante-1994"></a>D. Veynante, L. Vervisch, T. Poinsot, A. Liñán and G. Ruetsch, Triple flame structure and diffusion flame stabilization, *Proceedings of the Summer Program 1994*, Center for Turbulence Research, Stanford University (1994). [oa.upm.es/1537](https://oa.upm.es/1537/)
-  Used in (these two): `examples/triple_flame` and `tools/triple_flame_analysis.py` (the propagation speed U<sub>F</sub> / S<sub>L</sub> against the mixing thickness at the flame, D<sub>TF</sub>, and the weak-gradient limit √(ρ<sub>u</sub> / ρ<sub>b</sub>)).
+  Used in (these two): `examples/triple_flame` and `examples/triple_flame/triple_flame_analysis.py` (the propagation speed U<sub>F</sub> / S<sub>L</sub> against the mixing thickness at the flame, D<sub>TF</sub>, and the weak-gradient limit √(ρ<sub>u</sub> / ρ<sub>b</sub>)).
 - <a id="poinsot-1990"></a>T. Poinsot, D. Veynante and S. Candel, Diagrams of premixed turbulent combustion based on direct simulation, *Proc. Combust. Inst.* 23, 613–619 (1990). [doi:10.1016/S0082-0784(06)80308-5](https://doi.org/10.1016/S0082-0784%2806%2980308-5)
 - <a id="poinsot-1991"></a>T. Poinsot, D. Veynante and S. Candel, Quenching processes and premixed turbulent combustion diagrams, *J. Fluid Mech.* 228, 561–606 (1991). [doi:10.1017/S0022112091002823](https://doi.org/10.1017/S0022112091002823)
-  Used in (these two): `examples/flame_vortex`, `examples/flame_vortex_quenching` and `tools/flame_vortex_analysis.py` (the vortex-pair scales r and u′, the four outcomes and the 5% cut-off of the spectral diagram; their one-step flame with a linear heat loss, Le = 1.2, and its quenching).
+  Used in (these two): `examples/flame_vortex`, `examples/flame_vortex_quenching` and `examples/flame_vortex/flame_vortex_analysis.py` (the vortex-pair scales r and u′, the four outcomes and the 5% cut-off of the spectral diagram; their one-step flame with a linear heat loss, Le = 1.2, and its quenching).
 - <a id="ju-1997"></a>Y. Ju, H. Guo, K. Maruta and F. Liu, On the extinction limit and flammability limit of non-adiabatic stretched methane–air premixed flames, *J. Fluid Mech.* 342, 315–334 (1997). [doi:10.1017/S0022112097005636](https://doi.org/10.1017/S0022112097005636)
 - <a id="ju-masuya-ronney-1998"></a>Y. Ju, G. Masuya and P. D. Ronney, Effects of radiative emission and absorption on the propagation and extinction of premixed gas flames, *Proc. Combust. Inst.* 27, 2619–2626 (1998). [doi:10.1016/S0082-0784(98)80116-1](https://doi.org/10.1016/S0082-0784%2898%2980116-1)
   Used in (these two): the radiative flammability limits of the 1D radiation checks (`docs/design/chemistry.md`): the optically thin limit flame speed near e<sup>-1/2</sup> of the adiabatic one, and the limits of the optically thin model.
 - The spherical explosion of `examples/explosion_3d` is from [Toro (2009)](#toro-2009), §17.1.3.
 - <a id="noh-1987"></a>W. F. Noh, Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux, *J. Comput. Phys.* 72, 78–120 (1987). [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
-  Used in: `examples/noh_axisymmetric` and `tools/plot_noh.py` (the spherical Noh problem and its exact solution).
+  Used in: `examples/noh_axisymmetric` and `examples/noh_axisymmetric/plot_noh.py` (the spherical Noh problem and its exact solution).
 - <a id="clift-grace-weber-1978"></a>R. Clift, J. R. Grace and M. E. Weber, *Bubbles, Drops, and Particles*, Academic Press (1978).
-  Used in: `examples/sphere_axisymmetric` and `tools/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.
+  Used in: `examples/sphere_axisymmetric` and `examples/sphere_axisymmetric/plot_sphere_axisymmetric.py` (correlations of the drag coefficient and the separation angle of a sphere in steady flow, 20 < Re < 260), with [Johnson & Patel (1999)](#johnson-patel-1999) for the wake length.
 - <a id="sankaran-2005"></a>R. Sankaran, H. G. Im, E. R. Hawkes and J. H. Chen, The effects of non-uniform temperature distribution on the ignition of a lean homogeneous hydrogen–air mixture, *Proc. Combust. Inst.* 30, 875–882 (2005). [doi:10.1016/j.proci.2004.08.176](https://doi.org/10.1016/j.proci.2004.08.176)
 - <a id="chen-2006"></a>J. H. Chen, E. R. Hawkes, R. Sankaran, S. D. Mason and H. G. Im, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: I. Fundamental analysis and diagnostics, *Combust. Flame* 145, 128–144 (2006). [doi:10.1016/j.combustflame.2005.09.017](https://doi.org/10.1016/j.combustflame.2005.09.017)
 - <a id="hawkes-2006"></a>E. R. Hawkes, R. Sankaran, P. P. Pébay and J. H. Chen, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: II. Parametric study, *Combust. Flame* 145, 145–159 (2006). [doi:10.1016/j.combustflame.2005.09.018](https://doi.org/10.1016/j.combustflame.2005.09.018)
 - <a id="passot-pouquet-1987"></a>T. Passot and A. Pouquet, Numerical simulation of compressible homogeneous flows in the turbulent regime, *J. Fluid Mech.* 181, 441–466 (1987). [doi:10.1017/S0022112087002167](https://doi.org/10.1017/S0022112087002167)
-  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `tools/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `tools/autoignition_restart.py`).
+  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `examples/autoignition_2d/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `examples/autoignition_2d/autoignition_restart.py`); `spectrum = "passot_pouquet"` of synthetic turbulence (`[initialize.turbulence]`).

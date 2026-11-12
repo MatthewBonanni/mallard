@@ -6,11 +6,10 @@
 # positive.
 #
 # Generate the mesh first (needs the gmsh Python module, pip install gmsh):
-#   python ../../tools/make_mallard_mesh.py mallard.msh     # 1.07M triangles
-# Run (75,000 steps, about 1.5 hours on one data-center GPU; 251 snapshots,
-# 20 GB), then animate:
-#   Mallard -i input.toml
-#   python ../../tools/animate.py solut mallard --var MACH --cmap inferno_r \
+#   python make_mallard_mesh.py mallard.msh --order 3    # 1.05M cubic triangles, curved on the duck
+# Run (89,000 steps, 1h 15m on one A100; 251 snapshots, 20 GB), then animate:
+#   mallard -i input.toml
+#   python ../../tools/post/animate.py solut mallard --var MACH --cmap inferno_r \
 #       --vmin 0 --vmax 8.5 --interp linear --layout single --overlay \
 #       --body-color "#2a2f3a" --res 2400 --dpi 300 --width 7 \
 #       --xlim -0.35 3.0 --ylim -0.85 1.2 --fps 18 --title "Mach 8 mallard"
@@ -37,22 +36,22 @@ type = "wall_adiabatic"
 
 [[boundaries]]
 name = "inflow"
-type = "upt"
+type = "inlet_state"
 u = [8.0, 0.0]
 p = 0.7142857142857143
 T = 0.7142857142857143
 
 [[boundaries]]
 name = "outflow"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "bottom"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [numerics]
 riemann_solver = "RHLL"
@@ -66,6 +65,7 @@ bound_preserving = true
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
@@ -76,6 +76,5 @@ check_interval = 500
 
 [[write_data]]
 prefix = "./solut/mallard"
-format = "vtu"
 time_interval = 0.003
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]

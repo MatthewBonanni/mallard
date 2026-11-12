@@ -63,7 +63,7 @@ class HaloExchange {
 
         std::vector<int> ranks;
         bool nccl = false;
-        uint32_t n_values = 0;  // per cell in the buffers: the flow block, then the species
+        uint32_t n_values = 0;  // per cell the buffers hold; a state's cells take the flow block, then its species
         std::vector<uint32_t> send_offsets, recv_offsets;  // per neighbor, in cells
         Kokkos::View<uint32_t *> send_cells, recv_cells;
         Kokkos::View<rtype *> send_buffer, recv_buffer;

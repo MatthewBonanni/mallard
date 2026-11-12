@@ -34,7 +34,8 @@ closure for the filtered reaction rates.
 
 - Implicit LES, or tuning the scheme's dissipation to stand in for a model.
 - Wall models (wall-modeled LES). Walls are resolved (y+ of the first cell
-  about 1).
+  about 1); wall models are designed separately in
+  [wall_model.md](wall_model.md).
 - RANS and hybrid RANS/LES (DES, DDES, WMLES).
 - Synthetic inflow turbulence: that is #159. Cases that need it depend on it.
 - Flamelet / FPV / FGM tabulated chemistry, transported or presumed PDFs,
@@ -52,7 +53,7 @@ closure for the filtered reaction rates.
 | 1 | Favre-filtered equations closed by an eddy viscosity mu_t, with `lambda_t = cp mu_t / Pr_t` and `rho D_t = mu_t / Sc_t`; mu_t added to the molecular coefficients | Mixed or scale-similarity models; separate SGS flux kernels | Shares the viscous fluxes, boundary treatment, time step and transport infrastructure; the standard closure of compressible LES (Vreman et al. 1995; Garnier et al. 2009) |
 | 2 | **Sigma model** (Nicoud et al. 2011) as the primary eddy viscosity; WALE, Vreman and Smagorinsky also available | WALE, Vreman, dynamic Smagorinsky as primary | Local, no test filter, positive; vanishes in pure shear, solid rotation, two-component and axisymmetric/isotropic expansion; cubic near walls; insensitive to the one-dimensional dilatation of flames |
 | 3 | Dynamic Smagorinsky deferred | Germano-Lilly with local averaging | Needs a test filter and averaging on unstructured mixed meshes (section 2.5); Sigma gets near-wall and laminar behavior without it |
-| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
+| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3); a width scaled by the reconstruction's effective resolution was tried and rejected (section 3.1) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
 | 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
 | 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
 | 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
@@ -62,7 +63,7 @@ closure for the filtered reaction rates.
 
 ## 1. Filtered equations
 
-With the spatial filter `\bar{.}` (implicit in the grid, width Delta) and the
+With the spatial filter `\bar{.}` (implicit in the grid, width $\Delta$) and the
 Favre filter `\tilde{f} = \bar{rho f} / \bar{rho}`:
 
 ```
@@ -232,7 +233,7 @@ validation shows the static constant is inadequate (stage 7).
 
 **As implemented (stage 7, opt-in `dynamic = true`): a global dynamic
 procedure.** Section 8.1 showed the best static constant depends on the
-resolution (1.8 at 64^3, 1.35 at 128^3), which is what a dynamic constant
+resolution (1.8 at $64^3$, 1.35 at $128^3$), which is what a dynamic constant
 should capture. The global form (one constant per step, `C^2 = <L^d:M> /
 <M:M>` summed over the domain) avoids the averaging and clipping problems
 above, and its test filter, the volume-weighted average over a cell and its
@@ -246,13 +247,13 @@ neighbors per step (about 30% of a CPU step on the CBC case, once per step).
 
 | Case | static `C` | dynamic `C` (time mean) | result, dynamic vs static 1.35 |
 |---|---|---|---|
-| CBC 32^3 | 1.35 / 1.8 | 1.6 (rising from 1.1) | spectral error 0.165 / 0.142 vs 0.153 / 0.151 (1.8: 0.103 / 0.082) |
-| CBC 64^3 | 1.35 / 1.8 | 1.4 | 0.116 / 0.077 vs 0.107 / 0.104 (1.8: 0.058 / 0.063) |
-| CBC 128^3 | 1.35 / 1.8 | 1.15 | **0.060 / 0.054** vs 0.063 / 0.085 (1.8: 0.124 / 0.141) |
-| channel 395, 64^3 | 1.35 | 1.09 | `Re_tau` 408.0 (+4.0%) vs 402.3 (+2.6%); peak `v_rms+` 0.912 vs 0.889 |
+| CBC 32³ | 1.35 / 1.8 | 1.6 (rising from 1.1) | spectral error 0.165 / 0.142 vs 0.153 / 0.151 (1.8: 0.103 / 0.082) |
+| CBC 64³ | 1.35 / 1.8 | 1.4 | 0.116 / 0.077 vs 0.107 / 0.104 (1.8: 0.058 / 0.063) |
+| CBC 128³ | 1.35 / 1.8 | 1.15 | **0.060 / 0.054** vs 0.063 / 0.085 (1.8: 0.124 / 0.141) |
+| channel 395, 64³ | 1.35 | 1.09 | `Re_tau` 408.0 (+4.0%) vs 402.3 (+2.6%); peak `v_rms+` 0.912 vs 0.889 |
 
 The procedure finds the right trend with resolution (1.6, 1.4, 1.15) and the
-best spectra of any run at 128^3, but not the 1.8 that fits 64^3: that
+best spectra of any run at $128^3$, but not the 1.8 that fits $64^3$: that
 optimum compensates the second-order scheme's damping near the cutoff,
 which the Germano identity, written for the filter alone, cannot see. In the
 channel the domain-wide constant is pulled down by the regions of weak SGS
@@ -274,7 +275,7 @@ axisymmetric runs), for every cell type and reconstruction order.
   where a cell carries `(p + 1)^d` degrees of freedom, does not apply.
   Low-order schemes damp a band below the cutoff, i.e. act as an additional
   implicit filter; this is what the dissipation budget (section 4) measures,
-  rather than a factor folded into Delta.
+  rather than a factor folded into $\Delta$.
 - **Anisotropy.** Deardorff's width underestimates the largest extent of
   stretched cells. Scotti, Meneveau & Lilly (1993) give a correction
   `f(a_1, a_2) = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))`
@@ -285,10 +286,10 @@ axisymmetric runs), for every cell type and reconstruction order.
   each cell's extents `h_i = V / lambda_i` from the eigenvalues of its
   projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|` (exact for boxes, face
   data only, so periodic cells need no unwrapping), for the eddy viscosity
-  only (TFLES keeps `V^(1/3)`). Channel at `Re_tau = 395`, 64^3, Sigma 1.35:
+  only (TFLES keeps `V^(1/3)`). Channel at `Re_tau = 395`, $64^3$, Sigma 1.35:
   `Re_tau` 394.8 (+0.7%, against +2.6% with `V^(1/3)`), `Cf` +0.9%, `U+` at
   y+ = 30 / 100 13.40 / 16.61 (MKM 13.49 / 16.53), `eps_num / eps_sgs` 0.21;
-  peak `v_rms+` 0.882, unchanged. At `Re_tau = 590` (96^3, section 8.2):
+  peak `v_rms+` 0.882, unchanged. At `Re_tau = 590` ($96^3$, section 8.2):
   `Re_tau` 596.6 (+1.6%) against 611.0 (+4.1%) with `V^(1/3)`, `Cf` +2.9%
   against +7.9%, `U+` at y+ = 30 / 100 13.33 / 16.43 (MKM 13.53 / 16.54).
   On cubic cells it is `V^(1/3)`, so the isotropic turbulence and flame cases
@@ -296,8 +297,210 @@ axisymmetric runs), for every cell type and reconstruction order.
 - **Mixed meshes.** `V^(1/d)` is continuous across hexahedron-prism-
   tetrahedron transitions of equal edge length up to the volume ratio's
   cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube
-  `h`): tetrahedral regions get a smaller Delta at the same edge length,
+  `h`): tetrahedral regions get a smaller $\Delta$ at the same edge length,
   which is consistent with their higher number of cells per volume.
+
+### 3.1 Order-aware models (#660)
+
+Issue #660 asked whether the models should know the reconstruction's order: a
+fifth-order scheme resolves scales that a second-order one damps, so with the
+same width the model might damp scales the scheme already resolves. **Decision
+4 stands (the width stays `V^(1/d)`); what changes with the order is the
+gradient the models see** (`[les] gradients = "reconstruction"`, opt-in).
+
+**Phase 1: an effective width, refuted.** `tools/docs/effective_resolution.py`
+measures the modified wavenumber of each reconstruction through the real code
+([theory](../theory/les.md#resolution-of-the-reconstructions-and-the-models-gradients)):
+TENO5's central polynomial resolves 1.35 (2D) to 1.8 (3D) times MUSCL's
+wavenumber at the 1% rule of Moura et al., and on a smooth wave TENO resolves
+as its central polynomial whether or not the cell is flagged troubled (only the
+sector stencils drop to MUSCL's level). Shrinking the models' width by the ratio
+of TENO's effective width to MUSCL's (0.56 for TENO5 in 3D) made decaying
+isotropic turbulence worse at 32³ and 48³ (spectral error 0.112 / 0.113 ->
+0.158 / 0.172 at 32³): with an upwind flux TENO5 + Sigma under-dissipates near
+$k_c$ already, and less model makes it worse. The opt-in width was removed.
+
+**Diagnosis.** Two measurements on developed CBC fields:
+
+- *Spectral eddy viscosities* (Domaradzki, Xiao & Smolarkiewicz 2003): the
+  transfer of Mallard's one-step right-hand side minus the exact, dealiased
+  nonlinear transfer of the same band-limited field gives the numerical part;
+  the change when the model is switched on gives the model's. In units of
+  $\sqrt{E(k_c)/k_c}$ at 32³ with HLLC, the numerical part rises to 0.27 at
+  $k_c$ for MUSCL and to 0.39 for TENO5 (and is lower than MUSCL's below
+  $0.6\,k_c$); Sigma adds 0.07 to 0.12 at all $k$. Chollet & Lesieur's target
+  is 0.27 on its plateau and 0.71 at $k_c$. Both schemes plus the model fall
+  short near $k_c$, which is the pile-up in the spectra. This is the
+  calibration argument of ALDM (Hickel, Adams & Domaradzki 2006), applied to
+  an explicit model on top of a fixed scheme.
+- *The model's gradient.* The models took the least-squares gradient on the
+  face neighbors (second order, transfer function $\sin(kh)/(kh)$ per
+  direction). On the same fields, Sigma's mean eddy viscosity from it is 0.54
+  (32³) and 0.56 (48³) of its value from the exact gradient of the
+  band-limited field: Sigma at 1.35 acts like 0.75. That is why section 8.1's
+  coarse runs wanted C of about 1.8-1.9 (a scan at 32³ with TENO5 + HLLC:
+  C = 1.6, 1.9, 2.3 give 0.087 / 0.089, 0.062 / 0.084, 0.069 / 0.135).
+
+**Method.** With `gradients = "reconstruction"`, the models take in each cell
+TENO finds smooth the gradient of its central polynomial at the centroid,
+$a_{ij}/h$ from the linear coefficients (exact for polynomials of degree
+`order - 1`); troubled cells, whose faces may use the sector stencils, keep the
+least-squares gradient, and so do the viscous fluxes. This restores the model's
+own calibration (Nicoud et al. set $C = 1.35$ with exact gradients) instead of
+retuning C per mesh. PaSR's mixing time and TFLES's efficiency follow through
+$\mu_t$. Implementation:
+
+- `TENO::smooth_gradients` (a view, empty unless the key is on): the smooth
+  passes (`SmoothPass`, and `SmoothTeamPass` on GPUs) write the gradients of
+  W in the same pass that evaluates the face values, after the troubled-cell
+  return, so no stencil is read twice. A separate gradient pass cost +36% per
+  step; the fused write costs about +7% (TENO5, 3D, Threads).
+- `Solver::update_reconstruction_gradients` assembles
+  `les_velocity_gradients` (polynomial where smooth, least squares where
+  troubled), exchanges the halo, and the eddy-viscosity functors read it when
+  it is allocated. Outside the RHS (time step, output) `TENO::cell_gradients`
+  refills the polynomial gradients from the current state.
+- MUSCL and first order reject the key: their gradient is the least-squares
+  one already.
+
+**Validation: Comte-Bellot & Corrsin** (`examples/cbc_les` set-up, Sigma,
+HLLC, SSPRK3, CFL 0.8, two rescaled MUSCL pre-runs; columns as in section 8.1:
+log10 RMS of $E/E_\mathrm{CBC}$ for $k \le 2k_c/3$ and resolved over measured
+energy up to $k_c$ at stations 2 / 3, budget shares averaged to station 3).
+TENO flagged 0% of the cells troubled on every run, so the method used the
+polynomial gradient everywhere.
+
+| Mesh | Reconstruction | Model | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|---|
+| 32³ | MUSCL, hybrid flux | Sigma | 0.153 / 0.151 | 1.54 / 1.50 | -0.044 | 0.856 | 0.188 |
+| 32³ | MUSCL | Sigma | 0.083 / 0.077 | 1.14 / 1.09 | 0.592 | 0.338 | 0.071 |
+| 32³ | TENO5 | none | 0.184 / 0.204 | 1.43 / 1.48 | 0.897 | 0.000 | 0.103 |
+| 32³ | TENO5 | Sigma | 0.112 / 0.113 | 1.18 / 1.16 | 0.584 | 0.345 | 0.071 |
+| 32³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.114 / 0.119 | 1.19 / 1.18 | 0.589 | 0.339 | 0.071 |
+| 32³ | TENO5 | **Sigma, reconstruction gradients** | **0.091 / 0.094** | 1.12 / 1.09 | 0.523 | 0.413 | 0.064 |
+| 48³ | MUSCL | Sigma | 0.087 / 0.111 | 1.08 / 1.03 | 0.560 | 0.338 | 0.102 |
+| 48³ | TENO5 | none | 0.187 / 0.178 | 1.33 / 1.26 | 0.853 | 0.000 | 0.147 |
+| 48³ | TENO5 | Sigma | 0.107 / 0.115 | 1.11 / 1.05 | 0.554 | 0.344 | 0.102 |
+| 48³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.114 / 0.118 | 1.13 / 1.09 | 0.576 | 0.318 | 0.106 |
+| 48³ | TENO5 | **Sigma, reconstruction gradients** | **0.097 / 0.121** | 1.06 / 1.02 | 0.501 | 0.405 | 0.094 |
+| 64³ | MUSCL | Sigma | 0.112 / 0.149 | 1.04 / 1.00 | 0.537 | 0.329 | 0.134 |
+| 64³ | TENO5 | Sigma | 0.117 / 0.140 | 1.06 / 1.01 | 0.531 | 0.335 | 0.134 |
+| 64³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.121 / 0.131 | 1.09 / 1.04 | 0.567 | 0.291 | 0.141 |
+| 64³ | TENO5 | **Sigma, reconstruction gradients** | **0.120 / 0.156** | 1.02 / 0.99 | 0.485 | 0.391 | 0.125 |
+
+![Spectra with the least-squares and the reconstruction gradients](../images/cbc_reconstruction_gradients.png)
+
+Findings:
+
+- **The success criterion is met at 32³ only.** The reconstruction gradients
+  beat TENO5 + Sigma at both stations at 32³ (0.091 / 0.094 against 0.112 /
+  0.113, energy pile-up 1.12 / 1.09 against 1.18 / 1.16), at station 2 only at
+  48³ (0.097 against 0.107; 0.121 against 0.115 at station 3), and at neither
+  at 64³ (0.120 / 0.156 against 0.117 / 0.140). The pile-up shrinks at every
+  resolution (the SGS share rises from 0.34 to 0.39-0.41), but from 48³ on
+  that pushes the spectrum below the measurement above $0.4\,k_c$.
+- **The right amount of model falls with resolution, for every scheme.** At
+  64³ all runs, MUSCL included, are below the measurement from $0.4\,k_c$ on
+  (log ratio -0.3 to -0.6 at $2k_c/3$) and above it by 0.15-0.2 around
+  $0.2\,k_c$ (as are the runs without a model at 32³ and 48³). The global
+  dynamic procedure, which lowers C, is then the best TENO5 run at station 3
+  of 64³ (0.131) and the worst at 32³. So the least-squares attenuation is not
+  a bias to remove everywhere: at 32³ it costs accuracy, from 48³ on it
+  partly compensates for the scheme's own dissipation near $k_c$.
+- **MUSCL + HLLC + Sigma stays the most accurate** at 32³ and 48³ (and the
+  cheapest, about a ninth of TENO5's cost); at 64³ TENO5 + Sigma and MUSCL
+  are within 0.01.
+- **Per-face stencils would not change these runs.** TENO flagged no cell
+  troubled, and on smooth flow every face takes the central polynomial (phase
+  1), so a width or gradient that follows the per-face stencil equals the
+  central polynomial's here.
+
+**Literature and originality.** Searched 2026-11-05 (web search over Google
+Scholar, arXiv and journal pages; DOIs checked on Crossref): numerics-aware
+explicit SGS models (Dairay et al. 2017; Duan & Wang 2024; Sun & Verstappen
+2025, arXiv:2502.08154), TENO and WENO as implicit or with explicit models (Fu,
+Hu & Adams 2019; Schranner et al. 2015), ALDM (Hickel, Adams & Domaradzki
+2006), MILES/ILES (Grinstein, Margolin & Rider), numerical errors in LES
+(Ghosal 1996; Kravchenko & Moin 1997; Chow & Moin 2003; Park & Mahesh),
+effective eddy viscosities (Domaradzki et al. 2003), high-order DG/FR LES and
+their filter widths (Moura, Sherwin & Peiró 2015; Beck et al. 2016; Flad &
+Gassner), the order of the SGS discretization (Banhos & Matheou 2025, no effect
+in their boundary layers), order-aware TFLES/PaSR (nothing found); and, for phase 3 (2026-11-06), local
+numerical dissipation (Schranner et al. 2015), low-mesh-Reynolds corrections
+(Voke 1996, after Pao 1965), and balancing numerical and eddy viscosity (Sun &
+Verstappen 2025; Rubio et al. 2025, arXiv:2512.04574; Duan & Wang 2024).
+Evaluating the model on the element's polynomial is standard in DG and
+spectral-element LES (Beck et al. 2016); taking it from a finite-volume
+reconstruction's polynomial is an adaptation of that, and the attenuation
+diagnosis is Domaradzki's and ALDM's method. **Verdict: not new; no row in the
+[originality page](../numerics/originality.md).**
+
+**Phase 3: calibrating the constants to the numerics.** The aim was for
+Mallard to set each model's constant (or its gradient) from the numerics in
+use, without changing the model's form, so that users need not tune it. C
+scans on the same set-up, plus 128³ on one A100 (spectral error at stations
+2 / 3; LS = least-squares gradients, rc = reconstruction gradients):
+
+| Numerics | Mesh | Default (LS, C = 1.35) | Other constants |
+|---|---|---|---|
+| MUSCL + hybrid | 32³ | 0.153 / 0.151 | LS 1.8: **0.103 / 0.082** |
+| MUSCL + hybrid | 48³ | 0.144 / 0.135 | LS 1.8: **0.080 / 0.060** |
+| MUSCL + hybrid | 64³ | 0.107 / 0.104 | LS 1.8: **0.058 / 0.063** |
+| MUSCL + hybrid | 128³ | **0.063 / 0.085** | LS 1.55: 0.082 / 0.102; LS 1.8: 0.124 / 0.141 |
+| MUSCL + HLLC | 32³ | 0.083 / 0.077 | LS 1.6: **0.062 / 0.067** |
+| MUSCL + HLLC | 48³ | 0.087 / 0.111 | LS 1.1: 0.101 / 0.102 |
+| TENO5 + HLLC | 32³ | 0.112 / 0.113 | LS 1.6: 0.087 / 0.089; LS 1.9: **0.062 / 0.084**; LS 2.3: 0.069 / 0.135; rc 1.1: 0.119 / 0.122; rc 1.6: 0.066 / 0.083 |
+| TENO5 + HLLC | 48³ | 0.107 / 0.115 | LS 1.6: 0.094 / 0.126; rc 0.9: 0.135 / 0.128; rc 1.1: 0.115 / 0.117 |
+| TENO5 + HLLC | 64³ | 0.117 / 0.140 | LS 1.1: 0.125 / 0.127; rc 0.9: 0.129 / 0.127; rc 1.1: 0.119 / 0.133 |
+| TENO5 + HLLC | 128³ | 0.187 / 0.222 | rc 1.35: 0.208 / 0.242 |
+
+- **The best constant falls with resolution for every scheme.** It is above
+  1.8 to 64³ and at most 1.35 at 128³ with the hybrid flux, and it falls from
+  about 1.9 at 32³ toward 0 by 128³ with HLLC. The set-up is not the cause:
+  with the hybrid flux, the error at a fixed constant falls under refinement
+  (and the 64³ and 128³ values reproduce section 8.1).
+- **With HLLC, the scheme sets an error floor** from 64³ on. All runs,
+  including those without a model, have an energy excess around
+  $0.2$-$0.3\,k_c$ and a deficit above about $0.4\,k_c$, the cascade blocked
+  by the upwind dissipation. HLLC's dissipation at $k_c$ scales like
+  $c\Delta$, the needed eddy viscosity like $\Delta^{4/3}$, and here
+  $c \approx 10\,u'$.
+- **Three parameter-free adjustments were tested, and none tracks the best
+  constant.**
+  - *Undoing the least-squares attenuation*, $C/\sqrt{r}$. On the
+    hybrid-flux fields $r$ (Sigma's least-squares eddy viscosity over its
+    exact-gradient value) is 0.34, 0.35 and 0.44 at 32³, 64³ and 128³ at
+    station 2 (0.30, 0.34, 0.54 at station 3). On HLLC fields, whose cutoff is
+    damped, it is 0.54, 0.60 and 0.65 at 32³-64³. The correction would set
+    $C \approx 2.0$-$2.3$ at 128³, where 1.35 is best.
+  - *Lilly's argument on a Pao spectrum* ([Pao 1965](../references.md#pao-1965),
+    after [Voke 1996](../references.md#voke-1996)). It gives a parameter-free
+    low-mesh-Reynolds factor: with $\rho = \nu_{t,\infty}/\nu$, solve
+    $q = \exp(-\rho^{-2/3}(1-q)^{1/3})$ and set $\nu_t = \nu\,q/(1-q)$, which
+    recovers Lilly's $C_s = 0.18$ as $\rho \to \infty$. At CBC's $\rho$ of
+    1-6 it lowers $\nu_t$ by 3-20%, far less than the data ask for.
+  - *Subtracting the scheme's own dissipation*,
+    $\nu_t = \max(0, \nu_\mathrm{target} - \nu_\mathrm{num})$, with
+    $\nu_\mathrm{num}$ from the kinetic-energy budget (localizable after
+    [Schranner et al. 2015](../references.md#schranner-2015)). With HLLC,
+    $\varepsilon_\mathrm{num}$ is 1.6-1.8 times Sigma's dissipation at every
+    resolution, so the subtraction removes the model even at 32³-64³, where
+    it is needed: TENO5 without a model scores 0.184 / 0.204 at 32³. It
+    would work only with a fitted fraction of $\nu_\mathrm{num}$.
+- The dynamic procedure, with either gradient, lowers C and is worse at
+  32³-48³ (0.114 / 0.119 and 0.114 / 0.118); at 64³ it matches the default
+  (0.121 / 0.131).
+
+**Recommendation.** Keep the defaults (the literature constants with the
+least-squares gradients) for every model and scheme. No parameter-free
+adjustment beat them at every resolution from 32³ to 128³, and a fitted one
+was ruled out. `gradients = "reconstruction"` stays opt-in and experimental:
+it helps TENO on coarse meshes (32³) and hurts from 64³ on. For high-order
+LES, the constant is not the problem: TENO5 with an upwind flux is limited by
+the scheme from 64³ on (0.19 / 0.22 at 128³, against 0.063 / 0.085 for
+MUSCL + hybrid). With the hybrid flux, TENO takes KEEP on the cell values
+(section 4.4). Section 8.1's advice stands: $C = 1.5$-$1.8$ for Sigma when
+$k_c$ lies in the inertial range, checked against the budget and the spectrum.
 
 ## 4. Keeping the model's dissipation dominant
 
@@ -312,7 +515,7 @@ jump `u_R - u_L` of the reconstructions is `O(h^p)` for smooth fields but
 
 - TENO-E's nonlinear stencil selection discards the central stencil in
   troubled cells, and on LES meshes most cells near the cutoff are flagged
-  (76% of cells at 64^3 in `examples/isotropic_turbulence`), so the
+  (76% of cells at $64^3$ in `examples/isotropic_turbulence`), so the
   reconstruction falls back to more dissipative sector stencils.
 - The low-Mach correction (Thornber et al. 2008) already scales the velocity
   jump by `min(1, max(M, M_cut))`, so at `M ~ 0.1` the upwind dissipation of
@@ -362,7 +565,7 @@ included and is negligible at the CFL numbers used.
 Why the discrete pressure work: until #197 `eps_num` was `Pi - dK/dt|_conv`
 with `Pi` from the cell gradients, exact only up to their discretization
 error. That is harmless where `|Pi|` is a few percent of the dissipation
-(isotropic turbulence and the channel at `M_t <= 0.2`: on the 64^3 CBC case
+(isotropic turbulence and the channel at `M_t <= 0.2`: on the $64^3$ CBC case
 with Sigma `C = 1.8` the numerical share is -0.9% with `Pi_h` against +0.7%
 with `Pi`), but not in a flame at 1 atm, where thermal expansion makes `p
 div u` 1e3 to 1e4 times the dissipation and the gradient estimate of `Pi`
@@ -445,6 +648,156 @@ Alternatives considered:
   the budget would have to separate.
 - **Implicit LES** (no model, rely on TENO/Riemann dissipation): a non-goal.
 
+### 4.4 Central flux for TENO (#689)
+
+Section 8.1 found TENO-E with the hybrid flux unstable ($\varepsilon_\mathrm{num} = -0.22$ at
+32³), and #660 (section 3.1) found TENO5 + HLLC limited by the scheme from 64³ on. The cause
+is KEEP's means: its kinetic-energy identity holds for the two cells' values, and on
+reconstructed states each face produces kinetic energy
+$e_f = \Delta u \cdot F_m - \Delta(|u|^2/2) F_\rho - \bar{p}\, \Delta u \cdot n A$ (cell
+values $u_0, u_1$, $\Delta u = u_1 - u_0$) of either sign, whose size grows with the
+correction the reconstruction adds to the mean of the cells. `[numerics.hybrid] central` selects the states KEEP is fed:
+
+- **`cell_averages`** (the default with TENO): KEEP on the two cells' values, the Riemann part
+  on the reconstructed states (as for the low-dissipation unstructured schemes of
+  [Subbareddy & Candler 2009](../references.md#subbareddy-candler-2009) and
+  [Modesti & Pirozzoli 2017](../references.md#modesti-pirozzoli-2017)). Every interior face
+  changes the kinetic energy by exactly the pressure work, on any mesh, but the central part is
+  second order: in smooth flow TENO sets only the dissipation near shocks.
+- **`reconstructed`** (the default with MUSCL and first order): KEEP on the reconstructed face
+  states.
+
+A third candidate was evaluated and not adopted: KEEP on the reconstructed states plus, per
+interior face, a momentum diffusion $-\alpha \Delta u$ with its work
+$-\alpha \Delta u \cdot \bar{u}$ in the energy flux, $\alpha = \max(0, e_f) / |\Delta u|^2$,
+so that no face produces kinetic energy beyond the pressure work and both cells receive the
+removed energy as heat: the kinetic-energy form of the entropy correction of Abgrall
+([2018](https://doi.org/10.1016/j.jcp.2018.06.031); Abgrall, Öffner & Ranocha
+[2022](https://doi.org/10.1016/j.jcp.2022.110955)), applied per finite-volume face. It is the
+"KE correction" of the tables below.
+
+Tests: `HybridFlux.TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork` (TENO states on
+simplices; `reconstructed` departs from it), `HybridFlux.CellAverageCentralFluxConservesMassMomentumAndEnergy`,
+and `MPITest.HybridConvectiveFluxMatchesSerial` with TENO (the halo cells' values). For a gas
+mixture, `cell_averages` gives each cell's values its own surrogates `gamma` and `e0`, as the
+mixture KEEP flux of section 4.3 does with the face's (with double flux, each side's central flux
+takes its cell's frozen surrogates on both sides). They enter only the energy flux, so the
+kinetic energy still changes by exactly the pressure work
+(`HybridFlux.MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork`, with and
+without double flux); a pressure-equilibrium-preserving energy flux (#293) changes only the
+energy flux and keeps this identity.
+
+**Shocks** (`examples/sod` and `examples/shu_osher`, TENO5 on 200 cells, the examples'
+Riemann solvers; L1 density error against the exact solution and against TENO5 on 3,200
+cells): the sensor keeps the Riemann solver at the shocks with every central flux, and none
+oscillates.
+
+| Flux | Sod | Shu-Osher |
+|---|---|---|
+| Riemann solver | 0.00259 | 0.694 |
+| hybrid, `reconstructed` | 0.00239 | 0.651 |
+| hybrid, `cell_averages` | 0.00447 | 0.992 |
+| hybrid, KE correction | 0.00283 | 0.645 |
+
+`cell_averages` costs the accuracy of TENO's reconstruction wherever the sensor is off (1.7
+times the Riemann solver's error on Sod's contact and expansion, 1.4 times on the entropy wave
+behind Shu-Osher's shock); the KE correction keeps it.
+
+**Inviscid Taylor-Green vortex** (32³, Euler, the initial field of `examples/taylor_green_3d`,
+SSPRK3, CFL 0.8, HLLC as the Riemann solver; resolved kinetic energy over its initial value,
+and `eps_numerical` from `[integrals] budget`): with nothing else to remove energy, the
+central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `les` preset);
+the cell values keep it bounded. The last two rows are on tetrahedra (`cartesian_tet`, 16³
+boxes of six), where the reconstructed states add energy at a third of the rows but the
+Riemann solver, where the sensor fires, removes more.
+
+| Flux | K/K0 at t = 5 / 10 / 15 / 20 | Mean $\varepsilon_\mathrm{num}$ | Rows with $\varepsilon_\mathrm{num} < 0$ |
+|---|---|---|---|
+| TENO5 + HLLC | 0.892 / 0.485 / 0.341 / 0.275 | 1.04 | 0% |
+| TENO5, hybrid, `reconstructed` | 0.989 / 1.268 / 1.775 / 2.512 | -2.11 | 77% |
+| TENO5, hybrid, `cell_averages` | 1.000 / 0.962 / 0.825 / 0.692 | 0.49 | 18% (at least -0.012) |
+| TENO5, hybrid, KE correction | 0.885 / 0.518 / 0.318 / 0.215 | 1.22 | 0% |
+| MUSCL, hybrid, `reconstructed` | 0.980 / 1.044 / 1.319 / 1.851 | -1.21 | 62% |
+| MUSCL, hybrid, `cell_averages` | 1.000 / 0.958 / 0.862 / 0.674 | 0.48 | 19% (at least -0.011) |
+| MUSCL, hybrid, `reconstructed`, tetrahedra | 1.010 / 0.974 / 0.867 / 0.738 | 0.39 | 34% (at least -0.74) |
+| MUSCL, hybrid, `cell_averages`, tetrahedra | 0.989 / 0.915 / 0.781 / 0.685 | 0.51 | 0% |
+
+`cell_averages`' dissipation comes once the vortex breaks down, from the Riemann solver
+where the sensor fires; before that $\varepsilon_\mathrm{num}$ stays at round-off. The KE correction
+is stable but removes more energy than HLLC early on ($\varepsilon_\mathrm{num}$ 0.17 / 0.38 /
+0.63 at t = 0.5 / 2 / 3, against 0.04 / 0.26 / 0.49).
+
+**Comte-Bellot & Corrsin** (the set-up and columns of section 3.1: `examples/cbc_les`, Sigma
+with C = 1.35, HLLC, SSPRK3, CFL 0.8, two rescaled MUSCL pre-runs; spectral error and energy
+at stations 2 / 3, budget shares averaged to station 3; one A100 per run):
+
+| Mesh | Numerics | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|
+| 64³ | MUSCL, hybrid, `reconstructed` | 0.107 / 0.104 | 1.25 / 1.02 | -0.014 | 0.710 | 0.304 |
+| 64³ | MUSCL, hybrid, `cell_averages` | 0.172 / 0.142 | 1.35 / 1.14 | 0.007 | 0.704 | 0.289 |
+| 64³ | TENO5 + HLLC | 0.117 / 0.140 | 1.06 / 1.01 | 0.531 | 0.335 | 0.134 |
+| 64³ | TENO5, hybrid, `reconstructed` | 0.146 / 0.124 | 1.34 / 1.11 | -0.157 | 0.813 | 0.345 |
+| 64³ | TENO5, hybrid, `cell_averages` | 0.173 / 0.143 | 1.35 / 1.14 | 0.007 | 0.704 | 0.289 |
+| 64³ | TENO5, hybrid, KE correction | **0.056 / 0.081** | 1.03 / 0.93 | 0.440 | 0.394 | 0.166 |
+| 128³ | MUSCL, hybrid, `reconstructed` | 0.063 / 0.085 | 1.03 / 0.91 | -0.003 | 0.534 | 0.470 |
+| 128³ | MUSCL, hybrid, `cell_averages` | 0.076 / 0.056 | 1.07 / 0.91 | 0.003 | 0.537 | 0.460 |
+| 128³ | TENO5 + HLLC | 0.187 / 0.222 | 1.00 / 0.93 | 0.446 | 0.296 | 0.258 |
+| 128³ | TENO5, hybrid, `reconstructed` | **0.058 / 0.083** | 1.03 / 0.88 | -0.047 | 0.558 | 0.489 |
+| 128³ | TENO5, hybrid, `cell_averages` | 0.076 / **0.056** | 1.07 / 0.91 | 0.004 | 0.537 | 0.460 |
+| 128³ | TENO5, hybrid, KE correction | 0.165 / 0.195 | 0.93 / 0.88 | 0.402 | 0.314 | 0.285 |
+
+Findings:
+
+- **`reconstructed` with TENO is not stable**: it adds energy at both resolutions (-16% and
+  -5% of the dissipation), as in section 8.1, although at 128³ its spectrum is the closest.
+- **The KE correction acts as an upwind scheme.** Its correction removes 40-44% of the
+  dissipation at both resolutions, as much as HLLC does; that happens to be the right amount
+  at 64³ (the best spectrum of all runs, where every central scheme with the model alone piles
+  energy up) and far too much at 128³, where it shares HLLC's error floor.
+- **`cell_averages` meets the goal at both resolutions**: $\varepsilon_\mathrm{num} \ge 0$ and
+  under 1% of the dissipation, and at 128³ as accurate as MUSCL + hybrid (0.076 / 0.056
+  against 0.063 / 0.085). At 64³ the SGS model alone leaves the pile-up that section 8.1
+  found for every central scheme at C = 1.35 (energy 1.35 at station 2).
+- **With `cell_averages`, TENO plays no part in smooth flow**: TENO5 and MUSCL give the same
+  spectra and budgets to three digits (the sensor upwinds 0.1-0.2% of the cells, and TENO
+  flags none troubled), at ten times the cost per step (309 against 33 ms at 128³ on an
+  A100).
+
+**Decision.** `cell_averages` is the default with TENO and the hybrid flux: of the fluxes
+evaluated it is the only one that never adds kinetic energy and stays low-dissipation from 64³
+to 128³. For LES of smooth turbulence MUSCL with the `les` preset stays the recommendation:
+TENO with `cell_averages` gives the same result at ten times the cost, and earns it only where
+shocks need TENO.
+
+**The `les` preset keeps `reconstructed` (#825).** MUSCL's reconstructed states add kinetic
+energy only where nothing else removes it (the inviscid Taylor-Green vortex above). With
+viscosity, with or without a model, the two central fluxes are about as accurate, and
+`reconstructed` is the more accurate one at the coarse resolutions LES runs at. Viscous
+Taylor-Green vortex at Re = 1600 (the set-up above with `mu = 1/1600`, the `les` preset; RMS
+deviation of -dK/dt from the spectral DNS of `examples/taylor_green_3d` for t = 0.5-20 over
+its peak, K/K0 at t = 20 against the DNS's 0.173, the numerical share of the dissipation
+over t = 0-20 and the rows with $\varepsilon_\mathrm{num} < 0$):
+
+| Mesh | Model | Central | -dK/dt error | K/K0 at t = 20 | Numerical | Rows with $\varepsilon_\mathrm{num} < 0$ |
+|---|---|---|---|---|---|---|
+| 32³ | Sigma | `reconstructed` | 0.232 | 0.182 | 0.043 | 45% |
+| 32³ | Sigma | `cell_averages` | 0.199 | 0.215 | 0.002 | 38% |
+| 32³ | none | `reconstructed` | **0.096** | 0.132 | 0.038 | 37% |
+| 32³ | none | `cell_averages` | 0.122 | **0.173** | 0.062 | 22% |
+| 16³ × 6 tetrahedra | Sigma | `reconstructed` | 0.318 | 0.121 | -0.015 | 68% |
+| 16³ × 6 tetrahedra | Sigma | `cell_averages` | 0.345 | 0.093 | 0.004 | 14% |
+
+With MUSCL on the shock tubes (the set-up above, `limiter = "none"`), the L1 density error is
+0.00333 / 0.742 with `reconstructed` against 0.00420 / 0.884 with `cell_averages` (Sod /
+Shu-Osher; 0.00328 / 0.770 with the Riemann solver alone). Together with Comte-Bellot &
+Corrsin (`cell_averages` piles up more energy at 64³: 0.172 / 0.142 against 0.107 / 0.104,
+and is mixed at 128³), no case favors `cell_averages` enough to change the preset under the
+channel, wall-modeled channel, flame and bluff-body validations of section 8, which use it.
+The numerical share of `reconstructed` stays within -2% to +6% of the dissipation in every
+viscous case here and in section 8. Runs with no viscous or model sink (Euler), and runs that
+need $\varepsilon_\mathrm{num} \ge 0$ face by face (a budget read as the scheme's dissipation
+alone), set `central = "cell_averages"`.
+
 ## 5. Implementation: SGS fluxes in the solver
 
 - Input `[les]`: `model` (`sigma`, `wale`, `vreman`, `smagorinsky`),
@@ -489,7 +842,7 @@ Alternatives considered:
 
 The filtered rates `\bar{omega}_k` must be modeled because on an LES mesh the
 flame (thermal thickness `delta_L ~ 0.1-0.5 mm` for hydrocarbon and hydrogen
-flames at 1 atm) is thinner than Delta (1-5 mm in a laboratory burner LES).
+flames at 1 atm) is thinner than $\Delta$ (1-5 mm in a laboratory burner LES).
 
 | Closure | Idea | With finite-rate mechanisms | Explicit? | Premixed | Non-premixed |
 |---|---|---|---|---|---|
@@ -722,7 +1075,7 @@ converge toward the reference under refinement without retuning.
   phase correlations is excluded from the comparison, as is common.
 - Meshes `32^3` and `64^3` hexahedra (plus `64^3` tetrahedra to test the
   unstructured path), TENO5 and MUSCL, hybrid flux, Sigma (and WALE,
-  Vreman, Smagorinsky at 64^3).
+  Vreman, Smagorinsky at $64^3$).
 - **Targets**: spectra at stations 2 and 3 within 15% of the measurements
   for `k < 2/3 k_c` (`k_c = pi N / L`); resolved kinetic energy within 5% of
   the measured energy integrated up to `k_c`; `eps_num <= 0.5 eps_sgs` over
@@ -741,19 +1094,19 @@ station 3 (stations 2 / 3 for the first two columns):
 
 | Mesh | Flux | Model | Spectral error | Energy | Numerical | SGS | Molecular |
 |---|---|---|---|---|---|---|---|
-| 32^3 | hybrid | Sigma | 0.153 / 0.151 | 1.54 / 1.51 | -0.012 | 0.830 | 0.182 |
-| 32^3 | hybrid | Sigma `C = 1.8` | 0.103 / 0.082 | 1.29 / 1.20 | -0.002 | 0.891 | 0.111 |
-| 64^3 | hybrid | Sigma | 0.107 / 0.104 | 1.25 / 1.02 | 0.013 | 0.691 | 0.296 |
-| 64^3 | hybrid | Sigma `C = 1.8` | **0.058 / 0.063** | 1.08 / 0.97 | 0.013 | 0.796 | 0.191 |
-| 64^3 | hybrid | WALE | 0.090 / 0.086 | 1.20 / 0.98 | 0.007 | 0.730 | 0.263 |
-| 64^3 | hybrid | Vreman | 0.108 / 0.106 | 1.25 / 1.02 | 0.012 | 0.689 | 0.298 |
-| 64^3 | hybrid | Smagorinsky | 0.099 / 0.094 | 1.23 / 1.01 | 0.014 | 0.703 | 0.283 |
-| 64^3 | hybrid | none | 0.226 / 0.375 | 1.81 / 1.76 | -0.077 | 0 | 1.077 |
-| 64^3 | HLLC | Sigma `C = 1.8` | 0.154 / 0.217 | 0.95 / 0.93 | **0.463** | 0.435 | 0.103 |
-| 64^3 | HLLC | none (implicit LES) | 0.135 / 0.114 | 1.20 / 1.12 | **0.838** | 0 | 0.162 |
-| 128^3 | hybrid | Sigma | **0.063 / 0.085** | 1.03 / 0.91 | 0.020 | 0.522 | 0.459 |
-| 128^3 | hybrid | Sigma `C = 1.8` | 0.124 / 0.141 | 0.98 / 0.92 | 0.019 | 0.651 | 0.330 |
-| 128^3 | hybrid | none | 0.182 / 0.249 | 1.13 / 0.77 | 0.018 | 0 | 0.982 |
+| 32³ | hybrid | Sigma | 0.153 / 0.151 | 1.54 / 1.51 | -0.012 | 0.830 | 0.182 |
+| 32³ | hybrid | Sigma `C = 1.8` | 0.103 / 0.082 | 1.29 / 1.20 | -0.002 | 0.891 | 0.111 |
+| 64³ | hybrid | Sigma | 0.107 / 0.104 | 1.25 / 1.02 | 0.013 | 0.691 | 0.296 |
+| 64³ | hybrid | Sigma `C = 1.8` | **0.058 / 0.063** | 1.08 / 0.97 | 0.013 | 0.796 | 0.191 |
+| 64³ | hybrid | WALE | 0.090 / 0.086 | 1.20 / 0.98 | 0.007 | 0.730 | 0.263 |
+| 64³ | hybrid | Vreman | 0.108 / 0.106 | 1.25 / 1.02 | 0.012 | 0.689 | 0.298 |
+| 64³ | hybrid | Smagorinsky | 0.099 / 0.094 | 1.23 / 1.01 | 0.014 | 0.703 | 0.283 |
+| 64³ | hybrid | none | 0.226 / 0.375 | 1.81 / 1.76 | -0.077 | 0 | 1.077 |
+| 64³ | HLLC | Sigma `C = 1.8` | 0.154 / 0.217 | 0.95 / 0.93 | **0.463** | 0.435 | 0.103 |
+| 64³ | HLLC | none (implicit LES) | 0.135 / 0.114 | 1.20 / 1.12 | **0.838** | 0 | 0.162 |
+| 128³ | hybrid | Sigma | **0.063 / 0.085** | 1.03 / 0.91 | 0.020 | 0.522 | 0.459 |
+| 128³ | hybrid | Sigma `C = 1.8` | 0.124 / 0.141 | 0.98 / 0.92 | 0.019 | 0.651 | 0.330 |
+| 128³ | hybrid | none | 0.182 / 0.249 | 1.13 / 0.77 | 0.018 | 0 | 0.982 |
 
 Findings:
 
@@ -768,19 +1121,20 @@ Findings:
   spectrum about as well as the explicit models at their default constants,
   which is why a budget, not the spectrum alone, is needed to tell them
   apart.
-- **Model constant and resolution**: at 64^3 (`k_c` in the inertial range)
+- **Model constant and resolution**: at $64^3$ (`k_c` in the inertial range)
   every model at its literature constant leaves a pile-up over the last
   third of the wavenumbers; Sigma with `C = 1.8` matches the spectrum to
-  0.06 decades (15%). At 128^3 the literature constant (1.35) is the best
+  0.06 decades (15%). At $128^3$ the literature constant (1.35) is the best
   (0.06-0.09 decades) and 1.8 over-dissipates. The second-order
   discretization's own transfer function acts like a larger filter on the
   coarser mesh. Recommendation: keep `C = 1.35` (the default), use 1.5-1.8
   when `k_c` lies in the inertial range, and check with the budget and the
   spectrum. The channel (8.2) brackets the same range.
-- **TENO-E with the hybrid flux** (32^3) gave `eps_num = -0.22`: the
-  nonlinear stencil selection feeds energy into the resolved field when
-  nothing upwinds it. Use MUSCL without limiter (or a linear reconstruction)
-  with the hybrid flux; TENO stays for shocks with the Riemann flux.
+- **TENO-E with KEEP on its reconstructed states** ($32^3$) gave `eps_num = -0.22`:
+  the nonlinear stencil selection feeds energy into the resolved field when
+  nothing upwinds it. TENO with the hybrid flux therefore feeds KEEP the cell
+  values (section 4.4), which matches MUSCL without limiter at ten times the
+  cost; MUSCL stays the scheme for LES of smooth turbulence.
 - The targets of this section (15% for every `k <= 2/3 k_c`) are met in the
   mean (0.06 decades = 15%) but not point by point: the largest single-shell
   deviation is 31-47%, at the lowest shells (few modes, realization noise of
@@ -807,29 +1161,29 @@ Findings:
 ![LES of the channel at Re_tau = 395 against MKM](../images/channel_les_validation.png)
 
 `Re_tau = 395`, hybrid flux, MUSCL without limiter, averaged over t =
-100-300 h/U_b (11-12 h/u_tau), resolved fluctuations; dissipation shares of
+100-300 $h/U_b$ (11-12 $h/u_\tau$), resolved fluctuations; dissipation shares of
 the kinetic-energy budget over the same window:
 
 | Mesh | Flux | Model | `Re_tau` (392.2) | `Cf` | `U+(30)` / `U+(100)` (13.49 / 16.53) | peak `v_rms+` (1.00) | numerical / SGS / molecular |
 |---|---|---|---|---|---|---|---|
-| 64^3 | hybrid | Sigma | 402.3 (+2.6%) | +4.8% | 13.10 / 16.24 | 0.89 | 3.5 / 12.6 / 83.9% |
-| 64^3 | hybrid | Sigma `C = 1.8` | 389.4 (-0.7%) | -1.9% | 13.68 / 16.98 | 0.85 | 2.8 / 16.6 / 80.6% |
-| 64^3 | hybrid | none | 420.1 (+7.1%) | +14.2% | 12.27 / 15.16 | 0.97 | 5.0 / 0 / 95.0% |
-| 64^3 | HLLC | Sigma `C = 1.8` | 317.6 (-19%) | -35% | 17.86 / 22.05 | 0.78 | **13.5** / 5.4 / 81.1% |
-| 48^3 | hybrid | Sigma `C = 1.8` | 381.3 (-2.8%) | -5.9% | 14.09 / 17.47 | 0.80 | 3.2 / 17.9 / 78.9% |
-| 48^3 | hybrid | none | 405.3 (+3.3%) | +6.3% | 12.67 / 15.74 | 0.98 | 6.1 / 0 / 93.9% |
+| 64³ | hybrid | Sigma | 402.3 (+2.6%) | +4.8% | 13.10 / 16.24 | 0.89 | 3.5 / 12.6 / 83.9% |
+| 64³ | hybrid | Sigma `C = 1.8` | 389.4 (-0.7%) | -1.9% | 13.68 / 16.98 | 0.85 | 2.8 / 16.6 / 80.6% |
+| 64³ | hybrid | none | 420.1 (+7.1%) | +14.2% | 12.27 / 15.16 | 0.97 | 5.0 / 0 / 95.0% |
+| 64³ | HLLC | Sigma `C = 1.8` | 317.6 (-19%) | -35% | 17.86 / 22.05 | 0.78 | **13.5** / 5.4 / 81.1% |
+| 48³ | hybrid | Sigma `C = 1.8` | 381.3 (-2.8%) | -5.9% | 14.09 / 17.47 | 0.80 | 3.2 / 17.9 / 78.9% |
+| 48³ | hybrid | none | 405.3 (+3.3%) | +6.3% | 12.67 / 15.74 | 0.98 | 6.1 / 0 / 93.9% |
 
 Findings:
 
-- At 64^3 both Sigma constants meet the `Re_tau` target (3%) and the mean
+- At $64^3$ both Sigma constants meet the `Re_tau` target (3%) and the mean
   profile target (3% for y+ = 30-300); without a model `Re_tau` is 7% high,
   more than twice the model-on errors. `v_rms+` is 11-15% low (only the
   resolved part is counted) and misses the 10% target; `u_rms`, `w_rms` and
   `-u'v'` are within 10%.
-- At 48^3 the model-off run is closer to MKM in `Re_tau` than at 64^3 and
-  than the model-on run at 48^3 (+3.3% against -2.8%): on this mesh the
-  model-off result benefits from compensating errors, so the 48^3 pair does
-  not discriminate; the 64^3 pair does. Sigma's error decreases under
+- At $48^3$ the model-off run is closer to MKM in `Re_tau` than at $64^3$ and
+  than the model-on run at $48^3$ (+3.3% against -2.8%): on this mesh the
+  model-off result benefits from compensating errors, so the $48^3$ pair does
+  not discriminate; the $64^3$ pair does. Sigma's error decreases under
   refinement (-2.8% -> -0.7% for `C = 1.8`).
 - The SGS model carries 13-18% of the dissipation of resolved energy; most
   of it is molecular at this wall-resolved resolution. The hybrid flux's
@@ -841,7 +1195,7 @@ Findings:
   `u_rms+` 3.77), the turbulent momentum transfer too weak, and `Re_tau`
   19% low (`Cf` -35%).
 - **The DNS at `Re_tau = 180`** (`examples/channel_retau180`, 192 x 96 x
-  128, no model; #209), averaged over t = 80-160 h/U_b: with HLLC 6.8% of
+  128, no model; #209), averaged over t = 80-160 $h/U_b$: with HLLC 6.8% of
   the dissipation is numerical and `Re_tau = 173.7` (-2.5% from MKM's
   178.1, as the example's 172.6); with the hybrid flux 0.9% is numerical and
   `Re_tau = 179.8` (+0.9%). The upwind dissipation explains most of that
@@ -851,9 +1205,9 @@ Findings:
 
 ![LES of the channel at Re_tau = 590 against MKM](../images/channel_les_590.png)
 
-96^3 hexahedra (dx+ = 38, dz+ = 19, dy+ = 0.87 at the wall), the numerics
+$96^3$ hexahedra (dx+ = 38, dz+ = 19, dy+ = 0.87 at the wall), the numerics
 of the 395 case, `Re_b = 21,907` (MKM's `U_b+ = 18.65`), averaged over t =
-60-200 h/U_b (7.6-8.1 h/u_tau) after the synthetic initial field (the
+60-200 $h/U_b$ (7.6-8.1 $h/u_\tau$) after the synthetic initial field (the
 figure: Sigma with Scotti's width, the default). MKM's `Re_tau = 587.2`:
 
 | Model | `Re_tau` | `Cf` | `U+(30)` / `U+(100)` (13.53 / 16.54) | peak `u_rms+` (2.77) | peak `v_rms+` (1.04) | numerical / SGS / molecular |
@@ -869,7 +1223,7 @@ figure: Sigma with Scotti's width, the default). MKM's `Re_tau = 587.2`:
   same in wall units as at 395, and the near-wall ones are the more
   anisotropic, so the width matters more. `eps_num / eps_sgs` = 0.20 and
   0.17.
-- **`v_rms+`** is 8-9% low at 590 and 11-12% low at 395 on 64^3 (dx+ = 39,
+- **`v_rms+`** is 8-9% low at 590 and 11-12% low at 395 on $64^3$ (dx+ = 39,
   dz+ = 19), 8% low at 395 on 96 x 64 x 96 (dx+ = 26, dz+ = 13; `Re_tau`
   396.3, +1.0%): it improves with the streamwise and spanwise resolution and
   barely depends on the model (Scotti 0.88, `V^(1/3)` 0.89, `C = 1.8` 0.85,
@@ -933,7 +1287,7 @@ over 0.3-0.4 ms, when the wrinkling has developed):
   of the cross-section against the DNS's 1.13), so `E` must supply it.
 - **Colin's subgrid velocity overshoots at `Delta = 1.6 delta_L`**: mean
   `E = 2.10` and `S_T` +98%. The a priori test on the filtered DNS
-  (`tools/tfles_apriori.py`, t = 0.125-0.2 ms, fresh gas next to the flame)
+  (`examples/flame_turbulence/tfles_apriori.py`, t = 0.125-0.2 ms, fresh gas next to the flame)
   shows why: Colin's `u' = 2 Delta^3 |lap(curl u)|` is 3.3 / 7.0 / 10 `S_L`
   at `Delta` = 0.4 / 0.8 / 1.6 `delta_L`, while the DNS's velocity
   fluctuation below `F delta_L` is 0.6 / 1.0 / 1.2 `S_L` (5-8 times less);
@@ -1026,7 +1380,7 @@ with the mean `E` in the flame:
   0.005-0.04 on case 2, rising as the flame wrinkles; `|eps_num /
   eps_sgs|` (window means) 0.03 / 0.07 / 0.12 (case 1) and 0.38 / 0.26 /
   0.46 (case 2; `E = 1` 0.37, `C_u = 28` 0.40 at `F = 8`).
-- **A priori** (`tools/tfles_apriori.py` on the extracted DNS snapshots:
+- **A priori** (`examples/flame_turbulence/tfles_apriori.py` on the extracted DNS snapshots:
   the DNS top-hat filtered at `F delta_L` on the LES mesh, the model's test
   filter and global sums), against the wrinkling factor `Xi` of the DNS
   surface at the scale `F delta_L`:
@@ -1062,7 +1416,7 @@ benchmark keep `charlette` with `eddy_viscosity`.
 
 DNS: an H2/N2 (25% H2) - air counterflow diffusion flame profile (`K = 160`
 1/s, peak 1544 K, `Z_st = 0.556`) in the box and turbulence of the premixed
-DNS, pressure outlets on both ends, to 0.4 ms (`tools/flame_turbulence.py
+DNS, pressure outlets on both ends, to 0.4 ms (`examples/flame_turbulence/flame_turbulence.py
 init --x-f`, `analyze --z-fuel --z-st`). LES at `Delta` = 0.27 and 0.53 mm
 (8 and 16 DNS cells) with the Sigma model and `[les.combustion] model =
 "pasr"`, against quasi-laminar chemistry. Heat release over 0.2-0.4 ms
@@ -1073,7 +1427,7 @@ init --x-f`, `analyze --z-fuel --z-st`). LES at `Delta` = 0.27 and 0.53 mm
 | 0.27 mm | -10.7% (`kappa` 0.62 at `Z_st`) | +16.6% |
 | 0.53 mm | -50% (`T_st` 892 K: near extinction; `kappa` 0.26) | +41% |
 
-`eps_num / eps_sgs` <= 0.10 (PaSR) and 0.23 (quasi-laminar). PaSR moves the
+`eps_num / eps_sgs` ≤ 0.10 (PaSR) and 0.23 (quasi-laminar). PaSR moves the
 heat release the right way at the finer width and overcorrects at the
 coarser one, where `tau_mix = Delta^2 / (nu + nu_t)` with `C_mix = 1`
 overestimates the mixing time; it ships as experimental, not as a default.
@@ -1086,11 +1440,11 @@ The rig of Sjunnesson et al. at the conditions of the AIAA Model Validation
 for Propulsion workshop: a channel of height `3 D` with an equilateral
 triangle of edge `D = 40` mm, air at 288 K and `U_b = 16.6` m/s
 (`Re_D = 45,000`), span periodic over `2 D` (the workshop's choice; the rig
-is `6 D` wide), inlet `5 D` upstream of the base (`nscbc_inlet` with
+is `6 D` wide), inlet `5 D` upstream of the base (`inlet_state` with `nscbc`, with
 digital-filter turbulence, `u' = 5% U_b`, `L = 10` mm), outlet `17 D`
-downstream (`nscbc_outlet`), no-slip adiabatic walls without a wall model.
+downstream (`outlet_pressure` with `nscbc`), no-slip adiabatic walls without a wall model.
 Sigma with Scotti's width, hybrid flux, MUSCL without limiter, 2.7M
-hexahedra (`tools/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
+hexahedra (`examples/volvo_bluff_body/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
 near wake and shear layers, 0.6 mm at the separation corners. Statistics
 over 0.08-0.30 s (about 26 shedding periods, 4 flow-throughs of the
 domain), averaged over the span. Reference: the LDA data as plotted by Wu
@@ -1190,7 +1544,7 @@ One pull request each, stacked; the umbrella issue links them.
    for single gases, mixtures and double flux; tests and docs.
 3. **Decaying isotropic turbulence validation** (Comte-Bellot & Corrsin):
    initial-field tool, reference data, example, budget study (upwind vs
-   hybrid, model on vs off, 32^3/64^3).
+   hybrid, model on vs off, $32^3$/$64^3$).
 4. **Channel validation** at `Re_tau = 395` (590 if affordable), after #172.
 5. **TFLES**: thickening, sensor, Charlette efficiency with Colin's
    operator, per-cell chemistry time scaling; laminar-flame invariance tests.

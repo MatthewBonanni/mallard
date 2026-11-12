@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 #include "common_typedef.h"
 #include "mesh.h"
@@ -42,6 +42,8 @@ struct MeshBlock {
     std::vector<uint64_t> face_nodes;
     std::vector<uint32_t> face_zone;        // index into zone_names
     std::vector<std::string> zone_names;    // every zone, on every rank
+    std::vector<uint32_t> cell_zone;          // per cell, index into cell_zone_names; empty without cell zones
+    std::vector<std::string> cell_zone_names; // every rank
     // High-order boundary faces: CSR per boundary face (empty if none at all)
     // into the coordinates of all its nodes, corners first in Gmsh order;
     // linear faces have none
@@ -75,7 +77,7 @@ struct MeshBlock {
 rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta);
 
 /** @brief [mesh] stretching: the tanh factor of each direction, 0 (uniform) if not given. */
-Stretching mesh_stretching(const toml::value & input);
+Stretching mesh_stretching(const Input & input);
 
 /**
  * @brief Part r of p of a generated 2D mesh (cartesian, cartesian_tri or
@@ -96,6 +98,20 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                              uint64_t first_node, uint64_t end_node, const Stretching & stretching = {});
 
 /** @brief Total cell and node counts of a generated 3D box. */
+/**
+ * @brief An annulus r_in <= r <= r_out, or its sector 0 <= theta <= angle
+ *        (radians, angle < 2 pi), of n_theta x n_r quadrilaterals, extruded in
+ *        3D over 0 <= z <= Lz into n_theta x n_r x n_z hexahedra: rank r of p
+ *        holds its share of cells and nodes. Zones: inner, outer, start
+ *        (theta = 0) and end (theta = angle) of a sector, and in 3D back
+ *        (z = 0) and front (z = Lz).
+ */
+MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_in, double r_out, double angle,
+                        double Lz, int r, int p);
+
+/** @brief annulus_block from the [mesh] table (type = "annulus"), for rank r of p. */
+MeshBlock annulus_block(const Input & input, int r, int p);
+
 std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz, MeshType kind);
 
 /**
@@ -104,7 +120,7 @@ std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz,
  *        counterclockwise in 2D; {axis, angle} in 3D) and translation t
  *        (`translate`). The identity if absent; an error for generated meshes.
  */
-MeshTransform mesh_transform(const toml::value & input);
+MeshTransform mesh_transform(const Input & input);
 
 /** @brief Map a block's node coordinates (and high-order face nodes) by transform. */
 void transform_block(MeshBlock & block, const MeshTransform & transform);
@@ -122,13 +138,22 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
  *        and nodes exactly as Mesh::init. Other mesh files are read whole by
  *        every rank, so large meshes should be converted to HDF5 first.
  */
-MeshBlock read_mesh_block(const toml::value & input);
+MeshBlock read_mesh_block(const Input & input);
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see
  *        read_mesh_file); every rank reads the whole file.
  */
 MeshBlock read_file_block(const std::string & filename);
+
+/**
+ * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
+ *        and the directory relative paths start from if no such file exists.
+ */
+std::string mesh_filename(const Input & input);
+
+/** @brief The error of a generated mesh.type that this dimension's solver does not make. */
+InputError mesh_type_dimension_error(const Input & input, const std::string & type);
 
 /** @brief Whether a mesh file name denotes an HDF5 mesh file (.h5 or .hdf5). */
 bool is_hdf5_mesh(const std::string & filename);
@@ -138,6 +163,9 @@ bool have_hdf5();
 
 /** @brief Whether several ranks can write one HDF5 mesh file together. */
 bool have_parallel_hdf5();
+
+/** @brief The dimension (2 or 3) of an HDF5 mesh file, read by this rank alone. */
+int mesh_h5_dimension(const std::string & filename);
 
 /**
  * @brief Read this rank's block of an HDF5 mesh file (collective): cells,

@@ -4,12 +4,12 @@
 # transmissive boundaries. examples/riemann_2d is the same case on triangles.
 #
 # Run:
-#   ../../build/src/Mallard -i input.toml --kokkos-num-threads=8
-#   python ../../tools/animate.py solut riemann
+#   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/post/animate.py solut riemann
 #
 # Expected result at t = 0.8: the mushroom-shaped jet along the diagonal with
 # Kelvin-Helmholtz roll-ups on its slip lines. The README animation uses
-# Nx = Ny = 4096 (16.8M cells, rendered with tools/animate_cartesian.py).
+# Nx = Ny = 4096 (16.8M cells, rendered with tools/post/animate_cartesian.py).
 
 [run]
 t_stop = 0.8
@@ -37,19 +37,19 @@ p = """\
 
 [[boundaries]]
 name = "left"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "bottom"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [numerics]
 riemann_solver = "HLLC"
@@ -62,6 +62,7 @@ order = 5
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -72,6 +73,5 @@ check_interval = 200
 
 [[write_data]]
 prefix = "./solut/riemann"
-format = "vtu"
 time_interval = 0.01
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]

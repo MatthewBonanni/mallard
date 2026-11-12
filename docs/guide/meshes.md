@@ -8,7 +8,11 @@ for large distributed runs. Each boundary face belongs to a named **zone**,
 which `[[boundaries]]` assigns a condition to.
 
 The spatial dimension is a build option (`-DMallard_DIM=2`, the default, or
-`3`): one executable per dimension, the same input keys for both.
+`3`): one solver per dimension, `mallard2d` and `mallard3d`, with the same input
+keys. `mallard` runs the one a case needs, by its mesh: a mesh file's own
+dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or a
+`[[periodic]]` pair joins `back` and `front`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
+states it.
 
 ## Generated meshes
 
@@ -21,6 +25,8 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 38 more.
+
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
 
@@ -30,6 +36,7 @@ Ly = 1.0
 | `cartesian_tri` | Each quadrilateral split into two triangles along its bottom-left to top-right diagonal |
 | `wedge` | Quadrilaterals over an 8 degree compression ramp starting at x = 0.5 (the `wedge` example) |
 | `cartesian_tet`, `cartesian_prism`, `cartesian_pyramid`, `cartesian_mixed` | 3D only, see below |
+| `annulus` | The annulus `r_inner <= r <= r_outer` (default 1, 2) about the z axis, or its sector of `angle` degrees (default 360), of `Ntheta x Nr` quadrilaterals (default 64 x 16); in 3D extruded over `[0, Lz]` into `Nz` layers of hexahedra. Zones `inner`, `outer`, for a sector `start` and `end`, in 3D `back` and `front` |
 
 The zones of a generated mesh are `left` (x = 0), `right` (x = Lx), `bottom`
 (y = 0), `top` (y = Ly) and, in 3D, `back` (z = 0) and `front` (z = Lz).
@@ -47,9 +54,22 @@ hexahedra, pyramids and prisms in successive thirds of x):
 | `Nx`, `Ny`, `Nz` | 100 | Cells (2D) or blocks (3D) along each axis |
 | `Lx`, `Ly`, `Lz` | 1.0 | Domain size |
 | `stretching` | zeros | One factor per axis clustering nodes toward both ends |
-| `periodic` | none | Directions joined periodically, e.g. `["x", "z"]` |
+
+Opposite sides are joined with [`[[periodic]]`](#periodic-boundaries).
 
 ### Stretching
+
+```toml
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Lx = 1.0
+Ly = 2.0
+stretching = [0.0, 1.7]   # cluster cells toward y = 0 and y = Ly
+```
+
+*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
 
 `stretching = [beta_x, beta_y]` (three factors in 3D) clusters nodes toward
 both ends of each axis with a nonzero factor: node `j` of `N` sits at
@@ -66,13 +86,30 @@ Lx = 12.566370614359172
 Ly = 2.0
 Lz = 4.1887902047863905
 stretching = [0.0, 1.7, 0.0]   # cells at the walls ~8x thinner than at the center
-periodic = ["x", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 ```
 
 ![Uniform and stretched node spacing across a channel](../images/guide/stretching-light.svg#gh-light-mode-only)
 ![Uniform and stretched node spacing across a channel](../images/guide/stretching-dark.svg#gh-dark-mode-only)
 
 ## Periodic boundaries
+
+```toml
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+
+[[periodic]]
+zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
+```
+
+*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence) and 11 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -81,12 +118,17 @@ seam as the inside of the domain, and the zones disappear from
 ![A periodic seam: the cells of zone A are translated next to zone B, so the faces of the seam become interior faces](../images/guide/periodic-light.svg#gh-light-mode-only)
 ![A periodic seam: the cells of zone A are translated next to zone B, so the faces of the seam become interior faces](../images/guide/periodic-dark.svg#gh-dark-mode-only)
 
-- **Generated meshes:** `periodic = ["x", "y"]` in `[mesh]` joins
-  `left`/`right`, `bottom`/`top` and (3D, `"z"`) `back`/`front`. Not for
-  `wedge`.
-- **Mesh files:** pair zones with `[[periodic]]`; zone B must be zone A
-  translated node for node (to 1e-6 of the zones' shortest edge), as Gmsh's
-  `Periodic` constraint makes it. A node without a partner is reported with
+Each `[[periodic]]` entry pairs two zones, `zones = [A, B]`, of any mesh: zone
+B must be zone A translated by `translation` (B = A + translation), or rotated
+by `angle` ([below](#rotational-periodicity)), node for node (to 1e-6 of the
+zones' shortest edge).
+
+- **Generated meshes:** opposite sides need neither. `["left", "right"]`,
+  `["bottom", "top"]` and (3D) `["back", "front"]` are the box length apart,
+  and the annulus' `["start", "end"]` its `angle`. A `translation` or `angle`
+  given anyway must match the mesh. Not for `wedge`.
+- **Mesh files:** give the `translation` (or `angle`); Gmsh's `Periodic`
+  constraint makes matching zones. A node without a partner is reported with
   its coordinates.
 
 ```toml
@@ -99,9 +141,61 @@ zones = ["left", "right"]
 translation = [1.0, 0.0]     # B = A + translation
 ```
 
+| Key | Default | Meaning |
+|---|---|---|
+| `zones` | required | `[A, B]`, the two zones |
+| `translation` | generated meshes: from the mesh | B = A + translation, `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
+| `angle` | generated `annulus`: from the mesh | Instead of `translation`: degrees from A to B ([below](#rotational-periodicity)) |
+
 Each periodic direction needs at least 3 cells, and each zone joins at most
 one pair. Periodic meshes work in distributed runs, and with every
 reconstruction ([design order across seams](https://matthewbonanni.github.io/mallard/validation/#periodic-seams)).
+
+Before 0.9.0, generated meshes took `periodic = ["x", "z"]` in `[mesh]`; it
+was removed in 0.10.0, and `mallard input upgrade` rewrites it into `[[periodic]]` entries (`x`: `left`/`right`, `y`:
+`bottom`/`top`, `z`: `back`/`front`, `theta`: `start`/`end`).
+
+### Rotational periodicity
+
+Sectors of annular combustors or blade rows are periodic through a rotation:
+zone B is zone A turned by `angle` degrees about an axis. Give `angle`
+instead of `translation` (with `center`, a point of the axis, and in 3D
+`axis`); on the generated `annulus`, `zones = ["start", "end"]` needs no
+angle.
+Velocity, momentum and gradients turn across the seam; density, pressure,
+temperature, species and scalars carry over unchanged.
+
+![A sector of an annulus: zone B is zone A turned by alpha about the axis, and the velocity of a cell next to B, seen from the cells next to A, turns with it](../images/guide/rotational_periodic-light.svg#gh-light-mode-only)
+![A sector of an annulus: zone B is zone A turned by alpha about the axis, and the velocity of a cell next to B, seen from the cells next to A, turns with it](../images/guide/rotational_periodic-dark.svg#gh-dark-mode-only)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `angle` | none | Degrees from A to B, right-handed about `axis` (counterclockwise in 2D) |
+| `center` | origin | A point of the axis (2D: the center of rotation) |
+| `axis` | `[0, 0, 1]` | (3D) The axis direction |
+
+```toml
+[[periodic]]
+zones = ["side_a", "side_b"]   # a 30 degree sector about the z axis
+angle = 30.0
+```
+
+Pitfalls:
+
+- One rotation per mesh; in 3D it combines with translations along its axis
+  only (an annular sector periodic in z), in 2D with none.
+- The sector must not reach the axis, and needs at least 3 cells around.
+- MUSCL limits each Cartesian velocity component and TENO-E weighs Cartesian
+  derivatives, so a sector reproduces the full annulus to rounding only for
+  multiples of 90 degrees; other angles agree to the truncation error.
+- Transmissive boundary images and the transverse terms of characteristic
+  boundaries do not reach across the rotation; axisymmetric runs take none.
+
+![The full annulus and a quarter run with rotational periodicity agree to rounding](../images/guide/rotational_sector-light.svg#gh-light-mode-only)
+![The full annulus and a quarter run with rotational periodicity agree to rounding](../images/guide/rotational_sector-dark.svg#gh-dark-mode-only)
+
+The quarter of `examples/rotational_sector` against its full annulus: the
+largest difference over all cells is that of the annulus with its own copies.
 
 ## Mesh files (Gmsh)
 
@@ -110,6 +204,8 @@ reconstruction ([design order across seams](https://matthewbonanni.github.io/mal
 type = "file"
 filename = "cylinder.msh"
 ```
+
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo) and 5 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
@@ -147,6 +243,8 @@ type = "file"
 filename = "wing.cgns"    # or a Fluent .msh/.cas, or an OpenFOAM case directory
 ```
 
+*Used in:* the mesh-import tests (`test/data/meshes/`).
+
 | Format | `filename` | Zones | Build |
 |---|---|---|---|
 | CGNS (unstructured, HDF5-based) | `*.cgns` | `BC_t` by family name (Gmsh's physical names), else by BC name; boundary sections in no BC by section name | `-DMallard_ENABLE_CGNS=ON` |
@@ -175,8 +273,9 @@ Pitfalls:
   patches (OpenFOAM's 2D convention); compressed (`.gz`) and decomposed
   (`processor*`) meshes must be decompressed or reconstructed first. Cells
   must be of Mallard's types, as for Fluent.
-- A mesh of the other dimension is an error: build with the matching
-  `-DMallard_DIM`.
+- `mallard` runs the solver of the mesh's dimension, which must be installed
+  (built with the matching `-DMallard_DIM`); `mallard2d` and `mallard3d` run
+  directly reject a mesh of the other dimension.
 
 ## Transform on read
 
@@ -188,6 +287,8 @@ rotate = 90                              # 2D: degrees counterclockwise
 translate = [0.1, 0.0]
 ```
 
+*Used in:* the mesh-import tests.
+
 `[mesh.transform]` maps every node of a mesh file, `x -> R (S x) + t`: scale,
 then rotate about the origin, then translate.
 
@@ -197,13 +298,21 @@ then rotate about the origin, then translate.
 Pitfalls:
 
 - Everything else in the input (`[[periodic]]` translations,
-  `[[mesh.curved]]` shapes, probes, initial conditions) is in the
+  `[[mesh.curved]]` surfaces, regions, probes, initial conditions) is in the
   transformed coordinates.
 - Mesh files only: generated meshes reject it.
-- `mallard-mesh-convert input.toml mesh.h5` writes the transformed mesh; do
+- `mallard mesh convert input.toml mesh.h5` writes the transformed mesh; do
   not transform it again when running from `mesh.h5`.
 
 ## HDF5 meshes for large runs
+
+```toml
+[mesh]
+type = "file"
+filename = "mesh.h5"   # from mallard mesh convert
+```
+
+*Used in:* any example, after `mallard mesh convert input.toml mesh.h5`.
 
 Every rank of a distributed run reads a Gmsh or other mesh file whole,
 keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
@@ -211,15 +320,33 @@ which each rank reads only its own part (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 
 ```sh
-mallard-mesh-convert mesh.msh mesh.h5                # from any mesh file
-mpirun -n 8 mallard-mesh-convert input.toml mesh.h5  # the mesh of an input, written in parallel
+mallard mesh convert mesh.msh mesh.h5                # from any mesh file
+mpirun -n 8 mallard mesh convert input.toml mesh.h5  # the mesh of an input, written in parallel
 ```
 
 and then `filename = "mesh.h5"`. Generated meshes are always produced per
 rank, so no rank ever holds a whole generated or HDF5 mesh. The file layout is
-in the [input reference](../input.md#mesh).
+in the [input reference](../input.md#mesh). Later releases keep reading these
+files ([compatibility](output.md#formats-and-compatibility)).
 
 ## Curved boundaries
+
+```toml
+[[mesh.curved]]
+zone = "cylinder"
+type = "circle"          # a curve (2D)
+center = [0.0, 0.0]
+radius = 0.5
+
+[[mesh.curved]]           # 3D: the surface of a sphere
+zone = "ball"
+type = "sphere"
+center = [0.0, 0.0, 0.0]
+radius = 0.5
+filled = false
+```
+
+*Used in:* [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,
@@ -234,39 +361,103 @@ The geometry comes from either
 
 - **high-order boundary elements** of a Gmsh file (`line3`, `line4` in 2D;
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
-  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3`; or
-- **an analytic shape** that a zone is projected onto, on any mesh:
-
-```toml
-[[mesh.curved]]
-zone = "cylinder"
-shape = "circle"        # 2D; "sphere" or "cylinder" in 3D
-center = [0.0, 0.0]
-radius = 0.5
-# axis = [0.0, 0.0, 1.0]  for shape = "cylinder"
-```
+  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3` or
+  `make_mallard_mesh.py --order 3`; or
+- **a surface [region](geometry.md#regions)** (2D: a curve) that a zone is
+  projected onto, on any mesh: a `[[mesh.curved]]` entry is the zone's name
+  and a region, with the region's `type` and keys beside `zone`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `[mesh] curved_geometry` | `true` | `false` ignores high-order nodes and `[[mesh.curved]]` |
 | `zone` | required | Boundary zone to curve |
-| `shape` | required | `circle` (2D), `sphere` or `cylinder` (3D) |
-| `center`, `radius` | required | The shape (for a cylinder, a point of its axis) |
-| `axis` | required for `cylinder` | Direction of the cylinder's axis |
+| `type` | required | A surface (2D: a curve) that bounds a region: a filled [primitive](geometry.md#primitives), [boolean](geometry.md#booleans) or [`implicit`](geometry.md#implicit-regions) region with `filled = false`, its `{type = "boundary", of = ...}`, or in 2D a `circle` or `ellipse` |
+| `filled` | `true` | `false` on a filled region: its [boundary](geometry.md#boundaries-and-interiors), which the zone lies on; required for filled types (a filled region is an error) |
+| the region's keys | | `center`, `radius`, `semi_axes`, `axis`, `regions`, `f`, ..., and the [transforms](geometry.md#transforms) `translate`, `rotate`, `scale`, `pivot` |
+
+The zone lies on a surface (2D: a curve): the whole boundary of a filled
+region of primitives, booleans or implicit functions, written with
+`filled = false`, or in 2D a `circle` or `ellipse`. Surfaces that only part of
+a boundary forms (flat surfaces of 3D, boundary zones, clipped surfaces) are
+an error. A wing section, a body of revolution or a blended fillet becomes a
+boolean of primitives or an implicit function:
+
+```toml
+# An elliptic cylinder at 10 degrees of incidence (2D)
+[[mesh.curved]]
+zone = "body"
+type = "ellipse"
+center = [0.0, 0.0]
+semi_axes = [0.5, 0.25]
+rotate = -10
+
+# A superellipsoid (3D): any smooth f(x, y, z) = 0
+[[mesh.curved]]
+zone = "capsule"
+type = "implicit"
+f = "x^4 + y^4 + (z / 2)^4 - 1"
+filled = false
+```
+
+![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-light.svg#gh-light-mode-only)
+![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-dark.svg#gh-dark-mode-only)
+
+Circles in 2D (`circle`, or `disk` with `filled = false`), and the surfaces
+of spheres and infinite cylinders (no `length` or `inner_radius`) in 3D,
+without transforms, are projected in closed form, radially. Every other surface is projected by closest-point
+iterations on the region's function: Newton steps onto its zero level set
+along the gradient, then along the surface toward the point, with the
+gradient and curvature from fourth-order differences. They converge to round-off
+of the face size, and the faces' geometry with them.
 
 Pitfalls:
 
-- Zone nodes farther than 5% of an edge length from the shape are an error:
+- Zone nodes farther than 5% of an edge length from the surface are an error:
   the mesh must already approximate it.
+- The surface must be smooth where the zone is, with a nonzero gradient of
+  `f` for `implicit` regions (`(x^2 + y^2 - 1)^2` has none on its circle: an
+  error). A face that spans a crease (an edge of a `box`, where the members of
+  a `union` meet) is curved onto one side of it: give each side its own zone,
+  meeting at the crease.
+- In 2D the zone lies in the plane `z = 0`: a region's surface is its slice
+  there.
+- `edge` (smooth region edges) is an error here: the surface is sharp.
 - Not with `[physics] axisymmetric = true` yet.
 - At curved walls TENO-E uses one-sided stencils of limited degree
   (`curved_wall_degree`, default 3), so orders 5 and 6 are fourth order there;
   see [Numerics](numerics.md#teno-e-options).
+- Before 0.9.0 the key `type` was `shape`, and `"sphere"` and `"cylinder"`
+  meant their surfaces. `shape` was removed in 0.10.0, and `mallard input
+  upgrade` rewrites it (adding `filled = false` to spheres and cylinders) ([inputs from older releases](input_files.md#inputs-from-older-releases)).
+
+## Mesh quality
+
+`mallard check input.toml` ([Checking an input](input_files.md#checking-an-input))
+measures every cell of the mesh, taking for each the worst of its faces:
+
+| Metric | Definition | Warning above |
+|---|---|---|
+| Non-orthogonality | Angle in degrees between the face normal and the line joining the centroids of the two cells (cell to face centroid at a boundary) | 70 |
+| Skewness | Distance from the face centroid to where that line crosses the face, over the distance between the centroids | 0.5 |
+| Volume ratio | Larger over smaller volume of the two cells | 10 |
+| Aspect ratio | Largest over smallest distance from the cell centroid to its face centroids | 1000 |
+
+It reports the largest and mean value of each and where the worst cells are;
+`--mesh-fields PREFIX` writes the four fields to `PREFIX_000000.vtkhdf`
+(`PREFIX_000000.vtu` in builds without HDF5) for ParaView, with the
+reconstruction's stencil fields ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)).
+`mallard info mesh.msh --mesh-fields PREFIX` writes the four from the mesh file
+alone, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtkhdf out.png` draws a
+2D mesh's with the worst cells circled.
+
+![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-light.svg#gh-light-mode-only)
+![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-dark.svg#gh-dark-mode-only)
 
 ## See also
 
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)
 - [Boundary conditions](boundary_conditions.md): what to put on each zone
 - [Running in parallel](parallel.md): partitions and halos
+- [Geometry](geometry.md): regions shared by sources, probes and other features
 - Design notes: [periodic boundaries](../design/periodic.md),
   [curved boundaries](../design/curved_boundaries.md)

@@ -12,7 +12,9 @@ Nx = 336
 Ny = 216
 Lx = 0.0121604
 Ly = 0.0078174000000000004
-periodic = ["y"]
+
+[[periodic]]
+zones = ["bottom", "top"]
 
 [initialize]
 type = "restart"
@@ -20,7 +22,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [3.1364382441686103, 0.0]
 p = 101325.0
 T = 700
@@ -28,7 +30,7 @@ X = { "H2" = 0.14388489208633015, "O2" = 0.17985611510791077, "N2" = 0.676258992
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 
@@ -55,6 +57,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 1.5999999999999999e-05
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

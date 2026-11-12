@@ -26,12 +26,15 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "scratch.h"
+#include "verification.h"
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 const std::string PERFECT_AIR = SOURCE_DIR + "/test/data/chemistry/perfect_air.yaml";
 const std::string H2O2 = SOURCE_DIR + "/mechanisms/h2o2.yaml";
 
@@ -46,7 +49,7 @@ std::string mesh_block(const std::string & type, uint32_t nx, uint32_t n, double
     std::ostringstream s;
     s << "[mesh]\ntype = \"" << type << "\"\nNx = " << nx << "\nNy = " << n << "\nLx = " << Lx << "\nLy = " << L << "\n";
     if (N_DIM == 3) s << "Nz = " << n << "\nLz = " << L << "\n";
-    if (!periodic.empty()) s << "periodic = " << periodic << "\n";
+    s << periodic_sides(periodic);
     return s.str();
 }
 
@@ -129,11 +132,13 @@ TEST_P(MixtureEquivalence, ConstantCpSingleSpeciesReproducesPerfectGas) {
         "T = \"x < 0.5 ? 400.0 : 300.0\"\nu = " + velocity("x > 0.5 ? 50.0 : 0.0", "y > 0.6 ? -30.0 : 0.0") + "\n";
     const std::string scheme = numerics(c.reconstruction, c.riemann);
     const std::string bcs = boundaries(
-        "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[20.0, 0.0]" : "[20.0, 0.0, 0.0]") +
+        "type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[20.0, 0.0]" : "[20.0, 0.0, 0.0]") +
             "\np = 1.0e5\nT = 400.0\nY = { AIR = 1.0 }\n",
-        "type = \"p_out\"\np = 3.0e4\n", "type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n");
+        "type = \"outlet_pressure\"\np = 3.0e4\n", "type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n");
     Solver perfect;
-    perfect.init(parse_toml(common + scheme + bcs + perfect_air()));
+    std::string perfect_bcs = bcs;  // a perfect gas takes no composition
+    perfect_bcs.erase(perfect_bcs.find("Y = { AIR = 1.0 }\n"), 18);
+    perfect.init(parse_toml(common + scheme + perfect_bcs + perfect_air()));
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
@@ -294,6 +299,7 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
         "\nY = { AIR2 = \"(x - 0.5)^2 + (y - 0.5)^2 < 0.06 ? 1.0 : 0.0\" }\nbalance = \"AIR\"\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs");
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     const std::vector<rtype> before = solver.integrate_species();
     auto centroid = [&](Solver & s) {
@@ -332,6 +338,36 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
     }
 }
 
+TEST(MixtureTest, TimeDependentUptCompositionIsAdvected) {
+    // The composition of the inlet as an expression of t: with two
+    // species of identical thermodynamics the flow stays uniform, and each
+    // cell carries the composition that entered at t - x / u
+    const uint32_t nx = 80, n = N_DIM == 2 ? 2 : 1;
+    const double u = 50.0, t_stop = 0.015;
+    const std::string velocity_vec = N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]";
+    const std::string input =
+        "[run]\nt_stop = 0.015\ncfl = 0.4\n" + mesh_block("cartesian", nx, n, 1.0, 0.05) +
+        "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " + velocity_vec + "\nY = { AIR = 0.5, AIR2 = 0.5 }\n" +
+        numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
+        boundaries("type = \"inlet_state\"\nu = " + velocity_vec + "\np = 1.0e5\nT = 300.0\n"
+                   "Y = { AIR2 = \"0.5 + 0.4 * sin(2 * pi * 100 * t)\" }\nbalance = \"AIR\"\n",
+                   "type = \"outlet_pressure\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    double worst = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        const double x = double(solver.get_mesh()->h_cell_coords(c, 0));
+        if (x > 0.6) continue;
+        const double exact = 0.5 + 0.4 * std::sin(2.0 * M_PI * 100.0 * (t_stop - x / u));
+        worst = std::max(worst, std::abs(double(solver.h_species(c, 1) / solver.h_conservatives(c, 0)) - exact));
+        EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), 1.0e5, tol(1e-6, 1e-2));
+    }
+    RecordProperty("worst", std::to_string(worst));
+    EXPECT_LT(worst, 0.015);
+}
+
 TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
     // An inlet whose composition varies along it (an expression and a balance
     // species): with two species of identical thermodynamics the flow stays
@@ -343,9 +379,9 @@ TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
         "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
         (N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") + "\nY = { AIR = 1.0 }\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
-        boundaries("type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") +
+        boundaries("type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") +
                        "\np = 1.0e5\nT = 300.0\nY = { AIR2 = \"0.8 * y^2\" }\nbalance = \"AIR\"\n",
-                   "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+                   "type = \"outlet_pressure\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
@@ -389,7 +425,7 @@ std::vector<std::vector<double>> read_reference(const std::string & file, std::v
 /**
  * @brief L1 errors (relative to the reference maximum) of rho, u, p, T and
  *        Y_N2 against the exact solution of the multicomponent shock tube
- *        (tools/mixture_riemann.py), and the extreme mass fractions.
+ *        (tools/dev/mixture_riemann.py), and the extreme mass fractions.
  */
 std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruction, const std::string & riemann,
                                       double & Y_min, double & Y_max) {
@@ -400,10 +436,11 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
         "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
         "u = " + velocity("0.0") + "\n"
         "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-        boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+        boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                    "type = \"symmetry\"\n") +
         numerics(reconstruction, riemann) + mixture(H2O2);
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -504,10 +541,12 @@ std::array<double, 2> advection_errors(const std::string & mesh, uint32_t n, con
                mixture(H2O2);
     };
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(n, 0.0, 0.0)));
     solver.run();
     solver.copy_device_to_host();
     Solver exact;
+    exact.set_distributed(false);
     exact.init(parse_toml(input(1, u * t_end, v * t_end)));
     const auto & names = solver.get_species_names();
     const size_t k = static_cast<size_t>(std::find(names.begin(), names.end(), "H2") - names.begin());
@@ -539,8 +578,14 @@ TEST_P(MixtureAdvectionOrder, SmoothCompositionWaveConvergesAtDesignOrder) {
     const OrderCase & c = GetParam();
     const std::array<double, 2> coarse = advection_errors(c.mesh, c.n, c.reconstruction);
     const std::array<double, 2> fine = advection_errors(c.mesh, 2 * c.n, c.reconstruction);
-    EXPECT_GT(std::log2(coarse[0] / fine[0]), c.order) << "rho: " << coarse[0] << " -> " << fine[0];
-    EXPECT_GT(std::log2(coarse[1] / fine[1]), c.order) << "rho Y_H2: " << coarse[1] << " -> " << fine[1];
+    const size_t teno = c.reconstruction.find("order = ");
+    const std::string method = teno == std::string::npos ? "MUSCL" : "TENO" + c.reconstruction.substr(teno + 8, 1);
+    const double design = teno == std::string::npos ? 2.0 : std::stod(c.reconstruction.substr(teno + 8, 1));
+    const char * names[2] = {"L1 density error", "L1 H2 partial density error"};
+    for (size_t j = 0; j < 2; j++) {
+        verification::expect_order({"mixtures", method, verification::cells_of(c.mesh), names[j],
+                                    {double(c.n), double(2 * c.n)}, {coarse[j], fine[j]}, design, c.order});
+    }
 }
 
 // TENO5 in 2D only: on the coarse 3D meshes a test can afford, its large stencils
@@ -607,7 +652,7 @@ TEST(MixtureTest, HydrogenAirContactPressureErrorDecreasesUnderRefinement) {
 TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
     const std::string base = "[run]\nn_steps = 1\ncfl = 0.25\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
                              numerics("type = \"FO\"\n", "HLLC");
-    const std::string bcs = boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
+    const std::string bcs = boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
                                        "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     const std::string init = "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
                              std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") + "\n";
@@ -627,7 +672,7 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                      boundaries("type = \"farfield\"\nu = " +
                                     std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") +
                                     "\np = 1.0e5\nT = 300.0\nX = { H2 = 1.0 }\n",
-                                "type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
+                                "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
                      mixture(H2O2),
                  "farfield");
     expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
@@ -655,16 +700,16 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // double flux, whose frozen thermodynamics come from the seed); with
     // chemistry so is each cell's last sub-step, which seeds the integrator
     // (with Strang or SIMPLER splitting)
+    int run = 0;
     for (const auto & [double_flux, reacting, viscous, coupling] :
          {std::tuple{false, false, false, "strang"}, {true, false, false, "strang"}, {false, true, false, "strang"},
           {false, true, true, "strang"}, {false, true, true, "simpler"}}) {
-        const std::string dir = (std::filesystem::temp_directory_path() / "mallard_mixture_restart").string();
-        std::filesystem::remove_all(dir);
+        const std::string dir = (scratch_dir() / ("mallard_mixture_restart_" + std::to_string(run++))).string();
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
             return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" +
                    mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
                    "[initialize]\n" + init +
-                   boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                   boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                               "type = \"wall_adiabatic\"\n") +
                    numerics("type = \"MUSCL\"\n", "HLLC", double_flux) +
                    mixture(H2O2, "", viscous ? "navier_stokes" : "euler") +
@@ -692,21 +737,20 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
                 ASSERT_EQ(second.h_species(c, k), straight.h_species(c, k)) << "cell " << c;
             }
         }
-        std::filesystem::remove_all(dir);
     }
 }
 
 TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
     // The budget's extra right-hand side freezes the thermodynamics as a step does, and must not move the
     // temperature seeds the next step's freeze starts from
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_df_budget.csv").string();
+    const std::string file = (scratch_dir() / "mallard_df_budget.csv").string();
     auto input = [&](bool budget) {
         return "[run]\nn_steps = 12\ncfl = 0.25\n" +
                mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
                "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
                "u = " + velocity("0.0", "10.0 * sin(6.283 * x)") +
                "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-               boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+               boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                           "type = \"wall_adiabatic\"\n") +
                numerics("type = \"MUSCL\"\n", "HLLC", true) + mixture(H2O2, "", "navier_stokes") +
                (budget ? "[integrals]\ninterval = 1\nbudget = true\nfile = \"" + file + "\"\n" : "");
@@ -718,13 +762,13 @@ TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
     budgeted.run();
     plain.copy_device_to_host();
     budgeted.copy_device_to_host();
+    comm::barrier();  // Rank 0 writes the file
     std::ifstream rows(file);
     std::string line;
     int n_rows = 0;
     while (std::getline(rows, line)) n_rows++;
-    std::filesystem::remove(file);
     EXPECT_GT(n_rows, 12);
-    for (uint32_t c = 0; c < plain.get_mesh()->n_cells; c++) {
+    for (uint32_t c = 0; c < plain.get_mesh()->n_owned(); c++) {
         FOR_I_CONSERVATIVE ASSERT_EQ(budgeted.h_conservatives(c, i), plain.h_conservatives(c, i)) << "cell " << c;
         for (uint32_t k = 0; k < plain.get_species_names().size(); k++) {
             ASSERT_EQ(budgeted.h_species(c, k), plain.h_species(c, k)) << "cell " << c;
@@ -763,11 +807,11 @@ std::array<double, 2> contact_errors(const std::string & reconstruction, bool do
     solver.update_primitives();
     solver.copy_device_to_host();
     std::array<double, 2> err = {0.0, 0.0};
-    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         err[0] = std::max(err[0], std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0));
         err[1] = std::max(err[1], std::abs(double(solver.h_primitives(c, 0)) / 1000.0 - 1.0));
     }
-    return err;
+    return comm::allreduce(err, comm::Op::MAX);
 }
 
 } // namespace
@@ -801,10 +845,11 @@ TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
             "u = " + velocity("0.0") + "\n"
             "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", "
             "N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-            boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+            boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                        "type = \"symmetry\"\n") +
             numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2);
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(input));
         const double E0 = double(solver.integrate_conservatives()[N_DIM + 1]);
         solver.run();
@@ -850,9 +895,9 @@ namespace {
       << "p = \"x < 0.5 ? " << p1 << " : " << p2 << "\"\n"
       << "T = \"x < 0.5 ? " << T1 << " : " << T2 << " / (1 + (abs(y - 0.5) < 0.026 and abs(x - 0.51) < 0.02 ? 1e-3 : 0))\"\n"
       << "u = " << velocity("x < 0.5 ? " + std::to_string(u1) + " : " + std::to_string(u2)) << "\n"
-      << boundaries("type = \"upt\"\nu = [" + std::to_string(u1) + ", 0.0]\np = " + std::to_string(p1) +
+      << boundaries("type = \"inlet_state\"\nu = [" + std::to_string(u1) + ", 0.0]\np = " + std::to_string(p1) +
                         "\nT = " + std::to_string(T1) + "\nY = { AIR = 1.0 }\n",
-                    "type = \"p_out\"\np = " + std::to_string(p2) + "\n", "type = \"symmetry\"\n",
+                    "type = \"outlet_pressure\"\np = " + std::to_string(p2) + "\n", "type = \"symmetry\"\n",
                     "type = \"symmetry\"\n")
       << numerics("type = \"FO\"\n", riemann) << mixture(PERFECT_AIR, "air");
     Solver solver;
@@ -988,8 +1033,7 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
     // chemistry and the sponge's relaxation cancel. SIMPLER keeps it at another
     // time step; Strang splitting has a steady state of its own at each step
     SKIP_IN_SINGLE_PRECISION("the steady state holds to the round-off of the state");
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_simpler_steady").string();
-    std::filesystem::remove_all(dir);
+    const std::string dir = (scratch_dir() / "mallard_simpler_steady").string();
     const double dt = 5e-4;
     Solver steady;
     steady.init(parse_toml(stirred_reactor(uniform_state("2400.0", "{ H2O = 2.0, N2 = 3.76 }"), 400, dt, "simpler",
@@ -1038,7 +1082,6 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
               << "; residual " << residual / chemistry_rate << "\n";
     EXPECT_LT(simpler_drift, 1e-12);
     EXPECT_GT(strang_drift, 1e-4);
-    std::filesystem::remove_all(dir);
 }
 
 namespace {

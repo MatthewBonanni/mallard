@@ -4,7 +4,7 @@ Status: implemented (issue #157).
 
 `[physics] axisymmetric = true` turns the 2D solver into one for flows
 symmetric about the x axis without swirl: x is the axial coordinate z and y
-the radius r >= 0. One 2D mesh of the meridian half-plane then stands for the
+the radius $r \ge 0$. One 2D mesh of the meridian half-plane then stands for the
 3D body of revolution, so round jets, counterflow and Bunsen flames, blunt
 bodies and spherical blasts run at 2D cost.
 
@@ -91,8 +91,11 @@ All integral quantities are per radian: forces (`[[forces]]`, multiply by
 
 Per owned cell, added to the radial momentum before dividing by `V_c`:
 
-    S_c = int_c (p - tau_thetatheta) dA,
-    tau_thetatheta = mu (2 u_r / r - 2/3 div u),  div u = du_x/dx + du_r/dr + u_r / r.
+$$
+S_c = \int_c \left(p - \tau_{\theta\theta}\right)\mathrm{d}A, \qquad
+\tau_{\theta\theta} = \mu\left(\frac{2u_r}{r} - \frac{2}{3}\nabla\cdot\mathbf{u}\right), \qquad
+\nabla\cdot\mathbf{u} = \frac{\partial u_x}{\partial x} + \frac{\partial u_r}{\partial r} + \frac{u_r}{r}.
+$$
 
 - FO and MUSCL, and TENO's troubled cells: `S_c = (p_c - tau_thetatheta,c) A_c`
   from the cell values at the revolved centroid and the cell gradients the
@@ -204,6 +207,6 @@ Examples:
 - Counterflow diffusion flame (H2/N2 against air, 1 atm, 10 mm gap, the
   finite-jet setup of the 3D counterflow validation on the meridian plane, 20
   cells per flame width, MUSCL, mixture-averaged transport, started from
-  Cantera's flame and run for 4 / K_ox): the peak temperature is within 0.4%
-  (U_o = 2 m/s) and 0.7% (4 m/s) of Cantera's axisymmetric similarity solution
-  at the same local strain rate K_ox measured on the axis, as in the 3D runs.
+  Cantera's flame and run for $4/K_\mathrm{ox}$): the peak temperature is within 0.4%
+  ($U_o$ = 2 m/s) and 0.7% (4 m/s) of Cantera's axisymmetric similarity solution
+  at the same local strain rate $K_\mathrm{ox}$ measured on the axis, as in the 3D runs.

@@ -1,9 +1,21 @@
-# CMakeLists.txt for MallardTest
+# CMakeLists.txt for mallard-test2d/3d
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
+    divergence_report_test.cpp
+    derived_fields_test.cpp
+    scratch.cpp
     common_math_test.cpp
+    kexpr_test.cpp
+    region_test.cpp
+    region_mesh_test.cpp
+    initial_state_test.cpp
+    source_terms_test.cpp
+    case_template_test.cpp
+    front_end_test.cpp
+    cli_test.cpp
     time_integrator_test.cpp
+    binding_test.cpp
     comm_test.cpp
     chemistry_thermo_test.cpp
     chemistry_kinetics_test.cpp
@@ -17,9 +29,35 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     statistics_test.cpp
+    probes_test.cpp
+    region_snapshots_test.cpp
+    probe_reference_test.cpp
+    insitu_statistics_test.cpp
+    remap_test.cpp
     les_test.cpp
+    numerics_preset_test.cpp
     tfles_test.cpp
+    check_test.cpp
+    stencils_test.cpp
+    run_report_test.cpp
+    run_page_test.cpp
+    error_messages_test.cpp
     synthetic_inflow_test.cpp
+    provenance_test.cpp
+    health_test.cpp
+    input_upgrade_test.cpp
+    field_units_test.cpp
+    format_compat_test.cpp
+    output_reader_test.cpp
+    post_extract_test.cpp
+    post_convergence_test.cpp
+    wall_model_test.cpp
+    units_test.cpp
+    periodic_pairs_test.cpp
+    rotational_periodic_test.cpp
+    invariance_test.cpp
+    inlet_test.cpp
+    step_queue_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
@@ -32,7 +70,11 @@ if(Mallard_DIM EQUAL 2)
     teno_test.cpp
     viscous_test.cpp
     restart_test.cpp
+    run_control_test.cpp
+    triggers_test.cpp
+    step_control_test.cpp
     boundary_test.cpp
+    boundary_types_test.cpp
     nscbc_test.cpp
     source_test.cpp
     axisymmetric_test.cpp
@@ -40,6 +82,7 @@ if(Mallard_DIM EQUAL 2)
     mesh_file_test.cpp
     mpi_test.cpp
     periodic_test.cpp
+    preset_validation_test.cpp
     )
 else()
     list(APPEND MALLARD_TEST_SOURCES
@@ -56,21 +99,43 @@ else()
     periodic3d_test.cpp
     )
 endif()
-add_executable(MallardTest ${MALLARD_TEST_SOURCES})
+add_executable(mallard-test ${MALLARD_TEST_SOURCES})
+set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_DIM}d)
 
-target_include_directories(MallardTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(MallardTest PRIVATE MALLARD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# The compiled expressions round every operation on its own, and so must their hand-written references
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
+target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")
+add_dependencies(mallard-test mallard)
+# The run-control tests start runs on several ranks with the MPI launcher
+if(Mallard_ENABLE_MPI AND MPIEXEC_EXECUTABLE)
+    target_compile_definitions(mallard-test PRIVATE MALLARD_MPIEXEC="${MPIEXEC_EXECUTABLE}")
+    execute_process(COMMAND ${MPIEXEC_EXECUTABLE} --version OUTPUT_VARIABLE mpiexec_version ERROR_QUIET)
+    if(mpiexec_version MATCHES "Open MPI|OpenRTE|PRRTE")
+        target_compile_definitions(mallard-test PRIVATE MALLARD_MPIEXEC_OPEN_MPI)
+    endif()
+endif()
 
 include(FetchContent)
 FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.18.0
-  ${MALLARD_THIRD_PARTY}
+  SYSTEM
 )
+# Test-only: `cmake --install` leaves GoogleTest out
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-target_link_libraries(MallardTest PRIVATE gtest)
+target_link_libraries(mallard-test PRIVATE gtest)
 
-target_link_libraries(MallardTest PRIVATE MallardCore)
-mallard_target_warnings(MallardTest)
+target_link_libraries(mallard-test PRIVATE MallardCommands)
+# Malformed CGNS files written by the tests
+if(Mallard_ENABLE_CGNS)
+    target_link_libraries(mallard-test PRIVATE ${MALLARD_CGNS_LIBRARY})
+endif()
+mallard_target_warnings(mallard-test)

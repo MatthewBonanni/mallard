@@ -1,6 +1,6 @@
 # Stage 1 of examples/detonation_3d (see input.toml): the 2D cellular
 # detonation in a 3 cm channel that starts the 3D run, in a window that
-# follows the front (tools/detonation_window.py). 2D build.
+# follows the front (examples/detonation_3d/detonation_window.py). 2D build.
 
 [run]
 t_stop = 6.0e-6
@@ -19,11 +19,11 @@ file = "window_2d.restart"
 
 [[boundaries]]
 name = "left"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
@@ -62,7 +62,6 @@ time_interval = 2.0e-6
 # tool saves it, so this wall output is only overwritten by every segment
 [[write_data]]
 prefix = "./wall_2d/bottom"
-format = "vtu"
-geometry = "bottom"
+region = "bottom"
 time_interval = 6.0e-6
-variables = ["P_MAX"]
+fields = ["P_MAX"]

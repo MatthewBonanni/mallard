@@ -1,7 +1,7 @@
 /**
  * @file chemistry_benchmark.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Chemistry throughput benchmark (MallardReactor's [benchmark] mode).
+ * @brief Chemistry throughput benchmark (`mallard reactor`'s [benchmark] mode).
  * @version 0.3
  * @date 2026-10-03
  *
@@ -37,23 +37,27 @@ std::string brief(const double x) {
 
 } // namespace
 
-ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
+ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     const MixtureModel model = MixtureModel::from_input(input);
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const toml::value & table = input.at("reactor");
-    const toml::value & bench = input.at("benchmark");
-    const double T0 = find_double(table, "T"), p0 = find_double(table, "p");
-    const double end_time = find_double(table, "end_time");
-    const int64_t samples_in = toml::find_or<int64_t>(bench, "samples", 64);
-    const int64_t cells_in = toml::find_or<int64_t>(bench, "cells", 65536);
-    const int64_t repeats_in = toml::find_or<int64_t>(bench, "repeats", 3);
+    const Input & table = input.at("reactor");
+    const Input & bench = input.at("benchmark");
+    const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
+    const double end_time = find_double(table, "end_time", dim::time);
+    const int64_t samples_in = find_value_or<int64_t>(bench, "samples", 64);
+    const int64_t cells_in = find_value_or<int64_t>(bench, "cells", 65536);
+    const int64_t repeats_in = find_value_or<int64_t>(bench, "repeats", 3);
     if (samples_in < 1 || cells_in < 1 || repeats_in < 1) {
         throw InputError("benchmark: samples, cells and repeats must be positive.");
     }
     const uint32_t n_samples = static_cast<uint32_t>(samples_in), n_cells = static_cast<uint32_t>(cells_in);
     const uint32_t repeats = static_cast<uint32_t>(repeats_in);
-    const double igniting_fraction = find_double_or(bench, "igniting_fraction", -1.0);
-    const std::vector<double> dts = toml::find_or<std::vector<double>>(bench, "dt", std::vector<double>{1e-8, 1e-6});
+    const double igniting_fraction = find_double_or(bench, "igniting_fraction", dim::none, -1.0);
+    std::vector<double> dts = {1e-8, 1e-6};
+    if (bench.contains("dt")) {
+        dts.clear();
+        for (const auto & dt : bench.at("dt").as_array()) dts.push_back(as_double(dt, "benchmark.dt", dim::time));
+    }
     const chemistry::ReactorOptions options = reactor_options(input);
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
@@ -110,18 +114,18 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
 
     CellChemistryOptions cell_options;
     cell_options.reactor = options;
-    const int64_t lanes = toml::find_or<int64_t>(bench, "lanes", 0);
+    const int64_t lanes = find_value_or<int64_t>(bench, "lanes", 0);
     if (lanes < 0) throw InputError("benchmark.lanes must not be negative.");
     cell_options.lanes = static_cast<uint32_t>(lanes);
-    cell_options.bin_by_cost = toml::find_or<bool>(bench, "bin_by_cost", true);
-    const int64_t threads = toml::find_or<int64_t>(bench, "threads", 0);
+    cell_options.bin_by_cost = find_value_or<bool>(bench, "bin_by_cost", true);
+    const int64_t threads = find_value_or<int64_t>(bench, "threads", 0);
     if (threads < 0) throw InputError("benchmark.threads must not be negative.");
     cell_options.threads = static_cast<uint32_t>(threads);
-    cell_options.shared = static_cast<int>(toml::find_or<int64_t>(bench, "shared", -1));
+    cell_options.shared = static_cast<int>(find_value_or<int64_t>(bench, "shared", -1));
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
-    logging::items(model.summary());
+    logging::items(model.summary().settings);
     logging::items({
         {"Benchmark", std::to_string(n_cells) + " cells from " + std::to_string(n_samples) + " trajectory states (" +
                           std::to_string(n_igniting) + " igniting cells)"},
@@ -148,7 +152,9 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
     result.shared_bytes = cells.shared_bytes();
     result.cells = n_cells;
     result.igniting = n_igniting;
+    const Kokkos::View<double> dt_device("chemistry_benchmark_dt");
     for (const double dt : dts) {
+        Kokkos::deep_copy(dt_device, dt);
         double best = 1e300, mean_steps = 0.0, max_steps = 0.0;
         uint64_t active = 0;
         // Cells per bin of sub-steps (accepted and rejected): 0 (skipped), 1, 2, 3-4, 5-8, ..., more than 2^13
@@ -160,15 +166,17 @@ ChemistryBenchmark run_chemistry_benchmark(const toml::value & input) {
             Kokkos::deep_copy(rhoY, h_rhoY);
             Kokkos::deep_copy(T_seed, h_T);
             Kokkos::deep_copy(chem_cost, 0.0_r);
+            const uint64_t failed = cells.statistics().failures;
             Kokkos::fence();
             const auto start = std::chrono::steady_clock::now();
-            const CellChemistry::Statistics stats = cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt);
+            cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt_device);
             Kokkos::fence();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (stats.failures > 0) throw std::runtime_error("benchmark: the integrator failed in some cells.");
+            const CellChemistry::Statistics stats = cells.statistics();
+            if (stats.failures > failed) throw std::runtime_error("benchmark: the integrator failed in some cells.");
             if (r == 0) continue;
             best = std::min(best, seconds);
-            active = stats.active;
+            active = stats.last_active;
             auto h_cost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), chem_cost);
             double sum = 0.0, largest = 0.0;
             std::fill(histogram.begin(), histogram.end(), 0);

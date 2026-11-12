@@ -1,0 +1,856 @@
+/**
+ * @file input.cpp
+ * @brief Parsing of input files, and the keys no setup code read.
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ */
+
+#include "input.h"
+
+#include "common_io.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <sstream>
+
+// toml11 4.4's skip_comment_block, with the advance its loop over the comment's characters lacks
+// (it never ended on a comment in a malformed array or inline table).
+template <>
+void toml::detail::skip_comment_block<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    while (!loc.eof()) {
+        skip_whitespace(loc, ctx);
+        if (loc.current() == '#') {
+            while (!loc.eof() && loc.current() != '\n') loc.advance();
+            if (!loc.eof()) loc.advance();
+        } else if (!syntax::newline(ctx.toml_spec()).scan(loc).is_ok()) {
+            return;
+        }
+    }
+}
+
+namespace {
+
+constexpr int max_nesting = 64;
+thread_local int nesting = 0;
+thread_local size_t outermost_value = 0;  // where the value of the key = value pair being parsed starts
+
+/** @brief "key" of the line "key = [[..." of this position. */
+std::string key_before(const toml::detail::location & loc, size_t position) {
+    const auto & text = *loc.source();
+    size_t begin = position;
+    while (begin > 0 && text[begin - 1] != '\n') begin--;
+    const std::string line(text.begin() + static_cast<std::ptrdiff_t>(begin),
+                           text.begin() + static_cast<std::ptrdiff_t>(position));
+    const size_t eq = line.find('=');
+    const size_t first = line.find_first_not_of(" \t");
+    if (eq == std::string::npos || first >= eq) return "";
+    return line.substr(first, line.find_last_not_of(" \t", eq - 1) - first + 1);
+}
+
+[[noreturn]] void too_deep(const std::string & key, size_t line) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line;
+    d.message = "tables, arrays and inline tables are nested more than " + std::to_string(max_nesting) + " deep";
+    d.fix = "Close each [ with ] and each { with }; a deeper value needs a flatter layout";
+    d.docs = "docs/guide/input_files.md#anatomy-of-an-input";
+    throw InputError(d);
+}
+
+/**
+ * @brief toml11 4.4's skip_array_like and skip_inline_table_like (error recovery in a malformed
+ *        array or inline table), iterative: each level of the stack is one of their recursive calls.
+ *        A `=` ends the whole skip at the start of its line (toml11 ends only the innermost level,
+ *        and an enclosing level that rescans that line can re-enter the same `[` or `{` without end),
+ *        but not before the skip's own start: parse_array, which detects a skip that made no
+ *        progress, would otherwise parse the same elements again without end.
+ */
+void skip_nested(toml::detail::location & loc, const toml::detail::context<InputConfig> & ctx) {
+    using namespace toml::detail;
+    const auto & spec = ctx.toml_spec();
+    const size_t start = loc.get_location();
+    std::vector<bool> arrays{loc.current() == '['};  // the levels, innermost last: array or inline table
+    loc.advance();
+    while (!arrays.empty() && !loc.eof()) {
+        const auto c = loc.current();
+        const bool array = arrays.back();
+        if (c == '\"' || c == '\'') {
+            skip_string_like(loc, ctx);
+        } else if (c == '#') {
+            skip_comment_block(loc, ctx);
+            if (!array && !spec.v1_1_0_allow_newlines_in_inline_tables) arrays.pop_back();
+        } else if (c == '{') {
+            arrays.push_back(false);
+            loc.advance();
+        } else if (c == '[') {
+            const auto checkpoint = loc;
+            if (syntax::std_table(spec).scan(loc).is_ok() || syntax::array_table(spec).scan(loc).is_ok()) {
+                loc = checkpoint;
+                return;
+            }
+            arrays.push_back(true);
+            loc.advance();
+        } else if (array && c == '=') {
+            while (loc.get_location() > start) {
+                loc.retrace();
+                if (loc.current() == '\n') {
+                    loc.advance();
+                    break;
+                }
+            }
+            return;
+        } else if (array ? c == ']' : c == '}' || (c == '\n' && !spec.v1_1_0_allow_newlines_in_inline_tables)) {
+            arrays.pop_back();
+        } else {
+            loc.advance();
+        }
+    }
+}
+
+} // namespace
+
+template <>
+void toml::detail::skip_array_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    skip_nested(loc, ctx);
+}
+
+template <>
+void toml::detail::skip_inline_table_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    skip_nested(loc, ctx);
+}
+
+// toml11 4.4's parse_value, which parse_array and parse_inline_table call for each element: their
+// recursion has no depth limit, so deep nesting overflowed the stack. Here it ends at max_nesting
+// (check_nesting bounds the tables of dotted keys and [headers], which do not recurse here).
+template <>
+toml::result<toml::basic_value<InputConfig>, toml::error_info>
+toml::detail::parse_value<InputConfig>(location & loc, context<InputConfig> & ctx) {
+    struct Level {
+        Level() { nesting++; }
+        ~Level() { nesting--; }
+    } level;
+    if (nesting == 1) outermost_value = loc.get_location();
+    if (nesting > max_nesting) too_deep(key_before(loc, outermost_value), loc.line_number());
+    const auto type = guess_value_type(loc, ctx);
+    if (type.is_err()) return err(type.unwrap_err());
+    switch (type.unwrap()) {
+    case value_t::boolean: return parse_boolean(loc, ctx);
+    case value_t::integer: return parse_integer(loc, ctx);
+    case value_t::floating: return parse_floating(loc, ctx);
+    case value_t::string: return parse_string(loc, ctx);
+    case value_t::offset_datetime: return parse_offset_datetime(loc, ctx);
+    case value_t::local_datetime: return parse_local_datetime(loc, ctx);
+    case value_t::local_date: return parse_local_date(loc, ctx);
+    case value_t::local_time: return parse_local_time(loc, ctx);
+    case value_t::array: return parse_array(loc, ctx);
+    case value_t::table: return parse_inline_table(loc, ctx);
+    case value_t::empty:
+        if (ctx.toml_spec().ext_null_value) return parse_null(loc, ctx);
+        [[fallthrough]];
+    default:
+        return err(make_error_info("toml::parse_value: unknown value appeared", source_location(region(loc)), "here"));
+    }
+}
+
+namespace {
+
+void forget_lookups(Input & v) {
+    if (v.is_table()) {
+        auto & table = v.as_table();
+        table.forget_lookups();
+        for (auto & entry : table.entries()) forget_lookups(entry.second);
+    } else if (v.is_array()) {
+        for (auto & item : v.as_array()) forget_lookups(item);
+    }
+}
+
+std::string lower(std::string s) {
+    for (char & c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/** @brief Optimal string alignment distance, ignoring case. */
+size_t edit_distance(const std::string & a_in, const std::string & b_in) {
+    const std::string a = lower(a_in), b = lower(b_in);
+    std::vector<std::vector<size_t>> d(a.size() + 1, std::vector<size_t>(b.size() + 1));
+    for (size_t i = 0; i <= a.size(); i++) d[i][0] = i;
+    for (size_t j = 0; j <= b.size(); j++) d[0][j] = j;
+    for (size_t i = 1; i <= a.size(); i++) {
+        for (size_t j = 1; j <= b.size(); j++) {
+            const size_t cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            d[i][j] = std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost});
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                d[i][j] = std::min(d[i][j], d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    return d[a.size()][b.size()];
+}
+
+std::string without_indices(const std::string & path) {
+    std::string out;
+    bool in_index = false;
+    for (char c : path) {
+        if (c == '[') in_index = true;
+        if (!in_index) out += c;
+        if (c == ']') in_index = false;
+    }
+    return out;
+}
+
+std::string join(const std::string & table, const std::string & key) { return table.empty() ? key : table + "." + key; }
+
+/** @brief A key path as the catalog lists it: no array indices, and regions.<name> for every named region. */
+std::string catalog_path(const std::string & path) {
+    std::string out = without_indices(path);
+    const std::string prefix = "regions.";
+    if (out.compare(0, prefix.size(), prefix) != 0) return out;
+    const size_t end = out.find('.', prefix.size());
+    return prefix + "<name>" + (end == std::string::npos ? "" : out.substr(end));
+}
+
+using Lookups = std::multimap<std::string, std::string>;  // key -> path of the table it was looked up in
+
+void collect_lookups(const Input & v, const std::string & path, Lookups & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        for (const auto & key : table.lookups_made().keys) out.emplace(key, path);
+        for (const auto & [key, value] : table.entries()) collect_lookups(value, join(path, key), out);
+    } else if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) collect_lookups(array[i], path + "[" + std::to_string(i) + "]", out);
+    }
+}
+
+std::string suggest(const InputTable<std::string, Input> & table, const std::string & path, const std::string & key,
+                    const Lookups & lookups) {
+    std::string best;
+    size_t best_distance = (key.size() <= 2 ? 0 : std::max<size_t>(1, key.size() / 3)) + 1;
+    for (const auto & candidate : table.lookups_made().keys) {
+        if (table.entries().count(candidate)) continue;
+        const size_t distance = edit_distance(key, candidate);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = join(path, candidate);
+        }
+    }
+    if (!best.empty()) return best;
+    const auto [first, last] = lookups.equal_range(key);
+    for (auto it = first; it != last; ++it) {
+        if (without_indices(it->second) != without_indices(path)) return join(it->second, key);
+    }
+    return "";
+}
+
+void collect_unused(const Input & v, const std::string & path, const Lookups & lookups, std::vector<Diagnostic> & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        const auto & made = table.lookups_made();
+        for (const auto & [key, value] : table.entries()) {
+            if (made.all || made.keys.count(key)) {
+                collect_unused(value, join(path, key), lookups, out);
+            } else {
+                const auto location = value.location();
+                if (!location.is_ok()) continue;  // set by the program (e.g. a numerics preset), not the file
+                Diagnostic d;
+                d.key = join(path, key);
+                d.line = location.first_line_number();
+                d.message = "unknown, or unused with these settings";
+                d.suggestion = suggest(table, path, key, lookups);
+                const std::string section = d.key.substr(0, d.key.find_first_of(".["));
+                d.docs = "docs/input.md" + (section == d.key ? std::string() : "#" + lower(section));
+                out.push_back(std::move(d));
+            }
+        }
+    } else if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) {
+            collect_unused(array[i], path + "[" + std::to_string(i) + "]", lookups, out);
+        }
+    }
+}
+
+std::map<std::string, std::vector<std::string>> & recorded_options() {
+    static std::map<std::string, std::vector<std::string>> options;
+    return options;
+}
+
+std::map<std::string, Dimension> & recorded_dimensions() {
+    static std::map<std::string, Dimension> dimensions;
+    return dimensions;
+}
+
+std::mutex & options_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+std::string json_string(const std::string & s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"' || c == '\\') out += '\\';
+        if (static_cast<unsigned char>(c) < 0x20) continue;
+        out += c;
+    }
+    return out + "\"";
+}
+
+bool table_array(const Input & v) {
+    if (!v.is_array() || v.as_array().empty()) return false;
+    return std::all_of(v.as_array().begin(), v.as_array().end(), [](const Input & item) { return item.is_table(); });
+}
+
+std::vector<std::string> sorted_keys(const Input & table) {
+    std::vector<std::string> keys;
+    for (const auto & entry : table.as_table().entries()) keys.push_back(entry.first);
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+std::string key_text(const std::string & key) {
+    const bool bare = !key.empty() && std::all_of(key.begin(), key.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-';
+    });
+    return bare ? key : input_detail::string_text(key);
+}
+
+/** @brief A value as TOML writes it after `key = `, tables inline, keys sorted. */
+std::string inline_text(const Input & v) {
+    if (v.is_boolean()) return v.as_boolean() ? "true" : "false";
+    if (v.is_integer()) return std::to_string(v.as_integer());
+    if (v.is_floating()) return input_detail::float_text(v.as_floating());
+    if (v.is_string()) return input_detail::string_text(v.as_string());
+    if (v.is_array()) {
+        std::string out;
+        for (const auto & item : v.as_array()) out += (out.empty() ? "" : ", ") + inline_text(item);
+        return "[" + out + "]";
+    }
+    if (v.is_table()) {
+        std::string out;
+        for (const auto & key : sorted_keys(v)) {
+            out += (out.empty() ? "" : ", ") + key_text(key) + " = " + inline_text(v.as_table().entries().at(key));
+        }
+        return out.empty() ? "{}" : "{ " + out + " }";
+    }
+    return toml::format(v);
+}
+
+/** @brief The table's keys under its header: values first, then tables, then arrays of tables. */
+void write_table(const Input & table, const std::string & header, std::string & out) {
+    const auto keys = sorted_keys(table);
+    const auto & entries = table.as_table().entries();
+    for (const auto & key : keys) {
+        const Input & v = entries.at(key);
+        if (!v.is_table() && !table_array(v)) out += key_text(key) + " = " + inline_text(v) + "\n";
+    }
+    for (const auto & key : keys) {
+        const std::string sub = header.empty() ? key_text(key) : header + "." + key_text(key);
+        const Input & v = entries.at(key);
+        if (v.is_table()) {
+            out += "\n[" + sub + "]\n";
+            write_table(v, sub, out);
+        } else if (table_array(v)) {
+            for (const auto & item : v.as_array()) {
+                out += "\n[[" + sub + "]]\n";
+                write_table(item, sub, out);
+            }
+        }
+    }
+}
+
+/** @brief A string with a unit, of a key of this dimension, as the number quantity() reads; else v. */
+Input in_plain_units(const Input & v, const Dimension & dimension) {
+    if (!v.is_string() || dimension.same_as(dim::none) || !has_unit(v.as_string())) return v;
+    try {
+        const Quantity q = parse_quantity(v.as_string());
+        if (q.has_unit && q.dimension.same_as(dimension)) return Input(q.value / dimension.plain);
+    } catch (const UnitError &) {
+    }
+    return v;
+}
+
+struct Resolver {
+    std::map<std::string, std::vector<std::string>> options;
+    std::map<std::string, Dimension> dimensions;
+    std::vector<KeyRecord> keys;
+
+    Input value(const Input & v, const std::string & path, const Dimension & dimension) {
+        if (v.is_table()) return table(v, path);
+        if (!v.is_array()) return in_plain_units(v, dimension);
+        Input::array_type items;
+        const auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) {
+            items.push_back(value(array[i], path + "[" + std::to_string(i) + "]", dimension));
+        }
+        return Input(std::move(items));
+    }
+
+    /** @brief The keys of the table that setup looked up (all, if it iterated it), absent ones at their defaults. */
+    Input table(const Input & v, const std::string & path) {
+        const auto & entries = v.as_table().entries();
+        const auto & made = v.as_table().lookups_made();
+        std::set<std::string> looked_up = made.keys;
+        if (made.all) {
+            for (const auto & entry : entries) looked_up.insert(entry.first);
+        }
+        Input out(Input::table_type{});
+        for (const auto & key : looked_up) {
+            KeyRecord record;
+            record.path = join(path, key);
+            record.by_name = made.keys.count(key) > 0;
+            if (const auto use = made.uses.find(key); use != made.uses.end()) record.use = use->second;
+            const std::string catalog = catalog_path(record.path);
+            const auto d = dimensions.find(catalog);
+            if (d != dimensions.end() && record.use.dimension.same_as(dim::none)) record.use.dimension = d->second;
+            if (const auto o = options.find(catalog); o != options.end()) record.values = o->second;
+            std::optional<Input> resolved;
+            if (const auto entry = entries.find(key); entry != entries.end()) {
+                record.set = true;
+                resolved = value(entry->second, record.path, record.use.dimension);
+                if (!resolved->is_table() && !table_array(*resolved)) record.value = inline_text(*resolved);
+            } else if (!record.use.type.empty() && !record.use.required && !record.use.fallback.empty()) {
+                resolved = parse_input_string("v = " + record.use.fallback).as_table().entries().at("v");
+                record.value = inline_text(*resolved);
+            }
+            keys.push_back(std::move(record));
+            if (resolved) out.as_table().emplace(key, std::move(*resolved));
+        }
+        return out;
+    }
+};
+
+} // namespace
+
+/** @brief The dimension of a real value read under this key path (values read directly, not through find_). */
+static void record_dimension(const std::string & key, const Dimension & dimension) {
+    if (dimension.same_as(dim::none)) return;
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_dimensions()[catalog_path(key)] = dimension;
+}
+
+void record_options(const std::string & key, std::vector<std::string> names) {
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_options()[catalog_path(key)] = std::move(names);
+}
+
+const KeyRecord * ResolvedInput::find(const std::string & path) const {
+    for (const auto & key : keys) {
+        if (key.path == path) return &key;
+    }
+    return nullptr;
+}
+
+ResolvedInput resolve_input(const Input & input) {
+    Resolver r;
+    {
+        std::lock_guard<std::mutex> lock(options_mutex());
+        r.options = recorded_options();
+        r.dimensions = recorded_dimensions();
+    }
+    ResolvedInput resolved;
+    write_table(r.table(input, ""), "", resolved.toml);
+    if (!resolved.toml.empty() && resolved.toml.front() == '\n') resolved.toml.erase(0, 1);
+    resolved.keys = std::move(r.keys);
+    return resolved;
+}
+
+std::string key_catalog(const ResolvedInput & resolved) {
+    struct Entry {
+        KeyUse use;
+        std::vector<std::string> values;
+        bool set = false;
+    };
+    std::map<std::string, Entry> keys;
+    for (const auto & record : resolved.keys) {
+        if (!record.by_name) continue;
+        Entry & entry = keys[catalog_path(record.path)];
+        if (!record.use.type.empty()) entry.use = record.use;
+        if (!record.values.empty()) entry.values = record.values;
+        entry.set = entry.set || record.set;
+    }
+    std::string out = "{\n";
+    bool first = true;
+    for (const auto & [path, entry] : keys) {
+        out += first ? "" : ",\n";
+        first = false;
+        out += "  " + json_string(path) + ": {\"set\": " + (entry.set ? "true" : "false");
+        if (!entry.use.type.empty()) {
+            const Dimension & d = entry.use.dimension;
+            out += ", \"type\": " + json_string(entry.use.type);
+            if (!d.same_as(dim::none)) out += ", \"dimension\": " + json_string(d.describe());
+            if (std::string(d.plain_unit) != "SI") out += ", \"unit\": " + json_string(d.plain_unit);
+            // An optional key without a fallback has a default the run sets (e.g. from the mesh)
+            if (entry.use.required) {
+                out += ", \"required\": true";
+            } else if (!entry.use.fallback.empty()) {
+                out += ", \"default\": " + json_string(entry.use.fallback);
+            }
+        }
+        if (!entry.values.empty()) {
+            out += ", \"values\": [";
+            for (size_t i = 0; i < entry.values.size(); i++) out += (i ? ", " : "") + json_string(entry.values[i]);
+            out += "]";
+        }
+        out += "}";
+    }
+    return out + "\n}\n";
+}
+
+namespace {
+
+/** @brief toml11's syntax error, and what usually causes one. */
+[[noreturn]] void syntax_error(const toml::syntax_error & e) {
+    std::string text = e.what();
+    if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
+    while (!text.empty() && text.back() == '\n') text.pop_back();
+    throw InputError(text + "\nThe input is not valid TOML there. Common causes: text values without quotes "
+                            "(type = \"euler\"), a missing = or closing bracket, or a key set twice. See "
+                            "docs/guide/input_files.md#anatomy-of-an-input.");
+}
+
+/** @brief Rejects values deeper than max_nesting (the root table is depth 0), before anything recurses. */
+void check_nesting(const Input & root) {
+    struct Node {
+        const Input * value;
+        int depth;
+        std::string path;
+    };
+    std::vector<Node> stack{{&root, 0, ""}};
+    while (!stack.empty()) {
+        const Node node = std::move(stack.back());
+        stack.pop_back();
+        if (node.depth > max_nesting) too_deep(without_indices(node.path), line_of(*node.value));
+        if (node.value->is_table()) {
+            for (const auto & [key, value] : node.value->as_table().entries()) {
+                stack.push_back({&value, node.depth + 1, join(node.path, key)});
+            }
+        } else if (node.value->is_array()) {
+            const auto & array = node.value->as_array();
+            for (size_t i = 0; i < array.size(); i++) {
+                stack.push_back({&array[i], node.depth + 1, node.path + "[" + std::to_string(i) + "]"});
+            }
+        }
+    }
+}
+
+} // namespace
+
+Input parse_input(const std::string & filename) {
+    if (!std::ifstream(filename)) throw cannot_read("the input file", filename);
+    Input input;
+    try {
+        input = toml::parse<InputConfig>(filename);
+    } catch (const toml::syntax_error & e) {
+        syntax_error(e);
+    }
+    check_nesting(input);
+    forget_lookups(input);
+    return input;
+}
+
+Input parse_input_string(const std::string & text, const std::string & name) {
+    std::istringstream stream(text);
+    Input input;
+    try {
+        input = toml::parse<InputConfig>(stream, name);
+    } catch (const toml::syntax_error & e) {
+        syntax_error(e);
+    }
+    check_nesting(input);
+    forget_lookups(input);
+    return input;
+}
+
+std::vector<Diagnostic> unused_keys(const Input & input) {
+    Lookups lookups;
+    collect_lookups(input, "", lookups);
+    std::vector<Diagnostic> out;
+    collect_unused(input, "", lookups, out);
+    std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
+    return out;
+}
+
+std::string describe(const Diagnostic & key) {
+    std::string text = key.line > 0 ? "line " + std::to_string(key.line) + ": " : "";
+    text += key.key;
+    if (!key.suggestion.empty()) text += " (did you mean " + key.suggestion + "?)";
+    if (!key.valid.empty()) {
+        text += ": one of";
+        for (const auto & v : key.valid) text += " " + v;
+    }
+    return text;
+}
+
+std::string explain(const Diagnostic & d) {
+    std::string text = d.line > 0 ? "line " + std::to_string(d.line) + ": " : "";
+    text += d.key.empty() ? d.message : d.key + ": " + d.message;
+    if (!d.suggestion.empty() && d.message.find("did you mean") == std::string::npos) {
+        text += " (did you mean " + d.suggestion + "?)";
+    }
+    if (!text.empty() && text.back() != '.') text += ".";
+    if (!d.valid.empty()) {
+        text += " Accepted values:";
+        for (size_t i = 0; i < d.valid.size(); i++) text += (i ? ", " : " ") + d.valid[i];
+        text += ".";
+    }
+    if (!d.expected.empty()) text += " Expected " + d.expected + ".";
+    if (!d.fix.empty()) text += " " + d.fix + (d.fix.back() == '.' ? "" : ".");
+    const std::string docs = d.docs.empty() && !d.key.empty() ? docs_of(d.key) : d.docs;
+    if (!docs.empty()) text += " See " + docs + ".";
+    return text;
+}
+
+std::string docs_of(const std::string & key) {
+    const std::string section = lower(key.substr(0, key.find_first_of(".[ ")));
+    if (section == "reactor" || section == "benchmark") return "docs/input.md#mallard-reactor";
+    return section.empty() ? "docs/input.md" : "docs/input.md#" + section;
+}
+
+std::string with_docs(const std::string & text) {
+    if (text.find("See docs/") != std::string::npos || text.rfind("[error]", 0) == 0) return text;
+    size_t begin = 0;
+    while (begin < text.size() && text[begin] == '[') begin++;
+    size_t end = begin;
+    while (end < text.size() && (std::islower(static_cast<unsigned char>(text[end])) || text[end] == '_')) end++;
+    if (end == begin || end == text.size()) return text;
+    const char next = text[end];
+    const bool key = next == '.' || next == ':' || (begin > 0 && next == ']') || (next == '[' && begin == 0) ||
+                     text.compare(end, 2, " =") == 0;
+    if (!key) return text;
+    std::string out = text;
+    while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) out.pop_back();
+    if (!out.empty() && out.back() != '.') out += ".";
+    return out + " See " + docs_of(text.substr(begin, end - begin)) + ".";
+}
+
+size_t line_of(const Input & v) {
+    const auto location = v.location();
+    return location.is_ok() ? location.first_line_number() : 0;
+}
+
+size_t line_of(const Input & table, const std::string & key) {
+    if (table.is_table() && table.as_table().entries().count(key)) return line_of(table.as_table().entries().at(key));
+    return line_of(table);
+}
+
+std::string suggest_value(const std::string & value, const std::vector<std::string> & names) {
+    std::string best;
+    size_t best_distance = std::max<size_t>(1, value.size() / 3) + 1;
+    for (const auto & name : names) {
+        const size_t distance = edit_distance(value, name);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = name;
+        }
+    }
+    if (!best.empty()) return "\"" + best + "\"";
+    std::vector<std::string> containing;
+    if (value.size() >= 3) {
+        for (const auto & name : names) {
+            if (lower(name).find(lower(value)) != std::string::npos) containing.push_back(name);
+        }
+    }
+    if (containing.empty() || containing.size() > 3) return "";
+    std::string text;
+    for (size_t i = 0; i < containing.size(); i++) {
+        text += (i == 0 ? "" : i + 1 == containing.size() ? " or " : ", ") + ("\"" + containing[i] + "\"");
+    }
+    return text;
+}
+
+InputError missing_key(const Input & table, const std::string & key, const std::string & fix) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line_of(table);
+    const size_t dot = key.rfind('.');
+    const std::string name = dot == std::string::npos ? key : key.substr(dot + 1);
+    d.message = "missing; this key is required here";
+    d.fix = !fix.empty() ? fix
+            : dot == std::string::npos
+                ? "Add " + name + " = ... to the input"
+                : "Add " + name + " = ... to [" + key.substr(0, dot) + "]";
+    return InputError(d);
+}
+
+InputError not_accepted(const Input & table, const std::string & key, const std::string & value,
+                        std::vector<std::string> valid) {
+    Diagnostic d;
+    d.key = key;
+    const size_t dot = key.find_last_of('.');
+    d.line = line_of(table, dot == std::string::npos ? key : key.substr(dot + 1));
+    d.message = "\"" + value + "\" is not accepted";
+    d.suggestion = suggest_value(value, valid);
+    d.valid = std::move(valid);
+    return InputError(d);
+}
+
+namespace input_detail {
+
+namespace {
+
+std::string value_text(const Input & v) {
+    if (v.is_string()) return "\"" + v.as_string() + "\" (a string)";
+    if (v.is_integer()) return std::to_string(v.as_integer()) + " (an integer)";
+    if (v.is_floating()) {
+        std::ostringstream os;
+        os << v.as_floating();
+        return os.str() + " (a float)";
+    }
+    if (v.is_boolean()) return v.as_boolean() ? "true" : "false";
+    if (v.is_array()) return "an array";
+    if (v.is_table()) return "a table";
+    return "a date or time";
+}
+
+bool is_number_text(const std::string & s) {
+    if (s.empty()) return false;
+    char * end = nullptr;
+    std::strtod(s.c_str(), &end);
+    return end && *end == '\0';
+}
+
+} // namespace
+
+std::string float_text(const double x, const bool single) {
+    if (std::isnan(x)) return "nan";
+    if (std::isinf(x)) return x > 0 ? "inf" : "-inf";
+    // Whole numbers below 1e17 without an exponent: 60.0, not 6e+01
+    const int whole = std::fabs(x) >= 1.0 ? static_cast<int>(std::floor(std::log10(std::fabs(x)))) + 1 : 1;
+    std::string text;
+    for (int digits = 1; digits <= 17; digits++) {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "%.*g", whole <= 17 ? std::max(digits, whole) : digits, x);
+        text = buffer;
+        const double back = std::strtod(buffer, nullptr);
+        if (single ? static_cast<float>(back) == static_cast<float>(x) : back == x) break;
+    }
+    if (text.find_first_of(".e") == std::string::npos) text += ".0";
+    return text;
+}
+
+std::string string_text(const std::string & s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        const auto u = static_cast<unsigned char>(c);
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if (u < 0x20 || u == 0x7f) {
+            char buffer[8];
+            std::snprintf(buffer, sizeof(buffer), "\\u%04x", static_cast<unsigned>(u));
+            out += buffer;
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
+}
+
+InputError wrong_type(const Input & v, const std::string & key, const std::string & wanted, int64_t lo, int64_t hi) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line_of(v);
+    const bool integer = wanted.find("integer") != std::string::npos && wanted.find("array") == std::string::npos;
+    if (integer && v.is_integer()) {
+        d.message = std::to_string(v.as_integer()) + " is out of range";
+        d.expected = wanted + (lo == 0 ? " up to " + std::to_string(hi) : " from " + std::to_string(lo) + " to " +
+                                                                           std::to_string(hi));
+        return InputError(d);
+    }
+    d.message = "is " + value_text(v) + ", but must be " + wanted;
+    if (integer && v.is_floating() && v.as_floating() == std::floor(v.as_floating())) {
+        d.fix = "Write it without a decimal point: " + std::to_string(static_cast<long long>(v.as_floating()));
+    } else if ((integer || wanted == "a number") && v.is_string() && is_number_text(v.as_string())) {
+        d.fix = "Remove the quotes: " + v.as_string();
+    } else if (wanted == "true or false" && v.is_string() && (v.as_string() == "true" || v.as_string() == "false")) {
+        d.fix = "Remove the quotes: " + v.as_string();
+    } else if (wanted.rfind("a string", 0) == 0 && !v.is_array() && !v.is_table()) {
+        d.fix = "Put the value in double quotes";
+    } else if (wanted.rfind("an array", 0) == 0 && v.is_table()) {
+        d.fix = "For a list of tables, write each one's header with double brackets: [[" + key + "]]";
+    } else if (wanted.rfind("an array", 0) == 0 && !v.is_array()) {
+        d.fix = "Write it in square brackets, e.g. [a, b]";
+    }
+    return InputError(d);
+}
+
+} // namespace input_detail
+
+namespace {
+
+std::string expected_text(const Dimension & d) {
+    if (d.same_as(dim::none)) return "a number";
+    std::string text = d.describe();
+    const std::string examples = d.examples();
+    if (!examples.empty()) text += ", e.g. in " + examples;
+    return text + "; a number without a unit is in " + d.plain_unit;
+}
+
+[[noreturn]] void value_error(const Input & v, const std::string & key, const Dimension & d, const std::string & message,
+                              const std::string & suggestion = "") {
+    Diagnostic diagnostic;
+    diagnostic.key = key;
+    const auto location = v.location();
+    diagnostic.line = location.is_ok() ? location.first_line_number() : 0;
+    diagnostic.message = message;
+    diagnostic.suggestion = suggestion;
+    diagnostic.expected = expected_text(d);
+    diagnostic.docs = "docs/guide/input_files.md#units";
+    throw InputError(diagnostic);
+}
+
+std::string number_text(const double x) {
+    std::ostringstream text;
+    text << std::setprecision(17) << x;
+    return text.str();
+}
+
+} // namespace
+
+double quantity(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
+    if (v.is_floating()) return v.as_floating();
+    if (v.is_integer()) return static_cast<double>(v.as_integer());
+    if (!v.is_string()) {
+        value_error(v, key, dimension,
+                    dimension.same_as(dim::none) ? "must be a number" : "must be a number, or a string of a number and a unit");
+    }
+    const std::string & text = v.as_string();
+    Quantity q;
+    try {
+        q = parse_quantity(text);
+    } catch (const UnitError & e) {
+        value_error(v, key, dimension, e.what(), e.suggestion);
+    }
+    if (!q.has_unit) return q.value;
+    if (!q.dimension.same_as(dimension)) {
+        const std::string what = q.dimension.same_as(dim::none) ? "is dimensionless"
+                                                                 : "has the dimension of " + q.dimension.describe();
+        value_error(v, key, dimension, "\"" + text + "\" " + what);
+    }
+    if (q.absolute && dimension.interval) {
+        value_error(v, key, dimension,
+                    "\"" + text + "\" is an absolute temperature, but this key is a temperature difference: use K or degR");
+    }
+    return q.value / dimension.plain;
+}
+
+std::string quantity_or_expression(const Input & v, const std::string & key, const Dimension & dimension) {
+    record_dimension(key, dimension);
+    // Numbers as the solver reads them (in its precision), as expressions always have
+    if (!v.is_string()) return number_text(static_cast<double>(as_real(v, key, dimension)));
+    return has_unit(v.as_string()) ? number_text(quantity(v, key, dimension)) : v.as_string();
+}

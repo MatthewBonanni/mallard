@@ -1,0 +1,6 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "2d"
+demonstrates = ["generated wedge mesh", "oblique shock against theory"]
+tutorial = "wedge"
+validation = [{anchor = "oblique-shock", regime = "Mach 1.76 oblique shock, against shock theory"}]

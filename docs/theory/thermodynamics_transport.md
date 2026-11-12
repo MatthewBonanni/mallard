@@ -99,8 +99,8 @@ $$
 so that eq. $\eqref{eq:frozen-surrogates}$ holds exactly at the cell state; $e_0 = 0$ for a
 calorically perfect gas. The sound speed of the fluxes is the frozen one,
 $a = \sqrt{\gamma p/\rho}$. Reconstructed face states carry their own
-$(\gamma, e_0)$ ([chapter 5](finite_volume.md#gas-mixtures)), and the Riemann
-solvers use each side's pair ([chapter 6](fluxes.md#gas-mixtures)).
+$(\gamma, e_0)$ ([chapter 6](finite_volume.md#gas-mixtures)), and the Riemann
+solvers use each side's pair ([chapter 7](fluxes.md#gas-mixtures)).
 
 ## Transport
 
@@ -200,7 +200,7 @@ $$
 $$
 
 There is no Dufour effect, as in Cantera. The face discretization of
-eqs. $\eqref{eq:diffusive-fluxes-1}$-$\eqref{eq:diffusive-fluxes-2}$ is in [chapter 6](fluxes.md#mixture-diffusive-fluxes).
+eqs. $\eqref{eq:diffusive-fluxes-1}$-$\eqref{eq:diffusive-fluxes-2}$ is in [chapter 7](fluxes.md#mixture-diffusive-fluxes).
 
 ### Thermal diffusion (Soret effect)
 
@@ -236,7 +236,7 @@ remains that of the Fickian part.
 ### Time-step diffusivity
 
 Each cell's effective diffusivity for the viscous time-step limit
-([chapter 7](time_integration.md#time-step)) is
+([chapter 8](time_integration.md#time-step)) is
 
 $$
 \begin{equation}
@@ -285,8 +285,8 @@ exact energy conservation (`src/solver/solver_mixture.cpp`,
     Both fluxes estimate their wave speeds with each side's own frozen pair
     (`riemann::SideThermo`), so their mass fluxes agree at a contact for every
     Riemann solver. With the hybrid flux, each of the two is blended with the
-    central flux computed with the same pair ([chapter 6](fluxes.md#hybrid-central-upwind-flux)). The
-    species fluxes use the mean mass flux ([chapter 6](fluxes.md#species-fluxes)).
+    central flux computed with the same pair ([chapter 7](fluxes.md#hybrid-central-upwind-flux)). The
+    species fluxes use the mean mass flux ([chapter 7](fluxes.md#species-fluxes)).
 3. After the step, $\rho E$ of each cell is reset to the true equation of
     state at the pressure the frozen pair gives, keeping $\rho$, $\rho\mathbf{u}$
     and the composition: $T = p/(\rho R)$ and

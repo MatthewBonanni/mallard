@@ -7,7 +7,7 @@ SGS models, the filter width, the global dynamic procedure, the two
 turbulent combustion models (thickened flame and partially stirred
 reactor) and the synthetic turbulence of characteristic inlets. The
 low-dissipation convective flux used with LES is in
-[chapter 6](fluxes.md#hybrid-central-upwind-flux). Usage:
+[chapter 7](fluxes.md#hybrid-central-upwind-flux). Usage:
 [Large-eddy simulation](../guide/les.md); design and validation:
 [LES design notes](../design/les.md).
 
@@ -18,7 +18,7 @@ filter $\widetilde{\phi} = \overline{\rho\phi}/\overline{\rho}$, Mallard
 solves eq. (2) of [chapter 1](governing_equations.md#conservation-laws) for $\overline{\rho}$, $\overline{\rho}\widetilde{\mathbf{u}}$,
 $\overline{\rho}\widetilde{E}$ and $\overline{\rho}\widetilde{Y}_k$, with the
 molecular fluxes evaluated at the filtered state and the unclosed SGS fluxes
-modelled by gradient-diffusion closures:
+modeled by gradient-diffusion closures:
 
 $$
 \begin{equation}
@@ -39,9 +39,10 @@ of the SGS stress, the SGS diffusion of kinetic energy and the
 subgrid parts of the molecular fluxes are neglected, and without a
 combustion model the filtered reaction rates are those of the filtered
 state. Wall faces keep the molecular fluxes only
-([chapter 8](boundaries_sources.md#walls)). The eddy viscosity is
+([chapter 9](boundaries_sources.md#walls)), or take a wall model's
+([chapter 5](wall_models.md)). The eddy viscosity is
 recomputed at every stage from the cell velocity gradients of the viscous
-terms ([chapter 5](finite_volume.md#gradients-for-the-viscous-terms));
+terms ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms));
 filter symbols are dropped in the other chapters.
 
 ## Subgrid-scale models
@@ -115,6 +116,18 @@ the default constants (`[les] model`, `C`) are
     ($\sigma_3 = 0$ exactly for planar gradients). Sigma vanishes for every
     2D flow, so 2D builds reject it and default to WALE.
 
+![The operator of each subgrid-scale model for canonical velocity gradients, and its decay toward a no-slip wall](../images/theory/sgs_models-light.svg#gh-light-mode-only)
+![The operator of each subgrid-scale model for canonical velocity gradients, and its decay toward a no-slip wall](../images/theory/sgs_models-dark.svg#gh-dark-mode-only)
+
+*Left: $\mathcal{D}$ of each model relative to $\lvert\mathbf{g}\rvert = (g_{ij}g_{ij})^{1/2}$,
+for unit gradients; the last row is the mean over 2000 random traceless
+gradients. Only Sigma vanishes in every case without turbulence: pure
+shear, solid rotation, axisymmetric strain and any 2D gradient. Right:
+$\mathcal{D}$ of a velocity field expanded from a no-slip wall in the distance
+$y$; WALE and Sigma decay as $y^3$ like the subgrid stresses, Vreman as $y$
+and Smagorinsky not at all
+(`tools/docs/les_models.py`, from the operators in `src/physics/les.h`).*
+
 ## Filter width
 
 The filter width is the cell size $\Delta_V = \lvert\Omega_i\rvert^{1/d}$
@@ -135,6 +148,113 @@ The extents $h_1 \le h_2 \le h_3$ of an arbitrary cell are
 $h_m = \lvert\Omega_i\rvert/\lambda_m$, with $\lambda_m$ the eigenvalues of
 its projected-area tensor $\tfrac12\sum_f A_f\,\mathbf{n}_f\mathbf{n}_f^T$
 (exact for boxes, equal for regular tetrahedra).
+
+![Scotti's correction factor of the filter width against the two aspect ratios of a cell](../images/theory/filter_width-light.svg#gh-light-mode-only)
+![Scotti's correction factor of the filter width against the two aspect ratios of a cell](../images/theory/filter_width-dark.svg#gh-dark-mode-only)
+
+*The factor $\Delta/\Delta_V$ of eq. $\eqref{eq:filter-width}$ over the aspect
+ratios of a cell. Along both edges, pencils ($h_1 = h_2$) and pancakes
+($h_2 = h_3$), it grows to 1.42 at an aspect ratio of 10 and 3.0 at 100: the
+volume size alone underestimates the filter width of stretched wall cells.*
+
+## Resolution of the reconstructions and the model's gradients
+
+$\Delta_V$ does not depend on the reconstruction, but how far below the grid
+cutoff $k_c = \pi/\Delta_V$ a scheme resolves the flow does, and so does how
+well the model sees the resolved velocity gradient.
+
+**Effective resolution.** For linear advection
+$\partial_t u + a\,\partial_x u = 0$, a scheme turns a wave $e^{ikx}$ into
+$\mathrm{d}\overline{u}/\mathrm{d}t = -\mathrm{i}a\tilde k(k)\,\overline{u}$;
+the modified wavenumber $\tilde k$ equals $k$ for an exact scheme, and
+$-\mathrm{Im}\,\tilde k$ measures the numerical dissipation. After the "1%
+rule" of [Moura, Sherwin & Peiró 2015](../references.md#moura-2015), the
+effective wavenumber $k_\mathrm{eff}$ is where the dissipation reaches 1% per
+cell, and $r = \pi/(k_\mathrm{eff}\Delta_V)$ the ratio of the effective filter
+width to $\Delta_V$:
+
+$$
+\begin{equation}
+-\mathrm{Im}\,\tilde k(k_\mathrm{eff})\,\Delta_V = 0.01, \qquad
+\Delta_\mathrm{eff} = \frac{\pi}{k_\mathrm{eff}} = r\,\Delta_V.
+\label{eq:effective-width}
+\end{equation}
+$$
+
+`tools/docs/effective_resolution.py` measures $\tilde k$ of Mallard's own
+reconstructions with the HLLC flux, from one forward-Euler step of a density
+wave at uniform velocity and pressure, projected onto the wave
+([Pirozzoli 2006](../references.md#pirozzoli-2006)'s approximate dispersion
+relation for the nonlinear schemes):
+
+| Scheme | Quadrilaterals | Hexahedra | Irregular triangles |
+|---|---|---|---|
+| First order | 22.4 | | |
+| MUSCL, no limiter | 5.84 | 5.91 | 4.34 |
+| TENO3, central polynomial | 6.77 | 5.27 | 5.45 |
+| TENO4, central polynomial | 3.68 | 3.69 | |
+| TENO5, central polynomial | 4.32 | 3.31 | 3.83 |
+| TENO6, central polynomial | 2.90 | 2.88 | |
+| TENO5, every cell troubled | 4.36 | 3.34 | 3.83 |
+| TENO5, sector stencils only | 6.78 | 4.63 | |
+
+![Modified wavenumbers of the reconstructions](../images/theory/effective_resolution-light.svg#gh-light-mode-only)
+![Modified wavenumbers of the reconstructions](../images/theory/effective_resolution-dark.svg#gh-dark-mode-only)
+
+TENO5 resolves 1.35 (2D) to 1.8 (3D) times MUSCL's wavenumber. A smaller
+width for TENO (Moura et al.'s argument for DG) lowers the model, and in
+decaying isotropic turbulence that made TENO5 less accurate
+([design notes](../design/les.md#31-order-aware-models-660)): what sets the
+balance is the total spectral eddy viscosity near $k_c$, not the resolution.
+
+**Spectral eddy viscosities.** On a developed field of the Comte-Bellot &
+Corrsin case, the numerical and model parts of the spectral eddy viscosity
+$\nu(k) = -T(k)/(2k^2E(k))$ follow from one right-hand side: $T$ is the
+transfer of resolved energy by Mallard's operator minus that of the exact,
+dealiased nonlinear term of the same band-limited field (numerics), or the
+change of $T$ when the model is switched on (model)
+([Domaradzki, Xiao & Smolarkiewicz 2003](../references.md#domaradzki-2003)).
+In units of $\sqrt{E(k_c)/k_c}$ at $32^3$, with HLLC: the numerical part of
+MUSCL rises to 0.27 at $k_c$ and that of TENO5 to 0.39 (less below
+$0.6\,k_c$), while Sigma at its constant adds only 0.07 to 0.12 everywhere.
+The Chollet-Lesieur target ([Chollet & Lesieur 1981](../references.md#chollet-1981))
+is 0.27 on its plateau and 0.71 at $k_c$, so both schemes with the model
+under-dissipate there, as the spectra show.
+
+**The model's gradient.** The models' velocity gradient is the least-squares
+gradient on the face neighbors, second order: on uniform cells its transfer
+function is $\sin(k h)/(k h)$ per direction, near zero at the cutoff. On the
+same fields, Sigma's mean eddy viscosity from these gradients is 0.30-0.65 of
+its value from the exact gradient of the band-limited field (from 32³ to
+128³; lower with the hybrid flux, which leaves more energy at the cutoff, and
+higher with HLLC). The literature constants were set with such gradients
+in mind: undoing the attenuation over-dissipates on resolved meshes, so
+the constants are left as they are
+([design notes](../design/les.md#31-order-aware-models-660)).
+
+With `gradients = "reconstruction"` (TENO), the models take in each smooth cell
+the gradient of TENO's central polynomial $u_i(\mathbf{x}) = \overline{u}_i +
+\sum_l a_{il}\,\psi_l(\mathbf{x})$ (degree $p - 1$ at order $p$, exact for
+polynomials of that degree) at the centroid,
+
+$$
+\begin{equation}
+\frac{\partial u_i}{\partial x_j}\bigg|_{\mathbf{x}_c} = \frac{a_{ij}}{h},
+\label{eq:polynomial-gradient}
+\end{equation}
+$$
+
+the coefficients of the linear monomials (scaled by $h = V^{1/d}$), which
+the reconstruction computes in the same pass over its stencil; velocity
+gradients follow from those of the conservative variables. Troubled cells
+($\sigma_i \ge \sigma_\mathrm{threshold}$), whose faces may use the sector
+stencils, keep the least-squares gradient. The viscous fluxes keep the
+least-squares gradients. The eddy viscosity enters PaSR's mixing time and the
+thickened flame's efficiency as before, so both follow. In decaying isotropic
+turbulence this helps at $32^3$ and hurts from $48^3$ on, where TENO5 plus
+Sigma at its nominal strength over-dissipates above $0.4\,k_c$: a fixed
+model cannot track what the scheme leaves to it
+([design notes](../design/les.md#31-order-aware-models-660)).
 
 ## Global dynamic procedure
 
@@ -288,7 +408,7 @@ $$
 with $C_u$ = `C_u` (default 28). The Laplacian of the vorticity is the
 divergence of its face gradients, cell gradients averaged to interior faces
 and corrected along the line of centroids as the viscous fluxes are
-([chapter 6](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
+([chapter 7](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
 the efficiency (`efficiency = "none"`) or where $F = 1$ or $u'_\Delta = 0$,
 $\mathcal{E} = 1$. The fields $\Omega$, $F$ and $\mathcal{E}$ are evaluated
 once per time step and held over its stages.
@@ -322,7 +442,7 @@ chemistry substeps.
 
 ## Synthetic inflow turbulence
 
-A characteristic inlet (`nscbc_inlet`) with a `[boundaries.turbulence]`
+A characteristic inlet (`inlet_state` with `nscbc`) with a `[boundaries.turbulence]`
 table imposes a target velocity
 $\mathbf{u}^\mathrm{t} = \overline{\mathbf{u}} + \mathbf{u}'$ per face, whose
 fluctuation comes from the digital filter of
@@ -330,7 +450,7 @@ fluctuation comes from the digital filter of
 Reynolds stress imposed as
 [Lund, Wu & Squires 1998](../references.md#lund-1998) propose
 (`src/boundary/synthetic_inflow.cpp`). How the target enters the flow is in
-[chapter 8](boundaries_sources.md#characteristic-boundaries).
+[chapter 9](boundaries_sources.md#characteristic-boundaries).
 
 1. **Random field.** Independent unit-variance random numbers
     $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary

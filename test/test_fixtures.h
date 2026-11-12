@@ -18,19 +18,43 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "mesh.h"
 #include "boundary.h"
 #include "test_utils.h"
 
-inline toml::value parse_toml(const std::string & str) {
-    return toml::parse_str(str);
+/**
+ * @brief [[periodic]] entries joining the opposite sides of a generated box
+ *        along each direction named in `directions` ("xy", or "[\"x\", \"z\"]").
+ */
+inline std::string periodic_sides(const std::string & directions) {
+    std::string s;
+    for (const char d : directions) {
+        if (d == 'x') s += "[[periodic]]\nzones = [\"left\", \"right\"]\n";
+        if (d == 'y') s += "[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+        if (d == 'z') s += "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    }
+    return s;
+}
+
+inline Input parse_toml(const std::string & str) {
+    return parse_input_string(str);
+}
+
+/** @brief A zone's faces on the device (empty if there is no such zone), from its host list. */
+inline Kokkos::View<uint32_t *> device_zone_faces(const Mesh & mesh, const std::string & name) {
+    for (const FaceZone & zone : mesh.h_face_zones()) {
+        if (zone.get_name() == name) {
+            return Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace::memory_space(), zone.h_faces);
+        }
+    }
+    return Kokkos::View<uint32_t *>("no faces", 0);
 }
 
 inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, uint32_t ny,
                                        rtype Lx = 1.0, rtype Ly = 1.0) {
-    toml::value input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
+    Input input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
                                    "Nx = " + std::to_string(nx) + "\n" +
                                    "Ny = " + std::to_string(ny) + "\n" +
                                    "Lx = " + std::to_string(Lx) + "\n" +
@@ -47,7 +71,7 @@ inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, ui
  */
 inline std::shared_ptr<Mesh> make_mesh_3d(const std::string & type, uint32_t nx, uint32_t ny, uint32_t nz,
                                           rtype Lx = 1.0, rtype Ly = 1.0, rtype Lz = 1.0) {
-    toml::value input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
+    Input input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
                                    "Nx = " + std::to_string(nx) + "\n" +
                                    "Ny = " + std::to_string(ny) + "\n" +
                                    "Nz = " + std::to_string(nz) + "\n" +
@@ -108,13 +132,14 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages_3d(const M
  * @brief Boundary data assigning the same condition to every boundary face.
  */
 inline BoundaryData make_uniform_boundaries(const Mesh & mesh, BoundaryType type,
-                                            rtype gamma = 1.4_r) {
+                                            rtype gamma = 1.4_r, uint8_t options = 0) {
     std::vector<int32_t> face_bc(mesh.n_faces);
     for (uint32_t i_face = 0; i_face < mesh.n_faces; i_face++) {
         face_bc[i_face] = (mesh.h_cells_of_face(i_face, 1) < 0) ? 0 : -1;
     }
     BoundaryCondition bc;
     bc.type = type;
+    bc.options = options;
     return make_boundary_data(mesh, face_bc, {bc}, gamma);
 }
 

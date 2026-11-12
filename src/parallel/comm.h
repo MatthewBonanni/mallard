@@ -16,7 +16,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
+#include <string>
 #include <vector>
 #include <type_traits>
 
@@ -38,14 +40,16 @@ class Session {
         Session(const Session &) = delete;
         Session & operator=(const Session &) = delete;
 
+#ifdef Mallard_HAS_MPI
     private:
-        [[maybe_unused]] bool owns_mpi = false;
+        bool owns_mpi = false;
+#endif
 };
 
-/** @brief Rank of this process in the world communicator. */
+/** @brief Rank of this process in the world communicator; 0 before MPI starts and after it ends. */
 int rank();
 
-/** @brief Number of processes in the world communicator. */
+/** @brief Number of processes in the world communicator; 1 before MPI starts and after it ends. */
 int size();
 
 /** @brief Whether this is rank 0, which does all logging. */
@@ -105,10 +109,51 @@ template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send);
 
 /**
+ * @brief Rank 0's value, on every rank.
+ */
+std::string broadcast(const std::string & value);
+
+/** @brief Every rank's string, in rank order, on every rank (collective). */
+std::vector<std::string> allgather(const std::string & value);
+
+/**
+ * @brief The error of the lowest rank that has one (non-empty), on every rank;
+ *        empty if none has. For checks of rank-local data, so that every rank
+ *        throws and none waits in a later collective.
+ */
+std::string first_error(const std::string & error);
+
+/**
  * @brief Concatenation of every rank's local vector, in rank order.
  */
 template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local);
+
+/**
+ * @brief Concatenation of every rank's local vector, in rank order, on rank 0
+ *        (empty on the others).
+ */
+template <typename T>
+std::vector<T> gatherv(const std::vector<T> & local);
+
+namespace detail {
+
+/** @brief The most values one MPI message holds (its count is an int). */
+inline constexpr uint64_t mpi_max_count = uint64_t(std::numeric_limits<int>::max());
+
+/**
+ * @brief Personalized all-to-all of flat buffers with 64-bit counts and
+ *        offsets (collective): sends send_counts[q] values from
+ *        send + send_offsets[q] to rank q, and receives recv_counts[q] values
+ *        from rank q into recv + recv_offsets[q], in messages of at most
+ *        max_count values each. The spans hold at least size() entries.
+ */
+template <typename T>
+void alltoallv(const T * send, std::span<const uint64_t> send_counts, std::span<const uint64_t> send_offsets,
+               T * recv, std::span<const uint64_t> recv_counts, std::span<const uint64_t> recv_offsets,
+               uint64_t max_count = mpi_max_count);
+
+} // namespace detail
 
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */

@@ -25,7 +25,7 @@ $$
 where the partial densities $\rho Y_k$ are present for mixtures only
 (`[physics] gas = "mixture"`). All $N_s$ species are transported, besides
 $\rho$; the discretization keeps $\sum_k \rho Y_k = \rho$
-([chapter 6](fluxes.md)). The equations are
+([chapter 7](fluxes.md)). The equations are
 
 $$
 \begin{equation}
@@ -54,7 +54,7 @@ release appears as a change of composition at constant $\rho E$ and the
 energy equation has no chemical source. The source $\mathbf{S}$ collects the
 momentum and energy sources $\mathbf{s}_u$, $s_E$ of gravity, mass-flow
 forcing, user expressions, sponge layers and radiation, and the production
-rates $\dot\omega_k$ ([chapter 8](boundaries_sources.md#sources),
+rates $\dot\omega_k$ ([chapter 9](boundaries_sources.md#sources),
 [chapter 3](chemistry_radiation.md)).
 
 With `[physics] type = "euler"` (the default) the viscous flux
@@ -165,6 +165,6 @@ uniform pressure is an exact discrete steady state, because
 $\oint p\,n_r\,r\,\mathrm{d}l = \int_\Omega p\,\mathrm{d}A$ for uniform $p$.
 The cell unknowns are r-weighted averages
 $\overline{\mathbf{U}} = \int_\Omega \mathbf{U}\,r\,\mathrm{d}A \big/ \int_\Omega r\,\mathrm{d}A$;
-the discretization is in [chapter 5](finite_volume.md#axisymmetric-cells) and
+the discretization is in [chapter 6](finite_volume.md#axisymmetric-cells) and
 the design in [Axisymmetric flows](../design/axisymmetric.md). All integral
 outputs (forces, integrals, conserved totals) are per radian.

@@ -1,0 +1,305 @@
+# The features each test runs, for the feature matrix (docs/guide/features.md,
+# made by tools/docs/feature_matrix.py, which CI runs with --check).
+#
+# One table per test file (test/<file>.cpp), one key per test, "Suite.Name" as
+# its TEST macro names it. The value lists the features of the test's run, or a
+# list of runs where the test runs several cases: every pair of features in one
+# run counts as implemented. A test of the verification manual
+# (docs/verification/results.json) must be listed; its studies verify the
+# features common to all its runs and those its method names. Feature ids are
+# those of FEATURES in tools/docs/feature_matrix.py; defaults count (an input
+# without riemann_solver runs HLLC).
+
+[axisymmetric_test]
+"AxisymmetricQuiescent.GasAtUniformPressureStaysAtRest" = ["axisymmetric", "euler", "navier_stokes", "fo", "muscl", "teno3", "teno5", "hllc", "ssprk3", "periodic"]
+"AxisymmetricTest.GasMixtureAtRestStaysAtRest" = ["axisymmetric", "mixture", "euler", "navier_stokes", "muscl", "teno3", "hllc", "ssprk3"]
+"AxisymmetricTest.ConservesMassAxialMomentumAndEnergy" = [
+    ["axisymmetric", "navier_stokes", "teno4", "hllc", "ssprk3"],
+    ["axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3"],
+]
+"AxisymmetricTest.PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis" = ["axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
+"AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder" = [["axisymmetric", "euler", "teno3"], ["axisymmetric", "euler", "teno4"], ["axisymmetric", "euler", "teno5"]]
+
+[chemistry_reactor_test]
+"ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution" = ["chemistry"]
+
+[curved_test]
+"CurvedGeometry.StraightWallsAreSecondOrderAndHighOrderLinesConverge" = ["curved"]
+"CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder" = [["curved", "teno3"], ["curved", "teno4"], ["curved", "teno5"], ["curved", "teno6"]]
+"CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree" = ["curved", "teno5"]
+"CurvedSolver.GasAtRestStaysExactlyAtRest" = ["curved", "euler", "muscl", "teno4", "hllc", "ssprk3"]
+"CurvedSolver.RestartedRunMatchesUninterruptedRunExactly" = ["curved", "euler", "teno4", "hllc", "ssprk3", "restart"]
+
+[curved3d_test]
+"Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder" = ["curved"]
+"Curved3DSolver.GasAtRestStaysExactlyAtRest" = ["curved", "euler", "teno3", "hllc", "ssprk3"]
+
+[io_test]
+"IOTest.AsynchronousOutputWritesTheSameFiles" = [
+    ["euler", "muscl", "hllc", "ssprk3", "restart", "async"],
+    ["euler", "muscl", "hllc", "ssprk3", "restart", "async", "compression"],
+]
+"IOTest.CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError" = ["euler", "muscl", "hllc", "ssprk3", "restart", "async", "compression"]
+"IOTest.ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime" = ["euler", "muscl", "hllc", "ssprk3", "restart"]
+
+[les_test]
+"LESSolver.EddyViscosityUsesTheCellVolumeAsFilterWidth" = ["les", "navier_stokes", "fo", "hllc", "ssprk3"]
+"LESSolver.BudgetSplitsTheKineticEnergyRateOfTheRightHandSide" = [
+    ["les", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+    ["les", "navier_stokes", "teno4", "hllc", "ssprk3", "periodic"],
+]
+"LESSolver.ModelDrainsResolvedKineticEnergy" = ["les", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
+"LESReconstructionGradients.TroubledCellsKeepTheLeastSquaresGradients" = ["les", "navier_stokes", "teno3", "hllc", "ssprk3", "periodic"]
+"LESMixture.SchmidtNumberActsOnCompositionGradientsOnly" = ["les", "navier_stokes", "mixture", "muscl", "hllc", "ssprk3"]
+"HybridFlux.CentralFluxChangesKineticEnergyOnlyByThePressureWork" = ["hybrid", "navier_stokes", "fo", "hllc", "ssprk3", "periodic"]
+"HybridFlux.MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork" = [
+    ["hybrid", "mixture", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+    ["hybrid", "mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"],
+]
+
+[mixture_test]
+"MixtureEquivalence.ConstantCpSingleSpeciesReproducesPerfectGas" = [
+    ["mixture", "euler", "muscl", "hllc", "ssprk3"],
+    ["mixture", "euler", "fo", "rusanov", "ssprk3"],
+    ["mixture", "euler", "muscl", "hll", "ssprk3"],
+    ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"],
+    ["mixture", "euler", "muscl", "roe", "ssprk3"],
+    ["mixture", "euler", "double_flux", "muscl", "rhll", "ssprk3"],
+]
+"MixtureTest.IdenticalSpeciesAdvectWithoutDisturbingTheFlow" = ["mixture", "euler", "muscl", "hllc", "ssprk3", "periodic"]
+"MixtureShockTube.ConvergesToExactSolution" = [
+    ["mixture", "euler", "muscl", "hllc", "ssprk3"],
+    ["mixture", "euler", "teno5", "hllc", "ssprk3"],
+    ["mixture", "euler", "muscl", "roe", "ssprk3"],
+    ["mixture", "euler", "muscl", "rhll", "ssprk3"],
+]
+"MixtureAdvectionOrder.SmoothCompositionWaveConvergesAtDesignOrder" = [
+    ["mixture", "euler", "muscl", "hllc", "ssprk3", "periodic"],
+    ["mixture", "euler", "teno3", "hllc", "ssprk3", "periodic"],
+    ["mixture", "euler", "teno5", "hllc", "ssprk3", "periodic"],
+]
+"MixtureTest.RestartedRunMatchesUninterruptedRunExactly" = [
+    ["mixture", "euler", "muscl", "hllc", "ssprk3", "restart"],
+    ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3", "restart"],
+    ["mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "restart"],
+    ["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3", "restart"],
+    ["mixture", "navier_stokes", "chemistry", "simpler", "muscl", "hllc", "ssprk3", "restart"],
+]
+"MixtureTest.BudgetWithDoubleFluxLeavesTheSolutionUnchanged" = ["mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"]
+"MixtureTest.DoubleFluxKeepsPressureAndVelocityUniformAtContacts" = ["mixture", "euler", "double_flux", "muscl", "teno5", "hllc", "roe", "rhll", "ssprk3"]
+"MixtureTest.DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError" = ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"]
+"MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree" = [
+    ["mixture", "euler", "fo", "roe", "ssprk3"],
+    ["mixture", "euler", "fo", "rhll", "ssprk3"],
+]
+"ReactingTest.UniformMixtureIgnitesLikeTheConstantVolumeReactor" = ["mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "periodic"]
+"ReactingTest.SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves" = [
+    ["mixture", "euler", "chemistry", "fo", "hllc", "ssprk3", "periodic", "restart"],
+    ["mixture", "euler", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic", "restart"],
+]
+"ReactingTest.SimplerSplittingIsSecondOrderInTime" = ["mixture", "euler", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"]
+
+[mpi_test]
+"MPITest.FirstOrderMatchesSerial" = ["mpi", "euler", "fo", "hllc", "ssprk3"]
+"MPITest.MUSCLMatchesSerial" = ["mpi", "euler", "muscl", "hllc", "ssprk3"]
+"MPITest.TENOOnQuadsMatchesSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3"]
+"MPITest.TENOOnTrianglesMatchesSerial" = ["mpi", "euler", "teno4", "hllc", "ssprk3"]
+"MPITest.LowStorageIntegratorsAndErrorControlMatchSerial" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk54"],
+    ["mpi", "euler", "muscl", "hllc", "ck45"],
+    ["mpi", "euler", "muscl", "hllc", "rdpk3sp35", "error_control"],
+]
+"MPITest.GasMixtureMatchesSerialWithAndWithoutStepGraphs" = [
+    ["mpi", "mixture", "euler", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "teno3", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "double_flux", "chemistry", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "muscl", "hllc", "rdpk3sp35", "error_control"],
+]
+"MPITest.ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs" = [
+    ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "les", "muscl", "hllc", "ssprk3"],
+]
+"MPITest.PeriodicRunsMatchSerialAcrossSeamsCutByThePartition" = [
+    ["mpi", "euler", "teno5", "hllc", "ssprk3", "periodic"],
+    ["mpi", "euler", "teno4", "hllc", "ssprk3", "periodic"],
+    ["mpi", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+]
+"MPITest.PeriodicZonePairsOfAGmshMeshMatchSerial" = ["mpi", "euler", "teno4", "hllc", "ssprk3", "periodic"]
+"MPITest.LargeEddySimulationMatchesSerial" = [
+    ["mpi", "navier_stokes", "les", "muscl", "hllc", "ssprk3"],
+    ["mpi", "navier_stokes", "les", "teno3", "hllc", "ssprk3"],
+    ["mpi", "navier_stokes", "mixture", "les", "muscl", "hllc", "ssprk3"],
+    ["mpi", "navier_stokes", "mixture", "les", "teno3", "hllc", "ssprk3"],
+]
+"MPITest.ThickenedFlameMatchesSerial" = [
+    ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "les", "muscl", "hllc", "ssprk3"],
+]
+"MPITest.HybridConvectiveFluxMatchesSerial" = [
+    ["mpi", "euler", "hybrid", "fo", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "hybrid", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "hybrid", "double_flux", "muscl", "hllc", "ssprk3"],
+]
+"MPITest.AxisymmetricRunsMatchSerial" = [
+    ["mpi", "axisymmetric", "navier_stokes", "teno4", "hllc", "ssprk3"],
+    ["mpi", "axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3"],
+]
+"MPITest.RestartFilesDoNotDependOnTheRankCount" = ["mpi", "euler", "muscl", "hllc", "ssprk3", "restart"]
+"MPITest.AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk3", "restart", "async"],
+    ["mpi", "euler", "muscl", "hllc", "ssprk3", "restart", "async", "compression"],
+]
+"MPITest.VTKHDFOutputDoesNotDependOnTheRankCount" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk3", "compression"],
+    ["mpi", "euler", "muscl", "hllc", "ssprk3", "curved"],
+]
+"MPITest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3", "curved"]
+"MPITest.RemapDoesNotDependOnTheRankCount" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"],
+    ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "remap", "restart"],
+]
+
+[mpi3d_test]
+"MPI3DTest.TENOOnHexahedraMatchesSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3"]
+"MPI3DTest.NavierStokesOnTetrahedraMatchesSerial" = ["mpi", "navier_stokes", "muscl", "hllc", "ssprk3"]
+"MPI3DTest.LargeEddySimulationOnTetrahedraMatchesSerial" = [
+    ["mpi", "navier_stokes", "les", "muscl", "hllc", "ssprk3"],
+    ["mpi", "navier_stokes", "les", "teno3", "hllc", "ssprk3"],
+]
+"MPI3DTest.WallModelsMatchSerial" = [
+    ["mpi", "navier_stokes", "wall_model", "muscl", "hllc", "ssprk3", "periodic"],
+    ["mpi", "navier_stokes", "wall_model", "les", "hybrid", "muscl", "hllc", "ssprk3", "periodic"],
+]
+"MPI3DTest.DynamicFlameEfficiencyOnTetrahedraMatchesSerial" = ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"]
+"MPI3DTest.PeriodicZonePairsOfAGmshMeshMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3", "periodic"]
+"MPI3DTest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3", "curved"]
+"MPI3DTest.RemapDoesNotDependOnTheRankCount" = ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"]
+
+[periodic_test]
+"PeriodicBox2D.PreservesUniformFlowAndConservesMassMomentumAndEnergy" = ["euler", "fo", "muscl", "teno5", "hllc", "ssprk3", "periodic"]
+"PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder" = [
+    ["euler", "fo", "hllc", "rk4", "periodic"],
+    ["euler", "muscl", "hllc", "rk4", "periodic"],
+    ["euler", "teno3", "hllc", "rk4", "periodic"],
+    ["euler", "teno4", "hllc", "rk4", "periodic"],
+    ["euler", "teno5", "hllc", "rk4", "periodic"],
+    ["euler", "teno6", "hllc", "rk4", "periodic"],
+]
+"PeriodicInvariance2D.VortexCrossingTheSeamMatchesItsInteriorTranslate" = [
+    ["euler", "teno5", "hllc", "ssprk3", "periodic"],
+    ["navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+]
+
+[periodic3d_test]
+"PeriodicBox3D.PreservesUniformFlowAndConservesMassMomentumAndEnergy" = ["euler", "fo", "muscl", "teno3", "hllc", "ssprk3", "periodic"]
+"PeriodicAdvection3D.SmoothWaveConvergesAtDesignOrder" = [
+    ["euler", "fo", "hllc", "rk4", "periodic"],
+    ["euler", "muscl", "hllc", "rk4", "periodic"],
+    ["euler", "teno3", "hllc", "rk4", "periodic"],
+    ["euler", "teno4", "hllc", "rk4", "periodic"],
+    ["euler", "teno5", "hllc", "rk4", "periodic"],
+    ["euler", "teno6", "hllc", "rk4", "periodic"],
+]
+"PeriodicInvariance3D.PulseCrossingTheSeamMatchesItsInteriorTranslate" = [
+    ["euler", "teno4", "hllc", "ssprk3", "periodic"],
+    ["navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+]
+"PeriodicFile3D.ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms" = ["euler", "teno3", "hllc", "ssprk3", "periodic"]
+
+[preset_validation_test]
+"PresetValidation.SecondOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "muscl", "rhll", "ssprk3"]
+"PresetValidation.FirstOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "fo", "hll", "ssprk3"]
+"PresetValidation.SecondOrderResolvesSodsProblem" = ["euler", "muscl", "rhll", "ssprk3"]
+"PresetValidation.HighOrderConvergesAtHighOrderForSmoothFlow" = ["euler", "teno5", "hllc", "ssprk3"]
+"PresetValidation.LesLeavesTheTaylorGreenDecayToViscosity" = ["navier_stokes", "muscl", "hllc", "hybrid", "ssprk3"]
+"PresetValidation.ReactingPropagatesAPremixedFlameAtCanterasSpeed" = ["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3"]
+
+[remap_test]
+"RemapTest.IntegralsAreConservedToRounding" = ["remap"]
+"RemapTest.SmoothPeriodicFieldsConvergeAtTheDegreePlusOne" = ["remap", "periodic"]
+
+[restart_test]
+"RestartTest.RestartedRunMatchesUninterruptedRunExactly" = ["euler", "muscl", "hllc", "ssprk3", "restart"]
+"RestartTest.ErrorControlledRunRestartsExactly" = ["euler", "muscl", "hllc", "rdpk3sp35", "error_control", "restart"]
+"RestartTest.ReactingRestartedRunMatchesUninterruptedRunExactly" = ["mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "restart"]
+
+[rotational_periodic_test]
+"RotationalSector.MatchesTheFullAnnulus" = [
+    ["euler", "muscl", "hllc", "ssprk3", "periodic", "rotational"],
+    ["navier_stokes", "muscl", "hllc", "ssprk3", "periodic", "rotational"],
+    ["euler", "teno3", "hllc", "ssprk3", "periodic", "rotational"],
+    ["euler", "teno5", "hllc", "ssprk3", "periodic", "rotational"],
+    ["navier_stokes", "teno5", "hllc", "ssprk3", "periodic", "rotational"],
+]
+"MPI_SUITE.RotationalSectorsMatchSerial" = [
+    ["mpi", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic", "rotational"],
+    ["mpi", "navier_stokes", "teno5", "hllc", "ssprk3", "periodic", "rotational"],
+]
+
+[solver_test]
+"FreeStream.UniformFlowIsPreservedExactly" = ["euler", "fo", "muscl", "teno5", "rusanov", "hll", "hllc", "ssprk3"]
+"MeshRecon.ClosedBoxConservesMassMomentumEnergy" = ["euler", "fo", "muscl", "teno5", "hllc", "ssprk3"]
+"SodMesh.TENOConvergesFasterThanMUSCLForSmoothFlow" = [
+    ["euler", "muscl", "hllc", "ssprk3"],
+    ["euler", "teno5", "hllc", "ssprk3"],
+]
+"SolverRegression.BoundPreservingTENOKeepsAMach14NearVacuumPositive" = ["euler", "teno5", "rhll", "ssprk3"]
+"SolverValidation.RotatedHybridRiemannSolverIsCarbuncleFree" = [
+    ["euler", "fo", "roe", "ssprk3"],
+    ["euler", "fo", "rhll", "ssprk3"],
+]
+"SolverTest.ResultIsIndependentOfThreadCount" = ["navier_stokes", "muscl", "hllc", "ssprk3"]
+
+[solver3d_test]
+"FreeStream3D.UniformFlowIsPreservedExactly" = ["euler", "fo", "muscl", "hllc", "roe", "rhll", "ssprk3"]
+"ForcedChannel3D.SteadyProfileConvergesAtSecondOrder" = [
+    ["navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+    ["navier_stokes", "muscl", "hllc", "ssprk3"],
+]
+
+[step_control_test]
+"TimeStepTest.TighterToleranceGivesSmallerTimeError" = ["rdpk3sp35", "error_control"]
+
+[run_control_test]
+"RunControlTest.CheckpointOfAnErrorControlledRunResumesExactly" = ["rdpk3sp35", "error_control", "restart"]
+
+[teno_test]
+"TENOOrder.SmoothReconstructionConvergesAtDesignOrderInInterior" = [["teno3"], ["teno4"], ["teno5"], ["teno6"]]
+"TENOOrder.SmoothReconstructionConvergesAtDesignOrderWithMirroredBoundaries" = [["teno3"], ["teno4"], ["teno5"], ["teno6"]]
+
+[teno3d_test]
+"TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder" = [["teno3"], ["teno4"], ["teno5"], ["teno6"]]
+"TENO3DSolver.AdvectedPulseConvergesAndBeatsMUSCL" = [
+    ["euler", "muscl", "hllc", "ssprk3", "periodic"],
+    ["euler", "teno5", "hllc", "ssprk3", "periodic"],
+]
+
+[tfles_test]
+"ThickenedFlame.ReactionRatesAreDividedByTheThickening" = [
+    ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"],
+    ["les", "navier_stokes", "mixture", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"],
+]
+"ThickenedFlame.EddyViscosityVelocitySetsTheEfficiency" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
+
+[time_integrator_test]
+"TimeIntegratorTest.ForwardEulerIsFirstOrder" = ["fe"]
+"TimeIntegratorTest.SSPRK3IsThirdOrder" = ["ssprk3"]
+"TimeIntegratorTest.RK4IsFourthOrder" = ["rk4"]
+"TimeIntegratorTest.LowStorageMethodsHaveTheirDesignOrder" = [["ssprk54"], ["ck45"], ["rdpk3sp35"]]
+"TimeIntegratorTest.StageTimesGiveDesignOrderForTimeDependentRHS" = [["ssprk3"], ["rk4"], ["ssprk54"], ["ck45"], ["rdpk3sp35"]]
+"TimeIntegratorTest.EmbeddedEstimateIsTheLocalErrorOfTheSecondOrderPair" = ["rdpk3sp35"]
+
+[viscous_test]
+"ViscousMesh.CouetteFlowHasLinearVelocityProfile" = ["navier_stokes", "muscl", "hllc", "ssprk3"]
+"ViscousMesh.StokesFirstProblemMatchesErfcProfile" = ["navier_stokes", "muscl", "hllc", "ssprk3"]
+"ViscousMesh.ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder" = ["navier_stokes", "muscl", "hllc", "ssprk3"]
+
+[wall_model_test]
+"WallModel3D.LaminarCouetteFlowOverAModeledWall" = ["wall_model", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
+"WallModel3D.EachWallTakesItsOwnModel" = ["wall_model", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
+"WallModel3D.RestartIsExact" = ["wall_model", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic", "restart"]

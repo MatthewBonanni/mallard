@@ -19,6 +19,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "exact_sums.h"
 #include "input.h"
 #include "launch_bounds.h"
 #include "mixture_viscous_flux.h"
@@ -43,14 +44,20 @@ struct EddyViscosityFunctor {
     rtype cp;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> velocity;  // the models' own (les.reconstruction_gradients), else empty
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> sgs;
+    Kokkos::View<double *> state;  // [C, ...] (Solver::les_state)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double g[3][3];
-        velocity_gradient([&](int i, int j) { return gradients(c, 1 + i, j); }, g);
-        const rtype mu_t = W(c, 0) * les.nu_t(g, delta(c));
+        if (velocity.is_allocated()) {
+            velocity_gradient([&](int i, int j) { return velocity(c, i, j); }, g);
+        } else {
+            velocity_gradient([&](int i, int j) { return gradients(c, 1 + i, j); }, g);
+        }
+        const rtype mu_t = W(c, 0) * les.nu_t(g, delta(c), static_cast<rtype>(state(0)));
         sgs(c, 0) = mu_t;
         sgs(c, 1) = cp * mu_t / les.Pr_t;
         sgs(c, 2) = 0.0_r;
@@ -70,16 +77,22 @@ struct MixtureEddyViscosityFunctor {
     ScalarView scalars;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> velocity;  // the models' own (les.reconstruction_gradients), else empty
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> coefficients;
     Kokkos::View<rtype *[3]> sgs;
+    Kokkos::View<double *> state;  // [C, ...] (Solver::les_state)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double g[3][3];
-        velocity_gradient([&](int i, int j) { return gradients(c, i, j); }, g);
+        if (velocity.is_allocated()) {
+            velocity_gradient([&](int i, int j) { return velocity(c, i, j); }, g);
+        } else {
+            velocity_gradient([&](int i, int j) { return gradients(c, i, j); }, g);
+        }
         const double rho = static_cast<double>(W(c, 0));
-        const double nu_t = static_cast<double>(les.nu_t(g, delta(c)));
+        const double nu_t = static_cast<double>(les.nu_t(g, delta(c), static_cast<rtype>(state(0))));
         const ScalarMassFractions y{&scalars(c, 0)};
         const double R = gas.thermo.gas_constant(y);
         const double cp = gas.thermo.cp_mass(static_cast<double>(values(c, N_DIM)), y);
@@ -101,6 +114,8 @@ struct KineticEnergyRateFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & sum) const {
@@ -108,7 +123,11 @@ struct KineticEnergyRateFunctor {
         for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
             const uint32_t f = faces_of_cell(k);
             const rtype sign = (cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 1.0_r : -1.0_r;
-            for (uint8_t i = 0; i <= N_DIM; i++) R[i] += sign * face_flux(f, i);
+            rtype F[N_DIM + 1];
+            for (uint8_t i = 0; i <= N_DIM; i++) F[i] = face_flux(f, i);
+            // The flux is in the face's (cell 0's) frame
+            if (sign < 0.0_r && periodic.rotated()) periodic.unrotate(face_shift(f), F + 1);
+            for (uint8_t i = 0; i <= N_DIM; i++) R[i] += sign * F[i];
         }
         rtype u2 = 0.0_r, work = 0.0_r;
         FOR_I_DIM {
@@ -130,6 +149,8 @@ struct PressureWorkFunctor {
     Kokkos::View<rtype *[N_DIM]> face_normals;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & sum) const {
@@ -145,8 +166,12 @@ struct PressureWorkFunctor {
                 FOR_I_DIM work += W(c, 1 + i) * face_flux(f, 1 + i);
                 sum += sign * (work - 0.5_r * u2 * face_flux(f, 0));
             } else {
+                // The normal in cell c's frame
+                rtype n[N_DIM];
+                FOR_I_DIM n[i] = face_normals(f, i);
+                if (!owner && periodic.rotated()) periodic.unrotate(face_shift(f), n);
                 rtype u_n = 0.0_r;
-                FOR_I_DIM u_n += W(c, 1 + i) * face_normals(f, i);
+                FOR_I_DIM u_n += W(c, 1 + i) * n[i];
                 sum -= sign * 0.5_r * (W(c, N_DIM + 1) + W(other, N_DIM + 1)) * u_n;
             }
         }
@@ -182,15 +207,25 @@ struct VorticityGradientFunctor {
     void operator()(const uint32_t c) const {
         rtype q_c[3], g[3][N_DIM] = {};
         for (uint8_t v = 0; v < 3; v++) q_c[v] = vorticity(c, v);
+        const PeriodicMaps & periodic = stencil.faces.periodic;
         for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
             const uint32_t j = stencil.cells_of_cell(k);
             rtype w[N_DIM];
             FOR_I_DIM w[i] = stencil.weights.cells(k, i);
+            rtype q_j[3];
+            for (uint8_t v = 0; v < 3; v++) q_j[v] = vorticity(j, v);
+            if (periodic.rotated()) periodic.rotate(stencil.cells_of_cell_shift(k), q_j);
             for (uint8_t v = 0; v < 3; v++) {
-                const rtype dq = vorticity(j, v) - q_c[v];
+                const rtype dq = q_j[v] - q_c[v];
                 FOR_I_DIM g[v][i] += w[i] * dq;
             }
         }
+        stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+            for (uint8_t v = 0; v < 3; v++) {
+                const rtype dq = vorticity(j, v) - q_c[v];
+                FOR_I_DIM g[v][i] += stencil.weights.images(k, i) * dq;
+            }
+        });
         for (uint8_t v = 0; v < 3; v++) FOR_I_DIM gradients(c, v, i) = g[v][i];
     }
 };
@@ -211,7 +246,7 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> cell_volume;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[3]> vorticity;
     Kokkos::View<rtype *[3][N_DIM]> gradients;
@@ -222,6 +257,7 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *[3]> fields;
     Kokkos::View<rtype *> time_scale;
     Kokkos::View<rtype *[3]> sgs;  // [mu_t, ...]
+    Kokkos::View<double *> state;  // [..., beta] (Solver::les_state)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -231,19 +267,35 @@ struct ThickenedFlameFunctor {
             const uint32_t f = faces_of_cell(k);
             const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
             if (c1 < 0) continue;
-            rtype n[N_DIM], n_vec[N_DIM], d[N_DIM];
+            rtype n[N_DIM], n_vec[N_DIM], x1[N_DIM], d[N_DIM];
             FOR_I_DIM n_vec[i] = normals(f, i);
             unit<N_DIM>(n_vec, n);
-            FOR_I_DIM d[i] = (cell_coords(c1, i) + shifts(face_shift(f), i)) - cell_coords(c0, i);
+            const uint8_t s = face_shift(f);
+            FOR_I_DIM x1[i] = cell_coords(c1, i);
+            periodic.forward(s, x1, d);
+            FOR_I_DIM d[i] = d[i] - cell_coords(c0, i);
             const rtype d_n = dot<N_DIM>(d, n);
             const rtype sign = c0 == static_cast<int32_t>(c) ? 1.0_r : -1.0_r;
+            // Cell 1's vorticity and its gradient in the face's (cell 0's) frame
+            rtype q1[3], g1[3][N_DIM];
+            for (uint8_t v = 0; v < 3; v++) {
+                q1[v] = vorticity(c1, v);
+                FOR_I_DIM g1[v][i] = gradients(c1, v, i);
+            }
+            const bool rotated = periodic.rotated();
+            if (rotated) {
+                periodic.rotate(s, q1);
+                periodic.rotate_gradients(s, g1, 3, 0);
+            }
+            rtype g_n[3];
             for (uint8_t v = 0; v < 3; v++) {
                 rtype g[N_DIM];
-                FOR_I_DIM g[i] = 0.5_r * (gradients(c0, v, i) + gradients(c1, v, i));
-                const rtype dq = vorticity(c1, v) - vorticity(c0, v);
-                const rtype g_n = dot<N_DIM>(g, n) + (dq - dot<N_DIM>(g, d)) / d_n;
-                lap[v] += static_cast<double>(sign * face_area(f) * g_n);
+                FOR_I_DIM g[i] = 0.5_r * (gradients(c0, v, i) + g1[v][i]);
+                const rtype dq = q1[v] - vorticity(c0, v);
+                g_n[v] = dot<N_DIM>(g, n) + (dq - dot<N_DIM>(g, d)) / d_n;
             }
+            if (rotated && sign < 0.0_r) periodic.unrotate(s, g_n);
+            for (uint8_t v = 0; v < 3; v++) lap[v] += static_cast<double>(sign * face_area(f) * g_n[v]);
         }
         const double V = static_cast<double>(cell_volume(c)), D = static_cast<double>(delta(c));
         const double lap_norm = Kokkos::sqrt(lap[0] * lap[0] + lap[1] * lap[1] + lap[2] * lap[2]) / V;
@@ -253,7 +305,7 @@ struct ThickenedFlameFunctor {
         const double omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
         const double F = tf.thickening(D, omega);
         const double nu = static_cast<double>(transport(c, MU)) / rho;
-        const double E = tf.efficiency == ThickenedFlame::Efficiency::DYNAMIC ? tf.dynamic_wrinkling(F)
+        const double E = tf.efficiency == ThickenedFlame::Efficiency::DYNAMIC ? ThickenedFlame::dynamic_wrinkling(F, state(2))
                                                                                : tf.wrinkling(F, u_prime, nu);
         fields(c, 0) = static_cast<rtype>(F);
         fields(c, 1) = static_cast<rtype>(E);
@@ -279,6 +331,10 @@ struct GradientNormFunctor {
             const double dq = static_cast<double>(field(stencil.cells_of_cell(k), in)) - q_c;
             FOR_I_DIM g[i] += static_cast<double>(stencil.weights.cells(k, i)) * dq;
         }
+        stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+            const double dq = static_cast<double>(field(j, in)) - q_c;
+            FOR_I_DIM g[i] += static_cast<double>(stencil.weights.images(k, i)) * dq;
+        });
         double norm2 = 0.0;
         FOR_I_DIM norm2 += g[i] * g[i];
         field(c, out) = static_cast<rtype>(Kokkos::sqrt(norm2));
@@ -457,7 +513,7 @@ struct DynamicProcedureFunctor {
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
     Kokkos::View<uint8_t *> neighbor_shift;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
     Kokkos::View<rtype *> delta;
@@ -472,8 +528,38 @@ struct DynamicProcedureFunctor {
     KOKKOS_INLINE_FUNCTION
     double relative(const uint32_t c, const uint32_t k, const uint32_t end, const uint8_t i) const {
         if (k == end) return 0.0;
+        if (periodic.rotated()) {
+            rtype x[N_DIM], y[N_DIM];
+            for (uint8_t d = 0; d < N_DIM; d++) x[d] = cell_coords(neighbors(k), d);
+            periodic.forward(neighbor_shift(k), x, y);
+            return static_cast<double>(y[i] - cell_coords(c, i));
+        }
         return static_cast<double>(cell_coords(neighbors(k), i) - cell_coords(c, i)) +
-               static_cast<double>(shifts(neighbor_shift(k), i));
+               static_cast<double>(periodic.shifts(neighbor_shift(k), i));
+    }
+
+    /** @brief A = Q A Q^T for the 3 x 3 tensor A, Q the rotation of shift row s in its first N_DIM rows and columns. */
+    KOKKOS_INLINE_FUNCTION
+    void turn(const uint8_t s, double A[3][3]) const {
+        double B[3][3];
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                double sum = 0.0;
+                for (int a = 0; a < 3; a++) {
+                    for (int b = 0; b < 3; b++) sum += Q(s, i, a) * A[a][b] * Q(s, j, b);
+                }
+                B[i][j] = sum;
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) A[i][j] = B[i][j];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    double Q(const uint8_t s, const int i, const int j) const {
+        if (i < N_DIM && j < N_DIM) return static_cast<double>(periodic.rotations(s, i, j));
+        return i == j ? 1.0 : 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -510,13 +596,23 @@ struct DynamicProcedureFunctor {
             packed_gradient(gradients, n, gn);
             FOR_I_DIM {
                 u[i] = static_cast<double>(flow(n, 1 + i));
-                dx[i] = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
-                        (k < end ? static_cast<double>(shifts(neighbor_shift(k), i)) : 0.0);
+                dx[i] = relative(c, k, end, i);
             }
             const double r = static_cast<double>(flow(n, 0));
-            const double q[3][3] = {{model_stresses(n, 0), model_stresses(n, 3), model_stresses(n, 4)},
-                                    {model_stresses(n, 3), model_stresses(n, 1), model_stresses(n, 5)},
-                                    {model_stresses(n, 4), model_stresses(n, 5), model_stresses(n, 2)}};
+            double q[3][3] = {{model_stresses(n, 0), model_stresses(n, 3), model_stresses(n, 4)},
+                              {model_stresses(n, 3), model_stresses(n, 1), model_stresses(n, 5)},
+                              {model_stresses(n, 4), model_stresses(n, 5), model_stresses(n, 2)}};
+            if (k < end && periodic.rotated()) {
+                // The neighbor's velocity and tensors in cell c's frame
+                const uint8_t s = neighbor_shift(k);
+                double v[3] = {u[0], u[1], u[2]};
+                for (int i = 0; i < 3; i++) {
+                    u[i] = 0.0;
+                    for (int j = 0; j < 3; j++) u[i] += Q(s, i, j) * v[j];
+                }
+                turn(s, gn);
+                turn(s, q);
+            }
             w_sum += w;
             rho += w * r;
             for (int i = 0; i < 3; i++) {
@@ -569,46 +665,6 @@ struct DynamicProcedureFunctor {
         terms(c, 1) = mm * V;
     }
 };
-
-/**
- * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
- *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and order.
- */
-template <size_t N>
-std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const uint32_t n_owned, const bool distributed) {
-    std::array<double, N> largest = {};
-    for (size_t k = 0; k < N; k++) {
-        double local = 0.0;
-        Kokkos::parallel_reduce(
-            "dynamic_largest", n_owned,
-            KOKKOS_LAMBDA(const uint32_t c, double & m) { m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k))); },
-            Kokkos::Max<double>(local));
-        largest[k] = local;
-    }
-    if (distributed) largest = comm::allreduce(largest, comm::Op::MAX);
-    const uint64_t n_global =
-        distributed ? comm::allreduce(static_cast<uint64_t>(n_owned), comm::Op::SUM) : static_cast<uint64_t>(n_owned);
-    const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
-    std::array<int64_t, N> sums = {};
-    std::array<double, N> scale = {};
-    for (size_t k = 0; k < N; k++) {
-        if (!(largest[k] > 0.0)) continue;
-        const double s = std::ldexp(1.0, bits) / largest[k];
-        scale[k] = s;
-        int64_t local = 0;
-        Kokkos::parallel_reduce(
-            "dynamic_sum", n_owned,
-            KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
-                sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * s));
-            },
-            Kokkos::Sum<int64_t>(local));
-        sums[k] = local;
-    }
-    if (distributed) sums = comm::allreduce(sums, comm::Op::SUM);
-    std::array<double, N> result = {};
-    for (size_t k = 0; k < N; k++) result[k] = scale[k] > 0.0 ? static_cast<double>(sums[k]) / scale[k] : 0.0;
-    return result;
-}
 
 /**
  * @brief Extents h_1 <= h_2 <= h_3 of a 3D cell: V over the eigenvalues of its projected-area tensor
@@ -682,10 +738,11 @@ void Solver::update_thickened_flame() {
     Kokkos::parallel_for("tfles_fields", mesh->n_owned(),
                          ThickenedFlameFunctor{thickened_flame, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
-                                               mesh->cell_volume, mesh->cell_coords, mesh->shifts, mesh->face_shift,
+                                               mesh->cell_volume, mesh->cell_coords, mesh->periodic_maps(),
+                                               mesh->face_shift,
                                                tfles_vorticity, tfles_gradients, W_cells, transport_values,
                                                cell_transport, les_delta, tfles_fields, chem_time_scale,
-                                               les_coefficients});
+                                               les_coefficients, les_state});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
 }
@@ -695,28 +752,34 @@ void Solver::update_dynamic_efficiency() {
     const uint32_t n_owned = mesh->n_owned();
     const ThickenedFlame tf = thickened_flame;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values;
-    Kokkos::View<rtype *[3]> a = tfles_test[0], b = tfles_test[1];
+    Kokkos::View<rtype *[3]> progress = tfles_test[0], filtered = tfles_test[1];
     Kokkos::parallel_for("tfles_progress", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double T = static_cast<double>(values(c, N_DIM));
-        a(c, 0) = static_cast<rtype>(Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - tf.T_u) / (tf.T_b - tf.T_u))));
+        progress(c, 0) = static_cast<rtype>(Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - tf.T_u) / (tf.T_b - tf.T_u))));
     });
-    Kokkos::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, a, 0, 1});
-    exchange_cell_vectors(a);
+    Kokkos::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 1});
+    exchange_cell_vectors(progress);
     for (uint32_t pass = 0; pass < tfles_test_passes; pass++) {
         Kokkos::parallel_for("tfles_test_filter", n_owned,
-                             TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, a, b});
-        exchange_cell_vectors(b);
-        std::swap(a, b);
+                             TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, progress, filtered});
+        exchange_cell_vectors(filtered);
+        std::swap(progress, filtered);
     }
-    Kokkos::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient, a, 0, 2});
+    Kokkos::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 2});
     Kokkos::parallel_for("tfles_dynamic_terms", n_owned,
-                         DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, a,
+                         DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, progress,
                                                   tfles_test_passes, tfles_dynamic_terms});
-    const auto [resolved, test, log_gamma, scale] = exact_sums(tfles_dynamic_terms, n_owned, is_distributed());
-    // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts reproduce).
-    // A resolved surface below 1e-6 of the thickened volume over Delta_e is round-off in a uniform field: no flame
-    const bool flame = test > 1e-6 * scale && log_gamma > 0.0;
-    thickened_flame.beta = flame ? std::clamp(std::log(resolved / test) / (log_gamma / test), 0.0, 1.0) : 0.0;
+    tfles_dynamic_sums.sum(tfles_dynamic_terms);
+    const Kokkos::View<double *> sums = tfles_dynamic_sums.sums(), state = les_state;
+    Kokkos::parallel_for("tfles_dynamic_beta", 1, KOKKOS_LAMBDA(const int) {
+        const double resolved = sums(0), test = sums(1), log_gamma = sums(2), scale = sums(3);
+        // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts
+        // reproduce). A resolved surface below 1e-6 of the thickened volume over Delta_e is round-off in a
+        // uniform field: no flame
+        const bool flame = test > 1e-6 * scale && log_gamma > 0.0;
+        const double beta = Kokkos::log(resolved / test) / (log_gamma / test);
+        state(2) = flame ? (beta < 0.0 ? 0.0 : (1.0 < beta ? 1.0 : beta)) : 0.0;
+    });
 }
 
 void Solver::init_dynamic_efficiency() {
@@ -727,6 +790,7 @@ void Solver::init_dynamic_efficiency() {
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
+    tfles_dynamic_sums = ExactSums<4>(n_owned, is_distributed(), halo.uses_nccl());
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
     // average over the thickened cells (gamma >= sqrt(2); 4 passes on uniform hexahedra at n_res = 5)
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
@@ -793,16 +857,27 @@ void Solver::update_dynamic_constant() {
                          DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
     Kokkos::parallel_for("dynamic_terms", n_owned,
                          DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
-                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
+                                                 mesh->cells_of_cell_shift, mesh->periodic_maps(), mesh->cell_coords,
                                                  mesh->cell_volume, les_width, flow, g, dynamic_stresses,
                                                  dynamic_terms});
-    const auto [lm, mm] = exact_sums(dynamic_terms, n_owned, is_distributed());
-    // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
-    if (mm > 0.0) {
-        dynamic_ratio = lm / mm;
-        const double c2 = std::max(0.0, dynamic_ratio);
-        les.C = static_cast<rtype>(les.model == SGSModel::VREMAN ? c2 : std::sqrt(c2));
-    }
+    dynamic_sums.sum(dynamic_terms);
+    const Kokkos::View<double *> sums = dynamic_sums.sums(), state = les_state;
+    const bool vreman = les.model == SGSModel::VREMAN;
+    Kokkos::parallel_for("dynamic_constant", 1, KOKKOS_LAMBDA(const int) {
+        // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
+        if (!(sums(1) > 0.0)) return;
+        const double ratio = sums(0) / sums(1);
+        const double c2 = 0.0 < ratio ? ratio : 0.0;
+        state(0) = static_cast<double>(static_cast<rtype>(vreman ? c2 : Kokkos::sqrt(c2)));
+        state(1) = ratio;
+    });
+}
+
+double Solver::les_value(const int k) const {
+    if (!les_state.is_allocated()) return 0.0;
+    double v = 0.0;
+    Kokkos::deep_copy(v, Kokkos::subview(les_state, k));
+    return v;
 }
 
 void Solver::exchange_cell_vectors(const Kokkos::View<rtype *[3]> & v) {
@@ -855,16 +930,33 @@ void Solver::init_les() {
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
+        dynamic_sums = ExactSums<2>(mesh->n_owned(), is_distributed(), halo.uses_nccl());
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
+    les_state = Kokkos::View<double *>("les_state", 3);
+    Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
     h_les_coefficients = Kokkos::create_mirror_view(les_coefficients);
+    if (les.reconstruction_gradients) {
+        if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
+            throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
+                             "central polynomials of a TENO reconstruction, but this run reconstructs with " +
+                             FACE_RECONSTRUCTION_NAMES.at(face_reconstruction->get_type()) +
+                             ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key "
+                             "(docs/guide/les.md).");
+        }
+        reconstruction_gradients.polynomial =
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("les_polynomial_gradients", mesh->n_cells);
+        dynamic_cast<TENO &>(*face_reconstruction).smooth_gradients = reconstruction_gradients.polynomial;
+        if (halo.active()) reconstruction_gradients.halo = State("les_gradients_halo", mesh->n_cells, N_DIM * N_DIM);
+        les_velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("les_velocity_gradients", mesh->n_cells);
+    }
     if (!input.at("les").contains("combustion")) return;
     if (!reacting || !is_viscous()) {
         throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
     }
-    const toml::value & combustion = input.at("les").at("combustion");
-    if (toml::find_or<std::string>(combustion, "model", "") == "pasr") {
+    const Input & combustion = input.at("les").at("combustion");
+    if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
@@ -874,6 +966,7 @@ void Solver::init_les() {
     }
     thickened_flame = ThickenedFlame::from_input(input.at("les").at("combustion"));
     tfles_on = true;
+    Kokkos::deep_copy(Kokkos::subview(les_state, 2), thickened_flame.beta);
     tfles_fields = Kokkos::View<rtype *[3]>("tfles_fields", mesh->n_cells);
     h_tfles_fields = Kokkos::create_mirror_view(tfles_fields);
     chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
@@ -887,15 +980,50 @@ void Solver::init_les() {
 }
 
 void Solver::update_eddy_viscosity(const uint32_t n) {
+    if (les.reconstruction_gradients) update_reconstruction_gradients(n);
     if (is_mixture()) {
         Kokkos::parallel_for("eddy_viscosity", n,
                              MixtureEddyViscosityFunctor{les, mixture, W_cells, cell_scalars, transport_values,
-                                                         transport_gradients, les_width, cell_transport,
-                                                         les_coefficients});
+                                                         transport_gradients, les_velocity_gradients, les_width,
+                                                         cell_transport, les_coefficients, les_state});
     } else {
         Kokkos::parallel_for("eddy_viscosity", n,
-                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients, les_width, les_coefficients});
+                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients,
+                                                  les_velocity_gradients, les_width, les_coefficients, les_state});
     }
+}
+
+void Solver::update_reconstruction_gradients(const uint32_t n) {
+    const uint32_t n_owned = mesh->n_owned();
+    ReconstructionGradients & r = reconstruction_gradients;
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    Kokkos::View<rtype *> sigma = teno.troubled;
+    const rtype threshold = teno.sigma_threshold;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> P = r.polynomial, G = viscous_gradients;
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> T = transport_gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> g = les_velocity_gradients;
+    const bool mixture_gradients = is_mixture();
+    Kokkos::parallel_for("les_reconstruction_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const bool smooth = sigma(c) < threshold;
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+            g(c, i, j) = smooth ? P(c, 1 + i, j) : mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
+        }
+    });
+    if (n <= n_owned) return;
+    if (!halo.active()) {
+        Kokkos::parallel_for("les_gradients_rest", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
+        });
+        return;
+    }
+    SpeciesView packed = r.halo.species;
+    Kokkos::parallel_for("les_gradients_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) packed(c, i * N_DIM + j) = g(c, i, j);
+    });
+    halo.exchange(r.halo);
+    Kokkos::parallel_for("les_gradients_unpack", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = packed(c, i * N_DIM + j);
+    });
 }
 
 void Solver::eddy_viscosity_of_state(const uint32_t n) {
@@ -905,9 +1033,12 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         Kokkos::parallel_for("mixture_transport", mesh->n_cells,
                              MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                      transport_values});
-        Kokkos::parallel_for("mixture_gradients", n,
-                             MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                    bc_transport_values, mixture.n_species, cell_transport});
+        with_rotations(mesh->periodic_maps(), [&](auto rotations) {
+            Kokkos::parallel_for("mixture_gradients", n,
+                                 MixtureGradientFunctor<decltype(rotations)::value>{
+                                     viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                     mixture.n_species, cell_transport});
+        });
     } else {
         const Euler phys = physics;
         StateView U = conservatives;
@@ -920,14 +1051,20 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         });
         Kokkos::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
     }
+    // The right-hand side's reconstruction writes the polynomials' gradients of its stage; here, those of this state
+    if (les.reconstruction_gradients) {
+        face_reconstruction->cell_gradients(W_cells, reconstruction_gradients.polynomial, mesh->n_owned());
+    }
     update_eddy_viscosity(n);
 }
+
 
 rtype Solver::kinetic_energy_rate() const {
     rtype sum = 0.0_r;
     Kokkos::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
                             KineticEnergyRateFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                                     mesh->cells_of_face, face_flux, W_cells},
+                                                     mesh->cells_of_face, face_flux, W_cells, mesh->periodic_maps(),
+                                                     mesh->face_shift},
                             sum);
     return sum;
 }
@@ -936,7 +1073,8 @@ rtype Solver::pressure_work_rate() const {
     rtype sum = 0.0_r;
     Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
                             PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                                mesh->face_normals, face_flux, W_cells},
+                                                mesh->face_normals, face_flux, W_cells, mesh->periodic_maps(),
+                                                mesh->face_shift},
                             sum);
     return sum;
 }
@@ -960,6 +1098,6 @@ KineticEnergyBudget Solver::kinetic_energy_budget() {
         Kokkos::deep_copy(T_seed, seeds);
     }
     const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
-    const std::array<rtype, 4> total = comm::allreduce(local, comm::Op::SUM);
+    const std::array<rtype, 4> total = is_distributed() ? comm::allreduce(local, comm::Op::SUM) : local;
     return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
 }
