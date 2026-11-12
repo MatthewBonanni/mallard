@@ -95,7 +95,7 @@ mallard info medium
   Mallard            v0.9.1-119-g99d3221b5
 == Outcome ============================================================================= ok
   Ended (finished): t_stop = 200 reached, at step 20609, t = 200
-  Last snapshot: ./solut/wake_000004.vtkhdf, step 20609, t = 200
+  Last snapshot: ./solut/wake.vtkhdf, step 20609, t = 200
 
 == Health ============================================================================== ok
   Lowest values over the cells at any progress row so far, with where they occurred:
@@ -135,11 +135,11 @@ mallard info medium
   none
 
 == Output files =================================================================== 2 files
-  file                      kind      times  first t [s]  last t [s]  last step  fields  format
-  forces_cylinder.csv       table     1,030  0.190063414  199.92089   20600      6       CSV
-  solut/wake.vtkhdf  snapshot  5      0            200         20609      3       VTKHDF series index (VTKHDF snapshots)
+  file                 kind      times  first t [s]  last t [s]  last step  fields  format
+  forces_cylinder.csv  table     1,030  0.190063414  199.92089   20600      6       CSV
+  solut/wake.vtkhdf    snapshot  5      0            200         20609      3       VTKHDF
 
-== Files against the run record ======================= 5 recorded as written, size checked
+== Files against the run record ======================= 1 recorded as written, size checked
   Recorded files     all present, as written
 ```
 
@@ -257,18 +257,18 @@ cd fine && mallard post derive solut/wake.vtkhdf --latest --fields Q_CRITERION,E
 
 ```text
 == Derive =================================================================================
-  File               solut/wake.vtkhdf (VTKHDF series index (VTKHDF snapshots))
+  File               solut/wake.vtkhdf (VTKHDF)
   Case               the resolved input in the run block of solut/wake.vtkhdf
   Snapshots          1 of 5, t = 200 s
   Output             derived
 
 == Snapshots ==================================================================== 1 derived
   #  t [s]  step   file
-  0  200    41181  wake_000004.vtkhdf
+  0  200    41181  wake.vtkhdf, index 4
 
-== Written ======================================================================== 1 files
-  file                           kind      times  first t [s]  last t [s]  fields  format
-  derived/derived.vtkhdf  snapshot  1      200          200         3       VTKHDF series index (VTKHDF snapshots)
+== Written ========================================================================= 1 file
+  file                    kind      times  first t [s]  last t [s]  fields  format
+  derived/derived.vtkhdf  snapshot  1      200          200         3       VTKHDF
 ```
 
 The snapshot, `fine/derived/derived.vtkhdf`, opens in ParaView or Python like the run's own;
@@ -289,7 +289,7 @@ done
 
 ```text
 == Average ================================================================================
-  File               solut/wake.vtkhdf (VTKHDF series index (VTKHDF snapshots))
+  File               solut/wake.vtkhdf (VTKHDF)
   Case               the resolved input in the run block of solut/wake.vtkhdf
   Snapshots          3 of 5, t = 100 to 200 s
   Window             50 to 200 s; each snapshot weighs the time since the previous one (the first: since as long before it as the second is after it)
@@ -299,13 +299,12 @@ done
 
 == Snapshots =================================================================== 3 averaged
   #  t [s]  step   weight [s]  file
-  0  100    20595  50          wake_000002.vtkhdf
-  1  150    30888  50          wake_000003.vtkhdf
-  2  200    41181  50          wake_000004.vtkhdf
+  0  100    20595  50          wake.vtkhdf, index 2
+  1  150    30888  50          wake.vtkhdf, index 3
+  2  200    41181  50          wake.vtkhdf, index 4
 
-== Written ======================================================================== 2 files
+== Written ========================================================================= 1 file
   average/average.vtkhdf
-  average/average_041181.vtkhdf
 ```
 
 The snapshots are chosen by the times they record, and each weighs the time since the one before it (the
