@@ -11,7 +11,7 @@ this page by platform, with the support policy.
 When a job runs:
 
 - **every PR**: the gate, the CI run a pull request needs before it merges (`ci.yml`), and every push to `main`;
-- **main**: after every merge (`main` runs one at a time; merges that arrive while it runs are tested together next), and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
+- **main**: on `main` every 3 hours when it has changed since its last full run, and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
 
@@ -22,7 +22,7 @@ same configuration and running every N-th test of each suite run (googletest's s
 
 | Build | Hardware | Tested | What runs | When | Job |
 |---|---|---|---|---|---|
-| OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py | every PR | `ci.yml/openmp` |
+| OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py; the Python package's tests | every PR | `ci.yml/openmp` |
 | OpenMP, single precision, 2D, zlib | x86-64 CPU | Run | Full suite, two copies at once | every PR | `ci.yml/float` |
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
 | Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 2 jobs | every PR | `ci.yml/mpi` |

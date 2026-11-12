@@ -1,0 +1,1 @@
+- Distributed setup no longer fails or corrupts data when the values a rank exchanges or gathers total more than 2^31: MPI collectives take 64-bit totals and send long messages in pieces (#775).
