@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -34,6 +36,10 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--log-format", "", "text|jsonl",
+     "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
+     "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
+     "and the text on stderr. Default: text."},
     KOKKOS,
 };
 
@@ -81,9 +87,12 @@ constexpr Option CHECK_OPTIONS[] = {
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
     {"--view", "", "DIR",
-     "Write the case view to DIR/case.vtkhdf for ParaView: every region the case uses (filled regions as their "
-     "cells with their fractions, surfaces and curves with their normals or tangents and measures) and every "
-     "boundary zone, one block each (builds without HDF5: DIR/case.vtm). Default: none."},
+     "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
+     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
     KOKKOS,
 };
 
@@ -120,6 +129,10 @@ constexpr Option INFO_OPTIONS[] = {
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --mesh-fields does; the stencil fields need the case, from mallard check. "
      "Default: none."},
+    {"--view", "", "DIR",
+     "Mesh files: write the case view of the mesh alone (its cells, boundary and cell zones and periodic "
+     "pairs) to DIR, as mallard check --view does: DIR/case.vtkhdf (DIR/case.vtm without HDF5), "
+     "DIR/case-light.svg and DIR/case-dark.svg. Default: none."},
     {"--quality", "", "PREFIX", "Deprecated: --mesh-fields PREFIX."},
     {"--verify", "", "",
      "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
@@ -256,6 +269,11 @@ constexpr Option AVERAGE_OPTIONS[] = {
      "Also average over these directions, separated by commas (x,z: profiles in y of a channel), weighted by "
      "cell volume, and write a CSV profile, OUTPUT/NAME.csv, instead of a snapshot. Covariances include the "
      "dispersive part, the spatial variation of the time means. Default: none."},
+    {"--conditional", "", "TABLE",
+     "Also the PDF of one or two variables and conditional means and variances of fields on them, as an "
+     "inline TOML table or an array of them, as [[statistics.conditional]] takes them ({on = "
+     "\"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"]}), written to OUTPUT/conditional_<on>.csv unless the table "
+     "gives a file. Without --fields and --products, only these. Default: none."},
     {"--statistics", "", "",
      "Average over --homogeneous directions the [statistics] fields (MEAN_, COV_) that one snapshot of FILE "
      "holds, instead of averaging its states in time."},
@@ -380,7 +398,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
@@ -613,7 +633,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -624,7 +644,7 @@ constexpr Command COMMANDS[] = {
         .name = "info",
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
-        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]\n"
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX] [--view DIR]\n"
                     "mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
@@ -656,6 +676,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info solut/restart_001000.restart --format json\n"
                     "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --mesh-fields wing\n"
+                    "$ mallard info wing.msh --view view   # view/case-light.svg: the zones, labeled\n"
                     "$ mallard info runs/cylinder\n"
                     "$ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html",
         .exit_status = "0  the file was read\n"
@@ -674,11 +695,14 @@ constexpr Command COMMANDS[] = {
         .description =
             "Without an input file, lists every field the [[write_data]], [[probes]] and [statistics] fields "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
-            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
+            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...). Its \"available in\" column says where each one can be had: "
+            "written by [[write_data]], sampled by [[probes]], averaged by [statistics], or derived after the run "
+            "by mallard post derive.\n"
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
             "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
-            "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
+            "LES and statistics, and its dimension, with where each one can be had; then the common fields it "
+            "does not have, with what they need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard list fields\n"
@@ -886,9 +910,11 @@ constexpr Command COMMANDS[] = {
     {
         .name = "post average",
         .group = "Post",
-        .summary = "Means, RMS, Reynolds and Favre covariances over saved snapshots, as [statistics] keeps them",
+        .summary = "Means, RMS, covariances, PDFs and conditional statistics over saved snapshots, as [statistics] "
+                   "keeps them",
         .synopsis = "mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]\n"
                     "mallard post average FILE... --homogeneous DIRS [--region REGION]\n"
+                    "mallard post average FILE... --conditional TABLE\n"
                     "mallard post average FILE --statistics --homogeneous DIRS",
         .description =
             "Sets up the case of a series of restart files or snapshots and averages their states in time, for runs "
@@ -896,7 +922,9 @@ constexpr Command COMMANDS[] = {
             "by its own code, RMS_<a> (the square root of a variance) and with --favre the Favre means and "
             "covariances. Each snapshot weighs the time since the previous one, as a run's samples do, so restart "
             "files at the run's sampling steps, with --t-start at its t_start, give the run's averages bit for bit. "
-            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields).\n"
+            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields), and "
+            "in reacting runs HRR and OMEGA_<species>. --conditional adds the PDFs and conditional statistics of "
+            "[[statistics.conditional]], such as conditional means on the mixture fraction, written as CSV.\n"
             "\n"
             "The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a run writes its "
             "[statistics]. --homogeneous averages them further over directions in which the flow is statistically "
@@ -912,7 +940,9 @@ constexpr Command COMMANDS[] = {
         .examples = "$ mallard post average solut/restart_*.restart --t-start 40\n"
                     "$ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre\n"
                     "$ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
-                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z",
+                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z\n"
+                    "$ mallard post average solut/flame.vtkhdf.series --conditional \\\n"
+                    "      '{on = \"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"], weight = \"mass\"}'",
         .exit_status = "0  the averages were written\n"
                        "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
                        "file is not of its mesh\n"

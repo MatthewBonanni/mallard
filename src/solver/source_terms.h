@@ -26,6 +26,7 @@
 #include "kexpr.h"
 #include "input.h"
 #include "log.h"
+#include "report.h"
 #include "mesh.h"
 #include "state.h"
 
@@ -118,7 +119,7 @@ class SourceTerms {
         bool time_dependent() const { return m_time; }
         /** @brief Whether some expression reads a domain average (a global sum per stage). */
         bool uses_means() const { return m_means; }
-        const logging::Items & summary() const { return m_summary; }
+        const report::Summary & summary() const { return m_summary; }
 
         /**
          * @brief Add the sources to rhs: the flow block integrated over the
@@ -172,7 +173,7 @@ class SourceTerms {
         Kokkos::View<double *> means;
         Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
         ExactSums<N_MEANS + 1> mean_sums;
-        logging::Items m_summary;
+        report::Summary m_summary;
 
 };
 

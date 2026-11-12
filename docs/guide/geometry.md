@@ -18,7 +18,8 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
 | `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it; [regions defined by the solution](#regions-defined-by-the-solution) are placed on each snapshot's state, and their integrals and means averaged in time | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
-| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
+| `[[statistics.conditional]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): cells weighted by their fraction in it | [Statistics](statistics.md#conditional-statistics-and-pdfs-statisticsconditional) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces; a [moving region](#moving-regions) where it is at `t = 0` | [Initialization](initialization.md#regions) |
@@ -414,14 +415,14 @@ the run`, and `"solution": true` in `--json`; the case view leaves them out:
                             docs/guide/input_files.md#e-region-outside
 ```
 
-`mallard check input.toml --view view` also writes `view/case.vtkhdf`, the
-case view: one block per region (filled regions as their cells with
-`fraction`; surfaces, curves and points with `normal` or, for 3D curves,
-`tangent`, and their `area`, `length` or `count`) and per boundary zone. Open
-it in ParaView (5.12 or later) and pick blocks in the Multiblock Inspector;
-builds without HDF5 write `view/case.vtm`. More of the case (conditions,
-probes, injectors) is to join it
-([#546](https://github.com/MatthewBonanni/mallard/issues/546)).
+`mallard check input.toml --view view` also writes the
+[case view](input_files.md#the-case-view): `view/case-light.svg` and
+`view/case-dark.svg`, an image of the mesh, its zones and every region, each
+labeled, and `view/case.vtkhdf`, with one block per region (filled regions as
+their cells with `fraction`; surfaces, curves and points with `normal` or, for
+3D curves, `tangent`, and their `area`, `length` or `count`), per boundary
+zone and for the mesh's cells. Open it in ParaView (5.12 or later) and pick
+blocks in the Multiblock Inspector; builds without HDF5 write `view/case.vtm`.
 
 ### Transforms
 
@@ -805,6 +806,17 @@ import numpy as np
 d = np.genfromtxt("probe_wake.csv", delimiter=",", names=True)  # skips the comment lines
 last = d[d["step"] == d["step"].max()]
 print(last["x"], last["y"], last["P"])
+```
+
+Any probe file, CSV, HDF5 or VTKHDF, reads the same with the
+[Python package](python.md):
+
+```python
+import mallard
+
+f = mallard.open("probe_wake.csv")       # or probe_wake.h5, probe_wake.vtkhdf
+f.times                                   # each output's time
+p = f.read("P")                           # the last output, one value per sample
 ```
 
 `format = "hdf5"` writes one file, its arrays growing by a row per output:

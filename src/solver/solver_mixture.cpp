@@ -25,6 +25,17 @@
 
 namespace {
 
+/** @brief The primitives [u, p, T, h] of cell c from its W, gamma, e0 and T. */
+KOKKOS_INLINE_FUNCTION
+void set_primitives(const Kokkos::View<rtype *[N_PRIMITIVE]> & P, const uint32_t c, const rtype * W, const rtype gamma,
+                    const rtype e0, const rtype T) {
+    FOR_I_DIM P(c, i) = W[1 + i];
+    P(c, N_DIM) = W[N_DIM + 1];
+    P(c, N_DIM + 1) = T;
+    // h = e + p / rho, with e = p / (rho (gamma - 1)) + e0
+    P(c, N_DIM + 2) = W[N_DIM + 1] / W[0] * gamma / (gamma - 1.0_r) + e0;
+}
+
 /** @brief Applies a per-face functor to the entries of a list. */
 template <typename F>
 struct OverFaces {
@@ -46,6 +57,7 @@ struct MixtureCellFunctor {
     Kokkos::View<rtype *> molar_mass;  // empty unless TENO needs it
     Kokkos::View<rtype *[2]> frozen;   // double flux within a step: [gamma, e0] in place of the EOS
     bool update_seed;
+    Kokkos::View<rtype *[N_PRIMITIVE]> primitives;  // also set from the same state, unless empty (never with frozen)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -62,6 +74,7 @@ struct MixtureCellFunctor {
                                                 0.5_r * cons[0] * dot<N_DIM>(W_c + 1, W_c + 1));
         } else {
             gas.cell_state(cons, rhoY_c, T_seed(c), W_c, gamma, e0, T);
+            if (primitives.extent(0) > 0) set_primitives(primitives, c, W_c, gamma, e0, T);
         }
         FOR_I_CONSERVATIVE W(c, i) = W_c[i];
         if (molar_mass.extent(0) > 0) {
@@ -227,11 +240,7 @@ struct MixturePrimitivesFunctor {
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
         gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
-        FOR_I_DIM P(c, i) = W[1 + i];
-        P(c, N_DIM) = W[N_DIM + 1];
-        P(c, N_DIM + 1) = T;
-        // h = e + p / rho, with e = p / (rho (gamma - 1)) + e0
-        P(c, N_DIM + 2) = W[N_DIM + 1] / W[0] * gamma / (gamma - 1.0_r) + e0;
+        set_primitives(P, c, W, gamma, e0, T);
     }
 };
 
@@ -414,7 +423,18 @@ void Solver::mixture_reductions(step_queue::MixtureDiagnostics * out) {
 void Solver::update_cell_states(const State & solution, const bool update_seed) {
     MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars,
                                cell_molar_mass, cells_frozen ? frozen_thermo : Kokkos::View<rtype *[2]>(),
-                               update_seed};
+                               update_seed, {}};
+    Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
+}
+
+void Solver::update_cell_states_and_primitives() {
+    if (cells_frozen) {
+        update_cell_states(state(), false);
+        update_primitives();
+        return;
+    }
+    MixtureCellFunctor functor{mixture, conservatives, species, T_seed, W_cells, cell_scalars, cell_molar_mass,
+                               Kokkos::View<rtype *[2]>(), false, primitives};
     Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
 }
 

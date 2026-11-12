@@ -47,11 +47,13 @@ const char * const PRODUCTS = "U_X*U_X,U_X*U_Y,RHO*U_X,P*MACH";
 
 /**
  * @brief A periodic box with [statistics] from t = 1e-2 every 2 steps, writing restart files and
- *        a VTU snapshot of the averages at those steps; the run of it, in dir.
+ *        a VTU snapshot of the averages at those steps; the run of it, in dir. Its cells are
+ *        numbered along the Hilbert curve, unlike the mesh --statistics reads the snapshot on.
  */
 void run_case(const std::string & dir, bool axisymmetric = false) {
     std::ostringstream s;
-    s << "[run]\nn_steps = 6\ndt = 1.0e-2\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n";
+    s << "[run]\nn_steps = 6\ndt = 1.0e-2\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n"
+      << "cell_order = \"hilbert\"\n";
     if (N_DIM == 3) s << "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
     if (axisymmetric) {

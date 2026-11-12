@@ -69,6 +69,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
+    variant("python", default=True, description="The Python package mallard and the reader library it loads")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
@@ -97,6 +98,9 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("cgns+hdf5", when="+cgns")
     depends_on("cgns~mpi", when="+cgns~mpi")
     depends_on("zlib-api", when="+zlib")
+    extends("python", when="+python")
+    depends_on("python@3.10:", when="+python", type=("build", "run"))
+    depends_on("py-numpy", when="+python", type="run")
 
     conflicts("+openmp", when="+threads", msg="Kokkos builds one parallel host backend")
     conflicts("+cuda", when="+rocm", msg="Kokkos builds one device backend")
@@ -122,6 +126,10 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
                        "fish/vendor_completions.d/mallard.fish"]:
             if not os.path.exists(join_path(self.prefix.share, script)):
                 raise InstallError(f"no shell completion {script}: see the warning of cmake --install")
+        if self.spec.satisfies("+python"):
+            for dim in self.spec.variants["dims"].value:
+                if not find_libraries(f"libmallard{dim}d", self.prefix, shared=True, recursive=True):
+                    raise InstallError(f"no libmallard{dim}d")
 
     def _run_example(self, example, *command):
         share = join_path(self.prefix.share, "mallard")
@@ -139,6 +147,20 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         if not self.spec.satisfies("dims=2"):
             raise SkipTest("Mallard was built without dims=2")
         self._run_example("sod")
+
+    def test_python(self):
+        """Read the Sod example's output with the Python package"""
+        if not self.spec.satisfies("+python dims=2"):
+            raise SkipTest("Mallard was built without +python or dims=2")
+        self._run_example("sod")
+        case = join_path(self.test_suite.stage, "sod", "examples", "sod")
+        script = ("import mallard; f = mallard.open(mallard.run_files('.')[0]); rho = f.read('RHO'); "
+                  "assert f.kind == 'snapshot' and rho.size == f.geometry().n_cells and rho.min() > 0")
+        venv = self.spec["python-venv"].package
+        site = os.pathsep.join([join_path(self.prefix, venv.purelib), os.environ.get("PYTHONPATH", "")])
+        path = os.pathsep.join([self.prefix.bin, os.environ.get("PATH", "")])
+        with working_dir(case):
+            venv.command("-c", script, extra_env={"PYTHONPATH": site, "PATH": path})
 
     def test_reactor(self):
         """Run the hydrogen ignition example with mallard reactor"""
@@ -168,7 +190,11 @@ class CMakeBuilder(cmake.CMakeBuilder):
             self.define("USE_SYSTEM_CGNS", True),
             self.define_from_variant("Mallard_ENABLE_ZLIB", "zlib"),
             self.define("Mallard_ENABLE_TESTS", self.pkg.run_tests),
+            self.define_from_variant("Mallard_ENABLE_PYTHON", "python"),
         ]
+        if spec.satisfies("+python"):
+            site = join_path(self.pkg.prefix, spec["python-venv"].package.purelib)
+            args.append(self.define("Mallard_PYTHON_INSTALL_DIR", site))
         if spec.satisfies("+mpi"):
             args.append(self.define_from_variant("Mallard_GPU_AWARE_MPI", "gpu_aware_mpi"))
             if spec.satisfies("+cuda"):

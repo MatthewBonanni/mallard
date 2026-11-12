@@ -31,6 +31,7 @@
 
 #include "comm.h"
 #include "cut_quadrature.h"
+#include "data_writer.h"
 #include "data_paths.h"
 #include "json.h"
 #include "output_reader.h"
@@ -2045,7 +2046,8 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
     // A disk (sphere) sweeping x at 1e5 over four steps of 1e-6, where the
     // flow barely changes: rho = 1 + 0.5 x averages to its value at the mean
     // center, x = 0.55, a constant to itself, and the extremes are those of
-    // the cells it covered
+    // the cells it covered. The restart file keeps the means of those cells
+    // only, and a run continued from it writes the same averages
     const std::string dir = fresh_dir("region_moving_average");
     const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
                              (N_DIM == 2 ? "[\"0.3 + 1e5 * t\", 0.5]" : "[\"0.3 + 1e5 * t\", 0.5, 0.5]") +
@@ -2055,9 +2057,12 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
                "average = true\ninterval = 4\nreductions = [\"integral\", \"mean\", \"max\"]\n"
                "reductions_file = \"" + dir + "/" + name + ".csv\"\n";
     };
+    const std::string stats = "[statistics]\ninterval = 1\n" + probe("disk");
+    const std::string steps = "n_steps = 4\ndt = 1.0e-6\n";
     Solver solver;
     solver.init(parse_toml(box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n",
-                                    "[statistics]\ninterval = 1\n" + probe("disk"), "n_steps = 4\ndt = 1.0e-6\n")));
+                                    stats + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
+                                    "interval = 2\n", steps)));
     run(solver);
     if (comm::is_root()) {
         const auto rows = read_csv(dir + "/disk.csv");
@@ -2070,6 +2075,39 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
         EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
         EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
         EXPECT_GT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
+    }
+    // The restart at step 2 holds the cells the disk covered at t = 1e-6 and 2e-6, with their means
+    const Mesh & mesh = *solver.get_mesh();
+    const region::MeshRegions automatic(mesh);
+    const region::Region moving = region::read(parse_toml("r = " + disk).at("r"), "r", nullptr, &automatic);
+    std::vector<uint64_t> covered;
+    for (const double t : {1e-6, 2e-6}) {
+        const std::vector<double> f = region::cell_fractions(mesh, moving.at(t));
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            if (f[c] > 0.0) covered.push_back(mesh.n_global_cells > 0 ? mesh.h_global_cell(c) : c);
+        }
+    }
+    if (mesh.n_global_cells > 0) covered = comm::allgatherv(covered);
+    std::sort(covered.begin(), covered.end());
+    covered.erase(std::unique(covered.begin(), covered.end()), covered.end());
+    const RestartData restart = read_restart(dir + "/r_000002.restart");
+    const std::vector<double> * cells = restart.array("PROBE_AVERAGE_disk_CELLS");
+    ASSERT_NE(cells, nullptr);
+    EXPECT_EQ(std::vector<uint64_t>(cells->begin(), cells->end()), covered);
+    EXPECT_LT(covered.size(), mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned());
+    EXPECT_EQ(restart.array("PROBE_AVERAGE_disk_WEIGHTS")->size(), covered.size());
+    EXPECT_EQ(restart.array("PROBE_AVERAGE_disk_QUADRATURE")->size(), 2 * covered.size());
+    comm::barrier();
+    std::string input = box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n", stats, steps);
+    input.replace(input.find("[initialize]\n"), input.find("[numerics]") - input.find("[initialize]\n"),
+                  "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000002.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        const auto both = rows_at(dir + "/disk.csv", 4);
+        ASSERT_EQ(both.size(), 2u);
+        EXPECT_EQ(both[0], both[1]);
     }
     comm::barrier();
 }
@@ -2171,6 +2209,28 @@ TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach)
         const json::Value b = json::parse(output::open(file).sampling);
         EXPECT_EQ(b["measures"]["region"][volume].number, region::measures(copy.at(0.0), false).volume);
     }
+}
+
+TEST(ProbesTest, RegionsOfTheSolutionCoveringNoCellMeasureZero) {
+    // rho > 2 holds in no cell of a uniform flow: at each write the measure and integral are zero,
+    // and the extremes those of no cell
+    const std::string dir = fresh_dir("region_solution_empty");
+    const std::string probes = "[[probes]]\nname = \"dense\"\nregion = {type = \"where\", condition = \"RHO > 2\"}\n"
+                               "fields = [\"RHO\"]\nreductions = [\"integral\", \"max\"]\n"
+                               "reductions_file = \"" + dir + "/dense.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 2\ndt = 1.0e-5\n")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/dense.csv");
+        ASSERT_EQ(rows.size(), 3u);
+        for (const auto & row : rows) {
+            EXPECT_EQ(row.at(N_DIM == 2 ? "area" : "volume"), 0.0);
+            EXPECT_EQ(row.at("integral_RHO"), 0.0);
+            EXPECT_EQ(row.at("max_RHO"), -std::numeric_limits<double>::infinity());
+        }
+    }
+    comm::barrier();
 }
 
 TEST(ProbesTest, CutQuadratureIntegratesPolynomialsOverABallToRoundOff) {
