@@ -9,11 +9,14 @@ name: CI
 #
 # Two tiers. A branch runs the gate: the x86-64 suites of each backend, precision and
 # dimension, GCC 16 and Clang 23, and the CUDA, HIP and SYCL builds when it changes device
-# code. main runs everything after each merge (one run at a time: pushes that arrive while
-# it runs are tested together next): arm64, macOS, every compiler and CUDA version, Spack,
-# the tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs
-# everything on a branch.
+# code. Each merge into main runs the gate again on main; every 3 hours, if main has
+# changed, main runs everything: arm64, macOS, every compiler and CUDA version, Spack, the
+# tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs everything
+# on a branch.
 on:
+  # The full tier every 3 hours on main, if main has changed since its last full run
+  schedule:
+    - cron: '17 */3 * * *'
   push:
     branches: [main]
     paths-ignore:
@@ -48,7 +51,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'full' || 'gate' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -126,7 +129,8 @@ jobs:
       - id: check
         env:
           BEFORE: ${{ github.event.before }}
-          FULL: ${{ github.event_name == 'push' || inputs.full }}
+          FULL: ${{ github.event_name == 'schedule' || inputs.full }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "full=$FULL" >> "$GITHUB_OUTPUT"
           cuda='[
@@ -137,11 +141,17 @@ jobs:
           if [ "$FULL" != true ]; then cuda=$(jq 'map(select(.gate))' <<< "$cuda"); fi
           echo "cuda=$(jq -c . <<< "$cuda")" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
+          elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            base=$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -e schedule -s success -L 1 \
+              --json headSha -q '.[0].headSha // ""')
+            [ -n "$base" ] && git cat-file -e "$base^{commit}" 2> /dev/null || base=HEAD~20
           elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
           else base=$(git merge-base origin/main HEAD); fi
           echo "changed=$(tools/dev/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
           # Documentation alone needs none of the build jobs
-          if git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(git rev-parse "$base")" = "$(git rev-parse HEAD)" ]; then
+            echo code=false >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo code=false >> "$GITHUB_OUTPUT"
@@ -367,6 +377,13 @@ jobs:
         run: |
           python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
           python3 tools/dev/check_output_units.py build/src/mallard
+      - name: Python package
+        if: matrix.backend.name == 'openmp'
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          python3 -m pip install -q --break-system-packages ./tools pytest
+          PATH="$PWD/build/src:$PATH" python3 -m pytest -q test/python
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
@@ -448,14 +465,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python packages
-        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg
+        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg ./tools
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/tutorials/${{ github.sha }}
           restore-keys: ccache/tutorials/
-      # With HDF5, so that the tutorials and templates write the default VTKHDF output
+      # With HDF5, so that the tutorials and templates write the default VTKHDF output, and
+      # the Python package's library, which the post-processing tutorial reads it with
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -468,7 +486,7 @@ jobs:
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
               -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target mallard
+            cmake --build build-$dim -j $(nproc) --target mallard MallardReader
           done
           ccache --show-stats
           if [ "$GITHUB_REF" = refs/heads/main ]; then
@@ -824,7 +842,7 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
             -f description="Jobs: $RESULTS${ONLY:+ (only $ONLY)}" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Job results: $RESULTS"
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] || [ "$GITHUB_EVENT_NAME" = schedule ]; then
             run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             failed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
               --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI result") | "- [\(.name)](\(.html_url))"')
@@ -835,7 +853,7 @@ jobs:
               body=$(printf 'CI fails on main at %s ([run](%s)):\n\n%s\n' "$GITHUB_SHA" "$run" "$failed")
               if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
               else gh issue create -R "$GITHUB_REPOSITORY" --title "CI fails on main" --label ci-main --body "$body"; fi
-            elif [ -n "$open" ]; then
+            elif [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
               gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
             fi
           fi
