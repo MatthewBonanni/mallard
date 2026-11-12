@@ -17,6 +17,7 @@
 #include <array>
 #include <filesystem>
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,39 @@ inline std::filesystem::path example_path(const std::string & file) {
     return std::filesystem::path(source_dir()) / "examples" / file;
 }
 
+inline void collect_strings(const Input & v, std::set<std::string> & out) {
+    if (v.is_string()) {
+        out.insert(v.as_string());
+    } else if (v.is_array()) {
+        for (const auto & e : v.as_array()) collect_strings(e, out);
+    } else if (v.is_table()) {
+        for (const auto & [key, e] : v.as_table().entries()) collect_strings(e, out);
+    }
+}
+
+/** @brief Removes the named regions that only the removed outputs named, which would be unused keys. */
+inline void erase_unreferenced_regions(Input & input) {
+    auto & table = input.as_table().entries();
+    const auto it = table.find("regions");
+    if (it == table.end() || !it->second.is_table()) return;
+    auto & regions = it->second.as_table().entries();
+    std::set<std::string> named;
+    for (const auto & [key, v] : table) {
+        if (key != "regions") collect_strings(v, named);
+    }
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (const auto & [name, v] : regions) {
+            if (!named.count(name)) continue;
+            const size_t before = named.size();
+            collect_strings(v, named);
+            grew = grew || named.size() != before;
+        }
+    }
+    std::erase_if(regions, [&](const auto & r) { return !named.count(r.first); });
+    if (regions.empty()) table.erase(it);
+}
+
 /**
  * @brief The example's input with `[numerics] preset` in place of its scheme
  *        keys (riemann_solver, time_integrator, convective_flux and the
@@ -71,6 +105,7 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
     table["run"] = Input::table_type{{"n_steps", static_cast<Input::integer_type>(n_steps)}};
     table["output"] = Input::table_type{{"check_interval", 1000000}};
     for (const char * key : {"write_data", "probes", "statistics", "forces", "triggers"}) table.erase(key);
+    erase_unreferenced_regions(input);
 
     auto & mesh = input.at("mesh").as_table();
     if (mesh.at("type").as_string() == "file") {
