@@ -17,6 +17,8 @@ import effective_resolution
 import geometry
 import high_order_cost
 import inlets
+import les_models
+import limiters
 import mesh_fields
 import probes
 import python
@@ -43,6 +45,8 @@ def main():
     teno.figures()
     effective_resolution.figures()
     high_order_cost.figures()
+    limiters.figures()
+    les_models.figures()
     geometry.figures(args.mallard, args.mallard3d)
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
