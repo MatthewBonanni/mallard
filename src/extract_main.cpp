@@ -648,9 +648,9 @@ int post_extract(const cli::Args & args) {
     } catch (const UsageError & e) {
         return comm::is_root() ? cli::usage_error(*cli::command("post extract"), e.what()) : 2;
     } catch (const InputError & e) {
-        if (comm::is_root()) std::cerr << NAME << ": the case's input: " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": the case's input: " + e.what());
     } catch (const std::exception & e) {
-        if (comm::is_root()) std::cerr << NAME << ": " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": " + e.what());
     }
     return 1;
 }

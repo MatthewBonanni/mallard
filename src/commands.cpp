@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -34,6 +36,10 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--log-format", "", "text|jsonl",
+     "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
+     "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
+     "and the text on stderr. Default: text."},
     KOKKOS,
 };
 
@@ -289,7 +295,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 

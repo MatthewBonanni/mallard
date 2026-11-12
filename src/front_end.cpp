@@ -29,6 +29,8 @@
 #include "mesh/mesh_block.h"
 #include "mesh/mesh_file.h"
 #include "output_reader.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace fs = std::filesystem;
 
@@ -153,7 +155,7 @@ int exec(const fs::path & program, std::vector<std::string> & args) {
     std::string path = program.string();
     std::vector<char *> argv = c_args(path, args);
     execv(path.c_str(), argv.data());
-    std::cerr << "mallard: cannot run " << path << ": " << std::strerror(errno) << "\n";
+    logging::error(diagnostic_code::EXECUTABLE, "mallard: cannot run " + path + ": " + std::strerror(errno));
     return 1;
 }
 
@@ -166,11 +168,13 @@ int run_tests(const fs::path & bin, int dim, std::vector<std::string> & args) {
         if (!suite.empty()) suites.push_back(suite);
     }
     if (suites.empty()) {
-        std::cerr << "mallard test: no "
-                  << (dim ? "mallard-test" + std::to_string(dim) + "d" : "mallard-test2d or mallard-test3d") << " in "
-                  << bin.string() << " or " << (bin.parent_path() / "test").string() << ".\n"
-                  << "Build it with -DMallard_ENABLE_TESTS=ON" << (dim ? " -DMallard_DIM=" + std::to_string(dim) : "")
-                  << " and install it with -DMallard_INSTALL_TESTS=ON (both the default).\n";
+        logging::error(diagnostic_code::EXECUTABLE,
+                       "mallard test: no " +
+                           (dim ? "mallard-test" + std::to_string(dim) + "d" : "mallard-test2d or mallard-test3d") +
+                           " in " + bin.string() + " or " + (bin.parent_path() / "test").string() +
+                           ".\nBuild it with -DMallard_ENABLE_TESTS=ON" +
+                           (dim ? " -DMallard_DIM=" + std::to_string(dim) : "") +
+                           " and install it with -DMallard_INSTALL_TESTS=ON (both the default).");
         return 1;
     }
     if (suites.size() == 1) return exec(suites[0], args);
@@ -182,7 +186,7 @@ int run_tests(const fs::path & bin, int dim, std::vector<std::string> & args) {
         const pid_t pid = fork();
         if (pid == 0) {
             execv(path.c_str(), argv.data());
-            std::cerr << "mallard test: cannot run " << path << ": " << std::strerror(errno) << "\n";
+            logging::error(diagnostic_code::EXECUTABLE, "mallard test: cannot run " + path + ": " + std::strerror(errno));
             _exit(127);
         }
         int wstatus = 0;
@@ -371,7 +375,7 @@ int main(int argc, char ** argv) {
         if (args[i] != "--dim") continue;
         const std::string value = i + 1 < args.size() ? args[i + 1] : "";
         if (value != "2" && value != "3") {
-            std::cerr << "mallard: --dim takes 2 or 3 (see mallard --help)\n";
+            logging::error(diagnostic_code::USAGE, "mallard: --dim takes 2 or 3 (see mallard --help)");
             return 2;
         }
         dim = value[0] - '0';
@@ -390,7 +394,7 @@ int main(int argc, char ** argv) {
     const fs::path bin = executable_path().parent_path();
     const std::vector<int> installed = solvers();
     if (installed.empty()) {
-        std::cerr << "mallard: neither mallard2d nor mallard3d is in " << bin.string() << ".\n";
+        logging::error(diagnostic_code::EXECUTABLE, "mallard: neither mallard2d nor mallard3d is in " + bin.string() + ".");
         return 1;
     }
     const bool stated = dim != 0;
@@ -400,16 +404,21 @@ int main(int argc, char ** argv) {
     if (!stated && command && command->dim == cli::Case::output && !fs::exists(solver(bin, dim))) dim = 0;
     if (dim == 0) {
         if (!need.dimension_free && !need.dimension.unreadable && installed.size() > 1) {
-            std::cerr << "mallard: cannot tell whether " << need.what << " is 2D or 3D: " << need.dimension.why
-                      << "\nState it with --dim 2 or --dim 3, e.g. mallard --dim 3 -i input.toml.\n";
+            logging::error(diagnostic_code::DIMENSION, "mallard: cannot tell whether " + need.what + " is 2D or 3D: " +
+                                                           need.dimension.why +
+                                                           "\nState it with --dim 2 or --dim 3, e.g. mallard --dim 3 "
+                                                           "-i input.toml.");
             return 1;
         }
         dim = installed[0];
     }
     if (!fs::exists(solver(bin, dim))) {
-        std::cerr << "mallard: " << (stated ? "--dim " + std::to_string(dim) : need.what + " is " + std::to_string(dim) + "D and")
-                  << " needs mallard" << dim << "d, which is not in " << bin.string() << ".\nBuild it with -DMallard_DIM="
-                  << dim << " and install it to the same prefix as mallard" << installed[0] << "d (cmake --install).\n";
+        const std::string d = std::to_string(dim);
+        logging::error(diagnostic_code::EXECUTABLE,
+                       "mallard: " + (stated ? "--dim " + d : need.what + " is " + d + "D and") + " needs mallard" + d +
+                           "d, which is not in " + bin.string() + ".\nBuild it with -DMallard_DIM=" + d +
+                           " and install it to the same prefix as mallard" + std::to_string(installed[0]) +
+                           "d (cmake --install).");
         return 1;
     }
     return exec(solver(bin, dim), args);
