@@ -2244,6 +2244,7 @@ int Solver::run_loop() {
                 Kokkos::Timer output_timer;
                 write_staged_monitors(record);
                 write_staged_probes(record);
+                update_convergence();
                 t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();
                 if (record.progress) {

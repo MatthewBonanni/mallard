@@ -1,0 +1,1 @@
+- `[statistics.convergence]` samples the rows that `[integrals]`, `[[forces]]` and `[[probes]]` write from the step queue's records, and triggers on `convergence_<column>` values are evaluated on the device, which stops for the host only at the rows of the convergence's signals; the batch means of `[statistics] batch` are sampled on the device (#831).

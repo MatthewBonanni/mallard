@@ -453,6 +453,19 @@ TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("means", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, BatchMeansAreSampledWithoutStoppingTheDevice) {
+    // Batches of the means close on the device; the restart carries their averages and clock
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    expect_queue_invariant("batch_means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n";
+    EXPECT_EQ(run_case("batch_means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     Case c;
     c.run = "n_steps = 20\ncfl = 0.5\n";
@@ -538,6 +551,24 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     for (std::string line; std::getline(in, line);) rows += !line.empty() && std::isdigit(static_cast<unsigned char>(line[0]));
     for (uint64_t s = 0; s <= 60; s++) expected += s % 2 == 0 || s % 3 == 0 || s % 5 == 0;
     EXPECT_EQ(rows, expected);
+}
+
+TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
+    // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
+    // evaluates a trigger on them between those rows, where the host updates them
+    Case c;
+    c.run = "n_steps = 80\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+              "batches = 4\nfile = \"{dir}/convergence.csv\"\n"
+              "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence_triggers", c);
+    EXPECT_LT(o.step, 80u);
+    EXPECT_EQ(o.step % 3, 0u);
 }
 
 TEST(StepQueueTest, OutputsByTimeAndTStop) {

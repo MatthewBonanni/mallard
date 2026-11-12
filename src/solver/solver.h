@@ -395,6 +395,11 @@ class Solver {
         void act_on_triggers();
         /** @brief Whether the step graph evaluates the triggers: none reads the wall time or a probe's value. */
         bool triggers_on_device() const;
+        /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
+        bool convergence_on_device() const;
+        /** @brief Where the queue stops for those rows: the monitors' steps, and whether probe k is left to the host. */
+        void convergence_due_limits(step_queue::Horizon & h) const;
+        bool convergence_reads_probe(size_t k) const;
         /** @brief In the step graph: the triggers' variables and states at the step; stops the device before one fires. */
         void evaluate_triggers();
         /** @brief The device's trigger states into the host's, after the queue drained. */

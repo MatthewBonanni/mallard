@@ -1968,6 +1968,16 @@ std::vector<uint64_t> Probes::value_steps() const {
     return steps;
 }
 
+std::vector<size_t> Probes::value_probes() const {
+    std::vector<size_t> from;
+    for (size_t k = 0; k < probes.size(); k++) {
+        const Probe & p = *probes[k];
+        if (p.snapshot) continue;
+        from.insert(from.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0), k);
+    }
+    return from;
+}
+
 bool Probes::wrote_values(uint64_t step) const {
     return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
         return !p->snapshot && p->step_last_value == step;
