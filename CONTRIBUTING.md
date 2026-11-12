@@ -176,7 +176,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
-  x86-64. Each job also shows on the PR as its own status, `CI / <job>`.
+  x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
+  suites are split across several jobs (`CI / mpi-3d-1of4`, ...), each running a share of
+  the tests, so a test must not depend on another having run in the same process, and a
+  test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
 - **`main` runs everything after each merge**: every supported compiler on x86-64 and
   arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and case
@@ -184,6 +187,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   tested together next. A failure opens an issue labeled `ci-main`, fixed before anything
   else lands; the next passing run closes it. `-f full=true` runs all of it on a branch,
   for a change that targets one of those platforms.
+- **Trains**: maintainers land several ready PRs on one run by merging their heads onto
+  `main` in a `train/*` branch and running the gate there; `train.yml`, dispatched on
+  `main` with that run and the heads, checks that the run passed and contains each head,
+  then sets `CI` on them.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;

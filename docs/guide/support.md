@@ -15,6 +15,9 @@ When a job runs:
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
 
+A job *split across* N jobs runs as `<job>-1of<N>` to `<job>-<N>of<N>`, each building the
+same configuration and running every N-th test of each suite run (googletest's sharding).
+
 ## Builds
 
 | Build | Hardware | Tested | What runs | When | Job |
@@ -22,14 +25,14 @@ When a job runs:
 | OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py; the Python package's tests | every PR | `ci.yml/openmp` |
 | OpenMP, single precision, 2D, zlib | x86-64 CPU | Run | Full suite, two copies at once | every PR | `ci.yml/float` |
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
-| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3 | every PR | `ci.yml/mpi` |
-| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks | every PR | `ci.yml/mpi-3d` |
+| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 2 jobs | every PR | `ci.yml/mpi` |
+| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 4 jobs | every PR | `ci.yml/mpi-3d` |
 | Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | main | `ci.yml/tutorials` |
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
 | OpenMP, 2D, GCC 16 (Docker's `gcc:16.2.0`, Debian 13), CMake 4.2.3 | x86-64 CPU | Run | Full suite (2 threads) | every PR | `ci.yml/gcc-16` |
 | Serial, single precision, 2D, HDF5, Clang 22 (Ubuntu's) | x86-64 CPU | Run | Full suite | main | `ci.yml/clang-22` |
-| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite | every PR | `ci.yml/clang-23` |
+| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite, split across 2 jobs | every PR | `ci.yml/clang-23` |
 | OpenMP, 2D, HDF5, CGNS, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite (2 threads) | main | `ci.yml/gcc-15-arm64` |
 | Serial, MPI, 2D, dKaMinPar, HDF5, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks | main | `ci.yml/mpi-arm64` |
 | OpenMP, single precision, 3D, HDF5, CGNS, GCC 16 (Docker's `gcc:16.2.0`), CMake 4.2.3 | arm64 CPU | Run | Full suite (2 threads) | main | `ci.yml/gcc-16-arm64` |
