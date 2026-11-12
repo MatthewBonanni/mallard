@@ -22,6 +22,7 @@
 #include "comm.h"
 #include "commands.h"
 #include "derived_catalog.h"
+#include "diagnostic_code.h"
 #include "field_units.h"
 #include "input.h"
 #include "json.h"
@@ -68,7 +69,7 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
 }
 
 int report_errors(const CaseFields & c) {
-    for (const auto & e : c.errors) std::cerr << "mallard list: " << e << "\n";
+    for (const auto & e : c.errors) logging::error(diagnostic_code::LIST, "mallard list: " + e);
     return 1;
 }
 
@@ -275,10 +276,7 @@ int list_species_main(const cli::Args & args) {
 
 int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
-namespace {
-
-/** @brief The key catalog of every example and tutorial, as tools/dev/input_catalog.py merges it. */
-json::Value general_catalog() {
+json::Value general_key_catalog() {
     for (const std::filesystem::path & dir : data_dirs()) {
         std::ifstream in(dir / "docs" / "input-keys.json");
         if (!in) continue;
@@ -289,6 +287,8 @@ json::Value general_catalog() {
     throw std::runtime_error("the key catalog docs/input-keys.json is in none of Mallard's data directories (set "
                              "MALLARD_DATA_DIR to the source tree, or to the install tree's share/mallard)");
 }
+
+namespace {
 
 std::string section_of(const std::string & key) { return key.substr(0, key.find('.')); }
 
@@ -370,9 +370,9 @@ int list_keys_main(const cli::Args & args) {
     json::Value catalog;
     if (input_file.empty()) {
         try {
-            catalog = general_catalog();
+            catalog = general_key_catalog();
         } catch (const std::exception & e) {
-            std::cerr << "mallard list keys: " << e.what() << "\n";
+            logging::error(diagnostic_code::LIST, std::string("mallard list keys: ") + e.what());
             return 1;
         }
     } else {
