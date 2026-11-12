@@ -166,6 +166,18 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - Pull requests are squash-merged: the PR title becomes the commit subject on
   `main`, so make it descriptive. Intermediate commits on the branch need not be
   tidy; push new commits rather than rewriting history once a review has started.
+- Pull requests open at the same time edit the same docs, so write them to merge
+  without conflicts:
+  - in the README and the docs, one item per line (a bullet or a table row): a new
+    item is a line of its own, not more text on another item's line;
+  - where the order of a list carries no meaning (the README's command-line tools,
+    the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
+    items in their place, so that additions of different pull requests land on
+    different lines;
+  - in a merge, generated text is regenerated, not merged by hand: the "Used in"
+    lines (`python tools/docs/used_in.py`), the feature matrix
+    (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
+    (`python tools/dev/input_catalog.py build ...`).
 - **Before asking for CI**, run `tools/dev/precheck.sh`: in a few seconds and without a
   build, it checks that the branch merges into `main` and runs CI's checks that need no
   build (spelling, docs, feature matrix, changelog) on the merge.
@@ -196,6 +208,11 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;
   any other name fails the run). The `CI` status records the subset. A resolution in build files,
   shared headers or anything the whole suite exercises needs the full run.
+- **Only the tests a change can affect**: `-f gtest_filter=<pattern>` runs only those tests
+  in the backend jobs (`-*` for none), which still build and run their other checks in full.
+  Each push to `main` maps every test to the files it depends on (`coverage.yml`,
+  `tools/dev/test_coverage.py`), and each backend job uploads its results as JUnit XML
+  (`junit-<job>`), so the tooling that dispatches CI can pick the filter.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also

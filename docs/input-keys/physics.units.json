@@ -1,0 +1,47 @@
+{
+ "default": "\"SI\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_retau180/input.toml",
+  "examples/channel_wmles/lm2000.toml",
+  "examples/channel_wmles/lm5200.toml",
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/double_mach/input.toml",
+  "examples/explosion_3d/input.toml",
+  "examples/isotropic_turbulence/input.toml",
+  "examples/noh_axisymmetric/input.toml",
+  "examples/poiseuille_pipe/input.toml",
+  "examples/pulsed_jet/input.toml",
+  "examples/riemann_2d/input.toml",
+  "examples/riemann_2d_quads/coarse.toml",
+  "examples/riemann_2d_quads/input.toml",
+  "examples/riemann_2d_quads/remap.toml",
+  "examples/rotational_sector/annulus.toml",
+  "examples/rotational_sector/sector.toml",
+  "examples/sedov_3d/input.toml",
+  "examples/sedov_axisymmetric/input.toml",
+  "examples/shock_bubble_2d/input.toml",
+  "examples/shu_osher/input.toml",
+  "examples/sod/input.toml",
+  "examples/source_regions/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/taylor_green_3d/remap.toml",
+  "examples/turbulent_hot_spot_2d/input.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/viscous_shock_tube/input.toml",
+  "tutorials/cluster/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "SI",
+  "nondimensional"
+ ]
+}
