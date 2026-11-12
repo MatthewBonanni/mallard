@@ -15,7 +15,13 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct) and 8 more.
+*Used in:*
+[`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge),
+[`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3),
+[`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid),
+[`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
+[`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct)
+and 8 more.
 
 ## Expressions
 
@@ -33,7 +39,13 @@ p = """\
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 18 more.
+*Used in:*
+[`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod),
+[`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher),
+[`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
+and 18 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -91,7 +103,10 @@ region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
+*Used in:*
+[`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d),
+[`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
+[`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
 composition inside a region, and leaves the rest to the state below it. The
@@ -167,7 +182,9 @@ interpolation = "cubic"
 at = ["hypot(x - 0.6, y)"]   # the distance from the bubble's center
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
+*Used in:*
+[`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d),
+[`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.data]]` entry reads a CSV file (a header of column names,
 then rows of numbers; lines starting with `#` are comments) and gives every
@@ -320,7 +337,13 @@ format = "restart"
 interval = 10000
 ```
 
-*Used in:* [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 13 more.
+*Used in:*
+[`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
+[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
+and 13 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot
@@ -405,7 +428,9 @@ Nx = 100
 Ny = 100
 ```
 
-*Used in:* [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d).
+*Used in:*
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d).
 
 `type = "remap"` starts from a restart file written on a **different mesh**: a
 finer one (grid convergence, spinning up an LES from a coarse run), another
