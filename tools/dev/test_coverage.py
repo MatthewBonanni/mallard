@@ -5,7 +5,7 @@ depends on, so CI can rerun only the tests a change can affect.
     python3 tools/dev/test_coverage.py run --build BUILD --dim 2 --out map2d.json
         [--unit test|suite] [--jobs N] [--launcher "mpirun -n 1"] [--ranks N --rank-pattern PAT]
         [--llvm-cov llvm-cov] [--llvm-profdata llvm-profdata]
-    python3 tools/dev/test_coverage.py merge --out test-coverage.json map2d.json map3d.json
+    python3 tools/dev/test_coverage.py merge --out test-coverage.json.gz map2d.json map3d.json
 
 `run` needs a build with Clang's source-based coverage (-fprofile-instr-generate
 -fcoverage-mapping). It runs each test (or each suite) in its own process, with every
@@ -17,17 +17,23 @@ line. A test then depends on:
 - the data files that a file it executes names (`"test/data/meshes"`, `"examples" / file`):
   a path named in a string, or joined from strings with `/`, as a file or a directory;
 - the files of RULES["global"] (the build system, the CI workflow, the submodules).
+It also records the functions each test executes, as (file, first line, last line) spans of
+the instrumented functions (the function records of `llvm-cov export`), so a change inside
+a function body reruns only the tests that executed that function.
 With --ranks, the tests matching --rank-pattern also run on that many ranks, and the
 files of both runs count.
 
-The gate (outside this repository) reads the merged map: a changed file decides the tests
-that rerun when the map can answer for it, and the whole suite otherwise: a file no test
-depends on that is neither in RULES["none"] nor built only in the other dimension, a new
-file, or a test source that differs from the map's (its tests may have changed).
+The gate (outside this repository) reads the merged map (gzip JSON). A change confined to
+function bodies reruns the tests that executed those functions; any other change to a file
+(declarations, types, constants, macros, a function's signature or first line) reruns the
+tests that depend on the file. A file no test depends on that is neither in RULES["none"]
+nor built only in the other dimension, a new file, or a test source that differs from the
+map's (its tests may have changed) needs the whole suite.
 """
 import argparse
 import concurrent.futures
 import fnmatch
+import gzip
 import json
 import os
 import re
@@ -151,8 +157,19 @@ def list_tests(launcher, binary):
     return tests
 
 
+def repo_path(path, src_real, tracked):
+    full = os.path.realpath(path)
+    rel = os.path.relpath(full, src_real) if full.startswith(src_real + os.sep) else None
+    return rel if rel in tracked and not rel.startswith("src/external/") else None
+
+
+def coverage_args(args, prof):
+    return [f"-instr-profile={prof}", args.binary] + [x for o in args.objects for x in ("-object", o)]
+
+
 def executed(args, unit, launchers, tmp, src_real, tracked):
-    """The repository files the unit's processes executed, and whether all its runs passed."""
+    """The repository files and functions ((file, name)) the unit's processes executed, and whether
+    all its runs passed."""
     d = tempfile.mkdtemp(dir=tmp)
     env = dict(os.environ, LLVM_PROFILE_FILE=os.path.join(d, "%p.profraw"))
     ok = True
@@ -163,22 +180,46 @@ def executed(args, unit, launchers, tmp, src_real, tracked):
             print(f"{unit} failed ({r.returncode}):\n{(r.stdout + r.stderr)[-600:]}", flush=True)
             ok = False
     raws = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".profraw")]
-    files = set()
+    files, functions = set(), set()
     if raws:
         prof = os.path.join(d, "merged.profdata")
         subprocess.run(args.llvm_profdata + ["merge", "-sparse", "-o", prof] + raws, check=True,
                        stdout=subprocess.DEVNULL)
-        out = subprocess.run(args.llvm_cov + ["export", "-summary-only", f"-instr-profile={prof}", args.binary]
-                             + [x for o in args.objects for x in ("-object", o)],
-                             capture_output=True, text=True, check=True).stdout
-        for entry in json.loads(out)["data"][0]["files"]:
-            if entry["summary"]["lines"]["covered"] > 0:
-                full = os.path.realpath(entry["filename"])
-                rel = os.path.relpath(full, src_real) if full.startswith(src_real + os.sep) else None
-                if rel in tracked and not rel.startswith("src/external/"):
-                    files.add(rel)
+        spans = os.path.join(tmp, "spans.profdata")
+        if not os.path.exists(spans):
+            shutil.copy(prof, spans + f".{os.getpid()}.{unit.__hash__()}")
+            os.replace(spans + f".{os.getpid()}.{unit.__hash__()}", spans)
+        out = subprocess.run(args.llvm_cov + ["export", "-format=lcov", "-skip-expansions"] + coverage_args(args, prof),
+                             capture_output=True, text=True, check=True, errors="replace").stdout
+        rel = None
+        for line in out.splitlines():
+            if line.startswith("SF:"):
+                rel = repo_path(line[3:], src_real, tracked)
+            elif rel is None:
+                continue
+            elif line.startswith("FNDA:"):
+                count, name = line[5:].split(",", 1)
+                if int(count) > 0:
+                    functions.add((rel, name))
+            elif line.startswith("LH:") and int(line[3:]) > 0:
+                files.add(rel)
     shutil.rmtree(d, ignore_errors=True)
-    return files, ok
+    return files, functions, ok
+
+
+def function_spans(args, prof, src_real, tracked):
+    """{(file, name): (first line, last line)} of every instrumented function of the build."""
+    out = subprocess.run(args.llvm_cov + ["export", "-skip-expansions"] + coverage_args(args, prof),
+                         capture_output=True, text=True, check=True, errors="replace").stdout
+    spans = {}
+    for fn in json.loads(out)["data"][0]["functions"]:
+        rel = repo_path(fn["filenames"][0], src_real, tracked)
+        lines = [(r[0], r[2]) for r in fn["regions"] if r[5] == 0]
+        if rel and lines:
+            span = (min(a for a, _ in lines), max(b for _, b in lines))
+            old = spans.get((rel, fn["name"]))
+            spans[(rel, fn["name"])] = span if old is None else (min(old[0], span[0]), max(old[1], span[1]))
+    return spans
 
 
 def cmd_run(args):
@@ -213,12 +254,13 @@ def cmd_run(args):
             results[unit] = res
             if i % 50 == 0 or i == len(units):
                 print(f"{i}/{len(units)} units, {time.time() - start:.0f} s", flush=True)
+    spans = function_spans(args, os.path.join(tmp, "spans.profdata"), src, tracked)
     shutil.rmtree(tmp, ignore_errors=True)
 
     def expand(files):
         return files | {h for f in files for h in includes.get(f, ())}
 
-    unit_files = {u: expand(f) for u, (f, _) in results.items()}
+    unit_files = {u: expand(f) for u, (f, _, _) in results.items()}
     unit_of = {t: t.split(".")[0] + ".*" if args.unit == "suite" else t for t in tests}
     per_test = {t: unit_files[unit_of[t]] for t in tests}
     build_files = set(graph) | {h for hs in graph.values() for h in hs}
@@ -244,15 +286,45 @@ def cmd_run(args):
             with open(os.path.join(src, f), errors="replace") as fh:
                 for s in TEST_MACRO.findall(fh.read()):
                     suites.setdefault(s, set()).add(f)
+    # Functions as unique (file, first line, last line) spans; per test the spans it executed
+    span_ids, functions = {}, []
+    for (rel, _), (a, b) in sorted(spans.items()):
+        if rel in index and (rel, a, b) not in span_ids:
+            span_ids[(rel, a, b)] = len(functions)
+            functions.append([index[rel], a, b])
+    test_functions = {}
+    for t in order:
+        ids = sorted({span_ids[(f, *spans[(f, n)])] for f, n in results[unit_of[t]][1]
+                      if (f, *spans.get((f, n), (0, 0))) in span_ids})
+        test_functions[t] = encode(ids)
     out = {"dim": args.dim, "unit": args.unit, "seconds": round(time.time() - start),
+           "functions": functions, "test_functions": test_functions,
            "files": names, "build_files": sorted(index[f] for f in build_files),
            "tests": {t: sorted(index[f] for f in fs) for t, fs in sorted(per_test.items())},
-           "failed": sorted(u for u, (_, ok) in results.items() if not ok),
+           "failed": sorted(u for u, (_, _, ok) in results.items() if not ok),
            "data": by_ref, "suites": {s: sorted(fs) for s, fs in sorted(suites.items())}}
     with open(args.out, "w") as f:
         json.dump(out, f, separators=(",", ":"))
     print(f"{len(tests)} tests in {len(units)} units, {out['seconds']} s; {len(out['failed'])} failed; {args.out}")
     return 0
+
+
+def encode(ids):
+    """Sorted ids as the base-36 gaps between them, space-separated: a quarter of the JSON list."""
+    out, prev = [], -1
+    for i in ids:
+        out.append(base36(i - prev))
+        prev = i
+    return " ".join(out)
+
+
+def base36(n):
+    digits = ""
+    while True:
+        n, r = divmod(n, 36)
+        digits = "0123456789abcdefghijklmnopqrstuvwxyz"[r] + digits
+        if not n:
+            return digits
 
 
 def cmd_merge(args):
@@ -263,8 +335,8 @@ def cmd_merge(args):
         with open(path) as f:
             m = json.load(f)
         dims[str(m["dim"])] = m
-    with open(args.out, "w") as f:
-        json.dump({"version": 1, "commit": commit, "tree": tree, "rules": RULES, "data_roots": DATA_ROOTS,
+    with gzip.open(args.out, "wt") as f:
+        json.dump({"version": 2, "commit": commit, "tree": tree, "rules": RULES, "data_roots": DATA_ROOTS,
                    "dims": dims}, f, separators=(",", ":"))
     print(f"{args.out}: {', '.join(f'{d}D {len(m['tests'])} tests' for d, m in sorted(dims.items()))} at {commit}")
     return 0

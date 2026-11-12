@@ -77,9 +77,9 @@ jobs:
               --jobs "$(nproc)" --launcher "mpirun -n 1" --ranks 3 --rank-pattern "$mpi_tests" \
               --llvm-cov llvm-cov-22 --llvm-profdata llvm-profdata-22
           done
-          python3 tools/dev/test_coverage.py merge --out test-coverage.json map-2.json map-3.json
+          python3 tools/dev/test_coverage.py merge --out test-coverage.json.gz map-2.json map-3.json
       - uses: actions/upload-artifact@v4
         with:
           name: test-coverage
-          path: test-coverage.json
+          path: test-coverage.json.gz
           retention-days: 30
