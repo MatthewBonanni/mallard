@@ -373,7 +373,8 @@ shocks grow carbuncles: use `RHLL` there
 time_integrator = "RK4"
 ```
 
-*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les).
+*Used in:*
+[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les).
 
 | `[numerics]` key | Default | Meaning |
 |---|---|---|
