@@ -111,6 +111,7 @@ class PhaseAverage {
         /** @brief Add the sample at the device's time *t (collective; device only, capturable). */
         void sample(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
         bool triggered() const { return trigger_cell != NO_TRIGGER; }
+        uint64_t sampling_interval() const { return interval; }
 
         /** @brief PHASE_<bin>_<field>, bins zero-padded, bin-major. */
         std::vector<std::string> variables() const;
@@ -148,6 +149,8 @@ class PhaseAverage {
             double crossing[2];
             uint64_t n_crossings;
         };
+        /** @brief The clock in device memory, for a step graph's due(). */
+        Kokkos::View<const Clock> device_clock() const { return clock; }
         /** @brief Host copy (see copy_device_to_host): (cell, bin * n_fields + field). */
         const auto & host_means() const { return h_mean; }
 
@@ -254,20 +257,28 @@ class Statistics {
         }
         /** @brief Lowers step_limit to the first step after step at which a sample may be due. */
         void due_limits(uint64_t step, uint64_t & step_limit) const {
-            if (enabled()) step_limit = std::min(step_limit, (step / interval + 1) * interval);
+            const auto at = [&](bool on, uint64_t every) {
+                if (on) step_limit = std::min(step_limit, (step / every + 1) * every);
+            };
+            at(means_enabled(), interval);
+            at(spectra.enabled(), spectra.sampling_interval());
+            at(phase.enabled(), phase.sampling_interval());
+            for (const auto & c : conditional) at(true, c.sampling_interval());
         }
 
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
-        /**
-         * @brief Every sample can be taken in a step graph (unaveraged spectra are written at each sample; derived
-         *        fields and HRR are the host's).
-         */
-        bool samples_on_device() const {
-            return enabled() && (!spectra.enabled() || spectra.averaged()) && !derived_sampled && !chemistry_sampled;
+        /** @brief Every sample can be taken in a step graph (derived fields and HRR are the host's). */
+        bool samples_on_device() const { return enabled() && !derived_sampled && !chemistry_sampled; }
+        /** @brief The spectra's sample at the device's time *t, staged when unaveraged (capturable). */
+        void sample_spectra(const rtype * t, const CellSampler & sampler, const uint64_t * seq) {
+            spectra.sample_device(t, sampler);
+            spectra.copy_to_staging(seq);
         }
-        /** @brief The means' and spectra's sample at the device's time *t (device only, capturable). */
-        void sample_device(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief Unaveraged spectra: their samples staged into n_records record slots. */
+        void stage_spectra(uint64_t n_records) { spectra.stage(n_records); }
+        /** @brief Writes the unaveraged spectra staged in record slot `slot` at (step, t) (rank 0). */
+        void write_staged_spectra(uint64_t step, rtype t, uint64_t slot) const { spectra.write_staged(step, t, slot); }
         /** @brief Conditional entry i's sample at the device's time *t, which its own clock decides (capturable). */
         void sample_conditional(size_t i, const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
             conditional[i].sample_at(t, sampler, n_owned);

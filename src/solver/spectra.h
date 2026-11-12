@@ -62,8 +62,9 @@ class Spectra {
 
         bool enabled() const { return !pairs.empty(); }
         bool due(uint64_t step, rtype t) const { return enabled() && step % interval == 0 && t > t_start; }
-        void set_start(rtype t) { t_start = t; }
+        void set_start(rtype t);
         bool averaged() const { return average; }
+        uint64_t sampling_interval() const { return interval; }
 
         /**
          * @brief Take the sample of the device's time *t_device, t on the host (collective); unaveraged spectra are
@@ -72,6 +73,12 @@ class Spectra {
         void sample(uint64_t step, rtype t, const rtype * t_device, const CellSampler & sampler);
         /** @brief Add the averaged sample at the device's time *t (collective; device only, capturable). */
         void sample_device(const rtype * t, const CellSampler & sampler);
+        /** @brief Unaveraged spectra: rank 0 stages each sample into n_records record slots for write_staged. */
+        void stage(uint64_t n_records);
+        /** @brief Copies the sample into record slot (*seq - 1) % n_records, *seq in device memory (capturable). */
+        void copy_to_staging(const uint64_t * seq) const;
+        /** @brief Rank 0 writes the sample of record slot `slot` at (step, t), as sample does. */
+        void write_staged(uint64_t step, rtype t, uint64_t slot) const;
 
         /** @brief Start afresh at time t. */
         void start(rtype t);
@@ -125,7 +132,10 @@ class Spectra {
             double a;
             rtype t_last;
             uint64_t n_samples;
+            rtype t_start;  // samples are due after it, as due() has it
         };
+        /** @brief The clock in device memory, for a step graph's due(). */
+        Kokkos::View<const Clock> device_clock() const { return clock; }
 
         void move(const Route & route, uint32_t width, const rtype * src, rtype * dst) const;
         void fft(const Layout & layout, size_t axis);
@@ -137,6 +147,8 @@ class Spectra {
         void push();
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
         void write_file(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
+        /** @brief The file of the unaveraged sample at step: <file stem>_<step>.csv. */
+        std::string sample_file(uint64_t step) const;
         bool homogeneous(size_t axis) const;
 
         std::vector<std::string> fields;
@@ -182,6 +194,9 @@ class Spectra {
         mutable double weight = 0.0;
         mutable rtype t_last = 0.0;
         mutable uint64_t n_samples = 0;
+        // Unaveraged samples staged per record slot: spec, mean, shell; held while write_staged writes a slot's
+        Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
+        mutable bool holding_staged = false;
 };
 
 #endif // SPECTRA_H

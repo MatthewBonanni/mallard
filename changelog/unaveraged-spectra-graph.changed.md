@@ -1,0 +1,1 @@
+- Spectra written at each sample (`[statistics.spectra] average = false`) are sampled in the step graph and staged for the host, so the steps queued ahead of the host no longer stop at each sample (#906).

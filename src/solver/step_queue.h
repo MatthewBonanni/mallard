@@ -142,6 +142,7 @@ struct Record {
     uint64_t monitors;       // bit k: monitor k (forces of each zone, then the integrals) staged its row
     uint64_t probes;         // bit k: staged probe k is written
     uint64_t probe_samples;  // bit k: staged averaging probe k staged a sample for its averages
+    uint32_t spectra;        // the unaveraged spectra staged their sample
     ProgressLocals progress_locals;
 };
 

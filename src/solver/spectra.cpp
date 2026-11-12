@@ -361,10 +361,11 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     s_mean = Kokkos::View<double *>("spectra_sample_mean", acc_mean.size());
     s_shell = Kokkos::View<double *>("spectra_sample_shell", acc_shell.size());
     clock = Kokkos::View<Clock>("spectra_clock");
+    push();
 }
 
 void Spectra::pull() const {
-    if (!clock.is_allocated()) return;
+    if (!clock.is_allocated() || holding_staged) return;
     Clock k;
     Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
     weight = k.weight;
@@ -377,12 +378,19 @@ void Spectra::pull() const {
 }
 
 void Spectra::push() {
-    Clock k{weight, 0.0, t_last, n_samples};
+    Clock k{weight, 0.0, t_last, n_samples, t_start};
     Kokkos::deep_copy(clock, Kokkos::View<Clock, Kokkos::HostSpace>(&k));
     using Host = Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
     Kokkos::deep_copy(d_spec, Host(acc_spec.data(), acc_spec.size()));
     Kokkos::deep_copy(d_mean, Host(acc_mean.data(), acc_mean.size()));
     Kokkos::deep_copy(d_shell, Host(acc_shell.data(), acc_shell.size()));
+}
+
+void Spectra::set_start(const rtype t) {
+    t_start = t;
+    if (!clock.is_allocated()) return;
+    pull();
+    push();
 }
 
 void Spectra::start(rtype t) {
@@ -610,11 +618,54 @@ void Spectra::sample(const uint64_t step, const rtype t, const rtype * const t_d
     sample_device(t_device, sampler);
     if (average) return;
     pull();
+    if (comm::is_root()) write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
+}
+
+std::string Spectra::sample_file(const uint64_t step) const {
     std::ostringstream name;
     const std::filesystem::path path(file);
     name << (path.parent_path() / path.stem()).string() << "_" << std::setw(6) << std::setfill('0') << step
          << path.extension().string();
-    if (comm::is_root()) write_file(name.str(), step, t, snapshot_block::reason::INTERVAL);
+    return name.str();
+}
+
+void Spectra::stage(const uint64_t n_records) {
+    if (average || !comm::is_root()) return;
+    staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
+        "spectra_staging", n_records, acc_spec.size() + acc_mean.size() + acc_shell.size());
+}
+
+void Spectra::copy_to_staging(const uint64_t * const seq) const {
+    if (!staging.is_allocated()) return;
+    const auto st = staging;
+    const uint64_t n_records = staging.extent(0);
+    size_t at = 0;
+    for (const Kokkos::View<double *> & values : {d_spec, d_mean, d_shell}) {
+        const Kokkos::View<double *> v = values;
+        const size_t offset = at;
+        Kokkos::parallel_for("spectra_staged", v.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            st((*seq - 1) % n_records, offset + i) = v(i);
+        });
+        at += v.extent(0);
+    }
+}
+
+void Spectra::write_staged(const uint64_t step, const rtype t, const uint64_t slot) const {
+    if (!staging.is_allocated()) return;
+    const double * row = staging.data() + slot * staging.extent(1);
+    std::copy(row, row + acc_spec.size(), acc_spec.begin());
+    row += acc_spec.size();
+    std::copy(row, row + acc_mean.size(), acc_mean.begin());
+    row += acc_mean.size();
+    std::copy(row, row + acc_shell.size(), acc_shell.begin());
+    holding_staged = true;
+    try {
+        write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
+    } catch (...) {
+        holding_staged = false;
+        throw;
+    }
+    holding_staged = false;
 }
 
 void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) {
