@@ -614,7 +614,7 @@ void write_pack_case() {
     fs::create_directories("study/run");
     fs::copy_file(source_dir() + (three ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh"),
                   "study/data/cyl.msh");
-    std::ofstream("study/run/points.txt") << (three ? "0.6 0.0 0.5\n0.0 0.7 0.5\n" : "0.6 0.0\n0.0 0.7\n");
+    std::ofstream("study/run/points.txt") << (three ? "0.6 0.0 0.15\n0.0 0.7 0.15\n" : "0.6 0.0\n0.0 0.7\n");
     const std::string u = three ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
     std::ofstream input("study/run/input.toml");
     input << "[run]\nn_steps = 4\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"../data/cyl.msh\"\n"
