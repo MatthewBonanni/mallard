@@ -353,10 +353,10 @@ TEST(RegionMotionTest, SurfacesOfTheSolutionAreCutFromTheLevelsOfTheCellsTheyMay
         return 1.0 + r2;
     });
     const std::string where = "{type = \"where\", condition = \"P < 1.09\"}";
-    const std::string half = "{type = \"implicit\", f = \"x - 0.5\"}";
+    const std::string right_half = "{type = \"implicit\", f = \"x - 0.5\"}";
     const std::vector<std::pair<std::string, bool>> cases = {
         {"{type = \"isosurface\", field = \"P\", value = 1.09}", false},
-        {"{type = \"boundary\", of = {type = \"intersection\", regions = [" + where + ", " + half + "]}}", true},
+        {"{type = \"boundary\", of = {type = \"intersection\", regions = [" + where + ", " + right_half + "]}}", true},
     };
     for (const auto & [table, every] : cases) {
         const region::Region r = read(table);
