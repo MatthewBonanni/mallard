@@ -3718,6 +3718,20 @@
   "set_in": [],
   "type": "integer"
  },
+ "output.mixture": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "output.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "output.report": {
   "default": "\"report.html\"",
   "dims": [
@@ -5771,6 +5785,12 @@
    "examples/channel_wmles/tl_m3.0.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ]
+ },
+ "statistics.batch": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "statistics.convergence": {
   "dims": [
