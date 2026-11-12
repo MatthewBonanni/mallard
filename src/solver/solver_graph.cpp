@@ -30,6 +30,7 @@
 
 #include "device_comm.h"
 #include "diagnostic_code.h"
+#include "lock_arrays.h"
 #include "log.h"
 #include "probe_fluxes.h"
 #include "run_control.h"
@@ -59,17 +60,27 @@ void begin_capture(cudaGraph_t graph, const cudaGraphNode_t * after, const size_
                "cudaStreamBeginCaptureToGraph");
 }
 
+/** @brief A capture that cudaStreamEndCapture reports invalidated: it has ended, and the driver destroyed its graph. */
+struct CaptureInvalidated : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 void end_capture(cudaGraph_t graph) {
-    cuda_check(cudaStreamEndCapture(step_stream(), &graph), "cudaStreamEndCapture");
+    const cudaError_t err = cudaStreamEndCapture(step_stream(), &graph);
+    if (err == cudaErrorStreamCaptureInvalidated) {
+        throw CaptureInvalidated(std::string("cudaStreamEndCapture: ") + cudaGetErrorString(err));
+    }
+    cuda_check(err, "cudaStreamEndCapture");
 }
 
 /**
- * @brief Ends a capture that failed, if the stream still captures.
- * @return Whether the capture was invalidated. The driver then destroys the graph it captured into: the step graph,
- *         or a conditional node's body, which leaves the step graph holding a destroyed body. Destroying the step
- *         graph or that node then crashes in the driver, so the step graph is left to the process (once per run).
+ * @brief Ends a capture that failed with error, if the stream still captures.
+ * @return Whether the capture was invalidated, while the stream still captured or as cudaStreamEndCapture reported
+ *         it. The driver then destroys the graph it captured into: the step graph, or a conditional node's body,
+ *         which leaves the step graph holding a destroyed body. Destroying the step graph or that node then crashes
+ *         in the driver, so the step graph is left to the process (once per run).
  */
-bool abandon_capture() {
+bool abandon_capture(const std::exception & error) {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaStreamIsCapturing(step_stream(), &status);
     if (status != cudaStreamCaptureStatusNone) {
@@ -77,7 +88,7 @@ bool abandon_capture() {
         cudaStreamEndCapture(step_stream(), &graph);
     }
     cudaGetLastError();
-    return status == cudaStreamCaptureStatusInvalidated;
+    return status == cudaStreamCaptureStatusInvalidated || dynamic_cast<const CaptureInvalidated *>(&error);
 }
 #endif
 
@@ -581,8 +592,16 @@ void Solver::captured_launch() {
     try {
         step_prologue();
         device_if(&step_loop.data()->active, [&] {
-            if (fence_in_step_body) Kokkos::fence("fence_in_step_body");
+            if (capture_fault == CaptureFault::FENCE) Kokkos::fence("capture_fault");
             device_step_body();
+#ifdef KOKKOS_ENABLE_CUDA
+            if (capture_fault == CaptureFault::LEGACY_STREAM) {
+                // Last in the body, so that no checked call reports it before cudaStreamEndCapture
+                const uint32_t zero = 0;
+                (void)cudaMemcpy(&step_loop.data()->active, &zero, sizeof(zero), cudaMemcpyHostToDevice);
+                cudaGetLastError();
+            }
+#endif
         });
     } catch (...) {
         section.stop();
@@ -679,6 +698,7 @@ void Solver::step_prologue() {
 void Solver::capture_step_graph() {
 #ifdef KOKKOS_ENABLE_CUDA
     Kokkos::fence("step_graph");
+    lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
     try {
         cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
@@ -693,7 +713,7 @@ void Solver::capture_step_graph() {
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
-        if (!abandon_capture() && graph) cudaGraphDestroy(graph);
+        if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
         capture_graph = nullptr;
         halo_current = false;
         recording_step = false;
@@ -711,6 +731,7 @@ bool Solver::conditional_nodes_work() {
     bool works = true;
     if (is_distributed() && halo.uses_nccl()) {
         Kokkos::fence("conditional_nodes");
+        lock_arrays::copy_all();
         const Kokkos::View<uint32_t> on("conditional_probe_flag");
         Kokkos::deep_copy(on, 1u);
         const Kokkos::View<double *> x("conditional_probe", 1);
@@ -724,7 +745,7 @@ bool Solver::conditional_nodes_work() {
             end_capture(graph);
             cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
         } catch (const std::exception & e) {
-            if (abandon_capture()) graph = nullptr;
+            if (abandon_capture(e)) graph = nullptr;
             works = false;
             logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
                              "); one step per launch");
