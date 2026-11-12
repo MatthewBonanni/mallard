@@ -58,12 +58,18 @@ std::vector<std::string> condition_variables(const std::vector<std::string> & sp
     if (N_DIM == 3) v.push_back("U_Z");
     v.push_back("P");
     v.push_back("T");
+    std::vector<std::string> names;
     for (std::string s : species) {
         for (char & ch : s) {
             if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') ch = '_';
         }
+        names.push_back(s);
         v.push_back("Y_" + s);
     }
+    v.push_back("MACH");
+    v.push_back("H");
+    for (const std::string & s : names) v.push_back("X_" + s);
+    for (const std::string & g : CONDITION_GRADIENT_FIELDS) v.push_back(g);
     return v;
 }
 
