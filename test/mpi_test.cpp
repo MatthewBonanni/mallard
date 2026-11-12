@@ -512,6 +512,12 @@ TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
                                       "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30);
     input.replace(input.find("[numerics]\n"), 11, "[numerics]\n" + hybrid);
     expect_matches_serial(input);
+    // TENO's central flux reads the halo cells' W
+    std::string teno = box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", EULER,
+                                 bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                     "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30);
+    teno.replace(teno.find("[numerics]\n"), 11, "[numerics]\n" + hybrid);
+    expect_matches_serial(teno);
     expect_matches_serial(mixture_input(hybrid, "type = \"MUSCL\"\n", "", "euler"));
     expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
 }

@@ -1,0 +1,1 @@
+- TENO with `convective_flux = "hybrid"` feeds the central flux the cells' values (`central = "cell_averages"`) instead of the reconstructed states, which added kinetic energy: on Comte-Bellot & Corrsin at 128³ with Sigma the spectral error is 0.076 / 0.056 at stations 2 / 3, against 0.19 / 0.22 for TENO5 + HLLC. MUSCL, first order and gas mixtures are unchanged (#689).
