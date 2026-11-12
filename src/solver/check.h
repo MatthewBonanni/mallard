@@ -17,7 +17,9 @@
 #include <vector>
 
 #include "binding.h"
+#include "diagnostic_code.h"
 #include "input.h"
+#include "json.h"
 #include "log.h"
 #include "memory_tracker.h"
 #include "mesh_quality.h"
@@ -49,51 +51,12 @@ struct CheckOptions {
     bool memory_gpu = false;    // a GPU's memory: CUDA's context comes on top of Kokkos' allocations
 };
 
-/** @brief The codes of the check's findings: stable, each explained at CheckDiagnostic::docs(). */
-namespace check_code {
-inline constexpr const char * INPUT = "E-INPUT";  // the setup stopped on an input error
-inline constexpr const char * SETUP = "E-SETUP";  // the setup stopped on another error
-inline constexpr const char * KEY_UNUSED = "E-KEY-UNUSED";
-inline constexpr const char * KEY_DEPRECATED = "W-KEY-DEPRECATED";
-inline constexpr const char * CATALOG_WRITE = "E-CATALOG-WRITE";
-inline constexpr const char * MESH_FIELDS = "E-MESH-FIELDS";      // --mesh-fields or its stencils not written
-inline constexpr const char * RANKS = "E-RANKS";                  // --ranks under mpirun on other ranks
-inline constexpr const char * MEMORY_DEVICE = "E-MEMORY-DEVICE";  // the peak exceeds the device's memory
-inline constexpr const char * REGION_EMPTY = "E-REGION-EMPTY";
-inline constexpr const char * REGION_OUTSIDE = "E-REGION-OUTSIDE";
-inline constexpr const char * QUALITY_NON_ORTHOGONALITY = "W-QUALITY-NON-ORTHOGONALITY";
-inline constexpr const char * QUALITY_SKEWNESS = "W-QUALITY-SKEWNESS";
-inline constexpr const char * QUALITY_ASPECT_RATIO = "W-QUALITY-ASPECT-RATIO";
-inline constexpr const char * QUALITY_VOLUME_RATIO = "W-QUALITY-VOLUME-RATIO";
-inline constexpr const char * CFL_LIMIT = "W-CFL-LIMIT";
-inline constexpr const char * TFLES_THICKENING = "W-TFLES-THICKENING";
-inline constexpr const char * WALL_Y_PLUS = "W-WALL-Y-PLUS";
-inline constexpr const char * WALL_SPACING = "W-WALL-SPACING";
-inline constexpr const char * WALL_MODEL_EXCHANGE = "W-WALL-MODEL-EXCHANGE";
-inline constexpr const char * DNS_ETA = "W-DNS-ETA";
-inline constexpr const char * SIZING_FIXED = "W-SIZING-FIXED";  // the memory that does not scale with the cells
-inline constexpr const char * SIZING_PARTS = "W-SIZING-PARTS";  // no partition fits
-inline constexpr const char * ENV_GPU_AWARE_MPI = "E-ENV-GPU-AWARE-MPI";  // built for it, the MPI library has none
-inline constexpr const char * ENV_HOST_STAGING = "W-ENV-HOST-STAGING";    // device halos go through host memory
-inline constexpr const char * ENV_PLACEMENT = "W-ENV-PLACEMENT";          // binding::check
-inline constexpr const char * ENV_THREAD_BINDING = "W-ENV-THREAD-BINDING";  // OpenMP threads free to migrate
-
-/** @brief Every code: errors (E-) and warnings (W-). */
-inline constexpr std::array<const char *, 26> ALL = {
-    INPUT, SETUP, KEY_UNUSED, KEY_DEPRECATED, CATALOG_WRITE, MESH_FIELDS, RANKS, MEMORY_DEVICE, REGION_EMPTY, REGION_OUTSIDE,
-    QUALITY_NON_ORTHOGONALITY, QUALITY_SKEWNESS, QUALITY_ASPECT_RATIO, QUALITY_VOLUME_RATIO, CFL_LIMIT,
-    TFLES_THICKENING, WALL_Y_PLUS, WALL_SPACING, WALL_MODEL_EXCHANGE, DNS_ETA, SIZING_FIXED, SIZING_PARTS,
-    ENV_GPU_AWARE_MPI, ENV_HOST_STAGING, ENV_PLACEMENT, ENV_THREAD_BINDING};
-
-/** @brief The warning of each mesh-quality metric, in MeshQuality's order. */
-inline constexpr std::array<const char *, MeshQuality::N_METRICS> QUALITY = {
-    QUALITY_NON_ORTHOGONALITY, QUALITY_SKEWNESS, QUALITY_ASPECT_RATIO, QUALITY_VOLUME_RATIO};
-} // namespace check_code
+static_assert(diagnostic_code::QUALITY.size() == MeshQuality::N_METRICS);
 
 /** @brief An error or a warning of the check: its code, and what is wrong, with its numbers and the fix. */
 struct CheckDiagnostic {
     report::Status severity = report::Status::ERROR;  // ERROR or WARNING
-    std::string code;                                 // one of check_code
+    std::string code;                                 // one of diagnostic_code::ALL
     std::string message;
 
     /** @brief The page and anchor that explain the code: "docs/guide/input_files.md#w-cfl-limit". */
@@ -273,6 +236,13 @@ std::string check_text(const CheckReport & report, bool color);
 
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
 std::string check_json(const CheckReport & report);
+
+/**
+ * @brief The parts of the report a run records at setup (docs/guide/output.md#the-check-at-setup): status,
+ *        diagnostics, mesh_quality and resolution as check_json writes them, and the time step's integrator,
+ *        stability limit and CFL number.
+ */
+json::Object check_summary(const CheckReport & report);
 
 /** @brief Prints the report on rank 0: as text, colored on terminals, or as JSON. */
 void print_check(const CheckReport & report, bool json = false);

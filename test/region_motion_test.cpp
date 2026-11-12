@@ -87,7 +87,6 @@ std::unique_ptr<Solver> solver_on(const std::string & mesh, const std::vector<st
     return solver;
 }
 
-
 /** @brief A unit square of right triangles (unit cube of tetrahedra), n cells per side. */
 std::shared_ptr<Mesh> simplex_mesh(const uint32_t n) {
     auto mesh = std::make_shared<Mesh>();
@@ -147,6 +146,22 @@ double solution_measure(const Mesh & mesh, const std::string & table, const regi
     for (const double m : region::elements(mesh, r, h).measure) total += m;
     return total;
 }
+
+// Device lambdas live in free functions: nvcc rejects them in TEST bodies, which are private members
+void fill_terms(const Kokkos::View<double *[2]> & terms, const Kokkos::View<double **, Kokkos::LayoutLeft> & columns) {
+    Kokkos::parallel_for("fill", terms.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+        terms(c, 0) = columns(c, 0) = Kokkos::sin(1.0 + c) * 1e-3;
+        terms(c, 1) = columns(c, 1) = (c % 7 == 0 ? 1e8 : 1e-8) * Kokkos::cos(double(c));
+    });
+}
+
+void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & columns, const double r) {
+    Kokkos::parallel_for("fill", columns.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
+        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
+    });
+}
+
 } // namespace
 
 TEST(RegionMotionTest, ARepeatIsTheUnionOfItsCopies) {
@@ -389,10 +404,7 @@ TEST(RegionMotionTest, DeviceSumsAreTheExactSums) {
     const uint32_t n = 1000;
     Kokkos::View<double *[2]> terms("terms", n);
     Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
-    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t c) {
-        terms(c, 0) = columns(c, 0) = Kokkos::sin(1.0 + c) * 1e-3;
-        terms(c, 1) = columns(c, 1) = (c % 7 == 0 ? 1e8 : 1e-8) * Kokkos::cos(double(c));
-    });
+    fill_terms(terms, columns);
     const DeviceSums sums(2, n, false);
     sums.sum(columns, false);
     const auto got = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
@@ -406,10 +418,7 @@ TEST(RegionMotionTest, DeviceSumsAcrossRanksAreTheSameWithNcclAndMpi) {
     const uint32_t n = 100 + 37 * static_cast<uint32_t>(comm::rank());
     Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
     const double r = comm::rank();
-    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t c) {
-        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
-        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
-    });
+    fill_rank_columns(columns, r);
     const DeviceSums sums(2, n, true);
     sums.sum(columns, false);
     const auto mpi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());

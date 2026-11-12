@@ -895,20 +895,27 @@ TEST(CheckReportJson, ASetupThatStopsStillGivesEveryTopLevelKey) {
     input.replace(input.find("Nx = 16"), 7, "Nx = 16.0");
     const json::Value v = json::parse(check_json(check(input)));
     EXPECT_EQ(v["status"].string, "error");
-    EXPECT_EQ(v["diagnostics"].array.at(0)["code"].string, check_code::INPUT);
+    EXPECT_EQ(v["diagnostics"].array.at(0)["code"].string, diagnostic_code::INPUT);
     for (const char * key : {"time_step", "memory", "sizing", "cost", "mesh_quality"}) {
         EXPECT_TRUE(v[key].is_null()) << key;
     }
 }
 
-TEST(CheckDiagnostics, EveryCodeIsExplainedInTheDocs) {
-    const std::filesystem::path page = std::filesystem::path(source_dir()) / "docs" / "guide" / "input_files.md";
-    if (!std::filesystem::exists(page)) GTEST_SKIP() << "no docs in an install tree";
-    std::ifstream file(page);
-    const std::string docs((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    for (const char * code : check_code::ALL) {
-        const std::string link = CheckDiagnostic{report::Status::ERROR, code, ""}.docs();
+TEST(Diagnostics, AWarningNamesItsCodeAndTheDocsThatExplainIt) {
+    EXPECT_EQ(logging::diagnostic(false, diagnostic_code::CUDA_GRAPH, "steps run kernel by kernel", false),
+              "warning W-CUDA-GRAPH: steps run kernel by kernel\n  docs/guide/running.md#w-cuda-graph");
+    EXPECT_EQ(logging::diagnostic(true, diagnostic_code::INPUT, "input.toml: line 6", false),
+              "error E-INPUT: input.toml: line 6\n  docs/guide/input_files.md#e-input");
+    EXPECT_THROW(diagnostic_code::docs("W-NOT-A-CODE"), std::logic_error);
+}
+
+TEST(Diagnostics, EveryCodeIsExplainedInTheDocs) {
+    if (!std::filesystem::exists(std::filesystem::path(source_dir()) / "docs")) GTEST_SKIP() << "no docs in an install tree";
+    for (const auto & [code, page] : diagnostic_code::ALL) {
+        std::ifstream file(std::filesystem::path(source_dir()) / page);
+        const std::string docs((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const std::string link = diagnostic_code::docs(code);
         const std::string anchor = link.substr(link.find('#') + 1);
-        EXPECT_NE(docs.find("<a id=\"" + anchor + "\"></a>`" + code + "`"), std::string::npos) << code;
+        EXPECT_NE(docs.find("<a id=\"" + anchor + "\"></a>`" + code + "`"), std::string::npos) << code << " in " << page;
     }
 }
