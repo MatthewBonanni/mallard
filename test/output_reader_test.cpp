@@ -218,7 +218,7 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
             }
         }
         mine = run.in_global_order(file, mine, 3);
-        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], 1e-12) << name << " " << i;
+        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], rounding) << name << " " << i;
     }
 }
 
