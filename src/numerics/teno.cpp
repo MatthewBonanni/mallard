@@ -1116,11 +1116,17 @@ struct TENOFunctor {
      */
     KOKKOS_INLINE_FUNCTION
     void entry_W(const int32_t c, const int32_t code, rtype * W_e) const {
+        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        entry_W_loaded(c, code, W_e);
+    }
+
+    /** @brief entry_W, with W_e holding W(c) already. */
+    KOKKOS_INLINE_FUNCTION
+    void entry_W_loaded(const int32_t c, const int32_t code, rtype * W_e) const {
         if (code < -1) {
             turned_entry_W(c, code, W_e);
             return;
         }
-        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
         if (code >= 0) ghost_W(c, code, W_e);
     }
 
@@ -1145,7 +1151,6 @@ struct TENOFunctor {
     /** @brief entry_W of an entry reached across a periodic rotation. */
     KOKKOS_FUNCTION
     void turned_entry_W(const int32_t c, const int32_t code, rtype * W_e) const {
-        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
         int32_t row, rel_row;
         const int32_t f = teno::entry_face(code, boundary_faces, row, rel_row);
         if (f >= 0) {
@@ -1158,35 +1163,22 @@ struct TENOFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void entry_conservatives(const int32_t c, const int32_t f, rtype * U) const {
-        if constexpr (PRIM) {
-            entry_W(c, f, U);
-        } else {
-            rtype W_e[N_CONSERVATIVE];
-            entry_W(c, f, W_e);
-            conservatives_of(W_e, U);
-        }
+        rtype W_e[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        entry_conservatives_loaded(c, f, W_e, U);
     }
 
     /** @brief entry_conservatives, with W_e holding W(c) already. */
     KOKKOS_INLINE_FUNCTION
     void entry_conservatives_loaded(const int32_t c, const int32_t f, rtype * W_e, rtype * U) const {
-        if (f < -1) {
-            entry_conservatives(c, f, U);
-            return;
-        }
-        if (f >= 0) ghost_W(c, f, W_e);
+        entry_W_loaded(c, f, W_e);
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE U[i] = W_e[i];
         } else {
-            conservatives_of(W_e, U);
+            U[0] = W_e[0];
+            FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
+            U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
         }
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    void conservatives_of(const rtype * W_e, rtype * U) const {
-        U[0] = W_e[0];
-        FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1467,10 +1459,11 @@ struct TENOFunctor {
     static constexpr uint32_t TEAM_SIZE = TEAM_CELLS * PARTS;
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
     static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
-    // Stencil entries per round of staged_coefficients, a multiple of PARTS
-    static constexpr uint8_t STAGE = 3 * PARTS;
+    // Stencil entries per round of staged_coefficients, a multiple of PARTS;
+    // 0 (not staged) where the staged entries would not leave two teams per SM
+    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
     static constexpr size_t SMOOTH_SCRATCH =
-        TEAM_SCRATCH + sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS;
+        TEAM_SCRATCH + (sizeof(rtype) * N_CONSERVATIVE + 2 * sizeof(int32_t)) * STAGE * TEAM_CELLS + sizeof(int) * TEAM_CELLS;
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -1538,20 +1531,21 @@ struct TENOFunctor {
     }
 
     /**
-     * @brief smooth_coefficients<C> for the whole team, with the stencil
-     *        entries' states staged in team scratch: in rounds of STAGE
-     *        entries, each of a cell's threads loads every PARTS-th entry,
-     *        then every thread accumulates its chunk over the round's entries
-     *        in order, so the arithmetic is smooth_coefficients's. Every
-     *        thread of the team calls it.
+     * @brief smooth_coefficients<C> for the whole team, with the loads of the
+     *        stencil entries (cell, face field and W of the cell) staged in
+     *        team scratch: in rounds of STAGE entries, each of a cell's
+     *        threads loads every PARTS-th entry, then every thread takes each
+     *        entry of the round in order through smooth_coefficients's
+     *        arithmetic. Every thread of the team calls it.
      */
     template <uint8_t C, typename Member>
     KOKKOS_INLINE_FUNCTION
     void staged_coefficients(const Member & team, const bool active, const uint32_t i_cell, const uint8_t part,
-                             const rtype * U0, rtype * aK_team, rtype * U_team, int * ns_team, int * smooth_team,
-                             const uint32_t lane) const {
+                             const rtype * U0, rtype * aK_team, rtype * W_team, int32_t * c_team, int32_t * f_team,
+                             int * ns_team, int * smooth_team, const uint32_t lane) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
+        constexpr uint32_t PER = STAGE / PARTS;
         if (part == 0) ns_team[lane] = active ? stencil_large_size(i_cell) : 0;
         team.team_barrier();
         int ns_max = 0;
@@ -1562,30 +1556,28 @@ struct TENOFunctor {
         rtype m_mean = 0.0, m_m2 = 0.0;
         const auto stencil = stencil_large.template row<TABLE>(active ? i_cell : 0);
         for (uint16_t s0 = 0; s0 < ns_max; s0 = static_cast<uint16_t>(s0 + STAGE)) {
-            // Every load of the thread's entries first, so that they are in flight together
-            constexpr uint32_t PER = STAGE / PARTS;
+            // The thread's loads of the round first, so that they are in flight together
             int32_t c[PER], f[PER];
-            rtype W_e[PER][N_CONSERVATIVE];
             for (uint32_t j = 0; j < PER; j++) {
                 const uint32_t s = s0 + part + j * PARTS;
                 c[j] = s < ns ? stencil.cell(s) : -1;
                 f[j] = s < ns ? stencil.face(s) : -1;
             }
             for (uint32_t j = 0; j < PER; j++) {
-                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
-            }
-            for (uint32_t j = 0; j < PER; j++) {
                 if (c[j] < 0) continue;
-                rtype U[N_CONSERVATIVE];
-                entry_conservatives_loaded(c[j], f[j], W_e[j], U);
                 const uint32_t e = part + j * PARTS;
-                FOR_I_CONSERVATIVE U_team[(e * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = U[i];
+                c_team[e * TEAM_CELLS + lane] = c[j];
+                f_team[e * TEAM_CELLS + lane] = f[j];
+                FOR_I_CONSERVATIVE W_team[(e * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = W(c[j], i);
             }
             team.team_barrier();
             const uint16_t s1 = Kokkos::min<uint16_t>(ns, static_cast<uint16_t>(s0 + STAGE));
             for (uint16_t s = s0; s < s1; s++) {
-                rtype U[N_CONSERVATIVE];
-                FOR_I_CONSERVATIVE U[i] = U_team[((s - s0) * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
+                const uint32_t e = s - s0;
+                rtype W_e[N_CONSERVATIVE], U[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE W_e[i] = W_team[(e * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
+                const int32_t c_s = c_team[e * TEAM_CELLS + lane];
+                entry_conservatives_loaded(c_s, f_team[e * TEAM_CELLS + lane], W_e, U);
                 if constexpr (C == 0) {
                     const rtype W0_rho = W(i_cell, 0);
                     const rtype g = Kokkos::fabs(U[0] - W0_rho) / W0_rho;
@@ -1594,7 +1586,7 @@ struct TENOFunctor {
                     g_m2 += delta * (g - g_mean);
                     if constexpr (PRIM) {
                         const rtype M0 = cell_molar_mass(i_cell);
-                        const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
+                        const rtype m = Kokkos::fabs(cell_molar_mass(c_s) - M0) / M0;
                         const rtype delta_m = m - m_mean;
                         m_mean += delta_m / (s + 1);
                         m_m2 += delta_m * (m - m_mean);
@@ -1643,7 +1635,9 @@ struct TENOFunctor {
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-        rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+        rtype * W_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+        int32_t * c_team = static_cast<int32_t *>(team.team_scratch(0).get_shmem(sizeof(int32_t) * STAGE * TEAM_CELLS));
+        int32_t * f_team = static_cast<int32_t *>(team.team_scratch(0).get_shmem(sizeof(int32_t) * STAGE * TEAM_CELLS));
         int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
 
         const bool active = idx < n;
@@ -1656,7 +1650,12 @@ struct TENOFunctor {
         team.team_barrier();
         if (active) conservatives(i_cell, U0);
         with_chunk(part, [&](auto C) {
-            staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, U_team, ns_team, smooth_team, lane);
+            if constexpr (STAGE > 0) {
+                staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, W_team, c_team, f_team, ns_team,
+                                                        smooth_team, lane);
+            } else if (active) {
+                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
+            }
         });
         team.team_barrier();
         const int slot = smooth_team[lane];
