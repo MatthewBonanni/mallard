@@ -273,7 +273,7 @@ def ignition(P, args):
     rate = np.diff(T)[ok] / np.diff(t)[ok]
     t_ig = 0.5 * (t[:-1] + t[1:])[ok][np.argmax(rate)]
     ax.axvline(t_ig, color=P["muted"], lw=1, ls=":")
-    label(ax, t_ig + 4, 2050, f"ignition delay\n{t_ig:.0f} $\\mu$s", P, ha="left", size=11, color=P["muted"])
+    label(ax, t_ig - 3, 1900, f"ignition delay\n{t_ig:.0f} $\\mu$s", P, ha="right", size=11, color=P["muted"])
     ax2.legend(loc="center right", fontsize=11)
     ax.set_xlim(0, 100)
     return fig

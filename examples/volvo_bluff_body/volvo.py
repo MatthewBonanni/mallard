@@ -191,7 +191,7 @@ def cmd_plot(a):
             ax.set_xlabel("x/D")
             ax.set_ylabel("U/U_b on y = 0")
             ax.set_xlim(0, 12)
-            ax.legend(fontsize=7)
+            ax.legend(fontsize=7, loc="lower right")
         else:
             e = expc.get("fluct_sqrt_Urms2_plus_Vrms2")
             if e is not None:
