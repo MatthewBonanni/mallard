@@ -444,7 +444,9 @@ the domain is the third column of each row (`in_domain` is `null`). With
 `average = true` its reductions are those of the time averages over the cells
 it sweeps, each cell weighed by its mean `f V`: the integral is the mean of
 the integrals, the mean that integral over the mean measure in the domain
-(the third column), and the extremes those of the cells it has covered. With
+(the third column), and the extremes those of the cells it has covered. The
+means are kept, and written to restart files, for the cells it has covered
+only, so their memory follows the region's sweep, not the mesh. With
 `copies = "each"`, a region with [`repeat`](geometry.md#arrays-of-copies) gives
 one probe per copy, `<name>_copy<k>`, each with its own reductions file.
 
@@ -458,7 +460,8 @@ sample, and its reductions are those of the time averages per cell it
 crosses, each cell weighed by the mean area (2D: length) of the isosurface in
 it: the integral is the mean of the integrals, the mean that integral over
 the mean area (the third column), and the extremes those of the cells it has
-crossed. Isosurfaces take no `n_points`: their elements have no parameters to
+crossed; like a moving region's, its means are kept for those cells only.
+Isosurfaces take no `n_points`: their elements have no parameters to
 place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
 entry with the isosurface as its region writes the values on its elements at
 each write.
