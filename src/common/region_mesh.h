@@ -98,6 +98,34 @@ struct LevelCells {
 LevelCells level_cells(const Mesh & mesh, const Region & region);
 
 /**
+ * @brief Extracts the elements of a region of lower dimension than a mesh
+ *        repeatedly: what is fixed for the mesh and region (the mesh's extent
+ *        and mean cell size, the fractions of the region's clipping regions of
+ *        whole cells) is computed once, collectively, at construction. Keeps
+ *        references to mesh and region.
+ */
+class Extraction {
+    public:
+        struct Constants {
+            std::array<double, 3> lo{}, hi{};                 // the mesh's bounding box (0 beyond N_DIM)
+            double h = 1.0;                                    // its mean cell size
+            std::vector<std::vector<double>> cells;            // fractions of each clipping region of whole cells
+            std::vector<RegionView<Kokkos::HostSpace>> views;  // of each filled region
+        };
+
+        Extraction(const Mesh & mesh, const Region & region);
+        /** @brief elements(mesh, region). Collective. */
+        Elements elements() const;
+        /** @brief elements(mesh, region, levels). Collective. */
+        Elements elements(const Levels & levels) const;
+
+    private:
+        const Mesh & m_mesh;
+        const Region & m_region;
+        Constants m_constants;
+};
+
+/**
  * @brief The measures of a filled region's intersection with the domain:
  *        the sum of f V over the cells, with fractions f (cell_fractions),
  *        and the measure of its surface_in_domain(); per radian in
