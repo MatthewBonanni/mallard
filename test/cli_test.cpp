@@ -665,10 +665,20 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     EXPECT_EQ(catalog.status, 0) << catalog.err;
     EXPECT_TRUE(contains(catalog.out, "== Fields: conservative")) << catalog.out;
     const std::vector<std::vector<std::string>> catalog_rows = {
-        {"field", "units", "description", "needs"},
-        {"RHO", "kg m-3", "density", "every case"},
-        {"CFL", "dimensionless", "local CFL number", "every case"},
-        {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]"},
+        {"field", "units", "description", "needs", "available in"},
+        {"RHO", "kg m-3", "density", "every case", "write_data, probes, statistics"},
+        {"CFL", "dimensionless", "local CFL number", "every case", "write_data"},
+        {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]", "write_data"},
+        {"MACH", "dimensionless", "Mach number", "every case", "write_data, post derive"},
+        {"U", "m s-1", "velocity (vector)", "every case", "write_data, probes, statistics"},
+        {"Y_<s>", "dimensionless", "mass fraction of species s", "a mixture", "write_data, probes, statistics"},
+        {"MASS_FLUX", "kg m-2 s-1", "normal mass flux", "[[probes]] on a surface or boundary zone", "probes"},
+        {"MEAN_<A>", "A's", "time average of A", "[statistics] fields with A, or [[probes]] averaging A",
+         "write_data, probes"},
+        {"SOURCE_<A>", "A's s-1", "source of A, per second", "[[sources]] or [source]", "write_data"},
+        {"SKEWNESS", "dimensionless", "largest face skewness", "every case", "write_data"},
+        {"DELTA_OVER_ETA", "dimensionless", "cell size over the estimated Kolmogorov length",
+         "mallard check --mesh-fields (resolution estimates)", "-"},
     };
     for (const auto & row : catalog_rows) EXPECT_TRUE(has_row(catalog.out, row)) << row[0] << "\n" << catalog.out;
     EXPECT_TRUE(contains(catalog.out, "MEAN_<A>")) << catalog.out;
@@ -676,9 +686,11 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     const Result text = run({"list", "fields", "small.toml"}, true);
     ASSERT_EQ(text.status, 0) << text.err;
     const std::vector<std::vector<std::string>> case_rows = {
-        {"field", "units", "description"},
-        {"RHO", "kg m-3", "density"},
-        {"U_X", "m s-1", "x component of velocity"},
+        {"field", "units", "description", "available in"},
+        {"RHO", "kg m-3", "density", "write_data, probes, statistics"},
+        {"U_X", "m s-1", "x component of velocity", "write_data, probes, statistics"},
+        {"Q_CRITERION", "s-2", "Q-criterion", "write_data, post derive"},
+        {"P_MAX", "kg m-1 s-2", "largest pressure seen", "write_data"},
         {"field", "units", "needs"},
         {"MU_T", "kg m-1 s-1", "[les]"},
     };
@@ -698,6 +710,58 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     for (const auto & f : v["missing"].array) missing.push_back(f["name"].string + ": " + f["needs"].string);
     EXPECT_NE(std::find(missing.begin(), missing.end(), "MU_T: [les]"), missing.end());
     EXPECT_NE(std::find(missing.begin(), missing.end(), "Y_<s>: a mixture"), missing.end());
+    for (const auto & f : v["fields"].array) {
+        if (f["name"].string != "P") continue;
+        std::vector<std::string> where;
+        for (const auto & w : f["available"].array) where.push_back(w.string);
+        EXPECT_EQ(where, (std::vector<std::string>{"write_data", "probes", "statistics"}));
+    }
+}
+
+TEST(CliTest, OutputGuideTableIsTheFieldCatalog) {
+    SKIP_UNDER_MPI();
+    const fs::path docs = fs::path(source_dir()) / "docs" / "guide" / "output.md";
+    if (!fs::exists(docs)) GTEST_SKIP() << "no docs in " << source_dir();
+    const std::string text = read_file(docs);
+    const std::string begin = "<!-- BEGIN GENERATED fields -->\n", end = "<!-- END GENERATED fields -->";
+    ASSERT_TRUE(contains(text, begin) && contains(text, end));
+    const size_t from = text.find(begin) + begin.size();
+    std::istringstream table(text.substr(from, text.find(end) - from));
+    std::vector<std::vector<std::string>> rows;
+    for (std::string line; std::getline(table, line);) {
+        std::vector<std::string> cells;
+        const std::string inner = line.size() > 4 ? line.substr(2, line.size() - 4) : "";
+        for (size_t at = 0;;) {
+            const size_t stop = inner.find(" | ", at);
+            std::string c = inner.substr(at, stop == std::string::npos ? std::string::npos : stop - at);
+            if (c.size() > 1 && c.front() == '`' && c.back() == '`') c = c.substr(1, c.size() - 2);
+            cells.push_back(c);
+            if (stop == std::string::npos) break;
+            at = stop + 3;
+        }
+        rows.push_back(cells);
+    }
+    const Result listed = run({"list", "fields", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value v = json::parse(listed.out);
+    ASSERT_EQ(rows.size(), v["fields"].array.size() + 2)
+        << "docs/guide/output.md is out of date; python tools/docs/fields.py --mallard build/src/mallard updates it";
+    std::string group;
+    for (size_t i = 0; i < v["fields"].array.size(); i++) {
+        const json::Value & f = v["fields"].array[i];
+        std::string where;
+        for (const auto & w : f["available"].array) where += (where.empty() ? "" : ", ") + w.string;
+        const std::string needs = f.has("needs") ? f["needs"].string : "every case";
+        const std::vector<std::string> expected = {f["group"].string == group ? "" : f["group"].string,
+                                                   f["name"].string,
+                                                   f["units"].string,
+                                                   f["long_name"].string,
+                                                   needs,
+                                                   where.empty() ? "-" : where};
+        group = f["group"].string;
+        EXPECT_EQ(rows[i + 2], expected)
+            << "docs/guide/output.md is out of date; python tools/docs/fields.py --mallard build/src/mallard updates it";
+    }
 }
 
 TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
