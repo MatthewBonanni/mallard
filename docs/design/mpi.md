@@ -81,6 +81,13 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 - **Construction:** a distributed breadth-first search over vertex neighbors. Layer 1 comes from the node directory (section 5); for each further layer, a rank asks the directory for the cells around the nodes of its previous layer that it has not asked about, then fetches the new cells from the ranks whose blocks hold them. Deepening the halo continues the search from the existing layers rather than starting over.
 - **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, both in the receiver's local order.
 
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-light.svg#gh-light-mode-only)
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-dark.svg#gh-dark-mode-only)
+
+*Rank 1 of 3 with its halo layers, from Mallard runs: `tools/docs/runs.py` repeats the
+breadth-first search above on the owned cells of every rank and checks its counts against
+the run's report.*
+
 ### 7. Time stepping
 
 Per right-hand-side evaluation:
