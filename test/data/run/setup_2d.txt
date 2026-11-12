@@ -1,0 +1,85 @@
+== Mesh ===================================================================================
+  setting        value
+  Type           file mesh.msh
+  Cell order     Hilbert curve
+  Partitioner    multi-jagged
+  Halo exchange  MPI
+
+  quantity                     value    units   basis
+  cells                        460,800  cells   300,000 tri, 160,800 quad
+  faces                        692,400  faces
+  boundary faces               2,400    faces
+  ranks                        3        ranks
+  halo layers                  2        layers
+  halo cells                   4,200    cells   most on a rank
+  faces between ranks          1,900    faces
+  halo layer-1 cells           1,300    cells   most on a rank; 3,800 in all
+  cells received per exchange  2,600    cells   most on a rank; 7,600 in all
+
+  quantity              min        max        units  basis
+  x extent              0          4          m      nodes
+  y extent              -0.5       1          m      nodes
+  cell area             8.681e-06  3.400e-05  m^2    ratio 3.92
+  owned cells per rank  151,000    157,000    cells  imbalance 1.022 (largest / mean)
+
+== Numerics ===============================================================================
+  setting          value
+  Riemann solver   HLLC
+  Time integrator  SSPRK3
+
+  quantity           value  units  basis
+  time step          1e-05  s      the first step; the step controller sets the others
+  stop at step       5,000  steps
+  stop at time       0.2    s      simulated time
+  stop at wall time  3600   s      of this run
+
+== Time step at a CFL number ==============================================================
+  quantity    value  units  basis
+  CFL number  0.8    -      every step
+
+== Boundaries =============================================================================
+  zone   condition     faces  details
+  inlet  dirichlet     240    u from inflow.csv
+                              turbulence: synthetic, 5% intensity
+  wall   no_slip_wall  960    isothermal 300 K
+
+== Output =================================================================================
+  Intervals in steps, or in simulated time:
+  output      file               every  units  contents
+  progress    -                  200    steps  -
+  vtkhdf      solut/flow.vtkhdf  0.002  s      RHO, P
+  forces      forces_wall.csv    10     steps  wall
+  statistics  -                  -             from t = 0.1 s
+
+== Mesh ===================================================================================
+  setting        value
+  Type           file mesh.msh
+  Cell order     Hilbert curve
+  Partitioner    multi-jagged
+  Halo exchange  MPI
+
+  quantity                     value    units   basis
+  cells                        460,800  cells   300,000 tri, 160,800 quad
+  faces                        692,400  faces
+  boundary faces               2,400    faces
+  ranks                        3        ranks
+  halo layers                  2        layers
+  halo cells                   4,200    cells   most on a rank
+  faces between ranks          1,900    faces
+  halo layer-1 cells           1,300    cells   most on a rank; 3,800 in all
+  cells received per exchange  2,600    cells   most on a rank; 7,600 in all
+
+  quantity              min        max        units  basis
+  x extent              0          4          -      nodes
+  y extent              -0.5       1          -      nodes
+  cell area             8.681e-06  3.400e-05  -      ratio 3.92
+  owned cells per rank  151,000    157,000    cells  imbalance 1.022 (largest / mean)
+
+== Numerics ===============================================================================
+  setting          value
+  Riemann solver   HLLC
+  Time integrator  SSPRK3
+
+  quantity      value  units  basis
+  time step     1e-05  -      every step
+  stop at time  0.2    -      simulated time

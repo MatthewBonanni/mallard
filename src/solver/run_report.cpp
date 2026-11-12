@@ -1,6 +1,6 @@
 /**
  * @file run_report.cpp
- * @brief The progress table, the summary and the health section of a run.
+ * @brief The setup banner, the progress table, the summary and the health section of a run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -53,7 +53,128 @@ std::pair<std::string, std::string> bytes_parts(const double b) {
     return {text, "B"};
 }
 
+/** @brief A value in seconds as a bare cell: "%.6g". */
+std::string real(const double v) { return format("%.6g", v); }
+
 } // namespace
+
+void setup_text(report::Text & text, const std::vector<SetupSection> & sections) {
+    for (const SetupSection & s : sections) {
+        text.section(s.title);
+        bool first = true;
+        auto gap = [&] {
+            if (!first) text.blank();
+            first = false;
+        };
+        if (!s.settings.empty()) {
+            gap();
+            std::vector<Row> rows;
+            for (const auto & [name, value] : s.settings) rows.push_back({Status::NONE, {name, value}});
+            text.table({"setting", "value"}, rows, false);
+        }
+        if (!s.quantities.empty()) {
+            gap();
+            text.quantities(s.quantities, false);
+        }
+        for (const SetupSection::Table & t : s.tables) {
+            if (t.rows.empty()) continue;
+            gap();
+            if (!t.note.empty()) text.note(t.note);
+            text.table(t.columns, t.rows, false);
+        }
+    }
+}
+
+SetupSection mesh_section(const MeshSetup & m) {
+    using Kind = Column::Kind;
+    SetupSection s{.title = "Mesh", .settings = m.settings};
+    uint64_t n_cells = 0;
+    std::string types;
+    for (const auto & [type, n] : m.cells) {
+        n_cells += n;
+        types += (types.empty() ? "" : ", ") + logging::count(n) + " " + type;
+    }
+    s.quantities.push_back({Status::NONE, {"cells", logging::count(n_cells), "cells", "",
+                                           m.cells.size() == 1 ? m.cells[0].first : types}});
+    s.quantities.push_back({Status::NONE, {"faces", logging::count(m.faces), "faces", "", ""}});
+    s.quantities.push_back({Status::NONE, {"boundary faces", logging::count(m.boundary_faces), "faces", "", ""}});
+
+    SetupSection::Table ranges{.note = "", .columns = {"quantity", {"min", Kind::VALUE}, {"max", Kind::VALUE},
+                                                       {"units", Kind::UNITS}, "basis"}, .rows = {}};
+    const char * axes[] = {"x", "y", "z"};
+    for (size_t d = 0; d < N_DIM; d++) {
+        ranges.rows.push_back({Status::NONE, {std::string(axes[d]) + " extent", format("%.4g", m.lo[d]),
+                                              format("%.4g", m.hi[d]), units::column("m"), "nodes"}});
+    }
+    ranges.rows.push_back({Status::NONE, {N_DIM == 2 ? "cell area" : "cell volume", format("%.3e", m.size_min),
+                                          format("%.3e", m.size_max), units::column(N_DIM == 2 ? "m^2" : "m^3"),
+                                          "ratio " + format("%.3g", m.size_min > 0.0 ? m.size_max / m.size_min : 0.0)}});
+    if (m.partition) {
+        const MeshSetup::Partition & p = *m.partition;
+        s.settings.emplace_back("Partitioner", p.partitioner);
+        s.settings.emplace_back("Halo exchange", p.exchange);
+        const double mean = static_cast<double>(n_cells) / p.ranks;
+        ranges.rows.push_back({Status::NONE, {"owned cells per rank", logging::count(p.owned_min),
+                                              logging::count(p.owned_max), "cells",
+                                              "imbalance " + format("%.3f", static_cast<double>(p.owned_max) / mean) +
+                                                  " (largest / mean)"}});
+        s.quantities.push_back({Status::NONE, {"ranks", std::to_string(p.ranks), "ranks", "", ""}});
+        s.quantities.push_back({Status::NONE, {"halo layers", std::to_string(p.halo_layers), "layers", "", ""}});
+        s.quantities.push_back({Status::NONE, {"halo cells", logging::count(p.halo_max), "cells", "",
+                                               "most on a rank"}});
+        s.quantities.push_back({Status::NONE, {"faces between ranks", logging::count(p.cut_faces), "faces", "", ""}});
+        s.quantities.push_back({Status::NONE, {"halo layer-1 cells", logging::count(p.layer1_max), "cells", "",
+                                               "most on a rank; " + logging::count(p.layer1_all) + " in all"}});
+        s.quantities.push_back({Status::NONE, {"cells received per exchange", logging::count(p.received_max), "cells",
+                                               "", "most on a rank; " + logging::count(p.received_all) + " in all"}});
+    }
+    s.tables.push_back(std::move(ranges));
+    return s;
+}
+
+std::vector<Row> time_quantities(const TimeSetup & t) {
+    std::vector<Row> rows;
+    const std::string first = t.controlled ? "the first step; the step controller sets the others" : "every step";
+    if (t.use_cfl) {
+        rows.push_back({Status::NONE, {"CFL number", real(t.cfl), "-", "", first}});
+    } else {
+        rows.push_back({Status::NONE, {"time step", real(t.dt), units::column("s"), "", first}});
+    }
+    if (t.n_steps > 0) rows.push_back({Status::NONE, {"stop at step", logging::count(t.n_steps), "steps", "", ""}});
+    if (t.t_stop > 0.0) {
+        rows.push_back({Status::NONE, {"stop at time", real(t.t_stop), units::column("s"), "", "simulated time"}});
+    }
+    if (t.wall_stop > 0.0) {
+        rows.push_back({Status::NONE, {"stop at wall time", real(t.wall_stop), "s", "", "of this run"}});
+    }
+    return rows;
+}
+
+SetupSection::Table boundary_table(const std::vector<CheckBoundary> & boundaries) {
+    std::vector<Row> rows;
+    for (const CheckBoundary & b : boundaries) {
+        std::string details = b.details;
+        if (!b.turbulence.empty()) details += (details.empty() ? "" : "\n") + ("turbulence: " + b.turbulence);
+        rows.push_back({Status::NONE, {b.zone, b.condition, logging::count(b.faces), details.empty() ? "-" : details}});
+    }
+    return {.note = "", .columns = {"zone", "condition", "faces", "details"}, .rows = std::move(rows)};
+}
+
+SetupSection::Table output_table(const std::vector<OutputSummary> & outputs) {
+    using Kind = Column::Kind;
+    std::vector<Row> rows;
+    for (const OutputSummary & o : outputs) {
+        const bool steps = o.steps > 0;
+        const bool timed = !steps && o.seconds > 0.0;
+        rows.push_back({Status::NONE, {o.kind, o.file.empty() ? "-" : o.file,
+                                       steps ? logging::count(o.steps) : timed ? real(o.seconds) : "-",
+                                       steps ? "steps" : timed ? units::column("s") : "",
+                                       o.contents.empty() ? "-" : o.contents}});
+    }
+    return {.note = "Intervals in steps, or in simulated time:",
+            .columns = {"output", "file", {"every", Kind::VALUE}, {"units", Kind::UNITS}, "contents"},
+            .rows = std::move(rows)};
+}
 
 report::Stream progress_stream(const ProgressColumns & c, const bool color) {
     using Kind = Column::Kind;

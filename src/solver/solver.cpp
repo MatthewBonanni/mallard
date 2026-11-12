@@ -328,9 +328,7 @@ namespace {
  *        Each rank counts its owned cells; a face between two ranks is counted by
  *        the rank owning the side with the lower global cell id.
  */
-logging::Items describe_mesh(const Mesh & mesh) {
-    using logging::count;
-    using logging::format;
+MeshSetup describe_mesh(const Mesh & mesh) {
     const bool distributed = mesh.n_global_cells > 0;
     const uint32_t n_owned = mesh.n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && static_cast<uint32_t>(c) < n_owned; };
@@ -374,30 +372,21 @@ logging::Items describe_mesh(const Mesh & mesh) {
     const std::map<uint32_t, const char *> names = N_DIM == 2
         ? std::map<uint32_t, const char *>{{3, "tri"}, {4, "quad"}}
         : std::map<uint32_t, const char *>{{4, "tet"}, {5, "pyramid"}, {6, "prism"}, {8, "hex"}};
-    std::string types;
-    uint64_t n_cells = 0;
-    int n_types = 0;
+    MeshSetup m;
     for (uint32_t k = 0; k < MAX_NODES; k++) {
         if (counts[k] == 0) continue;
         const auto it = names.find(k);
-        types += (types.empty() ? "" : ", ") + count(counts[k]) + " " +
-                 (it != names.end() ? std::string(it->second) : std::to_string(k) + "-node");
-        n_cells += counts[k];
-        n_types++;
+        m.cells.emplace_back(it != names.end() ? std::string(it->second) : std::to_string(k) + "-node", counts[k]);
     }
-    std::string extent;
+    m.faces = counts[MAX_NODES];
+    m.boundary_faces = counts[MAX_NODES + 1];
     for (size_t d = 0; d < N_DIM; d++) {
-        extent += (d ? " x " : "") +
-                  format("[%.4g, %.4g]", static_cast<double>(-lo_hi[d]), static_cast<double>(lo_hi[N_DIM + d]));
+        m.lo[d] = static_cast<double>(-lo_hi[d]);
+        m.hi[d] = static_cast<double>(lo_hi[N_DIM + d]);
     }
-    return {
-        {"Cells", n_types == 1 ? types : count(n_cells) + ": " + types},
-        {"Faces", count(counts[MAX_NODES]) + " (" + count(counts[MAX_NODES + 1]) + " boundary)"},
-        {"Extent", extent},
-        {N_DIM == 2 ? "Cell area" : "Cell volume",
-         format("%.3e to %.3e (ratio %.3g)", static_cast<double>(v_min), static_cast<double>(v_max),
-                static_cast<double>(v_max / v_min))},
-    };
+    m.size_min = static_cast<double>(v_min);
+    m.size_max = static_cast<double>(v_max);
+    return m;
 }
 
 } // namespace
@@ -461,13 +450,13 @@ void Solver::init_mesh() {
     const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
                                                        : curved::surfaces_of_mesh(*mesh, input);
     mesh->apply_curved(surfaces);
-    mesh_summary = describe_mesh(*mesh);
-    mesh_summary.insert(mesh_summary.begin(),
-                        {"Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
-                                                                                         "mesh.msh")
-                                                : type});
+    mesh_setup = describe_mesh(*mesh);
+    Settings & mesh_settings = mesh_setup.settings;
+    mesh_settings.emplace_back("Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
+                                                                                               "mesh.msh")
+                                                      : type);
     const MeshTransform transform = mesh_transform(input);
-    if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
+    if (!transform.is_identity()) mesh_settings.emplace_back("Transform", transform.description);
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
         if (type == "file") {
@@ -479,7 +468,7 @@ void Solver::init_mesh() {
         }
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
-        mesh_summary.insert(mesh_summary.begin() + 1, {"Stretching", text + "] (tanh, toward both ends)"});
+        mesh_settings.emplace_back("Stretching", text + "] (tanh, toward both ends)");
     }
     n_cells_global = comm::allreduce(uint64_t(mesh->n_owned()), comm::Op::SUM);
     if (is_distributed()) {
@@ -488,18 +477,15 @@ void Solver::init_mesh() {
         const uint64_t min_owned = comm::allreduce(n_owned, comm::Op::MIN);
         const uint64_t max_owned = comm::allreduce(n_owned, comm::Op::MAX);
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
-        const double mean = static_cast<double>(n_cells_global) / comm::size();
-        mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
-                                                               partitioner == "graph"         ? "graph (KaMinPar)"
-                                                               : partitioner == "multijagged" ? "multi-jagged"
-                                                                                              : "Hilbert curve",
-                                                               comm::size(), halo_layers,
-                                                               halo.uses_nccl() ? "NCCL" : "MPI"));
-        mesh_summary.emplace_back("Cells per rank",
-                                  logging::format("%s to %s owned (imbalance %.3f), up to %s halo",
-                                                  logging::count(min_owned).c_str(),
-                                                  logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
-                                                  logging::count(max_halo).c_str()));
+        mesh_setup.partition = MeshSetup::Partition{.partitioner = partitioner == "graph"         ? "graph (KaMinPar)"
+                                                                   : partitioner == "multijagged" ? "multi-jagged"
+                                                                                                  : "Hilbert curve",
+                                                    .exchange = halo.uses_nccl() ? "NCCL" : "MPI",
+                                                    .ranks = comm::size(),
+                                                    .halo_layers = halo_layers,
+                                                    .owned_min = min_owned,
+                                                    .owned_max = max_owned,
+                                                    .halo_max = max_halo};
     }
     {
         const CellOrderChoice & choice = mesh->cell_order_choice;
@@ -518,7 +504,7 @@ void Solver::init_mesh() {
                                     hilbert ? choice.input_lines : choice.hilbert_lines,
                                     hilbert ? "in the input order" : "along the Hilbert curve");
         }
-        mesh_summary.emplace_back("Cell order", text);
+        mesh_settings.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all
@@ -535,7 +521,7 @@ void Solver::init_mesh() {
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
         if (n_high_order > 0) text += ", high-order faces from the mesh file";
         for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
-        mesh_summary.emplace_back("Curved boundary", text);
+        mesh_settings.emplace_back("Curved boundary", text);
     }
     axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
@@ -563,7 +549,7 @@ void Solver::init_mesh() {
             }
         }
         mesh->make_axisymmetric();
-        mesh_summary.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
+        mesh_setup.settings.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
     }
     mesh->copy_host_to_device();
 }
@@ -623,13 +609,12 @@ void Solver::describe_partition_surface() {
     const std::array<uint64_t, 3> local{cut, layer1, received};
     const auto total = comm::allreduce(local, comm::Op::SUM);
     const auto most = comm::allreduce(local, comm::Op::MAX);
-    mesh_summary.emplace_back(
-        "Partition surface",
-        logging::format("%s faces between ranks; per rank up to %s halo layer-1 cells (%s in all), %s cells "
-                        "received per exchange (%s in all)",
-                        logging::count(total[0] / 2).c_str(), logging::count(most[1]).c_str(),
-                        logging::count(total[1]).c_str(), logging::count(most[2]).c_str(),
-                        logging::count(total[2]).c_str()));
+    MeshSetup::Partition & p = *mesh_setup.partition;
+    p.cut_faces = total[0] / 2;
+    p.layer1_max = most[1];
+    p.layer1_all = total[1];
+    p.received_max = most[2];
+    p.received_all = total[2];
 }
 
 bool Solver::halo_too_shallow() {
@@ -2536,98 +2521,100 @@ RunStatus Solver::run_status() const {
 
 void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
-    logging::section("Mesh");
-    logging::Items mesh_items = mesh_summary;
-    for (auto & [name, value] : mesh_items) {
-        if (name == "Extent") value = units::with(value, "m");
-        if (name == "Cell area" || name == "Cell volume") {
-            const size_t ratio = value.find(" (ratio");
-            value = units::with(value.substr(0, ratio), N_DIM == 2 ? "m^2" : "m^3") + value.substr(ratio);
-        }
-    }
-    logging::items(mesh_items);
+    std::vector<SetupSection> sections = {mesh_section(mesh_setup)};
 
-    logging::section("Physics");
-    logging::item("Units", units::system() == units::System::SI
-                               ? "SI (physics.units)"
-                               : "nondimensional: numbers carry no units (physics.units)");
-    logging::items(is_mixture() ? mixture_model->summary() : physics.summary());
-    logging::items(source_summary);
-    logging::item("Initial state", initial_state);
+    SetupSection physics_section{.title = "Physics"};
+    Settings & physical = physics_section.settings;
+    physical.emplace_back("Units", units::system() == units::System::SI
+                                       ? "SI (physics.units)"
+                                       : "nondimensional: numbers carry no units (physics.units)");
+    for (const auto & item : is_mixture() ? mixture_model->summary() : physics.summary()) physical.push_back(item);
+    physical.insert(physical.end(), source_summary.begin(), source_summary.end());
+    physical.emplace_back("Initial state", initial_state);
+    sections.push_back(std::move(physics_section));
 
-    logging::section("Numerics");
-    if (!preset.name.empty()) logging::item("Preset", preset.summary(resolved));
-    logging::items(face_reconstruction->summary());
-    logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
+    SetupSection numerics{.title = "Numerics"};
+    Settings & numerical = numerics.settings;
+    if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
+    for (const auto & item : face_reconstruction->summary()) numerical.push_back(item);
+    numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        logging::item("Convective flux", "hybrid: KEEP central, Riemann solver where the compression sensor exceeds " +
-                                             real(double(hybrid_threshold)) + " (upwind floor " +
-                                             real(double(hybrid_floor)) + ")");
+        numerical.emplace_back("Convective flux", "hybrid: KEEP central, the Riemann solver where the compression "
+                                                  "sensor exceeds its threshold");
     }
-    logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    if (step_controller.enabled()) {
-        logging::item("Time step", step_controller.summary() + "; first step " +
-                                       (use_cfl ? "CFL " + real(double(cfl))
-                                                : "dt " + units::with(real(double(dt_fixed)), "s")));
-    } else {
-        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl))
-                                           : "dt " + units::with(real(double(dt_fixed)), "s") + " (fixed)");
-    }
-    std::string stop;
-    if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
-    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + units::with(real(double(t_stop)), "s");
-    if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
-    logging::item("Stop at", stop);
+    numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
+    if (step_controller.enabled()) numerical.emplace_back("Step controller", step_controller.summary());
 #ifdef KOKKOS_ENABLE_CUDA
     const std::string no_graph = step_graph_unsupported();
-    logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+    numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
 #endif
     const std::string by_host = device_steps_unsupported();
-    logging::item("Steps", by_host.empty() ? "decided on the device, up to " + logging::count(step_queue_depth) + " ahead"
-                                           : "taken by the host: " + by_host);
-    if (check_nan) logging::item("NaN check", "every step");
-    logging::item("Divergence", std::string("stop at the first non-finite value") +
-                                    (keep_last_good ? ", writing the last valid state" : ""));
-    if (les_on) logging::items(les.summary());
-    if (tfles_on) logging::items(thickened_flame.summary());
-    if (pasr_on) logging::items(pasr.summary());
-    if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    numerical.emplace_back("Steps", by_host.empty() ? "decided on the device, up to " +
+                                                          logging::count(step_queue_depth) + " ahead"
+                                                    : "taken by the host: " + by_host);
+    if (check_nan) numerical.emplace_back("NaN check", "every step");
+    numerical.emplace_back("Divergence", std::string("stop at the first non-finite value") +
+                                             (keep_last_good ? ", writing the last valid state" : ""));
+    if (les_on) for (const auto & item : les.summary()) numerical.push_back(item);
+    if (tfles_on) for (const auto & item : thickened_flame.summary()) numerical.push_back(item);
+    if (pasr_on) for (const auto & item : pasr.summary()) numerical.push_back(item);
+    if (double_flux) numerical.emplace_back("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    numerics.quantities = time_quantities({.use_cfl = use_cfl,
+                                           .cfl = double(cfl),
+                                           .dt = double(dt_fixed),
+                                           .controlled = step_controller.enabled(),
+                                           .n_steps = n_steps,
+                                           .t_stop = double(t_stop),
+                                           .wall_stop = double(t_wall_stop)});
+    if (hybrid_flux) {
+        numerics.quantities.push_back({report::Status::NONE, {"compression sensor threshold",
+                                                              real(double(hybrid_threshold)), "-", "", "hybrid flux"}});
+        numerics.quantities.push_back(
+            {report::Status::NONE, {"upwind floor", real(double(hybrid_floor)), "-", "", "hybrid flux"}});
+    }
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
-                                       (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
-                                       (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
-                                       real(chemistry_options.integrator.rtol) + ", atol " +
-                                       real(chemistry_options.atol_Y) + ")" +
-                                       (T_frozen > 0.0 ? ", frozen below " + real(T_frozen) + " K" : "") + ", " +
-                                       (cell_chemistry.lanes() == 1 ? std::string("one thread per cell")
-                                                                    : std::to_string(cell_chemistry.lanes()) +
-                                                                          " lanes per cell"));
+        numerical.emplace_back("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+                                                (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
+                                                (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
+                                                (cell_chemistry.lanes() == 1
+                                                     ? std::string("one thread per cell")
+                                                     : std::to_string(cell_chemistry.lanes()) + " lanes per cell"));
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry rtol", real(chemistry_options.integrator.rtol),
+                                                              "-", "", "relative tolerance"}});
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry atol", real(chemistry_options.atol_Y), "-", "",
+                                                              "absolute tolerance of the mass fractions"}});
+        if (T_frozen > 0.0) {
+            numerics.quantities.push_back({report::Status::NONE, {"chemistry frozen below", real(T_frozen),
+                                                                  units::column("K"), "", "temperature"}});
+        }
     }
+    sections.push_back(std::move(numerics));
 
-    logging::section("Boundaries");
-    for (const CheckBoundary & b : boundary_summary) {
-        logging::item(b.zone, b.condition + ", " + logging::count(b.faces) + " faces" +
-                                  (b.details.empty() ? "" : ", " + b.details));
-        if (!b.turbulence.empty()) logging::item(b.zone + " turbulence", b.turbulence);
-    }
+    SetupSection boundaries{.title = "Boundaries"};
+    boundaries.tables.push_back(boundary_table(boundary_summary));
+    sections.push_back(std::move(boundaries));
 
-    logging::section("Output");
-    logging::item("Progress", "every " + logging::count(check_interval) + " steps");
-    for (const auto & writer : data_writers) {
-        const auto [kind, text] = writer->summary();
-        logging::item(kind, text);
-    }
+    SetupSection output{.title = "Output"};
+    std::vector<OutputSummary> outputs = {{.kind = "progress", .file = "", .steps = check_interval,
+                                           .contents = "a row of the progress table"}};
+    for (const auto & writer : data_writers) outputs.push_back(writer->summary());
     for (const auto & monitor : force_monitors) {
-        logging::item("forces", monitor.file + " (" + monitor.zone + ") every " + logging::count(monitor.interval) +
-                                    " steps");
+        outputs.push_back({.kind = "forces", .file = monitor.file, .steps = monitor.interval, .contents = monitor.zone});
     }
     if (integral_monitor.interval > 0) {
-        logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
-                                       " steps");
+        outputs.push_back({.kind = "integrals", .file = integral_monitor.file, .steps = integral_monitor.interval});
     }
-    logging::items(statistics.summary());
-    logging::items(probes.summary());
-    logging::items(triggers.summary());
+    for (auto && o : statistics.summary()) outputs.push_back(std::move(o));
+    for (auto && o : probes.summary()) outputs.push_back(std::move(o));
+    output.tables.push_back(output_table(outputs));
+    SetupSection::Table trigger_table{.note = "", .columns = {"trigger", "condition and action"}, .rows = {}};
+    for (const auto & [name, text] : triggers.summary()) trigger_table.rows.push_back({report::Status::NONE, {name, text}});
+    output.tables.push_back(std::move(trigger_table));
+    sections.push_back(std::move(output));
+
+    report::Text text(logging::color_stdout());
+    setup_text(text, sections);
+    text.print();
 }
 
 void Solver::print_summary(const RunEnd & end) const {

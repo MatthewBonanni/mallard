@@ -370,10 +370,40 @@ check_interval = 100   # a progress row every 100 steps
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
-stage, summaries of mesh, physics (with the case's units, `physics.units`),
-numerics, boundaries and output, then one progress row every
-`[output] check_interval` steps (default 1). A note above the table says what
-the columns are, and under the column names a row gives their units:
+stage, then the Mesh, Physics (with the case's units, `physics.units`),
+Numerics, Boundaries and Output sections. Each section gives its settings in
+words, then its quantities in a table with a units column: the cells and faces,
+the extent, cell sizes and owned cells per rank as min and max, the partition's
+ranks, halo layers and exchange sizes, the time step or CFL number and the
+stops; the boundaries as zone, condition, faces and details; the outputs as
+file, interval (in steps, or in simulated time) and contents:
+
+```text
+== Mesh ===================================================================================
+  setting     value
+  Type        cartesian_tri
+  Cell order  Hilbert curve (auto: 0.195 cache lines per cell, 0.348 in the input order)
+
+  quantity        value    units  basis
+  cells           460,800  cells  tri
+  faces           692,400  faces
+  boundary faces  2,400    faces
+
+  quantity   min        max        units  basis
+  x extent   0          4          m      nodes
+  y extent   0          1          m      nodes
+  cell area  8.681e-06  8.681e-06  m^2    ratio 1
+...
+== Output =================================================================================
+  Intervals in steps, or in simulated time:
+  output    file                 every  units  contents
+  progress  -                    200    steps  a row of the progress table
+  vtkhdf    ./solut/dmr.vtkhdf   0.002  s      RHO, U_X, U_Y, P, MACH, SCHLIEREN
+```
+
+Then comes one progress row every `[output] check_interval` steps (default 1).
+A note above the table says what the columns are, and under the column names a
+row gives their units:
 
 ```text
        step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written

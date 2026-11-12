@@ -1,6 +1,6 @@
 /**
  * @file run_report_test.cpp
- * @brief The progress table, the summary and the health section of a run.
+ * @brief The setup banner, the progress table, the summary and the health section of a run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -153,4 +153,52 @@ TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     summary_section(text, s);
     health_section(text, h);
     expect_golden(text.str(), "summary_2d.txt");
+}
+
+// Guards the setup banner's sections: settings, quantities with units, the mesh's ranges and partition, the
+// boundaries' and the outputs' tables
+TEST(RunReport, SetupBannerMatchesTheGolden) {
+    if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D mesh (two extents, cell areas)";
+    MeshSetup mesh{.settings = {{"Type", "file mesh.msh"}, {"Cell order", "Hilbert curve"}},
+                   .cells = {{"tri", 300'000}, {"quad", 160'800}},
+                   .faces = 692'400,
+                   .boundary_faces = 2'400,
+                   .lo = {0.0, -0.5, 0.0},
+                   .hi = {4.0, 1.0, 0.0},
+                   .size_min = 8.681e-6,
+                   .size_max = 3.4e-5,
+                   .partition = MeshSetup::Partition{.partitioner = "multi-jagged",
+                                                     .exchange = "MPI",
+                                                     .ranks = 3,
+                                                     .halo_layers = 2,
+                                                     .owned_min = 151'000,
+                                                     .owned_max = 157'000,
+                                                     .halo_max = 4'200,
+                                                     .cut_faces = 1'900,
+                                                     .layer1_max = 1'300,
+                                                     .layer1_all = 3'800,
+                                                     .received_max = 2'600,
+                                                     .received_all = 7'600}};
+    SetupSection numerics{.title = "Numerics", .settings = {{"Riemann solver", "HLLC"}, {"Time integrator", "SSPRK3"}}};
+    numerics.quantities = time_quantities({.use_cfl = false, .dt = 1.0e-5, .controlled = true, .n_steps = 5'000,
+                                           .t_stop = 0.2, .wall_stop = 3600.0});
+    SetupSection cfl{.title = "Time step at a CFL number"};
+    cfl.quantities = time_quantities({.use_cfl = true, .cfl = 0.8});
+    SetupSection boundaries{.title = "Boundaries"};
+    boundaries.tables.push_back(boundary_table({{"inlet", "dirichlet", 240, "u from inflow.csv", "synthetic, 5% intensity"},
+                                                {"wall", "no_slip_wall", 960, "isothermal 300 K", ""}}));
+    SetupSection output{.title = "Output"};
+    output.tables.push_back(output_table({{.kind = "progress", .file = "", .steps = 200, .contents = ""},
+                                          {.kind = "vtkhdf", .file = "solut/flow.vtkhdf", .seconds = 2.0e-3,
+                                           .contents = "RHO, P"},
+                                          {.kind = "forces", .file = "forces_wall.csv", .steps = 10, .contents = "wall"},
+                                          {.kind = "statistics", .file = "", .contents = "from t = 0.1 s"}}));
+    report::Text si(false);
+    setup_text(si, {mesh_section(mesh), numerics, cfl, boundaries, output});
+    units::set_system(units::System::NONDIMENSIONAL);
+    numerics.quantities = time_quantities({.use_cfl = false, .dt = 1.0e-5, .t_stop = 0.2});
+    report::Text nondimensional(false);
+    setup_text(nondimensional, {mesh_section(mesh), numerics});
+    units::set_system(units::System::SI);
+    expect_golden(si.str() + "\n" + nondimensional.str(), "setup_2d.txt");
 }

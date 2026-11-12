@@ -1,7 +1,7 @@
 /**
  * @file run_report.h
- * @brief What a run prints as it goes and at its end: the progress table (names over units, a legend,
- *        and a written column), the summary and the health section, rendered with report::.
+ * @brief What a run prints: the setup banner, as it goes the progress table (names over units, a legend,
+ *        and a written column), and at its end the summary and the health section, rendered with report::.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -9,12 +9,74 @@
 #ifndef RUN_REPORT_H
 #define RUN_REPORT_H
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "check.h"
+#include "common_io.h"
 #include "report.h"
 #include "run_health.h"
+
+/** @brief Settings described in words, (setting, description) in display order. */
+using Settings = std::vector<std::pair<std::string, std::string>>;
+
+/** @brief A section of the setup banner: its settings, then its quantities, then tables of its own. */
+struct SetupSection {
+    struct Table {
+        std::string note;
+        std::vector<report::Column> columns;
+        std::vector<report::Row> rows;
+    };
+    std::string title;
+    Settings settings{};
+    std::vector<report::Row> quantities{};  // quantity, value, units, target (empty), basis
+    std::vector<Table> tables{};
+};
+
+/** @brief The sections of the setup banner, as report::Text renders them. */
+void setup_text(report::Text & text, const std::vector<SetupSection> & sections);
+
+/** @brief The mesh over every rank, and its partition in parallel runs. */
+struct MeshSetup {
+    Settings settings{};                                // type, transform, stretching, cell order, ...
+    std::vector<std::pair<std::string, uint64_t>> cells{};  // by type: "tri", "quad", ...
+    uint64_t faces = 0, boundary_faces = 0;
+    std::array<double, 3> lo{}, hi{};  // extent of the nodes, m
+    double size_min = 0.0, size_max = 0.0;  // cell area (2D) or volume (3D)
+    struct Partition {
+        std::string partitioner, exchange;  // "multi-jagged", "MPI"
+        int ranks = 0, halo_layers = 0;
+        uint64_t owned_min = 0, owned_max = 0, halo_max = 0;
+        uint64_t cut_faces = 0;  // faces between ranks
+        uint64_t layer1_max = 0, layer1_all = 0, received_max = 0, received_all = 0;
+    };
+    std::optional<Partition> partition{};
+};
+
+/** @brief The Mesh section. */
+SetupSection mesh_section(const MeshSetup & m);
+
+/** @brief The time step and when the run stops. */
+struct TimeSetup {
+    bool use_cfl = true;
+    double cfl = 0.0, dt = 0.0;  // the fixed time step, or the first one with a controller, s
+    bool controlled = false;      // the step controller sets dt after the first step
+    uint64_t n_steps = 0;         // 0: no limit, as t_stop and wall_stop
+    double t_stop = 0.0, wall_stop = 0.0;  // s
+};
+
+/** @brief Quantity rows of the time step and the stops. */
+std::vector<report::Row> time_quantities(const TimeSetup & t);
+
+/** @brief The table of the boundary zones: condition, faces over every rank and details. */
+SetupSection::Table boundary_table(const std::vector<CheckBoundary> & boundaries);
+
+/** @brief The table of the outputs: files, interval and what they hold. */
+SetupSection::Table output_table(const std::vector<OutputSummary> & outputs);
 
 /** @brief The optional columns of the progress table. */
 struct ProgressColumns {
