@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "comm.h"
@@ -56,4 +57,11 @@ TEST(CommTest, AlltoallvSendsLongMessagesInPieces) {
     comm::detail::alltoallv<uint64_t>(send.data(), send_counts, send_offsets, recv.data(), recv_counts, recv_offsets,
                                       2);
     EXPECT_EQ(recv, expected);
+}
+
+TEST(CommTest, AllgatherReturnsEveryRanksString) {
+    const auto text = [](int r) { return std::string(size_t(r % 3) * 2, char('a' + r)); };
+    const std::vector<std::string> all = comm::allgather(text(comm::rank()));
+    ASSERT_EQ(all.size(), size_t(comm::size()));
+    for (int r = 0; r < comm::size(); r++) EXPECT_EQ(all[size_t(r)], text(r));
 }

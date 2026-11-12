@@ -13,11 +13,13 @@
 #ifndef COMM_H
 #define COMM_H
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <type_traits>
@@ -158,6 +160,36 @@ void alltoallv(const T * send, std::span<const uint64_t> send_counts, std::span<
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */
 MPI_Comm world();
+
+/**
+ * @brief Posts a nonblocking send of n values to rank `to`, in messages of at
+ *        most max_count values each, and appends their requests. The matching
+ *        irecv splits the same n the same way.
+ */
+template <typename T>
+void isend(const T * data, const uint64_t n, const MPI_Datatype type, const int to, const int tag, const MPI_Comm c,
+           std::vector<MPI_Request> & requests, const uint64_t max_count = detail::mpi_max_count) {
+    for (uint64_t at = 0; at < n; at += max_count) {
+        requests.push_back(MPI_REQUEST_NULL);
+        if (MPI_Isend(data + at, static_cast<int>(std::min(max_count, n - at)), type, to, tag, c, &requests.back()) !=
+            MPI_SUCCESS) {
+            throw std::runtime_error("MPI error in MPI_Isend");
+        }
+    }
+}
+
+/** @brief Posts the nonblocking receive of n values from rank `from` that matches isend. */
+template <typename T>
+void irecv(T * data, const uint64_t n, const MPI_Datatype type, const int from, const int tag, const MPI_Comm c,
+           std::vector<MPI_Request> & requests, const uint64_t max_count = detail::mpi_max_count) {
+    for (uint64_t at = 0; at < n; at += max_count) {
+        requests.push_back(MPI_REQUEST_NULL);
+        if (MPI_Irecv(data + at, static_cast<int>(std::min(max_count, n - at)), type, from, tag, c, &requests.back()) !=
+            MPI_SUCCESS) {
+            throw std::runtime_error("MPI error in MPI_Irecv");
+        }
+    }
+}
 #endif
 
 } // namespace comm
