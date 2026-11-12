@@ -469,5 +469,7 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyA
     words.insert(words.end(), {"--region", "{type = \"isosurface\", field = \"RHO\", value = 1.1}", "--homogeneous", "y",
                                "-o", fresh_dir("moments_isosurface")});
     EXPECT_EQ(average(words, &errors), 1);
-    if (comm::is_root()) EXPECT_NE(errors.find("needs"), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("needs"), std::string::npos) << errors;
+    }
 }

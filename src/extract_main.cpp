@@ -1592,9 +1592,9 @@ int average(const cli::Args & args) {
     }
     if (!solution && !a.homogeneous.empty()) {
         std::vector<homogeneous::Column> columns;
-        const auto add_column = [&](const std::string & name, const auto & view, uint32_t k, bool is_favre) {
+        const auto add_column = [&](const std::string & column, const auto & view, uint32_t k, bool is_favre) {
             homogeneous::Column col;
-            col.name = name;
+            col.name = column;
             col.favre = is_favre;
             col.values.resize(mesh.n_owned());
             for (uint32_t c = 0; c < mesh.n_owned(); c++) col.values[c] = double(view(c, k));
