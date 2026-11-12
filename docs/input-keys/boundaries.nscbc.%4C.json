@@ -1,0 +1,16 @@
+{
+ "dimension": "length (m)",
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/forced_inlet/input.toml",
+  "examples/pulsed_jet/input.toml",
+  "examples/turbulent_inflow_duct/input.toml"
+ ],
+ "type": "number"
+}

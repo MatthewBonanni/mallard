@@ -17,7 +17,13 @@ t_start = 40.0
 interval = 10
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence) and 3 more.
+*Used in:*
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
+[`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct),
+[`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence)
+and 3 more.
 
 `[statistics]` keeps running time averages and covariances per cell, on the
 device, without communication: bitwise the same on any number of ranks, and
@@ -209,7 +215,8 @@ variable = "U_Y"
 level = 0.0
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
+*Used in:*
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
 
 Per-cell means over the samples whose phase in a periodic cycle falls in each
 of `bins` bins, output as `PHASE_<bin>_<field>` (`fields = ["PHASE_*"]`).
