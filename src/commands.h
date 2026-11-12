@@ -47,7 +47,7 @@ int list_species_main(const cli::Args & args);
 int list_keys_main(const cli::Args & args);
 
 /**
- * @brief The key catalog of every example and tutorial (docs/input-keys.json, as tools/dev/input_catalog.py merges
+ * @brief The key catalog of every example and tutorial (docs/input-keys/, as tools/dev/input_catalog.py merges
  *        it), from Mallard's data directories. @throws std::runtime_error if none has it
  */
 json::Value general_key_catalog();

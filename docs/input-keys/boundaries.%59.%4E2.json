@@ -1,0 +1,10 @@
+{
+ "dims": [
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/shock_bubble_3d/input.toml"
+ ],
+ "type": "number"
+}
