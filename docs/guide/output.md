@@ -259,10 +259,12 @@ noise: `FLAME_INDEX` is ±1 there, so read it where the flame is (mask it with
 ### Derived fields after the run
 
 `mallard post derive` sets the case of restart files or snapshots up again
-and writes snapshots of any of the fields above, from the run's own code
-(reconstruction, gradients and kernels), so they equal what `[[write_data]]`
-would have written at those steps, bit for bit from restart files
-([Command line](cli.md#mallard-post-derive)):
+and writes snapshots of the fields of the [derived](#derived-fields) and
+[mixture](#mixture-fields) tables above and `VORTICITY`, from the run's own code (reconstruction, gradients and kernels), so they equal
+what `[[write_data]]` would have written at those steps, bit for bit from
+restart files ([Command line](cli.md#mallard-post-derive)). What only the run
+itself records (`CFL`, `TENO_SIGMA`, `P_MAX`) it does not write; `mallard list
+fields` names the fields it writes:
 
 ```
 mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION

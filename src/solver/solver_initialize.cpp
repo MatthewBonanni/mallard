@@ -46,6 +46,7 @@ void Solver::init_solution() {
         apply_output_state(state_reader(*mesh));
         update_primitives();
         statistics.start(statistics.sampling_start());
+        probes.start_averages(statistics.sampling_start());
         initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
         return;
     }
@@ -188,8 +189,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
     }
     // States read for post-processing never continue the averages they hold
-    if (!state_reader) statistics.restore(restart, file, t);
-    probes.restore_averages(restart, file, t, statistics.resets());
+    if (!state_reader) {
+        statistics.restore(restart, file, t);
+        probes.restore_averages(restart, file, t, statistics.resets());
+    }
     probes.restore_spectra(restart, file, statistics.resets());
     if (resume_output && !statistics.resets()) convergence.restore(restart, file, averages_start());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);

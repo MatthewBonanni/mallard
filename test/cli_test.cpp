@@ -621,7 +621,7 @@ void write_pack_case() {
     fs::create_directories("study/run");
     fs::copy_file(source_dir() + (three ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh"),
                   "study/data/cyl.msh");
-    std::ofstream("study/run/points.txt") << (three ? "0.6 0.0 0.5\n0.0 0.7 0.5\n" : "0.6 0.0\n0.0 0.7\n");
+    std::ofstream("study/run/points.txt") << (three ? "0.6 0.0 0.15\n0.0 0.7 0.15\n" : "0.6 0.0\n0.0 0.7\n");
     const std::string u = three ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
     std::ofstream input("study/run/input.toml");
     input << "[run]\nn_steps = 4\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"../data/cyl.msh\"\n"
@@ -1101,6 +1101,39 @@ int run_shell(const std::string & shell, const std::string & flags, const fs::pa
     return WIFEXITED(status) ? WEXITSTATUS(status) : -2;
 }
 
+/**
+ * @brief Completes each line (the words after mallard; the last is the one completed) with the bash completion,
+ *        in dir: got, one line each, " " + the completions sorted, each followed by a space. The status of bash, -1
+ *        if it is not installed.
+ */
+int bash_complete(const fs::path & dir, const std::vector<std::vector<std::string>> & lines,
+                  std::vector<std::string> & got) {
+    const Result script = run({"completion", "bash"});
+    EXPECT_EQ(script.status, 0) << script.err;
+    std::ofstream(dir / "mallard.bash") << script.out;
+    std::ofstream driver(dir / "driver.sh");
+    driver << "export LC_ALL=C\ncd '" << dir.string() << "' && source mallard.bash || exit 1\n";
+    for (const auto & line : lines) {
+        driver << "COMP_WORDS=('" << mallard() << "'";
+        for (const std::string & w : line) driver << " '" << w << "'";
+        driver << "); COMP_CWORD=" << line.size() << "; COMPREPLY=(); _mallard\n"
+               << "printf '%s\\n' \"${COMPREPLY[@]}\" | sort | tr '\\n' ' '; echo\n";
+    }
+    driver.close();
+    std::string out;
+    const int status = run_shell("bash", "--norc --noprofile", dir / "driver.sh", out);
+    got.clear();
+    std::istringstream in(out);
+    for (std::string l; std::getline(in, l);) got.push_back(" " + l);
+    if (status == 0) {
+        EXPECT_EQ(got.size(), lines.size()) << out;
+    } else if (status != -1) {
+        ADD_FAILURE() << out;
+    }
+    got.resize(lines.size());
+    return status;
+}
+
 } // namespace
 
 TEST(CliTest, BashCompletesCommandsOptionsAndValues) {
@@ -1110,10 +1143,6 @@ TEST(CliTest, BashCompletesCommandsOptionsAndValues) {
     fs::create_directories(dir / "solut");
     fs::create_directories(dir / "run1");
     for (const char * f : {"case.toml", "notes.txt", "mesh.h5", "solut/restart_000010.restart"}) std::ofstream(dir / f);
-    const Result script = run({"completion", "bash"});
-    ASSERT_EQ(script.status, 0) << script.err;
-    std::ofstream(dir / "mallard.bash") << script.out;
-    // The words after mallard; the last is the one completed
     const std::vector<std::vector<std::string>> lines = {
         {""},
         {"input", ""},
@@ -1134,23 +1163,10 @@ TEST(CliTest, BashCompletesCommandsOptionsAndValues) {
         {"mesh", "convert", "case.toml", ""},
         {"input", "upgrade", "--dim", ""},
     };
-    std::ofstream driver(dir / "driver.sh");
-    driver << "export LC_ALL=C\ncd '" << dir.string() << "' && source mallard.bash || exit 1\n";
-    for (const auto & line : lines) {
-        driver << "COMP_WORDS=('" << mallard() << "'";
-        for (const std::string & w : line) driver << " '" << w << "'";
-        driver << "); COMP_CWORD=" << line.size() << "; COMPREPLY=(); _mallard\n"
-               << "printf '%s\\n' \"${COMPREPLY[@]}\" | sort | tr '\\n' ' '; echo\n";
-    }
-    driver.close();
-    std::string out;
-    const int status = run_shell("bash", "--norc --noprofile", dir / "driver.sh", out);
-    if (status == -1) GTEST_SKIP() << "no bash";
-    ASSERT_EQ(status, 0) << out;
     std::vector<std::string> got;
-    std::istringstream in(out);
-    for (std::string l; std::getline(in, l);) got.push_back(" " + l);
-    ASSERT_EQ(got.size(), lines.size()) << out;
+    const int status = bash_complete(dir, lines, got);
+    if (status == -1) GTEST_SKIP() << "no bash";
+    ASSERT_EQ(status, 0);
     for (const char * w : {"ctl", "check", "new", "input", "mesh", "test", "completion"}) {
         EXPECT_TRUE(contains(got[0], std::string(" ") + w + " ")) << w << ":" << got[0];
     }
@@ -1189,5 +1205,66 @@ TEST(CliTest, ZshAndFishCompletionParse) {
         if (status != -1) {
             EXPECT_EQ(status, 0) << out;
         }
+    }
+}
+
+TEST(CliTest, CompletionOffersTheKeyAndFieldCatalogs) {
+    SKIP_UNDER_MPI();
+    const Result listed_keys = run({"list", "keys", "--format", "json"}, true);
+    ASSERT_EQ(listed_keys.status, 0) << listed_keys.err;
+    std::vector<std::string> keys, numerics;
+    for (const std::string & key : json::parse(listed_keys.out)["keys"].keys()) {
+        const std::string section = key.substr(0, key.find('.'));
+        if (std::find(keys.begin(), keys.end(), section) == keys.end()) keys.push_back(section);
+        if (key.find('<') != std::string::npos || key == section) continue;
+        keys.push_back(key);
+        if (key.starts_with("numerics.f")) numerics.push_back(key);
+    }
+    const Result listed_fields = run({"list", "fields", "--format", "json"}, true);
+    ASSERT_EQ(listed_fields.status, 0) << listed_fields.err;
+    std::vector<std::string> fields;
+    const json::Value field_catalog = json::parse(listed_fields.out);
+    for (const json::Value & f : field_catalog["fields"].array) {
+        if (f["name"].string.find('<') == std::string::npos) fields.push_back(f["name"].string);
+    }
+    ASSERT_FALSE(numerics.empty());
+    ASSERT_TRUE(std::find(fields.begin(), fields.end(), "MACH") != fields.end());
+
+    const fs::path dir = fs::absolute("completion_catalogs");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "case.toml");
+    const std::vector<std::vector<std::string>> lines = {
+        {"list", "keys", ""},
+        {"list", "keys", "numerics.f"},
+        {"post", "extract", "flow.vtkhdf.series", "--fields", ""},
+        {"post", "extract", "flow.vtkhdf.series", "--fields", "RHO,U,"},
+        {"diff", "a.restart", "b.restart", "--fields", "=", "RHO,"},
+    };
+    std::vector<std::string> got;
+    const int status = bash_complete(dir, lines, got);
+    if (status == -1) GTEST_SKIP() << "no bash";
+    ASSERT_EQ(status, 0);
+    auto expected = [](std::vector<std::string> words, const std::string & head) {
+        for (std::string & w : words) w = head + w;
+        std::sort(words.begin(), words.end());
+        std::string out = " ";
+        for (const std::string & w : words) out += w + " ";
+        return out;
+    };
+    std::vector<std::string> keys_or_input = keys;
+    keys_or_input.push_back("case.toml");
+    EXPECT_EQ(got[0], expected(keys_or_input, ""));
+    EXPECT_EQ(got[1], expected(numerics, ""));
+    EXPECT_EQ(got[2], expected(fields, ""));
+    EXPECT_EQ(got[3], expected(fields, "RHO,U,"));
+    EXPECT_EQ(got[4], expected(fields, "RHO,"));
+
+    for (const std::string shell : {"zsh", "fish"}) {
+        SCOPED_TRACE(shell);
+        const Result script = run({"completion", shell});
+        ASSERT_EQ(script.status, 0) << script.err;
+        for (const std::string & w : keys) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
+        for (const std::string & w : fields) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
     }
 }
