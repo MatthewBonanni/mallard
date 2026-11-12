@@ -2850,6 +2850,11 @@ void Solver::write_output_of_state(bool next) {
 }
 
 void Solver::sample_statistics() {
+    update_statistics_fields();
+    statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+}
+
+void Solver::update_statistics_fields() {
     if (statistics.samples_derived()) {
         update_velocity_gradients();
         update_derived_fields();
@@ -2857,7 +2862,6 @@ void Solver::sample_statistics() {
         update_primitives();
     }
     if (statistics.samples_chemistry()) update_heat_release_rate();
-    statistics.sample(step, t, cell_sampler(), mesh->n_owned());
 }
 
 CellSampler Solver::sample_statistics_of_state(bool next) {

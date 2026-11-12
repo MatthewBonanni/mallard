@@ -657,8 +657,13 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
-        /** @brief Fences the device inside the step's conditional body, so a step graph's capture fails (tests). */
-        void set_fence_in_step_body(bool on) { fence_in_step_body = on; }
+        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
+        enum class CaptureFault {
+            NONE,
+            FENCE,         // fails while the stream captures
+            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+        };
+        void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -847,6 +852,8 @@ class Solver {
         region::CellFields cell_fields() const;
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
+        /** @brief The fields [statistics] sample: the primitives, and the derived fields and HRR they read (capturable). */
+        void update_statistics_fields();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -879,7 +886,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
-        bool fence_in_step_body = false;
+        CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         void * capture_graph = nullptr;        // cudaGraph_t being captured
@@ -900,7 +907,7 @@ class Solver {
         Kokkos::View<double *> monitor_results;  // columns of every monitor
         Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
-        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry]
+        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry, any]
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)

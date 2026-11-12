@@ -182,26 +182,31 @@ struct Case {
     std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
-    bool fence_in_step_body = false;
+    Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
+    std::string body;             // the mesh, state, boundaries, numerics and physics of another case than the box
 };
 
 std::string box_input(const Case & c, const std::string & dir, int depth) {
     std::ostringstream s;
-    s << "[run]\n" << c.run << "step_queue = " << depth << "\n"
-      << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
-    s << "[initialize]\ntype = \"analytical\"\n"
-      << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
-      << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\n" << c.right
-      << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
-    if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
-    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n" << c.numerics
-      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-      << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\n";
+    s << "[run]\n" << c.run << "step_queue = " << depth << "\n";
+    if (!c.body.empty()) {
+        s << c.body;
+    } else {
+        s << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+        if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
+        s << "[initialize]\ntype = \"analytical\"\n"
+          << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
+          << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
+          << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\n" << c.right
+          << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
+        if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+        s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n" << c.numerics
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+          << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    }
+    s << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\n";
     std::string extra = c.extra;
     for (size_t at; (at = extra.find("{dir}")) != std::string::npos;) extra.replace(at, 5, dir);
     s << extra;
@@ -309,17 +314,19 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         Solver solver;
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
-        solver.set_fence_in_step_body(c.fence_in_step_body);
+        solver.set_capture_fault(c.capture_fault);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0 && !c.fence_in_step_body) expect_capturable(guard, solver);
+        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
         solver.copy_device_to_host();
+        const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
             for (uint8_t v = 0; v < N_CONSERVATIVE; v++) o.U.push_back(solver.h_conservatives(i, v));
+            for (size_t k = 0; k < n_species; k++) o.U.push_back(solver.h_species(i, k));
         }
         o.graph_steps = solver.get_graph_steps();
         o.step = solver.get_step();
@@ -495,6 +502,52 @@ TEST(StepQueueTest, ConditionalStatisticsAreSampledWithoutStoppingTheDevice) {
     alone.extra = restarts + "[statistics]\ninterval = 2\n" + entries +
                   "[[triggers]]\nname = \"begin\"\nwhen = \"step >= 12\"\ndo = \"start statistics\"\n";
     expect_queue_invariant("conditional_alone", alone);
+}
+
+TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
+    // Means and conditional statistics of derived fields, computed under the sampling's conditional node
+    const std::string restarts = "check_interval = 1000\n"
+                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = restarts + "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"MACH\", \"Q_CRITERION\"]\n"
+                         "products = [\"MACH*SCHLIEREN\"]\n"
+                         "[[statistics.conditional]]\non = \"MACH\"\nbins = 6\nrange = [0.0, 0.6]\n"
+                         "fields = [\"DILATATION\", \"P\"]\ninterval = 3\nfile = \"{dir}/conditional_mach.csv\"\n";
+    c.distributed = comm::size() > 1;
+    expect_queue_invariant("derived", c);
+    Case bare = c;
+    bare.extra = restarts;
+    EXPECT_EQ(run_case("derived", c, 3).queued, run_case("bare", bare, 3).queued);
+
+    // HRR and OMEGA_<species> of a reacting mixture, with a flame index of its species gradients
+    Case reacting;
+    reacting.run = "n_steps = 12\ndt = 1.0e-8\n";
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 4\nLx = 1.0e-3\nLy = 1.0e-3\n";
+    if (N_DIM == 3) body << "Nz = 3\nLz = 1.0e-3\n";
+    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if (N_DIM == 3) body << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    body << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1100.0 + 400.0 * sin(pi * x / 1.0e-3)\"\n"
+         << "u = " << vector_of("0.0", "0.0", "0.0")
+         << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+         << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
+         << "[chemistry]\n";
+    reacting.body = body.str();
+    reacting.extra = restarts + "[output.mixture]\nfuel_species = \"H2\"\noxidizer_species = \"O2\"\n"
+                                "[statistics]\ninterval = 2\nfields = [\"HRR\", \"MACH\"]\nproducts = [\"HRR*FLAME_INDEX\"]\n"
+                                "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1100.0, 1500.0]\n"
+                                "fields = [\"HRR\", \"OMEGA_H2O\"]\nfile = \"{dir}/conditional_T.csv\"\n";
+    reacting.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("rates", reacting);
+    if (comm::is_root()) {
+        ASSERT_TRUE(o.files.count("conditional_T.csv"));
+        EXPECT_FALSE(o.files.at("conditional_T.csv").empty());
+    }
+    Case reacting_bare = reacting;
+    reacting_bare.extra = restarts;
+    EXPECT_EQ(run_case("rates", reacting, 3).queued, run_case("rates_bare", reacting_bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -730,17 +783,21 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
-    // A fence inside the step's conditional body invalidates the capture: the run warns and takes its steps
-    // kernel by kernel, as the host would
+    // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
+    // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;
     c.run = "n_steps = 12\ncfl = 0.5\n";
     const Outcome host = run_case("failed_capture", c, 0);
-    c.fence_in_step_body = true;
-    const Outcome fallback = run_case("failed_capture", c, 3);
-    expect_same(host, fallback, "a failed capture");
-    EXPECT_EQ(fallback.graph_steps, 0u);
-    ASSERT_EQ(fallback.warnings.size(), 1u);
-    EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+    for (const auto & [fault, reported_by] : {std::pair{Solver::CaptureFault::FENCE, "cudaDeviceSynchronize"},
+                                              std::pair{Solver::CaptureFault::LEGACY_STREAM, "cudaStreamEndCapture"}}) {
+        c.capture_fault = fault;
+        const Outcome fallback = run_case("failed_capture", c, 3);
+        expect_same(host, fallback, reported_by);
+        EXPECT_EQ(fallback.graph_steps, 0u) << reported_by;
+        ASSERT_EQ(fallback.warnings.size(), 1u) << reported_by;
+        EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+        EXPECT_NE(fallback.warnings[0].find(reported_by), std::string::npos) << fallback.warnings[0];
+    }
 #endif
 }
 
