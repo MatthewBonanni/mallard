@@ -582,6 +582,82 @@ std::vector<double> read_vtu_field(const std::string & file, const std::string &
     return x.values(*a);
 }
 
+/** @brief The VTK type of a cell of a mesh file by its corner count. */
+uint8_t corner_vtk_type(int dim, uint64_t corners) {
+    if (dim == 2) return corners == 3 ? 5 : corners == 4 ? 9 : 7;
+    switch (corners) {
+        case 4: return 10;
+        case 5: return 14;
+        case 6: return 13;
+        default: return 12;
+    }
+}
+
+/** @brief Appends cells given by their points' ids and the end of each cell's ids (VTK XML offsets). */
+void append_cells(Geometry & g, const std::vector<uint64_t> & ids, const std::vector<uint64_t> & ends, uint64_t shift,
+                  const std::vector<uint8_t> & types) {
+    const uint64_t base = g.connectivity.size();
+    for (const uint64_t id : ids) g.connectivity.push_back(id + shift);
+    for (const uint64_t end : ends) g.offsets.push_back(base + end);
+    g.types.insert(g.types.end(), types.begin(), types.end());
+}
+
+/** @brief VTK types of polydata cells: vertices, lines or polygons, by their point counts. */
+std::vector<uint8_t> poly_types(const std::string & kind, const std::vector<uint64_t> & offsets) {
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i + 1 < offsets.size(); i++) {
+        const uint64_t n = offsets[i + 1] - offsets[i];
+        if (kind == "Verts" || kind == "Vertices") {
+            out.push_back(n == 1 ? 1 : 2);
+        } else if (kind == "Lines") {
+            out.push_back(n == 2 ? 3 : 4);
+        } else {
+            out.push_back(7);
+        }
+    }
+    return out;
+}
+
+template <typename T>
+std::vector<T> integers(const std::vector<double> & v) {
+    std::vector<T> out(v.size());
+    for (size_t i = 0; i < v.size(); i++) out[i] = static_cast<T>(v[i]);
+    return out;
+}
+
+Geometry read_vtu_geometry(const std::string & file) {
+    Geometry g;
+    if (ends_with(file, ".pvtu")) {
+        for (const auto & piece : pvtu_pieces(file, read_bytes(file))) {
+            const Geometry p = read_vtu_geometry(piece);
+            const uint64_t shift = g.points.size() / 3;
+            g.points.insert(g.points.end(), p.points.begin(), p.points.end());
+            const std::vector<uint64_t> ends(p.offsets.begin() + 1, p.offsets.end());
+            append_cells(g, p.connectivity, ends, shift, p.types);
+        }
+        return g;
+    }
+    const VtkXml x(file);
+    if (const XmlArray * points = x.find("Points", "")) g.points = x.values(*points);
+    auto ids = [&](const char * section, const char * name) {
+        const XmlArray * a = x.find(section, name);
+        return a ? integers<uint64_t>(x.values(*a)) : std::vector<uint64_t>{};
+    };
+    if (x.type == "UnstructuredGrid") {
+        const XmlArray * types = x.find("Cells", "types");
+        append_cells(g, ids("Cells", "connectivity"), ids("Cells", "offsets"), 0,
+                     types ? integers<uint8_t>(x.values(*types)) : std::vector<uint8_t>{});
+        return g;
+    }
+    for (const char * kind : {"Verts", "Lines", "Polys"}) {
+        std::vector<uint64_t> ends = ids(kind, "offsets");
+        std::vector<uint64_t> starts{0};
+        starts.insert(starts.end(), ends.begin(), ends.end());
+        append_cells(g, ids(kind, "connectivity"), ends, 0, poly_types(kind, starts));
+    }
+    return g;
+}
+
 // ---------------------------------------------------------------------------
 // Series indexes: .vtkhdf.series, .pvd, .xmf
 
@@ -1198,6 +1274,85 @@ std::vector<double> read_h5_field(const Contents & c, const std::string & field,
     return all<double>(fields, field);
 }
 
+Geometry read_vtkhdf_geometry(const std::string & path) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    Handle file = open_file(path);
+    Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    Geometry g;
+    if (exists(top, "Points")) g.points = all<double>(top, "Points");
+    auto cells = [&](hid_t group) {
+        std::vector<uint64_t> offsets = all<uint64_t>(group, "Offsets");
+        if (offsets.empty()) offsets = {0};
+        return std::pair{all<uint64_t>(group, "Connectivity"), offsets};
+    };
+    if (exists(top, "Types")) {
+        auto [connectivity, offsets] = cells(top);
+        append_cells(g, connectivity, std::vector<uint64_t>(offsets.begin() + 1, offsets.end()), 0,
+                     all<uint8_t>(top, "Types"));
+        return g;
+    }
+    for (const char * kind : {"Vertices", "Lines", "Polygons"}) {
+        if (!exists(top, kind) || first_count(top, std::string(kind) + "/NumberOfCells") == 0) continue;
+        Handle group(H5Gopen2(top, kind, H5P_DEFAULT), H5Gclose, std::string("opening ") + kind);
+        auto [connectivity, offsets] = cells(group);
+        append_cells(g, connectivity, std::vector<uint64_t>(offsets.begin() + 1, offsets.end()), 0,
+                     poly_types(kind, offsets));
+    }
+    return g;
+}
+
+/** @brief The points and cells of an HDF5 output mesh file (XDMF Mixed topology). */
+Geometry read_output_mesh_geometry(const std::string & path) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    Handle file = open_file(path);
+    Handle nodes(H5Gopen2(file, "nodes", H5P_DEFAULT), H5Gclose, "opening nodes");
+    const std::vector<hsize_t> d = dims(nodes, "coordinates");
+    const size_t width = d.size() == 2 ? d[1] : 1;
+    const std::vector<double> xyz = all<double>(nodes, "coordinates");
+    Geometry g;
+    g.points.assign(d.at(0) * 3, 0.0);
+    for (size_t p = 0; p < d[0]; p++) {
+        for (size_t i = 0; i < width && i < 3; i++) g.points[3 * p + i] = xyz[width * p + i];
+    }
+    Handle cells(H5Gopen2(file, "cells", H5P_DEFAULT), H5Gclose, "opening cells");
+    const std::vector<int64_t> offsets = all<int64_t>(cells, "offsets");
+    const std::vector<int64_t> topology = all<int64_t>(cells, "topology");
+    static const std::map<int64_t, std::pair<uint8_t, size_t>> XDMF_TO_VTK = {
+        {4, {5, 3}}, {5, {9, 4}}, {6, {10, 4}}, {7, {14, 5}}, {8, {13, 6}}, {9, {12, 8}}};
+    for (size_t i = 0; i + 1 < offsets.size(); i++) {
+        const size_t at = static_cast<size_t>(offsets[i]);
+        const auto it = XDMF_TO_VTK.find(topology.at(at));
+        if (it == XDMF_TO_VTK.end()) fail(path, "has a cell of XDMF type " + std::to_string(topology[at]));
+        for (size_t k = 1; k <= it->second.second; k++) g.connectivity.push_back(static_cast<uint64_t>(topology.at(at + k)));
+        g.offsets.push_back(g.connectivity.size());
+        g.types.push_back(it->second.first);
+    }
+    return g;
+}
+
+/** @brief The sample points of a probe HDF5 file. */
+Geometry read_probe_h5_geometry(const std::string & path) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    Handle file = open_file(path);
+    const std::vector<hsize_t> d = dims(file, "coordinates");
+    const size_t width = d.size() == 2 ? d[1] : 1;
+    const std::vector<double> xyz = all<double>(file, "coordinates");
+    Geometry g;
+    g.points.assign(d.at(0) * 3, 0.0);
+    for (size_t p = 0; p < d[0]; p++) {
+        for (size_t i = 0; i < width && i < 3; i++) g.points[3 * p + i] = xyz[width * p + i];
+    }
+    return g;
+}
+
+std::vector<double> read_probe_h5_all(const std::string & path, const std::string & field) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    Handle file = open_file(path);
+    Handle fields(H5Gopen2(file, "fields", H5P_DEFAULT), H5Gclose, "opening fields");
+    if (!exists(fields, field)) fail(path, "has no field " + field);
+    return all<double>(fields, field);
+}
+
 #else
 
 [[noreturn]] void no_hdf5(const std::string & path) {
@@ -1210,6 +1365,14 @@ Contents open_h5(const std::string & path) { no_hdf5(path); }
 Contents open_vtkhdf(const std::string & path) { no_hdf5(path); }
 
 std::vector<double> read_h5_field(const Contents &, const std::string &, const Snapshot & s) { no_hdf5(s.file); }
+
+Geometry read_vtkhdf_geometry(const std::string & path) { no_hdf5(path); }
+
+Geometry read_output_mesh_geometry(const std::string & path) { no_hdf5(path); }
+
+Geometry read_probe_h5_geometry(const std::string & path) { no_hdf5(path); }
+
+std::vector<double> read_probe_h5_all(const std::string & path, const std::string &) { no_hdf5(path); }
 
 #endif
 
@@ -1402,10 +1565,149 @@ std::vector<double> read(const Contents & file, const std::string & field, size_
         case Kind::mesh: fail(file.path, "holds no field values");
         default: break;
     }
-    if (s.file != file.path) return read(open(s.file), field, 0);
     const std::string ext = extension(s.file);
     if (ext == ".vtu" || ext == ".vtp" || ext == ".pvtu") return read_vtu_field(s.file, field);
+    if (s.file != file.path) {
+        // A series member, read without opening it whole (its mesh summary)
+        Contents member;
+        member.format = ext == ".vtkhdf" ? "VTKHDF" : "XDMF output";
+        return read_h5_field(member, field, s);
+    }
     return read_h5_field(file, field, s);
+}
+
+std::vector<double> read_all(const Contents & file, const std::string & field) {
+    if (!file.field(field)) fail(file.path, "has no field " + field);
+    if (file.kind == Kind::table) {
+        const Table t = read_table(file.path);
+        const size_t column = static_cast<size_t>(std::find(t.header.begin(), t.header.end(), field) - t.header.begin());
+        std::vector<double> out;
+        out.reserve(t.rows.size());
+        for (const auto & row : t.rows) out.push_back(row[column]);
+        return out;
+    }
+    if (file.format == "probe HDF5") return read_probe_h5_all(file.path, field);
+    std::vector<double> out;
+    for (size_t k = 0; k < file.snapshots.size(); k++) {
+        const std::vector<double> v = read(file, field, k);
+        out.insert(out.end(), v.begin(), v.end());
+    }
+    return out;
+}
+
+Geometry read_geometry(const Contents & file, size_t snapshot) {
+    switch (file.kind) {
+        case Kind::restart:
+            fail(file.path, "is a restart file, which holds no mesh: read the geometry of the mesh file its run read");
+        case Kind::table: fail(file.path, "is a table, which holds no geometry: its coordinates are columns");
+        case Kind::mesh: {
+            if (file.format == "XDMF output mesh") return read_output_mesh_geometry(file.path);
+            const MeshBlock block = read_mesh(file.path);
+            Geometry g;
+            for (const auto & x : block.node_coords) {
+                for (size_t i = 0; i < 3; i++) g.points.push_back(i < x.size() ? x[i] : 0.0);
+            }
+            g.connectivity = block.cell_nodes;
+            g.offsets = block.cell_offsets;
+            for (uint64_t i = 0; i < block.n_cells(); i++) {
+                g.types.push_back(corner_vtk_type(N_DIM, block.cell_offsets[i + 1] - block.cell_offsets[i]));
+            }
+            return g;
+        }
+        default: break;
+    }
+    if (snapshot >= file.snapshots.size()) {
+        fail(file.path, "has " + std::to_string(file.snapshots.size()) + " snapshots, not " + std::to_string(snapshot + 1));
+    }
+    const Snapshot & s = file.snapshots[snapshot];
+    const std::string ext = extension(s.file);
+    if (ext == ".vtu" || ext == ".vtp" || ext == ".pvtu") return read_vtu_geometry(s.file);
+    if (ext == ".vtkhdf") return read_vtkhdf_geometry(s.file);
+    if (s.file != file.path) return read_geometry(open(s.file), 0);
+    if (file.format == "probe HDF5") return read_probe_h5_geometry(s.file);
+    if (file.format == "XDMF output") {
+        if (file.mesh_file.empty() || !fs::exists(file.mesh_file)) fail(file.path, "its mesh file " + file.mesh_file + " is missing");
+        return read_output_mesh_geometry(file.mesh_file);
+    }
+    return read_vtkhdf_geometry(s.file);
+}
+
+namespace {
+
+std::string zones_json(const std::vector<std::pair<std::string, uint64_t>> & list) {
+    json::Object o;
+    for (const auto & [name, n] : list) o.add(name, n);
+    return o.str();
+}
+
+std::string strings_json(const std::vector<std::string> & list) {
+    std::string out = "[";
+    for (const auto & s : list) out += (out.size() > 1 ? "," : "") + json::quote(s);
+    return out + "]";
+}
+
+} // namespace
+
+std::string to_json(const Contents & c) {
+    json::Object o;
+    o.add("path", c.path).add("kind", std::string(kind_name(c.kind))).add("format", c.format);
+    o.raw("version", c.version >= 0 ? std::to_string(c.version) : "null");
+    o.raw("dim", c.dim ? std::to_string(c.dim) : "null");
+    o.raw("precision", c.real_size == 8 ? "\"double\"" : c.real_size == 4 ? "\"single\"" : "null");
+    o.add("compressed", c.compressed).add("global_order", c.global_order);
+    const MeshSummary & m = c.mesh;
+    json::Object mesh;
+    mesh.add("cells", m.n_cells).add("points", m.n_points).add("faces", m.n_faces).add("boundary_faces", m.n_boundary_faces);
+    mesh.raw("cell_types", zones_json(m.cell_types));
+    if (m.has_bounds) {
+        std::string box = "[";
+        for (size_t i = 0; i < 3; i++) box += std::string(i ? "," : "") + "[" + json::number(m.lo[i]) + "," + json::number(m.hi[i]) + "]";
+        mesh.raw("bounds", box + "]");
+    } else {
+        mesh.raw("bounds", "null");
+    }
+    mesh.raw("boundary_zones", zones_json(m.boundary_zones)).raw("cell_zones", zones_json(m.cell_zones));
+    mesh.raw("file", c.mesh_file.empty() ? "null" : json::quote(c.mesh_file));
+    o.raw("mesh", mesh.str());
+    std::string snapshots = "[";
+    for (const auto & s : c.snapshots) {
+        json::Object e;
+        e.add("t", s.t).raw("step", s.step >= 0 ? std::to_string(s.step) : "null").add("file", s.file).add("index", s.index);
+        e.raw("run_id", s.run_id.empty() ? "null" : json::quote(s.run_id));
+        e.raw("snapshot", s.has_block ? s.block.json() : "null");
+        snapshots += (snapshots.size() > 1 ? "," : "") + e.str();
+    }
+    o.raw("snapshots", snapshots + "]");
+    std::string fields = "[";
+    for (const auto & f : c.fields) {
+        json::Object e;
+        e.add("name", f.name).add("components", f.components).add("units", f.units).add("long_name", f.long_name);
+        e.add("location", f.location).add("min", f.min).add("max", f.max);
+        fields += (fields.size() > 1 ? "," : "") + e.str();
+    }
+    o.raw("fields", fields + "]");
+    o.raw("species", strings_json(c.species()));
+    if (c.kind == Kind::restart) {
+        std::vector<std::string> arrays;
+        for (const auto & a : c.restart.arrays) arrays.push_back(a.first);
+        o.raw("restart", json::Object()
+                             .add_numbers("attributes", c.restart.attributes)
+                             .raw("arrays", strings_json(arrays))
+                             .add("boundary_faces", c.restart.n_faces)
+                             .str());
+    }
+    if (c.run.empty()) {
+        o.raw("run", "null");
+    } else {
+        try {
+            json::parse(c.run);
+        } catch (const std::exception & e) {
+            throw std::runtime_error(c.path + ": the run block is not valid JSON (" + e.what() + ")");
+        }
+        o.raw("run", c.run);
+    }
+    o.raw("notes", strings_json(c.notes));
+    return o.str();
 }
 
 void read_ranges(Contents & file, size_t snapshot) {
