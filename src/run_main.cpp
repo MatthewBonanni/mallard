@@ -18,6 +18,7 @@
 #include "build_info.h"
 #include "cli.h"
 #include "commands.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "log.h"
 #include "parallel/binding.h"
@@ -44,11 +45,11 @@ std::string error_text(const std::exception & e) {
 /**
  * @brief Reports a fatal error and ends all ranks of a parallel run.
  */
-[[noreturn]] void abort_parallel(const std::string & message) {
+[[noreturn]] void abort_parallel(const std::string & code, const std::string & message) {
     // Most errors (bad input) hit every rank; rank 0 reports and aborts first,
     // so the other ranks wait briefly rather than print the same message again
     if (!comm::is_root()) std::this_thread::sleep_for(std::chrono::seconds(2));
-    logging::error(message);
+    logging::error(code, message);
     comm::abort(1);
 }
 
@@ -71,6 +72,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
     int status = 0;
     {
         std::string error;
+        std::string code = diagnostic_code::SETUP;
         try {
             print_header(input_file);
             Solver solver;
@@ -85,7 +87,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 } catch (const InputError & e) {
                     if (resolve) throw;
                     report.input_file = input_file;
-                    report.error(check_code::INPUT, input_file + ": " + error_text(e));
+                    report.error(diagnostic_code::INPUT, input_file + ": " + error_text(e));
                 }
                 if (!resolve) check_environment(report);
                 if (resolve && report.ok()) {
@@ -93,9 +95,11 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                     std::cout << report.resolved << std::flush;
                 } else if (resolve) {
                     for (const CheckDiagnostic & d : report.diagnostics) {
-                        if (d.severity != report::Status::ERROR || d.code == check_code::KEY_UNUSED) continue;
+                        if (d.severity != report::Status::ERROR || d.code == diagnostic_code::KEY_UNUSED) continue;
+                        if (error.empty()) code = d.code;
                         error += (error.empty() ? "" : "\n") + d.message;
                     }
+                    if (error.empty()) code = diagnostic_code::KEY_UNUSED;
                     if (!report.unused.empty()) {
                         error += std::string(error.empty() ? "" : "\n") +
                                  "keys that are unknown or unused with these settings (mallard check lists them all):";
@@ -110,16 +114,21 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 binding::report();
                 solver.enable_control(true);
                 solver.init(input_file, restart_file);
+                code = diagnostic_code::RUN;
                 status = solver.run();
             }
         } catch (const InputError & e) {
+            code = e.code;
             error = input_file + ": " + error_text(e);
+        } catch (const diagnostic_code::Error & e) {
+            code = e.code;
+            error = error_text(e);
         } catch (const std::exception & e) {
             error = error_text(e);
         }
         if (!error.empty()) {
-            if (comm::size() > 1) abort_parallel(error);
-            logging::error(error);
+            if (comm::size() > 1) abort_parallel(code, error);
+            logging::error(code, error);
             status = 1;
         }
     }

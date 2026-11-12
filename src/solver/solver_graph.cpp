@@ -29,6 +29,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "device_comm.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "probe_fluxes.h"
 #include "run_control.h"
@@ -660,7 +661,7 @@ void Solver::capture_step_graph() {
         recording_step = false;
         use_step_graph = false;
         queue_depth = 1;
-        logging::warning(std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
+        logging::warning(diagnostic_code::CUDA_GRAPH, std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
     }
 #endif
 }
@@ -687,7 +688,7 @@ bool Solver::conditional_nodes_work() {
         } catch (const std::exception & e) {
             if (abandon_capture()) graph = nullptr;
             works = false;
-            logging::warning(std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
+            logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
                              "); one step per launch");
         }
         capture_graph = nullptr;

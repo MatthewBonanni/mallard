@@ -3718,6 +3718,15 @@
   "set_in": [],
   "type": "integer"
  },
+ "output.report": {
+  "default": "\"report.html\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
  "output.run_log": {
   "default": "\"mallard.jsonl\"",
   "dims": [

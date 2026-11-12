@@ -11,6 +11,7 @@
 
 #include "solver.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -116,7 +117,7 @@ void Solver::init_solution_restart() {
         return !then.empty() && !now.empty() && then != now;
     };
     if (comm::is_root() && differs("mesh")) {
-        logging::warning("Restart file " + file + " was written on a mesh file of other contents (the sha256 in its "
+        logging::warning(diagnostic_code::MESH_DIFFERS, "Restart file " + file + " was written on a mesh file of other contents (the sha256 in its "
                          "provenance differs) with as many cells: check that it is the mesh of this run.");
     }
     initial_state += comm::is_root() && differs("input") ? "; written by another input)" : ")";
