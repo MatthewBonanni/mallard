@@ -168,8 +168,8 @@ mallard post average solut/restart_*.restart --fields RHO,T \
     --region '{type = "where", condition = "T > 1500"}'
 ```
 
-It takes the fields only: `--products`, `--favre`, `--homogeneous` and
-`--snapshot` are errors with such a region
+It takes the fields only: `--products`, `--favre`, `--homogeneous`,
+`--snapshot` and `--conditional` are errors with such a region
 ([#851](https://github.com/MatthewBonanni/mallard/issues/851)).
 
 - Snapshots of `RHO`, `U` and `P` give the run's averages to their stored
