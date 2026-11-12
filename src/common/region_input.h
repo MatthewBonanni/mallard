@@ -71,6 +71,9 @@ Definition parse(const Input & value, const std::string & where, const Input * n
 Region read(const Input & value, const std::string & where, const Input * names = nullptr,
             const MeshRegions * mesh = nullptr);
 
+/** @brief The boundary of a filled region, as {type = "boundary", of = ...} gives it. */
+Region boundary(const Region & filled);
+
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 

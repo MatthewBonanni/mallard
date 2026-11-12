@@ -82,7 +82,7 @@ void run(const std::string & input_file) {
     chemistry::SparseLUPattern<Kokkos::HostSpace> pattern;
     if (sparse) pattern = chemistry::make_sparse_lu_pattern<Kokkos::HostSpace>(mech);
 
-    logging::items(model.summary());
+    logging::items(model.summary().settings);
     logging::items({
         {"Reactor", "adiabatic, constant volume"},
         {"Initial state", "T = " + brief(T0) + " K, p = " + brief(p0) + " Pa, rho = " + brief(rho) + " kg/m^3"},

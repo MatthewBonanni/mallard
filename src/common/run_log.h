@@ -11,6 +11,7 @@
 #define RUN_LOG_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <optional>
 #include <string>
 
@@ -47,6 +48,17 @@ void write(const json::Object & record, bool held = false);
 void hold();
 /** @brief Stops holding: writes the run's start record, then the held records. */
 void release(const json::Object & start);
+
+/**
+ * @brief Where progress records also go, one per line (mallard -i ... --log-format jsonl): written by rank 0,
+ *        set on every rank, nullptr for nowhere.
+ */
+void stream_progress(std::ostream * stream);
+/** @brief Whether progress records go to a stream. */
+bool streams_progress();
+
+/** @brief A progress record: write, and a line on the stream of stream_progress. */
+void write_progress(const json::Object & record);
 
 } // namespace run_log
 

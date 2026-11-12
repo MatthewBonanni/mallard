@@ -17,6 +17,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "case_image.h"
 #include "comm.h"
 #include "common_io.h"
 #ifdef Mallard_HAS_HDF5
@@ -55,7 +56,11 @@ namespace {
 Block gather(const Block & local) {
     if (comm::size() == 1) return local;
     Block all;
+    for (const Block & o : local.outline) all.outline.push_back(gather(o));
     all.name = local.name;
+    all.kind = local.kind;
+    all.label = local.label;
+    all.condition = local.condition;
     std::vector<double> xyz;
     for (const auto & x : local.points) xyz.insert(xyz.end(), x.begin(), x.end());
     std::vector<double> sizes = {double(local.points.size()), double(local.n_cells()), double(local.connectivity.size())};
@@ -108,12 +113,8 @@ void write_vtu(const std::string & path, const Block & b) {
 }
 #endif
 
-} // namespace
-
-std::string write(const std::string & path, const std::vector<Block> & local) {
-    std::vector<Block> blocks;
-    for (const Block & b : local) blocks.push_back(gather(b));
-    if (!comm::is_root()) return path;
+/** @brief The ParaView file of blocks gathered on rank 0 (which calls it). */
+std::string write_gathered(const std::string & path, const std::vector<Block> & blocks) {
     create_parent_directories("the case view", path);
 #ifdef Mallard_HAS_HDF5
     using namespace h5;
@@ -170,13 +171,45 @@ std::string write(const std::string & path, const std::vector<Block> & local) {
     for (size_t i = 0; i < blocks.size(); i++) {
         const std::string piece = blocks[i].name + ".vtu";
         write_vtu((dir / piece).string(), blocks[i]);
-        out << "<DataSet index=\"" << i << "\" name=\"" << blocks[i].name << "\" file=\"" << dir.filename().string() << "/"
-            << piece << "\"/>\n";
+        out << "<DataSet index=\"" << i << "\" name=\"" << case_image::xml_text(blocks[i].name) << "\" file=\""
+            << case_image::xml_text(dir.filename().string() + "/" + piece) << "\"/>\n";
     }
     out << "</vtkMultiBlockDataSet>\n</VTKFile>\n";
     if (!out) throw cannot_write("the case view", vtm.string());
     return vtm.string();
 #endif
+}
+
+std::vector<Block> gather_all(const std::vector<Block> & local) {
+    std::vector<Block> blocks;
+    for (const Block & b : local) blocks.push_back(gather(b));
+    return blocks;
+}
+
+} // namespace
+
+std::string write(const std::string & path, const std::vector<Block> & local) {
+    const std::vector<Block> blocks = gather_all(local);
+    return comm::is_root() ? write_gathered(path, blocks) : path;
+}
+
+std::vector<std::string> write_view(const std::string & dir, const std::vector<Block> & local,
+                                    const std::string & title) {
+    const std::vector<Block> blocks = gather_all(local);
+    const std::filesystem::path base(dir);
+    std::vector<std::string> files = {(base / "case.vtkhdf").string()};
+#ifndef Mallard_HAS_HDF5
+    files[0] = (base / "case.vtm").string();
+#endif
+    for (const char * theme : {"light", "dark"}) files.push_back((base / ("case-" + std::string(theme) + ".svg")).string());
+    if (!comm::is_root()) return files;
+    files[0] = write_gathered((base / "case.vtkhdf").string(), blocks);
+    for (size_t k = 1; k < files.size(); k++) {
+        std::ofstream out(files[k]);
+        out << case_image::svg(blocks, k == 2, title);
+        if (!out) throw cannot_write("the case view", files[k]);
+    }
+    return files;
 }
 
 } // namespace case_view
