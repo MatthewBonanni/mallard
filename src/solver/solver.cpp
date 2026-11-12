@@ -231,7 +231,7 @@ void Solver::setup_from_input() {
     });
     timed_phase("numerics", [&] { init_numerics(); });
     while (halo_too_shallow()) {
-        timed_phase("halo rebuild (" + std::to_string(halo_layers) + " layers)", [&] {
+        timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
             init_numerics();
@@ -521,8 +521,8 @@ void Solver::init_mesh() {
             counts[1]++;
         }
         const auto total = comm::allreduce(std::array<uint64_t, 2>{counts[0], counts[1]}, comm::Op::SUM);
-        std::string text = logging::count(total[0]) + " boundary faces";
-        if (N_DIM == 3) text += " (" + logging::count(total[1]) + " curved faces)";
+        std::string text = logging::count(total[0], "boundary face");
+        if (N_DIM == 3) text += " (" + logging::count(total[1], "curved face") + ")";
         uint64_t n_high_order = 0;
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
         if (n_high_order > 0) text += ", high-order faces from the mesh file";
@@ -568,7 +568,8 @@ int Solver::base_halo_layers() const {
     const bool viscous = find_value_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
     // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
     const bool hybrid = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
-    return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
+    // Fields of the velocity gradient in conditions read it in the cells' vertex neighbors
+    return (type == "FO" && !viscous && !hybrid && !region::conditions_read_gradients(input)) ? 1 : 2;
 }
 
 void Solver::trim_halo() {
@@ -748,7 +749,7 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
     }
     std::string text;
     for (const auto & [zone, n] : faces) {
-        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n) + " faces)";
+        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n, "face") + ")";
     }
     return text;
 }
@@ -979,7 +980,7 @@ void Solver::init_boundaries() {
             Kokkos::deep_copy(faces, h_faces);
             average_pressure_outlets.push_back(
                 {static_cast<int32_t>(i_bc), faces, Kokkos::View<double *[2]>("outlet_pA_A", owned.size()),
-                 ExactSums<2>(static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
+                 ExactSums(2, static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string details;
@@ -1120,6 +1121,7 @@ region::CellFields Solver::cell_fields() const {
         fields.R_universal = chemistry::GAS_CONSTANT;
     } else {
         fields.R = double(physics.R);
+        fields.gamma = double(physics.get_gamma());
     }
     return fields;
 }
@@ -1141,7 +1143,7 @@ void Solver::init_sources(region::Regions & regions) {
         if (g.size() != N_DIM) {
             throw InputError({.key = "source.gravity",
                               .line = line_of(source, "gravity"),
-                              .message = "has " + std::to_string(g.size()) + " components, but this build is " +
+                              .message = "has " + logging::count(g.size(), "component") + ", but this build is " +
                                          std::to_string(N_DIM) + "D",
                               .fix = N_DIM == 3 ? "Write gravity = [gx, gy, gz]" : "Write gravity = [gx, gy]"});
         }
@@ -1157,7 +1159,7 @@ void Solver::init_sources(region::Regions & regions) {
         if (m.size() != N_DIM) {
             throw InputError({.key = "source.mass_flow",
                               .line = line_of(source, "mass_flow"),
-                              .message = "has " + std::to_string(m.size()) + " components, but this build is " +
+                              .message = "has " + logging::count(m.size(), "component") + ", but this build is " +
                                          std::to_string(N_DIM) + "D",
                               .fix = N_DIM == 3 ? "Write mass_flow = [mx, my, mz]" : "Write mass_flow = [mx, my]"});
         }
@@ -2632,7 +2634,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
             {report::Status::NONE, {"upwind floor", real(double(hybrid_floor)), "-", "", "hybrid flux"}});
     }
     if (reacting) {
-        numerical.emplace_back("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+        numerical.emplace_back("Chemistry", logging::count(uint64_t(kinetics.n_reactions), "reaction") + ", " +
                                                 (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
                                                 (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
                                                 (cell_chemistry.lanes() == 1
@@ -2860,6 +2862,7 @@ void Solver::sample_statistics() {
 CellSampler Solver::sample_statistics_of_state(bool next) {
     if (next) apply_output_state(state_reader(*mesh));
     sample_statistics();
+    if (probes.averages_due(step, t)) sample_probe_averages();
     statistics.copy_device_to_host();
     return cell_sampler();
 }

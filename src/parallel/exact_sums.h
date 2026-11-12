@@ -3,8 +3,8 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Global sums of per-cell terms that are the same bit for bit on any
  *        number of ranks, threads or backends.
- * @version 0.2
- * @date 2026-10-29
+ * @version 0.3
+ * @date 2026-11-11
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
@@ -70,32 +70,34 @@ std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const 
 }
 
 /**
- * @brief The sums of exact_sums, bit for bit, kept on the device: reduced over
- *        the ranks with NCCL, nothing waits for the host, so a CUDA graph can
- *        capture them.
+ * @brief The sums of exact_sums, bit for bit, for a number of columns set at
+ *        run time, kept on the device: reduced over the ranks with NCCL,
+ *        nothing waits for the host, so a CUDA graph can capture them.
  */
-template <size_t N>
 class ExactSums {
     public:
         ExactSums() = default;
 
         /**
+         * @param n_columns Columns of the terms.
          * @param n_rows Rows of the terms on this rank (collective if distributed).
          * @param distributed_ Whether to sum over the ranks.
          * @param use_nccl_ Whether to reduce over the ranks with NCCL (comm::allreduce_device).
          */
-        ExactSums(const uint32_t n_rows, const bool distributed_, const bool use_nccl_)
-            : largest("exact_sums_largest", N), fixed("exact_sums_fixed", N), totals("exact_sums", N),
-              distributed(distributed_), use_nccl(use_nccl_),
+        ExactSums(const uint32_t n_columns, const uint32_t n_rows, const bool distributed_, const bool use_nccl_)
+            : largest("exact_sums_largest", n_columns), fixed("exact_sums_fixed", n_columns),
+              totals("exact_sums", n_columns), distributed(distributed_), use_nccl(use_nccl_),
               unit(exact_sums_unit(distributed_ ? comm::allreduce(static_cast<uint64_t>(n_rows), comm::Op::SUM)
                                                : static_cast<uint64_t>(n_rows))) {}
 
-        /** @brief Sum the terms into sums(), enqueued on the default execution space. */
-        void sum(const Kokkos::View<double *[N]> & terms) const {
+        /** @brief Sum the columns of terms (row, column) into sums(), enqueued on the default execution space. */
+        template <typename Terms>
+        void sum(const Terms & terms) const {
             using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
             const uint32_t n_rows = static_cast<uint32_t>(terms.extent(0));
+            const uint32_t n_columns = static_cast<uint32_t>(totals.extent(0));
             const Kokkos::View<double *> m = largest;
-            for (size_t k = 0; k < N; k++) {
+            for (uint32_t k = 0; k < n_columns; k++) {
                 Kokkos::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
                     x = Kokkos::fmax(x, Kokkos::fabs(terms(c, k)));
                 }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(m.data() + k)));
@@ -103,15 +105,15 @@ class ExactSums {
             if (distributed) comm::allreduce_device(m, comm::Op::MAX, use_nccl);
             const Kokkos::View<int64_t *> f = fixed;
             const double unit_ = unit;
-            for (size_t k = 0; k < N; k++) {
+            for (uint32_t k = 0; k < n_columns; k++) {
                 Kokkos::parallel_reduce("exact_sums", n_rows, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
                     if (m(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit_ / m(k))));
                 }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(f.data() + k)));
             }
             if (distributed) comm::allreduce_device(f, comm::Op::SUM, use_nccl);
             const Kokkos::View<double *> out = totals;
-            Kokkos::parallel_for("exact_sums_totals", 1, KOKKOS_LAMBDA(const int) {
-                for (size_t k = 0; k < N; k++) out(k) = m(k) > 0.0 ? static_cast<double>(f(k)) / (unit_ / m(k)) : 0.0;
+            Kokkos::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
+                out(k) = m(k) > 0.0 ? static_cast<double>(f(k)) / (unit_ / m(k)) : 0.0;
             });
         }
 

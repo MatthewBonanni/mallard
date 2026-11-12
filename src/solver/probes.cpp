@@ -894,9 +894,9 @@ std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const s
         }
         k = e + 1;
     }
-    if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN) + " more runs";
+    if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN, "more run");
     logging::warning(diagnostic_code::PROBE_OUTSIDE,
-                     key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
+                     key + ": " + logging::count(out.size()) + " of " + logging::count(n, "sample") + share +
                          " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
     g = probe::clip(g, keep, keep_quad);
     return clipped.str();
@@ -2715,13 +2715,15 @@ void accumulate(std::vector<double> & mean, const std::vector<double> & x, doubl
 
 /**
  * @brief accumulate over the union of the cells covered so far and those of a sample (both sorted), each absent
- *        one counting as zero: the means of every cell of the mesh, without the cells never covered.
+ *        one counting as zero: the means of every cell of the mesh, without the cells never covered; with
+ *        n_products, also of the products per cell.
  */
 void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_weights, std::vector<double> & mean_values,
-                      const std::vector<uint64_t> & x_cells, const std::vector<double> & x_weights,
-                      const std::vector<double> & x_values, size_t n_cols, double a) {
+                      std::vector<double> & mean_products, const std::vector<uint64_t> & x_cells,
+                      const std::vector<double> & x_weights, const std::vector<double> & x_values,
+                      const std::vector<double> & x_products, size_t n_cols, size_t n_products, double a) {
     std::vector<uint64_t> all;
-    std::vector<double> weights, values;
+    std::vector<double> weights, values, products;
     all.reserve(cells.size() + x_cells.size());
     size_t i = 0, j = 0;
     while (i < cells.size() || j < x_cells.size()) {
@@ -2733,12 +2735,17 @@ void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_
         for (size_t v = 0; v < n_cols; v++) {
             values.push_back(mean(old ? mean_values[i * n_cols + v] : 0.0, sampled ? x_values[j * n_cols + v] : 0.0));
         }
+        for (size_t k = 0; k < n_products; k++) {
+            products.push_back(mean(old ? mean_products[i * n_products + k] : 0.0,
+                                    sampled ? x_products[j * n_products + k] : 0.0));
+        }
         i += old ? 1 : 0;
         j += sampled ? 1 : 0;
     }
     cells = std::move(all);
     mean_weights = std::move(weights);
     mean_values = std::move(values);
+    mean_products = std::move(products);
 }
 
 } // namespace
@@ -2784,8 +2791,8 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
         std::vector<uint64_t> cells;
         std::vector<double> sums, weights;
         p.cell_sums(quad, cells, sums, weights);
-        accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, cells, weights, sums, p.n_evaluated(),
-                         w / p.average_weight);
+        accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, p.mean_products, cells, weights, sums,
+                         p.product_sums(quad, cells), p.n_evaluated(), p.products.size(), w / p.average_weight);
     } else {
         accumulate(p.mean_quadrature, quad, w / p.average_weight);
     }
@@ -2801,7 +2808,55 @@ void Probes::start_averages(rtype t) {
         p->mean_quadrature.clear();
         p->mean_weights.clear();
         p->mean_cells.clear();
+        p->mean_products.clear();
     }
+}
+
+void Probes::average_products(const std::string & name, const std::vector<std::vector<std::string>> & products) {
+    for (auto & pp : probes) {
+        Probe & p = *pp;
+        if (p.name != name || p.snapshot) continue;
+        if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
+        if (p.average_samples > 0) throw std::logic_error("probe " + name + ": products added after its first sample");
+        p.products.clear();
+        for (const auto & factors : products) {
+            std::vector<uint32_t> columns;
+            for (const std::string & f : factors) {
+                const auto it = std::find(p.variables.begin(), p.variables.end(), "MEAN_" + f);
+                if (it == p.variables.end()) throw std::runtime_error("probe " + name + " does not sample " + f);
+                columns.push_back(static_cast<uint32_t>(it - p.variables.begin()));
+            }
+            p.products.push_back(std::move(columns));
+        }
+        p.mean_products.clear();
+        return;
+    }
+    throw std::runtime_error("no [[probes]] named " + name);
+}
+
+Probes::CellAverages Probes::cell_averages(const std::string & name) const {
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.name != name || p.snapshot) continue;
+        if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
+        CellAverages out;
+        out.measure = measure_name(p.geometry);
+        out.measure_dimension = geometry_field("measure", p.geometry).dimension;
+        out.n_columns = p.n_evaluated();
+        const size_t n_cells = p.n_mean_cells(), n_products = p.products.size();
+        out.weights.assign(n_cells, 0.0);
+        out.values.assign(n_cells * out.n_columns, 0.0);
+        out.products.assign(n_cells * n_products, 0.0);
+        for (size_t i = 0; i < p.mean_cells.size(); i++) {
+            const size_t c = p.mean_cells[i];
+            out.weights[c] = p.mean_weights[i];
+            const size_t n = out.n_columns;
+            for (size_t v = 0; v < n; v++) out.values[c * n + v] = p.mean_quadrature[i * n + v];
+            for (size_t k = 0; k < n_products; k++) out.products[c * n_products + k] = p.mean_products[i * n_products + k];
+        }
+        return out;
+    }
+    throw std::runtime_error("no [[probes]] named " + name);
 }
 
 void Probes::restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset) {
@@ -3253,6 +3308,22 @@ void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<uint
     }
 }
 
+std::vector<double> Probes::Probe::product_sums(const std::vector<double> & quad, const std::vector<uint64_t> & cells) const {
+    const size_t n_cols = n_evaluated(), n = products.size();
+    std::vector<double> sums(cells.size() * n, 0.0);
+    if (quad.empty() || n == 0) return sums;
+    for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
+        const uint64_t cell = motion ? motion->cells[i] : isosurface->quad_cells[i];
+        const size_t c = static_cast<size_t>(std::lower_bound(cells.begin(), cells.end(), cell) - cells.begin());
+        for (size_t k = 0; k < n; k++) {
+            double x = geometry.quad_weights[i];
+            for (const uint32_t v : products[k]) x *= quad[i * n_cols + v];
+            sums[c * n + k] += x;
+        }
+    }
+    return sums;
+}
+
 void Probes::Probe::mean_fields(std::vector<double> & quad) {
     geometry.quad_weights = mean_weights;
     const size_t n_cols = n_evaluated();
@@ -3372,9 +3443,8 @@ std::vector<OutputSummary> Probes::summary() const {
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
-        const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
         const std::string extent = p.solution ? std::string(" from the solution")
-                                              : (p.from_region ? " over " : " of ") + logging::count(n) + unit;
+                                              : (p.from_region ? " over " : " of ") + logging::count(n, cells ? "cell" : "point");
         std::string text = p.geometry.type + extent +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
