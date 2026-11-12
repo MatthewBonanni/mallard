@@ -3,10 +3,15 @@ manual and TENO-E reference into docs/images/theory/, light and dark.
 
     python tools/docs/make_figures.py [--mallard build/src/mallard] [--mallard3d build-3d/src/mallard]
 
-Schematics and domain diagrams need numpy, scipy and matplotlib only; with
---mallard (a 2D build; an MPI build for the partitions) the figures from
-short runs and the sample run report are redrawn too (the Python package's with a build with -DMallard_ENABLE_PYTHON=ON), and with --mallard3d the 3D region, probe and mesh-field figures. MALLARD_FIGURE_PREVIEW=dir also writes PNGs on
-the site's backgrounds there, for review.
+Schematics and domain diagrams need numpy, scipy and matplotlib only.
+With --mallard (a 2D build; an MPI build for the partitions) the figures from
+short runs and the sample run report are redrawn too (the Python package's with a
+build with -DMallard_ENABLE_PYTHON=ON).
+With --mallard3d the 3D region, probe and mesh-field figures are drawn too.
+MALLARD_FIGURE_PREVIEW=dir also writes PNGs on the site's backgrounds there, for
+review.
+
+Each module's figures are drawn by one call below, in alphabetical order.
 """
 import argparse
 import sys
@@ -36,27 +41,27 @@ def main():
     ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D region, probe and mesh-field figures")
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
-    schematics.figures()
     domains.figures()
+    effective_resolution.figures()
+    geometry.figures(args.mallard, args.mallard3d)
+    high_order_cost.figures()
     inlets.figures()
+    les_models.figures()
+    limiters.figures()
+    schematics.figures()
+    teno.figures()
     theory.figures()
     time_integrators.figures()
-    teno.figures()
-    effective_resolution.figures()
-    high_order_cost.figures()
-    limiters.figures()
-    les_models.figures()
-    geometry.figures(args.mallard, args.mallard3d)
     if args.mallard:
-        sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
-        runs.main()
+        mesh_fields.figures(args.mallard, args.mallard3d)
         sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
         probes.main()
-        regions.figures(args.mallard, args.mallard3d)
         python.figures(args.mallard)
-        mesh_fields.figures(args.mallard, args.mallard3d)
+        regions.figures(args.mallard, args.mallard3d)
         sys.argv = [sys.argv[0], "--mallard", args.mallard]
         run_report.main()
+        sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
+        runs.main()
 
 
 if __name__ == "__main__":

@@ -1,1 +1,0 @@
-- The `--format json` reports of `mallard check` and `mallard info` name the quality fields' file `mesh_fields_file` instead of `quality_file`; `mallard check`'s also has `stencil_file` (#521).
