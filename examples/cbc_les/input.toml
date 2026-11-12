@@ -68,7 +68,7 @@ type = "restart"
 file = "cbc_64.restart"
 
 [numerics]
-preset = "les"  # MUSCL without limiter, hybrid KEEP / HLLC flux, SSPRK3, CFL 0.8
+preset = "les"  # MUSCL without limiter, hybrid KEEP / HLLC flux, SSPRK54, CFL 2.0
 check_nan = true
 
 [physics]

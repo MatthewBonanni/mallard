@@ -4,7 +4,7 @@
  * @brief One short validation case per numerics preset, run with the preset
  *        alone: the Noh implosion and Sod's problem (second_order and first_order), the convergence
  *        of a smooth wave (high_order), the decay of a Taylor-Green vortex
- *        (les) and the speed of a premixed flame (reacting).
+ *        and an under-resolved shear layer (les) and the speed of a premixed flame (reacting).
  * @version 0.1
  * @date 2026-10-16
  *
@@ -122,6 +122,29 @@ double taylor_green_excess_decay(const std::string & preset, uint32_t n) {
     return std::log(ke1 / ke0) / (-4.0 * nu * k * k * t_end) - 1.0;
 }
 
+/**
+ * @brief Kinetic energy at t = 4 over its initial value of an inviscid double
+ *        shear layer at Mach 0.2 on 64 x 64 quads, thinner (1/80) than a cell.
+ */
+double shear_layer_energy_ratio(const std::string & preset) {
+    std::ostringstream s;
+    s << "[run]\nt_stop = 4.0\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 64\nNy = 64\nLx = 1.0\nLy = 1.0\n"
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+      << "u = [\"0.2 * (y <= 0.5 ? tanh(80 * (y - 0.25)) : tanh(80 * (0.75 - y)))\", \"0.01 * sin(2 * pi * x)\"]\n"
+      << "p = \"1 / 1.4\"\n"
+      << numerics(preset) << "[physics]\ntype = \"euler\"\ngamma = 1.4\n"
+      << "p_ref = 0.7142857142857143\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
+    solver->init(parse_toml(s.str()));
+    const double ke0 = double(solver->integrate_flow_statistics()[0]);
+    solver->run();
+    return double(solver->integrate_flow_statistics()[0]) / ke0;
+}
+
 /** @brief examples/noh_axisymmetric at 60 x 60 to t = 0.6 (the shock at r = 0.2, rho = 64 behind it): the lowest
  *         pressure and the mean density over 0.05 < r < 0.15. */
 std::pair<double, double> noh(const std::string & preset) {
@@ -166,6 +189,10 @@ TEST(PresetValidation, HighOrderConvergesAtHighOrderForSmoothFlow) {
     const double e2 = wave_error("high_order", 32);
     EXPECT_GT(std::log2(e1 / e2), 4.0) << e1 << " " << e2;
     EXPECT_LT(e2, 0.05 * wave_error("second_order", 32));
+}
+
+TEST(PresetValidation, LesKeepsAnUnderresolvedShearLayerStable) {
+    EXPECT_NEAR(shear_layer_energy_ratio("les"), 1.0, 0.03);
 }
 
 TEST(PresetValidation, LesLeavesTheTaylorGreenDecayToViscosity) {

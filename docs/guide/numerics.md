@@ -26,7 +26,7 @@ nor `[numerics.face_reconstruction]` runs `high_order`.
 | `high_order` (default) | 5 (TENO-E) | TENO-E, order 5 | HLLC | SSPRK3 | 1.0 | Smooth flow, acoustics, vortices, moderate shocks: the least error for the cost ([why high order](#why-high-order)) |
 | `second_order` | 2 (MUSCL) | MUSCL, Venkatakrishnan limiter | RHLL | SSPRK3 | 0.5 | Complex geometry, strong shocks and blasts |
 | `first_order` | 1 | none (cell averages) | HLL | SSPRK3 | 0.5 | Debugging, start-up transients, the last fallback: low order and very dissipative |
-| `les` | 2 (MUSCL) | MUSCL, no limiter | hybrid (KEEP central, HLLC at shocks) | SSPRK3 | 0.8 | Turbulence: LES and DNS |
+| `les` | 2 (MUSCL) | MUSCL, no limiter | hybrid (KEEP central, HLLC at shocks) | SSPRK54 | 2.0 | Turbulence: LES and DNS |
 | `reacting` | 2 (MUSCL) | MUSCL, Venkatakrishnan limiter | HLLC | SSPRK3 | 0.35 | Flames and detonations with `[chemistry]` |
 
 Why each, and what it passes (each check runs in the test suite,
@@ -67,8 +67,16 @@ Why each, and what it passes (each check runs in the test suite,
   `second_order`. TENO with the hybrid flux gives the same result at ten times the cost,
   hence the unlimited MUSCL states
   ([LES design](../design/les.md#44-central-flux-for-teno-689)).
-  These are the keys of `cbc_les` and `channel_les`, within 0.7–1.6% of the
+  These are the reconstruction and flux of `cbc_les` and `channel_les`, within 0.7–1.6% of the
   DNS ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les)).
+  SSPRK54 at `cfl = 2.0` takes two thirds of SSPRK3's right-hand-side
+  evaluations at 0.8 for the same result: `cbc_les` on 32³ cells gives the
+  same spectra at both stations (log10 RMS deviation 0.153 / 0.151, resolved
+  energy 1.538 / 1.505) in 172 steps against 428, and the kinetic energy of
+  the Taylor–Green vortex (2D as above, and 3D on 32³ cells to t = 10) agrees
+  within 0.06%. Under-resolved double shear layers stay stable up to `cfl = 3.2`
+  on quads and triangles, and a turbulent channel on stretched cells (32 x
+  48 x 32) at 2.5.
 - **`reacting`** (second order): the scheme of the validated flames and detonations
   ([benchmark](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
   `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
@@ -333,7 +341,7 @@ shocks grow carbuncles: use `RHLL` there
 time_integrator = "RK4"
 ```
 
-*Used in:* every example keeps the default, `SSPRK3`; the others are in the time-integration tests.
+*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les).
 
 | `[numerics]` key | Default | Meaning |
 |---|---|---|
@@ -357,10 +365,14 @@ under-resolved Taylor–Green vortex. Leave it on except for comparisons.
 | `CK45` | 4, 5 (2N) | 3 | 2.2 | 0.89 |
 | `RDPK3Sp35` | 3, 5 (embedded 2) | 5 | 2.2 | 0.84 |
 
-- **`SSPRK54`** is the cheapest per unit time for smooth flow and keeps SSP
+- **`SSPRK54`**, the `les` preset's, is the cheapest per unit time for smooth flow and keeps SSP
   (monotone forward-Euler steps stay monotone up to `cfl` 1.5 times
   forward Euler's), with a time error about 45 times smaller than SSPRK3's at
-  the same step. With shocks, `cfl = 1.5` matches SSPRK3 at 1.0 in accuracy.
+  the same step. With shocks, `cfl` 1.5 to 1.8 matches SSPRK3 at 1.0 in accuracy
+  (Shu–Osher, the double Mach reflection and the 2D Riemann problem with TENO5),
+  for 7% fewer right-hand-side evaluations at 1.8. The `high_order` preset
+  keeps SSPRK3: the saving is small, and an input that sets `cfl = 1.0`
+  would take 5/3 as many evaluations with SSPRK54.
 - **`CK45`** needs the least memory of the fourth-order methods.
 - **`RDPK3Sp35`** with `[numerics.error_control]` chooses the step itself:
 

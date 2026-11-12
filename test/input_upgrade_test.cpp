@@ -496,7 +496,7 @@ TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
     ASSERT_EQ(notes.size(), 1u);
     EXPECT_NE(notes[0].find("type = \"FO\""), std::string::npos) << notes[0];
     // A preset, a reconstruction table, or a file that is not a run's input gets none
-    for (const std::string other : {"[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n",
+    for (const std::string other : {"[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\ntime_integrator = \"SSPRK3\"\n",
                                     "[run]\nt_stop = 1.0\n[numerics.face_reconstruction]\nbound_preserving = true\n",
                                     "[mesh]\ntype = \"cartesian\"\n"}) {
         EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
@@ -504,7 +504,7 @@ TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
 }
 
 TEST(InputUpgradeTest, VtkhdfOutputWithoutSeriesGetsANotice) {
-    const std::string head = "[numerics]\npreset = \"les\"\n";
+    const std::string head = "[numerics]\npreset = \"les\"\ntime_integrator = \"SSPRK54\"\n";
     const std::string text = head + "[[write_data]]\nprefix = \"solut/flow\"\ninterval = 10\nfields = [\"RHO\"]\n";
     const std::vector<std::string> notes = input_upgrade::notices(text);
     ASSERT_EQ(notes.size(), 1u);
@@ -516,4 +516,15 @@ TEST(InputUpgradeTest, VtkhdfOutputWithoutSeriesGetsANotice) {
         const std::string other = head + "[[write_data]]\nprefix = \"p\"\ninterval = 1\n" + entry;
         EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
     }
+}
+
+TEST(InputUpgradeTest, TheLesPresetsIntegratorGetsANotice) {
+    const std::vector<std::string> notes = input_upgrade::notices("[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n");
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("time_integrator = \"SSPRK3\""), std::string::npos) << notes[0];
+    EXPECT_EQ(notes[0].find("the cfl this input sets"), std::string::npos) << notes[0];
+    const std::vector<std::string> with_cfl =
+        input_upgrade::notices("[run]\nt_stop = 1.0\ncfl = 0.8\n[numerics]\npreset = \"les\"\n");
+    ASSERT_EQ(with_cfl.size(), 1u);
+    EXPECT_NE(with_cfl[0].find("the cfl this input sets"), std::string::npos) << with_cfl[0];
 }

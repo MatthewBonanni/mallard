@@ -92,7 +92,7 @@ RULES = {
     ("numerics.md", "### TENO-E options"): (lambda t: recon(t).get("bound_preserving", False), None),
     ("numerics.md", "## Riemann solvers"): (lambda t: "riemann_solver" in num(t), None),
     ("numerics.md", "## Time integration and other options"):
-        (lambda t: num(t).get("time_integrator", "SSPRK3") != "SSPRK3",
+        (lambda t: num(t).get("time_integrator", "SSPRK54" if num(t).get("preset") == "les" else "SSPRK3") != "SSPRK3",
          "every example keeps the default, `SSPRK3`; the others are in the time-integration tests"),
     ("output.md", "## Solution snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
     ("output.md", "### Terminal output"): (lambda t: "check_interval" in t.get("output", {}), None),

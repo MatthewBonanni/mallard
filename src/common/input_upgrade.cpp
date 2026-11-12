@@ -754,6 +754,13 @@ std::vector<std::string> notices(const std::string & text) {
                           prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
         }
     }
+    if (has("numerics", "preset") && input.at("numerics").at("preset").is_string() &&
+        input.at("numerics").at("preset").as_string() == "les" && !has("numerics", "time_integrator")) {
+        std::string note = "preset = \"les\": since 0.11.0 it runs SSPRK54 at cfl 2.0, not SSPRK3 at 0.8; add "
+                           "[numerics] time_integrator = \"SSPRK3\" to reproduce older results";
+        if (has("run", "cfl")) note += "; the cfl this input sets now applies to SSPRK54, which is cheapest near 2.0";
+        out.push_back(note);
+    }
     return out;
 }
 
