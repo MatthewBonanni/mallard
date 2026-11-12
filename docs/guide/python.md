@@ -282,7 +282,8 @@ verdicts. `mallard.command` runs any other command that has `--format json`:
 
 - [Python API](python_api.md): every function and class
 - [From run to figure](../tutorials/post_processing.md): a tutorial that takes three runs from
-  `mallard info` through `mallard post extract` and `mallard post convergence` to figures drawn with the package
+  `mallard info` through `mallard post extract`, `post derive`, `post average` and `post convergence` to figures
+  drawn with the package
 - [Output](output.md): what a run writes, units, run block and snapshot metadata
 - [Command line](cli.md): `mallard info`, `mallard diff`, `mallard post extract`, `mallard post convergence`
 - [Tools](../../tools/README.md): the plotting and animation scripts in `tools/`
