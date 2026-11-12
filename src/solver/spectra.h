@@ -78,7 +78,8 @@ class Spectra {
         /** @brief Rank 0 writes the current averages to the output file. */
         void write(uint64_t step, rtype t, const std::string & reason) const;
 
-        std::string summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
         uint64_t samples() const { return n_samples; }
 
         /** @brief Number of positions (cells of the inhomogeneous directions, row-major in axis order). */

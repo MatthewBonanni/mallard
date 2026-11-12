@@ -296,7 +296,7 @@ std::vector<std::pair<std::string, std::string>> Triggers::summary() const {
     std::vector<std::pair<std::string, std::string>> items;
     for (const auto & trigger : triggers) {
         std::string state = trigger.firings == 0 ? "" : "; fired " + logging::count(trigger.firings) + "x";
-        items.emplace_back("trigger " + trigger.name,
+        items.emplace_back(trigger.name,
                            describe(trigger) + (trigger.repeat ? " (repeat)" : " (once)") + state);
     }
     return items;
