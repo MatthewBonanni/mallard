@@ -1398,7 +1398,10 @@ int average(const cli::Args & args) {
         item("Covariances", products.empty() ? "none" : list_text(products));
         item("Favre", a.favre ? "means and covariances, weighted by density" : "no (--favre adds them)");
     }
-    for (const ConditionalStatistics & c : statistics.get_conditional()) item("Conditional", c.summary());
+    for (const ConditionalStatistics & c : statistics.get_conditional()) {
+        const OutputSummary o = c.summary();
+        item("Conditional", o.contents + ", every " + count(o.steps) + " steps -> " + o.file);
+    }
     logging::section("Snapshots", count(selected.size()) + " averaged");
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < selected.size(); i++) {
@@ -1433,9 +1436,9 @@ int post_command(const cli::Args & args, const Post post) {
     } catch (const UsageError & e) {
         return comm::is_root() ? cli::usage_error(*cli::command(command), e.what()) : 2;
     } catch (const InputError & e) {
-        if (comm::is_root()) std::cerr << "mallard " << command << ": the case's input: " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": the case's input: " + e.what());
     } catch (const std::exception & e) {
-        if (comm::is_root()) std::cerr << "mallard " << command << ": " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": " + e.what());
     }
     return 1;
 }

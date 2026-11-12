@@ -71,10 +71,13 @@ Maintain  mallard test | completion | --version
   alternatives (`2|3`, `FILE|latest`, `status|checkpoint|stop|set`) are words
   to offer; `FILE` and `INPUT` are files (`*.toml` for `-i`, `*.restart` for
   `--restart`), `NAME.ext` files of that extension, `DIR`, `RUN_DIR` and
-  `DIRECTORY` directories, and `TEMPLATE` the templates `mallard new` lists;
-  anything else (`N`, `KEY=VALUE`) completes nothing. A pass-through row offers
-  the options its help names (`--kokkos-num-threads=8`). So a command added to
-  the table completes with no change to the scripts.
+  `DIRECTORY` directories, `TEMPLATE` the templates `mallard new` lists,
+  `SECTION` the sections and keys of the key catalog (or an input file), and
+  the value of `--fields` the output fields of the field catalog, item by item
+  of the comma-separated list; anything else (`N`, `KEY=VALUE`) completes
+  nothing. A pass-through row offers the options its help names
+  (`--kokkos-num-threads=8`). So a command added to the table completes with
+  no change to the scripts.
 - **Pass-through options** are rows whose name ends in `*`: `--kokkos-*` for
   every command that starts Kokkos, `--gtest_*` for `mallard test`.
 - **Tests** (`test/cli_test.cpp`) run every command's `--help` and fail if a
@@ -82,8 +85,9 @@ Maintain  mallard test | completion | --version
   the parser accepts; check that `docs/guide/cli.md` shows every page as
   it is (`python tools/docs/cli.py --mallard build/src/mallard` regenerates
   it); and check that each shell's completion has every command and option,
-  that bash completes them and their values, and that the zsh and fish
-  scripts parse (where those shells are installed).
+  that bash completes them, their values and the key and field catalogs as
+  `mallard list keys` and `mallard list fields` print them, and that the zsh
+  and fish scripts parse (where those shells are installed).
 
 ## Adding a command
 

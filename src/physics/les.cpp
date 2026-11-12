@@ -80,12 +80,15 @@ double LES::scotti_factor(const double h1, const double h2, const double h3) {
     return std::cosh(std::sqrt(4.0 / 27.0 * (l1 * l1 - l1 * l2 + l2 * l2)));
 }
 
-logging::Items LES::summary() const {
+report::Summary LES::summary() const {
     using logging::real;
-    return {{"LES", SGS_MODEL_NAMES.at(model) + " (" + (model == SGSModel::VREMAN ? "c " : "C ") +
-                        real(double(C)) + "), Pr_t " + real(double(Pr_t)) + ", Sc_t " + real(double(Sc_t)) +
-                        ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
-                        (scotti ? " times Scotti's f(a_1, a_2)" : "") +
-                        (reconstruction_gradients ? ", gradients of the reconstruction polynomials" : "") +
-                        (dynamic ? "; C from the global dynamic procedure" : "")}};
+    report::Summary s;
+    s.setting("LES", SGS_MODEL_NAMES.at(model) + ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
+                         (scotti ? " times Scotti's f(a_1, a_2)" : "") +
+                         (reconstruction_gradients ? ", gradients of the reconstruction polynomials" : "") +
+                         (dynamic ? "; C from the global dynamic procedure" : ""));
+    s.quantity("LES C", real(double(C)), "-", dynamic ? "model constant of the first step" : "model constant");
+    s.quantity("LES Pr_t", real(double(Pr_t)), "-", "turbulent Prandtl number");
+    s.quantity("LES Sc_t", real(double(Sc_t)), "-", "turbulent Schmidt number");
+    return s;
 }
