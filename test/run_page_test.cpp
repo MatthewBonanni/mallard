@@ -152,7 +152,7 @@ TEST(RunPageTest, ADivergedRunsReportShowsTheLikelyCauseAndItsFix) {
     const std::string dir = fresh_dir("report_diverged");
     Solver solver;
     solver.init(parse_toml(case_input(dir, "n_steps = 500\ndt = 0.2\n", logged(dir))));
-    EXPECT_THROW(solver.run(), std::runtime_error);
+    EXPECT_THROW(solver.run(), diagnostic_code::Error);
     if (!comm::is_root()) return;
     const std::string page = read_file(dir + "/report.html");
     const json::Value divergence = last_record(dir + "/mallard.jsonl", "divergence");
@@ -161,6 +161,11 @@ TEST(RunPageTest, ADivergedRunsReportShowsTheLikelyCauseAndItsFix) {
     EXPECT_NE(page.find("<section id=\"divergence\">"), std::string::npos);
     EXPECT_NE(page.find("<td>" + cause["title"].string + "</td>"), std::string::npos);
     EXPECT_NE(page.find("banner error"), std::string::npos);
+    // The negative density before the failure: a warning with its code, in the record and on the page
+    const json::Value warning = last_record(dir + "/mallard.jsonl", "warning");
+    EXPECT_EQ(warning["code"].string, diagnostic_code::HEALTH_MARGIN);
+    EXPECT_EQ(warning["docs"].string, diagnostic_code::docs(diagnostic_code::HEALTH_MARGIN));
+    EXPECT_NE(page.find("<li><code>W-HEALTH-MARGIN</code> "), std::string::npos);
 }
 
 TEST(RunPageTest, ARunWithoutARunLogStillWritesItsReport) {
@@ -281,7 +286,7 @@ TEST(RunPageTest, ARunRecordsTheCheckAtSetupAsMallardCheckMeasuresIt) {
     EXPECT_EQ(check["time_step"]["cfl_limit"].number, 1.2);
     EXPECT_EQ(check["status"].string, "warning");
     ASSERT_EQ(check["diagnostics"].array.size(), 1u);
-    EXPECT_EQ(check["diagnostics"].array[0]["code"].string, check_code::CFL_LIMIT);
+    EXPECT_EQ(check["diagnostics"].array[0]["code"].string, diagnostic_code::CFL_LIMIT);
 
     const run_page::Page page = run_page::from_file(dir + "/mallard.jsonl");
     const std::string text = page.text(false);
@@ -291,7 +296,7 @@ TEST(RunPageTest, ARunRecordsTheCheckAtSetupAsMallardCheckMeasuresIt) {
     const size_t row = text.find("CFL number, run.cfl", section);
     ASSERT_NE(row, std::string::npos);
     EXPECT_EQ(text.substr(text.rfind('\n', row) + 1, 6), "  WARN");
-    EXPECT_NE(text.find(check_code::CFL_LIMIT, section), std::string::npos);
+    EXPECT_NE(text.find(diagnostic_code::CFL_LIMIT, section), std::string::npos);
     const std::string html = page.html();
     EXPECT_NE(html.find("<section id=\"check\"><h2>Check at setup <span class=\"status warning\">"), std::string::npos);
     EXPECT_NE(html.find("<td>aspect ratio</td>"), std::string::npos);

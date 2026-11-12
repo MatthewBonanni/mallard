@@ -11,6 +11,7 @@
 
 #include "solver.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -127,7 +128,7 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
             std::vector<std::string> skipped;
             const std::string run_log = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
             const FoundRestart found = newest_restart(prefixes, skipped, run_log);
-            for (const std::string & reason : skipped) logging::warning(reason + " Skipped by --restart latest.");
+            for (const std::string & reason : skipped) logging::warning(diagnostic_code::RESTART_SKIPPED, reason + " Skipped by --restart latest.");
             file = found.file;
             if (!file.empty()) {
                 logging::line("--restart latest: " + file + " (step " + std::to_string(found.step) + ", t = " +
@@ -170,7 +171,7 @@ int Solver::init(const Input & input_in) {
     input_from_file = false;
     deprecated_keys = input_upgrade::apply(input);
     if (!check_only) {
-        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+        for (const auto & finding : deprecated_keys) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
     try {
@@ -188,8 +189,10 @@ int Solver::init(const Input & input_in) {
         if (!unused.empty()) {
             std::string list;
             for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            throw InputError("keys that are unknown or unused with these settings (mallard check lists them all):" +
+            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
                              list);
+            error.code = diagnostic_code::KEY_UNUSED;
+            throw error;
         }
     }
     const ResolvedInput resolved = resolve_input(input);

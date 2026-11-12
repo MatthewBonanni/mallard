@@ -22,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
@@ -195,7 +196,7 @@ void Solver::diverged() {
     for (auto & writer : data_writers) writer->finish();
     if (checkpoint_writer) checkpoint_writer->finish();
     write_end_record({"diverged", "", message});
-    throw std::runtime_error(message);
+    throw diagnostic_code::Error(diagnostic_code::DIVERGED, message);
 }
 
 void Solver::act_on_requests() {

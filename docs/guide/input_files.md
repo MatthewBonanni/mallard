@@ -151,7 +151,8 @@ listed in the [input reference](../input.md#units), and a unit of another
 dimension stops the run before it starts:
 
 ```text
-error: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+error E-INPUT: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+  docs/guide/input_files.md#e-input
 ```
 
 **Writing units.** A number, an optional space, then the unit:
@@ -292,9 +293,10 @@ the wrong table, or one the chosen settings do not use (for example
 listed with its line and the closest key Mallard looked for:
 
 ```text
-error: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
+error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
   line 8: mesh.Nyy (did you mean mesh.Ny?)
   line 11: mesh.t_stop (did you mean run.t_stop?)
+  docs/guide/input_files.md#e-key-unused
 ```
 
 When another error stops the setup first, the keys with a suggestion are
@@ -307,8 +309,10 @@ wrong, lists the accepted values or the closest one, says what to do, and
 links the docs that explain the key; `mallard check` reports it the same way:
 
 ```text
-error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
-error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+error E-INPUT: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+  docs/guide/input_files.md#e-input
+error E-INPUT: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+  docs/guide/input_files.md#e-input
 ```
 
 A value of the wrong type is always an error, never replaced by the default.
@@ -475,7 +479,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 
 ### Diagnostics
 
-Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not.
+Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
 
 | Code | What it means | What to do |
 |---|---|---|
