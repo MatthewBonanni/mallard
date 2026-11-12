@@ -28,6 +28,7 @@
 #include "common_io.h"
 #include "input.h"
 #include "json.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "provenance.h"
 
@@ -413,7 +414,7 @@ int pack(const cli::Args & args) {
     item("Rerun", "tar -xf " + fs::path(out_path).filename().string() + " && cd " + top + "/" +
                       rerun_dir.generic_string() + " && " + command);
     item("Verify", "mallard pack --verify " + out_path);
-    for (const std::string & note : notes) logging::warning(note);
+    for (const std::string & note : notes) logging::warning(diagnostic_code::PACK_RERUN, note);
     return 0;
 }
 

@@ -114,16 +114,20 @@ bool written_pending();
 void set_verbose(bool on);
 
 /**
- * @brief Warning on stderr from rank 0, for conditions every rank sees alike; also a
- *        record of the run log.
+ * @brief Warning on stderr from rank 0, for conditions every rank sees alike: "warning W-CODE: message" and the
+ *        docs that explain the code (diagnostic_code::docs); also a record of the run log.
+ * @param code one of diagnostic_code::ALL
  */
-void warning(std::string_view message);
+void warning(std::string_view code, std::string_view message);
 
 /**
- * @brief Error on stderr from the calling rank, prefixed with the rank in parallel runs;
- *        also a record of the run log (rank 0).
+ * @brief Error on stderr from the calling rank, as warning, prefixed with the rank in parallel runs; also a record
+ *        of the run log (rank 0).
  */
-void error(std::string_view message);
+void error(std::string_view code, std::string_view message);
+
+/** @brief The text warning and error print: "warning W-CODE: message" and the docs line, with or without color. */
+std::string diagnostic(bool is_error, std::string_view code, std::string_view message, bool color);
 
 /// 1234567 -> "1,234,567".
 std::string count(uint64_t n);

@@ -10,8 +10,11 @@
 #include <algorithm>
 #include <cmath>
 
+#include "diagnostic_code.h"
 #include "log.h"
 #include "provenance.h"
+#include "report.h"
+#include "units.h"
 
 namespace divergence {
 
@@ -40,24 +43,27 @@ std::vector<double> pack_neighbors(const std::vector<uint64_t> & ids) {
     return out;
 }
 
-std::string at(const std::array<double, 3> & x) {
+std::string point(const std::array<double, 3> & x) {
     std::string s = "(" + real(x[0]);
     for (int d = 1; d < N_DIM; d++) s += ", " + real(x[size_t(d)]);
     return s + ")";
 }
+
+std::string at(const std::array<double, 3> & x) { return units::with(point(x), "m"); }
+
+/** @brief A column name with its units: "p [Pa]", or "p" in a nondimensional case. */
+std::string named(const std::string & name, const std::string & si) {
+    return units::system() == units::System::SI ? name + " [" + si + "]" : name;
+}
+
+/** @brief A value of a table: "%.4g", or "-" if not known. */
+std::string value(const double v) { return std::isfinite(v) ? logging::format("%.4g", v) : "-"; }
 
 std::string percent(double fraction) { return logging::format("%.0f%%", 100.0 * fraction); }
 
 std::string cell_name(const Evidence & e, const Cell & c) {
     std::string s = "cell " + std::to_string(c.id) + " at " + at(c.x);
     if (e.n_ranks > 1) s += " on rank " + std::to_string(c.rank);
-    return s;
-}
-
-std::string state(const Cell & c) {
-    std::string s = "rho " + real(c.rho) + ", |u| " + real(c.speed) + ", p " + real(c.p);
-    if (std::isfinite(c.T)) s += ", T " + real(c.T);
-    if (std::isfinite(c.cfl)) s += ", CFL " + logging::format("%.3g", c.cfl);
     return s;
 }
 
@@ -87,7 +93,8 @@ std::string quality(const Cell & c) {
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
         if (!std::isfinite(c.quality[m])) continue;
         s += (s.empty() ? "" : ", ") + std::string(MeshQuality::NAMES[m]) + " " +
-             logging::format("%.3g", std::fabs(c.quality[m]) < 1e-9 ? 0.0 : c.quality[m]);
+             logging::format("%.3g", std::fabs(c.quality[m]) < 1e-9 ? 0.0 : c.quality[m]) +
+             (std::string(MeshQuality::UNITS[m]) == "deg" ? " deg" : "");
     }
     return s.empty() ? "not known (a cell of another rank's halo)" : s;
 }
@@ -196,8 +203,10 @@ Cause boundary(const Evidence & e, const Zone * zone) {
     const double fraction = double(zone->near) / double(e.n_invalid);
     c.title = "boundary condition of " + zone->name + " (" + zone->type + ")";
     c.score = 0.4 * fraction;
-    const std::string compared = "p " + real(zone->p_ghost) + " and rho " + real(zone->rho_ghost) + " outside, against p " +
-                                 real(zone->p_cell) + " and rho " + real(zone->rho_cell) + " in the cell next to it";
+    const std::string compared = "p " + units::with(real(zone->p_ghost), "Pa") + " and rho " +
+                                 units::with(real(zone->rho_ghost), "kg/m^3") + " outside, against p " +
+                                 units::with(real(zone->p_cell), "Pa") + " and rho " +
+                                 units::with(real(zone->rho_cell), "kg/m^3") + " in the cell next to it";
     if (zone->inadmissible) {
         c.score += 0.5;
         c.evidence.push_back("its exterior state is not a valid state: " + compared);
@@ -242,7 +251,8 @@ Cause initial_state(const Evidence & e) {
         c.score = 0.95;
         c.evidence.push_back(start + " already has a non-positive density or pressure in " +
                              logging::count(e.n_inadmissible) + " cells, e.g. " + cell_name(e, e.inadmissible) + ": rho " +
-                             real(e.inadmissible.rho) + ", p " + real(e.inadmissible.p));
+                             units::with(real(e.inadmissible.rho), "kg/m^3") + ", p " +
+                             units::with(real(e.inadmissible.p), "Pa"));
     } else if (steps <= 10) {
         c.score = 0.35;
         c.evidence.push_back("the run failed " + logging::count(steps) + (steps == 1 ? " step" : " steps") +
@@ -315,21 +325,6 @@ Cause numerics(const Evidence & e) {
     return c;
 }
 
-std::string history(const Evidence & e) {
-    if (e.history.empty()) return "";
-    std::string s = logging::format("    %8s %11s %9s %6s %10s %10s", "step", "t", "dt", "CFL", "min rho", "min p");
-    const bool T = e.mixture;
-    if (T) s += logging::format(" %8s", "min T");
-    s += "\n";
-    for (const Sample & h : e.history) {
-        s += logging::format("    %8llu %11.5g %9.3g %6.3g %10.3g %10.3g", static_cast<unsigned long long>(h.step), h.t,
-                             h.dt, h.cfl, h.min_rho, h.min_p);
-        if (T) s += logging::format(" %8.4g", h.min_T);
-        s += "\n";
-    }
-    return s;
-}
-
 json::Object cell_record(const Cell & c) {
     json::Object r;
     r.add("id", c.id).add("rank", c.rank);
@@ -391,47 +386,71 @@ std::vector<Cause> rank_causes(const Evidence & e) {
     return kept;
 }
 
-std::string text(const Evidence & e, const std::vector<Cause> & causes) {
-    std::string s = "Divergence report (run " + provenance::run_id() + ")\n\n";
-    s += "What and where\n";
-    s += "  Step " + std::to_string(e.step) + ", t = " + real(e.t) + ": " + logging::count(e.n_invalid) +
-         (e.n_invalid == 1 ? " cell is" : " cells are") + " invalid (non-finite, or a non-positive density or pressure)";
-    std::string first;
+std::string text(const Evidence & e, const std::vector<Cause> & causes, const bool color) {
+    using report::Column;
+    using report::Row;
+    using report::Status;
+    report::Text text(color);
+    text.section("Divergence report", Status::ERROR);
+    text.note("Run " + provenance::run_id() + ".");
+    text.note(std::string(units::system() == units::System::SI ? "SI units"
+                                                               : "Nondimensional case (physics.units): no units") +
+              ". Invalid: a non-finite value, or a non-positive density or pressure.");
+    std::vector<Row> what = {{Status::ERROR, {"failing step", std::to_string(e.step), "-", "", ""}},
+                             {Status::NONE, {"t", real(e.t), units::column("s"), "", ""}},
+                             {Status::ERROR, {"invalid cells", logging::count(e.n_invalid), "cells", "",
+                                              "of " + logging::count(e.n_cells)}}};
     for (size_t q = 0; q < N_QUANTITIES; q++) {
         if (e.failed[q] == 0) continue;
-        first += (first.empty() ? "" : ", ") + std::string(QUANTITY_NAMES[q]) + " in " + logging::count(e.failed[q]);
+        what.push_back({Status::NONE, {std::string("  ") + QUANTITY_NAMES[q] + " failed first", logging::count(e.failed[q]),
+                                       "cells", "", ""}});
     }
-    if (!first.empty()) s += "; failed first: " + first;
-    s += "\n  Closest to failing at the last valid state: " + cell_name(e, e.focus);
-    if (e.focus.failed >= 0) s += std::string(" (its ") + QUANTITY_NAMES[size_t(e.focus.failed)] + " failed)";
-    s += "\n  The invalid cells lie within " + at(e.lo) + " - " + at(e.hi) + "\n";
     if (e.has_valid) {
-        s += "  Last valid state: step " + std::to_string(e.step_valid) + ", t = " + real(e.t_valid);
-        if (!e.restart_file.empty()) s += ", in " + e.restart_file;
-        s += "\n";
-    } else {
-        s += "  No valid state was kept" + std::string(e.step == e.step_start ? ": the run's first state is invalid"
-                                                                              : " ([run] keep_last_good = false)") + "\n";
+        what.push_back({Status::NONE, {"last valid step", std::to_string(e.step_valid), "-", "",
+                                       "t = " + units::with(real(e.t_valid), "s") +
+                                           (e.restart_file.empty() ? "" : ", in " + e.restart_file)}});
+    }
+    text.quantities(what);
+    text.line("The invalid cells lie within " + point(e.lo) + " - " + at(e.hi) + ".");
+    text.line("Closest to failing at the last valid state: " + cell_name(e, e.focus) +
+              (e.focus.failed >= 0 ? std::string(" (its ") + QUANTITY_NAMES[size_t(e.focus.failed)] + " failed)" : "") +
+              ".");
+    if (!e.has_valid) {
+        text.line("No valid state was kept" + std::string(e.step == e.step_start ? ": the run's first state is invalid."
+                                                                                 : " ([run] keep_last_good = false)."));
     }
 
-    s += "\nLikely causes, most likely first\n";
+    text.section("Likely causes");
+    text.note("Most likely first. The weight (0 to 1) ranks the causes of this failure; it is not a probability.");
+    std::vector<Row> rows;
     for (size_t k = 0; k < causes.size(); k++) {
         const Cause & c = causes[k];
-        s += logging::format("  %zu. %s (%.2f)\n", k + 1, c.title.c_str(), c.score);
-        for (const auto & line : c.evidence) s += "     - " + line + "\n";
-        if (!c.fix.empty()) s += "     Try: " + c.fix + "\n";
+        std::string details;
+        for (const auto & line : c.evidence) details += (details.empty() ? "" : "\n") + ("- " + line);
+        if (!c.fix.empty()) details += (details.empty() ? "" : "\n") + ("Try: " + c.fix);
+        rows.push_back({Status::NONE, {std::to_string(k + 1), c.title, logging::format("%.2f", c.score), details}});
     }
+    text.table({"#", "cause", "weight", "evidence, and what to try"}, rows, false);
 
-    s += e.has_valid ? "\nEvidence (the last valid state)\n" : "\nEvidence (the failing state: no valid state was kept)\n";
-    const auto describe = [&](const Cell & c, const std::string & indent) {
-        std::string d = indent + cell_name(e, c) + (c.failed >= 0 ? ", invalid" : "") + "\n";
-        d += indent + "  " + state(c) + "\n";
-        d += indent + "  quality: " + quality(c) + "\n";
+    text.section("Evidence");
+    text.note(e.has_valid ? "The last valid state (step " + std::to_string(e.step_valid) + ")."
+                          : "The failing state: no valid state was kept.");
+    const bool ranks = e.n_ranks > 1;
+    std::vector<Column> header = {"cell", "role"};
+    if (ranks) header.emplace_back("rank");
+    for (const auto & [name, si] : std::vector<std::pair<std::string, std::string>>{
+             {"rho", "kg/m^3"}, {"|u|", "m/s"}, {"p", "Pa"}, {"T", "K"}}) {
+        header.emplace_back(named(name, si));
+    }
+    header.emplace_back("CFL");
+    header.emplace_back("at, quality, boundary and activity");
+    std::vector<Row> cells;
+    const auto add = [&](const Cell & c, const std::string & role) {
+        std::string notes = at(c.x) + "\n" + quality(c);
         if (c.zone >= 0) {
-            d += indent + "  boundary " + e.zones[size_t(c.zone)].name + " (" + e.zones[size_t(c.zone)].type + ") " +
-                 (c.layers == 0 ? "on one of its faces"
-                              : std::to_string(c.layers) + (c.layers == 1 ? " cell" : " cells") + " away") +
-                 "\n";
+            notes += "\nboundary " + e.zones[size_t(c.zone)].name + " (" + e.zones[size_t(c.zone)].type + ") " +
+                     (c.layers == 0 ? "on one of its faces"
+                                    : std::to_string(c.layers) + (c.layers == 1 ? " cell" : " cells") + " away");
         }
         std::string flags;
         if (c.repaired) flags += "repaired";
@@ -440,38 +459,56 @@ std::string text(const Evidence & e, const std::vector<Cause> & causes) {
         if (std::isfinite(c.chemistry_cost)) {
             flags += std::string(flags.empty() ? "" : ", ") + logging::format("%.0f chemistry sub-steps", c.chemistry_cost);
         }
-        if (!flags.empty()) d += indent + "  " + flags + "\n";
-        return d;
+        if (!flags.empty()) notes += "\n" + flags;
+        std::vector<std::string> row = {std::to_string(c.id), role + (c.failed >= 0 ? ", invalid" : "")};
+        if (ranks) row.push_back(std::to_string(c.rank));
+        for (const double v : {c.rho, c.speed, c.p, c.T, c.cfl}) row.push_back(value(v));
+        row.push_back(notes);
+        cells.push_back({c.failed >= 0 ? Status::ERROR : Status::NONE, row});
     };
-    s += describe(e.focus, "  ");
-    if (!e.neighbors.empty()) {
-        s += "  Its neighbors:\n";
-        for (const Cell & n : e.neighbors) s += describe(n, "    ");
-    }
-    std::string others;
+    add(e.focus, "closest");
+    for (const Cell & n : e.neighbors) add(n, "neighbor");
     for (const Cell & n : e.others) {
         const bool listed = std::any_of(e.neighbors.begin(), e.neighbors.end(), [&](const Cell & m) { return m.id == n.id; });
-        if (!listed) others += describe(n, "    ");
+        if (!listed) add(n, "other");
     }
-    if (!others.empty()) s += "  Other invalid cells:\n" + others;
+    text.table(header, cells, false);
+    text.note("closest: the invalid cell closest to failing at that state; neighbor: its face neighbors; other: "
+              "the next invalid cells.");
+    std::vector<Row> means = {{Status::NONE, {"mean density", real(e.rho_mean), units::column("kg/m^3"), "", ""}},
+                              {Status::NONE, {"mean pressure", real(e.p_mean), units::column("Pa"), "", ""}}};
     if (e.n_inadmissible > 0) {
-        s += "  " + logging::count(e.n_inadmissible) + " cells of the last valid state have a non-positive density or "
-             "pressure, e.g. " + cell_name(e, e.inadmissible) + "\n";
+        means.push_back({Status::ERROR, {"cells with rho or p <= 0", logging::count(e.n_inadmissible), "cells", "",
+                                         "e.g. " + cell_name(e, e.inadmissible)}});
     }
-    s += "  Mean density " + real(e.rho_mean) + ", mean pressure " + real(e.p_mean) + "\n";
-    if (!e.history.empty()) s += "\nProgress rows before the failure\n" + history(e);
+    text.quantities(means, e.n_inadmissible > 0);
 
-    s += "\nReproduce\n";
+    if (!e.history.empty()) {
+        text.section("Progress rows before the failure");
+        std::vector<Column> h = {"step", named("t", "s"), named("dt", "s"), "CFL", named("min rho", "kg/m^3"),
+                                 named("min p", "Pa")};
+        if (e.mixture) h.emplace_back(named("min T", "K"));
+        std::vector<Row> history;
+        for (const Sample & r : e.history) {
+            std::vector<std::string> row = {std::to_string(r.step), logging::format("%.6g", r.t), value(r.dt),
+                                            value(r.cfl), value(r.min_rho), value(r.min_p)};
+            if (e.mixture) row.push_back(value(r.min_T));
+            history.push_back({Status::NONE, row});
+        }
+        text.table(h, history, false);
+    }
+
+    text.section("Reproduce");
     if (!e.restart_file.empty()) {
-        s += "  mallard -i <input> --restart " + e.restart_file + "\n"
-             "  with [numerics] check_nan = true and [output] check_interval = 1 to follow it step by step\n";
+        text.line("mallard -i <input> --restart " + e.restart_file);
+        text.note("with [numerics] check_nan = true and [output] check_interval = 1 to follow it step by step");
     }
     if (!e.snapshot_file.empty()) {
-        s += "  " + e.snapshot_file + ": the neighborhood of the invalid cells for ParaView (DIVERGED = 1 marks them; "
-             "the fields are the last valid state's, with the mesh quality)\n";
+        text.line(e.snapshot_file + ": the neighborhood of the invalid cells for ParaView (DIVERGED = 1 marks them; "
+                  "the fields are the last valid state's, with the mesh quality)");
     }
-    s += "  See docs/guide/running.md#divergence\n";
-    return s;
+    text.line("See " + diagnostic_code::docs(diagnostic_code::DIVERGED));
+    return text.str();
 }
 
 json::Object record(const Evidence & e, const std::vector<Cause> & causes) {
@@ -516,6 +553,13 @@ json::Object record(const Evidence & e, const std::vector<Cause> & causes) {
         return o.str();
     }));
     r.add("snapshot", e.snapshot_file);
+    const bool si = units::system() == units::System::SI;
+    json::Object u;
+    for (const auto & [key, units] : std::vector<std::pair<const char *, const char *>>{
+             {"t", "s"}, {"dt", "s"}, {"x", "m"}, {"rho", "kg m-3"}, {"speed", "m s-1"}, {"p", "Pa"}, {"T", "K"}}) {
+        u.add(key, std::string(si ? units : "1"));
+    }
+    r.raw("units", u.str());
     return r;
 }
 

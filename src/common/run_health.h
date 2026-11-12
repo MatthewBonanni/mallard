@@ -20,6 +20,13 @@
 
 namespace health {
 
+/**
+ * @brief A cell counts as limited (activity limited_cells) when its smallest MUSCL limiter over the variables is
+ *        below this. Smooth limiters (Venkatakrishnan) sit slightly below 1 almost everywhere in smooth flow; below
+ *        0.9 the limiter cuts the reconstructed gradient by more than a tenth, as at shocks and steep gradients.
+ */
+constexpr double LIMITED_BELOW = 0.9;
+
 /** @brief The smallest value of a quantity over the domain, where and when it occurred. */
 struct Extremum {
     std::string name;

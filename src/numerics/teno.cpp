@@ -30,6 +30,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "face_reconstruction.h"
 #include "growing_buffer.h"
 
@@ -3803,7 +3804,7 @@ void TENO::save_cache(const uint8_t halo_layers) {
     const std::string partial = cache_file + ".partial";
     std::ofstream out(partial, std::ios::binary);
     if (!out.good()) {
-        logging::warning("TENO: could not write stencil cache " + cache_file + ".");
+        logging::warning(diagnostic_code::TENO_CACHE, "TENO: could not write stencil cache " + cache_file + ".");
         return;
     }
     const uint32_t n_reconstructed = static_cast<uint32_t>(scale.extent(0));
@@ -3830,7 +3831,7 @@ void TENO::save_cache(const uint8_t halo_layers) {
     if (out.good()) std::filesystem::rename(partial, cache_file, error);
     if (!out.good() || error) {
         std::filesystem::remove(partial, error);
-        logging::warning("TENO: could not write stencil cache " + cache_file + ".");
+        logging::warning(diagnostic_code::TENO_CACHE, "TENO: could not write stencil cache " + cache_file + ".");
         return;
     }
     cache_status += (cache_status.empty() ? "" : ", ") +
