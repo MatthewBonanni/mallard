@@ -214,14 +214,14 @@ Input region_value(const std::string & text) {
     return parsed.as_table().entries().at("region");
 }
 
-/** @brief Whether a [[probes]] entry writes samples, not only reductions: a probe with region writes none. */
+/** @brief Whether a [[probes]] entry writes samples, not only reductions: a region probe writes none without n_points. */
 bool writes_samples(const Input & input, const Input::table_type & entry) {
     if (!entry.entries().contains("region")) return true;
     const Input & value = entry.entries().at("region");
     const Input * names = region::named_regions(input);
     const bool named = value.is_string() && names && names->as_table().entries().contains(value.as_string());
     const Input & table = named ? names->as_table().entries().at(value.as_string()) : value;
-    return probe::sampled(table) || (N_DIM == 3 && entry.entries().contains("n_points"));
+    return probe::sampled(table) || entry.entries().contains("n_points");
 }
 
 std::string probe_extension(const Input::table_type & entry) {

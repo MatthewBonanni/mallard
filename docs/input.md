@@ -1047,12 +1047,11 @@ ranks. A probe that is not due costs nothing.
 | `name` | Probe name |
 | `fields` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region, or with `sampling = "point"` the reconstruction integrated over each cell's part inside; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples, and a filled region with `n_points` samples at the nodes of a grid inside it too (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP`. Default: `[output] reference` |
-| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
+| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below); for a filled region, the reconstruction integrated over the region (below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
@@ -1078,6 +1077,8 @@ Types (`[x, y(, z)]` points):
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
 | `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
+
+The curves (`line`, `polyline`, `circle`, `arc`, `curve`) take `n_points = "cells"` instead of a number: one sample per cell the curve crosses (below).
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
 central reconstruction polynomial at the sample (order-consistent: the error
@@ -1109,7 +1110,15 @@ area, and integrates with a degree-5 rule on the triangles where the plane cuts
 the cell's tetrahedra (three Gauss points per cut segment in 2D), so its
 integrals are exact for the reconstruction polynomials up to degree 5 (and its
 area exact); a plane through mesh faces takes each face once. Its normal is
-`normal`. In 2D, curves are the surfaces: their normal points to the right of
+`normal`. With `n_points = "cells"`, a curve is cut exactly by the cells it
+crosses (straight pieces at the cells' faces, others at the roots of the
+faces' distance along the curve; curved cells by their curved shapes): one
+sample per cell and crossing, at the middle of its length in the cell and
+weighing that length (the `area` column), written as segments with their
+values as cell data, and three Gauss points on each crossing, so its
+integrals are exact for the reconstruction polynomials up to degree 5 along
+straight pieces. A curve along a face between two cells is sampled once, in one
+of them; one along a boundary face, in its cell. In 2D, curves are the surfaces: their normal points to the right of
 the direction of travel (outward for a counterclockwise `circle`). Surfaces,
 cut planes and 2D curves have the flux variables of boundary probes
 (`MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*`) along their
@@ -1322,8 +1331,22 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `type`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell. A filled
+With `sampling = "point"` (static filled regions), each sum is over the
+reconstruction instead: a cell entirely inside is one sample of its cell
+value weighing `V` (the integral of its polynomial, whose mean is that value),
+and a cell the region's surface cuts has quadrature points over its part
+inside (a high-order quadrature on the cell, or on its simplices where it is not a convex quadrilateral or hexahedron, spectrally accurate
+for smooth surfaces and exact for planes, fitted to a few points that
+integrate polynomials of the reconstruction's degree alike), so `integral` is
+exact for the reconstruction polynomials, curved surfaces included, and the
+third column is the measure of that quadrature. With `n_points = [n_x, n_y]`
+(3D: `[n_x, n_y, n_z]`, each at least 2), a filled region also writes samples
+at the nodes of a grid over the box around it and the mesh, those inside both,
+to `file` in `format` (`csv`, `hdf5`, `vtkhdf` or `vtp`, the nodes as
+vertices), with `sampling` as for points; its reductions stay those of its
+cells. Otherwise a region probe has no samples: `type`, `format`, `file` and
+`samples` do not apply. Moving regions and regions defined by the solution take neither. The region must cover
+part of some cell. A filled
 region's own volume and surface area, and those of its part in the domain,
 are recorded in the probe sampling block that heads `reductions_file` and in
 `mallard.jsonl`, with a warning when more than 0.1% of it lies outside the
@@ -1512,17 +1535,16 @@ Centers, `point`, `base`, sizes (`radius`, `inner_radius`, `length`, `size`,
 `rotate` angles, `scale` and an implicit `f` may be expressions of `t` (time,
 s): the region moves, placed where it is at each stage
 ([Moving regions](guide/geometry.md#moving-regions)). Filled regions alone
-move, in `[[sources]]`, `[[sponges]]` and `[[probes]]`; elsewhere, and for
-surfaces, curves and points, a moving region is an error. On a mesh with
+move, in `[[sources]]`, `[[sponges]]`, `[[probes]]` and `[[write_data]]`;
+elsewhere, and for surfaces, curves and points, a moving region is an error. On a mesh with
 `[[periodic]]` boundaries, a region that crosses one wraps into the domain
 ([Periodic boundaries](guide/geometry.md#periodic-boundaries)).
 
 Regions defined by the solution, `where` and `isosurface` and the booleans and
 boundaries that use them, follow the solution: in `[[sources]]` and
-`[[sponges]]` at every stage, in `[[probes]]` at every write, and in
-`mallard post extract` on the state of the output it reads. They take no
-transforms, `repeat` or `edge`; snapshots of them (`[[write_data]]`),
-averaged probes and probes of `n_points` on isosurfaces,
+`[[sponges]]` at every stage, in `[[probes]]` and `[[write_data]]` at every
+write, and in `mallard post extract` on the state of the output it reads. They
+take no transforms, `repeat` or `edge`; probes of `n_points` on isosurfaces,
 `[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 The outermost region may also have `edge`, the width of a smooth edge: the
@@ -1706,7 +1728,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
-| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
+| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it (a [moving](guide/geometry.md#moving-regions) one, or one [defined by the solution](guide/geometry.md#regions-defined-by-the-solution), the cells it covers at each write); a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
 | `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
 | `geometry` | Removed in 0.10.0 (deprecated in 0.9.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and XDMF's HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
@@ -1728,7 +1750,9 @@ on the curved geometry, after the mesh's nodes. A filled region's file is the
 With
 `series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
 snapshot's time (`Steps/Values`) and where its cell values start
-(`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
+(`Steps/CellDataOffsets/<name>`); a region whose cells change between writes
+stores each snapshot's mesh after the previous ones', where `Steps/PartOffsets`,
+`PointOffsets`, `CellOffsets` and `ConnectivityIdOffsets` say. Nothing else is added to the VTKHDF layout:
 the units and descriptions are HDF5 attributes of each dataset (`units`,
 `long_name`), and the root group carries the run block (`mallard_run`) and the format
 `version` as HDF5 attributes and the snapshot blocks as the dataset `mallard_snapshot`, which VTK ignores;

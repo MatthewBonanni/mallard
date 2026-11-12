@@ -42,6 +42,7 @@
 #include "log.h"
 #include "mesh_block.h"
 #include "region_input.h"
+#include "region_motion.h"
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -1749,13 +1750,30 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
         } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
             const region::Region & region = regions.get(*value, key);
             region::require_full_dimension(region, *value, key);
-            region::require_fixed(region, *value, key, "data files");
-            CellSubset subset{region.summary(), {}, regions.fractions(*value, key)};
-            for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-                if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
-            }
-            if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
-                throw InputError(key + " contains no part of any cell.");
+            CellSubset subset;
+            subset.name = region.summary();
+            if (region.moving() || region.solution()) {
+                // Its cells at each write: those of positive fraction where it is then
+                std::shared_ptr<const region::SolutionLevels> levels;
+                if (region.solution()) {
+                    levels = std::make_shared<region::SolutionLevels>(*mesh, region.conditions(), species_names,
+                                                                      cell_fields());
+                }
+                auto fractions = std::make_shared<region::MovingFractions>(*mesh, region, levels);
+                subset.at = [fractions](double time) {
+                    fractions->update(time);
+                    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fractions->fractions());
+                    return std::vector<double>(f.data(), f.data() + f.extent(0));
+                };
+                subset.solution = region.solution();
+            } else {
+                subset.fractions = regions.fractions(*value, key);
+                for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                    if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
+                }
+                if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
+                    throw InputError(key + " contains no part of any cell.");
+                }
             }
             add_writer(&subset, file_prefix);
         } else {
@@ -2740,6 +2758,10 @@ void Solver::write_data(bool force) {
     if (statistics.means_enabled() || statistics.get_phase().enabled()) {
         snapshot_block::set_averages(statistics.average_start(), statistics.average_end(),
                                      static_cast<int64_t>(statistics.samples()), statistics.field_averages());
+    }
+    if (std::any_of(data_writers.begin(), data_writers.end(),
+                    [&](const auto & w) { return w->follows_solution() && (force || w->due(step, t)); })) {
+        update_cell_W();
     }
     update_primitives();
     copy_device_to_host();

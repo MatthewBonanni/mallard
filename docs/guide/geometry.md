@@ -12,7 +12,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone); it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution), and expressions read the index of [copies](#arrays-of-copies) as `copy` | [Sources](sources.md#regions) |
 | `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh); filled regions may [move](#moving-regions); regions of any dimension may [follow the solution](#regions-defined-by-the-solution); `copies = "each"` reduces each [copy](#arrays-of-copies) | [Probes](probes.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
-| `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions) | [Output](output.md#snapshots-of-regions) |
+| `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions); filled regions may [move](#moving-regions), and regions of any dimension may [follow the solution](#regions-defined-by-the-solution) | [Output](output.md#snapshots-of-regions) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution) | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
@@ -576,8 +576,9 @@ Who follows a moving region:
 - `mallard check`, `[[initialize.regions]]` and `[[initialize.data]]` take the
   region where it is at `t = 0`.
 
-Surfaces, curves and points that move, snapshots of moving regions
-(`[[write_data]]`) and averaged probes of them are errors for now
+A [snapshot](output.md#snapshots-of-regions) of a moving filled region
+(`[[write_data]]`) holds the cells it covers at each write. Surfaces, curves
+and points that move, and averaged probes of them, are errors for now
 ([#747](https://github.com/MatthewBonanni/mallard/issues/747)).
 
 ### Regions defined by the solution
@@ -634,20 +635,22 @@ Who follows the solution, and when:
   divided by the integral of the fractions at the stage, and is zero while the
   region is empty.
 - `[[probes]]`: at each write, a `where` region's fractions and an
-  isosurface's elements, extracted anew. The measure column of the reductions
-  file is the region's at that time. The run-health timing row `regions` is
+  isosurface's elements, extracted anew, and at each sample of a probe with
+  `average = true`. The measure column of the reductions file is the region's
+  at that time. The run-health timing row `regions` is
   the time this takes.
+- `[[write_data]]`: at each write, a `where` region's cells (those of positive
+  fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
+  [snapshot](output.md#snapshots-of-regions) is a mesh of its own.
 - `mallard post extract`: the same regions on the state of each restart file
-  or snapshot it reads
+  or snapshot it reads, in its probes and `--snapshot`
   ([Probes of existing output](probes.md#probes-of-existing-output)), e.g.
   `--region '{type = "isosurface", field = "T", value = 1500}'`.
 - `mallard check` lists them, with no measure or cells: the solution places
   them during the run.
 
-They take no transforms, `repeat` or `edge`. Snapshots of them
-(`[[write_data]]`, [#797](https://github.com/MatthewBonanni/mallard/issues/797)),
-averaged probes and probes of `n_points` on isosurfaces
-([#798](https://github.com/MatthewBonanni/mallard/issues/798)),
+They take no transforms, `repeat` or `edge`. Probes of `n_points` on
+isosurfaces, whose elements have no parameters to place a grid of samples on,
 `[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 ### Periodic boundaries

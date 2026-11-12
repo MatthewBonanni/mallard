@@ -166,7 +166,6 @@ REQUIRES = [
 DEFINITIONS = [("simpler", "chemistry"), ("rotational", "periodic")]
 # Guards of combinations with something that is not a feature of the matrix
 OTHER_GUARDS = [
-    ("src/solver/probes.cpp", "extracted anew at each write; that is not supported"),
     ("src/solver/probes.cpp", "through a cut plane or curve is not supported with physics.axisymmetric"),
     ("src/solver/probes.cpp", "moment is not supported with physics.axisymmetric"),
     ("src/solver/synthetic_turbulence.cpp", "is not available on axisymmetric meshes"),
@@ -176,6 +175,7 @@ OTHER_GUARDS = [
     ("src/chemistry/mechanism.cpp", "transport model"),
     ("src/chemistry/mechanism.cpp", "(NASA7, NASA9, constant-cp)"),
     ("src/mesh/mesh_io.cpp", "parametric nodes are not supported"),
+    ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")

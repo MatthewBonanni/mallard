@@ -341,7 +341,8 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V
+            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V;
+            // isosurfaces: per cell, the means of the sums of w q and of w over its quadrature points
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
             std::vector<double> mean_nodes, mean_quadrature, mean_weights;
@@ -386,14 +387,25 @@ class Probes {
                 std::shared_ptr<region::SolutionLevels> levels;
                 uint32_t n_evaluated = 0;
                 bool per_cell = false;
+                uint64_t n_cells = 0;              // of the mesh, which its averages are kept per
+                std::vector<uint64_t> quad_cells;  // rank 0: the global cell of each gathered quadrature point
             };
             std::shared_ptr<Isosurface> isosurface;
             /** @brief The quadrature weights f V of a moving region at time t (collective). */
             void move(double t);
             /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
             void extract(double t);
-            /** @brief Rank 0 of a time-averaged moving region: its weights and values, mean f V q / mean f V. */
+            /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
+            bool cell_means() const { return average && (motion || isosurface); }
+            /** @brief The cells its time averages are kept per (cell_means), every cell of the mesh. */
+            uint64_t n_mean_cells() const { return motion ? quadrature.n_global : isosurface ? isosurface->n_cells : 0; }
+            /**
+             * @brief Rank 0 of time averages kept per cell: the weights and values of the cells, mean w q /
+             *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).
+             */
             void mean_fields(std::vector<double> & quad);
+            /** @brief Rank 0 of a time-averaged isosurface: the sums of w q and of w per cell of its latest extraction. */
+            void cell_sums(const std::vector<double> & quad, std::vector<double> & sums, std::vector<double> & weights) const;
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
@@ -434,6 +446,8 @@ class Probes {
                  const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
+        static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
+                                             const std::string & summary, uint32_t n_variables);
         /**
          * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
@@ -442,10 +456,11 @@ class Probes {
         /**
          * @brief A filled region probe's measures: its own and of its part in
          *        the domain, with a warning and p.clipped where part of it is
-         *        outside. Collective.
+         *        outside. Collective. quadrature_volume: the part in the domain from a quadrature (rank 0), not f V.
          */
         static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
-                                    const std::vector<double> & f, const std::string & key);
+                                    const std::vector<double> & f, const std::string & key,
+                                    const double * quadrature_volume = nullptr);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);

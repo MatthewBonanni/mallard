@@ -304,10 +304,10 @@ What a snapshot holds depends on the region's dimension:
 
 | Region | Written | Values |
 |---|---|---|
-| A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
+| A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones; a [moving](geometry.md#moving-regions) region or a `where` region [of the solution](geometry.md#regions-defined-by-the-solution), the cells it covers at each write | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
 | `"domain"` | The whole mesh, as without `region` | The cells' fields |
 | A boundary zone, by its name | Its faces: polygons (3D), a polyline (2D) | Point values at the face centroids, as a [boundary probe](probes.md#boundary-data) with `sampling = "point"` writes them, wall quantities included; other cell fields (`P_MAX`, `HRR`) from each face's cell |
-| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
+| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points; an `isosurface` or another surface [of the solution](geometry.md#regions-defined-by-the-solution), the elements extracted at each write | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
 | A cut plane or other [probe type as a region](geometry.md#probe-types-as-regions) | The exact cut of the mesh, or the resampled surface, curve or points | Point values of the reconstruction, as a [probe](probes.md) of it with `sampling = "point"`; fluxes (`MASS_FLUX`, ...) through surfaces and 2D curves; other cell fields from the cell of each sample |
 
 A volume is written by every rank in global order, like the whole mesh;
@@ -332,6 +332,12 @@ Pitfalls:
   values, while cell fields such as `HRR`, `VORTICITY` or `MEAN_*` are the
   averages of the cells the samples lie in: first order across the cell.
 - A volume region much smaller than a cell can cover no cell, which is an error.
+  A region that moves or follows the solution may cover none at some write:
+  that snapshot has no cells (no elements), and the series goes on.
+- The cells or elements of a region that moves or follows the solution change
+  from one snapshot to the next: each is a mesh of its own, and ParaView's
+  filters that assume one mesh over time (Temporal Statistics, Particle
+  Tracer) do not apply to it.
 - A boundary zone's samples lie at the face centroids, on the wall: `P` is the
   reconstruction's wall pressure, not the first cell's average. Cell fields
   such as `P_MAX` are still the cell's.
@@ -896,9 +902,9 @@ of each VTP file:
 | `probe`, `sampling` | The probe's name and `cell` or `point` |
 | `reconstruction` | For `sampling = "point"`, the method, order and fallbacks the values are read with (as in [Cell averages and point values](#cell-averages-and-point-values)); `null` for `cell` |
 | `variables` | Each column's `name` and `value` kind, and with `average = true` its `average` (`kind`, `of`, `weighting`, window `start`) |
-| `points` | For `point` and `points` probes, curves and resampled surfaces: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane or a boundary's faces |
-| `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); for a filled region partly outside the domain, the share of its volume outside (`volume_fraction`; planar 2D: `area_fraction`); `null` when nothing was dropped |
-| `measures` | For a filled region probe ([Measures](probes.md#region-probes)): the `region`'s own `volume` and `surface_area` (planar 2D: `area` and `perimeter`; axisymmetric: per radian) with their relative `tolerance` (0: closed form), `null` for a region of the mesh or an unbounded one, and the same of its part in the domain (`in_domain`); `null` for other probes |
+| `points` | For `point` and `points` probes, curves on `n_points` samples, resampled surfaces and grids in regions: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane, a curve on its cells or a boundary's faces |
+| `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); a curve on its cells, the share of its length outside (`length_fraction`); for a filled region partly outside the domain, the share of its volume outside (`volume_fraction`; planar 2D: `area_fraction`); `null` when nothing was dropped |
+| `measures` | For a filled region probe ([Measures](probes.md#region-probes)): the `region`'s own `volume` and `surface_area` (planar 2D: `area` and `perimeter`; axisymmetric: per radian) with their relative `tolerance` (0: closed form), `null` for a region of the mesh or an unbounded one, and the same of its part in the domain (`in_domain`; with `sampling = "point"`, its volume is that of the quadrature); `null` for other probes |
 | `units` | Units of the dimensional keys (m, s) |
 
 The distance is zero for a point value and the distance to the centroid of
