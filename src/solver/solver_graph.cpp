@@ -461,26 +461,9 @@ void Solver::device_step_body() {
             due(2) = phases && on && L.step % phase_every == 0 && (triggered || s(T) > phase_clock().t_start);
             records((L.seq - 1) % n_records).spectra = staged_spectra && due(1);
         });
-        if (means) {
-            device_if(&statistics_due.data()[0], [&] {
-                update_primitives();
-                statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
-            });
-        }
-        if (spectra) {
-            device_if(&statistics_due.data()[1], [&] {
-                update_primitives();
-                statistics.sample_spectra(step_scalars.data() + T, cell_sampler(), &step_loop.data()->seq);
-            });
-        }
-        if (phases) {
-            device_if(&statistics_due.data()[2], [&] {
-                update_primitives();
-                statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
-            });
-        }
         // Each conditional entry has its own interval and t_start, as ConditionalStatistics::due
-        for (size_t i = 0; i < statistics.get_conditional().size(); i++) {
+        const size_t n_conditional = statistics.get_conditional().size();
+        for (size_t i = 0; i < n_conditional; i++) {
             const ConditionalStatistics & entry = statistics.get_conditional()[i];
             const Kokkos::View<const ConditionalStatistics::Clock> entry_clock = entry.device_clock();
             const uint64_t entry_every = entry.sampling_interval();
@@ -488,8 +471,35 @@ void Solver::device_step_body() {
                 const step_queue::Loop & L = loop();
                 due(3 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
             });
+        }
+        Kokkos::parallel_for("statistics_any_due", 1, KOKKOS_LAMBDA(const int) {
+            uint32_t any = 0;
+            for (size_t i = 0; i < 3 + n_conditional; i++) any |= due(i);
+            due(3 + n_conditional) = any;
+        });
+        // The fields are computed once for every part due, as sample_statistics; boundary states at the step's end
+        recording_step = true;
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        device_if(&statistics_due.data()[3 + n_conditional], [&] { update_statistics_fields(); });
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        recording_step = false;
+        if (means) {
+            device_if(&statistics_due.data()[0], [&] {
+                statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
+        if (spectra) {
+            device_if(&statistics_due.data()[1], [&] {
+                statistics.sample_spectra(step_scalars.data() + T, cell_sampler(), &step_loop.data()->seq);
+            });
+        }
+        if (phases) {
+            device_if(&statistics_due.data()[2], [&] {
+                statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
+        for (size_t i = 0; i < n_conditional; i++) {
             device_if(&statistics_due.data()[3 + i], [&] {
-                update_primitives();
                 statistics.sample_conditional(i, step_scalars.data() + T, cell_sampler(), mesh->n_owned());
             });
         }
@@ -602,7 +612,7 @@ void Solver::write_staged_probes(const step_queue::Record & record) {
 
 bool Solver::statistics_on_device() const {
     // Fused chemistry is advanced by the host before a sample
-    return statistics.samples_on_device() && !defer_chemistry;
+    return statistics.enabled() && !defer_chemistry;
 }
 
 bool Solver::monitors_on_device() const {
@@ -758,7 +768,7 @@ void Solver::begin_device_steps() {
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
     if (statistics_on_device()) {
-        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 3 + statistics.get_conditional().size());
+        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 4 + statistics.get_conditional().size());
         statistics.stage_spectra(n_records);
     }
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);

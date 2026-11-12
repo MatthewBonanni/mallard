@@ -268,8 +268,6 @@ class Statistics {
 
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
-        /** @brief Every sample can be taken in a step graph (derived fields and HRR are the host's). */
-        bool samples_on_device() const { return enabled() && !derived_sampled && !chemistry_sampled; }
         /** @brief The spectra's sample at the device's time *t, staged when unaveraged (capturable). */
         void sample_spectra(const rtype * t, const CellSampler & sampler, const uint64_t * seq) {
             spectra.sample_device(t, sampler);
