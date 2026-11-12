@@ -86,7 +86,16 @@ struct Condition {
     std::string text;
 };
 
-/** @brief The variables of conditions: x, y, z, t, RHO, U_X, U_Y (, U_Z), P, T, then Y_<species> (other characters than letters, digits and _ as _). */
+/** @brief The fields of conditions that read the velocity gradient, last among condition_variables. */
+inline const std::vector<std::string> CONDITION_GRADIENT_FIELDS =
+    N_DIM == 2 ? std::vector<std::string>{"VORTICITY", "Q_CRITERION"}
+               : std::vector<std::string>{"VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z", "Q_CRITERION"};
+
+/**
+ * @brief The variables of conditions: x, y, z, t, RHO, U_X, U_Y (, U_Z), P, T,
+ *        Y_<species>, MACH, H, X_<species>, then CONDITION_GRADIENT_FIELDS
+ *        (species: other characters than letters, digits and _ as _).
+ */
 std::vector<std::string> condition_variables(const std::vector<std::string> & species);
 
 /** @brief A region as plain data: what parsing a region gives (see region_input.h). */

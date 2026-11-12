@@ -18,7 +18,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
 | `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it; [regions defined by the solution](#regions-defined-by-the-solution) are placed on each snapshot's state, and their integrals, means, covariances and profiles averaged in time | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
-| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them; regions defined by the solution are placed on the initial solution | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
 | `[[statistics.conditional]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): cells weighted by their fraction in it | [Statistics](statistics.md#conditional-statistics-and-pdfs-statisticsconditional) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
@@ -387,8 +387,10 @@ of their part in the domain, and the share outside it, as
 [region probes](probes.md#region-probes) record them. A region that covers no
 cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
 extent and the domain's. [Regions defined by the solution](#regions-defined-by-the-solution)
-are listed with `-` for measure and cells, made from `the solution, during
-the run`, and `"solution": true` in `--json`; the case view leaves them out:
+are placed on the initial solution: their measure and cells are those at the
+initial time, made from `the initial solution`, with `"solution": true` in
+`--json`. Such a region may be empty then, which is no error; the case view
+holds it as placed:
 
 ```
 == Regions =========================================================================== ERROR
@@ -604,9 +606,22 @@ reductions = ["integral", "mean"]
 
 A `where` region is filled where its `condition` holds on the solution: a
 comparison (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the
-solution's `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T` and `Y_<species>` (SI units),
-or several joined by `and`, `or`, `not` and parentheses
-(`"T > 1500 and not (Y_OH < 1e-3)"`). An `isosurface` (2D: a curve) is where
+solution's fields (SI units), or several joined by `and`, `or`, `not` and
+parentheses (`"T > 1500 and not (Y_OH < 1e-3)"`). The fields are
+
+- `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, and for mixtures `Y_<species>`;
+- `MACH`, `H` (specific enthalpy, with mixtures' frozen ratio of specific heats
+  and energy offset: `MACH` = |u| / sqrt(γ p / ρ), `H` = e0 + γ / (γ - 1) p / ρ),
+  and for mixtures `X_<species>`, the mole fractions;
+- of the velocity gradient: `VORTICITY` (2D; 3D: `VORTICITY_X`, `VORTICITY_Y`,
+  `VORTICITY_Z`) and `Q_CRITERION`, with the hoop strain u_r / r in
+  axisymmetric runs. Each cell's velocity gradient is fit by least squares to
+  the velocities of the cells sharing a node with it, as the level's gradient
+  is fit below.
+
+A species name's characters other than letters, digits and `_` read as `_`
+(`Y_C3H8`, `X_N2`). `"Q_CRITERION > 1e6 and VORTICITY_Z > 0"` (2D:
+`VORTICITY > 0`) holds in the vortex cores that turn counterclockwise about z. An `isosurface` (2D: a curve) is where
 `field`, one of those variables, equals `value`, given in the field's units;
 it faces toward increasing `field`, and `flip = true` reverses it. It is the
 [boundary](#boundaries-and-interiors) of `{type = "where", condition =
@@ -651,8 +666,8 @@ Who follows the solution, and when:
   the integrals, means, covariances and Favre averages over the region, or
   their profiles over homogeneous directions
   ([Averages of saved snapshots](statistics.md#averages-of-saved-snapshots-mallard-post-average)).
-- `mallard check` lists them, with no measure or cells: the solution places
-  them during the run.
+- `mallard check`: on the initial solution, with their measure and cells
+  then ([Checking regions](#checking-regions)).
 
 They take no transforms, `repeat` or `edge`. Probes of `n_points` on
 isosurfaces, whose elements have no parameters to place a grid of samples on,
