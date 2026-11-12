@@ -20,6 +20,7 @@
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 enum class SGSModel : uint8_t { SMAGORINSKY, WALE, VREMAN, SIGMA };
 
@@ -61,7 +62,7 @@ struct LES {
     /** @brief Model constant by default: Lilly's C_s, Nicoud & Ducros's C_w, Vreman's c, Nicoud et al.'s C_sigma. */
     static rtype default_constant(SGSModel model);
 
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     /** @brief D(g) of the model, the eddy viscosity for unit constant and filter width. */
     KOKKOS_INLINE_FUNCTION

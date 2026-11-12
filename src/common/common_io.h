@@ -75,6 +75,18 @@ struct WrittenFile {
     std::string sha256;
 };
 
+/**
+ * @brief An output of a run as its setup banner lists it: what it writes, to which files, how often (every steps
+ *        steps, or every seconds of simulated time) and what the files hold.
+ */
+struct OutputSummary {
+    std::string kind;
+    std::string file;
+    uint64_t steps = 0;
+    double seconds = 0.0;
+    std::string contents{};
+};
+
 /** @brief Size and (contents) SHA-256 of a complete file. */
 WrittenFile written_file(const std::string & path, bool contents = true);
 

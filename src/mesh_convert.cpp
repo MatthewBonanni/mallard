@@ -19,6 +19,8 @@
 #include "comm.h"
 #include "commands.h"
 #include "mesh_block.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 int mesh_convert_main(const cli::Args & args) {
     int argc = args.argc;
@@ -26,8 +28,8 @@ int mesh_convert_main(const cli::Args & args) {
     comm::Session session(argc, argv);
     if (!have_hdf5()) {
         if (comm::is_root()) {
-            std::cerr << "mallard mesh convert: this build has no HDF5 support "
-                         "(configure with -DMallard_ENABLE_HDF5=ON).\n";
+            logging::error(diagnostic_code::MESH_CONVERT, "mallard mesh convert: this build has no HDF5 support "
+                                                          "(configure with -DMallard_ENABLE_HDF5=ON).");
         }
         return 1;
     }
@@ -40,7 +42,7 @@ int mesh_convert_main(const cli::Args & args) {
         const uint64_t n_nodes = comm::allreduce(block.n_nodes(), comm::Op::SUM);
         if (comm::is_root()) std::cout << "Wrote " << out << ": " << n_cells << " cells, " << n_nodes << " nodes\n";
     } catch (const std::exception & e) {
-        std::cerr << "mallard mesh convert: " << e.what() << std::endl;
+        logging::error(diagnostic_code::MESH_CONVERT, std::string("mallard mesh convert: ") + e.what());
         return 1;
     }
     return 0;
