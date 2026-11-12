@@ -1,2 +1,2 @@
 - `mallard input resolve input.toml > full.toml` writes the input as the run uses it: every key the setup reads, with defaults and preset keys written out, quantities in plain units and keys sorted. It runs bitwise the same and resolves to itself (#509).
-- The provenance of every output file holds the resolved input (`input.resolved`); `tools/mallard/vtu.py` `resolved_input(path)` reads it (#509).
+- The run block of every output file holds the resolved input (`input.resolved`); `tools/mallard/vtu.py` `resolved_input(path)` reads it (#509).

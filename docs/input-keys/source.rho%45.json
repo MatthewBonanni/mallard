@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/heated_duct/closed.toml",
+  "examples/heated_duct/closed_upt.toml",
+  "examples/heated_duct/input.toml"
+ ]
+}
