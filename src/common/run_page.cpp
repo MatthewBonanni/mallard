@@ -597,7 +597,7 @@ std::vector<CheckPart> Page::check() const {
         }
         if (const auto it = by_key.find("Time step\ncfl"); it != by_key.end() && all[it->second].rows() > 0) {
             row("CFL number, largest so far", all[it->second].largest(),
-                "over " + logging::count(all[it->second].rows()) + " progress rows; " + basis);
+                "over " + logging::count(all[it->second].rows(), "progress row") + "; " + basis);
         }
         if (!part.rows.empty()) out.push_back(std::move(part));
     }
@@ -815,7 +815,7 @@ std::string Page::text(const bool color) const {
             return;
         }
         const bool cut = kept.n > kept.first.size() + kept.last.size();
-        text.line(logging::count(kept.n) + " " + noun + (kept.n == 1 ? "" : "s") +
+        text.line(logging::count(kept.n, noun) +
                   (cut ? ", the first and last " + std::to_string(KEPT) + " (all in mallard.jsonl):" : ":"));
         for (const auto * list : {&kept.first, &kept.last}) {
             for (const json::Value & w : *list) {

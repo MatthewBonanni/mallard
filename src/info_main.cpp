@@ -193,8 +193,8 @@ void print_snapshot_block(const output::Contents & c) {
     }
     if (b.averaged) {
         item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
-                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
-                                  " samples");
+                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples), "sample")
+                                                   : std::string("- samples")));
     }
     std::vector<std::vector<std::string>> rows;
     for (const snapshot_block::Field & f : b.fields) {
@@ -366,7 +366,7 @@ constexpr size_t SNAPSHOT_ROWS = 12;
 
 void print_snapshots(const output::Contents & c) {
     const size_t n = c.snapshots.size();
-    logging::section("Snapshots", count(n) + " snapshots");
+    logging::section("Snapshots", count(n, "snapshot"));
     bool steps = false;
     for (const auto & s : c.snapshots) steps = steps || s.step >= 0;
     std::vector<std::vector<std::string>> rows;
@@ -437,7 +437,7 @@ void print_restart(const output::Contents & c) {
         logging::section("Restart arrays");
         std::vector<std::vector<std::string>> rows;
         for (const auto & [name, values] : r.arrays) rows.push_back({name, count(values.size())});
-        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces) + " faces"});
+        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces, "face")});
         logging::table({"array", "values"}, rows);
     }
 }
@@ -572,7 +572,7 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
         if (error) {
             problems.emplace_back(path, "missing: removed or moved since the run wrote it");
         } else if (uint64_t(size) != recorded.bytes) {
-            problems.emplace_back(path, count(uint64_t(size)) + " bytes, the run wrote " + count(recorded.bytes) +
+            problems.emplace_back(path, count(uint64_t(size), "byte") + ", the run wrote " + count(recorded.bytes) +
                                             ": changed or cut short since");
         } else if (verify && !recorded.sha256.empty() && provenance::sha256_file(file.string()) != recorded.sha256) {
             problems.emplace_back(path, "its contents differ from what the run wrote (SHA-256)");
@@ -652,9 +652,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         }
     }
     if (record.found) {
-        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
+        std::cout << "\n" << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
-    logging::section("Output files", count(files.size()) + " files");
+    logging::section("Output files", count(files.size(), "file"));
     std::vector<std::vector<std::string>> rows;
     for (const auto & c : files) {
         const bool timed = !c.snapshots.empty() && c.kind != output::Kind::mesh;
