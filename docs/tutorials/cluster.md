@@ -349,7 +349,8 @@ with a summary of it, here at the end of the third job of section 5:
   warns once in the log when the density or pressure falls below
   10<sup>-3</sup> of its domain mean, before it reaches zero.
 - **Shares of the cells:** the troubled cells over the domain, then on the
-  least and the most active rank. With MUSCL it is `limited_cells`.
+  least and the most active rank. With MUSCL it is `limited_cells`, the
+  cells whose limiter is below 0.9 (shocks and steep gradients).
 - **Conservation:** the change of each total that the boundaries, sources
   and repairs do not explain, relative to the total. Round-off, as here, is a
   healthy run; Mallard warns above 10<sup>5</sup> machine epsilons, and

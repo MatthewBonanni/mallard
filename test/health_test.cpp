@@ -357,3 +357,32 @@ TEST(HealthReport, MarginsLocateTheMinima) {
     EXPECT_LE(report.margins_run[0].value, rho.value);
     EXPECT_FALSE(report.timing.empty());
 }
+
+namespace {
+
+/** @brief The share of the cells the MUSCL limiter cuts, after a few steps of a periodic flow of this density. */
+double limited_share(const std::string & rho) {
+    const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
+    const std::string u = N_DIM == 2 ? "[\"0.2\", \"0.0\"]" : "[\"0.2\", \"0.0\", \"0.0\"]";
+    const auto solver = run("[run]\nn_steps = 2\ncfl = 0.4\n" + mesh(32, 4, 1.0, 0.125, periodic) +
+                            "[initialize]\ntype = \"analytical\"\nrho = \"" + rho + "\"\np = \"1.0\"\nu = " + u +
+                            "\n[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+                            "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+                            "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+                            "[output]\ncheck_interval = 1\nrun_log = \"\"\nreport = \"\"\n");
+    for (const health::Spread & a : solver->get_health().activity) {
+        if (a.name == "limited_cells") return a.all;
+    }
+    throw std::runtime_error("no limited_cells");
+}
+
+} // namespace
+
+TEST(HealthReport, LimitedCellsAreThoseAtSteepGradientsNotEverySmoothCell) {
+    // Venkatakrishnan's limiter sits just below 1 in smooth flow: none of those cells is limited
+    EXPECT_LT(limited_share("1.0 + 0.05 * sin(2 * pi * x)"), 0.05);
+    // Two density jumps across the periodic box: the cells at each jump, a few of the 32 columns
+    const double at_steps = limited_share("abs(x - 0.5) < 0.25 ? 2.0 : 1.0");
+    EXPECT_GT(at_steps, 2.0 / 32.0);
+    EXPECT_LT(at_steps, 12.0 / 32.0);
+}
