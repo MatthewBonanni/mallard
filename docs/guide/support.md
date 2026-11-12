@@ -11,7 +11,7 @@ this page by platform, with the support policy.
 When a job runs:
 
 - **every PR**: the gate, the CI run a pull request needs before it merges (`ci.yml`), and every push to `main`;
-- **main**: after every merge (`main` runs one at a time; merges that arrive while it runs are tested together next), and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
+- **main**: on `main` every 3 hours when it has changed since its last full run, and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
 
