@@ -18,6 +18,8 @@
 #include <string_view>
 #include <thread>
 
+#include <unistd.h>
+
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
@@ -106,6 +108,11 @@ int main(int argc, char** argv) {
     std::string self = argv[0];
     if (self.find('/') != std::string::npos) self = std::filesystem::absolute(self).string();
     argv[0] = self.data();
+    // A JUnit report per process (ranks, concurrent copies), which the processes tests start do not inherit
+    if (const char * dir = std::getenv("MALLARD_TEST_XML")) {
+        GTEST_FLAG_SET(output, "xml:" + std::string(dir) + "/" + std::to_string(::getpid()) + ".xml");
+        ::unsetenv("MALLARD_TEST_XML");
+    }
     ::testing::InitGoogleTest(&argc, argv);
     if (!comm::is_root()) {
         // One report per run: other ranks print only their failures

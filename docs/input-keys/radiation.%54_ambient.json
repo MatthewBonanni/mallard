@@ -1,0 +1,9 @@
+{
+ "default": "300.0",
+ "dimension": "temperature (K)",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "number"
+}
