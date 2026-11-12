@@ -34,6 +34,7 @@ struct CatalogField {
     std::string long_name;
     std::string group;  ///< "conservative", "primitive", "derived", "transport", "mixture", "chemistry", ...
     std::string needs;  ///< what a case needs for it, empty if every case has it
+    bool post_derive = false;  ///< mallard post derive writes it from a snapshot or restart file
 };
 
 namespace field_units {
@@ -43,6 +44,9 @@ std::string group(const std::string & name);
 
 /** @brief The place of a group in the catalog's order. */
 size_t group_rank(const std::string & group);
+
+/** @brief Whether mallard post derive writes the field (MACH, VORTICITY_X) from a snapshot or restart file. */
+bool post_derive(const std::string & name);
 
 /** @brief Every field of the table and the patterns of per-species and derived fields, by group. */
 std::vector<CatalogField> catalog();

@@ -20,6 +20,7 @@
 #include "box_tree.h"
 #include "common_io.h"
 #include "input.h"
+#include "log.h"
 #include "provenance.h"
 
 namespace tabulated {
@@ -111,8 +112,8 @@ Csv read_csv(const std::string & file) {
             continue;
         }
         if (items.size() != csv.names.size()) {
-            throw InputError(file + ":" + std::to_string(line_number) + ": " + std::to_string(items.size()) +
-                             " values for " + std::to_string(csv.names.size()) + " columns.");
+            throw InputError(file + ":" + std::to_string(line_number) + ": " + logging::count(items.size(), "value") +
+                             " for " + logging::count(csv.names.size(), "column") + ".");
         }
         for (size_t i = 0; i < items.size(); i++) {
             char * end = nullptr;

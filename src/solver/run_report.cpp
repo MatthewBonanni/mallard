@@ -285,7 +285,7 @@ void summary_section(report::Text & text, const RunSummary & s) {
     std::vector<Row> rows;
     if (s.steps > 0 && s.stepping > 0.0) {
         rows.push_back({Status::NONE, {"throughput", format("%.3g", double(s.n_cells * s.steps) / s.stepping),
-                                       "cells/s", "", "over " + logging::count(s.steps) + " steps"}});
+                                       "cells/s", "", "over " + logging::count(s.steps, "step")}});
         rows.push_back({Status::NONE, {"wall time per step", milliseconds(s.stepping / double(s.steps)),
                                        "ms", "", "time stepping"}});
     }

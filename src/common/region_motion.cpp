@@ -110,7 +110,36 @@ struct Cones {
 
 namespace {
 
-/** @brief The variables of conditions (condition_variables) at a point x of cell c, its state W given. */
+/**
+ * @brief The gradient of a least-squares fit with normal matrix M and
+ *        right-hand side b, where the neighbors span every direction, else 0.
+ */
+KOKKOS_INLINE_FUNCTION void fit_gradient(const double (&M)[3][3], const double (&b)[3], double (&grad)[3]) {
+    grad[0] = grad[1] = grad[2] = 0.0;
+    if constexpr (N_DIM == 2) {
+        const double det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
+        if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1]) {
+            grad[0] = (M[1][1] * b[0] - M[0][1] * b[1]) / det;
+            grad[1] = (M[0][0] * b[1] - M[1][0] * b[0]) / det;
+        }
+    } else {
+        const double A[3][3] = {{M[1][1] * M[2][2] - M[1][2] * M[2][1], M[0][2] * M[2][1] - M[0][1] * M[2][2],
+                                 M[0][1] * M[1][2] - M[0][2] * M[1][1]},
+                                {M[1][2] * M[2][0] - M[1][0] * M[2][2], M[0][0] * M[2][2] - M[0][2] * M[2][0],
+                                 M[0][2] * M[1][0] - M[0][0] * M[1][2]},
+                                {M[1][0] * M[2][1] - M[1][1] * M[2][0], M[0][1] * M[2][0] - M[0][0] * M[2][1],
+                                 M[0][0] * M[1][1] - M[0][1] * M[1][0]}};
+        const double det = M[0][0] * A[0][0] + M[0][1] * A[1][0] + M[0][2] * A[2][0];
+        if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1] * M[2][2]) {
+            for (int a = 0; a < 3; a++) grad[a] = (A[a][0] * b[0] + A[a][1] * b[1] + A[a][2] * b[2]) / det;
+        }
+    }
+}
+
+/**
+ * @brief The variables of conditions (condition_variables) at a point x of
+ *        cell c, its state W and its velocity gradient a[k][i] = d u_k / d x_i given.
+ */
 struct LevelVariables {
     const double * x;
     double t;
@@ -118,6 +147,8 @@ struct LevelVariables {
     const CellFields & f;
     uint32_t c;
     uint32_t n_species;
+    const rtype (*a)[N_DIM];
+    bool axisymmetric;
 
     KOKKOS_INLINE_FUNCTION double mixture_sum() const {
         double s = 0.0;
@@ -126,14 +157,43 @@ struct LevelVariables {
     }
 
     KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const {
-        constexpr uint16_t RHO = 4, P = 5 + N_DIM, T = 6 + N_DIM;
-        if (i < 3) return x[i];
-        if (i == 3) return t;
-        if (i == RHO) return W[0];
-        if (i < P) return W[1 + (i - RHO - 1)];
-        if (i == P) return W[N_DIM + 1];
-        if (i == T) return W[N_DIM + 1] / (W[0] * (n_species > 0 ? f.R_universal * mixture_sum() : f.R));
-        return double(f.Y(c, i - T - 1));
+        constexpr int RHO = 4, P = 5 + N_DIM, T = 6 + N_DIM, Y0 = 7 + N_DIM;
+        const int n_sp = static_cast<int>(n_species), MACH = Y0 + n_sp, H = MACH + 1, X0 = H + 1, G0 = X0 + n_sp;
+        const int v = i;
+        if (v < 3) return x[v];
+        if (v == 3) return t;
+        if (v == RHO) return W[0];
+        if (v < P) return W[1 + (v - RHO - 1)];
+        if (v == P) return W[N_DIM + 1];
+        if (v == T) return W[N_DIM + 1] / (W[0] * (n_species > 0 ? f.R_universal * mixture_sum() : f.R));
+        if (v < MACH) return double(f.Y(c, v - Y0));
+        if (v < X0) {
+            const double gamma = n_species > 0 ? double(f.Y(c, n_species)) : f.gamma;
+            const double p_rho = W[N_DIM + 1] / W[0];
+            if (v == H) return (n_species > 0 ? double(f.Y(c, n_species + 1)) : 0.0) + gamma / (gamma - 1.0) * p_rho;
+            double u2 = 0.0;
+            for (int d = 0; d < N_DIM; d++) u2 += W[1 + d] * W[1 + d];
+            return Kokkos::sqrt(u2 / (gamma * p_rho));
+        }
+        if (v < G0) return double(f.Y(c, v - X0)) * f.inv_W(v - X0) / mixture_sum();
+        double g[3][3] = {};
+        for (int k = 0; k < N_DIM; k++) {
+            for (int d = 0; d < N_DIM; d++) g[k][d] = double(a[k][d]);
+        }
+        if (axisymmetric) g[2][2] = W[2] / x[1];
+        if constexpr (N_DIM == 2) {
+            if (v == G0) return g[1][0] - g[0][1];
+        } else {
+            if (v == G0) return g[2][1] - g[1][2];
+            if (v == G0 + 1) return g[0][2] - g[2][0];
+            if (v == G0 + 2) return g[1][0] - g[0][1];
+        }
+        // Q = (|Omega|^2 - |S|^2) / 2
+        double gg = 0.0;
+        for (int k = 0; k < 3; k++) {
+            for (int d = 0; d < 3; d++) gg += g[k][d] * g[d][k];
+        }
+        return -0.5 * gg;
     }
 };
 
@@ -141,13 +201,28 @@ struct LevelVariables {
 
 SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> & conditions,
                                const std::vector<std::string> & species, const CellFields & fields_) :
-    n_cells(mesh.n_cells), n_owned(mesh.n_owned()), n_conditions(static_cast<uint32_t>(conditions.size())),
-    n_species(static_cast<uint32_t>(species.size())), fields(fields_) {
+    n_cells(mesh.n_cells), n_owned(mesh.n_owned()), n_complete(mesh.n_complete()),
+    n_conditions(static_cast<uint32_t>(conditions.size())), n_species(static_cast<uint32_t>(species.size())),
+    axisymmetric(mesh.axisymmetric), fields(fields_) {
     const std::vector<std::string> variables = condition_variables(species);
     for (const Condition & c : conditions) programs.emplace_back(c.key, c.level, variables, expression_unit_hint);
     std::vector<const kexpr::Program *> all;
     for (const auto & p : programs) all.push_back(&p);
     table = kexpr::ProgramTable<>(all);
+    bool gradients = false;
+    for (const auto & p : programs) {
+        for (size_t v = variables.size() - CONDITION_GRADIENT_FIELDS.size(); v < variables.size(); v++) {
+            gradients = gradients || p.uses(static_cast<uint16_t>(v));
+        }
+    }
+    if (gradients) {
+        // The levels' fit reads the velocity gradients of the owned cells' vertex neighbors
+        if (n_complete < mesh.n_reconstructed()) {
+            throw std::logic_error("SolutionLevels: fields of the velocity gradient need two halo layers "
+                                   "(conditions_read_gradients).");
+        }
+        velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("region_velocity_gradients", n_cells);
+    }
     m_centroids = mesh.cell_coords;
     offsets_cells_of_cell = mesh.offsets_cells_of_cell;
     cells_of_cell = mesh.cells_of_cell;
@@ -166,58 +241,80 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
     const auto shift = cells_of_cell_shift;
     const PeriodicMaps maps = periodic;
     const auto out = m_levels;
+    const auto a = velocity_gradients;
+    const bool gradients = a.is_allocated(), axi = axisymmetric;
     const uint32_t owned = n_owned, n_k = n_conditions, n_sp = n_species;
+    if (gradients) {
+        Kokkos::parallel_for("region_velocity_gradients", n_complete, KOKKOS_LAMBDA(const uint32_t c) {
+            double M[3][3] = {}, b[N_DIM][3] = {};
+            for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
+                const uint32_t j = neighbors(q);
+                rtype x_j[N_DIM], y[N_DIM], W_j[N_CONSERVATIVE];
+                for (int d = 0; d < N_DIM; d++) x_j[d] = x_c(j, d);
+                for (int i = 0; i < N_CONSERVATIVE; i++) W_j[i] = f.W(j, i);
+                maps.forward(shift(q), x_j, y);
+                if (maps.rotated()) maps.rotate_state(shift(q), W_j);
+                double dx[3] = {0.0, 0.0, 0.0};
+                for (int d = 0; d < N_DIM; d++) dx[d] = static_cast<double>(y[d]) - static_cast<double>(x_c(c, d));
+                const double w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]);
+                for (int e = 0; e < N_DIM; e++) {
+                    for (int d = 0; d < N_DIM; d++) M[e][d] += w * dx[e] * dx[d];
+                }
+                for (int k = 0; k < N_DIM; k++) {
+                    const double du = static_cast<double>(W_j[1 + k]) - static_cast<double>(f.W(c, 1 + k));
+                    for (int d = 0; d < N_DIM; d++) b[k][d] += w * dx[d] * du;
+                }
+            }
+            for (int k = 0; k < N_DIM; k++) {
+                double grad[3];
+                fit_gradient(M, b[k], grad);
+                for (int d = 0; d < N_DIM; d++) a(c, k, d) = static_cast<rtype>(grad[d]);
+            }
+        });
+    }
     Kokkos::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double t = static_cast<double>(time());
         double x[3] = {0.0, 0.0, 0.0}, W[N_CONSERVATIVE];
+        rtype a_c[N_DIM][N_DIM] = {};
         for (int d = 0; d < N_DIM; d++) x[d] = static_cast<double>(x_c(c, d));
         for (int i = 0; i < N_CONSERVATIVE; i++) W[i] = static_cast<double>(f.W(c, i));
+        for (int k = 0; gradients && k < N_DIM; k++) {
+            for (int d = 0; d < N_DIM; d++) a_c[k][d] = a(c, k, d);
+        }
         for (uint32_t k = 0; k < n_k; k++) {
-            const double g = programs_(k, LevelVariables{x, t, W, f, c, n_sp});
+            const double g = programs_(k, LevelVariables{x, t, W, f, c, n_sp, a_c, axi});
             out(c, k, 0) = g;
             double M[3][3] = {}, b[3] = {};
             if (c < owned) {
                 for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
                     const uint32_t j = neighbors(q);
-                    rtype x_j[N_DIM], y[N_DIM], W_j[N_CONSERVATIVE];
+                    rtype x_j[N_DIM], y[N_DIM], W_j[N_CONSERVATIVE], a_j[N_DIM][N_DIM] = {};
                     for (int d = 0; d < N_DIM; d++) x_j[d] = x_c(j, d);
                     for (int i = 0; i < N_CONSERVATIVE; i++) W_j[i] = f.W(j, i);
+                    for (int e = 0; gradients && e < N_DIM; e++) {
+                        for (int d = 0; d < N_DIM; d++) a_j[e][d] = a(j, e, d);
+                    }
                     maps.forward(shift(q), x_j, y);
-                    if (maps.rotated()) maps.rotate_state(shift(q), W_j);
+                    if (maps.rotated()) {
+                        maps.rotate_state(shift(q), W_j);
+                        if (gradients) maps.rotate_gradients(shift(q), a_j, N_DIM, 0);
+                    }
                     double xn[3] = {0.0, 0.0, 0.0}, Wn[N_CONSERVATIVE], dx[3] = {0.0, 0.0, 0.0};
                     for (int d = 0; d < N_DIM; d++) {
                         xn[d] = static_cast<double>(y[d]);
                         dx[d] = xn[d] - x[d];
                     }
                     for (int i = 0; i < N_CONSERVATIVE; i++) Wn[i] = static_cast<double>(W_j[i]);
-                    const double dg = programs_(k, LevelVariables{xn, t, Wn, f, j, n_sp}) - g;
+                    const double dg = programs_(k, LevelVariables{xn, t, Wn, f, j, n_sp, a_j, axi}) - g;
                     const double w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]);
-                    for (int a = 0; a < N_DIM; a++) {
-                        for (int e = 0; e < N_DIM; e++) M[a][e] += w * dx[a] * dx[e];
-                        b[a] += w * dx[a] * dg;
+                    for (int e = 0; e < N_DIM; e++) {
+                        for (int d = 0; d < N_DIM; d++) M[e][d] += w * dx[e] * dx[d];
+                        b[e] += w * dx[e] * dg;
                     }
                 }
             }
-            // The gradient where the neighbors span every direction, else none
-            double grad[3] = {0.0, 0.0, 0.0};
-            if constexpr (N_DIM == 2) {
-                const double det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
-                if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1]) {
-                    grad[0] = (M[1][1] * b[0] - M[0][1] * b[1]) / det;
-                    grad[1] = (M[0][0] * b[1] - M[1][0] * b[0]) / det;
-                }
-            } else {
-                const double A[3][3] = {{M[1][1] * M[2][2] - M[1][2] * M[2][1], M[0][2] * M[2][1] - M[0][1] * M[2][2],
-                                         M[0][1] * M[1][2] - M[0][2] * M[1][1]},
-                                        {M[1][2] * M[2][0] - M[1][0] * M[2][2], M[0][0] * M[2][2] - M[0][2] * M[2][0],
-                                         M[0][2] * M[1][0] - M[0][0] * M[1][2]},
-                                        {M[1][0] * M[2][1] - M[1][1] * M[2][0], M[0][1] * M[2][0] - M[0][0] * M[2][1],
-                                         M[0][0] * M[1][1] - M[0][1] * M[1][0]}};
-                const double det = M[0][0] * A[0][0] + M[0][1] * A[1][0] + M[0][2] * A[2][0];
-                if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1] * M[2][2]) {
-                    for (int a = 0; a < 3; a++) grad[a] = (A[a][0] * b[0] + A[a][1] * b[1] + A[a][2] * b[2]) / det;
-                }
-            }
+            double grad[3];
+            fit_gradient(M, b, grad);
             for (int d = 0; d < N_DIM; d++) out(c, k, 1 + d) = grad[d];
         }
     });

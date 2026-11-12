@@ -815,6 +815,6 @@ OutputSummary Spectra::summary() const {
     for (size_t p = 0; p < pairs.size(); p++) {
         text += (p ? ", " : "") + fields[pairs[p].first] + (pairs[p].first == pairs[p].second ? "" : "*" + fields[pairs[p].second]);
     }
-    if (n_samples > 0 && average) text += " (" + logging::count(n_samples) + " samples so far)";
+    if (n_samples > 0 && average) text += " (" + logging::count(n_samples, "sample") + " so far)";
     return {.kind = "spectra", .file = file, .steps = interval, .contents = text};
 }

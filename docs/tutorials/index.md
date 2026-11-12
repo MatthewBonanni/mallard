@@ -18,7 +18,7 @@ the commands stay working.
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
 | 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
 | 8 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
-| 9 | [From run to figure](post_processing.md) | What a run wrote (`mallard info`), probes and fields after the run (`mallard post extract`), a grid convergence study (`mallard post convergence`), figures with the Python package | 40 minutes, laptop | Steady wake at Re = 40: reference computations and experiment |
+| 9 | [From run to figure](post_processing.md) | What a run wrote (the run report, `mallard info`), probes, fields and averages after the run (`mallard post extract`, `post derive`, `post average`), a grid convergence study (`mallard post convergence`), figures with the Python package | 16 minutes, laptop | Steady wake at Re = 40: reference computations and experiment |
 
 Tutorials 1 to 4 and 7 to 9 run on a laptop CPU; 8 and 9 follow on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
