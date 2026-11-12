@@ -942,7 +942,7 @@ class Solver {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             Kokkos::View<double *[2]> pA_A;   // Per face: p A, A
-            ExactSums<2> sums;                 // of pA_A over the ranks
+            ExactSums sums;                    // of pA_A over the ranks
             std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t (in timed_fields)
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
@@ -1015,11 +1015,11 @@ class Solver {
         std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
         Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
-        ExactSums<4> tfles_dynamic_sums;               // of tfles_dynamic_terms over the ranks
+        ExactSums tfles_dynamic_sums;                  // of tfles_dynamic_terms over the ranks
         uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
-        ExactSums<2> dynamic_sums;                     // of dynamic_terms over the ranks
+        ExactSums dynamic_sums;                        // of dynamic_terms over the ranks
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
         Kokkos::View<double *> les_state;  // device: [C, <L:M> / <M:M>, TFLES beta] of the dynamic procedures
         /** @brief les_state(k), 0 without LES. */

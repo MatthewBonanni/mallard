@@ -113,7 +113,6 @@ add_library(MallardCore STATIC
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
-    parallel/device_sums.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp

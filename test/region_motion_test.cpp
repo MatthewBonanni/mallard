@@ -2,7 +2,7 @@
  * @file region_motion_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Arrays of copies, regions that move, and regions that wrap across
- *        periodic boundaries; exact sums on the device.
+ *        periodic boundaries.
  * @version 0.1
  * @date 2026-11-10
  *
@@ -13,15 +13,11 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
-#include <array>
 #include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "device_comm.h"
-#include "device_sums.h"
-#include "exact_sums.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "mesh.h"
@@ -223,37 +219,3 @@ TEST(RegionMotionTest, MovingFractionsFollowCurvedWalls) {
     }
 }
 #endif
-
-TEST(RegionMotionTest, DeviceSumsAreTheExactSums) {
-    const uint32_t n = 1000;
-    Kokkos::View<double *[2]> terms("terms", n);
-    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
-    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t c) {
-        terms(c, 0) = columns(c, 0) = Kokkos::sin(1.0 + c) * 1e-3;
-        terms(c, 1) = columns(c, 1) = (c % 7 == 0 ? 1e8 : 1e-8) * Kokkos::cos(double(c));
-    });
-    const DeviceSums sums(2, n, false);
-    sums.sum(columns, false);
-    const auto got = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    const std::array<double, 2> expected = exact_sums(terms, n, false);
-    EXPECT_EQ(got(0), expected[0]);
-    EXPECT_EQ(got(1), expected[1]);
-}
-
-TEST(RegionMotionTest, DeviceSumsAcrossRanksAreTheSameWithNcclAndMpi) {
-    if (!comm::nccl_available() || comm::size() < 2) GTEST_SKIP() << "needs NCCL and more than one rank";
-    const uint32_t n = 100 + 37 * static_cast<uint32_t>(comm::rank());
-    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
-    const double r = comm::rank();
-    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t c) {
-        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
-        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
-    });
-    const DeviceSums sums(2, n, true);
-    sums.sum(columns, false);
-    const auto mpi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    sums.sum(columns, true);
-    const auto nccl = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    EXPECT_EQ(mpi(0), nccl(0));
-    EXPECT_EQ(mpi(1), nccl(1));
-}

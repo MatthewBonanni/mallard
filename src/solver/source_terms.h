@@ -28,8 +28,6 @@
 #include "mesh.h"
 #include "state.h"
 
-class DeviceSums;
-
 namespace region {
 class Regions;
 class MovingFractions;
@@ -162,8 +160,7 @@ class SourceTerms {
             int32_t integral = -1;
         };
         std::vector<Moving> moving;
-        std::unique_ptr<DeviceSums> integral_sums;
-        bool nccl_sums = false;
+        ExactSums integral_sums;
         Kokkos::View<double **, Kokkos::LayoutLeft> integrands;  // (cell, integral): fraction times measure
 
         std::shared_ptr<Mesh> mesh;
@@ -177,7 +174,7 @@ class SourceTerms {
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)
         Kokkos::View<double *> means;
         Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
-        ExactSums<N_MEANS + 1> mean_sums;
+        ExactSums mean_sums;
         logging::Items m_summary;
 
 };
