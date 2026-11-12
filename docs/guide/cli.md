@@ -129,21 +129,26 @@ Commands:
     mallard --version         Print the version
 
 Options:
-  -i FILE                The input file (TOML). Required.
-  --restart FILE|latest  Start from this restart file: replaces the input's
-                         [initialize] with type = "restart". latest: the newest
-                         complete restart file of the input's restart writers
-                         (of the run that started last, then of the highest
-                         step), or [initialize] if there is none. Default: as
-                         [initialize] says.
-  --verbose              A line for every file written, between the progress
-                         rows. Default: the progress table's written column
-                         counts them, and mallard.jsonl and the summary name
-                         them.
-  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
-                         per rank) or --kokkos-device-id=1 (the GPU; by default
-                         each rank gets its own).
-  -h, --help             Show this page.
+  -i FILE                  The input file (TOML). Required.
+  --restart FILE|latest    Start from this restart file: replaces the input's
+                           [initialize] with type = "restart". latest: the
+                           newest complete restart file of the input's restart
+                           writers (of the run that started last, then of the
+                           highest step), or [initialize] if there is none.
+                           Default: as [initialize] says.
+  --verbose                A line for every file written, between the progress
+                           rows. Default: the progress table's written column
+                           counts them, and mallard.jsonl and the summary name
+                           them.
+  --log-format text|jsonl  text: the setup, the progress table and the summary
+                           on stdout; jsonl: on stdout only the run record's
+                           progress records, one JSON object per line as
+                           mallard.jsonl has them, for live monitoring and
+                           plotting, and the text on stderr. Default: text.
+  --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                           per rank) or --kokkos-device-id=1 (the GPU; by
+                           default each rank gets its own).
+  -h, --help               Show this page.
 
 Options of mallard before any command:
   --dim 2|3  --dim 2 runs mallard2d, --dim 3 mallard3d, for any command.

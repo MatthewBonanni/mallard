@@ -2495,7 +2495,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         report_health(locals, values);
         status.health = run_health.last;
     }
-    if (run_log_on) {
+    if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
@@ -2506,7 +2506,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
         status.probes = probes.recorded();
-        run_log::write(status.record());
+        run_log::write_progress(status.record());
     }
 
     step_last_check = step;

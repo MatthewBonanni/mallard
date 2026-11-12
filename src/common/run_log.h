@@ -11,6 +11,7 @@
 #define RUN_LOG_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <optional>
 #include <string>
 
@@ -38,6 +39,17 @@ std::optional<uint64_t> last_step();
 
 /** @brief Writes a record as one line and flushes it, and adds it to the report; nothing if neither is open. */
 void write(const json::Object & record);
+
+/**
+ * @brief Where progress records also go, one per line (mallard -i ... --log-format jsonl): written by rank 0,
+ *        set on every rank, nullptr for nowhere.
+ */
+void stream_progress(std::ostream * stream);
+/** @brief Whether progress records go to a stream. */
+bool streams_progress();
+
+/** @brief A progress record: write, and a line on the stream of stream_progress. */
+void write_progress(const json::Object & record);
 
 } // namespace run_log
 

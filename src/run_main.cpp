@@ -24,6 +24,7 @@
 #include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "run_control.h"
+#include "run_log.h"
 #include "solver/solver.h"
 
 namespace {
@@ -53,8 +54,12 @@ std::string error_text(const std::exception & e) {
     comm::abort(1);
 }
 
-/** @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout. */
-int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false) {
+/**
+ * @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout.
+ *        With jsonl, stdout gets only the run's progress records and the text goes to stderr.
+ */
+int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false,
+          bool jsonl = false) {
     const std::string restart_file = args.value_or("--restart", "");
     logging::set_verbose(args.has("--verbose"));
     int argc = args.argc;
@@ -66,6 +71,11 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
     std::streambuf * const out = std::cout.rdbuf();
     const bool json = check && args.value_or("--format", "text") == "json";
     if (!comm::is_root() || resolve || json) std::cout.rdbuf(nullptr);
+    std::ostream records(out);
+    if (jsonl) {
+        if (comm::is_root()) std::cout.rdbuf(std::cerr.rdbuf());
+        run_log::stream_progress(&records);
+    }
 
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
@@ -132,6 +142,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
             status = 1;
         }
     }
+    run_log::stream_progress(nullptr);
     Kokkos::finalize();
     return status;
 }
@@ -195,7 +206,11 @@ std::string mesh_field_options(const cli::Args & args, CheckOptions & options) {
 
 int run_main(const cli::Args & args) {
     if (!args.has("-i")) return cli::usage_error(*cli::command(""), "missing -i input.toml");
-    return solve(args, args.value_or("-i", ""), nullptr);
+    const std::string log_format = args.value_or("--log-format", "text");
+    if (log_format != "text" && log_format != "jsonl") {
+        return cli::usage_error(*cli::command(""), "--log-format takes text or jsonl, not " + log_format);
+    }
+    return solve(args, args.value_or("-i", ""), nullptr, false, log_format == "jsonl");
 }
 
 int check_main(const cli::Args & args) {
