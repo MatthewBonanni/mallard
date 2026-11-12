@@ -837,7 +837,7 @@
   "type": "bool"
  },
  "chemistry.fuse_half_steps": {
-  "default": "false",
+  "default": "true",
   "dims": [
    2,
    3

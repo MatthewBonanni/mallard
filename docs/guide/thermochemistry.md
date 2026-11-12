@@ -131,7 +131,7 @@ Chemistry and flow are split:
 | `rtol`, `atol` | 1e-6, 1e-10 | Integrator tolerances (relative on Y and T, absolute on Y) |
 | `max_steps` | 100000 | Sub-steps allowed per cell and call; more stop the run |
 | `T_frozen` | 0 | No chemistry in cells below this temperature |
-| `fuse_half_steps` | `false` | Strang: fuse the closing half step with the next opening one, except where output reads the state (faster; results then depend on output times) |
+| `fuse_half_steps` | `true` | Strang: one chemistry call per step, the closing half step fused with the next opening one; output still shows the state at the step's end, and results do not depend on output or restarts. `false` takes the two half steps separately |
 | `C_reg` | 1e-12 | Concentration [kmol/m³] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
 | `sparse` | automatic | Sparse LU (`true`) or dense (`false`); automatic picks sparse from 30 species when it pays (GRI-3.0 and larger) |

@@ -739,6 +739,19 @@ std::vector<std::string> notices(const std::string & text) {
                       "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
                       "older first-order results");
     }
+    if (input.contains("chemistry") && input.at("chemistry").is_table() && !has("chemistry", "fuse_half_steps")) {
+        const Input & chemistry = input.at("chemistry");
+        const bool off = chemistry.contains("enabled") && chemistry.at("enabled").is_boolean() &&
+                         !chemistry.at("enabled").as_boolean();
+        const bool simpler = chemistry.contains("coupling") && chemistry.at("coupling").is_string() &&
+                             chemistry.at("coupling").as_string() == "simpler";
+        if (!off && !simpler) {
+            out.push_back("no chemistry.fuse_half_steps: since 0.11.0 Strang splitting fuses each step's closing "
+                          "chemistry half step with the next step's opening one (results change within the "
+                          "chemistry's tolerances); add fuse_half_steps = false to [chemistry] to reproduce older "
+                          "results");
+        }
+    }
     return out;
 }
 

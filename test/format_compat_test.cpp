@@ -59,6 +59,8 @@ struct Fixture {
     if (physics.contains("mechanism")) {
         physics["mechanism"] = (FORMATS / physics.at("mechanism").as_string()).lexically_normal().string();
     }
+    // The releases that wrote the fixtures took the chemistry's half steps separately
+    if (input.contains("chemistry")) input["chemistry"]["fuse_half_steps"] = false;
     if (!restart.empty()) {
         Input init(Input::table_type{});
         init["type"] = "restart";

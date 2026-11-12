@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "data_paths.h"
+#include "output_reader.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "scratch.h"
@@ -738,6 +739,88 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
             }
         }
     }
+}
+
+TEST(MixtureTest, FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts) {
+    // Output reads the state with the pending chemistry half step applied, and restart files hold the state before
+    // it with its time: neither moves the run, so a run with output at every step, one without, and one restarted
+    // at a step where the others wrote nothing end bitwise the same, and output mid-run is what a run ending there
+    // leaves. Unfused half steps give the same results within the chemistry's tolerances.
+    const std::string dir = (scratch_dir() / "mallard_fused_half_steps").string();
+    std::filesystem::remove_all(dir);
+    auto input = [&](const std::string & init, uint32_t n_steps, const std::string & output, bool fuse = true,
+                     const std::string & stepping = "cfl = 0.25\n") {
+        std::string numerics_block = numerics("type = \"MUSCL\"\n", "HLLC");
+        if (output.find("check_interval") != std::string::npos) {
+            numerics_block = numerics_block.substr(0, numerics_block.find("[output]"));
+        }
+        return "[run]\nn_steps = " + std::to_string(n_steps) + "\n" + stepping +
+               mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
+               "[initialize]\n" + init +
+               boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                          "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n") +
+               numerics_block + mixture(H2O2, "", "navier_stokes") +
+               (fuse ? "[chemistry]\n" : "[chemistry]\nfuse_half_steps = false\n") + output;
+    };
+    auto writer = [&](const std::string & prefix, const std::string & format, uint32_t interval) {
+        return "[[write_data]]\nprefix = \"" + dir + "/" + prefix + "\"\nformat = \"" + format +
+               "\"\ninterval = " + std::to_string(interval) + "\n" +
+               (format == "vtu" ? "fields = [\"RHO\", \"T\", \"RHOY_OH\"]\n" : "");
+    };
+    const std::string tube =
+        "type = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1200.0 : 300.0\"\nu = " +
+        velocity("0.0") + "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n";
+    Solver quiet, busy, ending, first, restarted, fused, unfused;
+    quiet.init(parse_toml(input(tube, 30, "")));
+    quiet.run();
+    busy.init(parse_toml(input(tube, 30,
+                               "[output]\ncheck_interval = 1\n" + writer("busy", "vtu", 1) +
+                                   writer("busy", "restart", 4) + "[statistics]\ninterval = 3\nfields = [\"T\"]\n")));
+    busy.run();
+    ending.init(parse_toml(input(tube, 28, writer("ending", "vtu", 28))));
+    ending.run();
+    first.init(parse_toml(input(tube, 13, writer("first", "restart", 13))));
+    first.run();
+    const RestartData written = read_restart(dir + "/first_000013.restart");
+    ASSERT_NE(written.attribute("CHEMISTRY_PENDING"), nullptr);
+    EXPECT_GT(*written.attribute("CHEMISTRY_PENDING"), 0.0);
+    restarted.init(parse_toml(input("type = \"restart\"\nfile = \"" + dir + "/first_000013.restart\"\n", 30, "")));
+    restarted.run();
+    // At one dt: with the cfl, each takes its dt from another state
+    fused.init(parse_toml(input(tube, 30, "", true, "dt = 5.0e-6\n")));
+    fused.run();
+    unfused.init(parse_toml(input(tube, 30, "", false, "dt = 5.0e-6\n")));
+    unfused.run();
+    for (Solver * s : {&quiet, &busy, &restarted, &fused, &unfused}) s->copy_device_to_host();
+    for (const Solver * s : {&busy, &restarted}) {
+        for (uint32_t c = 0; c < quiet.get_mesh()->n_cells; c++) {
+            FOR_I_CONSERVATIVE ASSERT_EQ(s->h_conservatives(c, i), quiet.h_conservatives(c, i)) << "cell " << c;
+            for (uint32_t k = 0; k < quiet.get_species_names().size(); k++) {
+                ASSERT_EQ(s->h_species(c, k), quiet.h_species(c, k)) << "cell " << c;
+            }
+        }
+    }
+    const output::Contents mid = output::open(dir + "/busy_000028.vtu");
+    const output::Contents end = output::open(dir + "/ending_000028.vtu");
+    for (const char * field : {"RHO", "T", "RHOY_OH"}) {
+        EXPECT_EQ(output::read(mid, field, 0), output::read(end, field, 0)) << field;
+    }
+    // The run ends on the state its last output shows
+    const std::vector<std::string> & names = ending.get_species_names();
+    const uint32_t oh = static_cast<uint32_t>(std::find(names.begin(), names.end(), "OH") - names.begin());
+    const std::vector<double> rhoY_OH = output::read(end, "RHOY_OH", 0);
+    ending.copy_device_to_host();
+    for (uint32_t c = 0; c < ending.get_mesh()->n_cells; c++) ASSERT_EQ(double(ending.h_species(c, oh)), rhoY_OH[c]);
+    // The chemistry moves only the species at constant volume and energy
+    EXPECT_LT(max_relative_difference(unfused, fused), tol(1e-5, 1e-3));
+    double rho = 0.0, species = 0.0;
+    for (uint32_t c = 0; c < fused.get_mesh()->n_cells; c++) {
+        rho = std::max(rho, std::abs(double(fused.h_conservatives(c, 0))));
+        for (uint32_t k = 0; k < fused.get_species_names().size(); k++) {
+            species = std::max(species, std::abs(double(unfused.h_species(c, k) - fused.h_species(c, k))));
+        }
+    }
+    EXPECT_LT(species, tol(1e-6, 1e-3) * rho);
 }
 
 TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {

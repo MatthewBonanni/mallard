@@ -172,10 +172,7 @@ void Solver::diverged() {
     MeshQuality quality;
     divergence::Evidence evidence = diagnose_divergence(has_valid, failed, quality);
     if (has_valid) {
-        if (chemistry_pending > 0.0) {
-            advance_chemistry(chemistry_pending);
-            chemistry_pending = 0.0;
-        }
+        flush_chemistry();
         write_data(true);
         evidence.restart_file = write_restarts();
         message += " The last valid state (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
@@ -348,6 +345,7 @@ std::string Solver::write_restarts() {
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = restart_arrays();
     std::string file;
+    swap_unflushed();
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;
         writer->write(step, t, true, attributes, faces, arrays);
@@ -359,6 +357,7 @@ std::string Solver::write_restarts() {
         checkpoint_writer->finish();
         file = checkpoint_writer->last_written();
     }
+    swap_unflushed();
     return file;
 }
 

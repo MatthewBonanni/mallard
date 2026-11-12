@@ -822,8 +822,8 @@ Finite-rate chemistry of gas mixtures (`gas = "mixture"` with a mechanism
 that has reactions). By default each step is Strang split: every owned cell
 that needs it is advanced as an adiabatic, constant-volume reactor over
 `dt / 2`, then the flow takes its step, then the reactors take another
-`dt / 2` (with `fuse_half_steps`, the second half step is fused with the
-next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
+`dt / 2` (by default, `fuse_half_steps`, the second half step is fused with
+the next step's first). With `coupling = "simpler"` (SIMPLER balanced splitting,
 [Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016)) each step
 evaluates the flow's right-hand side `T(U^n)` once, advances every owned
 cell over `dt` under its chemistry plus that constant source, then lets
@@ -842,7 +842,7 @@ double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
+| `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). Each pair of ranks moves at most its capacity of cells per call, which starts at 0 and follows the cells the pair asked for (growing at once, shrinking after 256 steps of less than half); the rest stay with their owner, and a balanced run moves none. With NCCL the messages carry the whole capacity, so that the step's CUDA graph keeps its sizes; a change of the capacities records it again. The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
@@ -949,7 +949,7 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 3), so a restarted run continues the averages bitwise, also on a different
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
-`chemistry.fuse_half_steps`, sampling steps read the state like output does.
+`chemistry.fuse_half_steps`, sampling steps read the state as output does.
 `tools/post/plane_average.py` averages them further over homogeneous directions
 (e.g. over x and z of a channel, as a function of y). `fields` and
 `products` may be left out when `[statistics.spectra]` or

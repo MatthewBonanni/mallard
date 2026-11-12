@@ -486,6 +486,17 @@ TEST(InputUpgradeTest, PresetsNamedForTheirOrderReadTheOldNamesWithAWarning) {
     }
 }
 
+TEST(InputUpgradeTest, StrangChemistryWithoutFuseHalfStepsGetsANotice) {
+    const std::string base = "[numerics]\npreset = \"high_order\"\n[chemistry]\n";
+    const std::vector<std::string> notes = input_upgrade::notices(base + "rtol = 1e-6\n");
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("fuse_half_steps = false"), std::string::npos) << notes[0];
+    for (const std::string & other : {base + "fuse_half_steps = true\n", base + "coupling = \"simpler\"\n",
+                                    base + "enabled = false\n"}) {
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
+    }
+}
+
 TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
     const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n";
     bool reformatted = true;
