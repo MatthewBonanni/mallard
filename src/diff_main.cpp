@@ -37,6 +37,7 @@
 #include "provenance.h"
 #include "remap.h"
 #include "report.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -189,6 +190,7 @@ struct FieldResult {
     std::string name, units, location;
     uint32_t components = 1;
     std::string problem;  ///< why it is not compared (units or components differ), else empty
+    std::string value_a, value_b;  ///< what the values are (snapshot block), empty where unrecorded
     Stats stats;
     double tol = 0.0;
     Status result = Status::same;
@@ -389,7 +391,7 @@ void find_mesh(Side & s, const std::string & mesh_file) {
     }
     const uint64_t n = s.mesh->n_global_cells > 0 ? s.mesh->n_global_cells : s.mesh->n_cells;
     if (n != s.c.mesh.n_cells) {
-        s.no_mesh = "its mesh (" + s.mesh_from + ") has " + count(n) + " cells, the file " + count(s.c.mesh.n_cells);
+        s.no_mesh = "its mesh (" + s.mesh_from + ") has " + count(n, "cell") + ", the file " + count(s.c.mesh.n_cells);
         s.mesh.reset();
         s.mesh_from.clear();
         return;
@@ -481,7 +483,7 @@ ArrayResult compare_array(const std::string & name, const std::vector<double> & 
     r.name = name;
     if (a.size() != b.size()) {
         r.s = Status::beyond;
-        r.problem = count(a.size()) + " values in A, " + count(b.size()) + " in B";
+        r.problem = count(a.size(), "value") + " in A, " + count(b.size()) + " in B";
         return r;
     }
     r.stats = compare(a, b, 1);
@@ -561,7 +563,7 @@ RestartResult compare_restart(const Side & a, const Side & b, const Tolerance & 
             r.faces.name = "face records";
             r.faces.s = Status::beyond;
             r.faces.problem = fa.first.size() == fb.first.size() ? "of different faces"
-                                                                 : count(fa.first.size()) + " faces in A, " +
+                                                                 : count(fa.first.size(), "face") + " in A, " +
                                                                        count(fb.first.size()) + " in B";
         } else {
             r.faces.name = "face records";
@@ -570,6 +572,19 @@ RestartResult compare_restart(const Side & a, const Side & b, const Tolerance & 
         }
     }
     return r;
+}
+
+/** @brief What a field's values are at the snapshot compared (cell_average, ...), empty where unrecorded. */
+std::string value_kind(const Side & s, const std::string & name) {
+    const output::Snapshot & snapshot = s.c.snapshots[s.snapshot];
+    if (!snapshot.has_block) return "";
+    const snapshot_block::Field * f = snapshot.block.field(name);
+    return f ? f->value : "";
+}
+
+/** @brief Whether A and B record different kinds of values of a field (a cell average against a point value). */
+bool values_differ(const FieldResult & f) {
+    return !f.value_a.empty() && !f.value_b.empty() && f.value_a != f.value_b;
 }
 
 /** @brief Which snapshot of each file to compare: by --step, --time or --snapshot, else the last. */
@@ -600,7 +615,7 @@ size_t pick_snapshot(const output::Contents & c, const Selection & pick, const c
     }
     if (pick.value == "last") return n - 1;
     if (pick.number >= static_cast<double>(n)) {
-        throw Trouble(file + " has " + count(n) + " snapshots, so no snapshot " + pick.value + " (they count from 0)");
+        throw Trouble(file + " has " + count(n, "snapshot") + ", so no snapshot " + pick.value + " (they count from 0)");
     }
     return static_cast<size_t>(pick.number);
 }
@@ -668,6 +683,8 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         f.location = fa.location;
         f.components = fa.components;
         f.tol = r.tolerance.of(name);
+        f.value_a = value_kind(a, name);
+        f.value_b = value_kind(b, name);
         if (!fa.units.empty() && !fb.units.empty() && fa.units != fb.units) {
             f.problem = "units differ: " + fa.units + " in A, " + fb.units + " in B";
         } else if (fa.components != fb.components) {
@@ -734,11 +751,12 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         const std::vector<double> va = output::read(a.c, f.name, a.snapshot);
         const std::vector<double> vb = remap ? remapped.at(f.name) : output::read(b.c, f.name, b.snapshot);
         if (va.size() != vb.size()) {
-            throw Trouble(f.name + " has " + count(va.size() / f.components) + " values in A and " +
+            throw Trouble(f.name + " has " + count(va.size() / f.components, "value") + " in A and " +
                           count(vb.size() / f.components) + " in B; --remap compares cell values on different meshes");
         }
         f.stats = compare(va, vb, f.components);
         f.result = status(f.stats, f.tol);
+        if (values_differ(f)) f.result = worst(f.result, Status::within);
         if (f.stats.d.linf > 0.0) {
             const size_t i = f.stats.at * f.components;
             f.a_at.assign(va.begin() + static_cast<std::ptrdiff_t>(i), va.begin() + static_cast<std::ptrdiff_t>(i + f.components));
@@ -801,7 +819,15 @@ std::string result_line(const Comparison & r) {
         case Status::same:
             what = r.restart ? "identical, the same state bit for bit" : "identical, every value compared bit for bit";
             break;
-        case Status::within: what = "within tolerance, differences but none beyond it"; break;
+        case Status::within: {
+            what = "within tolerance, differences but none beyond it";
+            std::vector<std::string> kinds;
+            for (const FieldResult & f : r.fields) {
+                if (values_differ(f)) kinds.push_back(f.name);
+            }
+            if (!kinds.empty()) what += "; different kinds of values of " + list_text(kinds);
+            break;
+        }
         case Status::beyond: {
             std::vector<std::string> beyond;
             for (const FieldResult & f : r.fields) {
@@ -823,11 +849,11 @@ std::string side_text(const Side & s) {
 }
 
 std::string how_text(const Comparison & r, const Side & a) {
-    const std::string n = count(a.c.mesh.n_cells);
-    if (r.how == "remap") return "B remapped onto A's mesh (" + n + " cells), then cell by cell";
+    const std::string n = count(a.c.mesh.n_cells, "cell");
+    if (r.how == "remap") return "B remapped onto A's mesh (" + n + "), then cell by cell";
     if (a.c.kind == output::Kind::table) return "row by row";
-    if (a.c.kind == output::Kind::probe) return "sample by sample (" + count(a.c.mesh.n_points) + " points)";
-    if (r.how == "same_mesh") return "cell by cell, in the mesh's global cell order (" + n + " cells)";
+    if (a.c.kind == output::Kind::probe) return "sample by sample (" + count(a.c.mesh.n_points, "point") + ")";
+    if (r.how == "same_mesh") return "cell by cell, in the mesh's global cell order (" + n + ")";
     return "value by value, in the files' order";
 }
 
@@ -879,6 +905,18 @@ void fields_section(report::Text & text, const Comparison & r) {
     text.table({"field", {"units", Kind::UNITS}, "differing " + entries + "s", {"L1", Kind::VALUE},
                 {"L2", Kind::VALUE}, {"Linf", Kind::VALUE}},
                rows);
+
+    std::vector<report::Row> kinds;
+    for (const FieldResult & f : r.fields) {
+        if (values_differ(f)) kinds.push_back({report::Status::WARNING, {f.name, f.value_a, f.value_b}});
+    }
+    if (!kinds.empty()) {
+        text.section("Value kinds", report::Status::WARNING);
+        text.note("A and B hold different kinds of values of these fields, as their snapshot metadata records: their "
+                  "difference includes that of a cell average and a point value, which at high order is of the "
+                  "scheme's truncation error.");
+        text.table({"field", "A", "B"}, kinds);
+    }
 
     text.section("Relative differences", s);
     text.note("A norm of B - A over the same norm of A; a field passes if its Linf is at most its tolerance.");
@@ -1061,6 +1099,8 @@ std::string comparison_json(const Comparison & r, const Side & a, const Side & b
         e.add("name", f.name).add("units", f.units).add("components", f.components).add("location", f.location);
         e.add("status", std::string(status_name(f.result))).add("tolerance", f.tol);
         e.raw("problem", f.problem.empty() ? "null" : json::quote(f.problem));
+        e.raw("value_a", f.value_a.empty() ? "null" : json::quote(f.value_a));
+        e.raw("value_b", f.value_b.empty() ? "null" : json::quote(f.value_b));
         if (f.stats.d.linf > 0.0) {
             std::string x = "null";
             if (f.has_x) x = numbers_json(std::vector<double>(f.x.begin(), f.x.begin() + N_DIM));
@@ -1154,7 +1194,10 @@ int diff_main(const cli::Args & args) {
         }
     }
     if (comm::size() > 1) {
-        std::cerr << "mallard diff: runs on one rank, not " << comm::size() << "; start it without mpirun.\n";
+        if (comm::is_root()) {
+            logging::error(diagnostic_code::ONE_RANK, "mallard diff: runs on one rank, not " +
+                                                          std::to_string(comm::size()) + "; start it without mpirun.");
+        }
         return TROUBLE;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -1172,7 +1215,7 @@ int diff_main(const cli::Args & args) {
         b.mesh.reset();
         return status;
     } catch (const std::exception & e) {
-        std::cerr << "mallard diff: " << e.what() << "\n";
+        logging::error(diagnostic_code::DIFF, std::string("mallard diff: ") + e.what());
         return TROUBLE;
     }
 }

@@ -118,12 +118,18 @@ atol = 1.0e-10
 [output]
 check_interval = 2000
 
+# The jets' cores are the streams of the mixture fraction (the "fuel" and
+# "oxidizer" zones also hold the N2 coflows)
+[output.mixture]
+fuel = {X = {H2 = 0.25, N2 = 0.75}}
+oxidizer = {X = {O2 = 0.21, N2 = 0.79}}
+
 [[write_data]]
 prefix = "./solut/plane"
 region = "sym_z"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 9.135573741e-05
-fields = ["RHO", "U", "P", "T", "HRR", "Y_*"]
+fields = ["RHO", "U", "P", "T", "HRR", "Y_*", "MIXTURE_FRACTION", "SCALAR_DISSIPATION", "FLAME_INDEX"]
 
 [[write_data]]
 prefix = "./solut/volume"

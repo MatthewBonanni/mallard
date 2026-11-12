@@ -19,6 +19,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "device_comm.h"
 #include "exact_sums.h"
 #include "input.h"
 #include "launch_bounds.h"
@@ -790,7 +791,7 @@ void Solver::init_dynamic_efficiency() {
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
-    tfles_dynamic_sums = ExactSums<4>(n_owned, is_distributed(), halo.uses_nccl());
+    tfles_dynamic_sums = ExactSums(4, n_owned, is_distributed(), halo.uses_nccl());
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
     // average over the thickened cells (gamma >= sqrt(2); 4 passes on uniform hexahedra at n_res = 5)
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
@@ -930,7 +931,7 @@ void Solver::init_les() {
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
-        dynamic_sums = ExactSums<2>(mesh->n_owned(), is_distributed(), halo.uses_nccl());
+        dynamic_sums = ExactSums(2, mesh->n_owned(), is_distributed(), halo.uses_nccl());
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
@@ -1079,25 +1080,70 @@ rtype Solver::pressure_work_rate() const {
     return sum;
 }
 
-KineticEnergyBudget Solver::kinetic_energy_budget() {
-    State scratch("budget_rhs", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
-    budget = KineticEnergyBudget{};
+void Solver::kinetic_energy_rate(rtype * const out) const {
+    Kokkos::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
+                            KineticEnergyRateFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                                     mesh->cells_of_face, face_flux, W_cells, mesh->periodic_maps(),
+                                                     mesh->face_shift},
+                            Kokkos::View<rtype, Kokkos::DefaultExecutionSpace::memory_space>(out));
+}
+
+void Solver::budget_rates_of_fluxes(const int stage) {
+    const Kokkos::View<rtype *> b = budget_rates;
+    rtype * const rates = budget_rates.data();
+    switch (stage) {
+        case 0:
+            // Before the viscous fluxes: the convective rate and the pressure work
+            Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), budget_rates, 0.0_r);
+            kinetic_energy_rate(rates);
+            Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
+                                    PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                                        mesh->cells_of_face, mesh->face_normals, face_flux, W_cells,
+                                                        mesh->periodic_maps(), mesh->face_shift},
+                                    Kokkos::View<rtype, Kokkos::DefaultExecutionSpace::memory_space>(rates + 3));
+            break;
+        case 1:
+            // After them: the viscous rate is what they added
+            kinetic_energy_rate(rates + 1);
+            Kokkos::parallel_for("budget_viscous", 1, KOKKOS_LAMBDA(const int) { b(1) = b(1) - b(0); });
+            break;
+        default:
+            // The SGS fluxes alone: their rate, out of the viscous one
+            kinetic_energy_rate(rates + 2);
+            Kokkos::parallel_for("budget_sgs", 1, KOKKOS_LAMBDA(const int) { b(1) -= b(2); });
+            break;
+    }
+}
+
+void Solver::allocate_budget() {
+    if (budget_rates.is_allocated()) return;
+    budget_rates = Kokkos::View<rtype *>("budget_rates", 4);
+    budget_rhs = State("budget_rhs", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
+    if (double_flux) budget_T_seed = Kokkos::View<rtype *>("budget_T_seed", T_seed.extent(0));
+}
+
+void Solver::enqueue_kinetic_energy_budget() {
+    const Kokkos::DefaultExecutionSpace exec;
+    allocate_budget();
     // Freezing moves the temperature seeds: restored, so that output does not change the solution
-    Kokkos::View<rtype *> seeds;
     if (double_flux) {
-        seeds = Kokkos::View<rtype *>("budget_T_seed", T_seed.extent(0));
-        Kokkos::deep_copy(seeds, T_seed);
+        Kokkos::deep_copy(exec, budget_T_seed, T_seed);
         freeze_thermodynamics();
         cells_frozen = true;
     }
     budget_pass = true;
-    calc_rhs(state(), scratch, t);
+    calc_rhs(state(), budget_rhs, t);
     budget_pass = false;
     if (double_flux) {
         cells_frozen = false;
-        Kokkos::deep_copy(T_seed, seeds);
+        Kokkos::deep_copy(exec, T_seed, budget_T_seed);
     }
-    const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
-    const std::array<rtype, 4> total = is_distributed() ? comm::allreduce(local, comm::Op::SUM) : local;
+    if (is_distributed()) comm::allreduce_device(budget_rates, comm::Op::SUM, halo.uses_nccl());
+}
+
+KineticEnergyBudget Solver::kinetic_energy_budget() {
+    enqueue_kinetic_energy_budget();
+    rtype total[4];
+    Kokkos::deep_copy(Kokkos::View<rtype *, Kokkos::HostSpace>(total, 4), budget_rates);
     return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
 }

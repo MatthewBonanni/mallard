@@ -10,8 +10,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <iomanip>
 #include <limits>
 #include <memory>
 #include <span>
@@ -256,15 +256,16 @@ TEST(HealthRepairs, ReactorClippingReportsTheChangeItMade) {
 
 namespace {
 
-/** @brief Hot H2/air whose fuel is a step, advected across a periodic box by a uniform flow; Strang chemistry. */
-std::string reacting_step(const std::string & extra, bool double_flux, const std::string & u) {
+/** @brief H2/air at rest in a periodic box of nx x ny cells, of these temperature and H2 expressions. */
+std::string h2_air(const std::string & T, const std::string & H2, const std::string & numerics, const std::string & extra,
+                   uint32_t nx = 16, uint32_t ny = 4) {
     const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
-    const std::string velocity = N_DIM == 2 ? "[\"" + u + "\", \"0.0\"]" : "[\"" + u + "\", \"0.0\", \"0.0\"]";
+    const std::string rest = N_DIM == 2 ? "[\"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\", \"0.0\"]";
     std::ostringstream s;
-    s << std::setprecision(17) << "[run]\nn_steps = 12\ncfl = 0.5\n" << mesh(16, 4, 0.01, 0.01, periodic)
-      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"x < 0.005 ? 1100.0 : 1300.0\"\nu = "
-      << velocity << "\nX = { H2 = \"x < 0.005 ? 2 : 0.01\", O2 = 1.0, N2 = 3.76 }\n"
-      << "[numerics]\nriemann_solver = \"HLLC\"\n" << (double_flux ? "double_flux = true\n" : "")
+    s << "[run]\nn_steps = 12\ncfl = 0.5\n" << mesh(nx, ny, 0.01, 0.01, periodic)
+      << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"" << T << "\"\nu = " << rest
+      << "\nX = { H2 = \"" << H2 << "\", O2 = 1.0, N2 = 3.76 }\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n" << numerics
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
       << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << H2O2 << "\"\n"
       << "[output]\ncheck_interval = 4\nrun_log = \"\"\n" << extra;
@@ -274,36 +275,45 @@ std::string reacting_step(const std::string & extra, bool double_flux, const std
 } // namespace
 
 TEST(HealthRepairs, ClippingInAReactingRunIsWhatTheAuditRecords) {
-    SKIP_IN_SINGLE_PRECISION("a clipping of 1e-6 of a cell's mass is below the round-off of the element totals");
-    // A negative OH mass fraction in one cell of each rank: the first chemistry call clips and
-    // renormalizes it, a change the audit must record exactly and the element balance must explain
+    // A negative H mass fraction in every cell: the first chemistry call clips and renormalizes it, a
+    // change the audit must record exactly and the element balance must explain. 1e-2 of the mass
+    // stands well above the round-off of the element totals, in single precision too
     auto solver_ptr = std::make_unique<Solver>();
     Solver & solver = *solver_ptr;
-    solver.init(parse_toml(reacting_step("[chemistry]\n", false, "0.0")));
+    solver.init(parse_toml(h2_air("x < 0.005 ? 1100.0 : 1300.0", "x < 0.005 ? 2 : 0.01", "", "[chemistry]\n")));
     const auto mech = chemistry::read_mechanism(H2O2);
     const uint32_t ns = mech.n_species();
-    const size_t oh = static_cast<size_t>(mech.species_index("OH")), n2 = static_cast<size_t>(mech.species_index("N2"));
+    const size_t h = static_cast<size_t>(mech.species_index("H")), n2 = static_cast<size_t>(mech.species_index("N2"));
     auto rhoY = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.species);
     auto U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.conservatives);
-    const double rho = double(U(0, 0)), V = double(solver.get_mesh()->h_cell_measure(0));
-    rhoY(0, n2) += static_cast<rtype>(1e-6 * rho);
-    rhoY(0, oh) -= static_cast<rtype>(1e-6 * rho);
-    Kokkos::deep_copy(solver.species, rhoY);
-    std::vector<double> expected(ns), Y(ns);
-    double positive = 0.0;
-    for (uint32_t k = 0; k < ns; k++) {
-        Y[k] = double(rhoY(0, k)) / rho;
-        positive += std::max(Y[k], 0.0);
+    const uint32_t n_owned = solver.get_mesh()->n_owned();
+    std::vector<double> expected(ns, 0.0), Y(ns);
+    std::array<double, 2> mass_cells = {0.0, 0.0};
+    for (uint32_t c = 0; c < n_owned; c++) {
+        const double rho = double(U(c, 0)), V = double(solver.get_mesh()->h_cell_measure(c));
+        rhoY(c, n2) += static_cast<rtype>(1e-2 * rho);
+        rhoY(c, h) -= static_cast<rtype>(1e-2 * rho);
+        double positive = 0.0;
+        for (uint32_t k = 0; k < ns; k++) {
+            Y[k] = double(rhoY(c, k)) / rho;
+            positive += std::max(Y[k], 0.0);
+        }
+        for (uint32_t k = 0; k < ns; k++) expected[k] += rho * V * (std::max(Y[k], 0.0) / positive - Y[k]);
+        mass_cells[0] += rho * V;
+        mass_cells[1] += 1.0;
     }
-    for (uint32_t k = 0; k < ns; k++) expected[k] = rho * V * (std::max(Y[k], 0.0) / positive - Y[k]);
+    Kokkos::deep_copy(solver.species, rhoY);
     comm::allreduce(std::span<double>(expected), comm::Op::SUM);
+    comm::allreduce(std::span<double>(mass_cells), comm::Op::SUM);
+    const double mass = mass_cells[0];
+    const auto cells = static_cast<uint64_t>(mass_cells[1]);
     solver.run();
 
     const health::Repair clip = repair(solver, "composition_clip");
-    EXPECT_EQ(clip.activations, static_cast<uint64_t>(comm::size()));
-    EXPECT_EQ(clip.cells, static_cast<uint64_t>(comm::size()));
+    EXPECT_EQ(clip.activations, cells);
+    EXPECT_EQ(clip.cells, cells);
     for (uint32_t k = 0; k < ns; k++) {
-        EXPECT_NEAR(change(clip, "species_" + mech.species[k].name), expected[k], 1e-12 * rho * V) << mech.species[k].name;
+        EXPECT_NEAR(change(clip, "species_" + mech.species[k].name), expected[k], 1e-12 * mass) << mech.species[k].name;
     }
     for (const char * e : {"element_H", "element_O", "element_N"}) {
         const health::Balance b = balance(solver, e);
@@ -318,18 +328,55 @@ TEST(HealthRepairs, ClippingInAReactingRunIsWhatTheAuditRecords) {
     expect_closed(solver, 1e-12);
 }
 
+TEST(HealthRepairs, ClippingChangesAreTheSameInEveryRun) {
+    // Every cell clips several species by different amounts: summed in an order that depends on the
+    // threads' timing, the changes would differ in their last bits between identical runs
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const uint32_t n2 = static_cast<uint32_t>(mech.species_index("N2"));
+    const auto clip_changes = [&]() {
+        auto solver = std::make_unique<Solver>();
+        solver->init(
+            parse_toml(h2_air("x < 0.005 ? 1100.0 : 1300.0", "x < 0.005 ? 2 : 0.01", "", "[chemistry]\n", 64, 16)));
+        auto rhoY = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->species);
+        auto U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->conservatives);
+        for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+            const double rho = double(U(c, 0));
+            for (const char * name : {"H", "O", "OH", "HO2"}) {
+                const uint32_t k = static_cast<uint32_t>(mech.species_index(name));
+                const double moved = 1e-7 * rho * (1.0 + 0.618 * double((c * 7 + k * 3) % 11));
+                rhoY(c, k) -= static_cast<rtype>(moved);
+                rhoY(c, n2) += static_cast<rtype>(moved);
+            }
+        }
+        Kokkos::deep_copy(solver->species, rhoY);
+        solver->run();
+        const health::Repair clip = repair(*solver, "composition_clip");
+        EXPECT_GE(clip.cells, solver->get_mesh()->n_owned());
+        std::vector<double> out;
+        for (const auto & entry : clip.change) out.push_back(entry.second);
+        return out;
+    };
+    const std::vector<double> first = clip_changes();
+    for (int i = 0; i < 2; i++) {
+        const std::vector<double> again = clip_changes();
+        ASSERT_EQ(again.size(), first.size());
+        for (size_t k = 0; k < first.size(); k++) EXPECT_EQ(again[k], first[k]) << "run " << i + 1 << ", component " << k;
+    }
+}
+
 TEST(HealthRepairs, DoubleFluxEnergyResetIsTheEnergyChangeAtRest) {
-    SKIP_IN_SINGLE_PRECISION("the reset's change is of the order of the energy fluxes' round-off");
-    // A temperature and composition step at rest: the pressure and velocity stay uniform, so no flux
-    // changes the energy, and its total changes only by the reset to the true equation of state
-    const auto solver_ptr = run(reacting_step("", true, "0.0"));
+    // Uniform H2/air at rest, heated by a uniform energy source: every face flux cancels, so the
+    // energy changes only by the source and by the reset to the true equation of state, which corrects
+    // the frozen heat capacity over the step's heating
+    const auto solver_ptr = run(h2_air("1200.0", "2", "double_flux = true\n", "[source]\nrhoE = \"1e11\"\n"));
     const Solver & solver = *solver_ptr;
     const health::Repair reset = repair(solver, "energy_reset");
     EXPECT_GT(reset.activations, 0u);
     const health::Balance energy = balance(solver, "energy");
     EXPECT_FALSE(energy.checked);
-    EXPECT_NE(change(reset, "energy"), 0.0);
-    EXPECT_NEAR(energy.change, change(reset, "energy"), 1e-13 * std::fabs(energy.total));
+    const double tol = roundoff(1e-13) * std::fabs(energy.total);
+    EXPECT_GT(std::fabs(change(reset, "energy")), 10.0 * tol);
+    EXPECT_NEAR(energy.change, energy.sources + change(reset, "energy"), tol);
 }
 
 TEST(HealthReport, MarginsLocateTheMinima) {

@@ -37,6 +37,7 @@
 #include "provenance.h"
 #include "remap.h"
 #include "report.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -589,8 +590,7 @@ FieldValues field_values(const Run & run, const std::string & field_text, const 
     }
     const output::Field & f = *best.field(field);
     if (component >= f.components) {
-        throw UsageError(field_text + ": " + field + " has " + std::to_string(f.components) + " component" +
-                         (f.components == 1 ? "" : "s"));
+        throw UsageError(field_text + ": " + field + " has " + count(f.components, "component"));
     }
     if (f.components > 1 && field_text.find('[') == std::string::npos) {
         throw UsageError(field + " is a vector: give one component, as " + field + "[0]");
@@ -612,7 +612,7 @@ bool recorded_axisymmetric(const Run & run) {
 void check_cells(const Run & run, const Mesh & mesh, const FieldValues & f) {
     const uint64_t n = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_cells;
     if (n != f.values.size()) {
-        throw std::runtime_error(run.arg + ": its recorded mesh has " + count(n) + " cells, its snapshot " +
+        throw std::runtime_error(run.arg + ": its recorded mesh has " + count(n, "cell") + ", its snapshot " +
                                  count(f.values.size()));
     }
 }
@@ -929,7 +929,7 @@ report::Text study_text(const Study & s, const bool color) {
             text.note(s.field + " = " + s.exact + ", cell averages");
         }
         std::vector<report::Column> header = {"norm"};
-        for (size_t i = 0; i < s.norms[0].errors.size(); i++) header.emplace_back(count(s.runs[i].cells) + " cells");
+        for (size_t i = 0; i < s.norms[0].errors.size(); i++) header.emplace_back(count(s.runs[i].cells, "cell"));
         header.emplace_back("orders");
         rows.clear();
         for (const NormResult & r : s.norms) {
@@ -1277,9 +1277,9 @@ int post_convergence(const cli::Args & args) {
     } catch (const UsageError & e) {
         return cli::usage_error(*cli::command("post convergence"), e.what());
     } catch (const InputError & e) {
-        std::cerr << NAME << ": a run's input: " << e.what() << "\n";
+        logging::error(diagnostic_code::CONVERGENCE, std::string(NAME) + ": a run's input: " + e.what());
     } catch (const std::exception & e) {
-        std::cerr << NAME << ": " << e.what() << "\n";
+        logging::error(diagnostic_code::CONVERGENCE, std::string(NAME) + ": " + e.what());
     }
     return 1;
 }
@@ -1289,7 +1289,10 @@ int convergence_main(const cli::Args & args) {
     char ** argv = args.argv;
     comm::Session session(argc, argv);
     if (comm::size() > 1) {
-        if (comm::is_root()) std::cerr << NAME << ": runs on one rank, not " << comm::size() << "; start it without mpirun.\n";
+        if (comm::is_root()) {
+            logging::error(diagnostic_code::ONE_RANK, std::string(NAME) + ": runs on one rank, not " +
+                                                          std::to_string(comm::size()) + "; start it without mpirun.");
+        }
         return 1;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);

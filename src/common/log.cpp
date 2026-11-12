@@ -282,7 +282,8 @@ void warning(std::string_view code, std::string_view message) {
     std::cout << std::flush;
     std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
     run_log::write(json::Object().add("type", "warning").add("code", std::string(code)).add("message", message).add(
-        "docs", diagnostic_code::docs(code)));
+                       "docs", diagnostic_code::docs(code)),
+                   true);
 }
 
 void error(std::string_view code, std::string_view message) {
@@ -303,6 +304,10 @@ std::string count(uint64_t n) {
         out += digits[i];
     }
     return out;
+}
+
+std::string count(uint64_t n, std::string_view noun) {
+    return count(n) + " " + std::string(noun) + (n == 1 ? "" : "s");
 }
 
 std::string duration(double s) {

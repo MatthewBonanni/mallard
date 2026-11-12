@@ -1125,6 +1125,14 @@ struct InitialState::Impl {
                            double & edge, bool & bounded) {
         const region::Region r = region::read(table, where, region_names);
         region::require_full_dimension(r, table, where);
+        if (r.solution()) {
+            throw InputError(Diagnostic{.key = where,
+                                        .line = line_of(table),
+                                        .message = "follows the solution, which the initial state sets",
+                                        .fix = "Give the region by its geometry, or write the condition into the "
+                                               "initial state's expressions",
+                                        .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
+        }
         const auto & h = r.host();
         const uint32_t vertex_offset = static_cast<uint32_t>(vertices.size() / 2);
         const uint32_t program_offset = static_cast<uint32_t>(programs.size());
@@ -1253,7 +1261,7 @@ struct InitialState::Impl {
             }
             const uint32_t neighbors = find_value_or<uint32_t>(e, "neighbors", 1);
             set = data.add_points(coords, fields, neighbors, where);
-            kind = std::to_string(coords[0].size()) + " points, " +
+            kind = logging::count(coords[0].size(), "point") + ", " +
                    (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance");
         } else {
             if (e.contains("neighbors")) {
@@ -1344,7 +1352,7 @@ struct InitialState::Impl {
                 if (u.size() != N_DIM) {
                     throw InputError({.key = where + ".u",
                                       .line = line_of(t, "u"),
-                                      .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                      .message = "has " + logging::count(u.size(), "component") + ", but this build is " +
                                                  std::to_string(N_DIM) + "D",
                                       .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
                 }

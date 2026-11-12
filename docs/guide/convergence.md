@@ -308,6 +308,14 @@ $ mallard post convergence n16 n32 n64 --field RHO \
   n64: RHO of n64/restart_000027.restart at t = 0.05 s
 ```
 
+![The density_squared integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-light.svg#gh-light-mode-only)
+![The density_squared integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-dark.svg#gh-dark-mode-only)
+
+*The same runs, through `--format json` (`tools/docs/runs.py`). Left: plotted
+against $(h/h_1)^p$ with the observed order, the three values lie on a line
+that meets $h = 0$ at $\phi_\text{ext}$; the GCI band on the finest value (inset)
+contains the exact 1.01. Right: the error norms fall at the design order 2.*
+
 The runs table lists each run's cells and its size relative to the finest. The
 `fine` column is the finest run's value; `extrapolated` is $\phi_\text{ext}$;
 `GCI` is the band on `fine`. `--format json` prints everything as one object

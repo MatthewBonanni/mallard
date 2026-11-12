@@ -1,6 +1,6 @@
 /**
  * @file run_report_test.cpp
- * @brief The progress table, the summary and the health section of a run.
+ * @brief The setup banner, the progress table, the summary and the health section of a run.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -17,8 +17,13 @@
 #include "common.h"
 #include "comm.h"
 #include "data_paths.h"
+#include "les.h"
 #include "log.h"
+#include "pasr.h"
+#include "physics.h"
 #include "run_report.h"
+#include "step_control.h"
+#include "tfles.h"
 #include "units.h"
 
 namespace {
@@ -112,6 +117,12 @@ TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
     EXPECT_EQ(logging::take_written(), "");
 }
 
+TEST(RunReport, ACountOfOneTakesTheSingular) {
+    EXPECT_EQ(logging::count(1, "cell"), "1 cell");
+    EXPECT_EQ(logging::count(0, "cell"), "0 cells");
+    EXPECT_EQ(logging::count(1234, "boundary face"), "1,234 boundary faces");
+}
+
 // Guards the summary's and the health section's tables, units and what they leave out
 TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D run (points with two coordinates)";
@@ -153,4 +164,75 @@ TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     summary_section(text, s);
     health_section(text, h);
     expect_golden(text.str(), "summary_2d.txt");
+}
+
+/** @brief A Physics and a Numerics section from the components' summaries, as Solver::print_setup builds them. */
+std::vector<SetupSection> component_sections(const bool thickened_flame) {
+    Euler gas = Euler::from_reference(1.4_r, 101325.0_r, 288.15_r, 1.225_r);
+    gas.viscosity_model = ViscosityModel::SUTHERLAND;
+    gas.mu_ref = 1.716e-5_r;
+    LES les{.model = SGSModel::WALE, .C = 0.5_r};
+    ThickenedFlame flame{.delta_L = 4.0e-4, .s_L = 0.38, .T_u = 300.0, .T_b = 2200.0};
+    flame.efficiency = ThickenedFlame::Efficiency::CHARLETTE;
+    flame.beta = 0.5;
+    flame.eddy_viscosity_velocity = true;
+    StepController controller;
+    controller.init(1.0e-6_r, 1.0e-4_r, {0.64_r, -0.31_r, 0.04_r}, 3);
+    SetupSection physics{.title = "Physics"};
+    physics.add(gas.summary());
+    SetupSection numerics{.title = "Numerics"};
+    numerics.add(controller.summary());
+    numerics.add(les.summary());
+    numerics.add(thickened_flame ? flame.summary() : PartiallyStirredReactor{}.summary());
+    return {physics, numerics};
+}
+
+// Guards the setup banner's sections: settings, quantities with units, the mesh's ranges and partition, the
+// boundaries' and the outputs' tables, the components' constants
+TEST(RunReport, SetupBannerMatchesTheGolden) {
+    if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D mesh (two extents, cell areas)";
+    MeshSetup mesh{.settings = {{"Type", "file mesh.msh"}, {"Cell order", "Hilbert curve"}},
+                   .cells = {{"tri", 300'000}, {"quad", 160'800}},
+                   .faces = 692'400,
+                   .boundary_faces = 2'400,
+                   .lo = {0.0, -0.5, 0.0},
+                   .hi = {4.0, 1.0, 0.0},
+                   .size_min = 8.681e-6,
+                   .size_max = 3.4e-5,
+                   .partition = MeshSetup::Partition{.partitioner = "multi-jagged",
+                                                     .exchange = "MPI",
+                                                     .ranks = 3,
+                                                     .halo_layers = 2,
+                                                     .owned_min = 151'000,
+                                                     .owned_max = 157'000,
+                                                     .halo_max = 4'200,
+                                                     .cut_faces = 1'900,
+                                                     .layer1_max = 1'300,
+                                                     .layer1_all = 3'800,
+                                                     .received_max = 2'600,
+                                                     .received_all = 7'600}};
+    SetupSection numerics{.title = "Numerics", .settings = {{"Riemann solver", "HLLC"}, {"Time integrator", "SSPRK3"}}};
+    numerics.quantities = time_quantities({.use_cfl = false, .dt = 1.0e-5, .controlled = true, .n_steps = 5'000,
+                                           .t_stop = 0.2, .wall_stop = 3600.0});
+    SetupSection cfl{.title = "Time step at a CFL number"};
+    cfl.quantities = time_quantities({.use_cfl = true, .cfl = 0.8});
+    SetupSection boundaries{.title = "Boundaries"};
+    boundaries.tables.push_back(boundary_table({{"inlet", "dirichlet", 240, "u from inflow.csv", "synthetic, 5% intensity"},
+                                                {"wall", "no_slip_wall", 960, "isothermal 300 K", ""}}));
+    SetupSection output{.title = "Output"};
+    output.tables.push_back(output_table({{.kind = "progress", .file = "", .steps = 200, .contents = ""},
+                                          {.kind = "vtkhdf", .file = "solut/flow.vtkhdf", .seconds = 2.0e-3,
+                                           .contents = "RHO, P"},
+                                          {.kind = "forces", .file = "forces_wall.csv", .steps = 10, .contents = "wall"},
+                                          {.kind = "statistics", .file = "", .contents = "from t = 0.1 s"}}));
+    report::Text si(false);
+    setup_text(si, {mesh_section(mesh), numerics, cfl, boundaries, output});
+    setup_text(si, component_sections(true));
+    units::set_system(units::System::NONDIMENSIONAL);
+    numerics.quantities = time_quantities({.use_cfl = false, .dt = 1.0e-5, .t_stop = 0.2});
+    report::Text nondimensional(false);
+    setup_text(nondimensional, {mesh_section(mesh), numerics});
+    setup_text(nondimensional, component_sections(false));
+    units::set_system(units::System::SI);
+    expect_golden(si.str() + "\n" + nondimensional.str(), "setup_2d.txt");
 }

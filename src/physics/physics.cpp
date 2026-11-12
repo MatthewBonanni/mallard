@@ -69,23 +69,32 @@ Euler Euler::from_input(const Input & input) {
     return euler;
 }
 
-logging::Items Euler::summary() const {
-    auto real = [](const rtype v, const char * unit) { return units::with(logging::real(double(v)), unit); };
-    logging::Items out = {
-        {"Model", is_viscous() ? "Navier-Stokes" : "Euler"},
-        {"Gas", "gamma " + logging::real(double(gamma)) + ", R " + real(R, "J/(kg K)") + ", cp " + real(cp, "J/(kg K)") +
-                    ", cv " + real(cv, "J/(kg K)")},
-    };
-    if (is_viscous()) {
-        if (viscosity_model == ViscosityModel::SUTHERLAND) {
-            out.emplace_back("Viscosity", "Sutherland, mu " + real(mu_ref, "Pa s") + " at T " + real(T_mu_ref, "K") +
-                                              ", S " + real(S_mu, "K") + ", Pr " + logging::real(double(Pr)));
-        } else if (viscosity_model == ViscosityModel::POWER_LAW) {
-            out.emplace_back("Viscosity", "power law, mu " + real(mu_ref, "Pa s") + " (T / " + real(T_mu_ref, "K") +
-                                              ")^" + logging::real(double(n_mu)) + ", Pr " + logging::real(double(Pr)));
-        } else {
-            out.emplace_back("Viscosity", "constant, mu " + real(mu_ref, "Pa s") + ", Pr " + logging::real(double(Pr)));
-        }
+report::Summary Euler::summary() const {
+    using logging::real;
+    const std::string specific_heat = units::column("J/(kg K)");
+    report::Summary s;
+    s.setting("Model", is_viscous() ? "Navier-Stokes" : "Euler");
+    s.setting("Gas", "perfect gas");
+    s.quantity("gamma", real(double(gamma)), "-", "ratio of specific heats");
+    s.quantity("R", real(double(R)), specific_heat, "gas constant");
+    s.quantity("cp", real(double(cp)), specific_heat, "specific heat at constant pressure");
+    s.quantity("cv", real(double(cv)), specific_heat, "specific heat at constant volume");
+    if (!is_viscous()) return s;
+    const std::string temperature = units::column("K");
+    if (viscosity_model == ViscosityModel::SUTHERLAND) {
+        s.setting("Viscosity", "Sutherland's law");
+        s.quantity("mu", real(double(mu_ref)), units::column("Pa s"), "dynamic viscosity at T_mu_ref");
+        s.quantity("T_mu_ref", real(double(T_mu_ref)), temperature, "reference temperature of the viscosity");
+        s.quantity("sutherland_S", real(double(S_mu)), temperature, "Sutherland's constant");
+    } else if (viscosity_model == ViscosityModel::POWER_LAW) {
+        s.setting("Viscosity", "power law, mu (T / T_mu_ref)^viscosity_exponent");
+        s.quantity("mu", real(double(mu_ref)), units::column("Pa s"), "dynamic viscosity at T_mu_ref");
+        s.quantity("T_mu_ref", real(double(T_mu_ref)), temperature, "reference temperature of the viscosity");
+        s.quantity("viscosity_exponent", real(double(n_mu)), "-", "");
+    } else {
+        s.setting("Viscosity", "constant");
+        s.quantity("mu", real(double(mu_ref)), units::column("Pa s"), "dynamic viscosity");
     }
-    return out;
+    s.quantity("Pr", real(double(Pr)), "-", "Prandtl number");
+    return s;
 }
