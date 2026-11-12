@@ -21,6 +21,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "report.h"
 #include "state.h"
 
 /**
@@ -82,7 +83,7 @@ class StepController {
         /** @brief Restores the history written by attributes (absent names leave the defaults). */
         void restore(const std::vector<std::pair<std::string, double>> & attributes);
 
-        std::string summary() const;
+        report::Summary summary() const;
 
     private:
         rtype abs_tol = 0.0;
