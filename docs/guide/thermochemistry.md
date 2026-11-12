@@ -23,7 +23,13 @@ T = 300.0
 X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }   # mole fractions, normalized
 ```
 
-*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 11 more.
+*Used in:*
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence),
+[`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
+[`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
+[`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
+and 11 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -100,7 +106,13 @@ atol = 1.0e-10
 # T_frozen = 400.0       # no chemistry below 400 K
 ```
 
-*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 10 more.
+*Used in:*
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence),
+[`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
+[`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
+[`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
+and 10 more.
 
 A mixture whose mechanism has reactions reacts when the input has a
 `[chemistry]` table.
@@ -163,7 +175,8 @@ T_ambient = 300.0
 # species = ["H2O", "CO2"]
 ```
 
-*Used in:* [`flame_vortex_quenching`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-vortex-quenching).
+*Used in:*
+[`flame_vortex_quenching`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-vortex-quenching).
 
 Optically thin radiative heat loss (the TNF workshop model):
 `q = 4 sigma sum_i p_i a_i(T) (T^4 - T_ambient^4)`, with Planck-mean
@@ -200,7 +213,9 @@ rtol = 1.0e-6
 atol = 1.0e-10
 ```
 
-*Used in:* [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`autoignition_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#autoignition-2d).
+*Used in:*
+[`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
+[`autoignition_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#autoignition-2d).
 
 `mallard reactor` integrates one adiabatic, constant-volume reactor with the
 solver's own chemistry, and writes `t`, `T`, `p` and the mass fractions as

@@ -1,0 +1,12 @@
+{
+ "default": "0.5",
+ "defaults_by_dim": {
+  "2": "1.0"
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [],
+ "type": "number"
+}
