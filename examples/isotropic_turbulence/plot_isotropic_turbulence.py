@@ -135,7 +135,7 @@ def main():
             report(name, johnsen["t_over_tau"], johnsen[name], s["t_over_tau"], s[f"{name}_fd6"], lab)
         ax.set_ylabel(LABELS[name])
         style(ax)
-    axes[0, 0].legend(fontsize=8)
+    axes[0, 0].legend(fontsize=8, loc="upper right")
     axes[0, 0].set_title("filtered to $64^3$, 6th-order differences", loc="left", fontsize=10)
     print("Filtered to 64^3, spectral derivatives, against Subramaniam et al. (2019):")
     for j, name in enumerate(["kinetic_energy", "enstrophy", "dilatation_variance", "density_variance"]):
@@ -152,7 +152,7 @@ def main():
                 report(name, wchr["t_over_tau"][sel], wchr[name][sel], s["t_over_tau"], s[f"{name}_spec"], lab)
         ax.set_ylabel(LABELS[name])
         style(ax)
-    axes[1, 0].legend(fontsize=8)
+    axes[1, 0].legend(fontsize=8, loc="upper right")
     axes[1, 0].set_title("filtered to $64^3$, spectral derivatives", loc="left", fontsize=10)
     fig.suptitle(r"Decaying isotropic turbulence, $M_{t,0} = 0.6$, $Re_{\lambda,0} = 100$: filtered statistics")
     fig.tight_layout()
