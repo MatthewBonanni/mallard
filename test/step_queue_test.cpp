@@ -182,6 +182,7 @@ struct Case {
     std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
+    Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
 };
 
 std::string box_input(const Case & c, const std::string & dir, int depth) {
@@ -278,9 +279,11 @@ struct Outcome {
     rtype t = 0.0;
     uint64_t rejected = 0;
     uint64_t queued = 0;
+    uint64_t graph_steps = 0;
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
+    std::vector<std::string> warnings;
 };
 
 /**
@@ -306,17 +309,19 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         Solver solver;
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
+        solver.set_capture_fault(c.capture_fault);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0) expect_capturable(guard, solver);
+        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
         solver.copy_device_to_host();
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
             for (uint8_t v = 0; v < N_CONSERVATIVE; v++) o.U.push_back(solver.h_conservatives(i, v));
         }
+        o.graph_steps = solver.get_graph_steps();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -338,6 +343,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             for (std::string line; std::getline(in, line);) {
                 const json::Value v = json::parse(line);
                 if (v["type"].string == "progress" || v["type"].string == "event") o.log.push_back(strip(without_timing(v)));
+                if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
             }
         } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos) {
             o.files[file] = without_records(read_file(entry.path()));
@@ -685,6 +691,28 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     c.distributed = true;
     const Outcome o = expect_queue_invariant("distributed", c);
     EXPECT_EQ(o.step, 24u);
+}
+
+TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "step graphs are captured in CUDA builds only";
+#else
+    // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
+    // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    const Outcome host = run_case("failed_capture", c, 0);
+    for (const auto & [fault, reported_by] : {std::pair{Solver::CaptureFault::FENCE, "cudaDeviceSynchronize"},
+                                              std::pair{Solver::CaptureFault::LEGACY_STREAM, "cudaStreamEndCapture"}}) {
+        c.capture_fault = fault;
+        const Outcome fallback = run_case("failed_capture", c, 3);
+        expect_same(host, fallback, reported_by);
+        EXPECT_EQ(fallback.graph_steps, 0u) << reported_by;
+        ASSERT_EQ(fallback.warnings.size(), 1u) << reported_by;
+        EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+        EXPECT_NE(fallback.warnings[0].find(reported_by), std::string::npos) << fallback.warnings[0];
+    }
+#endif
 }
 
 namespace {

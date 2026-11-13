@@ -652,6 +652,13 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
+        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
+        enum class CaptureFault {
+            NONE,
+            FENCE,         // fails while the stream captures
+            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+        };
+        void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -670,6 +677,8 @@ class Solver {
         uint64_t get_graph_steps() const { return graph_steps; }
         /** @brief Steps the host took from their records without acting on them (steps run ahead of it). */
         uint64_t get_queued_steps() const { return n_queued_steps; }
+        /** @brief Launches the host keeps ahead of the device's steps. */
+        uint32_t get_queue_depth() const { return queue_depth; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
@@ -870,6 +879,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         void * capture_graph = nullptr;        // cudaGraph_t being captured
