@@ -401,15 +401,18 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
     };
     for (const std::string & name : fields) {
-        const derived::Field f = derived::find(name.c_str());
-        if (f == derived::N_FIELDS) {
+        if (!field_units::post_derive(name)) {
             std::vector<std::string> names;
-            for (const auto & d : derived::FIELDS) names.emplace_back(d.name);
+            for (const CatalogField & c : field_units::catalog()) {
+                if (c.post_derive) names.push_back(c.name);
+            }
             const std::string like = suggest_value(name, names);
-            throw UsageError("--fields: " + name + " is not a derived field" +
+            throw UsageError("--fields: mallard post derive does not write " + name +
                              (like.empty() ? "" : " (did you mean " + like + "?)") +
-                             "; mallard list fields lists them, in its derived and mixture groups");
+                             "; mallard list fields names those it writes");
         }
+        const derived::Field f = derived::find(name.c_str());
+        if (f == derived::N_FIELDS) continue;
         const uint16_t needs = derived::FIELDS[f].needs;
         uint16_t missing = 0;
         if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
