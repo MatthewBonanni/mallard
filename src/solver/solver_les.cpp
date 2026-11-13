@@ -387,10 +387,11 @@ struct TestFilterWidthFunctor {
         for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
             const uint32_t n = neighbors(k);
             const double w = static_cast<double>(volume(n));
+            const uint32_t s = neighbor_shift(k);
             w_sum += w;
             FOR_I_DIM {
                 const double dx = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
-                                  static_cast<double>(shifts(neighbor_shift(k), i));
+                                  static_cast<double>(shifts(s, i));
                 x1[i] += w * dx;
                 x2[i] += w * dx * dx;
             }
@@ -529,14 +530,15 @@ struct DynamicProcedureFunctor {
     KOKKOS_INLINE_FUNCTION
     double relative(const uint32_t c, const uint32_t k, const uint32_t end, const uint8_t i) const {
         if (k == end) return 0.0;
+        const uint32_t s = neighbor_shift(k);
         if (periodic.rotated()) {
             rtype x[N_DIM], y[N_DIM];
             for (uint8_t d = 0; d < N_DIM; d++) x[d] = cell_coords(neighbors(k), d);
-            periodic.forward(neighbor_shift(k), x, y);
+            periodic.forward(s, x, y);
             return static_cast<double>(y[i] - cell_coords(c, i));
         }
         return static_cast<double>(cell_coords(neighbors(k), i) - cell_coords(c, i)) +
-               static_cast<double>(periodic.shifts(neighbor_shift(k), i));
+               static_cast<double>(periodic.shifts(s, i));
     }
 
     /** @brief A = Q A Q^T for the 3 x 3 tensor A, Q the rotation of shift row s in its first N_DIM rows and columns. */

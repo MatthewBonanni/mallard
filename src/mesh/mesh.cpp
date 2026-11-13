@@ -651,7 +651,7 @@ void Mesh::compute_cell_neighbors() {
     Kokkos::deep_copy(face_shift, h_face_shift);
 }
 
-void Mesh::h_forward(const uint8_t s, const rtype * x, rtype * y) const {
+void Mesh::h_forward(const uint32_t s, const rtype * x, rtype * y) const {
     FOR_I_DIM y[i] = x[i];
     if (is_rotational()) {
         rtype r[N_DIM];
@@ -664,7 +664,7 @@ void Mesh::h_forward(const uint8_t s, const rtype * x, rtype * y) const {
     FOR_I_DIM y[i] = y[i] + h_shifts(s, i);
 }
 
-void Mesh::h_backward(const uint8_t s, const rtype * x, rtype * y) const {
+void Mesh::h_backward(const uint32_t s, const rtype * x, rtype * y) const {
     rtype d[N_DIM];
     FOR_I_DIM d[i] = x[i] - h_shifts(s, i);
     FOR_I_DIM y[i] = d[i];
@@ -687,11 +687,12 @@ std::array<rtype, N_DIM> Mesh::h_face_point(const uint32_t f, const uint32_t c) 
 std::array<rtype, N_DIM> Mesh::h_face_normal(const uint32_t f, const uint32_t c) const {
     std::array<rtype, N_DIM> n;
     FOR_I_DIM n[i] = h_face_normals(f, i);
-    if (h_cells_of_face(f, 1) != int32_t(c) || !h_rotated_row(h_face_shift(f))) return n;
+    const uint32_t s = h_face_shift(f);
+    if (h_cells_of_face(f, 1) != int32_t(c) || !h_rotated_row(s)) return n;
     std::array<rtype, N_DIM> m;
     FOR_I_DIM {
         m[i] = 0.0_r;
-        for (uint8_t j = 0; j < N_DIM; j++) m[i] += h_shift_rotations(h_face_shift(f), j, i) * n[j];
+        for (uint8_t j = 0; j < N_DIM; j++) m[i] += h_shift_rotations(s, j, i) * n[j];
     }
     return m;
 }
