@@ -450,7 +450,9 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
                     if (c1 < 0 || !mesh.h_rotated_row(mesh.h_face_shift(f))) continue;
                     cut += (uint32_t(c0) < mesh.n_owned()) != (uint32_t(c1) < mesh.n_owned());
                 }
-                if (comm::size() > 1) EXPECT_GT(comm::allreduce(cut, comm::Op::SUM), 0u);
+                if (comm::size() > 1) {
+                    EXPECT_GT(comm::allreduce(cut, comm::Op::SUM), 0u);
+                }
             });
         }
     }
