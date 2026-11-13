@@ -49,8 +49,9 @@ checks() {
     if "$python" -c 'import yaml' 2> /dev/null; then
         run "workflow triggers" "$python" tools/dev/check_workflow_triggers.py
         run "support matrix names every CI job" "$python" tools/dev/check_support_matrix.py
+        run "CI runs the tests on the docs they read" "$python" tools/dev/check_tested_docs.py
     else
-        echo "== workflow triggers, support matrix: skipped (no PyYAML; PYTHON= a python with it)"
+        echo "== workflow triggers, support matrix, docs the tests read: skipped (no PyYAML; PYTHON= a python with it)"
     fi
     run "spelling" "$python" tools/dev/check_spelling.py
     run "CI's test splitting" "$python" tools/dev/test_split_test.py
