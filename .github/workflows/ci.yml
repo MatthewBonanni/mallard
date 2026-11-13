@@ -209,7 +209,9 @@ jobs:
     runs-on: ubuntu-26.04
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
-      any: ${{ steps.pick.outputs.any }}
+      builds: ${{ steps.pick.outputs.builds }}
+      shards: ${{ steps.pick.outputs.shards }}
+      times_run: ${{ steps.times.outputs.run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -230,7 +232,7 @@ jobs:
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true, "gate": true},
             {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3", "gate": true},
             {"name": "clang-22", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "hdf5": true},
-            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "shards": 2, "gate": true},
+            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "gate": true},
             {"name": "gcc-15-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "os": "ubuntu-26.04-arm"},
             {"name": "mpi-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "os": "ubuntu-26.04-arm"},
             {"name": "gcc-16-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "cgns": true, "container": "gcc:16.2.0", "cmake": "4.2.3", "os": "ubuntu-26.04-arm"},
@@ -247,19 +249,32 @@ jobs:
             # The gate's MPI jobs leave the whole suite on one rank to the jobs without MPI
             backends=$(jq -c 'map(select(.gate) | .full = false)' <<< "$backends")
           fi
-          # A backend with shards runs as that many jobs, <name>-<i>of<n>, each building and
-          # running every n-th test of each suite run (googletest's sharding); names and -f only
-          # stay per backend, and the jobs share the backend's compiler cache
-          backends=$(jq -c 'map(if .shards then . as $b | range(1; $b.shards + 1)
-                                  | $b + {shard: ., job: "\($b.name)-\(.)of\($b.shards)"}
-                                else . + {job: .name} end)' <<< "$backends")
-          echo "any=$(jq 'length > 0' <<< "$backends")" >> "$GITHUB_OUTPUT"
-          echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
-          sh tools/dev/ci_status.sh queued $(jq -r '.[].job' <<< "$backends")
+          # A backend with shards builds once, in the job build-<name>, and runs as that many
+          # test jobs, <name>-<i>of<n>, each running every n-th test of each suite run
+          # (googletest's sharding) on that build; -f only names the backend
+          whole=$(jq -c 'map(select(.shards | not) | . + {job: .name})' <<< "$backends")
+          builds=$(jq -c 'map(select(.shards) | . + {job: "build-\(.name)"})' <<< "$backends")
+          shards=$(jq -c 'map(select(.shards) | . as $b | range(1; $b.shards + 1)
+                              | $b + {shard: ., job: "\($b.name)-\(.)of\($b.shards)"})' <<< "$backends")
+          { echo "backends=$whole"; echo "builds=$builds"; echo "shards=$shards"; } >> "$GITHUB_OUTPUT"
+          sh tools/dev/ci_status.sh queued $(jq -r '.[].job' <<< "$whole $builds $shards")
+      # The newest passed run on main with test reports, whose durations split every job's
+      # tests (tools/dev/test_split.py); none: tools/dev/test_times.json
+      - id: times
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
+                        --limit 10 --json databaseId -q '.[].databaseId'); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
+                  -q '[.artifacts[] | select(.name | startswith("junit-"))] | length')
+            if [ "$n" -gt 0 ]; then echo "run $id"; echo "run=$id" >> "$GITHUB_OUTPUT"; break; fi
+          done || true
 
+  # The backends without shards: each job builds and runs its checks
   build-and-test:
     needs: matrix
-    if: needs.matrix.outputs.any == 'true'
+    if: needs.matrix.outputs.backends != '[]'
     runs-on: ${{ matrix.backend.os || 'ubuntu-26.04' }}
     container: ${{ matrix.backend.container || '' }}
     strategy:
@@ -267,27 +282,24 @@ jobs:
       matrix:
         backend: ${{ fromJSON(needs.matrix.outputs.backends) }}
     name: ${{ matrix.backend.job }}
+    # The build and test jobs of sharded backends below reuse these steps (YAML aliases)
     steps:
-      - uses: actions/checkout@v4
+      - &checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Report the job as running
+      - &report-running
+        name: Report the job as running
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.backend.job }}
         run: sh tools/dev/ci_status.sh running
-      # Read by googletest in every suite run below; mpirun's ranks inherit it
-      - name: Shard the suite
-        if: matrix.backend.shard
-        env:
-          SHARD: ${{ matrix.backend.shard }}
-          SHARDS: ${{ matrix.backend.shards }}
-        run: printf 'GTEST_TOTAL_SHARDS=%s\nGTEST_SHARD_INDEX=%s\n' "$SHARDS" "$((SHARD - 1))" >> "$GITHUB_ENV"
       # Both read by every suite run below: googletest's filter, and a JUnit report per process
       # (tools/dev/test_coverage.py's map and this report let a dispatch rerun only the
       # tests a change can affect)
-      - name: Select the tests and record their results
+      - &select-tests
+        name: Select the tests and record their results
         env:
           FILTER: ${{ inputs.gtest_filter }}
         run: |
@@ -295,31 +307,37 @@ jobs:
           echo "MALLARD_TEST_XML=$RUNNER_TEMP/junit" >> "$GITHUB_ENV"
           printf '%s\n' "$FILTER" > "$RUNNER_TEMP/junit/filter.txt"
           if [ -n "$FILTER" ]; then echo "GTEST_FILTER=$FILTER" >> "$GITHUB_ENV"; fi
-      - name: Install MPI
+      - &install-mpi
+        name: Install MPI
         timeout-minutes: 25
         if: matrix.backend.mpi
         run: >
           sh tools/dev/apt_install.sh
           libopenmpi-dev openmpi-bin libtbb-dev libhdf5-openmpi-dev
-      - name: Install HDF5
+      - &install-hdf5
+        name: Install HDF5
         timeout-minutes: 25
         if: matrix.backend.hdf5
         run: sh tools/dev/apt_install.sh libhdf5-dev
-      - name: Install CGNS
+      - &install-cgns
+        name: Install CGNS
         timeout-minutes: 25
         if: matrix.backend.cgns
         run: sh tools/dev/apt_install.sh libhdf5-dev libcgns-dev
-      - name: Install ccache
+      - &install-ccache
+        name: Install ccache
         timeout-minutes: 25
         if: runner.os == 'Linux'
         run: >
           sh tools/dev/apt_install.sh
           ccache ${{ matrix.backend.packages }}
-      - name: Install ccache (macOS)
+      - &install-ccache-macos
+        name: Install ccache (macOS)
         timeout-minutes: 15
         if: runner.os == 'macOS'
         run: brew install ccache ${{ matrix.backend.packages }}
-      - name: Install Clang ${{ matrix.backend.llvm }} (apt.llvm.org)
+      - &install-clang
+        name: Install Clang ${{ matrix.backend.llvm }} (apt.llvm.org)
         if: matrix.backend.llvm
         timeout-minutes: 25
         env:
@@ -329,7 +347,8 @@ jobs:
           echo "deb http://apt.llvm.org/resolute/ llvm-toolchain-resolute-$LLVM main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sh tools/dev/apt_install.sh clang-$LLVM
       # Kitware's build of the oldest CMake that Mallard supports (cmake_minimum_required)
-      - name: Install CMake ${{ matrix.backend.cmake }}
+      - &install-cmake
+        name: Install CMake ${{ matrix.backend.cmake }}
         if: matrix.backend.cmake
         env:
           VERSION: ${{ matrix.backend.cmake }}
@@ -339,13 +358,15 @@ jobs:
           echo "/opt/cmake-$VERSION-linux-$(uname -m)/bin" >> "$GITHUB_PATH"
       # Branches restore main's latest cache. The name ends with a slash: a bare prefix
       # (ccache-mpi-) also matched other backends' caches (ccache-mpi-3d-...)
-      - name: Restore compiler cache
+      - &restore-cache
+        name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
           restore-keys: ccache/${{ matrix.backend.name }}/
-      - name: Configure
+      - &configure
+        name: Configure
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: >
@@ -354,7 +375,8 @@ jobs:
           -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON ${{ matrix.backend.flags }}
       # The statistics count this build only. On main, the cache it saves keeps only what this
       # build used (a hit renews an entry), so it holds one tree and stays small
-      - name: Build
+      - &build
+        name: Build
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 1G
@@ -367,18 +389,42 @@ jobs:
           if [ "$GITHUB_REF" = refs/heads/main ]; then
             ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
           fi
-      - name: Save compiler cache
-        if: github.ref == 'refs/heads/main' && (!matrix.backend.shard || matrix.backend.shard == 1)
+      - &save-cache
+        name: Save compiler cache
+        if: github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
-      - name: Test
+      # The backend's test durations, which split its tests among processes and shards: those
+      # of the run the matrix job picked, or else tools/dev/test_times.json
+      - &download-times
+        name: Download the test reports of main
+        if: needs.matrix.outputs.times_run
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ needs.matrix.outputs.times_run }}
+          github-token: ${{ github.token }}
+          pattern: junit-${{ matrix.backend.name }}*
+          path: ${{ runner.temp }}/times
+      - &test-times
+        name: Test durations
+        env:
+          NAME: ${{ matrix.backend.name }}
+        run: python3 tools/dev/test_split.py times "$RUNNER_TEMP/times" "$NAME" tools/dev/test_times.json > build/test_times.json
+      # As many processes at once as the runner's cores hold: one per core with Serial, one
+      # per two with OpenMP and Threads (tools/dev/parallel_test.sh)
+      - &test
+        name: Test
         if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
           OMP_NUM_THREADS: 2
           KOKKOS_NUM_THREADS: 2
-        run: ./build/src/mallard test
+          FLAGS: ${{ matrix.backend.flags }}
+        run: |
+          case "$FLAGS" in *OPENMP=ON*|*THREADS=ON*) threads=2 ;; *) threads=1 ;; esac
+          sh tools/dev/parallel_test.sh $(( $(getconf _NPROCESSORS_ONLN) / threads )) build/test_times.json ./build/src/mallard test
       - name: Upgrade the inputs of every release
         if: matrix.backend.name == 'openmp'
         run: |
@@ -410,7 +456,8 @@ jobs:
           ./build/src/mallard test & first=$!
           ./build/src/mallard test --gtest_brief=1 & second=$!
           ok=true; wait $first || ok=false; wait $second || ok=false; $ok
-      - name: Test (MPI)
+      - &test-mpi
+        name: Test (MPI)
         if: matrix.backend.mpi
         timeout-minutes: 90
         env:
@@ -419,28 +466,31 @@ jobs:
           MALLARD_TEST_TIMEOUT: 600
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
-          # A filter of this step, restricted to the dispatch's GTEST_FILTER (empty: no test)
-          list() { mpirun -n 1 ./build/src/mallard test --gtest_list_tests --gtest_filter="$1" |
+          # A filter of this step, restricted to GTEST_FILTER (the dispatch's selection, or the
+          # shard's share of it; empty: no test). The listing writes no JUnit report
+          list() { env -u MALLARD_TEST_XML mpirun -n 1 ./build/src/mallard test --gtest_list_tests --gtest_filter="$1" |
                    awk '/^[^ ].*\.$/ { s = $1 } /^  / { print s $1 }' | sort; }
           only() {
             if [ -z "${GTEST_FILTER:-}" ]; then echo "$1"; return; fi
             comm -12 <(list "$1") <(list "$GTEST_FILTER") | paste -sd: -
           }
-          if [ "$FULL" = true ]; then
-            mpirun -n 1 ./build/src/mallard test
-          else
-            one=$(only "$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*")
-            if [ -n "$one" ]; then mpirun -n 1 ./build/src/mallard test --gtest_filter="$one"; fi
-          fi
+          if [ "$FULL" != true ]; then one=$(only "$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*"); fi
           mpi=$(only "$mpi_tests")
-          # Every test on 3 ranks, so none assumes a single rank; two rank
-          # counts at once, so tests that share a file path collide
-          if [ -n "$mpi" ]; then mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi" & two=$!; fi
+          # Every test on 3 ranks, so none assumes a single rank; meanwhile the MPI tests on
+          # 2 ranks, so tests that share a file path collide, then the 1-rank run
           mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_brief=1 & three=$!
-          ok=true; if [ -n "$mpi" ]; then wait "$two" || ok=false; fi; wait $three || ok=false; $ok
+          {
+            ok=true
+            if [ -n "$mpi" ]; then mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi" || ok=false; fi
+            if [ "$FULL" = true ]; then mpirun -n 1 ./build/src/mallard test || ok=false
+            elif [ -n "$one" ]; then mpirun -n 1 ./build/src/mallard test --gtest_filter="$one" || ok=false; fi
+            $ok
+          } & others=$!
+          ok=true; wait $others || ok=false; wait $three || ok=false; $ok
           if [ -n "$mpi" ]; then mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi"; fi
       # Every rank in the report, and no warning about a sensible placement
-      - name: Rank report (MPI)
+      - &rank-report
+        name: Rank report (MPI)
         if: matrix.backend.name == 'mpi' && (!matrix.backend.shard || matrix.backend.shard == 1)
         run: |
           dir=$(mktemp -d)
@@ -456,7 +506,8 @@ jobs:
             [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
             if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
           done
-      - name: Upload the test results
+      - &upload-junit
+        name: Upload the test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -464,13 +515,112 @@ jobs:
           path: ${{ runner.temp }}/junit
           if-no-files-found: ignore
           retention-days: 30
-      - name: Report the job's result
+      - &report-result
+        name: Report the job's result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.backend.job }}
         run: sh tools/dev/ci_status.sh ${{ job.status }}
+
+  # A sharded backend's single build: its executables, without symbols, for its test jobs
+  build:
+    needs: matrix
+    if: needs.matrix.outputs.builds != '[]'
+    runs-on: ${{ matrix.backend.os || 'ubuntu-26.04' }}
+    container: ${{ matrix.backend.container || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.matrix.outputs.builds) }}
+    name: ${{ matrix.backend.job }}
+    steps:
+      - *checkout
+      - *report-running
+      - *install-mpi
+      - *install-hdf5
+      - *install-cgns
+      - *install-ccache
+      - *install-ccache-macos
+      - *install-clang
+      - *install-cmake
+      - *restore-cache
+      - *configure
+      - *build
+      - *save-cache
+      - *download-times
+      - *test-times
+      # tar keeps the symlink build/src/mallard and the modes, which an artifact drops; the
+      # test jobs restore it at the same path, which the test binary has built in
+      - name: Package the executables
+        run: |
+          strip build/src/mallard[23]d build/test/mallard-test[23]d
+          tar -cf "$RUNNER_TEMP/build.tar" build/src/mallard build/src/mallard[23]d build/test/mallard-test[23]d build/test_times.json
+          ls -l build/src/mallard[23]d build/test/mallard-test[23]d "$RUNNER_TEMP/build.tar"
+      - name: Upload the executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.backend.name }}
+          path: ${{ runner.temp }}/build.tar
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - *report-result
+
+  # A sharded backend's test jobs, on its build. Each runs as soon as all the builds end, and
+  # also when another backend's build failed (its own then has no executables to download)
+  test:
+    needs: [matrix, build]
+    if: ${{ !cancelled() && needs.matrix.result == 'success' && needs.matrix.outputs.shards != '[]' }}
+    runs-on: ${{ matrix.backend.os || 'ubuntu-26.04' }}
+    container: ${{ matrix.backend.container || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.matrix.outputs.shards) }}
+    name: ${{ matrix.backend.job }}
+    steps:
+      # The sources hold the test data and the pages the tests read
+      - uses: actions/checkout@v4
+      - *report-running
+      - *select-tests
+      - *install-mpi
+      - *install-hdf5
+      - *install-cgns
+      - name: Download the executables
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.backend.name }}
+          path: ${{ runner.temp }}
+      - name: Unpack the executables
+        run: tar -xf "$RUNNER_TEMP/build.tar"
+      # The shard's share of the selected tests, split by the build's durations alike in every
+      # shard (tools/dev/test_split.py), becomes GTEST_FILTER of every suite run below
+      - name: Shard the suite
+        env:
+          SHARD: ${{ matrix.backend.shard }}
+          SHARDS: ${{ matrix.backend.shards }}
+          MPI: ${{ matrix.backend.mpi }}
+        run: |
+          if [ "$MPI" = true ]; then
+            env -u MALLARD_TEST_XML mpirun -n 1 ./build/src/mallard test --gtest_list_tests > "$RUNNER_TEMP/tests.txt"
+          else
+            env -u MALLARD_TEST_XML ./build/src/mallard test --gtest_list_tests > "$RUNNER_TEMP/tests.txt"
+          fi
+          split="$RUNNER_TEMP/junit/split.txt"
+          if ! filter=$(python3 tools/dev/test_split.py split build/test_times.json "$SHARDS" "$SHARD" \
+                          < "$RUNNER_TEMP/tests.txt" 2> "$split"); then
+            cat "$split" "$RUNNER_TEMP/tests.txt"
+            exit 1
+          fi
+          cat "$split"
+          echo "GTEST_FILTER=$filter" >> "$GITHUB_ENV"
+      - *test
+      - *test-mpi
+      - *rank-report
+      - *upload-junit
+      - *report-result
 
   # The tutorials (tutorials/) at reduced size: Gmsh meshes, runs on two MPI
   # ranks and their post-processing scripts, so they keep working
@@ -595,9 +745,12 @@ jobs:
     name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
     # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
-    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH)
+    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH).
+    # Only main writes: no other branch could read what a branch writes, and it would push
+    # main's objects out of the repository's 10 GB of cache
     env:
       SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     steps:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
@@ -647,8 +800,11 @@ jobs:
   # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
   # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
   # compilers, for portability errors and warnings the GCC, Clang and nvcc builds miss.
-  # sccache caches the compiles that it can (hipcc and icpx calls it does not recognize
-  # run uncached).
+  # HIP compiles through sccache, written by main only, as in the CUDA builds. SYCL compiles
+  # through ccache in depend mode, saved by main as the backends' caches are: icpx gives
+  # each compile a random id and generated integration headers, and sccache hit only the
+  # sources without kernels; depend mode hashes the sources and the dependency file, which
+  # leaves the generated headers out.
   portability:
     needs: [changelog, device]
     if: >-
@@ -663,18 +819,25 @@ jobs:
         toolchain:
           - name: hip
             image: rocm/dev-ubuntu-26.04:10.1.0-full
+            launcher: sccache
             flags: >-
               -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DCMAKE_PREFIX_PATH=/opt/rocm -DKokkos_ENABLE_HIP=ON
               -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
           - name: sycl
             image: ubuntu:26.04
             oneapi: '2026.2'
+            launcher: ccache
             flags: >-
               -DCMAKE_CXX_COMPILER=icpx -DKokkos_ENABLE_SYCL=ON
               -DKokkos_ARCH_INTEL_GEN=ON -DKokkos_ENABLE_ONEDPL=OFF
     name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     env:
       SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_DEPEND: "true"
+      CCACHE_MAXSIZE: 2G
+      LAUNCHER: ${{ matrix.toolchain.launcher }}
     steps:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
@@ -686,7 +849,7 @@ jobs:
         timeout-minutes: 25
         run: >
           sh tools/dev/apt_install.sh --no-install-recommends
-          git cmake make curl g++ gfortran libopenmpi-dev openmpi-bin ca-certificates
+          git cmake make curl g++ gfortran libopenmpi-dev openmpi-bin ca-certificates ${{ matrix.toolchain.launcher == 'ccache' && 'ccache' || '' }}
       # The oneAPI image lags the releases: the compiler from Intel's apt repository
       - name: Install oneAPI ${{ matrix.toolchain.oneapi }}
         if: matrix.toolchain.oneapi
@@ -715,18 +878,39 @@ jobs:
           STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh running
       - uses: mozilla-actions/sccache-action@v0.0.9
+        if: matrix.toolchain.launcher == 'sccache'
+      - name: Restore compiler cache
+        if: matrix.toolchain.launcher == 'ccache'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/${{ github.sha }}
+          restore-keys: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
           -DKokkos_ENABLE_SERIAL=ON ${{ matrix.toolchain.flags }}
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER="$LAUNCHER"
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_DIM=${{ matrix.dim }}
+      # As in the backends' builds, the cache main saves keeps only what this build used
       - name: Build
-        run: cmake --build build -j $(nproc) -- -k
+        run: |
+          if [ "$LAUNCHER" = ccache ]; then ccache -z > /dev/null; fi
+          start=$(date +%s)
+          cmake --build build -j "$(nproc)" -- -k
+          if [ "$LAUNCHER" = ccache ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
+          fi
       - name: Cache statistics
         if: always()
-        run: sccache --show-stats
+        run: $LAUNCHER --show-stats
+      - name: Save compiler cache
+        if: matrix.toolchain.launcher == 'ccache' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/${{ github.sha }}
       - name: Report the job's result
         if: always()
         env:
@@ -856,8 +1040,15 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, spack, fuzz]
+    needs: [changelog, device, matrix, build-and-test, build, test, tutorials, cuda, portability, spack, fuzz]
     runs-on: ubuntu-26.04
+    # The workflow's permissions, and deleting caches
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      statuses: write
+      pull-requests: read
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -878,8 +1069,12 @@ jobs:
           for r in $RESULTS; do
             case "$r" in success|skipped) ;; *) state=failure ;; esac
           done
+          # A count per result, then the only input, cut to fit a status description (140 characters)
+          desc="Jobs: $(tr ' ' '\n' <<< "$RESULTS" | sort | uniq -c | awk '{ printf "%s%d %s", (NR > 1 ? ", " : ""), $1, $2 }')"
+          only=${ONLY:+ (only $ONLY)}
+          if [ $(( ${#desc} + ${#only} )) -gt 140 ]; then only="${only:0:$(( 136 - ${#desc} ))}...)"; fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
-            -f description="Jobs: $RESULTS${ONLY:+ (only $ONLY)}" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            -f description="$desc$only" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Job results: $RESULTS"
           if [ "$GITHUB_EVENT_NAME" = push ] || [ "$GITHUB_EVENT_NAME" = schedule ]; then
             run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -897,3 +1092,18 @@ jobs:
             fi
           fi
           [ "$state" = success ]
+      # Each build's newest compiler cache on main is the one branches restore; the older ones
+      # would only push other caches out of the repository's 10 GB
+      - name: Delete main's superseded compiler caches
+        if: always() && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?ref=refs/heads/main&key=ccache/&per_page=100" \
+            --jq '.actions_caches[] | [.created_at, .id, .key] | @tsv' |
+          sort -r | awk -F'\t' '{ split($3, k, "/"); if (seen[k[2]]++) print $2, $3 }' |
+          while read -r id key; do
+            echo "Deleting $key"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" > /dev/null
+          done
