@@ -659,28 +659,131 @@ class RegionLevel {
         }
 };
 
-/** @brief The maps of the unit box onto the pieces of owned cell c: its simplices, or a curved cell's cones. */
-std::vector<cut_quadrature::Map> cell_maps(const Mesh & mesh, const uint32_t c) {
+/** @brief The determinant of the N_DIM x N_DIM matrix of columns J. */
+double determinant(const Vec3 * J) {
+    if constexpr (N_DIM == 2) return J[0][0] * J[1][1] - J[0][1] * J[1][0];
+    return J[0][0] * (J[1][1] * J[2][2] - J[1][2] * J[2][1]) - J[0][1] * (J[1][0] * J[2][2] - J[1][2] * J[2][0]) +
+           J[0][2] * (J[1][0] * J[2][1] - J[1][1] * J[2][0]);
+}
+
+/**
+ * @brief The maps of the unit box onto the pieces of curved cell c, none of
+ *        them collapsed. With o the cell's vertex average, each face's
+ *        reference element is split into triangles (a quadrilateral along a
+ *        diagonal; 2D: the edge), each with the flat triangle L through the
+ *        face's points at its corners: the straight simplex from o to o + (L -
+ *        o) / 2, mapped as simplex_maps does, and the shell from there to the
+ *        face, x = (1 - s) (o + (L - o) / 2) + s F along s, over the
+ *        quadrilaterals between the triangle's corners, the midpoints of its
+ *        sides and its centroid. The straight simplices tile the cell's
+ *        middle and the shells the rest, as the cones from o do, with the
+ *        cones' signs: negative where o lies beyond the face's plane.
+ */
+std::vector<cut_quadrature::Map> curved_cell_maps(const Mesh & mesh, const uint32_t c) {
+    using Xi = std::array<double, 2>;
+    const curved::Geometry * geometry = mesh.curved_geometry.get();
     std::vector<cut_quadrature::Map> maps;
-    if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c)) {
-        const curved::Geometry * geometry = mesh.curved_geometry.get();
-        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
-            const uint32_t f = mesh.h_face_of_cell(c, k);
-            std::array<double, 2> lo, hi;
-            geometry->box_of(f, lo, hi);
-            const double a[2] = {lo[0], N_DIM == 2 ? 0.0 : lo[1]}, b[2] = {hi[0], N_DIM == 2 ? 1.0 : hi[1]};
-            maps.push_back([geometry, c, k, f, a0 = a[0], a1 = a[1], b0 = b[0], b1 = b[1]](const cut_quadrature::Coordinates & u, Vec3 & x) {
-                double p[3] = {a0 + u[0] * (b0 - a0), N_DIM == 2 ? u[1] : a1 + u[1] * (b1 - a1), u[N_DIM - 1]};
-                double xi[2] = {0.0, 0.0};
-                const double j = geometry->face_coordinates(f, p, xi);
-                curved::Vec3 y, dx[3];
-                const double dv = geometry->cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
-                for (size_t d = 0; d < 3; d++) x[d] = d < N_DIM ? y[d] : 0.0;
-                return dv * j * (b0 - a0) * (N_DIM == 2 ? 1.0 : b1 - a1);
-            });
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+        const uint32_t f = mesh.h_face_of_cell(c, k);
+        std::vector<std::array<Xi, 3>> triangles;
+        if constexpr (N_DIM == 2) {
+            triangles.push_back({Xi{-1.0, 0.0}, Xi{1.0, 0.0}, Xi{0.0, 0.0}});
+        } else if (mesh.h_n_nodes_of_face(f) == 3) {
+            triangles.push_back({Xi{0.0, 0.0}, Xi{1.0, 0.0}, Xi{0.0, 1.0}});
+        } else {
+            triangles.push_back({Xi{-1.0, -1.0}, Xi{1.0, -1.0}, Xi{1.0, 1.0}});
+            triangles.push_back({Xi{-1.0, -1.0}, Xi{1.0, 1.0}, Xi{-1.0, 1.0}});
         }
-        return maps;
+        for (const auto & xi : triangles) {
+            curved::Vec3 o, corners[N_DIM], dx[3];
+            geometry->cone_eval(c, k, xi[0].data(), 0.0, o, dx);
+            for (size_t i = 0; i < N_DIM; i++) geometry->cone_eval(c, k, xi[i].data(), 1.0, corners[i], dx);
+            // The inner corners, and the derivatives of the inner triangle along the face's reference coordinates
+            std::array<Vec3, N_DIM> inner;
+            overlap::Simplex s;
+            for (size_t d = 0; d < N_DIM; d++) s[0][d] = o[d];
+            for (size_t i = 0; i < N_DIM; i++) {
+                for (size_t d = 0; d < 3; d++) inner[i][d] = 0.5 * (o[d] + corners[i][d]);
+                for (size_t d = 0; d < N_DIM; d++) s[i + 1][d] = inner[i][d];
+            }
+            // d inner / d xi from its corners: the columns of [xi_1 - xi_0, xi_2 - xi_0] invert to the barycentric
+            std::array<Vec3, N_DIM - 1> d_inner{};
+            if constexpr (N_DIM == 2) {
+                for (size_t d = 0; d < 3; d++) d_inner[0][d] = (inner[1][d] - inner[0][d]) / (xi[1][0] - xi[0][0]);
+            } else {
+                const double a = xi[1][0] - xi[0][0], b = xi[2][0] - xi[0][0], e = xi[1][1] - xi[0][1], g = xi[2][1] - xi[0][1];
+                const double det = a * g - b * e;
+                for (size_t d = 0; d < 3; d++) {
+                    const double t1 = inner[1][d] - inner[0][d], t2 = inner[2][d] - inner[0][d];
+                    d_inner[0][d] = (g * t1 - e * t2) / det;
+                    d_inner[N_DIM - 2][d] = (a * t2 - b * t1) / det;
+                }
+            }
+            // The cone's orientation: the sign of its volume against that of the determinant of its derivatives
+            Xi centroid{0.0, 0.0};
+            Vec3 inner_center{0.0, 0.0, 0.0};
+            for (size_t i = 0; i < N_DIM; i++) {
+                for (size_t j = 0; j < 2; j++) centroid[j] += xi[i][j] / N_DIM;
+                for (size_t d = 0; d < 3; d++) inner_center[d] += (inner[i][d] - o[d]) / N_DIM;
+            }
+            curved::Vec3 y, dy[3];
+            const double cone = geometry->cone_eval(c, k, centroid.data(), 1.0, y, dy);
+            const double orientation = (cone > 0.0) == (determinant(dy) > 0.0) ? 1.0 : -1.0;
+            Vec3 columns[3];
+            for (size_t j = 0; j + 1 < N_DIM; j++) columns[j] = d_inner[j];
+            columns[N_DIM - 1] = inner_center;
+            const double sign = orientation * determinant(columns) > 0.0 ? 1.0 : -1.0;
+            for (cut_quadrature::Map & map : cut_quadrature::simplex_maps(s)) {
+                maps.push_back([map = std::move(map), sign](const cut_quadrature::Coordinates & u, Vec3 & x) {
+                    return sign * map(u, x);
+                });
+            }
+            for (size_t i = 0; i < (N_DIM == 2 ? 1u : 3u); i++) {
+                // The face coordinates at the corners of the piece's quadrilateral (2D: the whole edge)
+                std::array<Xi, 4> q;
+                if constexpr (N_DIM == 2) {
+                    q = {xi[0], xi[1], xi[0], xi[1]};
+                } else {
+                    const Xi & v = xi[i], & next = xi[(i + 1) % 3], & prev = xi[(i + 2) % 3];
+                    q[0] = v;
+                    q[1] = {0.5 * (v[0] + next[0]), 0.5 * (v[1] + next[1])};
+                    q[2] = {0.5 * (v[0] + prev[0]), 0.5 * (v[1] + prev[1])};
+                    q[3] = {(xi[0][0] + xi[1][0] + xi[2][0]) / 3.0, (xi[0][1] + xi[1][1] + xi[2][1]) / 3.0};
+                }
+                maps.push_back([geometry, c, k, q, xi0 = xi[0], inner0 = inner[0], d_inner, orientation](const cut_quadrature::Coordinates & u,
+                                                                                          Vec3 & x) {
+                    const double v0 = u[0], v1 = N_DIM == 2 ? 0.0 : u[1], t = u[N_DIM - 1];
+                    double p[2], dp[2][2];
+                    for (size_t j = 0; j < 2; j++) {
+                        p[j] = (1.0 - v0) * (1.0 - v1) * q[0][j] + v0 * (1.0 - v1) * q[1][j] + (1.0 - v0) * v1 * q[2][j] +
+                               v0 * v1 * q[3][j];
+                        dp[0][j] = (1.0 - v1) * (q[1][j] - q[0][j]) + v1 * (q[3][j] - q[2][j]);
+                        dp[1][j] = (1.0 - v0) * (q[2][j] - q[0][j]) + v0 * (q[3][j] - q[1][j]);
+                    }
+                    curved::Vec3 F, dF[3];
+                    geometry->cone_eval(c, k, p, 1.0, F, dF);
+                    Vec3 I = inner0, J[3];
+                    for (size_t d = 0; d < 3; d++) {
+                        for (size_t j = 0; j + 1 < N_DIM; j++) I[d] += (p[j] - xi0[j]) * d_inner[j][d];
+                        x[d] = (1.0 - t) * I[d] + t * F[d];
+                        for (size_t a = 0; a + 1 < N_DIM; a++) {
+                            J[a][d] = 0.0;
+                            for (size_t j = 0; j + 1 < N_DIM; j++) J[a][d] += ((1.0 - t) * d_inner[j][d] + t * dF[j][d]) * dp[a][j];
+                        }
+                        J[N_DIM - 1][d] = F[d] - I[d];
+                    }
+                    return orientation * determinant(J);
+                });
+            }
+        }
     }
+    return maps;
+}
+
+/** @brief The maps of the unit box onto the pieces of owned cell c: its simplices, or curved_cell_maps. */
+std::vector<cut_quadrature::Map> cell_maps(const Mesh & mesh, const uint32_t c) {
+    if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c)) return curved_cell_maps(mesh, c);
+    std::vector<cut_quadrature::Map> maps;
     const std::vector<overlap::Point> nodes = overlap::cell_nodes(mesh, c);
     const overlap::Region region = overlap::region(nodes);
     if (nodes.size() == (1u << N_DIM) && region.pieces.size() == 1) {
@@ -725,8 +828,9 @@ VolumeQuadrature volume_quadrature(const Mesh & mesh, const region::Region & reg
     const double edge = region.edge();
     const bool bounded = region.bounded();
     const std::vector<double> fractions = bounded && level.shapes() ? std::vector<double>{} : region::cell_fractions(mesh, region);
-    // Gauss points per interval: few for the points kept, more for the moments they are fitted to
-    const std::vector<uint32_t> rules = {degree / 2 + 2, degree / 2 + 8};
+    // Gauss points per interval: few for the points kept, more for the moments they are fitted to; curved cells'
+    // shells are not polynomial maps, and reach round-off on coarse curved walls with two more
+    const std::vector<uint32_t> rules = {degree / 2 + 2, degree / 2 + 8}, curved_rules = {degree / 2 + 2, degree / 2 + 10};
     std::vector<double> local;  // per sample: global cell, index in its cell, weight
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
         Vec3 center{0.0, 0.0, 0.0};
@@ -760,11 +864,13 @@ VolumeQuadrature volume_quadrature(const Mesh & mesh, const region::Region & reg
             const double s = 0.5 - phi / edge;
             return s * s * (3.0 - 2.0 * s);
         };
+        const bool curved = mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c);
         for (const auto & map : cell_maps(mesh, c)) {
             const std::vector<double> shifts = edge > 0.0 ? std::vector<double>{-0.5 * edge, 0.5 * edge} : std::vector<double>{0.0};
             for (const double shift : shifts) {
                 part.clear();
-                cut_quadrature::integrate(map, [&](const Vec3 & x) { return level(c, x) + shift; }, bounded, rules, part);
+                cut_quadrature::integrate(map, [&](const Vec3 & x) { return level(c, x) + shift; }, bounded,
+                                          curved ? curved_rules : rules, part);
                 for (size_t r = 0; r < 2; r++) {
                     for (cut_quadrature::Point p : part[r]) {
                         if (edge > 0.0) {

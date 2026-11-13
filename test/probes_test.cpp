@@ -38,7 +38,11 @@
 #include "file_format.h"
 #include "input.h"
 #include "mechanism.h"
+#include "curved.h"
+#include "mesh.h"
+#include "probe_cells.h"
 #include "probe_geometry.h"
+#include "region.h"
 #include "probe_spectra.h"
 #include "region_input.h"
 #include "region_mesh.h"
@@ -2279,6 +2283,93 @@ TEST(ProbesTest, PointSampledRegionsIntegrateTheReconstructionOverTheCellsTheyCu
     EXPECT_NEAR(r.at(measure), volume, tol * volume);
     EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
     EXPECT_NEAR(r.at("integral_P"), volume, tol * volume);
+}
+
+TEST(ProbesTest, PointSampledRegionsIntegrateToRoundOffInCurvedCellsTheyCutAtTheirCenters) {
+    // A ball about the center of an annulus (3D: a spherical shell) between curved walls, its surface through the
+    // vertex average of a cell at the inner wall and near those of its neighbors: its part in the domain, the
+    // shell between the inner wall and the ball, has a quadratic's integral to round-off, on quadrilaterals and
+    // triangles (3D: hexahedra and prisms)
+    const double r_in = 1.0;
+    for (const bool simplices : {false, true}) {
+        std::vector<std::array<rtype, N_DIM>> nodes;
+        std::vector<std::vector<uint32_t>> cells;
+        std::vector<Mesh::BoundaryFace> faces;
+#if N_DIM == 2
+        const uint32_t n_r = 3, n_t = 24;
+        auto id = [&](const uint32_t i, const uint32_t j) { return j * n_t + i % n_t; };
+        for (uint32_t j = 0; j <= n_r; j++) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                const double r = 1.0 + 0.384 * j / n_r, t = 2.0 * std::numbers::pi * i / n_t;
+                nodes.push_back({rtype(r * std::cos(t)), rtype(r * std::sin(t))});
+            }
+        }
+        for (uint32_t j = 0; j < n_r; j++) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                const uint32_t q[4] = {id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)};
+                if (!simplices) {
+                    cells.push_back({q[0], q[1], q[2], q[3]});
+                } else {
+                    cells.push_back({q[0], q[1], q[2]});
+                    cells.push_back({q[0], q[2], q[3]});
+                }
+            }
+        }
+        for (uint32_t i = 0; i < n_t; i++) {
+            faces.push_back({{id(i, 0), id(i + 1, 0)}, "inner"});
+            faces.push_back({{id(i, n_r), id(i + 1, n_r)}, "outer"});
+        }
+        const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                                   "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+#else
+        const Shell s = shell(4, 2, simplices);
+        nodes = s.nodes;
+        cells = s.cells;
+        faces = s.faces;
+        const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\n"
+                                   "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\ntype = \"sphere\"\nfilled = false\n"
+                                   "center = [0.0, 0.0, 0.0]\nradius = 1.5\n";
+#endif
+        Mesh mesh;
+        mesh.init_from_connectivity(nodes, cells, faces);
+        mesh.apply_curved(curved::surfaces_of_mesh(mesh, parse_toml("[mesh]\n" + shapes)));
+        double r = 0.0;
+        for (uint32_t c = 0; c < mesh.n_owned() && r == 0.0; c++) {
+            if (!mesh.curved_geometry->cell_is_curved(c)) continue;
+            double o[3] = {0.0, 0.0, 0.0}, lowest = std::numeric_limits<double>::infinity();
+            const uint32_t n = mesh.h_n_nodes_of_cell(c);
+            for (uint32_t k = 0; k < n; k++) {
+                double rk = 0.0;
+                for (size_t d = 0; d < N_DIM; d++) {
+                    const double x = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
+                    o[d] += x / n;
+                    rk += x * x;
+                }
+                lowest = std::min(lowest, std::sqrt(rk));
+            }
+            if (lowest < r_in + 1e-3) r = std::sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+        }
+        ASSERT_GT(r, r_in);
+        std::ostringstream ball;
+        ball.precision(17);
+        ball << "r = {type = \"sphere\", center = " << numbers3("0", "0", "0") << ", radius = " << r << "}";
+        const region::Region region = region::read(parse_toml(ball.str()).at("r"), "r");
+        const probe::VolumeQuadrature q = probe::volume_quadrature(mesh, region, 2, false);
+        double volume = 0.0, integral = 0.0;
+        for (size_t i = 0; i < q.weights.size(); i++) {
+            const auto & x = q.points.points[q.points.gathered_row[i]];
+            volume += q.weights[i];
+            integral += q.weights[i] * quadratic(x[0], x[1]);
+        }
+        const double pi = std::numbers::pi;
+        const double exact = N_DIM == 2 ? pi * (r * r - r_in * r_in) : 4.0 / 3.0 * pi * (std::pow(r, 3) - std::pow(r_in, 3));
+        const double second = N_DIM == 2 ? pi * (std::pow(r, 4) - std::pow(r_in, 4)) / 4.0
+                                         : 4.0 * pi * (std::pow(r, 5) - std::pow(r_in, 5)) / 15.0;
+        const double tol = rounding_or(1e-12);
+        const char * kind = simplices ? "simplices" : "quadrilaterals or hexahedra";
+        EXPECT_NEAR(volume, exact, tol * exact) << kind;
+        EXPECT_NEAR(integral, 2.0 * exact + (0.25 - 0.1) * second, tol * integral) << kind;
+    }
 }
 
 TEST(ProbesTest, GridsInRegionsSampleAsPointProbesAtTheirNodes) {

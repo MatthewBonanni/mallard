@@ -480,9 +480,11 @@ cell averages: a cell entirely inside is one sample of its cell value weighing
 its volume (the integral of its reconstruction polynomial), and a cell the
 region's surface cuts has quadrature points over its part inside, high-order
 for curved surfaces and fitted to a few points of the reconstruction's
-degree. `integral` is then exact for the reconstruction polynomials, and the
-third column is the volume of that quadrature: the region's part in the
-domain to round-off for a smooth surface.
+degree. On a mesh with [curved boundaries](meshes.md#curved-boundaries), the
+cells at curved walls are integrated over their curved shapes. `integral` is
+then exact for the reconstruction polynomials, and the third column is the
+volume of that quadrature: the region's part in the domain to round-off for a
+smooth surface.
 
 ### Grids in regions
 
