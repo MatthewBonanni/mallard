@@ -240,18 +240,18 @@ memory (`/usr/bin/time -l`), the best of 3 (2D) or 2 (3D) runs:
 
 | Case | Files | `post derive` | `post derive`, TENO cache | `pvbatch` |
 |---|---|---|---|---|
-| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 6.2 s, 1.1 GB | 0.47 s, 1.0 GB | 3.0 s, 0.21 GB |
-|  | 11 | 6.5 s, 1.1 GB | 0.74 s, 1.0 GB | 3.8 s, 0.23 GB |
-| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 37 s, 9.6 GB | 5.0 s, 9.5 GB | 3.7 s, 0.32 GB |
-|  | 11 | 40 s, 9.6 GB | 8.0 s, 9.5 GB | 6.4 s, 0.37 GB |
+| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 4.6 s, 1.1 GB | 0.64 s, 1.0 GB | 3.8 s, 0.21 GB |
+|  | 11 | 5.0 s, 1.1 GB | 1.0 s, 1.0 GB | 4.4 s, 0.24 GB |
+| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 32 s, 9.6 GB | 4.5 s, 9.5 GB | 3.3 s, 0.32 GB |
+|  | 11 | 33 s, 9.6 GB | 7.2 s, 9.5 GB | 5.8 s, 0.37 GB |
 
-- **Setup dominates.** Without a cache, the TENO setup is about 6 s in 2D and
-  35 s in 3D, against ParaView's 3 s start (Python, the reader and the
-  pipeline). Each further snapshot costs about 0.03 s in 2D and 0.3 s in 3D
-  for `post derive` (the TENO gradient pass), 0.08 s and 0.26 s for `pvbatch`:
-  in 2D `post derive` is faster from about 70 snapshots on, in 3D not at all.
+- **Setup dominates.** Without a cache, the TENO setup is about 4 s in 2D and
+  28 s in 3D, against ParaView's 3-4 s start (Python, the reader and the
+  pipeline). Each further snapshot costs about 0.04 s in 2D and 0.27 s in 3D
+  for `post derive` (the TENO gradient pass), 0.06 s and 0.24 s for `pvbatch`:
+  in 2D `post derive` is faster from about 40 snapshots on, in 3D not at all.
 - **With the run's cache.** Reading the TENO cache (0.76 GB in 2D, 8.4 GB in
-  3D) instead of computing it makes `post derive` 6 and 5 times faster than
+  3D) instead of computing it makes `post derive` 6 and 4 times faster than
   `pvbatch` in 2D; in 3D it is slower by a quarter to a third.
 - **Memory** is the TENO tables' (about 32 KB per hexahedron at order 5):
   5 times ParaView's in 2D, 30 times in 3D.
