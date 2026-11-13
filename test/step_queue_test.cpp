@@ -596,6 +596,18 @@ TEST(StepQueueTest, RowsOfRunsWithBoundariesOfTRunAhead) {
     expect_queue_invariant("boundary_rows", c);
 }
 
+TEST(StepQueueTest, BoundariesOfTSeeTheHostsStageTimes) {
+    // Stage times t + c dt with c not a power of two, formed on the device in captured steps
+    for (const std::string integrator : {"SSPRK54", "CK45"}) {
+        Case c;
+        c.run = "n_steps = 8\ncfl = 0.5\n";
+        c.extra = "check_interval = 1\n";
+        c.integrator = integrator;
+        c.right = "type = \"outlet_pressure\"\np = \"1.0 + 0.5 * sin(30 * t)\"\n";
+        expect_queue_invariant("stage_times_" + integrator, c);
+    }
+}
+
 TEST(StepQueueTest, BoundaryOfTOutOfRangeStopsAtTheHostsRow) {
     // The outlet pressure turns negative between rows: every depth stops with its error at the next row
     Case c;
