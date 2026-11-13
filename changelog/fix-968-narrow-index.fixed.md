@@ -1,0 +1,1 @@
+- The build rejects Kokkos View accesses whose indices are all narrower than `int`, which Kokkos 5 computes in a wrapping 8- or 16-bit offset; the periodic shift rows that did so now index with 32 bits (no results change) (#968).
