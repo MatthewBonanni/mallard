@@ -41,10 +41,8 @@ namespace {
 struct NodeCells {
     std::vector<uint32_t> offsets, cells;
 
-    NodeCells(const std::vector<std::vector<uint32_t>> & cell_nodes, size_t n_nodes) : offsets(n_nodes + 1, 0) {
-        for (const auto & cell : cell_nodes) {
-            for (uint32_t v : cell) offsets[v + 1]++;
-        }
+    NodeCells(const CellNodes & cell_nodes, size_t n_nodes) : offsets(n_nodes + 1, 0) {
+        for (uint32_t v : cell_nodes.nodes) offsets[v + 1]++;
         std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
         cells.resize(offsets.back());
         std::vector<uint32_t> fill(offsets.begin(), offsets.end() - 1);
@@ -60,7 +58,7 @@ struct NodeCells {
  * per cell of those blocks; order is new -> old, position old -> new.
  */
 double lines_per_cell(const std::vector<uint32_t> & order, const std::vector<uint32_t> & position,
-                      const std::vector<std::vector<uint32_t>> & cells, const NodeCells & around, uint32_t n,
+                      const CellNodes & cells, const NodeCells & around, uint32_t n,
                       uint32_t layers) {
     constexpr uint32_t block = 256, stride = 8;
     constexpr uint32_t line = static_cast<uint32_t>(128 / sizeof(rtype));
@@ -100,7 +98,7 @@ double lines_per_cell(const std::vector<uint32_t> & order, const std::vector<uin
 } // namespace
 
 LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const std::vector<std::vector<uint32_t>> & cells, const std::vector<uint32_t> & group_ends) {
+                             const CellNodes & cells, const std::vector<uint32_t> & group_ends) {
     LocalityOrder result;
     std::vector<uint32_t> & order = result.order;
     order.resize(cells.size());

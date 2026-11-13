@@ -44,8 +44,8 @@ struct Report {
     uint64_t n_partial = 0;      // target cells the source mesh covers only in part
     uint64_t n_nearest = 0;      // target cells it misses, which take the nearest source cell's average
     double max_uncovered = 0.0;  // largest uncovered fraction of a target cell
-    uint64_t n_reduced = 0;      // source cells whose stencils allowed only a lower degree
-    uint64_t n_limited = 0;      // source cells whose polynomials the limiter scaled down
+    uint64_t n_reduced = 0;      // fitted source cells whose stencils allowed only a lower degree
+    uint64_t n_limited = 0;      // fitted source cells whose polynomials the limiter scaled down
     std::vector<double> source_total, target_total;  // integral of each variable
     std::vector<double> source_magnitude;            // integral of its magnitude
 };
@@ -62,7 +62,9 @@ std::shared_ptr<Mesh> source_mesh(const Input & input, uint8_t degree);
 
 /**
  * @brief Cell averages on a source mesh (owned cells and halo), as
- *        polynomials of the cells the rank owns.
+ *        polynomials of the cells the rank owns. A cell's polynomial is
+ *        fitted the first time a target cell cuts it: a source cell wholly
+ *        inside one target cell contributes its average and measure alone.
  */
 class Source {
     public:
@@ -85,14 +87,13 @@ class Source {
          */
         std::vector<std::vector<double>> to(const Mesh & target, uint32_t n, Report & report) const;
 
-        /** @brief Value of variable v of owned source cell c's polynomial at x. */
-        double evaluate(uint32_t c, uint32_t v, const overlap::Point & x) const;
-
     private:
         /** @brief Weighted measure and integrals of every variable over simplices inside owned cell c. */
         void integrate(uint32_t c, const std::vector<overlap::Simplex> & simplices, double * out) const;
-        void fit(uint32_t c, const std::vector<std::vector<double>> & values);
-        void limit(uint32_t c, const std::vector<std::vector<double>> & values, const std::vector<int> & groups);
+        /** @brief Fits the polynomials of the owned cells marked in need that have none yet. */
+        void fit(const std::vector<uint8_t> & need) const;
+        void fit(uint32_t c) const;
+        void limit(uint32_t c) const;
         void monomials(uint32_t c, const overlap::Point & x, double * phi) const;
 
         std::shared_ptr<const Mesh> mesh;
@@ -103,12 +104,14 @@ class Source {
         std::vector<double> size;             // [local cell] measure^(1/N_DIM)
         std::vector<double> measure;          // [local cell] weighted measure
         std::vector<double> moments;          // [local cell][n_max] means of ((x - center) / size)^l
-        std::vector<uint8_t> degree;          // [owned cell]
-        std::vector<double> mean;             // [owned cell][var]
-        std::vector<double> coefficients;     // [owned cell][var][n_max], constant slot unused
+        std::vector<std::vector<double>> values;  // [var][local cell] averages
+        std::vector<int> groups;                  // [var] limiter group
+        mutable std::vector<uint8_t> fitted;      // [owned cell]
+        mutable std::vector<uint8_t> degree;      // [owned cell], once fitted
+        mutable std::vector<double> coefficients;  // [owned cell][var][n_max], constant slot unused
         BoxTree tree;
         std::vector<overlap::Region> regions;  // [owned cell]
-        uint64_t n_reduced = 0, n_limited = 0;
+        mutable uint64_t n_reduced = 0, n_limited = 0;
 };
 
 /** @brief The source of cell averages [variable][global cell] in source's global cell order. */
