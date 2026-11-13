@@ -92,6 +92,10 @@ cmake --build build -j
   - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
     calls, no allocation, no I/O. Functions called from kernels are
     `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
+  - A View of rank 2 or more holds at most 2^31 entries: Kokkos computes its offset
+    in the common type of the indices, which can be `int`, and every allocation is
+    checked (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
+    with 64 bits, as `teno::PackedStencils` does.
   - Data lives in `Kokkos::View`s in the default memory space; copy to the host
     with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
   - Results must not depend on the backend, thread count or rank count: reductions

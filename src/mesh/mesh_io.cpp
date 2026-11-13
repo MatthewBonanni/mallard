@@ -26,6 +26,7 @@
 #include "common_io.h"
 #include "log.h"
 #include "periodic.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -71,6 +72,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                                   const std::string & unlisted_zone, const PeriodicNodes & classes) {
     n_nodes = static_cast<uint32_t>(nodes.size());
     n_cells = static_cast<uint32_t>(input_cells.size());
+    view_entries::set_cells(n_cells);
     // A mesh without global ids is whole: its input order becomes the global order
     std::vector<std::vector<uint32_t>> ordered_cells;
     if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
