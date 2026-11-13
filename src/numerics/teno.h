@@ -280,11 +280,16 @@ T ipow(const T x, const uint8_t n) {
  */
 template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, T * phi) {
-    const uint8_t nk = n_dof(r);
-    for (uint8_t l = 0; l < nk; l++) {
-        uint8_t a, b;
-        exponents(l, a, b);
-        phi[l] = ipow(xi, a) * ipow(eta, b);
+    // Powers by repeated multiplication, as ipow forms them
+    T px[MAX_DEGREE + 1], py[MAX_DEGREE + 1];
+    px[0] = py[0] = T(1);
+    for (uint8_t k = 1; k <= r; k++) {
+        px[k] = px[k - 1] * xi;
+        py[k] = py[k - 1] * eta;
+    }
+    uint8_t l = 0;
+    for (uint8_t d = 1; d <= r; d++) {
+        for (uint8_t b = 0; b <= d; b++) phi[l++] = px[d - b] * py[b];
     }
 }
 
@@ -308,13 +313,18 @@ void monomial_gradients(const uint8_t r, const T xi, const T eta, T * d_xi, T * 
  */
 template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) {
+    // Powers by repeated multiplication, as ipow forms them
+    T px[MAX_DEGREE + 1], py[MAX_DEGREE + 1], pz[MAX_DEGREE + 1];
+    px[0] = py[0] = pz[0] = T(1);
+    for (uint8_t k = 1; k <= r; k++) {
+        px[k] = px[k - 1] * xi;
+        py[k] = py[k - 1] * eta;
+        pz[k] = pz[k - 1] * zeta;
+    }
     uint8_t l = 0;
     for (uint8_t d = 1; d <= r; d++) {
         for (int i = d; i >= 0; i--) {
-            for (int j = d - i; j >= 0; j--) {
-                phi[l++] = ipow(xi, static_cast<uint8_t>(i)) * ipow(eta, static_cast<uint8_t>(j)) *
-                           ipow(zeta, static_cast<uint8_t>(d - i - j));
-            }
+            for (int j = d - i; j >= 0; j--) phi[l++] = px[i] * py[j] * pz[d - i - j];
         }
     }
 }

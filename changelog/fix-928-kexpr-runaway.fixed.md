@@ -1,0 +1,1 @@
+- When several input expressions stop at the iteration limit together, the error now names the same one on every run, rather than one that depended on thread scheduling.

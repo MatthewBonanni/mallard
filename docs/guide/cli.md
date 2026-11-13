@@ -914,7 +914,8 @@ Options:
   -i FILE                The input file of the case: its mesh, physics,
                          numerics, [regions] and [[probes]]. Default: the input
                          in the run block of FILE (Mallard 0.10 and later record
-                         it resolved).
+                         it resolved), whose mesh file, mechanism and TENO
+                         cache_file resolve from the run's directory.
   --probe NAMES          The [[probes]] of the input to extract, by name,
                          separated by commas (--probe wake,box). Default: every
                          one, unless --region or --snapshot is given.
@@ -1008,7 +1009,8 @@ Options:
   -i FILE                The input file of the case: its mesh, physics, numerics
                          and [output] reference and mixture. Default: the input
                          in the run block of FILE (Mallard 0.10 and later record
-                         it resolved).
+                         it resolved), whose mesh file, mechanism and TENO
+                         cache_file resolve from the run's directory.
   --reference TABLE      The [output] reference of CP, as an inline TOML table
                          ('{rho = 1.2, u = [30, 0], p = 101325}'), in place of
                          the input's. Default: the input's.
@@ -1152,7 +1154,9 @@ Options:
                          derive. Default: the input's.
   -i FILE                The input file of the case: its mesh, physics and
                          numerics. Default: the input in the run block of FILE
-                         (Mallard 0.10 and later record it resolved).
+                         (Mallard 0.10 and later record it resolved), whose mesh
+                         file, mechanism and TENO cache_file resolve from the
+                         run's directory.
   --snapshot vtkhdf|vtu  The format of the snapshot of the averages:
                          OUTPUT/NAME.vtkhdf, or a .vtu file with a .pvd index.
                          Default: vtkhdf, or vtu in builds without HDF5.

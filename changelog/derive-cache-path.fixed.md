@@ -1,0 +1,1 @@
+- `mallard post extract`, `post derive` and `post average`, setting the case up from a file's run block, resolve its relative mesh file, mechanism and TENO `cache_file` from the run's directory instead of the working directory, so that started elsewhere they read the run's TENO cache instead of recomputing it (#916).

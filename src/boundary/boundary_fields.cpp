@@ -450,6 +450,7 @@ void TimedBoundaryFields::finish() {
     program_list = all;
     error_face = Kokkos::View<int32_t>("timed_error_face");
     error = Kokkos::View<double[3]>("timed_error");
+    launch_error = Kokkos::View<LaunchError>("timed_launch_error");
 }
 
 void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & all) {
@@ -516,7 +517,34 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
 
 namespace {
 
-struct TimedFieldsFunctor {
+/**
+ * @brief Reduces a launch's errors to the lowest index, the same on every schedule, and keeps it unless an earlier
+ *        launch's is kept: 1 + index in `error`, its time, value and kind in `error_value`.
+ */
+struct FirstError {
+    using value_type = LaunchError;
+    Kokkos::View<int32_t> error;
+    Kokkos::View<double[3]> error_value;
+
+    KOKKOS_INLINE_FUNCTION void init(value_type & e) const { e.index = LaunchError::NONE; }
+    KOKKOS_INLINE_FUNCTION void join(value_type & e, const value_type & other) const {
+        if (other.index < e.index) e = other;
+    }
+    KOKKOS_INLINE_FUNCTION void final(value_type & e) const {
+        if (e.index == LaunchError::NONE || error() != 0) return;
+        error() = static_cast<int32_t>(e.index) + 1;
+        error_value(0) = e.t;
+        error_value(1) = e.v;
+        error_value(2) = e.kind;
+    }
+    /** @brief The first error of an index stands. */
+    static KOKKOS_INLINE_FUNCTION void fail(value_type & e, const uint32_t index, const int kind, const double t,
+                                            const double v) {
+        if (index < e.index) e = {index, kind, t, v};
+    }
+};
+
+struct TimedFieldsFunctor : FirstError {
     Kokkos::View<uint32_t *> face_bc;
     Kokkos::View<uint32_t *> face_set;
     Kokkos::View<double *[3]> face_x;
@@ -531,19 +559,12 @@ struct TimedFieldsFunctor {
     Kokkos::View<rtype> time;
     Kokkos::View<BoundaryCondition *> bcs;
     TimedBoundaryFields::Gas gas;
-    Kokkos::View<int32_t> error_face;
-    Kokkos::View<double[3]> error;
 
-    KOKKOS_INLINE_FUNCTION void fail(const uint32_t k, const int slot, const double t, const double v) const {
-        if (Kokkos::atomic_compare_exchange(&error_face(), 0, static_cast<int32_t>(k) + 1) == 0) {
-            error(0) = t;
-            error(1) = v;
-            error(2) = slot;
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, LaunchError & found) const {
         constexpr uint8_t E = N_DIM + 1;
+        const auto fail = [&](const uint32_t face, const int slot, const double t, const double v) {
+            FirstError::fail(found, face, slot, t, v);
+        };
         const uint32_t i_bc = face_bc(k), s = face_set(k);
         const double t = static_cast<double>(time());
         const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), t};
@@ -676,7 +697,7 @@ struct TimedFieldsFunctor {
     }
 };
 
-struct InletTargetsFunctor {
+struct InletTargetsFunctor : FirstError {
     Kokkos::View<int32_t *> chars;
     Kokkos::View<double *[3]> x;
     Kokkos::View<uint32_t *[N_DIM]> slots;
@@ -684,11 +705,9 @@ struct InletTargetsFunctor {
     Kokkos::View<double *[N_DIM]> scale;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype *[N_DIM]> target;
-    Kokkos::View<int32_t> error_face;
-    Kokkos::View<double[2]> error;
     Kokkos::View<rtype> time;
 
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, LaunchError & e) const {
         const double t = static_cast<double>(time());
         const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), t};
         const kexpr::ArrayVariables variables{vars};
@@ -705,10 +724,7 @@ struct InletTargetsFunctor {
                 factor[i] = norm > 0.0 ? factor[i] / norm : 0.0;
                 into += factor[i] * scale(k, i);
             }
-            if (!(into > 0.0) && Kokkos::atomic_compare_exchange(&error_face(), 0, static_cast<int32_t>(k) + 1) == 0) {
-                error(0) = t;
-                error(1) = into;
-            }
+            if (!(into > 0.0)) fail(e, k, 0, t, into);
         }
         for (uint8_t d = 0; d < N_DIM; d++) {
             target(chars(k), d) = static_cast<rtype>(programs(slots(k, d), variables) * factor[d]);
@@ -716,18 +732,8 @@ struct InletTargetsFunctor {
     }
 };
 
-/** @brief Record the first error of the mass-flow profiles: 1 + index (a face or a profile), time, value, kind. */
-KOKKOS_INLINE_FUNCTION void profile_fail(const Kokkos::View<int32_t> & error, const Kokkos::View<double[3]> & value,
-                                         const uint32_t index, const double t, const double v, const int kind) {
-    if (Kokkos::atomic_compare_exchange(&error(), 0, static_cast<int32_t>(index) + 1) == 0) {
-        value(0) = t;
-        value(1) = v;
-        value(2) = kind;
-    }
-}
-
 /** @brief Partial sums of profile x measure over a chunk of an inlet's faces, in order. */
-struct ProfileChunkFunctor {
+struct ProfileChunkFunctor : FirstError {
     Kokkos::View<uint32_t *[3]> chunk_range;
     Kokkos::View<uint32_t *> program;
     Kokkos::View<double *[3]> x;
@@ -735,17 +741,15 @@ struct ProfileChunkFunctor {
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
     Kokkos::View<double *> chunk_sum;
-    Kokkos::View<int32_t> error;
-    Kokkos::View<double[3]> error_value;
 
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c) const {
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, LaunchError & e) const {
         const double t = static_cast<double>(time());
         const uint32_t p = program(chunk_range(c, 0));
         double sum = 0.0;
         for (uint32_t f = chunk_range(c, 1); f < chunk_range(c, 2); f++) {
             const double vars[4] = {x(f, 0), x(f, 1), x(f, 2), t};
             const double v = programs(p, kexpr::ArrayVariables{vars});
-            if (!(v >= 0.0)) profile_fail(error, error_value, f, t, v, TimedBoundaryFields::NEGATIVE_PROFILE);
+            if (!(v >= 0.0)) fail(e, f, TimedBoundaryFields::NEGATIVE_PROFILE, t, v);
             sum += v * measure(f);
         }
         chunk_sum(c) = sum;
@@ -753,24 +757,22 @@ struct ProfileChunkFunctor {
 };
 
 /** @brief mdot(t) over the integral of each profile, from its chunks in order. */
-struct ProfileScaleFunctor {
+struct ProfileScaleFunctor : FirstError {
     Kokkos::View<uint32_t *> chunks;
     Kokkos::View<double *> chunk_sum;
     Kokkos::View<uint32_t *> mdot;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
     Kokkos::View<double *> scale;
-    Kokkos::View<int32_t> error;
-    Kokkos::View<double[3]> error_value;
 
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t p) const {
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t p, LaunchError & e) const {
         const double t = static_cast<double>(time());
         double area = 0.0;
         for (uint32_t c = chunks(p); c < chunks(p + 1); c++) area += chunk_sum(c);
         const double vars[4] = {0.0, 0.0, 0.0, t};
         const double m = programs(mdot(p), kexpr::ArrayVariables{vars});
-        if (!(area > 0.0)) profile_fail(error, error_value, p, t, area, TimedBoundaryFields::ZERO_INTEGRAL);
-        if (!(m >= 0.0)) profile_fail(error, error_value, p, t, m, TimedBoundaryFields::NEGATIVE_MDOT);
+        if (!(area > 0.0)) fail(e, p, TimedBoundaryFields::ZERO_INTEGRAL, t, area);
+        if (!(m >= 0.0)) fail(e, p, TimedBoundaryFields::NEGATIVE_MDOT, t, m);
         scale(p) = area > 0.0 && m >= 0.0 ? m / area : 0.0;
     }
 };
@@ -799,12 +801,15 @@ struct ProfileFluxFunctor {
 void TimedBoundaryFields::apply_profiles(const Kokkos::View<rtype> & time,
                                          const Kokkos::View<BoundaryCondition *> & bcs) const {
     if (profiles.empty()) return;
-    Kokkos::parallel_for("mass_flow_profile_chunks", static_cast<uint32_t>(chunk_range.extent(0)),
-                         ProfileChunkFunctor{chunk_range, profile_program, inlet_x, inlet_measure, programs, time,
-                                             chunk_sum, profile_error, profile_error_value});
-    Kokkos::parallel_for("mass_flow_profile_scale", static_cast<uint32_t>(profiles.size()),
-                         ProfileScaleFunctor{profile_chunks, chunk_sum, profile_mdot, programs, time, profile_scale,
-                                             profile_error, profile_error_value});
+    const FirstError first_error{profile_error, profile_error_value};
+    Kokkos::parallel_reduce("mass_flow_profile_chunks", static_cast<uint32_t>(chunk_range.extent(0)),
+                            ProfileChunkFunctor{first_error, chunk_range, profile_program, inlet_x, inlet_measure,
+                                                programs, time, chunk_sum},
+                            launch_error);
+    Kokkos::parallel_reduce("mass_flow_profile_scale", static_cast<uint32_t>(profiles.size()),
+                            ProfileScaleFunctor{first_error, profile_chunks, chunk_sum, profile_mdot, programs, time,
+                                                profile_scale},
+                            launch_error);
     Kokkos::parallel_for("mass_flow_profile_flux", static_cast<uint32_t>(profile_bc.extent(0)),
                          ProfileFluxFunctor{profile_bc, profile_of, profile_x, profile_program, programs, time,
                                             profile_scale, bcs});
@@ -851,11 +856,12 @@ void TimedBoundaryFields::check_profiles() const {
 
 void TimedBoundaryFields::apply(const Kokkos::View<rtype> & time, const Kokkos::View<BoundaryCondition *> & bcs,
                                 const Gas & gas) const {
-    const TimedFieldsFunctor functor{face_bc,  face_set, face_x, face_direction, set_type, set_slot, set_composition,
-                                     set_direction, composition_species, composition_program, programs, time, bcs,
-                                     gas, error_face, error};
+    const TimedFieldsFunctor functor{{error_face, error}, face_bc, face_set, face_x, face_direction, set_type,
+                                     set_slot, set_composition, set_direction, composition_species,
+                                     composition_program, programs, time, bcs, gas};
     if (!faces_host.empty()) {
-        Kokkos::parallel_for("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor);
+        Kokkos::parallel_reduce("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor,
+                                launch_error);
     }
     apply_profiles(time, bcs);
 }
@@ -1027,7 +1033,8 @@ void TimedInletTargets::finish() {
     direction = Kokkos::View<int32_t *[N_DIM]>("timed_inlet_direction", n);
     scale = Kokkos::View<double *[N_DIM]>("timed_inlet_scale", n);
     error_face = Kokkos::View<int32_t>("timed_inlet_error_face");
-    error = Kokkos::View<double[2]>("timed_inlet_error");
+    error = Kokkos::View<double[3]>("timed_inlet_error");
+    launch_error = Kokkos::View<LaunchError>("timed_inlet_launch_error");
     auto h_scale = Kokkos::create_mirror_view(scale);
     auto h_direction = Kokkos::create_mirror_view(direction);
     auto h_chars = Kokkos::create_mirror_view(chars);
@@ -1076,7 +1083,8 @@ void TimedInletTargets::check() const {
 
 void TimedInletTargets::fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target) const {
     if (host_chars.empty()) return;
-    Kokkos::parallel_for("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
-                         InletTargetsFunctor{chars, x, slots, direction, scale, programs, target, error_face, error,
-                                             time});
+    Kokkos::parallel_reduce("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
+                            InletTargetsFunctor{{error_face, error}, chars, x, slots, direction, scale, programs,
+                                                target, time},
+                            launch_error);
 }
