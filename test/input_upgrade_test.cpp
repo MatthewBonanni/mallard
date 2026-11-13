@@ -521,10 +521,11 @@ TEST(InputUpgradeTest, VtkhdfOutputWithoutSeriesGetsANotice) {
 TEST(InputUpgradeTest, TheLesPresetsIntegratorGetsANotice) {
     const std::vector<std::string> notes = input_upgrade::notices("[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n");
     ASSERT_EQ(notes.size(), 1u);
-    EXPECT_NE(notes[0].find("time_integrator = \"SSPRK3\""), std::string::npos) << notes[0];
+    EXPECT_NE(notes[0].find("time_integrator = \"SSPRK3\" and [run] cfl = 0.8"), std::string::npos) << notes[0];
     EXPECT_EQ(notes[0].find("the cfl this input sets"), std::string::npos) << notes[0];
     const std::vector<std::string> with_cfl =
-        input_upgrade::notices("[run]\nt_stop = 1.0\ncfl = 0.8\n[numerics]\npreset = \"les\"\n");
+        input_upgrade::notices("[run]\nt_stop = 1.0\ncfl = 0.5\n[numerics]\npreset = \"les\"\n");
     ASSERT_EQ(with_cfl.size(), 1u);
     EXPECT_NE(with_cfl[0].find("the cfl this input sets"), std::string::npos) << with_cfl[0];
+    EXPECT_EQ(with_cfl[0].find("[run] cfl = 0.8"), std::string::npos) << with_cfl[0];
 }
