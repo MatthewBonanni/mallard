@@ -18,6 +18,8 @@
 
 #include "common_typedef.h"
 
+struct CellNodes;
+
 /**
  * @brief A box of cells numbered lexicographically, i fastest: the cell at
  *        (i, j, k) is first + i + n[0] (j + n[1] k), and the cell across each of
@@ -43,7 +45,7 @@ struct StructuredBlock {
  *        neighbor in the given numbering, then j, and indices grow with it, so
  *        that a box already numbered i fastest keeps its numbering.
  */
-std::vector<StructuredBlock> structured_blocks(const std::vector<std::vector<uint32_t>> & cells, uint32_t n_cells,
+std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, uint32_t n_cells,
                                                uint32_t min_extent, std::vector<uint32_t> & block_cells);
 
 #endif // STRUCTURED_BLOCKS_H

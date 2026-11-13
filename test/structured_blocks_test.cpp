@@ -123,6 +123,12 @@ void expect_boxes(const Cells & cells, const std::vector<StructuredBlock> & bloc
 
 uint32_t count(const Cells & cells) { return static_cast<uint32_t>(cells.size()); }
 
+CellNodes nodes_of(const Cells & cells) {
+    CellNodes out;
+    for (const auto & c : cells) out.add(c);
+    return out;
+}
+
 } // namespace
 
 /** @brief A box keeps its numbering: its fastest axis becomes i, whichever it is. */
@@ -135,7 +141,7 @@ TEST(StructuredBlocks, ABoxIsOneBlockInItsOwnNumbering) {
     do {
         const Box box = make_box(n, axes);
         std::vector<uint32_t> block_cells;
-        const auto blocks = structured_blocks(box.cells, count(box.cells), 3, block_cells);
+        const auto blocks = structured_blocks(nodes_of(box.cells), count(box.cells), 3, block_cells);
         ASSERT_EQ(blocks.size(), 1u);
         for (size_t a = 0; a < N_DIM; a++) EXPECT_EQ(blocks[0].n[a], n[axes[a]]);
         std::vector<uint32_t> identity(box.cells.size());
@@ -179,7 +185,7 @@ TEST(StructuredBlocks, AShuffledBoxWithRotatedCellsIsOneBlock) {
         cell = turned;
     }
     std::vector<uint32_t> block_cells;
-    const auto blocks = structured_blocks(box.cells, count(box.cells), 3, block_cells);
+    const auto blocks = structured_blocks(nodes_of(box.cells), count(box.cells), 3, block_cells);
     ASSERT_EQ(blocks.size(), 1u);
     EXPECT_EQ(block_cells.size(), box.cells.size());
     expect_boxes(box.cells, blocks, block_cells, 3);
@@ -192,10 +198,10 @@ TEST(StructuredBlocks, ShortBoxesAndCellsPastNCellsStayUnstructured) {
     n[1] = 2;
     const Box box = make_box(n, natural());
     std::vector<uint32_t> block_cells;
-    EXPECT_TRUE(structured_blocks(box.cells, count(box.cells), 3, block_cells).empty());
-    EXPECT_EQ(structured_blocks(box.cells, count(box.cells), 2, block_cells).size(), 1u);
+    EXPECT_TRUE(structured_blocks(nodes_of(box.cells), count(box.cells), 3, block_cells).empty());
+    EXPECT_EQ(structured_blocks(nodes_of(box.cells), count(box.cells), 2, block_cells).size(), 1u);
     // The first two rows along i
-    EXPECT_EQ(structured_blocks(box.cells, 16, 1, block_cells).size(), 1u);
+    EXPECT_EQ(structured_blocks(nodes_of(box.cells), 16, 1, block_cells).size(), 1u);
     EXPECT_EQ(block_cells.size(), 16u);
 }
 
@@ -213,7 +219,7 @@ TEST(StructuredBlocks, AnLShapeSplitsIntoBoxes) {
     const uint32_t n_hex = count(cells);
     cells.push_back(std::vector<uint32_t>(box.cells.back().begin(), box.cells.back().begin() + N_DIM + 1));
     std::vector<uint32_t> block_cells;
-    const auto blocks = structured_blocks(cells, count(cells), 3, block_cells);
+    const auto blocks = structured_blocks(nodes_of(cells), count(cells), 3, block_cells);
     EXPECT_EQ(blocks.size(), 2u);
     EXPECT_EQ(block_cells.size(), n_hex);
     expect_boxes(cells, blocks, block_cells, 3);
@@ -238,7 +244,7 @@ TEST(StructuredBlocks, ARingIsCutOnceAndThreeBlocksMeetingAtAVertexStayBoxes) {
         }
     }
     std::vector<uint32_t> block_cells;
-    auto blocks = structured_blocks(ring, count(ring), 3, block_cells);
+    auto blocks = structured_blocks(nodes_of(ring), count(ring), 3, block_cells);
     ASSERT_EQ(blocks.size(), 1u);
     EXPECT_EQ(blocks[0].n[0], around);
     EXPECT_EQ(block_cells.size(), ring.size());
@@ -266,7 +272,7 @@ TEST(StructuredBlocks, ARingIsCutOnceAndThreeBlocksMeetingAtAVertexStayBoxes) {
             }
         }
     }
-    blocks = structured_blocks(star, count(star), 3, block_cells);
+    blocks = structured_blocks(nodes_of(star), count(star), 3, block_cells);
     EXPECT_GE(blocks.size(), 2u);
     expect_boxes(star, blocks, block_cells, 3);
 }
@@ -279,7 +285,7 @@ TEST(StructuredBlocks, AutoNumbersBlocksFirst) {
     std::mt19937 rng(5);
     std::shuffle(box.cells.begin(), box.cells.end(), rng);
     const uint32_t n_cells = count(box.cells);
-    const LocalityOrder numbered = locality_order({CellOrder::AUTO, 2, true}, box.nodes, box.cells, {n_cells});
+    const LocalityOrder numbered = locality_order({CellOrder::AUTO, 2, true}, box.nodes, nodes_of(box.cells), {n_cells});
     ASSERT_EQ(numbered.blocks.size(), 1u);
     EXPECT_EQ(numbered.blocks[0].first, 0u);
     std::vector<uint32_t> sorted = numbered.order;
@@ -290,12 +296,12 @@ TEST(StructuredBlocks, AutoNumbersBlocksFirst) {
     std::vector<uint32_t> identity(n_cells);
     std::iota(identity.begin(), identity.end(), 0u);
     expect_boxes(renumbered, numbered.blocks, identity, 5);
-    EXPECT_TRUE(locality_order({CellOrder::AUTO, 2, false}, box.nodes, box.cells, {n_cells}).blocks.empty());
-    EXPECT_TRUE(locality_order({CellOrder::HILBERT, 2, false}, box.nodes, box.cells, {n_cells}).blocks.empty());
+    EXPECT_TRUE(locality_order({CellOrder::AUTO, 2, false}, box.nodes, nodes_of(box.cells), {n_cells}).blocks.empty());
+    EXPECT_TRUE(locality_order({CellOrder::HILBERT, 2, false}, box.nodes, nodes_of(box.cells), {n_cells}).blocks.empty());
 
     // Halo groups keep their place, and blocks are only among the owned cells
     const uint32_t n_owned = n_cells / 2;
-    const LocalityOrder split = locality_order({CellOrder::AUTO, 1, true}, box.nodes, box.cells, {n_owned, n_cells});
+    const LocalityOrder split = locality_order({CellOrder::AUTO, 1, true}, box.nodes, nodes_of(box.cells), {n_owned, n_cells});
     for (uint32_t c = 0; c < n_cells; c++) ASSERT_EQ(split.order[c] < n_owned, c < n_owned);
 }
 

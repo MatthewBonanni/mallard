@@ -301,13 +301,15 @@ TEST(DistributedMeshTest, AutoCellOrderRenumbersOnlyWhenItSavesCacheLines) {
     std::mt19937 rng(7);
     std::shuffle(cells.begin(), cells.end(), rng);
     const uint32_t n = static_cast<uint32_t>(cells.size());
-    const LocalityOrder shuffled = locality_order({CellOrder::AUTO, 1}, nodes, cells, {n});
+    CellNodes shuffled_cells;
+    for (const auto & c : cells) shuffled_cells.add(c);
+    const LocalityOrder shuffled = locality_order({CellOrder::AUTO, 1}, nodes, shuffled_cells, {n});
     EXPECT_EQ(shuffled.choice.order, CellOrder::HILBERT);
     EXPECT_LT(shuffled.choice.hilbert_lines, 0.5 * shuffled.choice.input_lines);
-    EXPECT_EQ(shuffled.order, locality_order({CellOrder::HILBERT}, nodes, cells, {n}).order);
+    EXPECT_EQ(shuffled.order, locality_order({CellOrder::HILBERT}, nodes, shuffled_cells, {n}).order);
 
-    std::vector<std::vector<uint32_t>> along(n);
-    for (uint32_t c = 0; c < n; c++) along[c] = cells[shuffled.order[c]];
+    CellNodes along;
+    for (uint32_t c = 0; c < n; c++) along.add(cells[shuffled.order[c]]);
     const LocalityOrder kept = locality_order({CellOrder::AUTO, 1}, nodes, along, {n});
     EXPECT_EQ(kept.choice.order, CellOrder::INPUT);
     for (uint32_t c = 0; c < n; c++) ASSERT_EQ(kept.order[c], c);

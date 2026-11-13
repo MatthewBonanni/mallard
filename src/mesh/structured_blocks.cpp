@@ -15,7 +15,10 @@
 #include <bit>
 #include <limits>
 #include <numeric>
+#include <span>
 #include <unordered_map>
+
+#include "cell_order.h"
 
 namespace {
 
@@ -39,7 +42,7 @@ constexpr uint32_t corner_of(uint32_t bits) {
 using FaceKey = std::array<uint32_t, N_FACE_NODES>;
 
 /** Sorted nodes of local side `side` (2 * axis + bit) of cell `c`. */
-FaceKey face_key(const std::vector<uint32_t> & c, uint32_t side) {
+FaceKey face_key(std::span<const uint32_t> c, uint32_t side) {
     const uint32_t axis = side / 2, bit = side % 2;
     FaceKey key{};
     uint32_t k = 0;
@@ -68,7 +71,7 @@ uint64_t pack(const Coord & x) {
 using Across = std::array<std::pair<uint32_t, uint32_t>, N_SIDES>;
 
 /** The cell across each local side of every candidate cell, and the neighbor's side there. */
-std::vector<Across> neighbors_across(const std::vector<std::vector<uint32_t>> & cells, uint32_t n_cells) {
+std::vector<Across> neighbors_across(const CellNodes & cells, uint32_t n_cells) {
     struct Entry {
         FaceKey key;
         uint32_t cell, side;
@@ -99,7 +102,7 @@ std::vector<Across> neighbors_across(const std::vector<std::vector<uint32_t>> & 
  * Frame of neighbor `o` of cell `c` across c's side in block direction (g, up),
  * o's side there being `o_side`; false if their shared nodes do not match.
  */
-bool frame_across(const std::vector<uint32_t> & c, const Frame & fc, const std::vector<uint32_t> & o,
+bool frame_across(std::span<const uint32_t> c, const Frame & fc, std::span<const uint32_t> o,
                   uint32_t o_side, uint32_t g, bool up, Frame & fo) {
     fo.axis[g] = o_side / 2;
     fo.grows[g] = (o_side % 2 == 0) == up;
@@ -123,7 +126,7 @@ bool frame_across(const std::vector<uint32_t> & c, const Frame & fc, const std::
 
 } // namespace
 
-std::vector<StructuredBlock> structured_blocks(const std::vector<std::vector<uint32_t>> & cells, const uint32_t n_cells,
+std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, const uint32_t n_cells,
                                                const uint32_t min_extent, std::vector<uint32_t> & block_cells) {
     std::vector<std::pair<std::array<uint32_t, N_DIM>, std::vector<uint32_t>>> boxes;
     const std::vector<Across> across = neighbors_across(cells, n_cells);
