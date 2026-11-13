@@ -189,9 +189,13 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
   x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
-  suites are split across several jobs (`CI / mpi-3d-1of4`, ...), each running a share of
-  the tests, so a test must not depend on another having run in the same process, and a
-  test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
+  suites are split across several jobs (`CI / mpi-3d-1of4`, ...) on one build
+  (`CI / build-mpi-3d`), each running a share of the tests of about equal duration
+  (`tools/dev/test_split.py`, from the durations of `main`'s newest passed run, or else
+  `tools/dev/test_times.json`, which `test_split.py refresh` rewrites), and the suites without MPI run as several processes at once, so a test must
+  not depend on another having run in the same process nor share a file path with another,
+  and a test that reruns the test binary passes its own `--gtest_filter` (CI sets
+  `GTEST_FILTER`) and unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
 - **`main` runs everything every 3 hours** when it has changed: every supported compiler
   on x86-64 and arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and
