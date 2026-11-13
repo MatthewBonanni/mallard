@@ -229,8 +229,8 @@ The Taylor–Green vortex of the 0.8.0 measurements, on the same hardware, with 
 
 With 128³ cells per GPU, 4 GPUs take 346 ms per step and one takes 344 ms (99.4%).
 
-- **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures and meshes with rotational periodicity ([#911](https://github.com/MatthewBonanni/mallard/issues/911)) also reconstruct the first halo layer.
-- **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own. LES with `gradients = "reconstruction"` starts the first stage after the time step ([#912](https://github.com/MatthewBonanni/mallard/issues/912)).
+- **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures also reconstruct the first halo layer.
+- **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own.
 - **What is left at 8–16 GPUs** (busiest rank, about 1.7 ms per step): the halo-dependent cells and the faces are taken from index lists rather than contiguous ranges (TENO and flux kernels 2–8% slower per item), the gradients of halo-layer-1 cells that the viscous fluxes read, and packing face states. Numbering each rank's cells and faces as [interior | near the partition] (#277) would turn the lists into ranges.
 
 ### 2D, Mallard 0.3.0 {#scaling-2d}

@@ -581,11 +581,17 @@ void Solver::exchange_halo(const State & state) {
 
 void Solver::exchange_for_first_stage() {
     // The first stage's interior reconstruction does not depend on dt: start it
-    // before the exchange and the dt reduction, so that it covers both, unless
-    // the time step's eddy viscosity reads the troubled-cell flags it would overwrite
-    if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty() &&
-        !(les_on && les.reconstruction_gradients)) {
-        if (reconstruction_started) discard_reconstruction();
+    // before the exchange and the dt reduction, so that it covers both
+    if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
+        if (reconstruction_started) {
+            discard_reconstruction();
+        } else if (les_on && les.reconstruction_gradients) {
+            // The time step's eddy viscosity reads the troubled-cell flags of the last stage, which the
+            // reconstruction overwrites
+            const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+            Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), reconstruction_gradients.troubled,
+                              Kokkos::subview(teno.troubled, Kokkos::make_pair(0u, mesh->n_owned())));
+        }
         update_boundary_states(t);
         start_reconstruction(conservatives);
         reconstruction_started = true;

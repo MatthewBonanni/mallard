@@ -359,7 +359,10 @@ $\mu_t$. Implementation:
   `les_velocity_gradients` (polynomial where smooth, least squares where
   troubled), exchanges the halo, and the eddy-viscosity functors read it when
   it is allocated. Outside the RHS (time step, output) `TENO::cell_gradients`
-  refills the polynomial gradients from the current state.
+  fills polynomial gradients of the current state into a view of their own,
+  since the first stage's reconstruction may already be writing the stage's
+  (`docs/design/mpi.md`, section 7); the time step reads the troubled-cell
+  flags of the last stage, copied before that reconstruction starts.
 - MUSCL and first order reject the key: their gradient is the least-squares
   one already.
 

@@ -665,8 +665,7 @@ bool Solver::halo_too_shallow() {
 }
 
 bool Solver::exchanges_partition_faces() const {
-    // Rotational periodic faces rotate their cell 1 side before it would be exchanged
-    return is_distributed() && !is_mixture() && !mesh->is_rotational() && face_reconstruction->exchanges_partition_faces();
+    return is_distributed() && !is_mixture() && face_reconstruction->exchanges_partition_faces();
 }
 
 void Solver::init_rhs_split() {
@@ -3318,7 +3317,7 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
             update_dynamic_constant();
-            update_eddy_viscosity(mesh->n_owned());
+            update_eddy_viscosity(mesh->n_owned(), true);
         }
     }
     // On comm_space, so that the reduction ahead of the allreduce does not wait
