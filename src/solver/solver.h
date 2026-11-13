@@ -1300,6 +1300,7 @@ class Solver {
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
         Kokkos::View<rtype> characteristic_time;  // device: t + dt, the time of the inlet targets at the step end
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
+        Kokkos::View<rtype *[2]> characteristic_start;  // error control: char_state at the step's start
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
         // Velocities of inlet_state with nscbc depending on t
