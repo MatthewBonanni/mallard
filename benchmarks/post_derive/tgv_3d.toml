@@ -1,0 +1,74 @@
+# mallard post derive against ParaView (benchmarks/README.md): the
+# Taylor-Green vortex of examples/taylor_green_3d on 64^3 hexahedra (262,144
+# cells), TENO5, up to t = 0.5, with 11 snapshots of RHO, U, P and T, the
+# derived fields the run itself writes at the same steps, and restart files.
+# Needs the 3D build.
+
+[run]
+t_stop = 0.5
+cfl = 1.0
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Nz = 64
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 5
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "solut/tgv"
+time_interval = 0.05
+fields = ["RHO", "U", "P", "T"]
+
+[[write_data]]
+prefix = "inrun/tgv"
+time_interval = 0.05
+fields = ["MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "VORTICITY"]
+
+[[write_data]]
+prefix = "restart/tgv"
+format = "restart"
+time_interval = 0.05

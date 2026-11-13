@@ -1,0 +1,89 @@
+# mallard post derive against ParaView (benchmarks/README.md): the double Mach
+# reflection of examples/double_mach on 480 x 120 x 2 triangles (115,200
+# cells), TENO5, up to t = 0.05, with 11 snapshots of RHO, U, P and T, the
+# derived fields the run itself writes at the same steps, and restart files.
+
+[run]
+t_stop = 0.05
+cfl = 1.0
+
+[mesh]
+type = "cartesian_tri"
+Nx = 480
+Ny = 120
+Lx = 4.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "y > 1.7320508075688772 * (x - 1/6) ? 8.0 : 1.4"
+u = ["y > 1.7320508075688772 * (x - 1/6) ? 7.1447096811216 : 0.0",
+     "y > 1.7320508075688772 * (x - 1/6) ? -4.125 : 0.0"]
+p = "y > 1.7320508075688772 * (x - 1/6) ? 116.5 : 1.0"
+
+[[boundaries]]
+name = "left"
+type = "dirichlet"
+rho = "8.0"
+u = ["7.1447096811216", "-4.125"]
+p = "116.5"
+
+[[boundaries]]
+name = "right"
+type = "outlet_extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "dirichlet"
+where = "x < 1/6"
+rho = "8.0"
+u = ["7.1447096811216", "-4.125"]
+p = "116.5"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+where = "x >= 1/6"
+
+[[boundaries]]
+name = "top"
+type = "dirichlet"
+rho = "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 8.0 : 1.4"
+u = ["x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 7.1447096811216 : 0.0",
+     "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? -4.125 : 0.0"]
+p = "x < 1/6 + (1 + 20 * t) / 1.7320508075688772 ? 116.5 : 1.0"
+
+[numerics]
+riemann_solver = "RHLL"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 200
+
+[[write_data]]
+prefix = "solut/dmr"
+time_interval = 0.005
+fields = ["RHO", "U", "P", "T"]
+
+[[write_data]]
+prefix = "inrun/dmr"
+time_interval = 0.005
+fields = ["MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "VORTICITY"]
+
+[[write_data]]
+prefix = "restart/dmr"
+format = "restart"
+time_interval = 0.005

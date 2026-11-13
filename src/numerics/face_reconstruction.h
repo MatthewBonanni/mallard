@@ -116,6 +116,14 @@ class FaceReconstruction {
         virtual std::vector<uint32_t> cells_independent_of_halo(uint32_t n_owned) const;
 
         /**
+         * @brief Whether distributed runs reconstruct owned cells only and get
+         *        the halo side of each partition face from the rank owning it
+         *        (FaceExchange), rather than reconstructing halo layer 1 too.
+         *        Requires cells_independent_of_halo() and calc_cell_face_values().
+         */
+        virtual bool exchanges_partition_faces() const { return false; }
+
+        /**
          * @brief Reconstruct the listed cells' sides of their faces, on the
          *        given execution space instance, as far as each cell can on its
          *        own (see cells_independent_of_halo()). Once every reconstructed
@@ -134,6 +142,13 @@ class FaceReconstruction {
         /** @brief Complete the face values after calc_cell_face_values(). */
         virtual void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+
+        /**
+         * @brief Drop what calc_cell_face_values() left for
+         *        finish_cell_face_values(), on the default instance, when the
+         *        face values will not be completed.
+         */
+        virtual void discard_cell_face_values() {}
 
         /**
          * @brief Turn the velocity of the cell 1 sides of faces across
@@ -343,6 +358,8 @@ class TENO : public FaceReconstruction {
                                    Kokkos::View<uint32_t *> cells) override;
         void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
+        bool exchanges_partition_faces() const override { return true; }
+        void discard_cell_face_values() override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -438,8 +455,8 @@ class TENO : public FaceReconstruction {
          */
         void for_each_stencil(const std::function<void(uint32_t, const CellStencils &)> & visit, bool pinv) const;
 
-        /** @brief Local cells that some stencil (central or sector) of a reconstructed cell reads. */
-        std::vector<uint8_t> stencil_cells() const;
+        /** @brief Local cells that some stencil (central or sector) of the reconstructed cells flagged in cells reads. */
+        std::vector<uint8_t> stencil_cells(const std::vector<uint8_t> & cells) const;
 
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of

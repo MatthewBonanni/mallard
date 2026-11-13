@@ -5,8 +5,8 @@ manual and TENO-E reference into docs/images/theory/, light and dark.
 
 Schematics and domain diagrams need numpy, scipy and matplotlib only.
 With --mallard (a 2D build; an MPI build for the partitions) the figures from
-short runs and the sample run report are redrawn too (the Python package's with
-a build that has its library, the default).
+short runs and the sample run report are redrawn too (the Python package's with a
+build that has its library, the default).
 With --mallard3d the 3D region, probe and mesh-field figures are drawn too.
 MALLARD_FIGURE_PREVIEW=dir also writes PNGs on the site's backgrounds there, for
 review.

@@ -86,12 +86,13 @@ the names the run has.
 monitors and probes are written, from the values they wrote: a monitor
 written every 10 steps keeps its value in between. A condition that reads a
 monitor before its first value is false. On GPUs the device evaluates the
-conditions of `t`, the step, `dt` and the monitors at every step, and the
-steps queued ahead of the host (`[run] step_queue`) stop only at a step a
+conditions of `t`, the step, `dt`, `wall` and the monitors at every step, and
+the steps queued ahead of the host (`[run] step_queue`) stop only at a step a
 trigger fires at; every rank holds the same values, so every rank acts after
-the same step. Conditions that read `wall` or a probe's value are evaluated by
-the host: rank 0 evaluates every condition and sends the outcome to the
-others, and the host then takes every step itself.
+the same step. There `wall` is rank 0's as its host last posted it before the
+step. Conditions that read a probe's value are evaluated by the host: rank 0
+evaluates every condition and sends the outcome to the others, and the host
+then takes every step itself.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
 final output and a restart are written, the exit status is 0 and the log

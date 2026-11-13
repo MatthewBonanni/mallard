@@ -74,6 +74,26 @@ deliberate performance change, update the baselines in the same pull request.
 for 400 steps; the run's summary gives the time per cell and step and the
 chemistry's share.
 
+## `post_derive/`: `mallard post derive` against ParaView
+
+`dmr_2d.toml` (2D) and `tgv_3d.toml` (3D) write 11 VTKHDF snapshots of `RHO`,
+`U`, `P` and `T`, the same steps' `MACH`, `Q_CRITERION`, `LAMBDA2`,
+`SCHLIEREN` and `VORTICITY` from the run, and restart files. `pv_derive.py` is
+the `pvbatch` pipeline that derives those fields; `run.sh` times both on the
+last snapshot and on the series, with and without a TENO `cache_file`, and
+`compare.py` (`pvpython`) gives the relative differences of two snapshots of
+the fields, optionally only more than a margin from the domain's faces:
+
+```bash
+mkdir tgv && cd tgv
+mallard -i ../benchmarks/post_derive/tgv_3d.toml --kokkos-num-threads=2
+../benchmarks/post_derive/run.sh "$(command -v mallard)" \
+    /Applications/ParaView-6.0.1.app/Contents/bin/pvbatch ../benchmarks/post_derive/tgv_3d.toml
+```
+
+`mallard diff` compares `post derive`'s snapshots with the run's (`inrun/`).
+Results: [Reading output](../docs/design/output_reader.md#cost-against-paraview).
+
 ## AMD MI355X against the A100
 
 One AMD Instinct MI355X (ROCm 10.0, Kokkos HIP, gfx950) against one
