@@ -28,6 +28,7 @@
 #include "common_typedef.h"
 #include "data.h"
 #include "data_writer.h"
+#include "derived_fields.h"
 #include "mesh.h"
 #include "spectra.h"
 #include "state.h"
@@ -36,19 +37,23 @@
  * @brief Cell values that statistics and probes sample, by code: 0 is RHO,
  *        1 + i the primitive PRIMITIVE_NAMES[i], FIRST_CONSERVED + i the
  *        conserved CONSERVATIVE_NAMES[1 + i] (RHOU_*, RHOE), FIRST_SPECIES + k
- *        the mass fraction Y_k of species k and FIRST_PARTIAL_DENSITY + k its
- *        partial density RHOY_k. The primitives must be current.
+ *        the mass fraction Y_k of species k, FIRST_PARTIAL_DENSITY + k its
+ *        partial density RHOY_k and FIRST_DERIVED + j column j of the derived
+ *        fields (derived_catalog.h). The primitives, and the derived fields
+ *        sampled, must be current.
  */
 struct CellSampler {
     StateView U;
     SpeciesView rhoY;
     Kokkos::View<rtype *[N_PRIMITIVE]> P;
+    Kokkos::View<rtype **> derived = {};
 
     static constexpr int32_t RHO = 0;
     static constexpr int32_t FIRST_PRIMITIVE = 1;
     static constexpr int32_t FIRST_CONSERVED = 1 + N_PRIMITIVE;
     static constexpr int32_t FIRST_SPECIES = FIRST_CONSERVED + N_CONSERVATIVE - 1;
     static constexpr int32_t FIRST_PARTIAL_DENSITY = 1 << 16;
+    static constexpr int32_t FIRST_DERIVED = 1 << 24;
 
     KOKKOS_INLINE_FUNCTION
     rtype operator()(const uint32_t c, const int32_t code) const {
@@ -56,12 +61,16 @@ struct CellSampler {
         if (code < FIRST_CONSERVED) return P(c, code - FIRST_PRIMITIVE);
         if (code < FIRST_SPECIES) return U(c, code - FIRST_CONSERVED + 1);
         if (code < FIRST_PARTIAL_DENSITY) return rhoY(c, code - FIRST_SPECIES) / U(c, 0);
-        return rhoY(c, code - FIRST_PARTIAL_DENSITY);
+        if (code < FIRST_DERIVED) return rhoY(c, code - FIRST_PARTIAL_DENSITY);
+        return derived(c, code - FIRST_DERIVED);
     }
 
-    /** @brief Code of a variable name (RHO, a primitive, RHOU_*, RHOE, Y_<species>, RHOY_<species>); throws InputError naming key. */
+    /**
+     * @brief Code of a variable name (RHO, a primitive, RHOU_*, RHOE, Y_<species>, RHOY_<species>, and
+     *        with derived, a derived field it computes); throws InputError naming key.
+     */
     static int32_t code(const std::string & name, const std::vector<std::string> & species_names,
-                        const std::string & key);
+                        const std::string & key, const derived::Selection * derived = nullptr);
 };
 
 /**
@@ -157,9 +166,16 @@ class PhaseAverage {
  */
 class Statistics {
     public:
-        /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
+        /**
+         * @brief Read [statistics] (if any) and allocate the mesh's cells; derived fields average
+         *        the columns derived computes.
+         */
         void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                  bool use_nccl = false);
+                  const derived::Selection & derived = {}, bool use_nccl = false);
+        /** @brief The derived fields [statistics] fields and products average, for the solver to compute. */
+        static std::vector<derived::Field> derived_fields(const Input & input);
+        /** @brief Whether the means sample derived fields, which must be current when they sample. */
+        bool samples_derived() const { return derived_sampled; }
 
         bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
         bool means_enabled() const { return !fields.empty(); }
@@ -227,6 +243,7 @@ class Statistics {
         uint64_t interval = 1;
         rtype t_start = 0.0;
         bool reset = false;
+        bool derived_sampled = false;
 
         Kokkos::View<int32_t *> codes;
         Kokkos::View<uint32_t *[2]> pairs;

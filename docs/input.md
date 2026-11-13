@@ -719,7 +719,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -935,8 +935,8 @@ changing it.
 
 | Key | Description |
 |---|---|
-| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE` and, for mixtures, `Y_<species>` and `RHOY_<species>` |
-| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, for mixtures `Y_<species>` and `RHOY_<species>`, and the [derived fields](guide/output.md#derived-fields) of the derived and mixture groups of `mallard list fields` (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...), computed at each sample as `[[write_data]]` writes them, with the `[output]` input they need |
+| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`, `"P*MACH"`) whose covariance to keep; their means are kept too |
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
@@ -964,8 +964,11 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
-`tools/post/plane_average.py` averages them further over homogeneous directions
-(e.g. over x and z of a channel, as a function of y). `fields` and
+`mallard post average --statistics --homogeneous x,z` averages them further
+over homogeneous directions (e.g. over x and z of a channel, as a function of
+y), and `mallard post average` computes the same averages from saved
+snapshots of a run without them
+([guide](guide/statistics.md#averages-of-saved-snapshots-mallard-post-average)). `fields` and
 `products` may be left out when `[statistics.spectra]` or
 `[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
 `[statistics]` unless they set their own, and `reset` applies to them too.

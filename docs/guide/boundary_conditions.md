@@ -947,7 +947,7 @@ bitwise the same on any number of ranks and across restarts.
 | Key | Default | Meaning |
 |---|---|---|
 | `reynolds_stress` | required (or `profile`) | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions |
-| `profile` | — | Instead of `u` and `reynolds_stress`: a CSV of plane averages from a precursor run (`tools/post/plane_average.py`) |
+| `profile` | — | Instead of `u` and `reynolds_stress`: a CSV of plane averages from a precursor run (`mallard post average --homogeneous`) |
 | `length_scale` | required | Integral length: one number, one per direction, or one list per component |
 | `convection_velocity` | mean inflow speed (at `t = 0`) | `U_c` of Taylor's hypothesis |
 | `seed` | 1 | Random seed |

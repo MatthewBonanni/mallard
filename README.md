@@ -58,6 +58,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard info` on any output file
   - `mallard new` case templates
   - `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`)
+  - `mallard post average` for its means, RMS, Reynolds and Favre covariances and plane averages
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions
   - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output

@@ -243,6 +243,61 @@ constexpr Option DERIVE_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option AVERAGE_OPTIONS[] = {
+    {"--fields", "", "LIST",
+     "The variables to average, separated by commas, as [statistics] fields takes them, derived fields "
+     "included (RHO,U_X,P,MACH). Default: RHO, U_X, U_Y, U_Z (3D), P and T."},
+    {"--products", "", "LIST",
+     "The covariances to keep, as pairs A*B separated by commas (U_X*U_Y,P*U_X), or none; a variable not in "
+     "--fields is averaged too. Default: the variance of every field and the covariances of the velocity "
+     "components (the Reynolds stresses)."},
+    {"--favre", "", "",
+     "Also Favre (density-weighted) means FAVRE_MEAN_<a> and covariances FAVRE_COV_<a>_<b> of the fields and "
+     "products other than RHO, exactly, the triple correlations included; adds RHO to the fields."},
+    {"--t-start", "", "T",
+     "Where the averaging window starts, in s: the first snapshot weighs the time since then (each other, the "
+     "time since the previous one). The run's [statistics] t_start reproduces its averages. Default: as long "
+     "before the first snapshot as the second is after it, so that evenly spaced snapshots weigh the same."},
+    {"--homogeneous", "", "DIRS",
+     "Also average over these directions, separated by commas (x,z: profiles in y of a channel), weighted by "
+     "cell volume, and write a CSV profile, OUTPUT/NAME.csv, instead of a snapshot. Covariances include the "
+     "dispersive part, the spatial variation of the time means. Default: none."},
+    {"--statistics", "", "",
+     "Average over --homogeneous directions the [statistics] fields (MEAN_, COV_) that one snapshot of FILE "
+     "holds, instead of averaging its states in time."},
+    {"--rtol", "", "R",
+     "With --homogeneous: cells share a row where their centers agree to R times the mesh's extent in each "
+     "kept direction. Default: 1e-6."},
+    {"--region", "", "REGION",
+     "Average over a region only: a name of the input's [regions] or of the mesh, or an inline TOML table, as "
+     "[[write_data]] region takes it; with --homogeneous, a region of the mesh's dimension, its cells weighted "
+     "by the fraction of them in it. Default: the whole mesh."},
+    {"--reference", "", "TABLE",
+     "The [output] reference of CP, as an inline TOML table, in place of the input's, as for mallard post "
+     "derive. Default: the input's."},
+    {"--mixture", "", "TABLE",
+     "The [output.mixture] table of the mixture fields, inline, in place of the input's, as for mallard post "
+     "derive. Default: the input's."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics and numerics. Default: the input in the run block of FILE "
+     "(Mallard 0.10 and later record it resolved)."},
+    {"--snapshot", "", "vtkhdf|vtu",
+     "The format of the snapshot of the averages: OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or a .vtu "
+     "file with a .pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the output: NAME_<step>.vtkhdf, or NAME.csv. Default: average."},
+    {"--steps", "", "LIST",
+     "Average the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Average the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: "
+     "every snapshot."},
+    {"--every", "", "N", "Average every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Only the last snapshot selected (with --statistics)."},
+    {"--output", "-o", "DIR", "The directory the output goes to. Default: average."},
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option CONVERGENCE_OPTIONS[] = {
     {"--quantity", "", "NAMES",
      "The quantities to study, separated by commas: TABLE:COLUMN (integrals:rho2, forces_wall:F_x), a column "
@@ -835,6 +890,43 @@ constexpr Command COMMANDS[] = {
         .run = derive_main,
     },
     {
+        .name = "post average",
+        .group = "Post",
+        .summary = "Means, RMS, Reynolds and Favre covariances over saved snapshots, as [statistics] keeps them",
+        .synopsis = "mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]\n"
+                    "mallard post average FILE... --homogeneous DIRS [--region REGION]\n"
+                    "mallard post average FILE --statistics --homogeneous DIRS",
+        .description =
+            "Sets up the case of a series of restart files or snapshots and averages their states in time, for runs "
+            "without [statistics]: per cell, the means MEAN_<a> and covariances COV_<a>_<b> that [statistics] keeps, "
+            "by its own code, RMS_<a> (the square root of a variance) and with --favre the Favre means and "
+            "covariances. Each snapshot weighs the time since the previous one, as a run's samples do, so restart "
+            "files at the run's sampling steps, with --t-start at its t_start, give the run's averages bit for bit. "
+            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields).\n"
+            "\n"
+            "The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a run writes its "
+            "[statistics]. --homogeneous averages them further over directions in which the flow is statistically "
+            "uniform and writes a CSV profile (the kept coordinates, n_cells, then the columns), which synthetic "
+            "inflow profile reads; --statistics does that to the [statistics] fields one snapshot already holds. "
+            "The states are read one at a time, so memory does not grow with the number of snapshots.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; the snapshots' steps and times are those "
+            "the files record, in increasing time. Under mpirun -n N the cells are split over N ranks.",
+        .options = AVERAGE_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post average solut/restart_*.restart --t-start 40\n"
+                    "$ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre\n"
+                    "$ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
+                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z",
+        .exit_status = "0  the averages were written\n"
+                       "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
+                       "file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = average_main,
+    },
+    {
         .name = "post convergence",
         .group = "Post",
         .summary = "Order of accuracy, extrapolated value and grid convergence index (GCI) of runs at several "
@@ -983,7 +1075,7 @@ constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals, snapshots and derived fields of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};
