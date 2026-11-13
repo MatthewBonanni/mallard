@@ -101,7 +101,9 @@ add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
 
 # libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
 # every library it links is compiled position independent
-option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" OFF)
+option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" ON)
+set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
+    "A site-packages directory to install the Python package into, besides share/mallard/tools")
 if(${PROJECT_NAME}_ENABLE_PYTHON)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
@@ -296,6 +298,9 @@ include(GNUInstallDirs)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 if(${PROJECT_NAME}_ENABLE_PYTHON)
     install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+    if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
+        install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
+    endif()
 endif()
 # mallard links to either solver; installs of both dimensions share it
 install(CODE "
