@@ -470,7 +470,7 @@ template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct ProgramTable {
     Kokkos::View<const Instr *, MemorySpace> code;
     Kokkos::View<const uint32_t *, MemorySpace> offsets;  // program p is code[offsets(p), offsets(p + 1))
-    Kokkos::View<uint32_t, MemorySpace> runaway;          // 1 + a program stopped at MAX_ITERATIONS, or 0
+    Kokkos::View<uint32_t, MemorySpace> runaway;          // ~p for the lowest program p stopped at MAX_ITERATIONS, or 0
     Kokkos::View<const uint8_t *, MemorySpace> jumps;     // per program: whether it has jumps
     bool loops = false;
 
@@ -507,7 +507,7 @@ struct ProgramTable {
         const uint32_t begin = offsets(p);
         bool stopped = false;
         const double v = evaluate(code.data() + begin, offsets(p + 1) - begin, vars, stopped);
-        if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
+        if (stopped) Kokkos::atomic_max(&runaway(), ~p);
         return v;
     }
 
@@ -526,16 +526,16 @@ struct ProgramTable {
         for (int l = 0; l < K; l++) {
             bool stopped = false;
             out[l] = evaluate(c, n, detail::Lane<Vars>{vars, l}, stopped);
-            if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
+            if (stopped) Kokkos::atomic_max(&runaway(), ~p);
         }
     }
 
-    /** @brief 1 + the index of a program whose evaluation stopped at MAX_ITERATIONS, or 0 (no programs with loops: 0 without a copy). */
+    /** @brief 1 + the lowest index of a program whose evaluation stopped at MAX_ITERATIONS, or 0 (no programs with loops: 0 without a copy). */
     uint32_t stopped() const {
         if (!loops) return 0;
         uint32_t r = 0;
         Kokkos::deep_copy(r, runaway);
-        return r;
+        return r == 0 ? 0 : ~r + 1;
     }
 };
 

@@ -179,12 +179,15 @@ std::vector<Selected> select(const std::vector<output::Contents> & files, const 
     return out;
 }
 
+/** @brief c's run block, else that of its first snapshot's file (a series index records none). */
+std::string run_block(const output::Contents & c) {
+    if (c.run.empty() && !c.snapshots.empty() && c.snapshots[0].file != c.path) return output::open(c.snapshots[0].file).run;
+    return c.run;
+}
+
 /** @brief The input recorded in an output file's run block: resolved where recorded so, else as written. */
 std::string recorded_input(const output::Contents & c, bool & resolved) {
-    std::string block = c.run;
-    if (block.empty() && !c.snapshots.empty() && c.snapshots[0].file != c.path) {
-        block = output::open(c.snapshots[0].file).run;
-    }
+    const std::string block = run_block(c);
     if (block.empty()) return "";
     const json::Value p = json::parse(block);
     const json::Value * input = p.find("input");
@@ -660,6 +663,29 @@ std::vector<output::Contents> open_files(const cli::Args & args, const std::stri
     return files;
 }
 
+/** @brief The files a run's input names relative to its working directory, as they resolve from the run's directory. */
+void rebase_on_run_directory(Input & input, const std::string & directory) {
+    if (directory.empty()) return;
+    const auto rebase = [&](const char * table, const char * sub, const char * key) {
+        auto & top = input.as_table().entries();
+        const auto t = top.find(table);
+        if (t == top.end() || !t->second.is_table()) return;
+        auto * entries = &t->second.as_table().entries();
+        if (sub) {
+            const auto s = entries->find(sub);
+            if (s == entries->end() || !s->second.is_table()) return;
+            entries = &s->second.as_table().entries();
+        }
+        const auto v = entries->find(key);
+        if (v == entries->end() || !v->second.is_string() || v->second.as_string().empty()) return;
+        const fs::path path(v->second.as_string());
+        if (path.is_relative()) v->second = Input((fs::path(directory) / path).lexically_normal().string());
+    };
+    if (find_value_or<std::string>(input, "mesh", "type", "file") == "file") rebase("mesh", nullptr, "filename");
+    rebase("physics", nullptr, "mechanism");
+    rebase("numerics", "face_reconstruction", "cache_file");
+}
+
 /** @brief The case's input: -i, else the input in the first file's run block; case_from says which. */
 Input case_input(const cli::Args & args, const output::Contents & first, std::string & case_from) {
     Input input;
@@ -676,6 +702,7 @@ Input case_input(const cli::Args & args, const output::Contents & first, std::st
         case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
                     first.path;
         input = parse_input_string(text, first.path + " (its run block)");
+        rebase_on_run_directory(input, provenance::find_string(run_block(first), "run", "directory"));
     }
     for (const auto & finding : input_upgrade::apply(input)) {
         if (comm::is_root()) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));

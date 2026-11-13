@@ -30,6 +30,7 @@
 
 #include "device_comm.h"
 #include "diagnostic_code.h"
+#include "lock_arrays.h"
 #include "log.h"
 #include "probe_fluxes.h"
 #include "run_control.h"
@@ -40,8 +41,9 @@
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests]
-constexpr int N_REDUCE = 1 + run_control::N_REQUESTS;
+// step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests,
+// -wall], the posted values from index 1 on
+constexpr int N_REDUCE = Solver::N_STEP_REDUCE, N_POSTED = N_REDUCE - 1, WALL = N_REDUCE - 1;
 constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), T_HALF = DT_SCALES + int(N_DT_SCALES),
               HALF_SCALES = T_HALF + 1, HALF_DT = HALF_SCALES + int(DT), N_STEP_SCALARS = HALF_SCALES + int(N_DT_SCALES);
 using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
@@ -58,17 +60,27 @@ void begin_capture(cudaGraph_t graph, const cudaGraphNode_t * after, const size_
                "cudaStreamBeginCaptureToGraph");
 }
 
+/** @brief A capture that cudaStreamEndCapture reports invalidated: it has ended, and the driver destroyed its graph. */
+struct CaptureInvalidated : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 void end_capture(cudaGraph_t graph) {
-    cuda_check(cudaStreamEndCapture(step_stream(), &graph), "cudaStreamEndCapture");
+    const cudaError_t err = cudaStreamEndCapture(step_stream(), &graph);
+    if (err == cudaErrorStreamCaptureInvalidated) {
+        throw CaptureInvalidated(std::string("cudaStreamEndCapture: ") + cudaGetErrorString(err));
+    }
+    cuda_check(err, "cudaStreamEndCapture");
 }
 
 /**
- * @brief Ends a capture that failed, if the stream still captures.
- * @return Whether the capture was invalidated. The driver then destroys the graph it captured into: the step graph,
- *         or a conditional node's body, which leaves the step graph holding a destroyed body. Destroying the step
- *         graph or that node then crashes in the driver, so the step graph is left to the process (once per run).
+ * @brief Ends a capture that failed with error, if the stream still captures.
+ * @return Whether the capture was invalidated, while the stream still captured or as cudaStreamEndCapture reported
+ *         it. The driver then destroys the graph it captured into: the step graph, or a conditional node's body,
+ *         which leaves the step graph holding a destroyed body. Destroying the step graph or that node then crashes
+ *         in the driver, so the step graph is left to the process (once per run).
  */
-bool abandon_capture() {
+bool abandon_capture(const std::exception & error) {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaStreamIsCapturing(step_stream(), &status);
     if (status != cudaStreamCaptureStatusNone) {
@@ -76,7 +88,7 @@ bool abandon_capture() {
         cudaStreamEndCapture(step_stream(), &graph);
     }
     cudaGetLastError();
-    return status == cudaStreamCaptureStatusInvalidated;
+    return status == cudaStreamCaptureStatusInvalidated || dynamic_cast<const CaptureInvalidated *>(&error);
 }
 #endif
 
@@ -174,8 +186,7 @@ void Solver::record_step() {
     Kokkos::deep_copy(exec, step_requests, requests_posted);
     Kokkos::deep_copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)), step_requests);
     // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
-    halo.exchange(state());
-    halo_current = true;
+    exchange_for_first_stage();
     update_boundary_states(t);
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
     if (is_distributed()) comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl());
@@ -289,6 +300,8 @@ void Solver::record_stage_time(const rtype c) {
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
 
 const rtype * Solver::step_time_device() const { return step_scalars.data() + T; }
+
+const rtype * Solver::step_wall_device() const { return step_reduce.data() + WALL; }
 
 template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
@@ -438,26 +451,66 @@ void Solver::device_step_body() {
     // Before the samples and probes, so that a step a trigger fires at is the host's alone
     if (triggers_on_device()) evaluate_triggers();
     if (statistics_on_device()) {
-        // The samples of steps the device goes on from, as after_step takes them
+        // The samples of steps the device goes on from, as after_step takes them: each part by its own interval
+        // and t_start, as Statistics::due
         const Kokkos::View<const Statistics::Clock> clock = statistics.device_clock();
+        const Kokkos::View<const Spectra::Clock> spectra_clock = statistics.get_spectra().device_clock();
+        const Kokkos::View<const PhaseAverage::Clock> phase_clock = statistics.get_phase().device_clock();
         const Kokkos::View<uint32_t *> due = statistics_due;
-        const uint64_t every = statistics.sampling_interval();
-        const bool triggered = statistics.phases_triggered();
+        const bool means = statistics.means_enabled(), spectra = statistics.get_spectra().enabled(),
+                   phases = statistics.get_phase().enabled(), triggered = statistics.phases_triggered();
+        const bool staged_spectra = spectra && !statistics.get_spectra().averaged();
+        const uint64_t every = statistics.sampling_interval(), spectra_every = statistics.get_spectra().sampling_interval(),
+                       phase_every = statistics.get_phase().sampling_interval();
         Kokkos::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
-            const bool on = L.active && L.advanced && L.step % every == 0;
-            due(0) = on && s(T) > clock().t_start;
+            const bool on = L.active && L.advanced;
+            due(0) = means && on && L.step % every == 0 && s(T) > clock().t_start;
+            due(1) = spectra && on && L.step % spectra_every == 0 && s(T) > spectra_clock().t_start;
             // Phases of a trigger signal follow it before t_start too
-            due(1) = on && (triggered || s(T) > clock().t_start);
+            due(2) = phases && on && L.step % phase_every == 0 && (triggered || s(T) > phase_clock().t_start);
+            records((L.seq - 1) % n_records).spectra = staged_spectra && due(1);
         });
-        device_if(&statistics_due.data()[0], [&] {
-            update_primitives();
-            statistics.sample_device(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+        // Each conditional entry has its own interval and t_start, as ConditionalStatistics::due
+        const size_t n_conditional = statistics.get_conditional().size();
+        for (size_t i = 0; i < n_conditional; i++) {
+            const ConditionalStatistics & entry = statistics.get_conditional()[i];
+            const Kokkos::View<const ConditionalStatistics::Clock> entry_clock = entry.device_clock();
+            const uint64_t entry_every = entry.sampling_interval();
+            Kokkos::parallel_for("conditional_due", 1, KOKKOS_LAMBDA(const int) {
+                const step_queue::Loop & L = loop();
+                due(3 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
+            });
+        }
+        Kokkos::parallel_for("statistics_any_due", 1, KOKKOS_LAMBDA(const int) {
+            uint32_t any = 0;
+            for (size_t i = 0; i < 3 + n_conditional; i++) any |= due(i);
+            due(3 + n_conditional) = any;
         });
-        if (statistics.get_phase().enabled()) {
+        // The fields are computed once for every part due, as sample_statistics; boundary states at the step's end
+        recording_step = true;
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        device_if(&statistics_due.data()[3 + n_conditional], [&] { update_statistics_fields(); });
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        recording_step = false;
+        if (means) {
+            device_if(&statistics_due.data()[0], [&] {
+                statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
+        if (spectra) {
             device_if(&statistics_due.data()[1], [&] {
-                update_primitives();
+                statistics.sample_spectra(step_scalars.data() + T, cell_sampler(), &step_loop.data()->seq);
+            });
+        }
+        if (phases) {
+            device_if(&statistics_due.data()[2], [&] {
                 statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
+        for (size_t i = 0; i < n_conditional; i++) {
+            device_if(&statistics_due.data()[3 + i], [&] {
+                statistics.sample_conditional(i, step_scalars.data() + T, cell_sampler(), mesh->n_owned());
             });
         }
     }
@@ -548,8 +601,16 @@ void Solver::captured_launch() {
     try {
         step_prologue();
         device_if(&step_loop.data()->active, [&] {
-            if (fence_in_step_body) Kokkos::fence("fence_in_step_body");
+            if (capture_fault == CaptureFault::FENCE) Kokkos::fence("capture_fault");
             device_step_body();
+#ifdef KOKKOS_ENABLE_CUDA
+            if (capture_fault == CaptureFault::LEGACY_STREAM) {
+                // Last in the body, so that no checked call reports it before cudaStreamEndCapture
+                const uint32_t zero = 0;
+                (void)cudaMemcpy(&step_loop.data()->active, &zero, sizeof(zero), cudaMemcpyHostToDevice);
+                cudaGetLastError();
+            }
+#endif
         });
     } catch (...) {
         section.stop();
@@ -569,7 +630,7 @@ void Solver::write_staged_probes(const step_queue::Record & record) {
 
 bool Solver::statistics_on_device() const {
     // Fused chemistry is advanced by the host before a sample
-    return statistics.samples_on_device() && !defer_chemistry;
+    return statistics.enabled() && !defer_chemistry;
 }
 
 bool Solver::monitors_on_device() const {
@@ -639,12 +700,14 @@ void Solver::step_prologue() {
         record.outcome = step_queue::INACTIVE;
         record.reasons = 0;
         record.progress = 0;
+        record.spectra = 0;
     });
 }
 
 void Solver::capture_step_graph() {
 #ifdef KOKKOS_ENABLE_CUDA
     Kokkos::fence("step_graph");
+    lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
     try {
         cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
@@ -659,7 +722,7 @@ void Solver::capture_step_graph() {
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
-        if (!abandon_capture() && graph) cudaGraphDestroy(graph);
+        if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
         capture_graph = nullptr;
         halo_current = false;
         recording_step = false;
@@ -677,6 +740,7 @@ bool Solver::conditional_nodes_work() {
     bool works = true;
     if (is_distributed() && halo.uses_nccl()) {
         Kokkos::fence("conditional_nodes");
+        lock_arrays::copy_all();
         const Kokkos::View<uint32_t> on("conditional_probe_flag");
         Kokkos::deep_copy(on, 1u);
         const Kokkos::View<double *> x("conditional_probe", 1);
@@ -690,7 +754,7 @@ bool Solver::conditional_nodes_work() {
             end_capture(graph);
             cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
         } catch (const std::exception & e) {
-            if (abandon_capture()) graph = nullptr;
+            if (abandon_capture(e)) graph = nullptr;
             works = false;
             logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
                              "); one step per launch");
@@ -713,8 +777,8 @@ bool Solver::conditional_nodes_work() {
 void Solver::begin_device_steps() {
     dt_reduce_slot();
     step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
-    step_requests = Kokkos::View<rtype *>("step_requests", run_control::N_REQUESTS);
-    requests_posted = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_requests_posted", run_control::N_REQUESTS);
+    step_requests = Kokkos::View<rtype *>("step_requests", N_POSTED);
+    requests_posted = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_requests_posted", N_POSTED);
     step_loop = Kokkos::View<step_queue::Loop>("step_loop");
     const uint32_t n_records = static_cast<uint32_t>(std::max<uint64_t>(step_queue_depth, 1));
     step_records = Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace>("step_records", n_records);
@@ -723,7 +787,10 @@ void Solver::begin_device_steps() {
     if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
-    if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 2);
+    if (statistics_on_device()) {
+        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 4 + statistics.get_conditional().size());
+        statistics.stage_spectra(n_records);
+    }
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
     if (triggers_on_device()) {
         trigger_vars = Kokkos::View<double *>("step_trigger_vars", triggers.variables().size());
@@ -858,6 +925,9 @@ void Solver::post_requests() {
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
     const int pending = run_control::pending();
     for (int k = 0; k < run_control::N_REQUESTS; k++) requests_posted(k) = (pending >> k) & 1 ? rtype(-1) : rtype(0);
+    // Rank 0's wall time, as the host's triggers read it: the reduction's minimum of its negative
+    requests_posted(WALL - 1) = !is_distributed() || comm::is_root() ? static_cast<rtype>(-timer.seconds())
+                                                                     : std::numeric_limits<rtype>::max();
 }
 
 void Solver::launch_device_step() {
