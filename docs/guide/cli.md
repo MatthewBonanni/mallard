@@ -618,9 +618,9 @@ mallard post derive.
 With an input file, reads it and its mechanism (not its mesh, which need not
 exist yet) and lists exactly the fields [[write_data]] fields accept for it: its
 species, its physics, chemistry, LES and statistics, and its dimension (mallard
---dim 3 list fields for a 3D case whose mesh file does not exist yet), with where
-each one can be had; then the common fields it does not have, with what they
-need.
+--dim 3 list fields for a 3D case whose mesh file does not exist yet), with
+where each one can be had; then the common fields it does not have, with what
+they need.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),
