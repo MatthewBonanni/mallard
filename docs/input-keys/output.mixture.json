@@ -3,5 +3,7 @@
   2,
   3
  ],
- "set_in": []
+ "set_in": [
+  "examples/flame_turbulence/input.toml"
+ ]
 }

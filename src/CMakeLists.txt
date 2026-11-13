@@ -66,6 +66,7 @@ add_library(MallardCore STATIC
     physics/physics.cpp
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
+    solver/conditional_statistics.cpp
     solver/chemistry_benchmark.cpp
     solver/conservation_ledger.cpp
     solver/statistical_convergence.cpp

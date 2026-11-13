@@ -246,9 +246,13 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh, derived_selection, is_distributed() && halo.uses_nccl());
         init_rhs_split();
         used_regions = std::make_unique<region::Regions>(input, *mesh);
+        statistics.init(input, species_names, *mesh, derived_selection,
+                        {.chemistry = reacting,
+                         .regions = used_regions.get(),
+                         .distributed = is_distributed(),
+                         .nccl = halo.uses_nccl()});
         init_sources(*used_regions);
         init_sponges(*used_regions);
         init_mesh_fields();
@@ -2813,6 +2817,7 @@ void Solver::sample_statistics() {
     } else {
         update_primitives();
     }
+    if (statistics.samples_chemistry()) update_heat_release_rate();
     statistics.sample(step, t, cell_sampler(), mesh->n_owned());
 }
 
@@ -3369,12 +3374,14 @@ void Solver::update_velocity_gradients() {
 void Solver::update_cell_W() {
     halo.exchange(state());
     update_boundary_states(t);
+    if (is_mixture()) {
+        update_cell_states_and_primitives();
+        return;
+    }
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
-        update_cell_states(state(), false);
-    } else Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);

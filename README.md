@@ -58,7 +58,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard info` on any output file
   - `mallard new` case templates
   - `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`)
-  - `mallard post average` for its means, RMS, Reynolds and Favre covariances and plane averages
+  - `mallard post average` for its means, RMS, Reynolds and Favre covariances, plane averages, PDFs and conditional statistics
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions
   - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output
@@ -68,7 +68,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation
 - Probes on points, curves, surfaces, boundaries and regions
-- Statistics, spectra and phase averages
+- Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))

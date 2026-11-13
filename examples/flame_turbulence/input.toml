@@ -89,9 +89,26 @@ fuse_half_steps = true
 [output]
 check_interval = 500
 
+# The progress variable on T (laminar burnt temperature 2390 K)
+[output.mixture]
+progress = {T_unburnt = 300.0, T_burnt = 2390.0}
+
 [integrals]
 interval = 100
 budget = true
+
+# The PDF of the progress variable in the box and the heat release and H2
+# consumption rates conditioned on it, density-weighted, over the second half
+# of the run: solut/conditional_progress.csv
+[statistics]
+t_start = 2.0e-4
+interval = 10
+
+[[statistics.conditional]]
+on = "PROGRESS_VARIABLE"
+fields = ["HRR", "OMEGA_H2"]
+weight = "mass"
+file = "solut/conditional_progress.csv"
 
 [[write_data]]
 prefix = "./solut/flame"

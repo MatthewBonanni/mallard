@@ -262,6 +262,11 @@ constexpr Option AVERAGE_OPTIONS[] = {
      "Also average over these directions, separated by commas (x,z: profiles in y of a channel), weighted by "
      "cell volume, and write a CSV profile, OUTPUT/NAME.csv, instead of a snapshot. Covariances include the "
      "dispersive part, the spatial variation of the time means. Default: none."},
+    {"--conditional", "", "TABLE",
+     "Also the PDF of one or two variables and conditional means and variances of fields on them, as an "
+     "inline TOML table or an array of them, as [[statistics.conditional]] takes them ({on = "
+     "\"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"]}), written to OUTPUT/conditional_<on>.csv unless the table "
+     "gives a file. Without --fields and --products, only these. Default: none."},
     {"--statistics", "", "",
      "Average over --homogeneous directions the [statistics] fields (MEAN_, COV_) that one snapshot of FILE "
      "holds, instead of averaging its states in time."},
@@ -892,9 +897,11 @@ constexpr Command COMMANDS[] = {
     {
         .name = "post average",
         .group = "Post",
-        .summary = "Means, RMS, Reynolds and Favre covariances over saved snapshots, as [statistics] keeps them",
+        .summary = "Means, RMS, covariances, PDFs and conditional statistics over saved snapshots, as [statistics] "
+                   "keeps them",
         .synopsis = "mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]\n"
                     "mallard post average FILE... --homogeneous DIRS [--region REGION]\n"
+                    "mallard post average FILE... --conditional TABLE\n"
                     "mallard post average FILE --statistics --homogeneous DIRS",
         .description =
             "Sets up the case of a series of restart files or snapshots and averages their states in time, for runs "
@@ -902,7 +909,9 @@ constexpr Command COMMANDS[] = {
             "by its own code, RMS_<a> (the square root of a variance) and with --favre the Favre means and "
             "covariances. Each snapshot weighs the time since the previous one, as a run's samples do, so restart "
             "files at the run's sampling steps, with --t-start at its t_start, give the run's averages bit for bit. "
-            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields).\n"
+            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields), and "
+            "in reacting runs HRR and OMEGA_<species>. --conditional adds the PDFs and conditional statistics of "
+            "[[statistics.conditional]], such as conditional means on the mixture fraction, written as CSV.\n"
             "\n"
             "The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a run writes its "
             "[statistics]. --homogeneous averages them further over directions in which the flow is statistically "
@@ -918,7 +927,9 @@ constexpr Command COMMANDS[] = {
         .examples = "$ mallard post average solut/restart_*.restart --t-start 40\n"
                     "$ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre\n"
                     "$ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
-                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z",
+                    "$ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z\n"
+                    "$ mallard post average solut/flame.vtkhdf.series --conditional \\\n"
+                    "      '{on = \"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"], weight = \"mass\"}'",
         .exit_status = "0  the averages were written\n"
                        "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
                        "file is not of its mesh\n"

@@ -247,6 +247,7 @@ struct Plan {
     std::vector<std::string> probes;  // names
     std::vector<std::string> files;   // that may be written: probe files, reductions files, snapshot indexes
     std::string snapshot_prefix;
+    std::vector<std::string> conditional;  // the conditional statistics files
 };
 
 /**
@@ -748,6 +749,7 @@ struct Averages {
     std::vector<std::string> fields;
     std::vector<std::pair<uint32_t, uint32_t>> products;  // indices into fields
     bool favre = false;
+    std::vector<Input> conditional;  // [[statistics.conditional]] entries
     std::string homogeneous;  // the directions averaged over ("xz"); empty: a snapshot of every cell
     double rtol = 1e-6;
 
@@ -796,7 +798,10 @@ std::vector<std::string> velocity_names() {
 
 /** @brief Whether [statistics] fields take name (species variables are checked against the case later). */
 void check_variable(const std::string & name, const std::string & option) {
-    if (name.starts_with("Y_") || name.starts_with("RHOY_") || derived::find(name.c_str()) != derived::N_FIELDS) return;
+    if (name.starts_with("Y_") || name.starts_with("RHOY_") || name.starts_with("OMEGA_") || name == "HRR" ||
+        derived::find(name.c_str()) != derived::N_FIELDS) {
+        return;
+    }
     std::vector<std::string> known = {"RHO"};
     known.insert(known.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
     known.insert(known.end(), CONSERVATIVE_NAMES.begin() + 1, CONSERVATIVE_NAMES.end());
@@ -806,17 +811,43 @@ void check_variable(const std::string & name, const std::string & option) {
     const std::string like = suggest_value(name, names);
     throw UsageError(option + ": " + name + " is not a variable [statistics] averages" +
                      (like.empty() ? "" : " (did you mean " + like + "?)") + "; it takes " + list_text(known) +
-                     ", Y_<species>, RHOY_<species> and the derived fields of mallard list fields");
+                     ", Y_<species>, RHOY_<species>, HRR, OMEGA_<species> and the derived fields of mallard list "
+                     "fields");
+}
+
+/** @brief --conditional: an inline table, or an array of them, of [[statistics.conditional]] entries. */
+std::vector<Input> conditional_entries(const std::string & text) {
+    const Input parsed = parse_input_string("value = " + text, "--conditional");
+    const Input & value = parsed.as_table().entries().at("value");
+    std::vector<Input> out;
+    if (value.is_table()) out.push_back(value);
+    if (value.is_array()) {
+        for (const Input & item : value.as_array()) {
+            if (!item.is_table()) break;
+            out.push_back(item);
+        }
+        if (out.size() != value.as_array().size()) out.clear();
+    }
+    if (out.empty()) {
+        throw UsageError("--conditional takes an inline TOML table ({on = \"MIXTURE_FRACTION\", fields = [\"T\"]}) "
+                         "or an array of them, not " + text);
+    }
+    for (const Input & entry : out) {
+        for (const std::string & name : ConditionalStatistics::sampled(entry)) check_variable(name, "--conditional");
+    }
+    return out;
 }
 
 Averages choose_averages(const cli::Args & args) {
     Averages a;
     a.favre = args.has("--favre");
+    if (args.has("--conditional")) a.conditional = conditional_entries(args.value_or("--conditional", ""));
     std::vector<std::string> fields = {"RHO"};
     for (const auto & u : velocity_names()) fields.push_back(u);
     fields.insert(fields.end(), {"P", "T"});
+    if (!a.conditional.empty() && !a.favre && !args.has("--products")) fields.clear();
     if (args.has("--fields")) fields = split_list(args.value_or("--fields", ""));
-    if (fields.empty()) throw UsageError("--fields lists no variable");
+    if (fields.empty() && (args.has("--fields") || a.conditional.empty())) throw UsageError("--fields lists no variable");
     const auto add_field = [&](const std::string & name, const std::string & option) {
         check_variable(name, option);
         const auto it = std::find(a.fields.begin(), a.fields.end(), name);
@@ -871,6 +902,9 @@ Averages choose_averages(const cli::Args & args) {
         a.homogeneous += d;
     }
     if (args.has("--homogeneous") && a.homogeneous.empty()) throw UsageError("--homogeneous lists no direction");
+    if (!a.homogeneous.empty() && a.fields.empty()) {
+        throw UsageError("--homogeneous averages fields over directions: give --fields with --conditional");
+    }
     if (args.has("--rtol")) {
         a.rtol = parse_number(args.value_or("--rtol", ""), "--rtol");
         if (a.rtol <= 0.0) throw UsageError("--rtol takes a positive number");
@@ -901,8 +935,20 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     statistics["products"] = string_array(products);
     statistics["t_start"] = Input(t_start);
     statistics["interval"] = Input(1);
+    if (!a.conditional.empty()) {
+        Input::array_type entries;
+        for (Input entry : a.conditional) {
+            auto & e = entry.as_table().entries();
+            if (!e.contains("file")) {
+                e["file"] = Input(under(dir, ConditionalStatistics::default_file(ConditionalStatistics::on_of(entry))));
+            }
+            plan.conditional.push_back(e.at("file").as_string());
+            entries.push_back(entry);
+        }
+        statistics["conditional"] = Input(entries);
+    }
     top["statistics"] = Input(statistics);
-    if (!a.homogeneous.empty()) return plan;
+    if (!a.homogeneous.empty() || a.fields.empty()) return plan;
     const std::string format = args.value_or(
         "--snapshot", have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
     if (format != "vtkhdf" && format != "vtu") throw UsageError("--snapshot takes vtkhdf or vtu, not " + format);
@@ -1246,9 +1292,12 @@ int average(const cli::Args & args) {
 
     homogeneous::Profile profile;
     std::string profile_path;
-    if (a.homogeneous.empty()) {
+    if (a.homogeneous.empty() && !a.fields.empty()) {
         solver.write_output_of_state(false);
-    } else {
+    } else if (!a.conditional.empty()) {
+        statistics.write(solver.get_step(), solver.get_time(), snapshot_block::current_reason(true));
+    }
+    if (!a.homogeneous.empty()) {
         std::vector<homogeneous::Column> columns;
         const auto add_column = [&](const std::string & name, const auto & view, uint32_t k, bool is_favre) {
             homogeneous::Column col;
@@ -1290,7 +1339,8 @@ int average(const cli::Args & args) {
     comm::barrier();
     std::cout.rdbuf(out);
     if (!comm::is_root()) return 0;
-    const std::vector<Written> written = a.homogeneous.empty() ? read_written(plan, since) : std::vector<Written>{};
+    const std::vector<Written> written =
+        a.homogeneous.empty() && !a.fields.empty() ? read_written(plan, since) : std::vector<Written>{};
     std::vector<std::string> products;
     for (const auto & [i, j] : a.products) products.push_back(a.fields[i] + "*" + a.fields[j]);
     std::vector<std::string> paths;
@@ -1301,18 +1351,28 @@ int average(const cli::Args & args) {
         }
     }
     if (!profile_path.empty()) paths.push_back(profile_path);
+    for (const std::string & path : plan.conditional) paths.push_back(path);
+    // The window of the means, or of the conditional statistics without them
+    double window_start = statistics.average_start(), window_end = statistics.average_end();
+    uint64_t samples = statistics.samples();
+    if (a.fields.empty() && !statistics.get_conditional().empty()) {
+        const ConditionalStatistics::Result r = statistics.get_conditional().front().result();
+        window_start = r.t_first;
+        window_end = r.t_last;
+        samples = r.samples;
+    }
     if (report == "json") {
         json::Object o;
         std::vector<std::string> names;
         for (const auto & c : files) names.push_back(c.path);
         o.raw("files", json_strings(names)).add("input", case_from).add("output", dir);
         o.raw("window", json::Object()
-                            .add("start", statistics.average_start())
-                            .add("end", statistics.average_end())
-                            .add("samples", statistics.samples())
+                            .add("start", window_start)
+                            .add("end", window_end)
+                            .add("samples", samples)
                             .str());
         o.raw("fields", json_strings(a.fields)).raw("products", json_strings(products));
-        o.add("favre", a.favre).add("homogeneous", a.homogeneous);
+        o.add("favre", a.favre).add("homogeneous", a.homogeneous).raw("conditional", json_strings(plan.conditional));
         std::string snaps = "[";
         for (size_t k = 0; k < selected.size(); k++) {
             json::Object s;
@@ -1330,12 +1390,18 @@ int average(const cli::Args & args) {
     item("Case", case_from);
     item("Snapshots", count(selected.size()) + " of " + count(n_available) + ", t = " + seconds(t_first) +
                           (selected.size() > 1 ? " to " + seconds(selected.back().snapshot.t) : "") + " s");
-    item("Window", seconds(statistics.average_start()) + " to " + seconds(statistics.average_end()) +
+    item("Window", seconds(window_start) + " to " + seconds(window_end) +
                        " s; each snapshot weighs the time since the previous one (the first: since " +
                        (args.has("--t-start") ? "--t-start" : "as long before it as the second is after it") + ")");
-    item("Fields", list_text(a.fields));
-    item("Covariances", products.empty() ? "none" : list_text(products));
-    item("Favre", a.favre ? "means and covariances, weighted by density" : "no (--favre adds them)");
+    if (!a.fields.empty()) {
+        item("Fields", list_text(a.fields));
+        item("Covariances", products.empty() ? "none" : list_text(products));
+        item("Favre", a.favre ? "means and covariances, weighted by density" : "no (--favre adds them)");
+    }
+    for (const ConditionalStatistics & c : statistics.get_conditional()) {
+        const OutputSummary o = c.summary();
+        item("Conditional", o.contents + ", every " + count(o.steps) + " steps -> " + o.file);
+    }
     logging::section("Snapshots", count(selected.size()) + " averaged");
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < selected.size(); i++) {
@@ -1349,6 +1415,7 @@ int average(const cli::Args & args) {
     if (!selected.front().step_recorded) logging::line("  *: position in the files, which record no step.");
     if (!a.homogeneous.empty()) {
         print_profile(profile, profile_path, a.homogeneous);
+        for (const std::string & path : plan.conditional) item("Written", path);
         return 0;
     }
     logging::section("Written", count(paths.size()) + " files");
