@@ -1,0 +1,1 @@
+- **Distributed LES with `gradients = "reconstruction"` starts the first stage's interior reconstruction before the time-step exchange and reduction**, as other TENO runs do: the time step's eddy viscosity keeps its own polynomial gradients and the troubled-cell flags of the last stage. Results are bitwise unchanged (#912).
