@@ -1014,7 +1014,7 @@ jobs:
             case "$r" in success|skipped) ;; *) state=failure ;; esac
           done
           # A count per result, then the only input, cut to fit a status description (140 characters)
-          desc="Jobs: $(printf '%s\n' $RESULTS | sort | uniq -c | awk '{ printf "%s%d %s", (NR > 1 ? ", " : ""), $1, $2 }')"
+          desc="Jobs: $(tr ' ' '\n' <<< "$RESULTS" | sort | uniq -c | awk '{ printf "%s%d %s", (NR > 1 ? ", " : ""), $1, $2 }')"
           only=${ONLY:+ (only $ONLY)}
           if [ $(( ${#desc} + ${#only} )) -gt 140 ]; then only="${only:0:$(( 136 - ${#desc} ))}...)"; fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
