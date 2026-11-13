@@ -50,6 +50,7 @@ enum Reason : uint32_t {
     INVALID_DT = 32,   // an accepted step of dt <= 0
     DIVERGENCE = 64,
     CHEMISTRY = 128,   // the chemistry failed in some cell, or its balancing across ranks must grow
+    BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
 };
 
 /**

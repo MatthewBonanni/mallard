@@ -179,6 +179,7 @@ struct Case {
     std::string extra;            // after [output]'s first key; {dir} stands for the run's directory
     std::string numerics;         // [numerics] keys
     std::string integrator = "SSPRK3";
+    std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
 };
@@ -192,7 +193,7 @@ std::string box_input(const Case & c, const std::string & dir, int depth) {
       << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
       << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\n" << c.right
       << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
     if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
@@ -461,6 +462,27 @@ TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n";
     EXPECT_EQ(run_case("probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, RowsOfRunsWithBoundariesOfTRunAhead) {
+    // A row every step, with an outlet pressure of t: its range is checked on the device at each row
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    c.extra = "check_interval = 1\n";
+    c.right = "type = \"outlet_pressure\"\np = \"1.0 + 0.5 * t\"\n";
+    expect_queue_invariant("boundary_rows", c);
+}
+
+TEST(StepQueueTest, BoundaryOfTOutOfRangeStopsAtTheHostsRow) {
+    // The outlet pressure turns negative between rows: every depth stops with its error at the next row
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    c.extra = "check_interval = 4\n";
+    c.right = "type = \"outlet_pressure\"\np = \"1.0 - 2.0 * t\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("boundary_error", c);
+    EXPECT_NE(o.error.find("must be positive"), std::string::npos) << o.error;
+    EXPECT_EQ(o.step % 4, 0u);
 }
 
 TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {

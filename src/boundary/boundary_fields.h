@@ -266,6 +266,9 @@ class TimedBoundaryFields {
          *         at the iteration limit, if any. */
         void check() const;
 
+        /** @brief Set failed(0) to 1 if check() would throw (kernels only, capturable in a step graph). */
+        void flag_error(const Kokkos::View<double *> & failed) const;
+
     private:
         struct FaceHost {
             uint32_t i_bc;
@@ -346,6 +349,9 @@ class DirichletStates {
         /** @brief Throw the InputError of an expression stopped at the iteration limit, if any was. */
         void check() const;
 
+        /** @brief Set failed(0) to 1 if check() would throw (kernels only, capturable in a step graph). */
+        void flag_error(const Kokkos::View<double *> & failed) const;
+
     private:
         struct FaceHost {
             int32_t state;
@@ -387,6 +393,9 @@ class TimedInletTargets {
         /** @brief Throw the InputError of an expression stopped at the iteration limit, or of a direction of t
          *         that was zero or pointed out of the domain, if any was. */
         void check() const;
+
+        /** @brief Set failed(0) to 1 if check() would throw (kernels only, capturable in a step graph). */
+        void flag_error(const Kokkos::View<double *> & failed) const;
 
     private:
         std::vector<std::shared_ptr<kexpr::Program>> host_programs;
