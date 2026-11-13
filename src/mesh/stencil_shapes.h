@@ -32,10 +32,14 @@ struct StencilShapes {
 /**
  * @brief Stencil shapes of the blocks' cells at least `reach` cells from every
  *        face of their block: two such cells have one shape if the cells within
- *        reach along every axis around them have the same nodes, relative to
- *        the cell's vertex average and in units of h = V^(1/N_DIM), rounded to
- *        1e-9, and the same h, to 1e-9 of the first block cell's. Round-off can
- *        split a shape in two, never join two.
+ *        reach along every axis around them have the same geometry relative to
+ *        the cell, to rounding: each cell's nodes relative to its vertex
+ *        average and the offset and size of the next cell along each axis, in
+ *        units of its h = V^(1/N_DIM), rounded to 1e-9, and the cell's h, to
+ *        1e-9 relative. Round-off can split a shape in two; cells whose
+ *        geometry within reach differs by more than the rounding never share
+ *        one. `reach` must cover all the cells the reconstruction's setup
+ *        reads (TENO: its gather depth).
  */
 StencilShapes stencil_shapes(const Mesh & mesh, uint32_t reach);
 

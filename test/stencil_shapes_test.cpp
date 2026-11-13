@@ -27,9 +27,9 @@ namespace {
 
 constexpr uint32_t M = N_DIM == 2 ? 14 : 10;
 
-std::shared_ptr<Mesh> box(const std::string & extra = "") {
-    std::string text = "[mesh]\ntype = \"cartesian\"\nNx = " + std::to_string(M) + "\nNy = " + std::to_string(M) + "\n";
-    if constexpr (N_DIM == 3) text += "Nz = " + std::to_string(M) + "\n";
+std::shared_ptr<Mesh> box(const std::string & extra = "", uint32_t m = M) {
+    std::string text = "[mesh]\ntype = \"cartesian\"\nNx = " + std::to_string(m) + "\nNy = " + std::to_string(m) + "\n";
+    if constexpr (N_DIM == 3) text += "Nz = " + std::to_string(m) + "\n";
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml(text + extra));
     mesh->copy_host_to_device();
@@ -70,6 +70,34 @@ TEST(StencilShapes, AStretchedBoxHasOneShapePerPlane) {
     for (const auto & [j, set] : by_plane) EXPECT_EQ(set.size(), 1u) << "plane " << j;
 }
 
+/** @brief A node moved 1e-6 of a cell from where it was changes the shapes of the cells whose reach includes it, and only those. */
+TEST(StencilShapes, GeometryAtTheEdgeOfTheReachChangesTheShape) {
+    const uint32_t m = 16, reach = 5;
+    const auto mesh = box("", m);
+    // The corner node at (1, 1[, 1]): in the cells along the far faces only
+    uint32_t corner = 0;
+    for (uint32_t v = 0; v < mesh->n_nodes; v++) {
+        bool far = true;
+        FOR_I_DIM far = far && mesh->h_node_coords(v, i) > 0.999_r;
+        if (far) corner = v;
+    }
+    ASSERT_EQ(stencil_shapes(*mesh, reach).first.size(), 1u);
+    mesh->h_node_coords(corner, 0) += 1e-6_r / rtype(m);
+    const StencilShapes shapes = stencil_shapes(*mesh, reach);
+    // Cells by their position: the corner cell (m - 1, m - 1[, m - 1]) is within reach of (m - 1 - reach, ...)
+    auto cell_at = [&](uint32_t i, uint32_t j) {
+        const StructuredBlock & block = mesh->structured_blocks.at(0);
+        uint32_t l = i + block.n[0] * j;
+        if constexpr (N_DIM == 3) l += block.n[0] * block.n[1] * j;
+        return block.first + l;
+    };
+    const uint32_t near = m - 1 - reach, far = reach;
+    EXPECT_NE(shapes.shape[cell_at(near, near)], shapes.shape[cell_at(far, far)]);
+    EXPECT_EQ(shapes.shape[cell_at(far, far)], shapes.shape[cell_at(far + 1, far)]);
+    EXPECT_EQ(stencil_shapes(*mesh, reach - 1).shape[cell_at(near, near)],
+              stencil_shapes(*mesh, reach - 1).shape[cell_at(far, far)]);
+}
+
 #if Mallard_DIM == 3
 namespace {
 
@@ -84,19 +112,21 @@ std::array<int32_t, N_DIM> index_of(const Mesh & mesh, uint32_t c) {
 } // namespace
 
 /**
- * @brief On a stretched box, TENO5 reads cells up to 3 away along an axis
- *        (one more than its vertex layers), and the central pseudo-inverses of
- *        two cells of one shape at that reach agree to round-off once their
+ * @brief On a stretched box, TENO5's stencils read cells up to 3 away along an
+ *        axis, within its gather depth, and the central pseudo-inverses of two
+ *        cells of one shape over the gather depth agree to round-off once their
  *        entries are matched by offset.
  */
 TEST(StencilShapes, CellsOfOneShapeHaveOneTENOTable) {
-    const auto mesh = box("stretching = [0.0, 1.7, 0.0]\n");
+    const auto mesh = box("stretching = [0.0, 1.7, 0.0]\n", 14);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, 1.4_r);
     TENO teno;
     teno.set_mesh(mesh);
     teno.set_boundaries(bd);
     teno.init(parse_toml("type = \"TENO\"\norder = 5\n"));
-    const StencilShapes shapes = stencil_shapes(*mesh, 3);
+    uint32_t depth = 0;
+    for (const uint8_t d : teno.gather_depth) depth = std::max<uint32_t>(depth, d);
+    const StencilShapes shapes = stencil_shapes(*mesh, depth);
 
     using Offset = std::array<int32_t, N_DIM>;
     std::vector<std::map<Offset, std::vector<double>>> table(shapes.first.size());

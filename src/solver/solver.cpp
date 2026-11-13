@@ -1552,10 +1552,15 @@ void Solver::init_numerics() {
 }
 
 void Solver::describe_stencil_shapes() {
-    // TENO's stencils reach one cell past its vertex layers on stretched blocks, MUSCL reads the face neighbors
+    // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
     const FaceReconstructionType type = face_reconstruction->get_type();
     if (type == FaceReconstructionType::FIRST_ORDER) return;
-    const uint32_t reach = type == FaceReconstructionType::TENO ? cell_numbering_of_input(input).layers + 1 : 1;
+    uint32_t reach = 1;
+    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
+        reach = 0;
+        for (const uint8_t depth : teno->gather_depth) reach = std::max<uint32_t>(reach, depth);
+        reach = comm::allreduce(reach, comm::Op::MAX);
+    }
     const StencilShapes shapes = stencil_shapes(*mesh, reach);
     const uint64_t interior = comm::allreduce(
         uint64_t(std::count_if(shapes.shape.begin(), shapes.shape.end(), [](uint32_t s) { return s != StencilShapes::NONE; })),
