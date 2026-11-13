@@ -967,9 +967,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     // Cells per batch: whole slices of the packed stencils
     const uint32_t slice = 1u << slice_shift;
     const uint32_t n_target = subset ? static_cast<uint32_t>(subset->size()) : mesh->n_reconstructed();
-    uint32_t batch = std::max(setup.batch_cells() / slice * slice, slice);
-    batch = std::min(batch, (n_target + slice - 1) / slice * slice);
-    batch = std::max(batch, slice);
+    const uint32_t batch = std::max(setup.batch_cells() / slice * slice, slice);
     teno_setup::TableBatch out(batch, n_dof_large, setup.max_large(), setup.max_small(), teno_setup::batch_interleaved());
     Kokkos::View<uint32_t *> cells("teno_setup_batch_cells", batch);
     std::unique_ptr<TableBuilder> builder;
