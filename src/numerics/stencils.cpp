@@ -267,7 +267,7 @@ void build_teno(const TENO & teno, const Mesh & mesh, Builder & b) {
  *        vertex fit), with the fit's own weights of each.
  */
 void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & boundaries, Builder & b) {
-    // Per face: 1 its ghost enters the vertex fit, 2 the vertex fit leaves it out, 4 an image cell stands in
+    // Per face: 2 the vertex fit leaves it out, 4 an image cell stands in
     Kokkos::View<uint8_t *> flags("stencil_face_flags", mesh.n_faces);
     // Ghost offsets do not depend on the states, so any admissible ones do
     Kokkos::View<rtype *[N_CONSERVATIVE]> unit_states("stencil_unit_states", mesh.n_cells);
@@ -276,7 +276,7 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     g.faces = make_gradient(mesh, boundaries, unit_states, muscl.gradients);
     Kokkos::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
         if (g.faces.cells_of_face(f, 1) >= 0) return;
-        flags(f) = static_cast<uint8_t>((g.ghost_face(f) ? 1 : 0) | (g.faces.one_sided(f) ? 2 : 0) |
+        flags(f) = static_cast<uint8_t>((g.faces.one_sided(f) ? 2 : 0) |
                                         (g.faces.boundaries.image_stencil(f) ? 4 : 0));
     });
     Kokkos::View<rtype *[N_DIM]> face_fit("stencil_face_fit_weights", mesh.faces_of_cell.extent(0));
@@ -288,6 +288,8 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     auto w_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.cells);
     auto w_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.faces);
     auto w_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.images);
+    auto ghost_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.ghost_offsets);
+    auto ghost_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.ghost_faces);
     auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.offsets_cells_of_cell);
     auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell);
     auto neighbor_shift = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift);
@@ -320,9 +322,8 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
             if (image_offsets.extent(0) > 0) {
                 for (uint32_t k = image_offsets(c); k < image_offsets(c + 1); k++) add(images(k), MIRROR, -1, w_images, k);
             }
-            for (uint32_t k = f0; k < f1; k++) {
-                const uint32_t f = mesh.h_faces_of_cell(k);
-                if (h_flags(f) & 1) add(c, MIRROR, static_cast<int32_t>(f), w_faces, k);
+            for (uint32_t k = ghost_offsets(c); k < ghost_offsets(c + 1); k++) {
+                add(c, MIRROR, static_cast<int32_t>(ghost_faces(k)), w_faces, k);
             }
         } else {
             for (uint32_t k = f0; k < f1; k++) {

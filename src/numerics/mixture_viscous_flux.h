@@ -141,9 +141,7 @@ struct MixtureGradientFunctor {
         }
         rtype W_i[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = f.W(c, i);
-        for (uint32_t k = f.offsets_faces_of_cell(c); k < f.offsets_faces_of_cell(c + 1); k++) {
-            const uint32_t i_face = f.faces_of_cell(k);
-            if (!stencil.ghost_face(i_face)) continue;
+        stencil.for_each_ghost(c, [&](const uint32_t i_face, const uint32_t k) {
             rtype dx[N_DIM], W_g[N_CONSERVATIVE];
             f.neighbor(c, i_face, W_i, dx, W_g);
             for (uint8_t v = 0; v < N_DIM; v++) {
@@ -165,14 +163,14 @@ struct MixtureGradientFunctor {
                     dT = 2.0_r * d * bc.data[N_DIM + 1] / coefficients(c, LAMBDA);
                 }
                 FOR_I_DIM gradients(c, N_DIM, i) += stencil.weights.faces(k, i) * dT;
-                continue;
+                return;
             }
-            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic()) continue;
+            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic()) return;
             for (uint32_t v = N_DIM; v < n_vars; v++) {
                 const rtype dq = bc_values(i_bc, v - N_DIM) - values(c, v);
                 FOR_I_DIM gradients(c, v, i) += stencil.weights.faces(k, i) * dq;
             }
-        }
+        });
     }
 };
 

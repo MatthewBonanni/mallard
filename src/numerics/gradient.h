@@ -246,12 +246,15 @@ void cholesky_solve(const T L[N][N], T * x) {
 
 /**
  * @brief Weights of LSQVertexGradientFunctor, aligned with cells_of_cell,
- *        faces_of_cell (zero for interior faces) and BoundaryData::image_neighbors.
+ *        ghost_faces and BoundaryData::image_neighbors.
  */
 struct VertexGradientWeights {
     Kokkos::View<rtype *[N_DIM]> cells;
     Kokkos::View<rtype *[N_DIM]> faces;
     Kokkos::View<rtype *[N_DIM]> images;
+    /** @brief The boundary faces whose ghosts enter each cell's stencil, in faces_of_cell order (CSR). */
+    Kokkos::View<uint32_t *> ghost_offsets;
+    Kokkos::View<uint32_t *> ghost_faces;
 };
 
 /** @brief Kind of a point of a vertex-gradient stencil. */
@@ -305,9 +308,18 @@ struct LSQVertexGradientFunctor {
         return faces.cells_of_face(i_face, 1) < 0 && !faces.one_sided(i_face) && !faces.boundaries.image_stencil(i_face);
     }
 
+    /** @brief Calls f(i_face, k) for every ghost face of cell i_cell, k indexing weights.faces. */
+    template <typename F>
+    KOKKOS_INLINE_FUNCTION
+    void for_each_ghost(const uint32_t i_cell, F && f) const {
+        for (uint32_t k = weights.ghost_offsets(i_cell); k < weights.ghost_offsets(i_cell + 1); k++) {
+            f(weights.ghost_faces(k), k);
+        }
+    }
+
     /**
      * @brief Offset of every stencil point of cell i_cell, passed to
-     *        f(offset, kind, index into cells_of_cell, faces_of_cell or
+     *        f(offset, kind, index into cells_of_cell, weights.ghost_faces or
      *        BoundaryData::image_neighbors).
      */
     template <typename F>
@@ -329,13 +341,11 @@ struct LSQVertexGradientFunctor {
         // The ghost positions do not depend on the states
         rtype W_i[N_CONSERVATIVE], W_g[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = 1.0;
-        for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
-            const uint32_t i_face = faces.faces_of_cell(k);
-            if (!ghost_face(i_face)) continue;
+        for_each_ghost(i_cell, [&](const uint32_t i_face, const uint32_t k) {
             rtype dx[N_DIM];
             faces.neighbor(i_cell, i_face, W_i, dx, W_g);
             f(dx, StencilPoint::FACE, k);
-        }
+        });
     }
 
     /**
@@ -454,16 +464,14 @@ struct LSQVertexGradientFunctor {
                 for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.images(k, d) * dW;
             }
         });
-        for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
-            const uint32_t i_face = faces.faces_of_cell(k);
-            if (!ghost_face(i_face)) continue;
+        for_each_ghost(i_cell, [&](const uint32_t i_face, const uint32_t k) {
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             faces.neighbor(i_cell, i_face, W_i, dx, W_j);
             FOR_I_CONSERVATIVE {
                 const rtype dW = W_j[i] - W_i[i];
                 for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.faces(k, d) * dW;
             }
-        }
+        });
         FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) faces.gradients(i_cell, i, d) = g[i][d];
     }
 };
@@ -488,10 +496,34 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
                                                      bool quadratic = true) {
     LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
                                      {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
-                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0)),
+                                      {},
                                       Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_images",
-                                                                   faces.boundaries.image_neighbors.extent(0))},
+                                                                   faces.boundaries.image_neighbors.extent(0)),
+                                      Kokkos::View<uint32_t *>("vertex_gradient_weights_ghost_offsets", mesh.n_cells + 1),
+                                      {}},
                                      quadratic, quadratic ? mesh.cell_covariance : Kokkos::View<rtype *[3]>()};
+    // Only boundary faces have ghosts: the weights of a cell's faces are stored for those alone
+    const Kokkos::View<uint32_t *> ghost_offsets = functor.weights.ghost_offsets;
+    const uint32_t n_cells = mesh.n_cells;
+    uint32_t n_ghosts = 0;
+    Kokkos::parallel_scan("vertex_gradient_ghost_offsets", n_cells + 1,
+                          KOKKOS_LAMBDA(const uint32_t c, uint32_t & sum, const bool final) {
+        if (final) ghost_offsets(c) = sum;
+        if (c == n_cells) return;
+        for (uint32_t k = faces.offsets_faces_of_cell(c); k < faces.offsets_faces_of_cell(c + 1); k++) {
+            if (functor.ghost_face(faces.faces_of_cell(k))) sum++;
+        }
+    }, n_ghosts);
+    functor.weights.ghost_faces = Kokkos::View<uint32_t *>("vertex_gradient_weights_ghost_faces", n_ghosts);
+    functor.weights.faces = Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", n_ghosts);
+    const Kokkos::View<uint32_t *> ghost_faces = functor.weights.ghost_faces;
+    Kokkos::parallel_for("vertex_gradient_ghost_faces", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        uint32_t g = ghost_offsets(c);
+        for (uint32_t k = faces.offsets_faces_of_cell(c); k < faces.offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t i_face = faces.faces_of_cell(k);
+            if (functor.ghost_face(i_face)) ghost_faces(g++) = i_face;
+        }
+    });
     Kokkos::parallel_for("vertex_gradient_weights", mesh.n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;

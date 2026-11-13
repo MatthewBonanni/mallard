@@ -314,22 +314,20 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
                 FOR_I_DIM g[v][i] += s.weights.images(k, i) * dq;
             }
         });
-        for (uint32_t k = f.offsets_faces_of_cell(c); k < f.offsets_faces_of_cell(c + 1); k++) {
-            const uint32_t i_face = f.faces_of_cell(k);
-            if (!s.ghost_face(i_face)) continue;
+        s.for_each_ghost(c, [&](const uint32_t i_face, const uint32_t k) {
             const int32_t i_bc = f.boundaries.face_bc(i_face);
             const BoundaryCondition & bc = f.boundaries.bcs(i_bc);
-            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic() || bc_Y.extent(0) == 0) continue;
+            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic() || bc_Y.extent(0) == 0) return;
             rtype total = 0.0;
             for (uint32_t m = 0; m < n_species; m++) total += bc_Y(i_bc, m);
-            if (!(total > 0.5_r)) continue;
+            if (!(total > 0.5_r)) return;
             for (uint32_t v = 0; v < N_SCALARS; v++) {
                 rtype ghost = 0.0;
                 for (uint32_t m = 0; m < n_species; m++) ghost += weights(v, m) * bc_Y(i_bc, m);
                 const rtype dq = ghost - values(c, v);
                 FOR_I_DIM g[v][i] += s.weights.faces(k, i) * dq;
             }
-        }
+        });
         for (uint32_t v = 0; v < N_SCALARS; v++) {
             FOR_I_DIM gradients(c, v, i) = g[v][i];
         }
