@@ -1,0 +1,1 @@
+- Run-control commands submitted on a rank other than 0 no longer stay pending after the run, where the next solver of the process acted on them in collectives the other ranks never reached and hung (#946).

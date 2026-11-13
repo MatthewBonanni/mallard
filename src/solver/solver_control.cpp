@@ -222,12 +222,11 @@ void Solver::act_on_requests() {
 }
 
 void Solver::apply_commands() {
-    std::vector<run_control::Command> commands;
+    // Every rank empties its queue, so that no request stays pending; all follow rank 0's commands
+    std::vector<run_control::Command> commands = run_control::take_commands();
+    if (!comm::is_root()) commands.clear();
     std::string text;
-    if (comm::is_root()) {
-        commands = run_control::take_commands();
-        for (const auto & command : commands) text += command.text + "\n";
-    }
+    for (const auto & command : commands) text += command.text + "\n";
     text = comm::broadcast(text);
     const std::vector<std::string> lines = split(text, '\n');
     for (size_t i = 0; i < lines.size(); i++) {

@@ -194,6 +194,8 @@ TEST(RunControlTest, CommandsChangeRuntimeSettingsAtTheNextStep) {
     run_control::submit("set n_steps=7 write_data.0.interval=3 cfl=0.5");
     EXPECT_EQ(solver.run(), 0);
     EXPECT_EQ(solver.get_step(), 7u);
+    // On every rank: a request left pending would reach the next run
+    EXPECT_EQ(run_control::pending(), 0);
     for (uint64_t step : {3u, 6u}) EXPECT_TRUE(fs::exists(restart_file(dir, step))) << step;
     EXPECT_FALSE(fs::exists(restart_file(dir, 4)));
 }
