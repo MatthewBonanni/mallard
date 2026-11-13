@@ -1,0 +1,10 @@
+{
+ "default": "true",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/turbulent_inflow_duct/input.toml"
+ ],
+ "type": "bool"
+}

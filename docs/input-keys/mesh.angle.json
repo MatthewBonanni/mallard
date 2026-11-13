@@ -1,0 +1,14 @@
+{
+ "default": "360.0",
+ "dimension": "angle (rad)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/rotational_sector/annulus.toml",
+  "examples/rotational_sector/sector.toml",
+  "examples/rotational_sector/sector_3d.toml"
+ ],
+ "type": "number",
+ "unit": "deg"
+}
