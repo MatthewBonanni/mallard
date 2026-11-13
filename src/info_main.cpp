@@ -743,11 +743,11 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
     if (args.has("--quality")) {
         logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard info --quality is deprecated: use --mesh-fields");
     }
-    const MeshBlock block = output::read_mesh(path);
+    MeshBlock block = output::read_mesh(path);
     output::Contents c = output::mesh_contents(path, block);
     Kokkos::ScopeGuard kokkos(argc, argv);
     auto mesh = std::make_shared<Mesh>();
-    mesh->init_from_block(block);
+    mesh->init_from_block(std::move(block));
     mesh->copy_host_to_device();
     c.mesh.n_faces = mesh->n_faces;
     const MeshQuality quality = mesh_quality(*mesh);

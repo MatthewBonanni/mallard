@@ -426,17 +426,18 @@ class Mesh {
         /**
          * @brief Build the mesh with periodic node classes found beforehand
          *        (e.g. across ranks); boundary faces of classes.zones, if given,
-         *        are dropped.
+         *        are dropped. Takes the nodes and cells, and frees them as soon
+         *        as the mesh holds them.
          */
-        void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                    const std::vector<std::vector<uint32_t>> & cells,
+        void init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, CellNodes cells,
                                     const std::vector<BoundaryFace> & boundary_faces,
                                     const std::string & unlisted_zone, const PeriodicNodes & classes);
 
         /**
-         * @brief Build the mesh from a block holding the whole mesh.
+         * @brief Build the mesh from a block holding the whole mesh, freeing the
+         *        block's cells and nodes as soon as the mesh holds them.
          */
-        void init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic = {});
+        void init_from_block(MeshBlock block, const std::vector<PeriodicPair> & periodic = {});
 
         /**
          * @brief Curve the faces on the given surfaces (see curved::Geometry):
@@ -614,25 +615,19 @@ class Mesh {
     protected:
     private:
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
-        /**
-         * @brief Positively oriented copy of 3D cells (Gmsh/VTK convention), as
-         *        CSR offsets and node lists.
-         */
-        static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                    const std::vector<std::vector<uint32_t>> & cells,
-                                    std::vector<uint32_t> & offsets, std::vector<uint32_t> & cell_nodes);
+        /** @brief Orient 3D cells positively (Gmsh/VTK convention), in place. */
+        static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells);
 
-        void allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                               const std::vector<uint32_t> & cell_node_offsets,
-                               const std::vector<uint32_t> & cell_nodes,
-                               const std::vector<uint32_t> & cell_face_offsets,
-                               const std::vector<uint32_t> & cell_faces,
-                               const std::vector<uint32_t> & face_node_offsets,
-                               const std::vector<uint32_t> & face_nodes,
-                               const std::vector<std::array<int32_t, 2>> & face_cells,
-                               const std::vector<uint8_t> & face_shifts,
-                               const std::vector<uint32_t> & interior,
-                               const std::map<std::string, std::vector<uint32_t>> & zone_faces);
+        /** @brief Copy the connectivity into the mesh's views, freeing each vector once copied. */
+        void allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, CellNodes && cells,
+                               std::vector<uint32_t> && cell_face_offsets,
+                               std::vector<uint32_t> && cell_faces,
+                               std::vector<uint32_t> && face_node_offsets,
+                               std::vector<uint32_t> && face_nodes,
+                               std::vector<std::array<int32_t, 2>> && face_cells,
+                               std::vector<uint8_t> && face_shifts,
+                               std::vector<uint32_t> && interior,
+                               std::map<std::string, std::vector<uint32_t>> && zone_faces);
 
         void h_neighbors_of_cell_helper(uint32_t i_cell,
                                         uint8_t n_order,

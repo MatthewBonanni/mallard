@@ -97,4 +97,10 @@ const std::array<std::string, N_PRIMITIVE> PRIMITIVE_NAMES = {
 };
 #endif
 
+/** @brief Free a container's memory now (assigning {} to a std::vector only empties it). */
+template <typename T>
+void release(T & container) {
+    T().swap(container);
+}
+
 #endif // COMMON_TYPEDEF_H
