@@ -89,6 +89,7 @@ struct CheckRegion {
     double own_measure = std::numeric_limits<double>::quiet_NaN();
     double own_surface = std::numeric_limits<double>::quiet_NaN();
     double own_tolerance = 0.0;  // relative; 0 in closed form
+    bool solution = false;       // defined by the solution: placed during the run, so neither measured nor counted
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */

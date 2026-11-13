@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "cell_fields.h"
 #include "common.h"
 #include "exact_sums.h"
 #include "kexpr.h"
@@ -49,15 +50,7 @@ enum Variable : uint16_t {
 /** @brief Domain averages: rho, rho u, rho E, rho |u|^2 / 2. */
 constexpr int N_MEANS = 6;
 
-/** @brief What the expressions read in each cell: W = [rho, u, p], and for mixtures the mass fractions. */
-struct CellFields {
-    Kokkos::View<rtype *[N_DIM]> coords;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
-    Kokkos::View<rtype **, Kokkos::LayoutRight> Y;  // (cell, k), mixtures
-    Kokkos::View<double *> inv_W;                   // kmol/kg, mixtures
-    double R = 0.0;                                 // single gas: gas constant
-    double R_universal = 0.0;                       // mixtures: J/(kmol K)
-};
+using CellFields = region::CellFields;
 
 /** @brief Values of the variables in one cell, read on demand. */
 struct CellVariables {

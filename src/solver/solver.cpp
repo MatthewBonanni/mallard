@@ -1109,8 +1109,8 @@ void Solver::init_boundaries() {
     timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
 }
 
-void Solver::init_sources(region::Regions & regions) {
-    sources::CellFields fields;
+region::CellFields Solver::cell_fields() const {
+    region::CellFields fields;
     fields.coords = mesh->cell_coords;
     fields.W = W_cells;
     if (is_mixture()) {
@@ -1120,7 +1120,11 @@ void Solver::init_sources(region::Regions & regions) {
     } else {
         fields.R = double(physics.R);
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions,
+    return fields;
+}
+
+void Solver::init_sources(region::Regions & regions) {
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, cell_fields(), regions,
                                                          is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
         source_summary.add(terms->summary());
@@ -1661,6 +1665,7 @@ void Solver::init_output(region::Regions & regions) {
         }
     }
     probes.set_reconstruction(face_reconstruction.get());
+    probes.set_cell_fields(cell_fields());
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);

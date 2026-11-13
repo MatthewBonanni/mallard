@@ -23,10 +23,12 @@
   "implicit",
   "interior",
   "intersection",
+  "isosurface",
   "polygon",
   "rectangle",
   "sphere",
   "torus",
-  "union"
+  "union",
+  "where"
  ]
 }

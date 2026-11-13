@@ -256,13 +256,16 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             const Input & value = entry->at("region");
             const region::Region & r = regions.get(value, where + ".region");
             region::require_full_dimension(r, value, where + ".region");
-            moves = r.moving();
+            moves = r.moving() || r.solution();
             const uint32_t n_parts = per_copy ? std::max<uint32_t>(1, static_cast<uint32_t>(r.copies().size())) : 1;
             parts.assign(n_parts, Part{});
             double integral = 0.0;
+            std::shared_ptr<const region::SolutionLevels> levels;
+            if (r.solution()) levels = std::make_shared<region::SolutionLevels>(*mesh, r.conditions(), species, fields);
             for (uint32_t k = 0; k < n_parts; k++) {
-                std::vector<double> fractions = n_parts > 1 ? region::cell_fractions(*mesh, r.copy(k))
-                                                            : regions.fractions(value, where + ".region");
+                std::vector<double> fractions = r.solution()  ? std::vector<double>(mesh->n_cells, 0.0)
+                                                : n_parts > 1 ? region::cell_fractions(*mesh, r.copy(k))
+                                                              : regions.fractions(value, where + ".region");
                 std::vector<double> weighted(n_owned);
                 for (uint32_t c = 0; c < n_owned; c++) weighted[c] = fractions[c] * measure[c];
                 const double part = ordered_sum(*mesh, weighted);
@@ -275,8 +278,8 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
                 parts[k].scale = total && part > 0.0 ? 1.0 / part : 1.0;
                 if (moves) {
                     Moving m;
-                    m.fractions = n_parts > 1 ? std::make_unique<region::MovingFractions>(*mesh, r.copy(k))
-                                              : std::make_unique<region::MovingFractions>(*mesh, r);
+                    m.fractions = n_parts > 1 ? std::make_unique<region::MovingFractions>(*mesh, r.copy(k), levels)
+                                              : std::make_unique<region::MovingFractions>(*mesh, r, levels);
                     m.row = static_cast<uint32_t>(parts[k].row);
                     if (total) m.integral = parts[k].integral = n_totals++;
                     moving.push_back(std::move(m));
@@ -285,7 +288,9 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             }
             std::ostringstream text;
             text << r.summary();
-            if (moves) {
+            if (r.solution()) {
+                text << ", from the solution";
+            } else if (moves) {
                 text << ", moving";
             } else {
                 m_summary.quantity(label + " region " + (N_DIM == 2 ? "area" : "volume"), logging::real(integral),

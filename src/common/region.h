@@ -75,6 +75,20 @@ struct Copy {
     uint32_t first = 0, count = 0;
 };
 
+/**
+ * @brief A condition on the solution: where its level, an expression of the
+ *        fields and x, y, z, t (condition_variables), is negative. key names
+ *        it in the input, text is as given.
+ */
+struct Condition {
+    std::string level;
+    std::string key;
+    std::string text;
+};
+
+/** @brief The variables of conditions: x, y, z, t, RHO, U_X, U_Y (, U_Z), P, T, then Y_<species> (other characters than letters, digits and _ as _). */
+std::vector<std::string> condition_variables(const std::vector<std::string> & species);
+
 /** @brief A region as plain data: what parsing a region gives (see region_input.h). */
 struct Definition {
     std::vector<Node> nodes;  // of every filled region of shapes
@@ -86,6 +100,7 @@ struct Definition {
     std::vector<Motion> motions;           // the moving nodes
     std::vector<kexpr::Program> times;     // programs of t of the steps and motions
     std::vector<Copy> copies;              // of its repeat, or none
+    std::vector<Condition> conditions;     // of its CONDITION filled regions, by index
     uint32_t root = 0;                     // filled regions: the whole one
     uint32_t own = 0;                      // filled regions: the whole one before it wraps
     int dimension = N_DIM;
@@ -180,6 +195,16 @@ class Region {
         const std::vector<Step> & steps() const { return m_steps; }
         const std::vector<kexpr::Program> & times() const { return m_times; }
 
+        /**
+         * @brief Whether it depends on the solution: a filled region with a
+         *        condition among its parts, or a surface or curve on the
+         *        boundary of one (an isosurface).
+         */
+        bool solution() const { return m_solution; }
+
+        /** @brief The conditions of its CONDITION filled regions, by index. */
+        const std::vector<Condition> & conditions() const { return m_conditions; }
+
         /** @brief The copies of its repeat (none without one). */
         const std::vector<Copy> & copies() const { return m_copies; }
 
@@ -208,7 +233,9 @@ class Region {
         std::vector<Motion> m_motions;
         std::vector<kexpr::Program> m_times;
         std::vector<Copy> m_copies;
+        std::vector<Condition> m_conditions;
         bool m_moving = false;
+        bool m_solution = false;
         double m_time = 0.0;  // of implicit shapes
         uint32_t m_own = 0;
         uint32_t m_root = 0;

@@ -86,7 +86,9 @@ Expressions read `x`, `y`, `z`, `t`, the local state `rho`, `u_x`, `u_y`,
 averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`, and
 `copy`, the index of a copy of a region with
 [`repeat`](geometry.md#arrays-of-copies). Regions may
-[move](geometry.md#moving-regions), with centers, sizes and transforms of `t`.
+[move](geometry.md#moving-regions), with centers, sizes and transforms of `t`,
+or follow the solution, such as `{type = "where", condition = "T > 1500"}`
+([Regions defined by the solution](geometry.md#regions-defined-by-the-solution)).
 Region lengths take units too (`radius = "5 mm"`). Write
 `SOURCE_RHOE` (and `SOURCE_RHO`, `SOURCE_RHOU_X`, ...) to see where sources
 act.

@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 43 more.
+and 44 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -769,7 +769,7 @@ type = "symmetry"
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach),
 [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge),
 [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d)
-and 30 more.
+and 31 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.

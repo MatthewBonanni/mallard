@@ -39,9 +39,9 @@ interval = 10
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
-[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
-[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180)
-and 3 more.
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions),
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
+and 4 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -369,7 +369,8 @@ interval = 10
 
 *Used in:*
 [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
-[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters).
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions).
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not
@@ -441,6 +442,13 @@ the integrals, the mean that integral over the mean measure in the domain
 `copies = "each"`, a region with [`repeat`](geometry.md#arrays-of-copies) gives
 one probe per copy, `<name>_copy<k>`, each with its own reductions file.
 
+**Regions defined by the solution.** A `where` region and an `isosurface`
+([Regions defined by the solution](geometry.md#regions-defined-by-the-solution))
+are placed on the solution at each write: a `where` region's fractions, and an
+isosurface's elements, extracted anew from the cells' levels. The reductions
+file's measure column is the region's at that time, and its `measures` are
+`null`. Isosurfaces take no `n_points` or `average`.
+
 Give the region by name to measure exactly where a source or sponge acts:
 
 **Control-volume balances.** The conserved variables and the flux variables
@@ -501,8 +509,11 @@ a probe type; its files are `probe_extract.csv` and
 also writes the chosen fields (`--fields`, of `--region` if given) as
 `[[write_data]]` would have. Files go to `extract/` (`-o DIR`) under the names
 the input gives them, every probe at every snapshot chosen whatever its
-`interval`. The report lists what it wrote and the reductions of the last
-snapshot, each with its units:
+`interval`. [Regions defined by the solution](geometry.md#regions-defined-by-the-solution)
+are placed on each file's state, as the run places them on its own: `--region
+'{type = "isosurface", field = "T", value = 1500}'` gives the flame's area and
+the flux through it at every snapshot. The report lists what it wrote and the
+reductions of the last snapshot, each with its units:
 
 ```
 $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart

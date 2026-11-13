@@ -60,8 +60,12 @@ void Solver::init_sponges(region::Regions & regions) {
         if (sponge.contains("region")) {
             const region::Region & r = regions.get(sponge.at("region"), where + ".region");
             region::require_full_dimension(r, sponge.at("region"), where + ".region");
-            if (r.moving()) {
-                moving = std::make_shared<region::MovingFractions>(*mesh, r);
+            if (r.moving() || r.solution()) {
+                std::shared_ptr<const region::SolutionLevels> levels;
+                if (r.solution()) {
+                    levels = std::make_shared<region::SolutionLevels>(*mesh, r.conditions(), species_names, cell_fields());
+                }
+                moving = std::make_shared<region::MovingFractions>(*mesh, r, levels);
             } else {
                 fractions = &regions.fractions(sponge.at("region"), where + ".region");
             }

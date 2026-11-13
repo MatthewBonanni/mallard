@@ -25,6 +25,7 @@
   "examples/flame_turbulence/les.toml",
   "examples/forced_inlet/input.toml",
   "examples/heated_wall/input.toml",
+  "examples/hot_gas_regions/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/riemann_2d_quads/coarse.toml",
   "examples/sedov_3d/input.toml",

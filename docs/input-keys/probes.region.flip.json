@@ -1,6 +1,10 @@
 {
+ "default": "false",
  "dims": [
   2
  ],
- "set_in": []
+ "set_in": [
+  "examples/hot_gas_regions/input.toml"
+ ],
+ "type": "bool"
 }

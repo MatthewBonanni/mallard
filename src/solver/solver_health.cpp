@@ -379,6 +379,12 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
         const std::vector<double> io = {(t_wall_output - run_health.output_last) / double(steps),
                                         (writing - run_health.writing_last) / double(steps)};
         for (const auto & s : health::spread({"output_sync", "output_async"}, io, {1.0, 1.0})) report.timing.push_back(s);
+        if (probes.any_solution()) {
+            // Regions defined by the solution, placed for the probes (part of output_sync)
+            const std::vector<double> placing = {(probes.region_seconds() - run_health.regions_last) / double(steps)};
+            for (const auto & s : health::spread({"regions"}, placing, {1.0})) report.timing.push_back(s);
+            run_health.regions_last = probes.region_seconds();
+        }
         run_health.output_last = t_wall_output;
         run_health.writing_last = writing;
     }

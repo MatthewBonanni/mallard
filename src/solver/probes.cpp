@@ -624,9 +624,14 @@ void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region
 
 void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                              const bool per_cell) {
+    select_elements(p, mesh, region::elements(mesh, r), r.dimension(), r.summary(), n_variables, per_cell);
+}
+
+void Probes::select_elements(Probe & p, const Mesh & mesh, region::Elements e, const int dimension,
+                             const std::string & summary, uint32_t n_variables, const bool per_cell) {
     // The quadrature points of the region's elements, in the order of their cells' global ids, then position;
     // cell averages without normals are the same summed per cell: one sample each
-    region::Elements e = region::elements(mesh, r);
+    p.geometry.quad_weights.clear();
     if (per_cell) {
         std::map<uint32_t, std::pair<double, std::array<double, 3>>> cells;
         for (size_t k = 0; k < e.size(); k++) {
@@ -681,8 +686,8 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region 
     }
     p.quadrature.in_cells(mesh, set, {}, n_variables);
     if (!per_cell) p.quadrature.set_normals(normals);
-    p.geometry.dim = static_cast<uint8_t>(r.dimension());
-    p.geometry.type = "region " + r.summary();
+    p.geometry.dim = static_cast<uint8_t>(dimension);
+    p.geometry.type = "region " + summary;
 }
 
 namespace {
@@ -1522,7 +1527,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             }
         } else if (snapshot) {
             if (r.kind == probe::RegionValue::Kind::ZONE) region_zones = r.zones;
-            if (r.kind == probe::RegionValue::Kind::ELEMENTS) elements = r.region;
+            if (r.kind == probe::RegionValue::Kind::ELEMENTS) {
+                elements = r.region;
+                region::require_fixed(*elements, value, rkey, "snapshots");
+            }
         }
     }
     p.from_region = !snapshot && where == &entry && entry.contains("region");
@@ -1533,6 +1541,19 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     // A surface region with n_points is resampled on a grid of samples, written like a curve's
     p.resampled = region && region->dimension() == N_DIM - 1 && N_DIM == 3 && entry.contains("n_points");
+    p.solution = region && region->solution();
+    if (p.solution && region->dimension() < N_DIM) {
+        for (const char * k : {"n_points", "average"}) {
+            if (!entry.contains(k) || (std::string(k) == "average" && !find_value<bool>(entry, k))) continue;
+            throw InputError(Diagnostic{.key = key + "." + k,
+                                        .line = line_of(entry, k),
+                                        .message = std::string(k == std::string("average") ? "averages" : "resamples") +
+                                                   " a surface or curve, and this one follows the solution, extracted "
+                                                   "anew at each write; that is not supported yet",
+                                        .fix = std::string("Remove ") + k,
+                                        .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
+        }
+    }
     for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
         // Surfaces and curves sample at their quadrature points: cell averages or point values there
         const std::string name = k;
@@ -1742,11 +1763,15 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     } else if (p.from_region) {
         const region::Region & r = *region;
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
-        if (r.dimension() == N_DIM && r.moving()) {
+        if (r.dimension() == N_DIM && (r.moving() || r.solution())) {
             // Every owned cell, weighed by f V at each write
             std::vector<double> weights(mesh.n_owned(), 0.0);
             auto motion = std::make_shared<Probe::Motion>();
-            motion->fractions = std::make_shared<region::MovingFractions>(mesh, r);
+            std::shared_ptr<const region::SolutionLevels> levels;
+            if (r.solution()) {
+                levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
+            }
+            motion->fractions = std::make_shared<region::MovingFractions>(mesh, r, levels);
             motion->distributed = mesh.n_global_cells > 0;
             std::vector<uint64_t> global;
             for (uint32_t c = 0; c < mesh.n_owned(); c++) {
@@ -1795,11 +1820,24 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             if (!p.reductions.empty()) {
                 p.quadrature.locate(mesh, p.geometry.quad_points, n_evaluated, p.geometry.quad_normals);
             }
+        } else if (r.solution()) {
+            // Extracted at each write from the solution then
+            const bool normals = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::normals(k); });
+            auto iso = std::make_shared<Probe::Isosurface>();
+            iso->mesh = &mesh;
+            iso->region = std::make_shared<region::Region>(r.with_root(r.root(), r.copies()));
+            iso->levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
+            iso->n_evaluated = n_evaluated;
+            iso->per_cell = p.sampling == Sampling::CELL && !normals && !p.gradients;
+            p.isosurface = std::move(iso);
+            p.geometry.dim = static_cast<uint8_t>(r.dimension());
+            p.geometry.type = "region " + r.summary();
+            p.measures = json::Object().raw("region", "null").raw("in_domain", "null").str();
         } else {
             const bool normals = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::normals(k); });
             select_elements(p, mesh, r, n_evaluated, p.sampling == Sampling::CELL && !normals && !p.gradients);
         }
-        if (p.quadrature.n_global == 0) {
+        if (p.quadrature.n_global == 0 && !p.solution) {
             throw InputError(Diagnostic{.key = key + ".region",
                                         .line = line_of(entry, "region"),
                                         .message = "covers no part of any cell of the mesh",
@@ -2200,7 +2238,7 @@ bool Probes::snapshots_need_transport() const {
 
 bool Probes::point_values_due(uint64_t step, rtype t) const {
     return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
-        return !p->snapshot && p->sampling == Sampling::POINT && p->due(step, t);
+        return !p->snapshot && (p->sampling == Sampling::POINT || p->solution) && p->due(step, t);
     });
 }
 
@@ -2224,6 +2262,10 @@ bool Probes::all_gradients_due(uint64_t step, rtype t, bool wall_model, bool sna
 bool Probes::any_gradients() const {
     return std::any_of(probes.begin(), probes.end(),
                        [](const auto & p) { return p->gradients || p->sampling == Sampling::POINT; });
+}
+
+bool Probes::any_solution() const {
+    return std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->solution; });
 }
 
 bool Probes::any_point_values() const {
@@ -2264,7 +2306,10 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         if (p.motion && p.average) {
             p.mean_fields(sampled_quad);
         } else {
+            Kokkos::Timer timer;
             if (p.motion) p.move(double(t));
+            if (p.isosurface) p.extract(double(t));
+            if (p.solution) m_region_seconds += timer.seconds();
             if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
         }
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
@@ -2474,7 +2519,7 @@ std::tuple<bool, bool, bool> Probes::average_needs(bool wall_model) const {
     bool cell_W = false, transport = false, all_gradients = false;
     for (const auto & p : probes) {
         if (!p->average) continue;
-        cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients;
+        cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients || p->solution;
         transport = transport || p->transport;
         all_gradients = all_gradients || p->diffusive || (wall_model && p->gradients);
     }
@@ -2489,7 +2534,9 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         const double w = static_cast<double>(t) - p.average_t_last;
         if (!(w > 0.0)) continue;
         std::vector<double> nodes, quad;
+        Kokkos::Timer timer;
         if (p.motion) p.move(static_cast<double>(t));
+        if (p.solution) m_region_seconds += timer.seconds();
         p.sample(fields, nodes, quad);
         p.average_weight += w;
         p.average_t_last = static_cast<double>(t);
@@ -2815,6 +2862,14 @@ void Probes::Probe::move(const double t) {
     }
 }
 
+void Probes::Probe::extract(const double t) {
+    const Isosurface & iso = *isosurface;
+    iso.levels->update(t);
+    const auto levels = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), iso.levels->levels());
+    select_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels), iso.region->dimension(),
+                    iso.region->summary(), iso.n_evaluated, iso.per_cell);
+}
+
 void Probes::Probe::mean_fields(std::vector<double> & quad) {
     geometry.quad_weights = mean_weights;
     const size_t n_cols = n_evaluated();
@@ -2935,7 +2990,9 @@ std::vector<OutputSummary> Probes::summary() const {
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
         const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
-        std::string text = p.geometry.type + (p.from_region ? " over " : " of ") + logging::count(n) + unit +
+        const std::string extent = p.solution ? std::string(" from the solution")
+                                              : (p.from_region ? " over " : " of ") + logging::count(n) + unit;
+        std::string text = p.geometry.type + extent +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {

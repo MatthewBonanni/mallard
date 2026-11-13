@@ -33,6 +33,7 @@
 #include "physics.h"
 #include "boundary.h"
 #include "case_view.h"
+#include "cell_fields.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
 #include "common_io.h"
@@ -46,6 +47,8 @@ namespace region {
 class Region;
 class Regions;
 class MovingFractions;
+class SolutionLevels;
+struct Elements;
 }
 struct ProbeFluxes;
 
@@ -275,6 +278,11 @@ class Probes {
 
         /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
         void set_reconstruction(const FaceReconstruction * r);
+        /** @brief The cell fields that regions defined by the solution read (before init). */
+        void set_cell_fields(const region::CellFields & f) { cell_fields = f; }
+        /** @brief Wall seconds spent placing regions defined by the solution, so far, and whether any probe has one. */
+        double region_seconds() const { return m_region_seconds; }
+        bool any_solution() const;
 
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
@@ -403,8 +411,20 @@ class Probes {
                 bool distributed = false;
             };
             std::shared_ptr<Motion> motion;
+            bool solution = false;  // its region follows the solution (ProbeFields::W must be current)
+            /** @brief An isosurface (or another surface or curve of the solution): extracted at each write. */
+            struct Isosurface {
+                const Mesh * mesh = nullptr;
+                std::shared_ptr<region::Region> region;
+                std::shared_ptr<region::SolutionLevels> levels;
+                uint32_t n_evaluated = 0;
+                bool per_cell = false;
+            };
+            std::shared_ptr<Isosurface> isosurface;
             /** @brief The quadrature weights f V of a moving region at time t (collective). */
             void move(double t);
+            /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
+            void extract(double t);
             /** @brief Rank 0 of a time-averaged moving region: its weights and values, mean f V q / mean f V. */
             void mean_fields(std::vector<double> & quad);
 
@@ -462,6 +482,8 @@ class Probes {
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);
+        static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
+                                    const std::string & summary, uint32_t n_variables, bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
         snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
@@ -470,6 +492,8 @@ class Probes {
         rtype average_start = 0.0;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together
+        region::CellFields cell_fields;
+        double m_region_seconds = 0.0;
 };
 
 #endif // PROBES_H

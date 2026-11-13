@@ -795,6 +795,8 @@ class Solver {
         CellSampler cell_sampler() const {
             return CellSampler{conservatives, species, primitives, derived_fields, hrr, production};
         }
+        /** @brief The cell fields that source expressions and regions defined by the solution read. */
+        region::CellFields cell_fields() const;
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */

@@ -9,16 +9,16 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 
 | Feature | Geometry | Guide |
 |---|---|---|
-| `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone); it may [move](#moving-regions), and expressions read the index of [copies](#arrays-of-copies) as `copy` | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh); filled regions may [move](#moving-regions); `copies = "each"` reduces each [copy](#arrays-of-copies) | [Probes](probes.md#region-probes) |
+| `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone); it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution), and expressions read the index of [copies](#arrays-of-copies) as `copy` | [Sources](sources.md#regions) |
+| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh); filled regions may [move](#moving-regions); regions of any dimension may [follow the solution](#regions-defined-by-the-solution); `copies = "each"` reduces each [copy](#arrays-of-copies) | [Probes](probes.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
 | `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions) | [Output](output.md#snapshots-of-regions) |
-| `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) | [Sponge layers](sources.md#sponge-layers) |
+| `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution) | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output | [Probes](probes.md#probes-of-existing-output) |
+| `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
 | `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
-| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
 | `[[statistics.conditional]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): cells weighted by their fraction in it | [Statistics](statistics.md#conditional-statistics-and-pdfs-statisticsconditional) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
@@ -61,7 +61,8 @@ region = {type = "sphere", center = [0, 0, 0], radius = "2 mm"}
 A region is a table: a primitive, a boolean of regions, or the
 [boundary or interior](#boundaries-and-interiors) of a region, each with
 optional transforms, nested to any depth; or the [name](#named-regions) of
-one, or of a [region of the mesh](#regions-of-the-mesh). Each `type` has one
+one, or of a [region of the mesh](#regions-of-the-mesh); or a
+[region defined by the solution](#regions-defined-by-the-solution). Each `type` has one
 dimension, the same wherever it is used: filled (a volume; an area in 2D), a
 surface, a curve. A filled region of primitives has a **signed distance** φ,
 negative inside, that never exceeds the distance to its surface. Mallard uses it
@@ -385,7 +386,9 @@ surface area (2D: area and perimeter), independent of the mesh, against those
 of their part in the domain, and the share outside it, as
 [region probes](probes.md#region-probes) record them. A region that covers no
 cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
-extent and the domain's:
+extent and the domain's. [Regions defined by the solution](#regions-defined-by-the-solution)
+are listed with `-` for measure and cells, made from `the solution, during
+the run`, and `"solution": true` in `--json`; the case view leaves them out:
 
 ```
 == Regions =========================================================================== ERROR
@@ -577,6 +580,76 @@ Who follows a moving region:
 Surfaces, curves and points that move, snapshots of moving regions
 (`[[write_data]]`) and averaged probes of them are errors for now
 ([#747](https://github.com/MatthewBonanni/mallard/issues/747)).
+
+### Regions defined by the solution
+
+```toml
+# The burnt gas, and the flame as the isosurface T = 1500 K
+[regions]
+burnt = {type = "where", condition = "T > 1500"}
+
+[[probes]]
+name = "burnt"
+region = "burnt"
+fields = ["RHO", "T"]
+reductions = ["integral", "mean"]
+
+[[probes]]
+name = "flame"
+region = {type = "isosurface", field = "T", value = "1500 K"}
+fields = ["MASS_FLUX", "P"]
+reductions = ["integral", "mean"]
+```
+
+A `where` region is filled where its `condition` holds on the solution: a
+comparison (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the
+solution's `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T` and `Y_<species>` (SI units),
+or several joined by `and`, `or`, `not` and parentheses
+(`"T > 1500 and not (Y_OH < 1e-3)"`). An `isosurface` (2D: a curve) is where
+`field`, one of those variables, equals `value`, given in the field's units;
+it faces toward increasing `field`, and `flip = true` reverses it. It is the
+[boundary](#boundaries-and-interiors) of `{type = "where", condition =
+"<field> < <value>"}`, and the boundary of any `where` region is its own
+isosurface, facing out of it.
+
+Each cell's **level** is linear: the value of the condition's level function
+(for `a < b`, `a - b`; `and` the larger of two, `or` the smaller, `not` its
+negative; the condition holds where it is negative) at the cell's centroid,
+with its gradient fit by least squares to the values of the cells sharing a
+node with it, across periodic boundaries too. A cell's volume fraction is the exact part of its
+straight triangles (tetrahedra) where that linear level is negative, and an
+isosurface's elements are the level's zero set on them. Both are exact for a
+linear field and converge at second order otherwise, smoothly as the region
+moves through the cells. Booleans with regions of shapes or of the mesh
+combine the cell fractions (`intersection` their product, `union` the
+larger, `difference` the first times one minus the second), exact where a
+cell is wholly inside or outside one of them.
+
+![Volume fractions of where T > 1.5 over two hot spots on a coarse triangle mesh, with the exact isotherm; and the relative errors of a where region's area and of its isosurface's length on refined triangle meshes, both converging at second order](../images/guide/region-solution-light.svg#gh-light-mode-only)
+![Volume fractions of where T > 1.5 over two hot spots on a coarse triangle mesh, with the exact isotherm; and the relative errors of a where region's area and of its isosurface's length on refined triangle meshes, both converging at second order](../images/guide/region-solution-dark.svg#gh-dark-mode-only)
+
+Who follows the solution, and when:
+
+- `[[sources]]` and `[[sponges]]`: at every stage, on the device, as a captured
+  CUDA graph of the step does with no host work. A total (`total = true`) is
+  divided by the integral of the fractions at the stage, and is zero while the
+  region is empty.
+- `[[probes]]`: at each write, a `where` region's fractions and an
+  isosurface's elements, extracted anew. The measure column of the reductions
+  file is the region's at that time. The run-health timing row `regions` is
+  the time this takes.
+- `mallard post extract`: the same regions on the state of each restart file
+  or snapshot it reads
+  ([Probes of existing output](probes.md#probes-of-existing-output)), e.g.
+  `--region '{type = "isosurface", field = "T", value = 1500}'`.
+- `mallard check` lists them, with no measure or cells: the solution places
+  them during the run.
+
+They take no transforms, `repeat` or `edge`. Snapshots of them
+(`[[write_data]]`, [#797](https://github.com/MatthewBonanni/mallard/issues/797)),
+averaged probes and probes of `n_points` on isosurfaces
+([#798](https://github.com/MatthewBonanni/mallard/issues/798)),
+`[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 ### Periodic boundaries
 

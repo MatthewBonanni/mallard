@@ -1202,6 +1202,82 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     }
 }
 
+TEST(ProbesTest, FluxesThroughIsosurfacesFollowTheDivergence) {
+    // rho = 1 + r^2: its isosurface rho = 1 + R^2 is the circle (sphere) of radius R, with normals toward
+    // increasing rho, outward; the flux of rho u through it, with u linear, is 1 + R^2 times the integral
+    // of div u over the disk (ball), and its area and flux converge at second order
+    const double R = 0.2, pi = std::numbers::pi, div = N_DIM == 2 ? 0.3 : 0.25;
+    const double area = N_DIM == 2 ? 2.0 * pi * R : 4.0 * pi * R * R;
+    const double flux = (1.0 + R * R) * div * (N_DIM == 2 ? pi * R * R : 4.0 / 3.0 * pi * R * R * R);
+    const std::string value = std::to_string(1.0 + R * R);
+    std::vector<double> area_errors, flux_errors;
+    for (const uint32_t n : N_DIM == 2 ? std::vector<uint32_t>{12, 24, 48} : std::vector<uint32_t>{12, 24}) {
+        const std::string dir = fresh_dir("isosurface");
+        std::string probes;
+        for (const char * flip : {"false", "true"}) {
+            probes += std::string("[[probes]]\nname = \"") + (flip[0] == 't' ? "inward" : "outward") +
+                      "\"\nregion = {type = \"isosurface\", field = \"RHO\", value = " + value + ", flip = " + flip +
+                      "}\nfields = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
+                      "reductions_file = \"" + dir + "/" + (flip[0] == 't' ? "inward" : "outward") + ".csv\"\n";
+        }
+        std::string input = box_case(n, N_DIM == 2 ? "1 + (x - 0.5)^2 + (y - 0.5)^2" : "1 + (x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2",
+                                     "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probes);
+        const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
+        input.replace(input.find(u), u.size(), "u = " + vector3("0.1 * (x - 0.5)", "0.2 * (y - 0.5)", "-0.05 * (z - 0.5)"));
+        if (N_DIM == 3) input.replace(input.find("Nz = "), 5 + std::to_string(n / 2).size(), "Nz = " + std::to_string(n));
+        Solver solver;
+        solver.init(parse_toml(input));
+        run(solver);
+        const auto out = read_csv(dir + "/outward.csv").front(), in = read_csv(dir + "/inward.csv").front();
+        const std::string measure = N_DIM == 2 ? "length" : "area";
+        area_errors.push_back(std::fabs(out.at(measure) - area) / area);
+        flux_errors.push_back(std::fabs(out.at("integral_MASS_FLUX") - flux) / flux);
+        EXPECT_EQ(in.at("integral_MASS_FLUX"), -out.at("integral_MASS_FLUX")) << n;
+        EXPECT_EQ(in.at(measure), out.at(measure)) << n;
+    }
+    for (size_t i = 1; i < area_errors.size(); i++) {
+        EXPECT_GT(std::log2(area_errors[i - 1] / area_errors[i]), 1.7) << area_errors[i - 1] << " " << area_errors[i];
+        // 3D: the flux error is near 1e-3 already on the coarsest mesh, where other errors than the surface's compete
+        if (N_DIM == 2) {
+            EXPECT_GT(std::log2(flux_errors[i - 1] / flux_errors[i]), 1.7) << flux_errors[i - 1] << " " << flux_errors[i];
+        }
+    }
+    EXPECT_LT(area_errors.back(), 0.01);
+    EXPECT_LT(flux_errors.back(), 2e-3);
+}
+
+TEST(ProbesTest, RegionsOfTheSolutionAreTheSameOnAnyNumberOfRanks) {
+    // Each cell's level and its gradient are its own and its vertex neighbors', across
+    // periodic boundaries too; the sums run in global cell order
+    const std::string dir = fresh_dir("solution_ranks");
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        const std::vector<std::pair<std::string, std::string>> regions = {
+            {"dense", "{type = \"where\", condition = \"RHO > 1.1 and not (x < 0.3)\"}"},
+            {"level", "{type = \"isosurface\", field = \"RHO\", value = 1.1}"}};
+        for (const auto & [name, region] : regions) {
+            probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"" +
+                      (name == "level" ? ", \"MASS_FLUX\"" : "") + "]\nregion = " +
+                      region + "\nreductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"" + dir +
+                      "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return box_case(12, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 4\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"dense", "level"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        EXPECT_EQ(read_csv(file + "_serial.csv").size(), 5u) << name;
+    }
+}
+
 TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMassMomentumAndEnergy) {
     // A density wave convected through a circle (sphere): the rate of change of
     // the mass, momentum and total energy inside, a region probe's integrals of

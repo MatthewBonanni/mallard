@@ -46,6 +46,8 @@ bool vtkhdf() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()
 const std::string BOX = N_DIM == 3 ? "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.4, 0.2, 0.6]}"
                                    : "{type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.2]}";
 
+const std::string FRONT = "{type = \"isosurface\", field = \"RHO\", value = 1.1}";
+
 /** @brief A periodic box with a curve probe of point values, a region probe and restart files and snapshots every 2 steps. */
 std::string case_input(const std::string & dir, uint32_t n) {
     std::ostringstream s;
@@ -65,6 +67,9 @@ std::string case_input(const std::string & dir, uint32_t n) {
       << "file = \"" << dir << "/probe_line.csv\"\n"
       << "[[probes]]\nname = \"box\"\nregion = " << BOX << "\nfields = [\"RHO\", \"T\", \"P\"]\n"
       << "time_interval = 0.002\nreductions_file = \"" << dir << "/probe_box_reductions.csv\"\n"
+      << "[[probes]]\nname = \"front\"\nregion = " << FRONT << "\nfields = [\"RHO\", \"MASS_FLUX\"]\n"
+      << "reductions = [\"integral\", \"mean\"]\ninterval = 2\nreductions_file = \"" << dir
+      << "/probe_front_reductions.csv\"\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
     if (vtkhdf()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nfields = [\"RHO\", \"U\", \"P\"]\n"
@@ -146,6 +151,14 @@ TEST(PostExtractTest, RestartFilesGiveTheRunsProbesBitForBit) {
                        region}),
               0);
     EXPECT_EQ(rows(region + "/probe_b_reductions.csv"), std::vector<std::string>{rows(run + "/probe_box_reductions.csv").back()});
+
+    // Regions of the solution are those of the file's solution
+    EXPECT_EQ(rows(out + "/probe_front_reductions.csv"), after_step_0(run + "/probe_front_reductions.csv"));
+    const std::string front = fresh_dir("front");
+    ASSERT_EQ(extract({run + "/restart_000002.restart", "--region", FRONT, "--fields", "RHO,MASS_FLUX", "--reductions",
+                       "integral,mean", "--name", "f", "-o", front}),
+              0);
+    EXPECT_EQ(rows(front + "/probe_f_reductions.csv"), std::vector<std::string>{after_step_0(run + "/probe_front_reductions.csv").front()});
 }
 
 TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {

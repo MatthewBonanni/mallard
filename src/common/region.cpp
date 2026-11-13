@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -43,7 +44,28 @@ struct ProgramValues {
     KOKKOS_INLINE_FUNCTION double operator()(const uint32_t p) const { return values[p]; }
 };
 
+/** @brief Whether filled region i of filled has a condition among its parts. */
+bool has_condition(const std::vector<Filled> & filled, const uint32_t i) {
+    const Filled & f = filled[i];
+    if (f.kind == Filled::Kind::CONDITION) return true;
+    return std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return has_condition(filled, k); });
+}
+
 } // namespace
+
+std::vector<std::string> condition_variables(const std::vector<std::string> & species) {
+    std::vector<std::string> v = {"x", "y", "z", "t", "RHO", "U_X", "U_Y"};
+    if (N_DIM == 3) v.push_back("U_Z");
+    v.push_back("P");
+    v.push_back("T");
+    for (std::string s : species) {
+        for (char & ch : s) {
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') ch = '_';
+        }
+        v.push_back("Y_" + s);
+    }
+    return v;
+}
 
 std::vector<uint32_t> owned_zone_faces(const Mesh & mesh, const std::vector<std::string> & zones) {
     std::vector<uint32_t> faces;
@@ -67,7 +89,17 @@ Region::Region(Definition d) :
     m_motions = std::move(d.motions);
     m_times = std::move(d.times);
     m_copies = std::move(d.copies);
+    m_conditions = std::move(d.conditions);
     m_own = d.dimension == N_DIM ? d.own : 0;
+    if (m_dimension == N_DIM) {
+        m_solution = has_condition(m_filled, m_root);
+    } else {
+        for (const Piece & p : m_pieces) {
+            for (const auto * list : {&p.carriers, &p.inside, &p.outside}) {
+                for (const uint32_t i : *list) m_solution = m_solution || has_condition(m_filled, i);
+            }
+        }
+    }
     m_moving = !m_motions.empty() ||
                std::any_of(m_programs.begin(), m_programs.end(), [](const kexpr::Program & p) { return p.uses(3); });
     m_host.edge = d.edge;
@@ -88,6 +120,7 @@ Region Region::with_root(const uint32_t i, std::vector<Copy> cs) const {
     d.motions = m_motions;
     d.times = m_times;
     d.copies = std::move(cs);
+    d.conditions = m_conditions;
     d.root = d.own = i;
     d.dimension = m_dimension;
     d.bounded = m_bounded;
@@ -100,6 +133,7 @@ Region Region::with_root(const uint32_t i, std::vector<Copy> cs) const {
 }
 
 bool Region::rigid() const {
+    if (m_solution) return false;
     if (std::any_of(m_programs.begin(), m_programs.end(), [](const kexpr::Program & p) { return p.uses(3); })) return false;
     for (const Motion & m : m_motions) {
         for (const int32_t p : m.program) {
@@ -156,7 +190,7 @@ std::vector<Piece> boundary_pieces(const std::vector<Filled> & filled, const uin
     };
     Piece piece;
     piece.flip = flip;
-    if (f.kind == Filled::Kind::SHAPES) {
+    if (f.kind == Filled::Kind::SHAPES || f.kind == Filled::Kind::CONDITION) {
         piece.carriers = {i};
         return {piece};
     }
@@ -196,6 +230,7 @@ Region Region::surface_in_domain() const {
     d.vertices = m_vertices;
     d.programs = m_programs;
     d.filled = m_filled;
+    d.conditions = m_conditions;
     Filled domain;
     domain.kind = Filled::Kind::ALL;
     domain.cells = true;
@@ -419,6 +454,8 @@ std::vector<double> fractions_of(const Mesh & mesh, const Region & region, const
         }
         case Filled::Kind::INSIDE:
             return inside_fractions(mesh, f.zones);
+        case Filled::Kind::CONDITION:
+            throw std::logic_error("cell_fractions: a condition's fractions follow the solution (SolutionLevels).");
         default:
             break;
     }

@@ -64,6 +64,17 @@ struct Elements {
  */
 Elements elements(const Mesh & mesh, const Region & region);
 
+/** @brief The levels of a region's conditions in each local cell: SolutionLevels::levels() mirrored on the host. */
+using Levels = Kokkos::View<const double **[N_DIM + 1], Kokkos::DefaultExecutionSpace::array_layout, Kokkos::HostSpace>;
+
+/**
+ * @brief The elements of a region defined by the solution, with its
+ *        conditions' levels: where a condition bounds or clips it, each cell's
+ *        linear level is cut on the cell's simplices (exact for it, without
+ *        subdividing). Collective.
+ */
+Elements elements(const Mesh & mesh, const Region & region, const Levels & levels);
+
 /**
  * @brief The measures of a filled region's intersection with the domain:
  *        the sum of f V over the cells, with fractions f (cell_fractions),
