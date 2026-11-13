@@ -807,6 +807,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     auto mesh = std::make_shared<Mesh>();
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
     mesh->cell_order_choice = numbered.choice;
+    mesh->structured_blocks = numbered.blocks;
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
     mesh->h_global_node_id = std::move(node_ids);

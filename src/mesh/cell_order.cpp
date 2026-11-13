@@ -25,6 +25,7 @@ CellNumbering cell_numbering_of_input(const Input & input) {
                                   input.contains("mesh") ? line_of(input.at("mesh"), "cell_order") : size_t(0))
                           ->second;
     if (numbering.order == CellOrder::AUTO) {
+        numbering.blocks = true;
         // TENO of order p reads about (p - 1) / 2 layers around a cell; MUSCL's gradients and fluxes, one
         const Input reconstruction =
             toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
@@ -99,8 +100,11 @@ double lines_per_cell(const std::vector<uint32_t> & order, const std::vector<uin
 
 } // namespace
 
-LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const std::vector<std::vector<uint32_t>> & cells, const std::vector<uint32_t> & group_ends) {
+namespace {
+
+LocalityOrder curve_or_input_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
+                                   const std::vector<std::vector<uint32_t>> & cells,
+                                   const std::vector<uint32_t> & group_ends) {
     LocalityOrder result;
     std::vector<uint32_t> & order = result.order;
     order.resize(cells.size());
@@ -147,5 +151,24 @@ LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<
         order = std::move(identity);
         result.choice.order = CellOrder::INPUT;
     }
+    return result;
+}
+
+} // namespace
+
+LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
+                             const std::vector<std::vector<uint32_t>> & cells, const std::vector<uint32_t> & group_ends) {
+    LocalityOrder result = curve_or_input_order(numbering, nodes, cells, group_ends);
+    if (!numbering.blocks || group_ends.empty()) return result;
+    const uint32_t n_owned = group_ends[0];
+    std::vector<uint32_t> block_cells;
+    result.blocks = structured_blocks(cells, n_owned, 2 * numbering.layers + 1, block_cells);
+    if (result.blocks.empty()) return result;
+    std::vector<uint8_t> in_block(n_owned, 0);
+    for (uint32_t c : block_cells) in_block[c] = 1;
+    std::vector<uint32_t> & order = result.order;
+    const auto rest = std::stable_partition(order.begin(), order.begin() + n_owned, [&](uint32_t c) { return !in_block[c]; });
+    std::rotate(order.begin(), rest, order.begin() + n_owned);
+    std::copy(block_cells.begin(), block_cells.end(), order.begin());
     return result;
 }

@@ -317,7 +317,8 @@ TEST(DistributedMeshTest, AutoCellOrderRenumbersOnlyWhenItSavesCacheLines) {
  * @brief Numbering a rank's cells by locality permutes the owned cells and
  *        each halo layer among themselves and renumbers the faces, but every
  *        cell, face orientation and geometry by global id stays bitwise the
- *        same, and so do the cells exchanged with each neighbor.
+ *        same, and so do the cells exchanged with each neighbor. Auto with
+ *        structured blocks puts each block's owned cells first.
  */
 TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
     for (const std::string & mesh_input : mesh_inputs()) {
@@ -345,9 +346,9 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
         std::set<std::vector<double>> ref_faces;
         for (uint32_t f = 0; f < ref->n_faces; f++) ref_faces.insert(face(*ref, f));
 
-        {
+        for (const CellNumbering numbering : {CellNumbering{CellOrder::HILBERT}, CellNumbering{CellOrder::AUTO, 1, true}}) {
             Distribution dist;
-            const auto mesh = distributed.build_local_mesh(3, dist, {CellOrder::HILBERT});
+            const auto mesh = distributed.build_local_mesh(3, dist, numbering);
             ASSERT_EQ(mesh->n_cells, ref->n_cells);
             EXPECT_EQ(mesh->n_owned(), ref->n_owned());
             EXPECT_EQ(mesh->n_reconstructed(), ref->n_reconstructed());
@@ -362,8 +363,13 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
                 EXPECT_EQ(mesh->h_cell_volume(c), ref->h_cell_volume(r));
                 FOR_I_DIM EXPECT_EQ(mesh->h_cell_coords(c, i), ref->h_cell_coords(r, i));
             }
-            if (comm::size() == 1) {
+            if (comm::size() == 1 && numbering.order == CellOrder::HILBERT) {
                 EXPECT_GT(moved, 0u);
+            }
+            for (const StructuredBlock & block : mesh->structured_blocks) {
+                uint32_t size = 1;
+                for (uint32_t e : block.n) size *= e;
+                EXPECT_LE(block.first + size, mesh->n_owned());
             }
             // The same cells go to and come from each neighbor (in the receiver's order)
             auto global = [](const Mesh & m, const std::vector<uint32_t> & cells) {

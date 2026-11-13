@@ -40,6 +40,7 @@ add_library(MallardCore STATIC
     mesh/read_openfoam.cpp
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
+    mesh/structured_blocks.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp

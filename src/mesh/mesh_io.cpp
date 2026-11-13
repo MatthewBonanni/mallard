@@ -76,7 +76,8 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
         const LocalityOrder numbered = locality_order(cell_order, nodes, input_cells, {n_cells});
         cell_order_choice = numbered.choice;
-        if (numbered.choice.order == CellOrder::HILBERT) {
+        structured_blocks = numbered.blocks;
+        if (numbered.choice.order == CellOrder::HILBERT || !numbered.blocks.empty()) {
             ordered_cells.resize(n_cells);
             h_global_cell_id.resize(n_cells);
             for (uint32_t c = 0; c < n_cells; c++) {
