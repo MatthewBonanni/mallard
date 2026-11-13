@@ -768,9 +768,8 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                     const std::vector<std::vector<double>> Y =
                         composition ? composition->mass_fractions(mesh->face_coords, faces) : std::vector<std::vector<double>>();
                     for (size_t j = 0; j < profiled.size(); j++) {
-                        const auto center = Kokkos::subview(mesh->h_face_coords, faces[j], Kokkos::ALL());
                         Point x{};
-                        FOR_I_DIM x[i] = static_cast<double>(center(i));
+                        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(faces[j], i));
                         const double T = T_varies ? fields->temperature(x, 0.0) : T_uniform;
                         prescribe(input_boundaries.size() + profiled[j], composition ? Y[j] : Y_uniform, T);
                     }

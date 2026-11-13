@@ -934,7 +934,7 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
         const uint32_t f = mesh.h_face_of_cell(c, k);
         const double sign = (mesh.h_cells_of_face(f, 0) == int32_t(c)) ? 1.0 : -1.0;
         // The face is in its cell 0's frame
-        const uint8_t s = sign < 0.0 ? mesh.h_face_shift(f) : 0;
+        const uint32_t s = sign < 0.0 ? mesh.h_face_shift(f) : 0u;
         const bool turn = sign < 0.0 && mesh.h_rotated_row(s);
         auto vector = [&](const Vec3 & u) {
             if (!turn) return u;
@@ -999,7 +999,7 @@ void Geometry::box_of(uint32_t f, std::array<double, 2> & lo, std::array<double,
 double Geometry::cone_eval(uint32_t c, uint32_t k, const double * xi, double t, Vec3 & x, Vec3 * dx) const {
     const uint32_t f = mesh.h_face_of_cell(c, k);
     const bool own = mesh.h_cells_of_face(f, 0) == int32_t(c);
-    const uint8_t s = own ? 0 : mesh.h_face_shift(f);
+    const uint32_t s = own ? 0u : mesh.h_face_shift(f);
     const bool turn = !own && mesh.h_rotated_row(s);
     auto vector = [&](const Vec3 & u) {
         if (!turn) return u;

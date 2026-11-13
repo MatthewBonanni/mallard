@@ -13,6 +13,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "comm.h"
@@ -91,9 +92,22 @@ TEST(RunReport, EveryRowKeepsTheColumnsAligned) {
     wide.min_T = wide.max_T = 99999.9;
     wide.sum_Y_error = -1.0e-10;
     wide.chemistry_steps = 99999;
-    for (const ProgressRow & row : {typical(), wide}) {
+    ProgressRow small = typical();
+    small.wall_per_step = 1.2e-3;
+    small.min_p = -3.2;
+    small.max_mach = 0.05;
+    small.min_T = 50.0;
+    small.troubled = 0.0;
+    const auto points = [](const std::string & line) {
+        std::vector<size_t> at;
+        for (size_t i = line.find('.'); i != std::string::npos; i = line.find('.', i + 1)) at.push_back(i);
+        return at;
+    };
+    const std::vector<size_t> typical_points = points(table.row(progress_cells(ALL, typical())));
+    for (const ProgressRow & row : {typical(), wide, small}) {
         const std::string line = table.row(progress_cells(ALL, row));
         EXPECT_EQ(line.find(row.written), written) << line;
+        EXPECT_EQ(points(line), typical_points) << "a decimal point out of its column: " << line;
     }
 }
 
@@ -115,6 +129,14 @@ TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
     EXPECT_EQ(logging::take_written(), "2 vtu, 1 restart");
     EXPECT_FALSE(logging::written_pending());
     EXPECT_EQ(logging::take_written(), "");
+}
+
+TEST(RunReport, NumbersOfAColumnShareTheirDecimalPoint) {
+    const std::vector<std::string> column = logging::align_decimals(
+        {"1.5", "-12.25", "1,024", "3e-05", "27.1 kB", "-", "nan", "HLLC", "1 key: see E-KEY-UNUSED"});
+    const std::vector<std::string> expected = {"    1.5   ", "  -12.25  ", "1,024     ", "    3e-05 ", "   27.1 kB",
+                                               "    -     ", "  nan     ", "HLLC",       "1 key: see E-KEY-UNUSED"};
+    EXPECT_EQ(column, expected);
 }
 
 TEST(RunReport, ACountOfOneTakesTheSingular) {
