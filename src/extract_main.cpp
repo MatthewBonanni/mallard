@@ -1,7 +1,8 @@
 /**
  * @file extract_main.cpp
- * @brief `mallard post extract`: the probes, regions and snapshots of existing output, written by the
- *        run's own code on a case set up from the output's input.
+ * @brief `mallard post extract`: the probes, regions and snapshots of existing output, and
+ *        `mallard post derive`: snapshots of derived fields of it, both written by the run's own
+ *        code on a case set up from the output's input.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -22,11 +23,13 @@
 
 #include "cli.h"
 #include "commands.h"
+#include "derived_catalog.h"
 #include "diagnostic_code.h"
 #include "input.h"
 #include "input_upgrade.h"
 #include "json.h"
 #include "log.h"
+#include "mesh_block.h"
 #include "output_reader.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
@@ -42,7 +45,6 @@ using logging::count;
 using logging::format;
 using logging::item;
 
-const char * const NAME = "mallard post extract";
 
 /** @brief A usage error found after parsing: printed by rank 0 as cli::usage_error does. */
 struct UsageError : std::runtime_error {
@@ -352,6 +354,89 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     return plan;
 }
 
+/** @brief The value of an option that takes an inline TOML table, as the input has it. */
+Input inline_table(const std::string & text, const std::string & option) {
+    const Input parsed = parse_input_string("value = " + text, option);
+    const Input & value = parsed.as_table().entries().at("value");
+    if (!value.is_table()) throw UsageError(option + " takes an inline TOML table ({...}), not " + text);
+    return value;
+}
+
+/** @brief An example of the [output] table a derived-field need takes, for messages. */
+std::string need_hint(uint16_t need) {
+    if (need == derived::need::REFERENCE) return "--reference '{rho = 1.2, u = [30, 0], p = 101325}'";
+    if (need == derived::need::PROGRESS) return "--mixture '{progress = {T_unburnt = 300, T_burnt = 2200}}'";
+    return "--mixture '{fuel = {X = {CH4 = 1}}, oxidizer = {X = {O2 = 1, N2 = 3.76}}}'";
+}
+
+/**
+ * @brief The case input of mallard post derive: no probes, one snapshot of the --fields (with the
+ *        state, with --with-state) at each step, and [output] reference and mixture from --reference
+ *        and --mixture, which replace the input's.
+ */
+Plan prepare_derive(Input & input, const cli::Args & args, const std::string & dir) {
+    Plan plan;
+    auto & top = input.as_table().entries();
+    for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize", "probes"}) top.erase(key);
+    if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
+    auto & output = top.at("output").as_table().entries();
+    output["run_log"] = Input("");
+    output["health"] = Input(false);
+    if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
+    if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
+
+    if (!args.has("--fields")) throw UsageError("--fields is required: the derived fields to write (MACH,P0,CP)");
+    const std::vector<std::string> fields = split_list(args.value_or("--fields", ""));
+    if (fields.empty()) throw UsageError("--fields lists no field");
+    const auto has = [&](const char * table, const char * key) {
+        if (!output.contains(table)) return false;
+        return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
+    };
+    for (const std::string & name : fields) {
+        const derived::Field f = derived::find(name.c_str());
+        if (f == derived::N_FIELDS) {
+            std::vector<std::string> names;
+            for (const auto & d : derived::FIELDS) names.emplace_back(d.name);
+            const std::string like = suggest_value(name, names);
+            throw UsageError("--fields: " + name + " is not a derived field" +
+                             (like.empty() ? "" : " (did you mean " + like + "?)") +
+                             "; mallard list fields lists them, in its derived and mixture groups");
+        }
+        const uint16_t needs = derived::FIELDS[f].needs;
+        uint16_t missing = 0;
+        if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
+        if ((needs & derived::need::STREAMS) && !has("mixture", "fuel")) missing = derived::need::STREAMS;
+        if ((needs & derived::need::PROGRESS) && !has("mixture", "progress")) missing = derived::need::PROGRESS;
+        if ((needs & derived::need::SPECIES_PAIR) && !has("mixture", "fuel") &&
+            !(has("mixture", "fuel_species") && has("mixture", "oxidizer_species"))) {
+            missing = derived::need::STREAMS;
+        }
+        if (missing) {
+            throw std::runtime_error(name + " needs [output] " +
+                                     (missing == derived::need::REFERENCE ? "reference" : "mixture keys") +
+                                     " (" + derived::FIELDS[f].needs_text + "), which the run's input does not " +
+                                     "have: give them, e.g. " + need_hint(missing));
+        }
+    }
+    std::vector<std::string> variables;
+    if (args.has("--with-state")) variables = {"RHO", "U", "P", "T"};
+    variables.insert(variables.end(), fields.begin(), fields.end());
+    const std::string format = args.value_or(
+        "--snapshot", have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
+    if (format != "vtkhdf" && format != "vtu") throw UsageError("--snapshot takes vtkhdf or vtu, not " + format);
+    Input::table_type entry;
+    plan.snapshot_prefix = under(dir, args.value_or("--name", "derived"));
+    entry["prefix"] = Input(plan.snapshot_prefix);
+    entry["fields"] = string_array(variables);
+    entry["interval"] = Input(1);
+    entry["format"] = Input(format);
+    if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
+    top["write_data"] = Input(Input::array_type{Input(entry)});
+    plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
+    plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
+    return plan;
+}
+
 /** @brief Fields the state needs, read from a snapshot: the conservative variables if it holds them, else primitives. */
 std::vector<std::string> state_fields(const output::Contents & c) {
     const bool conservative = c.field("RHO") && c.field("RHOE") && (c.field("RHOU") || c.field("RHOU_X"));
@@ -491,8 +576,8 @@ void print_json(const std::vector<output::Contents> & files, const std::vector<S
 
 void print_text(const std::vector<output::Contents> & files, const std::vector<Selected> & selected,
                 const std::string & case_from, const std::string & dir, const std::vector<Written> & written,
-                size_t n_available) {
-    logging::section("Extract");
+                size_t n_available, bool derive) {
+    logging::section(derive ? "Derive" : "Extract");
     std::vector<std::string> names;
     for (const auto & c : files) names.push_back(c.path + " (" + c.format + ")");
     item(files.size() == 1 ? "File" : "Files", list_text(names));
@@ -504,7 +589,7 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
     if (!first.step_recorded) item("Steps", "not recorded in the files: numbered by position, from 0");
     item("Output", dir);
 
-    logging::section("Snapshots", count(selected.size()) + " extracted");
+    logging::section("Snapshots", count(selected.size()) + (derive ? " derived" : " extracted"));
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < selected.size(); i++) {
         const Selected & e = selected[i];
@@ -541,8 +626,9 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
     }
 }
 
-int extract(const cli::Args & args) {
-    const std::string dir = args.value_or("--output", "extract");
+int extract(const cli::Args & args, const bool derive) {
+    const std::string verb = derive ? "derive" : "extract";
+    const std::string dir = args.value_or("--output", derive ? "derived" : "extract");
     const std::string report = args.value_or("--format", "text");
     if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
     if (args.has("--sampling") && args.value_or("--sampling", "") != "cell" && args.value_or("--sampling", "") != "point") {
@@ -553,11 +639,11 @@ int extract(const cli::Args & args) {
         output::Contents c = output::open(path);
         if (c.kind != output::Kind::snapshot && c.kind != output::Kind::restart) {
             throw std::runtime_error(path + " is a " + output::kind_name(c.kind) +
-                                     " file; extract takes restart files and snapshots of the whole mesh");
+                                     " file; " + verb + " takes restart files and snapshots of the whole mesh");
         }
         if (!c.global_order) {
             throw std::runtime_error(path + " holds cells in an order of its own (" + c.format +
-                                     "), not the mesh's: extract from restart files, VTKHDF or XDMF snapshots of the "
+                                     "), not the mesh's: " + verb + " from restart files, VTKHDF or XDMF snapshots of the "
                                      "whole mesh");
         }
         files.push_back(std::move(c));
@@ -585,7 +671,7 @@ int extract(const cli::Args & args) {
     for (const auto & finding : input_upgrade::apply(input)) {
         if (comm::is_root()) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
-    const Plan plan = prepare(input, args, dir);
+    const Plan plan = derive ? prepare_derive(input, args, dir) : prepare(input, args, dir);
 
     // The setup's report and the writers' events are the run's, not this command's: errors and warnings still show
     std::ostringstream quiet;
@@ -635,35 +721,48 @@ int extract(const cli::Args & args) {
     if (report == "json") {
         print_json(files, selected, case_from, dir, written);
     } else {
-        print_text(files, selected, case_from, dir, written, n_available);
+        print_text(files, selected, case_from, dir, written, n_available, derive);
     }
     return 0;
 }
 
 } // namespace
 
-int post_extract(const cli::Args & args) {
+namespace {
+
+int post_command(const cli::Args & args, const bool derive) {
+    const std::string command = derive ? "post derive" : "post extract";
     try {
-        return extract(args);
+        return extract(args, derive);
     } catch (const UsageError & e) {
-        return comm::is_root() ? cli::usage_error(*cli::command("post extract"), e.what()) : 2;
+        return comm::is_root() ? cli::usage_error(*cli::command(command), e.what()) : 2;
     } catch (const InputError & e) {
-        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": the case's input: " + e.what());
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": the case's input: " + e.what());
     } catch (const std::exception & e) {
-        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": " + e.what());
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": " + e.what());
     }
     return 1;
 }
 
-int extract_main(const cli::Args & args) {
+int post_main(const cli::Args & args, const bool derive) {
     int argc = args.argc;
     char ** argv = args.argv;
     comm::Session session(argc, argv);
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
-    const int status = post_extract(args);
+    const int status = post_command(args, derive);
     // A rank that failed alone would leave the others waiting in a collective
     if (status == 1 && comm::size() > 1) comm::abort(1);
     Kokkos::finalize();
     return status;
 }
+
+} // namespace
+
+int post_extract(const cli::Args & args) { return post_command(args, false); }
+
+int post_derive(const cli::Args & args) { return post_command(args, true); }
+
+int extract_main(const cli::Args & args) { return post_main(args, false); }
+
+int derive_main(const cli::Args & args) { return post_main(args, true); }

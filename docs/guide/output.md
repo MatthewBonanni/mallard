@@ -73,9 +73,9 @@ and 48 more.
 |---|---|
 | Conservative | `RHO`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `RHOU` (vector) |
 | Primitive | `U_X`, `U_Y`, `U_Z`, `U` (vector), `P`, `T`, `H` |
-| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` ([below](#derived-fields)) |
+| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN`, `P0`, `T0`, `H0`, `SOUND_SPEED`, `ENTROPY`, `DILATATION`, `HELICITY` (3D), `ENSTROPHY`, `STRAIN_RATE`, `CP` ([below](#derived-fields)) |
 | TENO | `TENO_SIGMA` (troubled-cell indicator) |
-| Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`) |
+| Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`); `MIXTURE_FRACTION`, `PROGRESS_VARIABLE`, `FLAME_INDEX`, `SCALAR_DISSIPATION` ([below](#mixture-fields)) |
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
@@ -84,24 +84,39 @@ and 48 more.
 
 ### Derived fields
 
-Fields that show the flow's structure, computed from the state being written
-(with the same cell gradients as `VORTICITY` and the `[integrals]` monitor:
-the TENO reconstruction polynomials, else least squares), so they cost nothing
-in steps that write none:
+Fields that show the flow's structure and state, computed from the state
+being written (with the same cell gradients as `VORTICITY` and the
+`[integrals]` monitor: the TENO reconstruction polynomials, else least
+squares), so they cost nothing in steps that write none. Choosing them
+before the run is not required: [`mallard post derive`](#derived-fields-after-the-run)
+computes the same values from restart files and snapshots afterwards.
 
 ```toml
+[output]
+reference = {rho = 1.2, u = [30.0, 0.0], p = 101325.0}   # for CP only
+
 [[write_data]]
 prefix = "solut/jet"
 interval = 500
-fields = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
+fields = ["RHO", "U", "P", "MACH", "P0", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "CP"]
 ```
 
 | Name | Units | Definition |
 |---|---|---|
-| `MACH` | `1` | \|u\| / c, with c = √(γ p / ρ) and, for mixtures, each cell's frozen γ |
+| `MACH` | `1` | Mach number \|u\| / c, with c = √(γ p / ρ) and, for mixtures, each cell's frozen γ |
+| `P0` | `Pa` | Stagnation pressure p (1 + (γ − 1) M² / 2)^(γ / (γ − 1)), the isentropic relation with the cell's γ (frozen, for mixtures) |
+| `T0` | `K` | Stagnation temperature T (1 + (γ − 1) M² / 2), likewise |
+| `H0` | `m2 s-2` | Stagnation (total) specific enthalpy h + \|u\|² / 2, with the exact h of `H` |
+| `SOUND_SPEED` | `m s-1` | Speed of sound c = √(γ p / ρ) (frozen, for mixtures) |
+| `ENTROPY` | `m2 s-2 K-1` | Specific entropy. **Perfect gas:** s = c_p ln(T / T_ref) − R ln(p / p_ref), zero at the `[physics]` reference state `p_ref`, `T_ref`. **Mixtures:** the absolute (third-law) entropy Σ Y_k (s°_k(T) − R_k ln(X_k p / p°)) of the mechanism's NASA polynomials, with the entropy of mixing, p° = 1 atm. The two references differ: never compare a perfect-gas value with a mixture value |
 | `Q_CRITERION` | `s-2` | Q = (‖Ω‖² − ‖S‖²) / 2 ([Hunt, Wray & Moin 1988](../references.md#hunt-wray-moin-1988)): positive where rotation dominates strain, i.e. in vortices. Before 0.10.0 it was called `Q`, which is now an error that names `Q_CRITERION` |
 | `LAMBDA2` | `s-2` | λ₂, the middle eigenvalue of S² + Ω² ([Jeong & Hussain 1995](../references.md#jeong-hussain-1995)): negative in vortex cores |
 | `SCHLIEREN` | `kg m-4` | \|∇ρ\|, a numerical schlieren image of shocks, contact surfaces and mixing layers |
+| `DILATATION` | `s-1` | Dilatation ∇·u, the trace of the velocity gradient (with u_r / r in axisymmetric runs): negative in compressions and shocks |
+| `HELICITY` | `m s-2` | Helicity density u·ω, ω = ∇×u. 3D only: in 2D ω is normal to u, and `HELICITY` is an error |
+| `ENSTROPHY` | `s-2` | Enstrophy \|ω\|² / 2 |
+| `STRAIN_RATE` | `s-1` | Strain-rate magnitude \|S\| = √(2 S_ij S_ij), as LES models use it |
+| `CP` | `1` | Pressure coefficient (p − p_ref) / q_ref, q_ref = ρ_ref \|u_ref\|² / 2 of `[output] reference = {rho, u, p}`; the same definition and reference as the wall probes' `CP`. Without a reference it is an error that asks for one |
 
 S and Ω are the symmetric and antisymmetric parts of the velocity
 gradient ∂u_i/∂x_j. A 2D run treats its flow as a 3D one
@@ -116,7 +131,72 @@ reference rate (e.g. Q = 0.1 (U/D)²) rather than absolute values. On coarse
 meshes the gradients, and hence the criteria, are smoothed. `SCHLIEREN` spans
 orders of magnitude between shocks and the rest of the flow; a logarithmic
 color map or exp(−k \|∇ρ\| / max \|∇ρ\|) in
-ParaView's calculator shows both.
+ParaView's calculator shows both. `P0`, `T0` and `SOUND_SPEED` of mixtures use
+the frozen γ, consistent with `MACH`; they are not the stagnation state of a
+reacting or equilibrium expansion. The wall quantities `Y_PLUS`, `CF`,
+`TAU_W` and `Q_W` are [boundary probe](probes.md#boundary-data) variables,
+which `[output] reference` also serves.
+
+### Mixture fields
+
+Fields of gas mixtures, relative to the streams, species and definitions of
+`[output.mixture]` ([keys](../input.md#outputmixture)):
+
+```toml
+[output.mixture]
+fuel = "fuel_inlet"                      # a [[boundaries]] name, or {X = {CH4 = 1.0}}
+oxidizer = {X = {O2 = 1.0, N2 = 3.76}}
+progress = {species = ["CO2", "CO"], burnt = 0.15}
+
+[[write_data]]
+prefix = "solut/flame"
+interval = 200
+fields = ["T", "HRR", "MIXTURE_FRACTION", "PROGRESS_VARIABLE", "FLAME_INDEX", "SCALAR_DISSIPATION"]
+```
+
+| Name | Units | Definition |
+|---|---|---|
+| `MIXTURE_FRACTION` | `1` | Bilger's mixture fraction Z = (β − β_O) / (β_F − β_O), β = 2 Z_C / W_C + Z_H / (2 W_H) − Z_O / W_O of the element mass fractions ([Bilger, Stårner & Kee 1990](../references.md#bilger-starner-kee-1990)), β_F and β_O those of the `fuel` and `oxidizer` streams: 1 in the fuel, 0 in the oxidizer, conserved by reactions |
+| `PROGRESS_VARIABLE` | `1` | c of `progress`: Σ Y_k of its `species` divided by `burnt` (without `burnt`, the raw sum); or (T − T_unburnt) / (T_burnt − T_unburnt) |
+| `FLAME_INDEX` | `1` | Takeno's flame index ∇Y_F·∇Y_O / (\|∇Y_F\| \|∇Y_O\|) of `fuel_species` and `oxidizer_species` ([Yamashita, Shimada & Takeno 1996](../references.md#yamashita-shimada-takeno-1996)): +1 where the gradients align (premixed), −1 where they oppose (non-premixed), 0 where either vanishes. Euler runs too |
+| `SCALAR_DISSIPATION` | `s-1` | χ = 2 D \|∇Z\|² ([Peters 2000](../references.md#peters-2000)), with D = λ / (ρ c_p) of each cell (a unity-Lewis diffusivity). Needs `navier_stokes`, which has λ |
+
+The mass-fraction gradients of `FLAME_INDEX` and `SCALAR_DISSIPATION` are
+least squares over the cell's neighbors, the stencil of the velocity
+gradient's fallback: the species have no TENO polynomials. Boundary faces
+take the prescribed composition of `inlet_state` conditions and the cell's
+own elsewhere.
+
+Pitfalls: Z needs streams that differ in β (a fuel with C or H, an
+oxidizer with O); species in neither stream (products, diluents) count by
+their elements, so Z stays conserved through the flame. Mass fractions of
+roughly constant value have gradients of round-off size whose direction is
+noise: `FLAME_INDEX` is ±1 there, so read it where the flame is (mask it with
+`HRR` or c between 0.05 and 0.95). A progress variable of species needs
+`burnt` to reach 1 in the burnt gas; give the burnt gas's sum, e.g. from
+`mallard reactor` or Cantera's equilibrium.
+
+### Derived fields after the run
+
+`mallard post derive` sets the case of restart files or snapshots up again
+and writes snapshots of any of the fields above, from the run's own code
+(reconstruction, gradients and kernels), so they equal what `[[write_data]]`
+would have written at those steps, bit for bit from restart files
+([Command line](cli.md#mallard-post-derive)):
+
+```
+mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION
+mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state
+mallard post derive solut/flow.vtkhdf.series --fields CP --reference '{rho = 1.2, u = [30, 0], p = 101325}'
+mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \
+    --mixture '{fuel = "fuel_inlet", oxidizer = "air_inlet"}'
+```
+
+The snapshots go to `derived/derived_<step>.vtkhdf` (`-o`, `--name`; `.vtu`
+without HDF5), with only the fields asked for unless `--with-state` adds
+`RHO`, `U`, `P` and `T`. The case's `[output] reference` and
+`[output.mixture]` come from the run's input; `--reference` and `--mixture`
+give them for runs that set none, or replace them.
 
 ### Which format
 
@@ -952,7 +1032,8 @@ $ mallard info solut/flow.vtkhdf.series
 
 `mallard post extract` evaluates probes, region integrals and snapshots of
 chosen fields on the state of restart files and snapshots after the run, as
-the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)).
+the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)),
+and `mallard post derive` their [derived fields](#derived-fields-after-the-run).
 
 `mallard post convergence` compares runs of a case at several resolutions:
 the observed order, the extrapolated value and the grid convergence index of

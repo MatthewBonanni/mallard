@@ -59,12 +59,13 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard new` case templates
   - `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`)
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions
+  - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output
   - tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](docs/images/guide/run_report_sample.html))
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
-- VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
+- VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation
 - Probes on points, curves, surfaces, boundaries and regions
 - Statistics, spectra and phase averages
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged

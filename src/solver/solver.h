@@ -289,7 +289,10 @@ class Solver {
          */
         void update_vortex_fields();
 
-        /** @brief The written derived fields of each owned cell, into derived_fields, after update_velocity_gradients. */
+        /**
+         * @brief The written derived fields of each owned cell, into derived_fields, after
+         *        update_velocity_gradients (and the transport coefficients and mass-fraction gradients they need).
+         */
         void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
@@ -652,8 +655,10 @@ class Solver {
         // The vorticity (one component in 2D), if written
         Kokkos::View<rtype **> vortex_fields;
         Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
-        // MACH, Q_CRITERION, LAMBDA2 and SCHLIEREN, those written, in the columns of derived_selection
+        // The derived fields written (derived_catalog.h), in the columns of derived_selection
         derived::Selection derived_selection;
+        derived::Settings derived_settings;
+        derived::Workspace derived_workspace;
         Kokkos::View<rtype **> derived_fields;
         Kokkos::View<rtype **>::host_mirror_type h_derived_fields;
 

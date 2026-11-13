@@ -138,7 +138,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
 | `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
 | `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
-| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
+| `CF`, `CP` | Skin friction and pressure coefficients of `reference` (the probe's, else `[output] reference`) |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
 | `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain |

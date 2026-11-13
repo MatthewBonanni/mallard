@@ -209,6 +209,40 @@ constexpr Option EXTRACT_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option DERIVE_OPTIONS[] = {
+    {"--fields", "", "LIST",
+     "The derived fields to write, separated by commas (MACH,P0,Q_CRITERION), as mallard list fields lists "
+     "them in its derived and mixture groups. Required."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics, numerics and [output] reference and mixture. Default: the "
+     "input in the run block of FILE (Mallard 0.10 and later record it resolved)."},
+    {"--reference", "", "TABLE",
+     "The [output] reference of CP, as an inline TOML table ('{rho = 1.2, u = [30, 0], p = 101325}'), in place "
+     "of the input's. Default: the input's."},
+    {"--mixture", "", "TABLE",
+     "The [output.mixture] table of the mixture fields, inline ('{fuel = \"fuel_inlet\", oxidizer = {X = {O2 = 1, "
+     "N2 = 3.76}}}'), in place of the input's. Default: the input's."},
+    {"--with-state", "", "", "Also write RHO, U, P and T in each snapshot, so that it stands alone."},
+    {"--region", "", "REGION",
+     "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
+     "table, as [[write_data]] region takes it. Default: the whole mesh."},
+    {"--snapshot", "", "vtkhdf|vtu",
+     "The format of the snapshots: OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or .vtu files with a .pvd "
+     "index. Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the snapshots: NAME_<step>.vtkhdf. Default: derived."},
+    {"--steps", "", "LIST",
+     "Derive the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Derive the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: "
+     "every snapshot."},
+    {"--every", "", "N", "Derive every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Derive only the last snapshot selected."},
+    {"--output", "-o", "DIR", "The directory the snapshots go to. Default: derived."},
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option CONVERGENCE_OPTIONS[] = {
     {"--quantity", "", "NAMES",
      "The quantities to study, separated by commas: TABLE:COLUMN (integrals:rho2, forces_wall:F_x), a column "
@@ -765,6 +799,42 @@ constexpr Command COMMANDS[] = {
         .run = extract_main,
     },
     {
+        .name = "post derive",
+        .group = "Post",
+        .summary = "Derived fields of existing output (MACH, P0, Q_CRITERION, ...), as the run would have written them",
+        .synopsis = "mallard post derive FILE... --fields LIST [-i input.toml] [--with-state] [-o DIR]\n"
+                    "mallard post derive FILE... --fields CP --reference TABLE\n"
+                    "mallard post derive FILE... --fields MIXTURE_FRACTION --mixture TABLE",
+        .description =
+            "Sets up the case of a restart file, snapshot or series and writes snapshots of derived fields of its "
+            "stored state, without rerunning, so the fields need not be chosen before a long run. It runs the "
+            "run's own code, with its reconstruction and gradients: a field is what [[write_data]] would have "
+            "written at that step, the same values for restart files and snapshots of the conservative "
+            "variables, the same to rounding for snapshots of RHO, U and P. --fields takes the fields of the "
+            "derived and mixture groups of mallard list fields; those that need input the run did not give "
+            "(the reference of CP, the streams of MIXTURE_FRACTION) take it from --reference and --mixture.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; --steps, --times, --every and --latest "
+            "choose the snapshots by the steps and times the files record. The snapshots go to the output "
+            "directory, so a run's files are never overwritten. Under mpirun -n N the fields are computed on N "
+            "ranks.",
+        .options = DERIVE_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION\n"
+                    "$ mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state\n"
+                    "$ mallard post derive solut/flow.vtkhdf.series --fields CP \\\n"
+                    "      --reference '{rho = 1.2, u = [30, 0], p = 101325}'\n"
+                    "$ mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \\\n"
+                    "      --mixture '{fuel = \"fuel_inlet\", oxidizer = \"air_inlet\"}'",
+        .exit_status = "0  every snapshot was derived\n"
+                       "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
+                       "file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = derive_main,
+    },
+    {
         .name = "post convergence",
         .group = "Post",
         .summary = "Order of accuracy, extrapolated value and grid convergence index (GCI) of runs at several "
@@ -913,7 +983,7 @@ constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals and snapshots of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots and derived fields of it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

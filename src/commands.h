@@ -64,6 +64,11 @@ int extract_main(const cli::Args & args);
 /** @brief The work of `mallard post extract`, with MPI and Kokkos started (tests call it). */
 int post_extract(const cli::Args & args);
 
+/** @brief `mallard post derive FILE...`: snapshots of derived fields of existing output. */
+int derive_main(const cli::Args & args);
+
+/** @brief The work of `mallard post derive`, with MPI and Kokkos started (tests call it). */
+int post_derive(const cli::Args & args);
 /** @brief `mallard post convergence RUN...`: observed order, Richardson extrapolation and GCI. */
 int convergence_main(const cli::Args & args);
 
