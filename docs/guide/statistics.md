@@ -101,9 +101,9 @@ and covariances exactly, the triple correlation included, from saved snapshots.
 
 ```sh
 mallard post average solut/restart_*.restart --t-start 40          # MEAN_, COV_, RMS_ per cell
-mallard post average solut/flow.vtkhdf.series --favre              # and FAVRE_MEAN_, FAVRE_COV_
-mallard post average solut/flow.vtkhdf.series --homogeneous x,z    # profiles in y: average/average.csv
-mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z
+mallard post average solut/flow.vtkhdf --favre              # and FAVRE_MEAN_, FAVRE_COV_
+mallard post average solut/flow.vtkhdf --homogeneous x,z    # profiles in y: average/average.csv
+mallard post average stats/channel.vtkhdf --latest --statistics --homogeneous x,z
 ```
 
 For a run without `[statistics]`, or with other fields than it averaged,
@@ -113,7 +113,7 @@ snapshots in time, per cell, with `[statistics]`'s own code: the same
 with `--favre`, the Favre means `FAVRE_MEAN_<a>` and covariances
 `FAVRE_COV_<a>_<b>`. It reads one state at a time, so its memory does not grow
 with the series. The result is one snapshot at the last step,
-`average/average_<step>.vtkhdf`, with the averaging window in its
+`average/average.vtkhdf`, with the averaging window in its
 [snapshot block](output.md#snapshot-metadata).
 
 | Option | Default | Meaning |
@@ -336,7 +336,7 @@ outside the ranges.
 `fields` and `products`.
 
 ```bash
-mallard post average solut/flame.vtkhdf.series --conditional \
+mallard post average solut/flame.vtkhdf --conditional \
     '{on = "MIXTURE_FRACTION", fields = ["T", "HRR"], weight = "mass"}'
 ```
 

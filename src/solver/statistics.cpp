@@ -84,6 +84,14 @@ const char * const BATCH_WEIGHT = "STATISTICS_BATCH_WEIGHT";
 const char * const BATCH_ORIGIN = "STATISTICS_BATCH_ORIGIN";
 const char * const BATCH_PREFIXES[3] = {"BATCH_", "BATCH_AVG_", "BATCH_M2_"};
 
+std::vector<std::string> average_names(const std::vector<std::string> & fields,
+                                       const std::vector<std::pair<uint32_t, uint32_t>> & products) {
+    std::vector<std::string> names;
+    for (const auto & f : fields) names.push_back("MEAN_" + f);
+    for (const auto & [i, j] : products) names.push_back("COV_" + fields[i] + "_" + fields[j]);
+    return names;
+}
+
 } // namespace
 
 std::vector<derived::Field> Statistics::derived_fields(const Input & input) {
@@ -104,6 +112,52 @@ std::vector<derived::Field> Statistics::derived_fields(const Input & input) {
         if (f != derived::N_FIELDS && std::find(out.begin(), out.end(), f) == out.end()) out.push_back(f);
     }
     return out;
+}
+
+void Statistics::read_fields(const Input & table) {
+    auto add_field = [&](const std::string & name) {
+        const auto it = std::find(fields.begin(), fields.end(), name);
+        if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
+        fields.push_back(name);
+        return static_cast<uint32_t>(fields.size() - 1);
+    };
+    for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
+        if (std::find(fields.begin(), fields.end(), name) != fields.end()) {
+            throw InputError("statistics.fields: \"" + name + "\" is listed twice.");
+        }
+        add_field(name);
+    }
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
+        const size_t star = product.find('*');
+        if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
+            throw InputError("statistics.products: \"" + product + "\" is not of the form \"A*B\".");
+        }
+        const std::pair<uint32_t, uint32_t> pair{add_field(product.substr(0, star)), add_field(product.substr(star + 1))};
+        for (const auto & other : products) {
+            if (other == pair || (other.first == pair.second && other.second == pair.first)) {
+                throw InputError("statistics.products: \"" + product + "\" is listed twice.");
+            }
+        }
+        products.push_back(pair);
+    }
+}
+
+std::vector<std::string> Statistics::data_names(const Input & input) {
+    if (!input.contains("statistics")) return {};
+    const Input & table = input.at("statistics");
+    Statistics s;
+    s.read_fields(table);
+    if (table.contains("phase")) s.phase.read_variables(table.at("phase"));
+    std::vector<std::string> names = average_names(s.fields, s.products);
+    if (table.contains("batch")) {
+        const std::vector<std::string> averages = names;
+        for (const auto & name : averages) {
+            names.push_back("CI_" + name);
+            for (const char * prefix : BATCH_PREFIXES) names.push_back(prefix + name);
+        }
+    }
+    for (const auto & name : s.phase.variables()) names.push_back(name);
+    return names;
 }
 
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
@@ -139,31 +193,7 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
             chemistry_sampled = chemistry_sampled || CellSampler::is_chemistry(c);
         }
     }
-    auto add_field = [&](const std::string & name) {
-        const auto it = std::find(fields.begin(), fields.end(), name);
-        if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
-        fields.push_back(name);
-        return static_cast<uint32_t>(fields.size() - 1);
-    };
-    for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
-        if (std::find(fields.begin(), fields.end(), name) != fields.end()) {
-            throw InputError("statistics.fields: \"" + name + "\" is listed twice.");
-        }
-        add_field(name);
-    }
-    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
-        const size_t star = product.find('*');
-        if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
-            throw InputError("statistics.products: \"" + product + "\" is not of the form \"A*B\".");
-        }
-        const std::pair<uint32_t, uint32_t> pair{add_field(product.substr(0, star)), add_field(product.substr(star + 1))};
-        for (const auto & other : products) {
-            if (other == pair || (other.first == pair.second && other.second == pair.first)) {
-                throw InputError("statistics.products: \"" + product + "\" is listed twice.");
-            }
-        }
-        products.push_back(pair);
-    }
+    read_fields(table);
     if (fields.empty()) {
         if (spectra.enabled() || phase.enabled() || !conditional.empty() || table.contains("convergence")) return;
         for (const auto & probe : find_value_or<std::vector<Input>>(input, "probes", {})) {
@@ -347,18 +377,6 @@ void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint
         for (uint32_t i = 0; i < n_fields; i++) m(c, i) += a * (sampler(c, code(i)) - m(c, i));
     });
 }
-
-namespace {
-
-std::vector<std::string> average_names(const std::vector<std::string> & fields,
-                                       const std::vector<std::pair<uint32_t, uint32_t>> & products) {
-    std::vector<std::string> names;
-    for (const auto & f : fields) names.push_back("MEAN_" + f);
-    for (const auto & [i, j] : products) names.push_back("COV_" + fields[i] + "_" + fields[j]);
-    return names;
-}
-
-} // namespace
 
 std::vector<std::string> Statistics::variables() const {
     std::vector<std::string> names = average_names(fields, products);
@@ -585,12 +603,8 @@ Dimension variable_dimension(const std::string & name) {
 
 } // namespace
 
-void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+void PhaseAverage::read_variables(const Input & table) {
     const std::string key = "statistics.phase";
-    interval = find_value_or<uint64_t>(table, "interval", interval_in);
-    if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     bins = find_value_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
     fields = find_value_or<std::vector<std::string>>(table, "fields", {});
@@ -600,6 +614,15 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
             throw InputError(key + ".fields: \"" + fields[i] + "\" is listed twice.");
         }
     }
+}
+
+void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+    const std::string key = "statistics.phase";
+    interval = find_value_or<uint64_t>(table, "interval", interval_in);
+    if (interval == 0) throw InputError(key + ".interval must be positive.");
+    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
+    read_variables(table);
     std::vector<int32_t> h_codes;
     for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key + ".fields"));
     codes = to_device(h_codes, "phase_codes");

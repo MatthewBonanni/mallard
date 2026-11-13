@@ -263,7 +263,7 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 
 ## Post-processing
 
-Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes (`format = "xdmf"`); these scripts read each of them.
+Mallard writes VTKHDF files that ParaView opens (`PREFIX.vtkhdf` holds the series; with `series = false` the `.vtkhdf.series` file indexes it), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes (`format = "xdmf"`); these scripts read each of them.
 
 ### `mallard`: the Python package
 
@@ -272,7 +272,7 @@ Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is th
 ```python
 import mallard
 
-f = mallard.open("solut/flow.vtkhdf.series")
+f = mallard.open("solut/flow.vtkhdf")
 p = f.read_all("P")                           # (snapshots, cells)
 g = f.geometry()                              # points, connectivity, offsets, VTK types
 ```
@@ -283,17 +283,17 @@ Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h
 import sys; sys.path.insert(0, "tools")
 from mallard.vtu import read_vtu, read_vtu_cells
 
-pts, tris, tri_cell, arrays = read_vtu("solut/riemann_000080.vtkhdf")   # 2D: triangles of every cell
+pts, tris, tri_cell, arrays = read_vtu("solut/riemann.vtkhdf")   # 2D: triangles of every cell (of the last snapshot)
 rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] is the time
-pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
+pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units. `mallard.stencils` (needs h5py) reads the [stencil file](../docs/guide/output.md#mesh-and-stencil-fields) of `mallard check --mesh-fields`: `read_stencils(path).stencil(cell)` gives a cell's stencil members (global ids) with their stencil, role and boundary face, and its degree, sizes, condition number and reach.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `read_index(prefix)` lists the snapshots of a series (of its series file `PREFIX.vtkhdf`, or its `.vtkhdf.series` or `.pvd` index), each a path every reader here reads as that snapshot, `snapshot("solut/flow")` gives the last (`snapshot("solut/flow_000010")` a snapshot file of `series = false` or VTU output) and `series(dir)` lists the snapshots in a directory. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, `times(path)`, `snapshots(path)` the snapshots of a series file, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units. `mallard.stencils` (needs h5py) reads the [stencil file](../docs/guide/output.md#mesh-and-stencil-fields) of `mallard check --mesh-fields`: `read_stencils(path).stencil(cell)` gives a cell's stencil members (global ids) with their stencil, role and boundary face, and its degree, sizes, condition number and reach.
 
 ### `plot_vtu.py`: one field of a snapshot
 
 ```sh
-python tools/post/plot_vtu.py solut/riemann_000080.vtkhdf rho.png [--var RHO] [--contours 24]
+python tools/post/plot_vtu.py solut/riemann.vtkhdf rho.png [--var RHO] [--contours 24]
 ```
 
 A quick look at a 2D snapshot without ParaView: one cell field (any array of the file) with its range and optional contours.
@@ -304,7 +304,7 @@ A quick look at a 2D snapshot without ParaView: one cell field (any array of the
 ### `compare_png.py`: runs side by side
 
 ```sh
-python tools/post/compare_png.py compare.png RHO fo/solut/riemann_000080.vtkhdf teno5/solut/riemann_000080.vtkhdf
+python tools/post/compare_png.py compare.png RHO fo/solut/riemann.vtkhdf teno5/solut/riemann.vtkhdf
 ```
 
 The same field of several snapshots side by side, each titled with its run directory and range: compare schemes, meshes or settings at a glance.

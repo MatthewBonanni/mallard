@@ -579,7 +579,19 @@ class Solver {
          */
         void init_chemistry();
         void allocate_chemistry();
-        void advance_chemistry(double dt_chem);
+        void advance_chemistry(double dt_chem, bool audited = true);
+        /**
+         * @brief Fused half steps: applies the pending half step for what reads the state now (output,
+         *        checks, the end of the run), keeping the state to continue from; idempotent.
+         */
+        void flush_chemistry();
+        /** @brief Puts back the state flush_chemistry kept: the run goes on as if no output had read it. */
+        void unflush_chemistry();
+        /**
+         * @brief Exchanges the state with the one flush_chemistry kept, also on the host: restart files hold the
+         *        state the run continues from. Called again, it puts them back.
+         */
+        void swap_unflushed();
         /**
          * @brief SIMPLER balanced splitting (Wu, Ma & Ihme 2019): with
          *        c = -T(U^n), the reaction substep dU/dt = R(U) - c over dt,
@@ -596,7 +608,7 @@ class Solver {
         /** @brief Throws if more cells failed than the last check saw (chem_io, written by the device). */
         void check_chemistry_failures();
         /** @brief The chemistry call over chem_dt(), with the repair audit; capturable in a step graph. */
-        void run_chemistry(const ChemistryForcing * forcing);
+        void run_chemistry(const ChemistryForcing * forcing, bool audited = true);
         void set_chemistry_dt(double dt_chem);
         /** @brief chem_io's failed cells, over the ranks, from the device. */
         void reduce_chemistry_failures();
@@ -709,9 +721,16 @@ class Solver {
 
         /**
          * @brief After init: every field [[write_data]] variables accept in this case, those computed
-         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included.
+         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included, last.
          */
         std::vector<std::string> output_fields() const;
+
+        /**
+         * @brief Instead of init, without the mesh (mallard list fields and species): the input's upgrades and
+         *        numerics preset and the physics, which loads the mechanism (get_species_names).
+         * @return The output_fields() of init, decided from the input alone.
+         */
+        std::vector<std::string> init_fields(const Input & input);
 
         StateView conservatives;
         SpeciesView species;
@@ -1224,6 +1243,10 @@ class Solver {
         State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
+        // flush_chemistry: the state before the pending half step, while output reads the state after it
+        bool chemistry_flushed = false;
+        State unflushed;
+        Kokkos::View<rtype *> unflushed_T_seed, unflushed_chem_h, unflushed_chem_cost;
 
         // Optically thin radiation ([radiation])
         bool radiating = false;

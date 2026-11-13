@@ -202,31 +202,39 @@ std::string uuid([[maybe_unused]] int device) {
 #ifdef Mallard_HAS_MPI
 /// Every rank's string of comm, in rank order.
 std::vector<std::string> allgather(MPI_Comm c, const std::string & mine) {
-    int size = 0;
+    int size = 0, me = 0;
     MPI_Comm_size(c, &size);
-    int n = static_cast<int>(mine.size());
-    std::vector<int> counts(static_cast<size_t>(size)), displs(static_cast<size_t>(size) + 1, 0);
-    MPI_Allgather(&n, 1, MPI_INT, counts.data(), 1, MPI_INT, c);
-    for (size_t r = 0; r < counts.size(); r++) displs[r + 1] = displs[r] + counts[r];
-    std::string all(static_cast<size_t>(displs.back()), '\0');
-    MPI_Allgatherv(mine.data(), n, MPI_CHAR, all.data(), counts.data(), displs.data(), MPI_CHAR, c);
+    MPI_Comm_rank(c, &me);
+    const size_t p = static_cast<size_t>(size);
+    uint64_t n = mine.size();
+    std::vector<uint64_t> counts(p), displs(p + 1, 0);
+    MPI_Allgather(&n, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, c);
+    for (size_t r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
+    std::string all(displs.back(), '\0');
+    std::vector<MPI_Request> requests;
+    for (int q = 0; q < size; q++) {
+        const size_t r = static_cast<size_t>(q);
+        if (q != me) comm::irecv(all.data() + displs[r], counts[r], MPI_CHAR, q, 0, c, requests);
+    }
+    for (int q = 0; q < size; q++) {
+        if (q != me) comm::isend(mine.data(), n, MPI_CHAR, q, 0, c, requests);
+    }
+    MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE);
+    std::copy(mine.begin(), mine.end(), all.begin() + static_cast<ptrdiff_t>(displs[static_cast<size_t>(me)]));
     std::vector<std::string> out;
-    for (size_t r = 0; r < counts.size(); r++) out.push_back(all.substr(size_t(displs[r]), size_t(counts[r])));
+    for (size_t r = 0; r < p; r++) out.push_back(all.substr(displs[r], counts[r]));
     return out;
 }
 
 /// Every rank's string on rank 0, in rank order (empty elsewhere).
 std::vector<std::string> gather(const std::string & mine) {
-    const int size = comm::size();
-    int n = static_cast<int>(mine.size());
-    std::vector<int> counts(static_cast<size_t>(size)), displs(static_cast<size_t>(size) + 1, 0);
-    MPI_Gather(&n, 1, MPI_INT, counts.data(), 1, MPI_INT, 0, comm::world());
-    for (size_t r = 0; r < counts.size(); r++) displs[r + 1] = displs[r] + counts[r];
-    std::string all(comm::is_root() ? static_cast<size_t>(displs.back()) : 0, '\0');
-    MPI_Gatherv(mine.data(), n, MPI_CHAR, all.data(), counts.data(), displs.data(), MPI_CHAR, 0, comm::world());
+    const std::vector<uint64_t> counts = comm::gatherv(std::vector<uint64_t>{mine.size()});
+    const std::vector<char> all = comm::gatherv(std::vector<char>(mine.begin(), mine.end()));
     std::vector<std::string> out;
-    if (comm::is_root()) {
-        for (size_t r = 0; r < counts.size(); r++) out.push_back(all.substr(size_t(displs[r]), size_t(counts[r])));
+    uint64_t at = 0;
+    for (const uint64_t n : counts) {
+        out.emplace_back(all.data() + at, n);
+        at += n;
     }
     return out;
 }

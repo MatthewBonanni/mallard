@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <stdexcept>
 
 #include <Kokkos_Core.hpp>
 
@@ -32,6 +33,30 @@ struct MaxCostFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, rtype & max) const { max = Kokkos::fmax(max, cost(c)); }
 };
+
+template <typename T>
+struct SwapFunctor {
+    T * a;
+    T * b;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const size_t i) const {
+        const T v = a[i];
+        a[i] = b[i];
+        b[i] = v;
+    }
+};
+
+/** @brief Exchanges the values of two views of one shape. */
+template <typename V>
+void swap_values(const V & a, const V & b) {
+    if (a.span() != b.span() || !a.span_is_contiguous() || !b.span_is_contiguous()) {
+        throw std::logic_error("swap_values: views of different spans");
+    }
+    using T = typename V::value_type;
+    Kokkos::parallel_for("swap_values", Kokkos::RangePolicy<Kokkos::IndexType<size_t>>(0, a.span()),
+                         SwapFunctor<T>{a.data(), b.data()});
+}
 
 } // namespace
 
@@ -56,7 +81,7 @@ void Solver::init_chemistry() {
     }
     chemistry_options = reactor_options(input);
     T_frozen = find_double_or(table, "T_frozen", dim::temperature, 0.0);
-    fuse_chemistry = find_value_or<bool>(table, "fuse_half_steps", false);
+    fuse_chemistry = find_value_or<bool>(table, "fuse_half_steps", !simpler);
     if (simpler && fuse_chemistry) {
         throw InputError("chemistry.fuse_half_steps applies to Strang splitting; coupling = \"simpler\" makes one "
                          "chemistry call per step already.");
@@ -102,8 +127,8 @@ void Solver::set_chemistry_dt(const double dt_chem) {
     Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { d() = dt_chem; });
 }
 
-void Solver::run_chemistry(const ChemistryForcing * forcing) {
-    const bool audit = run_health.clip_site != HealthState::NONE;
+void Solver::run_chemistry(const ChemistryForcing * forcing, const bool audited) {
+    const bool audit = audited && run_health.clip_site != HealthState::NONE;
     const Kokkos::View<double *> clipped =
         audit ? run_health.repairs.recorder(run_health.clip_site).change : Kokkos::View<double *>();
     // SIMPLER's chemistry moves every cell, so the ledger has no element balance of it
@@ -120,12 +145,53 @@ void Solver::run_chemistry(const ChemistryForcing * forcing) {
     }
 }
 
-void Solver::advance_chemistry(const double dt_chem) {
+void Solver::advance_chemistry(const double dt_chem, const bool audited) {
     const double start = timer.seconds();
     set_chemistry_dt(dt_chem);
-    run_chemistry(nullptr);
+    run_chemistry(nullptr, audited);
     check_chemistry();
     t_wall_chemistry += timer.seconds() - start;
+}
+
+void Solver::flush_chemistry() {
+    if (!reacting || chemistry_flushed || chemistry_pending <= 0.0) return;
+    if (!unflushed.flow.is_allocated()) {
+        unflushed = State("unflushed", mesh->n_cells, static_cast<uint32_t>(species.extent(1)));
+        unflushed_T_seed = Kokkos::View<rtype *>("unflushed_T_seed", T_seed.extent(0));
+        unflushed_chem_h = Kokkos::View<rtype *>("unflushed_chem_h", chem_h.extent(0));
+        unflushed_chem_cost = Kokkos::View<rtype *>("unflushed_chem_cost", chem_cost.extent(0));
+    }
+    deep_copy(unflushed, state());
+    Kokkos::deep_copy(unflushed_T_seed, T_seed);
+    Kokkos::deep_copy(unflushed_chem_h, chem_h);
+    Kokkos::deep_copy(unflushed_chem_cost, chem_cost);
+    // The repair audit counts the pending half step once, in the call it is fused into
+    advance_chemistry(chemistry_pending, false);
+    chemistry_flushed = true;
+    halo_current = false;
+}
+
+void Solver::unflush_chemistry() {
+    if (!chemistry_flushed) return;
+    deep_copy(state(), unflushed);
+    Kokkos::deep_copy(T_seed, unflushed_T_seed);
+    Kokkos::deep_copy(chem_h, unflushed_chem_h);
+    Kokkos::deep_copy(chem_cost, unflushed_chem_cost);
+    chemistry_flushed = false;
+    halo_current = false;
+}
+
+void Solver::swap_unflushed() {
+    if (!chemistry_flushed) return;
+    swap_values(conservatives, unflushed.flow);
+    swap_values(species, unflushed.species);
+    swap_values(T_seed, unflushed_T_seed);
+    swap_values(chem_h, unflushed_chem_h);
+    // The host's copies are the device's views off GPUs
+    Kokkos::deep_copy(h_conservatives, conservatives);
+    Kokkos::deep_copy(h_species, species);
+    Kokkos::deep_copy(h_T_seed, T_seed);
+    Kokkos::deep_copy(h_chem_h, chem_h);
 }
 
 void Solver::reduce_chemistry_failures() {

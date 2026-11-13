@@ -2204,23 +2204,86 @@ void Solver::register_data() {
     if (output_data) output_data(*mesh, data);
 }
 
-std::vector<std::string> Solver::output_fields() const {
-    std::vector<std::string> names;
-    for (const auto & d : data) names.push_back(d.name());
-    std::vector<std::string> on_request = {"P_MAX"};
+namespace {
+
+/** @brief The fields setup computes only when a writer asks for them (the derived ones the case can have). */
+std::vector<std::string> on_request_fields(const derived::Settings & derived_settings) {
+    std::vector<std::string> names = {"P_MAX"};
     for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
-        if (derived_settings.available(static_cast<derived::Field>(f))) on_request.emplace_back(derived::FIELDS[f].name);
+        if (derived_settings.available(static_cast<derived::Field>(f))) names.emplace_back(derived::FIELDS[f].name);
     }
-    for (const char * name : MeshQuality::FIELDS) on_request.emplace_back(name);
-    for (const char * name : stencils::FIELDS) on_request.emplace_back(name);
+    for (const char * name : MeshQuality::FIELDS) names.emplace_back(name);
+    for (const char * name : stencils::FIELDS) names.emplace_back(name);
     if constexpr (N_DIM == 2) {
-        on_request.emplace_back("VORTICITY");
+        names.emplace_back("VORTICITY");
     } else {
-        FOR_I_DIM on_request.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+        FOR_I_DIM names.push_back(std::string("VORTICITY_") + "XYZ"[i]);
     }
-    for (const auto & name : on_request) {
-        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    return names;
+}
+
+} // namespace
+
+std::vector<std::string> Solver::output_fields() const {
+    const std::vector<std::string> on_request = on_request_fields(derived_settings);
+    std::vector<std::string> names;
+    for (const auto & d : data) {
+        if (std::find(on_request.begin(), on_request.end(), d.name()) == on_request.end()) names.push_back(d.name());
     }
+    names.insert(names.end(), on_request.begin(), on_request.end());
+    return names;
+}
+
+std::vector<std::string> Solver::init_fields(const Input & input_in) {
+    input = input_in;
+    deprecated_keys = input_upgrade::apply(input);
+    preset = numerics_preset::apply(input);
+    init_physics();
+    derived_settings = derived::Settings::from_input(input, physics, mixture_model.get(), is_viscous());
+    // In the order of register_data
+    std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    for (const auto & s : species_names) names.push_back("RHOY_" + s);
+    if (is_mixture()) {
+        for (const auto & s : species_names) {
+            names.push_back("Y_" + s);
+            names.push_back("X_" + s);
+        }
+        names.emplace_back("T_SEED");
+        if (is_viscous()) {
+            names.emplace_back("MU");
+            names.emplace_back("LAMBDA");
+            for (const auto & s : species_names) names.push_back("D_" + s);
+            if (mixture.transport.thermal_diffusion) {
+                for (const auto & s : species_names) names.push_back("DT_" + s);
+            }
+        }
+        if (reacting) {
+            for (const char * name : {"CHEM_H", "CHEM_COST", "HRR"}) names.emplace_back(name);
+            for (const auto & s : species_names) names.push_back("OMEGA_" + s);
+        }
+        if (radiating) names.emplace_back("QRAD");
+    }
+    names.insert(names.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    names.emplace_back("CFL");
+    if (sources::SourceTerms::in_input(input)) {
+        for (const auto & name : CONSERVATIVE_NAMES) names.push_back("SOURCE_" + std::string(name));
+        for (const auto & s : species_names) names.push_back("SOURCE_RHOY_" + s);
+    }
+    if (LES::in_input(input)) {
+        names.emplace_back("MU_T");
+        if (input.at("les").contains("combustion")) {
+            if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
+                names.emplace_back("PASR_KAPPA");
+            } else {
+                for (const char * name : {"TF_F", "TF_E", "TF_OMEGA"}) names.emplace_back(name);
+            }
+        }
+    }
+    for (const auto & name : Statistics::data_names(input)) names.push_back(name);
+    const Input reconstruction = toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+    if (find_value_or<std::string>(reconstruction, "type", "FO") == "TENO") names.emplace_back("TENO_SIGMA");
+    const std::vector<std::string> on_request = on_request_fields(derived_settings);
+    names.insert(names.end(), on_request.begin(), on_request.end());
     return names;
 }
 
@@ -2317,6 +2380,9 @@ int Solver::run_loop() {
 
     RunEnd stop;
     try {
+        // A restart's pending half step, where this run does not fuse it into its first step
+        if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
+        if (!reacting || simpler) chemistry_pending = 0.0;
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
@@ -2329,10 +2395,11 @@ int Solver::run_loop() {
             update_convergence();
             t_wall_output += output_timer.seconds();
         }
+        flush_chemistry();
         print_progress();
+        unflush_chemistry();
         publish_status();
-        // Strang splitting with the half steps of consecutive steps fused into one
-        // chemistry call, except where output, checks or the end read the state
+        // Strang splitting with the half steps of consecutive steps fused into one chemistry call
         defer_chemistry = reacting && fuse_chemistry;
         use_device_steps = device_steps_unsupported().empty();
         use_step_graph = use_device_steps && step_graph_unsupported().empty();
@@ -2383,6 +2450,7 @@ int Solver::run_loop() {
             after_step(step_timer, false);
         }
     } catch (const DivergedError &) {
+        unflush_chemistry();
         defer_chemistry = false;
         destroy_step_graph();
         check_timed_boundaries();
@@ -2391,6 +2459,7 @@ int Solver::run_loop() {
     defer_chemistry = false;
     destroy_step_graph();
     check_timed_boundaries();
+    flush_chemistry();
     const bool row_due = step != step_last_check;
     Kokkos::Timer output_timer;
     probes.finish(step, t);
@@ -2400,6 +2469,9 @@ int Solver::run_loop() {
     const std::string restart_file =
         control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
     t_wall_output += output_timer.seconds();
+    // The solver is left at the state of t
+    chemistry_flushed = false;
+    chemistry_pending = 0.0;
     // Files written at the step of the last row get a row of their own (rank 0 counts them)
     if (row_due || comm::allreduce(int(logging::written_pending()), comm::Op::MAX) > 0) print_progress();
     output_timer.reset();
@@ -2418,14 +2490,10 @@ int Solver::run_loop() {
 
 void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     act_on_requests();
-    if (chemistry_pending > 0.0 && state_needed()) {
-        advance_chemistry(chemistry_pending);
-        chemistry_pending = 0.0;
-        halo_current = false;
-    }
     check_fields();
     // Steps on the device update p_max themselves
     if (p_max.is_allocated() && !on_device) update_p_max();
+    if (state_needed()) flush_chemistry();
     if (statistics.due(step, t)) sample_statistics();
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
@@ -2448,6 +2516,8 @@ void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     }
     poll_control_files();
     publish_status();
+    // The end of the run reads the state too
+    if (stop_reason().empty()) unflush_chemistry();
 }
 
 RunEnd Solver::stop_reason() const {
@@ -2855,6 +2925,7 @@ RestartAttributes Solver::restart_attributes() const {
     }
     for (const auto & a : triggers.attributes()) attributes.push_back(a);
     for (const auto & a : convergence.attributes()) attributes.push_back(a);
+    if (chemistry_pending > 0.0) attributes.emplace_back("CHEMISTRY_PENDING", chemistry_pending);
     return attributes;
 }
 
@@ -2885,9 +2956,11 @@ void Solver::write_data(bool force) {
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = restart_arrays();
+    swap_unflushed();
     for (auto & writer : data_writers) {
         if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
+    swap_unflushed();
     statistics.write(step, t, snapshot_block::current_reason(force));
     if (snapshots) {
         // Regions of lower dimension: point values, written as probes write them
@@ -2901,6 +2974,7 @@ void Solver::write_data(bool force) {
 
 void Solver::write_output_of_state(bool next) {
     if (next) apply_output_state(state_reader(*mesh));
+    flush_chemistry();
     write_data(true);
     write_probes();
     for (auto & writer : data_writers) writer->finish();

@@ -294,7 +294,7 @@ void Solver::record_stage_time(const rtype c) {
     const Kokkos::View<rtype> st = stage_time;
     const Kokkos::View<rtype *> s = step_scalars;
     const int origin = simpler_half_step ? T_HALF : T, h = simpler_half_step ? HALF_DT : STEP_DT;
-    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(origin) + c * s(h); });
+    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = time_of_stage(s(origin), c, s(h)); });
 }
 
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }

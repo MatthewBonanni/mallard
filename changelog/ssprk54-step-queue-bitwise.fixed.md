@@ -1,0 +1,1 @@
+- Runs with time-dependent boundaries, inflows, sources or sponges under SSPRK54, RDPK3Sp35 or CK45 take the same steps on GPUs whether the steps are queued ahead in CUDA graphs or launched by the host: the stage times t + c dt are rounded once on both. On CPUs these runs change in the last bits.

@@ -75,11 +75,13 @@ check_interval = 200
 
 [[write_data]]
 prefix = "solut/dmr"
+series = false
 time_interval = 0.005
 fields = ["RHO", "U", "P", "T"]
 
 [[write_data]]
 prefix = "inrun/dmr"
+series = false
 time_interval = 0.005
 fields = ["MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "VORTICITY"]
 

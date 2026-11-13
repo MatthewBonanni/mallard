@@ -6,8 +6,8 @@
     check.py TOOLS python STEM [STEM...]        the Sod check, read with the installed Python package mallard
 
 TOOLS is the directory of Mallard's Python tools (share/mallard/tools). A STEM
-PREFIX_NNNNNN names a 2D or 3D snapshot: its .vtkhdf file, or without HDF5 its
-.vtu file (the .pvtu index of a distributed run).
+PREFIX names the series of a 2D or 3D run, whose last snapshot is checked: its
+.vtkhdf file, or without HDF5 its .pvd index (of .pvtu files on several ranks).
 """
 import os
 import re
@@ -21,7 +21,7 @@ IGNITION_DELAY_RTOL = 0.02
 
 
 def cells(stem):
-    """Snapshot file, cell-center x and density of a snapshot."""
+    """Snapshot file, cell-center x and density of the last snapshot of a series."""
     from mallard.vtu import read_vtu_cells, snapshot
     path = snapshot(stem)
     pts, conn, offs, _, arrays = read_vtu_cells(path)

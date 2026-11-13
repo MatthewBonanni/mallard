@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "data_paths.h"
 #include "field_units.h"
 #include "output_reader.h"
 #include "provenance.h"
@@ -198,8 +199,8 @@ std::string channel(const std::string & dir) {
           << "[[probes]]\nname = \"cut_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/cut_probe.h5\"\n"
           << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
           << "\nfields = [\"MASS_FLUX\"]\n"
-          << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
-          << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\n" << variables
+          << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\ninterval = 2\n"
           << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
           << "region = \"bottom\"\ninterval = 2\nfields = [\"P\", \"U\"]\n"
           << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "
@@ -587,6 +588,7 @@ TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     listing.set_distributed(false);
     listing.init(parse_toml(base));
     const std::vector<std::string> listed = listing.output_fields();
+    EXPECT_EQ(Solver().init_fields(parse_toml(base)), listed);
     for (const char * name : {"RHO", "U_X", "P", "CFL", "Q_CRITERION", "MACH", "LAMBDA2", "SCHLIEREN", "P_MAX", "TENO_SIGMA", "MEAN_P"}) {
         EXPECT_NE(std::find(listed.begin(), listed.end(), name), listed.end()) << name;
     }
@@ -611,6 +613,51 @@ TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     EXPECT_THROW(unlisted.init(parse_toml(base + "[[write_data]]\nprefix = \"" + dir + "/mu\"\nformat = \"vtu\"\n"
                                           "fields = [\"MU_T\"]\n")),
                  InputError);
+}
+
+TEST(FieldUnitsTest, FieldsFromTheInputAloneAreThoseOfTheSetup) {
+    // mallard list fields and species decide from the input, without the mesh, what setup decides with it
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    std::ostringstream box;
+    box << "[run]\nn_steps = 1\ndt = 1.0e-7\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n";
+    if (N_DIM == 3) box << "Nz = 3\nLz = 0.03\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    box << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        << "[output]\ncheck_interval = 1000000\n";
+    const std::string u = N_DIM == 2 ? "u = [\"0.2\", \"0.0\"]\n" : "u = [\"0.2\", \"0.0\", \"0.0\"]\n";
+    const std::string gas = box.str() + "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\np = \"1.0\"\n" + u +
+                            "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    const std::string mixture =
+        box.str() + "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1500.0\"\n" + u +
+        "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\n"
+        "mechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
+    const std::string les = std::string("[les]\nmodel = \"") + (N_DIM == 3 ? "sigma" : "wale") + "\"\n";
+    const std::vector<std::string> cases = {
+        gas + "[numerics]\npreset = \"robust\"\n",
+        gas + "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n[[sources]]\nrhoE = \"1.0 + x\"\n"
+              "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*RHO\"]\nbatch = 1.0e-3\n"
+              "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.01\n",
+        mixture + "transport = \"mixture_averaged\"\nsoret = true\n[radiation]\n[[sources]]\nrhoE = \"1.0\"\n",
+        mixture + "[chemistry]\n" + les + "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1.25e-2\ns_L = 2.0\n"
+                  "T_unburnt = 0.0\nT_burnt = 4000.0\n",
+        mixture + "[chemistry]\n" + les + "[les.combustion]\nmodel = \"pasr\"\n",
+    };
+    std::vector<std::string> every;
+    for (const std::string & text : cases) {
+        Solver setup;
+        setup.set_distributed(false);
+        setup.init(parse_toml(text));
+        Solver listing;
+        const std::vector<std::string> listed = listing.init_fields(parse_toml(text));
+        EXPECT_EQ(listed, setup.output_fields()) << text;
+        EXPECT_EQ(listing.get_species_names(), setup.get_species_names()) << text;
+        every.insert(every.end(), listed.begin(), listed.end());
+    }
+    // The fields each feature adds are among those compared
+    for (const char * name : {"TENO_SIGMA", "SOURCE_RHOE", "SOURCE_RHOY_H2", "MEAN_P", "COV_U_X_RHO", "CI_MEAN_P",
+                              "BATCH_M2_COV_U_X_RHO", "PHASE_2_U_Y",
+                              "DT_H2", "QRAD", "OMEGA_OH", "MU_T", "TF_OMEGA", "PASR_KAPPA"}) {
+        EXPECT_NE(std::find(every.begin(), every.end(), name), every.end()) << name;
+    }
 }
 
 TEST(FieldUnitsTest, CatalogGroupsHoldEveryNamedField) {

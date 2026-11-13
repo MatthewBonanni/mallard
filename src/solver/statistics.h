@@ -102,6 +102,8 @@ class PhaseAverage {
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
         void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                   uint32_t n_cells, uint64_t interval, rtype t_start, bool use_nccl);
+        /** @brief Read the bins and fields of [statistics.phase] (table), which name its variables. */
+        void read_variables(const Input & table);
 
         bool enabled() const { return !fields.empty(); }
         /** @brief Triggered phases follow the signal before t_start too. */
@@ -298,6 +300,8 @@ class Statistics {
         /** @brief Whether the averages have confidence intervals by batches. */
         bool batches_enabled() const { return batch > 0.0_r; }
         uint64_t batches() const { return host_batch_clock().n_closed; }
+        /** @brief The fields register_data adds for the [statistics] of an input, from the input alone (no mesh). */
+        static std::vector<std::string> data_names(const Input & input);
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
 
@@ -373,6 +377,8 @@ class Statistics {
         void set_clock(const Clock & k);
         BatchClock host_batch_clock() const;
         void set_batch_clock(const BatchClock & b);
+        /** @brief Read fields and products of [statistics] (table). */
+        void read_fields(const Input & table);
 };
 
 /**

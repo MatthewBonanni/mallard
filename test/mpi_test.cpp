@@ -1169,15 +1169,15 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
     expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                        "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        "interval = 3\nseries = false\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
                                         io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
-    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nfields = [\"RHO\", \"U\"]\n",
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nfields = [\"RHO\", \"U\"]\n",
                                         io_dir() + "_vtkhdf_series", {""});
     expect_vtkhdf_output_matches_serial(input,
                                         "interval = 3\nfields = [\"P\", \"U\"]\n" + zlib +
                                             "regions = [{type = \"disk\", center = [0.5, 0.4], radius = 0.25}, \"bottom\", "
                                             "{type = \"cut_plane\", point = [0.45, 0.4], normal = [1.0, 0.3]}]\n",
-                                        io_dir() + "_vtkhdf_regions", {"_0_000000", "_0_000006", "_bottom", "_2"});
+                                        io_dir() + "_vtkhdf_regions", {"_0", "_bottom", "_2"});
     const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"
@@ -1188,7 +1188,7 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
-        "interval = 2\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+        "interval = 2\nseries = false\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
 #endif
 }
 

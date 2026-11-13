@@ -60,11 +60,13 @@ file = "integrals.csv"
 
 [[write_data]]
 prefix = "solut/tgv"
+series = false
 time_interval = 0.05
 fields = ["RHO", "U", "P", "T"]
 
 [[write_data]]
 prefix = "inrun/tgv"
+series = false
 time_interval = 0.05
 fields = ["MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "VORTICITY"]
 

@@ -90,7 +90,7 @@ def render(fig, t, x, y, p, foil, p0, x_front, x_lo_all, args, D):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("series", help="PREFIX.vtkhdf.series, or PREFIX.pvd (VTU)")
+    ap.add_argument("series", help="the series PREFIX (PREFIX.vtkhdf, or PREFIX.pvd of VTU output)")
     ap.add_argument("out")
     ap.add_argument("--window", type=float, default=0.16)
     ap.add_argument("--fps", type=float, default=15)

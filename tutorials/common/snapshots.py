@@ -1,31 +1,21 @@
 """Read Mallard's output for the tutorial scripts: the snapshots of a series
-PREFIX (indexed by PREFIX.vtkhdf.series, or PREFIX.pvd in builds without
-HDF5; a boundary zone's snapshots are all in PREFIX.vtkhdf) and their cells."""
+PREFIX (all in PREFIX.vtkhdf, or PREFIX.pvd in builds without HDF5) and their
+cells."""
 import os
-import re
 import sys
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_index, read_vtu_cells  # noqa: E402
 
 
 def series(prefix):
     """(time, path) of every snapshot of the series PREFIX."""
-    if os.path.exists(prefix + ".vtkhdf.series"):
-        from mallard.vtkhdf import read_series
-        out = read_series(prefix + ".vtkhdf.series")
-    elif os.path.exists(prefix + ".vtkhdf"):
-        # One file of every snapshot: read() reads its last
-        from mallard.vtkhdf import times
-        out = [(t, prefix + ".vtkhdf") for t in times(prefix + ".vtkhdf")]
-    elif os.path.exists(prefix + ".pvd"):
-        text = open(prefix + ".pvd").read()
-        out = [(float(t), os.path.join(os.path.dirname(prefix), f))
-               for t, f in re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)]
-    else:
-        raise SystemExit(f"no {prefix}.vtkhdf.series (or .pvd)")
+    try:
+        out = read_index(prefix)
+    except FileNotFoundError:
+        raise SystemExit(f"no {prefix}.vtkhdf (or .pvd)")
     if not out:
         raise SystemExit(f"{prefix}: no snapshots")
     return out

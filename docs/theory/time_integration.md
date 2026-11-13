@@ -143,7 +143,7 @@ in 3D. Mixtures use the frozen sound speed $a = \sqrt{\gamma p/\rho}$.
 A time step of a reacting run is (`Solver::take_step`):
 
 1. Strang splitting: chemistry over $\Delta t/2$ (fused with the previous
-    step's second half with `fuse_half_steps`); SIMPLER: the transport
+    step's second half by default, `fuse_half_steps`); SIMPLER: the transport
     tendency, then chemistry over $\Delta t$ ([chapter 3](chemistry_radiation.md#coupling-with-the-flow));
 2. with double flux, freezing each cell's $(\gamma, e_0)$
     ([chapter 2](thermodynamics_transport.md#double-flux));

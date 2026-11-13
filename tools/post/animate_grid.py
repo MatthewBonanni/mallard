@@ -26,7 +26,7 @@ vertical line, over reference curves ("reference": {"label", "file": a CSV
 of t and y, optional "color", "alpha", "lw", "ls"}, or a list of them);
 "t_end" maps the normalized time to t. Detonation panels show a 2D detonation run's pressure
 over the channel and, below it, the numerical soot foil (P_MAX) behind the
-front ("series": the run's .vtkhdf.series or .pvd; "xlim" in mesh units). "gif_width" and
+front ("series": the run's .vtkhdf, .vtkhdf.series or .pvd; "xlim" in mesh units). "gif_width" and
 "gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
 "mp4_width" scales the MP4, and "background" sets the figure color (to match
 pre-rendered frames). Field, frames and detonation panels show their time in
@@ -70,7 +70,7 @@ DIM = "#9a9a9a"
 
 def snapshot_files(panel):
     if panel.get("type") == "detonation":
-        if panel["series"].endswith(".series"):
+        if panel["series"].endswith((".series", ".vtkhdf")):
             from mallard.vtkhdf import read_series
             return [f for _, f in read_series(panel["series"])]
         base = os.path.dirname(panel["series"])

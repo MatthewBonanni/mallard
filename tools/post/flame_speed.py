@@ -17,7 +17,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_vtu_cells, series  # noqa: E402
+from mallard.vtu import read_index, read_vtu_cells  # noqa: E402
 
 
 def profile(path):
@@ -38,7 +38,7 @@ def deficient(a):
 
 def analyze(run_dir):
     rows = []
-    for f in series(os.path.join(run_dir, "solut"), "flame_[0-9]*"):
+    for _, f in read_index(os.path.join(run_dir, "solut", "flame")):
         t, x, a = profile(f)
         k = deficient(a)
         dx = np.diff(np.concatenate([[0.0], 0.5 * (x[1:] + x[:-1]), [x[-1] + 0.5 * (x[-1] - x[-2])]]))
