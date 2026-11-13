@@ -153,18 +153,38 @@ void Solver::advance_chemistry(const double dt_chem, const bool audited) {
     t_wall_chemistry += timer.seconds() - start;
 }
 
+void Solver::allocate_unflushed() {
+    if (unflushed.flow.is_allocated()) return;
+    unflushed = State("unflushed", mesh->n_cells, static_cast<uint32_t>(species.extent(1)));
+    unflushed_T_seed = Kokkos::View<rtype *>("unflushed_T_seed", T_seed.extent(0));
+    unflushed_chem_h = Kokkos::View<rtype *>("unflushed_chem_h", chem_h.extent(0));
+    unflushed_chem_cost = Kokkos::View<rtype *>("unflushed_chem_cost", chem_cost.extent(0));
+    cell_chemistry.allocate_kept();
+}
+
+void Solver::keep_unflushed() {
+    const Kokkos::DefaultExecutionSpace exec;
+    deep_copy(exec, unflushed, state());
+    Kokkos::deep_copy(exec, unflushed_T_seed, T_seed);
+    Kokkos::deep_copy(exec, unflushed_chem_h, chem_h);
+    Kokkos::deep_copy(exec, unflushed_chem_cost, chem_cost);
+    cell_chemistry.keep();
+}
+
+void Solver::restore_unflushed() {
+    const Kokkos::DefaultExecutionSpace exec;
+    deep_copy(exec, state(), unflushed);
+    Kokkos::deep_copy(exec, T_seed, unflushed_T_seed);
+    Kokkos::deep_copy(exec, chem_h, unflushed_chem_h);
+    Kokkos::deep_copy(exec, chem_cost, unflushed_chem_cost);
+    cell_chemistry.restore();
+    halo_current = false;
+}
+
 void Solver::flush_chemistry() {
     if (!reacting || chemistry_flushed || chemistry_pending <= 0.0) return;
-    if (!unflushed.flow.is_allocated()) {
-        unflushed = State("unflushed", mesh->n_cells, static_cast<uint32_t>(species.extent(1)));
-        unflushed_T_seed = Kokkos::View<rtype *>("unflushed_T_seed", T_seed.extent(0));
-        unflushed_chem_h = Kokkos::View<rtype *>("unflushed_chem_h", chem_h.extent(0));
-        unflushed_chem_cost = Kokkos::View<rtype *>("unflushed_chem_cost", chem_cost.extent(0));
-    }
-    deep_copy(unflushed, state());
-    Kokkos::deep_copy(unflushed_T_seed, T_seed);
-    Kokkos::deep_copy(unflushed_chem_h, chem_h);
-    Kokkos::deep_copy(unflushed_chem_cost, chem_cost);
+    allocate_unflushed();
+    keep_unflushed();
     // The repair audit counts the pending half step once, in the call it is fused into
     advance_chemistry(chemistry_pending, false);
     chemistry_flushed = true;
@@ -173,12 +193,8 @@ void Solver::flush_chemistry() {
 
 void Solver::unflush_chemistry() {
     if (!chemistry_flushed) return;
-    deep_copy(state(), unflushed);
-    Kokkos::deep_copy(T_seed, unflushed_T_seed);
-    Kokkos::deep_copy(chem_h, unflushed_chem_h);
-    Kokkos::deep_copy(chem_cost, unflushed_chem_cost);
+    restore_unflushed();
     chemistry_flushed = false;
-    halo_current = false;
 }
 
 void Solver::swap_unflushed() {

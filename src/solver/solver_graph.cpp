@@ -151,11 +151,6 @@ std::string Solver::step_graph_unsupported() const {
     return device_steps_unsupported();
 }
 
-bool Solver::progress_on_device() const {
-    // Rows of runs with fused chemistry follow the half step the host completes first
-    return !defer_chemistry;
-}
-
 void Solver::flag_timed_boundaries() {
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), boundary_failed, 0.0);
     timed_fields.flag_error(boundary_failed);
@@ -433,6 +428,7 @@ void Solver::device_step_body() {
                 if (due(k)) record.monitors |= uint64_t(1) << k;
             }
         });
+        flush_chemistry_if(monitor_due.data(), n_monitors);
         for (uint32_t k = 0; k < n_monitors; k++) {
             device_if(&monitor_due.data()[k], [&] {
                 monitor_reductions(k);
@@ -487,6 +483,7 @@ void Solver::device_step_body() {
             for (size_t i = 0; i < 3 + n_conditional; i++) any |= due(i);
             due(3 + n_conditional) = any;
         });
+        flush_chemistry_if(&statistics_due.data()[3 + n_conditional], 1);
         // The fields are computed once for every part due, as sample_statistics; boundary states at the step's end
         recording_step = true;
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
@@ -556,6 +553,7 @@ void Solver::device_step_body() {
             // The next step ends at the next output time, as next_target_time has it
             if (timed && on) s(T_TARGET) = t_target;
         });
+        flush_chemistry_if(&probe_due.data()[n_probes], 1);
         device_if(&probe_due.data()[n_probes], [&] {
             const auto [cell_W, transport, all_gradients] = probes.staged_needs(wall_model_on);
             if (cell_W) {
@@ -575,6 +573,7 @@ void Solver::device_step_body() {
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
         recording_step = false;
     }
+    flush_chemistry_if(&step_loop.data()->progress, 1);
     device_if(&step_loop.data()->progress, [&] {
         if (timed_boundaries) flag_timed_boundaries();
         progress_reductions();
@@ -592,6 +591,53 @@ void Solver::device_step_body() {
             record.progress = 1;
         });
     });
+    unflush_chemistry_on_device();
+}
+
+void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
+    if (!defer_chemistry) return;
+    const Kokkos::View<uint32_t *> f = chemistry_flush;
+    Kokkos::parallel_for("chemistry_flush_due", 1, KOKKOS_LAMBDA(const int) {
+        uint32_t any = 0;
+        for (uint32_t i = 0; i < n; i++) any |= flags[i];
+        f(0) = any && !f(1);
+        f(1) = f(1) || f(0);
+    });
+    device_if(&chemistry_flush.data()[0], [&] {
+        // flush_chemistry over the pending time step_chemistry left, timed as the step's chemistry
+        keep_unflushed();
+        const Kokkos::View<double> chem = chem_dt;
+        const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
+        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = io(0); });
+        const bool recording = recording_step;
+        recording_step = true;
+        run_chemistry(nullptr, false);
+        recording_step = recording;
+        reduce_chemistry_failures();
+        // A failed flush stops the device; the host flushes again, from the kept state, and reports it as it would
+        const Kokkos::View<step_queue::Loop> loop = step_loop;
+        const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+        const uint64_t n_records = step_records.extent(0);
+        Kokkos::parallel_for("chemistry_flush_check", 1, KOKKOS_LAMBDA(const int) {
+            step_queue::Loop & L = loop();
+            if (!(io(1) > L.chemistry_failures)) return;
+            io(1) = L.chemistry_failures;
+            records((L.seq - 1) % n_records).reasons |= step_queue::CHEMISTRY;
+            L.active = 0;
+            L.progress = 0;
+        });
+    });
+    halo_current = false;
+}
+
+void Solver::unflush_chemistry_on_device() {
+    if (!defer_chemistry) return;
+    device_if(&chemistry_flush.data()[1], [&] {
+        restore_unflushed();
+        const Kokkos::View<uint32_t *> f = chemistry_flush;
+        Kokkos::parallel_for("chemistry_unflushed", 1, KOKKOS_LAMBDA(const int) { f(1) = 0; });
+    });
+    halo_current = false;
 }
 
 void Solver::captured_launch() {
@@ -628,15 +674,10 @@ void Solver::write_staged_probes(const step_queue::Record & record) {
     }
 }
 
-bool Solver::statistics_on_device() const {
-    // Fused chemistry is advanced by the host before a sample
-    return statistics.enabled() && !defer_chemistry;
-}
+bool Solver::statistics_on_device() const { return statistics.enabled(); }
 
 bool Solver::monitors_on_device() const {
-    // Fused chemistry is advanced by the host before a monitor reads the state
-    return (!force_monitors.empty() || integral_monitor.interval > 0) && !defer_chemistry &&
-           force_monitors.size() + 1 <= 64;
+    return (!force_monitors.empty() || integral_monitor.interval > 0) && force_monitors.size() + 1 <= 64;
 }
 
 void Solver::allocate_monitors() {
@@ -792,6 +833,10 @@ void Solver::begin_device_steps() {
         statistics.stage_spectra(n_records);
     }
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
+    if (defer_chemistry) {
+        chemistry_flush = Kokkos::View<uint32_t *>("step_chemistry_flush", 2);
+        allocate_unflushed();
+    }
     if (triggers_on_device()) {
         trigger_vars = Kokkos::View<double *>("step_trigger_vars", triggers.variables().size());
         trigger_states = Kokkos::View<Triggers::DeviceState *>("step_trigger_states", triggers.size());
@@ -832,8 +877,7 @@ void Solver::begin_device_steps() {
         monitor_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
             "step_monitor_staging", n_records, monitor_offsets.back());
     }
-    // Fused chemistry is advanced by the host before a probe reads the state
-    for (size_t k = 0; k < probes.size() && staged_probes.size() < 64 && !defer_chemistry; k++) {
+    for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
         if (!probes.can_stage(k) || convergence_reads_probe(k)) continue;
         probes.stage(k, n_records);
         staged_probes.push_back(k);
@@ -864,7 +908,6 @@ step_queue::Horizon Solver::step_horizon() const {
     step_queue::Horizon h;
     if (n_steps > 0) h.at_step(n_steps);
     if (t_stop > 0) h.at_time(t_stop_reached());
-    if (!progress_on_device()) h.at_multiple(step, check_interval);
     if (!triggers.empty() && !triggers_on_device()) h.at_step(step + 1);
     if (!monitors_on_device()) {
         for (const auto & monitor : force_monitors) h.at_multiple(step, monitor.interval);
@@ -886,7 +929,7 @@ void Solver::resume_device_steps() {
     loop.seq = n_launched;
     loop.step = step;
     loop.active = 1;
-    loop.check_interval = progress_on_device() ? check_interval : 0;
+    loop.check_interval = check_interval;
     loop.horizon = step_horizon();
     if (reacting) {
         loop.chemistry_failures = static_cast<double>(chem_failures_seen);

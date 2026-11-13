@@ -1,0 +1,1 @@
+- Characteristic (`nscbc`) boundaries under `[numerics.error_control]`: a rejected step now restores the faces' incoming waves with the solution and its retry advances them with the retry's time step, so runs are bit for bit identical at any `[run] step_queue` (#963).

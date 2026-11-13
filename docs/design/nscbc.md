@@ -43,7 +43,9 @@ K = sigma c (1 - M^2) / L
 
 Here `p_b` and `u_b` are first refreshed from the current outgoing wave.
 `K dt` is capped at 1. The face's `w-` goes into the exterior state at every
-stage of the step.
+stage of the step. Under `[numerics.error_control]` a rejected step restores
+`p_b` and `u_b` with the solution, and its retry advances them with its own
+`dt`, on the host and in queued steps alike.
 
 The face keeps `p_b` and `u_b` rather than `w-` itself: pressure and
 velocity are continuous at contacts, `w-` is not. A hot front leaving
