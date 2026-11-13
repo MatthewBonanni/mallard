@@ -112,17 +112,20 @@ constexpr uint8_t SLICE_SHIFT =
 
 /**
  * @brief Per-cell stencils of different sizes, stored without padding to the
- *        largest one in the mesh. Slot s of a cell's stencil holds the stencil
- *        cell, its mirror boundary face (or -1) and `width` pseudo-inverse
- *        entries. Consecutive cells form slices of 2^shift cells; a slice is
- *        padded to its largest stencil and interleaves its cells' slots.
- *        With single, pinv holds the pseudo-inverse entries as floats, two to
- *        an element, at the same indices.
+ *        largest one in the mesh. Slot s of a cell's stencil holds an entry
+ *        and `width` pseudo-inverse entries. An entry e >= 0 is the stencil
+ *        cell e, without a mirror face; e < 0 is the image -1 - e, whose cell
+ *        and mirror boundary face (TENO's face field) images holds at
+ *        2 (-1 - e) and 2 (-1 - e) + 1: images are rare, so the face field
+ *        is stored only for them. Consecutive cells form slices of 2^shift
+ *        cells; a slice is padded to its largest stencil and interleaves its
+ *        cells' slots. With single, pinv holds the pseudo-inverse entries as
+ *        floats, two to an element, at the same indices.
  */
 struct PackedStencils {
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
     Kokkos::View<int32_t *> cells;
-    Kokkos::View<int32_t *> faces;
+    Kokkos::View<int32_t *> images;        // (2 image + {0: cell, 1: face field})
     Kokkos::View<rtype *> pinv;
     uint8_t shift = SLICE_SHIFT;
     uint8_t width = 0;
@@ -134,19 +137,29 @@ struct PackedStencils {
         return single ? (n * sizeof(float) + sizeof(rtype) - 1) / sizeof(rtype) : n;
     }
 
+    /** @brief The entry of image k. */
+    KOKKOS_INLINE_FUNCTION
+    static int32_t image_entry(const uint64_t k) { return -1 - static_cast<int32_t>(k); }
+
     /** @brief One cell's stencil, resolved once per cell, for pseudo-inverse entries of type T. */
     template <typename T>
     struct RowT {
         const T * pinv_;
         const int32_t * cells_;
-        const int32_t * faces_;
+        const int32_t * images_;
         uint8_t shift;
 
         KOKKOS_INLINE_FUNCTION
-        int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
+        int32_t cell(const uint32_t s) const {
+            const int32_t e = cells_[s << shift];
+            return e >= 0 ? e : images_[2 * (-1 - e)];
+        }
 
         KOKKOS_INLINE_FUNCTION
-        int32_t face(const uint32_t s) const { return faces_[s << shift]; }
+        int32_t face(const uint32_t s) const {
+            const int32_t e = cells_[s << shift];
+            return e >= 0 ? -1 : images_[2 * (-1 - e) + 1];
+        }
 
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
@@ -166,7 +179,7 @@ struct PackedStencils {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
         return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start * width) << shift) + lane,
-                       cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift};
+                       cells.data() + (start << shift) + lane, images.data(), shift};
     }
 };
 

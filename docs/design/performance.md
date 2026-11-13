@@ -580,6 +580,27 @@ Apple M4 Pro, 2 Threads, TENO5, `numerics` setup phase, the better of 2 alternat
 The 3D moments (5.6 s for 64³, the same before and after), the QR and the search are left: their
 operations are already in order, and changing their order would change the tables.
 
+### 14. TENO table memory (#431)
+
+Bytes per cell of the TENO tables (the "reconstruction tables" row of `mallard check --memory a100-80`, CPU build,
+periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the cells per A100-80GB that
+`mallard check` predicts:
+
+| case | before | compact stencil entries | cells per A100-80GB before / after |
+|---|---|---|---|
+| TENO3, hexahedra | 10.3 kB | 9.77 kB | 5.64M / 5.85M |
+| TENO4, hexahedra | 18.1 kB | 17.4 kB | 3.58M / 3.69M |
+| TENO5, hexahedra | 32.0 kB | 31.3 kB | 2.08M / 2.12M |
+| TENO6, hexahedra | 65.1 kB | 64.2 kB | 1.10M / 1.12M |
+| TENO3, tetrahedra | 8.52 kB | 8.10 kB | 6.46M / 6.69M |
+| TENO4, tetrahedra | 14.4 kB | 13.9 kB | 4.31M / 4.43M |
+| TENO5, tetrahedra | 44.0 kB | 43.1 kB | 1.63M / 1.66M |
+| TENO6, tetrahedra | 72.0 kB | 71.1 kB | 1.02M / 1.04M |
+
+- **Compact stencil entries.** Each stencil slot held its cell and its mirror face (or -1), 8 bytes. Mirror
+  images are rare (cells next to straight walls and symmetry planes), so a slot now holds one word: the cell, or,
+  for an image, its index in a per-rank list of (cell, face) pairs. Results are bitwise unchanged.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
