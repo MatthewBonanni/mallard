@@ -721,17 +721,21 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
 /**
  * @brief Lebesgue constant max_q |1 - sum_s c_qs| + sum_s |c_qs| of the
  *        reconstruction at the rows of psi (zero-mean basis, n per row),
- *        c_qs = psi_q . P(:, s), for P from pseudo_inverse().
+ *        c_qs = psi_q . P(:, s), for P from pseudo_inverse(); T (m * n) holds
+ *        P transposed, so that the sums over s run along contiguous memory.
  */
-KOKKOS_INLINE_FUNCTION
-double lebesgue_constant(const Lane<double> & psi, const int n_rows, const int n, const Lane<double> & X, const int m,
-                         const Lane<double> & coef) {
+template <class Array>
+KOKKOS_INLINE_FUNCTION double lebesgue_constant(const Array & psi, const int n_rows, const int n, const Array & X,
+                                                const int m, const Array & coef, const Array & T) {
+    for (int s = 0; s < m; s++) {
+        for (int l = 0; l < n; l++) T[l * m + s] = X[s * n + l];
+    }
     double lambda = 0.0;
     for (int q = 0; q < n_rows; q++) {
         for (int s = 0; s < m; s++) coef[s] = 0.0;
         for (int l = 0; l < n; l++) {
             const double p = psi[q * n + l];
-            for (int s = 0; s < m; s++) coef[s] += p * X[s * n + l];
+            for (int s = 0; s < m; s++) coef[s] += p * T[l * m + s];
         }
         double sum = 0.0, abs_sum = 0.0;
         for (int s = 0; s < m; s++) {
@@ -743,6 +747,16 @@ double lebesgue_constant(const Lane<double> & psi, const int n_rows, const int n
         if (lambda < value) lambda = value;
     }
     return lambda;
+}
+
+/** @brief lebesgue_constant() on raw pointers where the lanes are contiguous (host threads), so its loops vectorize. */
+KOKKOS_INLINE_FUNCTION
+double lebesgue_constant(const Lane<double> & psi, const int n_rows, const int n, const Lane<double> & X, const int m,
+                         const Lane<double> & coef, const Lane<double> & T) {
+    if (psi.stride == 1 && X.stride == 1 && coef.stride == 1 && T.stride == 1) {
+        return lebesgue_constant(psi.p, n_rows, n, X.p, m, coef.p, T.p);
+    }
+    return lebesgue_constant<Lane<double>>(psi, n_rows, n, X, m, coef, T);
 }
 
 /** @brief Insert visit (c, lattice) into w's open-addressing set of cap slots; 1 if new, 0 if present, -1 if full. */
@@ -1501,7 +1515,7 @@ struct CellSetup {
         for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
             if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
             if (!build(static_cast<int>(n_try))) continue;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef);
+            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
             w.tried_n[n_tried] = n_try;
             w.tried_lebesgue[n_tried] = lebesgue;
             n_tried++;
@@ -3803,7 +3817,7 @@ struct Caps2D {
 /** @brief Scratch arrays of the cells of a batch (or of the host threads) in 2D. */
 template <class Space>
 struct Scratch2D {
-    SlotArray<uint32_t, Space> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, tried_n;
+    SlotArray<uint32_t, Space> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, row_visit;
     SlotArray<int32_t, Space> entry_face, lf_face, lf_turns;
     SlotArray<uint64_t, Space> hash;
     SlotArray<double, Space> entry_x, entry_y, entry_key, lines, lf, means, A, X, psi, coef, tried_lebesgue, si;
@@ -3818,7 +3832,7 @@ struct Scratch2D {
           entry_order("teno_setup_order", c.entries, n, interleaved),
           line_first("teno_setup_line_first", c.lines, n, interleaved),
           lf_line("teno_setup_line_face_line", c.line_faces, n, interleaved),
-          sector("teno_setup_sector", c.sector, n, interleaved), tried_n("teno_setup_tried", c.rows, n, interleaved),
+          sector("teno_setup_sector", c.sector, n, interleaved), row_visit("teno_setup_row_visit", c.rows, n, interleaved),
           entry_face("teno_setup_entry_face", c.entries, n, interleaved),
           lf_face("teno_setup_line_faces", c.line_faces, n, interleaved),
           lf_turns("teno_setup_line_face_turns", c.line_faces, n, interleaved),
@@ -3838,7 +3852,7 @@ struct Scratch2D {
 
 /** @brief One thread's view of its 2D scratch. */
 struct Lanes2D {
-    Lane<uint32_t> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, tried_n;
+    Lane<uint32_t> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, row_visit;
     Lane<int32_t> entry_face, lf_face, lf_turns;
     Lane<uint64_t> hash;
     Lane<double> entry_x, entry_y, entry_key, lines, lf, means, A, X, psi, coef, tried_lebesgue, si;
@@ -3848,7 +3862,7 @@ template <class Space>
 KOKKOS_INLINE_FUNCTION Lanes2D lanes_of(const Scratch2D<Space> & s, const size_t slot) {
     return Lanes2D{s.visit_cell.lane(slot), s.visit_lattice.lane(slot), s.entry_visit.lane(slot),
                    s.entry_order.lane(slot), s.line_first.lane(slot),   s.lf_line.lane(slot),
-                   s.sector.lane(slot),      s.tried_n.lane(slot),      s.entry_face.lane(slot),
+                   s.sector.lane(slot),      s.row_visit.lane(slot),    s.entry_face.lane(slot),
                    s.lf_face.lane(slot),     s.lf_turns.lane(slot),     s.hash.lane(slot),
                    s.entry_x.lane(slot),     s.entry_y.lane(slot),      s.entry_key.lane(slot),
                    s.lines.lane(slot),       s.lf.lane(slot),           s.means.lane(slot),
@@ -4231,6 +4245,13 @@ struct CellSetup2D {
             for (int t = 0; t < p; t++) c *= (a - t);
             return c;
         };
+        // Exponents and falling factorials of every monomial, once per cell rather than per point
+        uint8_t ea[teno::MAX_NK], eb[teno::MAX_NK];
+        for (uint8_t l = 0; l < nk; l++) teno::exponents(l, ea[l], eb[l]);
+        double fall[teno::MAX_DEGREE + 1][teno::MAX_DEGREE + 1];
+        for (int a = 0; a <= r; a++) {
+            for (int p = 0; p <= r; p++) fall[a][p] = falling(a, p);
+        }
         const bool curved_cell = g.curved && g.rule_start(i + 1) > g.rule_start(i);
         auto identity = [](const double px, const double py, double & qx, double & qy) {
             qx = px;
@@ -4238,16 +4259,20 @@ struct CellSetup2D {
         };
         integrate(i, x0, y0, h, identity, [&](const double x, const double y, const double wq) {
             const double weight = curved_cell ? wq / (h * h) : wq;
+            // Powers by repeated multiplication, as teno::ipow forms them
+            double px[teno::MAX_DEGREE + 1], py[teno::MAX_DEGREE + 1];
+            px[0] = py[0] = 1.0;
+            for (int k = 1; k <= r; k++) {
+                px[k] = px[k - 1] * x;
+                py[k] = py[k - 1] * y;
+            }
             double d[teno::MAX_NK];
             for (int bp = 0; bp <= r; bp++) {
                 for (int bq = 0; bp + bq <= r; bq++) {
                     if (bp + bq == 0) continue;
                     for (uint8_t l = 0; l < nk; l++) {
-                        uint8_t a, b;
-                        teno::exponents(l, a, b);
-                        d[l] = (a >= bp && b >= bq) ? falling(a, bp) * falling(b, bq) * teno::ipow(x, uint8_t(a - bp)) *
-                                                          teno::ipow(y, uint8_t(b - bq))
-                                                    : 0.0;
+                        const int a = ea[l], b = eb[l];
+                        d[l] = (a >= bp && b >= bq) ? fall[a][bp] * fall[b][bq] * px[a - bp] * py[b - bq] : 0.0;
                     }
                     // The binomial weight makes each degree's sum the squared norm of the derivative tensor
                     const double wb = weight * (falling(bp + bq, bp) / falling(bp, bp));
@@ -4378,7 +4403,7 @@ struct CellSetup2D {
             if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
             if (!build(static_cast<int>(n_try))) continue;
             n_built = n_try;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef);
+            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
             if (lebesgue < best) {
                 best = lebesgue;
                 n_used = static_cast<uint16_t>(n_try);
@@ -4403,6 +4428,13 @@ struct CellSetup2D {
             }
         }
 
+        // The visits of the rows of w.means that are no mirror images: the
+        // sectors' means are the first of theirs, which the gather below keeps
+        for (uint32_t s = 0; s < n_means; s++) {
+            const uint32_t e = w.entry_order[s];
+            w.row_visit[s] = w.entry_face[e] < 0 ? w.entry_visit[e] : ~0u;
+        }
+
         // Small sector stencils, one per face: entries whose offset from the
         // centroid lies in the cone spanned by the face's vertices
         const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
@@ -4414,6 +4446,18 @@ struct CellSetup2D {
             n_entries = gather(w, i, end[depth_wide], x0, y0, h);
             if (n_entries < 0) return OUT_OF_SCRATCH;
         }
+        // Means of degree 2 of sorted entry j: the first of its row of w.means, else computed
+        auto small_means = [&](const uint32_t j, double * means) {
+            const uint32_t e = w.entry_order[j];
+            if (w.entry_face[e] < 0) {
+                for (uint32_t s = 0; s < n_means; s++) {
+                    if (w.row_visit[s] != w.entry_visit[e]) continue;
+                    for (uint32_t l = 0; l < teno::NK_SMALL; l++) means[l] = w.means[s * nk + l];
+                    return;
+                }
+            }
+            entry_means(w, j, x0, y0, h, 2, means);
+        };
         const FitColumns fit_small = fit_columns(flat, teno::NK_SMALL);
         const auto small_cells = out.small_cells.lane(slot);
         const auto small_faces = out.small_faces.lane(slot);
@@ -4455,7 +4499,7 @@ struct CellSetup2D {
             }
             for (uint32_t s = 0; s < n_sector; s++) {
                 double means[teno::MAX_NK];
-                entry_means(w, w.sector[s], x0, y0, h, 2, means);
+                small_means(w.sector[s], means);
                 for (int j = 0; j < fit_small.n; j++) {
                     w.A[int(s) * fit_small.n + j] = means[fit_small.col[j]] - mean0[fit_small.col[j]];
                 }

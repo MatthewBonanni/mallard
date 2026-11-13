@@ -549,6 +549,37 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
 
 Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
 
+### 13. TENO setup on CPUs (#916)
+
+A start without a TENO cache, and `mallard post derive` or `post extract` of a run without one, spend nearly
+all their setup in the per-cell tables. Profiled on the host (`sample`, 2 Threads), the 2D setup was mostly
+the monomial means over each stencil cell's quadrature points (36 per triangle at order 5) and the
+smoothness-indicator integrals, the 3D setup the central least-squares fit (QR and pseudo-inverse), its
+Lebesgue constant, the cells' moments and the 3D monomial means.
+
+- **Powers by recurrence.** `teno::monomials` and the 2D smoothness integrals formed each power with
+  `ipow` and each monomial's exponents by a search, at every point; they now take the powers from a table
+  built by the same repeated multiplication, and the exponents and falling factorials once per cell.
+- **Sector means from the central ones.** In 2D, the degree-2 means of a sector stencil's cell are the
+  first of the degree-r means the central fit already has (the same sums, term by term), so they are
+  copied instead of integrated again; mirror images, whose line face may change with the deeper gather,
+  are still integrated.
+- **Lebesgue constant along memory.** The sums over the stencil's cells read the pseudo-inverse
+  transposed into the free least-squares matrix, so they run over contiguous memory and vectorize.
+
+Every value takes the same sequence of operations, so the tables are bitwise unchanged: the TENO cache
+files of the cases below and of the 2D and 3D cylinder test meshes (triangles and quadrilaterals with
+curved walls, tetrahedra and pyramids, symmetry planes) are byte for byte those of the previous code.
+Apple M4 Pro, 2 Threads, TENO5, `numerics` setup phase, the better of 2 alternating runs:
+
+| case | tables before | tables after | instructions |
+|---|---|---|---|
+| 2D double Mach reflection, 115,200 triangles | 6.2 s | 3.7 s | -36% |
+| 3D Taylor-Green vortex, 64³ hexahedra | 26.0 s | 23.4 s | -19% |
+
+The 3D moments (5.6 s for 64³, the same before and after), the QR and the search are left: their
+operations are already in order, and changing their order would change the tables.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
