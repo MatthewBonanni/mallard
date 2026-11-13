@@ -516,6 +516,36 @@ None of them won, so none was kept. On the A100, ordinary global loads are alrea
 where the read-only path caches. The smooth pass waits on the latency of its dependent loads (section 1),
 not on cache capacity, and the flux kernels stream their face data once.
 
+### 12. Staged stencil entries in the 3D smooth pass (#641, not kept)
+
+The team smooth pass (TENO5 on hexahedra, conservative variables) compiles to 168 registers and a 320 B stack. Its
+launch bounds leave room for 10 warps per SM. Over the stencil, each entry is a chain of dependent loads (the
+stencil cell, then its 5 values of W, scattered), and the 5 threads of a cell all load the same entries. Nsight
+Compute's counters were not available, so these figures come from the compiled kernel (`cuobjdump`).
+
+The tried change: each team stages its stencil entries in team scratch, in rounds of STAGE entries. Each of a cell's
+threads loads every fifth entry, issuing all its loads of the round before using any, then every thread takes the
+round's entries in order. This was tried in two forms. Times are for `teno5_3d` on one A100, interleaved best of 3:
+
+| | ms/step | cells/s | bitwise |
+|---|---|---|---|
+| main | 146-147 | 6.05M | |
+| loader converts to conservative variables, STAGE = 10 | 136 | 6.50M | no |
+| the same, STAGE = 15 | 137 | 6.46M | not checked |
+| the same, STAGE = 25 | 146 | 6.08M | not checked |
+| loader stages the raw loads (stencil cell, face field, W) only, STAGE = 10 | 157-158 | 5.61M | yes (`teno5_3d`, 30 steps) |
+
+- With the conversion in the loading thread, U goes through shared memory. nvcc can then no longer fuse `W0 * W1 - U0`
+  into one FMA as it does on main, and 6 of 8 cases differ from main by about 3e-16 relative.
+- Order 6 does not fit two teams per SM with the staged entries (Kokkos caps the team size at 32).
+- STAGE = 25 (78 KB of scratch per team) leaves the SM about 28 KB of L1, against 92 KB on main, and loses the gain.
+- Staging only the raw loads keeps the arithmetic and the results, but every thread then repeats the conversion and
+  reads 5 doubles of shared memory per entry, which costs more than the loads it overlaps.
+- A run of main against itself on a gas-mixture case was bitwise identical, so the differences above come from
+  the change.
+
+Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
