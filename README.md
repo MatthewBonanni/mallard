@@ -70,6 +70,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Probes on points, curves, surfaces, boundaries and regions
 - Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
+- A [Python package](docs/guide/python.md): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 - 40 [examples](examples), compared with exact solutions, other codes, DNS and experiments
@@ -118,6 +119,7 @@ Start with the [tutorials](docs/tutorials/index.md), then see:
 - [`docs/input.md`](docs/input.md) for every input key
 - [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts
 - [`tools/`](tools) for plotting and animation
+- the [Python package](docs/guide/python.md) for your own analysis in Python
 
 `mallard test` runs the test suites of an install (`./build/src/mallard test` in a build tree).
 

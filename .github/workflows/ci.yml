@@ -223,7 +223,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           backends='[
-            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
+            {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON -DMallard_ENABLE_PYTHON=ON", "cgns": true, "full": true, "gate": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "shards": 2, "gate": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "shards": 4, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
@@ -440,6 +440,13 @@ jobs:
         run: |
           python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
           python3 tools/dev/check_output_units.py build/src/mallard
+      - name: Python package
+        if: matrix.backend.name == 'openmp'
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          python3 -m pip install -q --break-system-packages ./tools pytest
+          PATH="$PWD/build/src:$PATH" python3 -m pytest -q test/python
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent

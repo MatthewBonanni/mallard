@@ -21,7 +21,12 @@ page is [Command line](../guide/cli.md#mallard-info).
 - its run block (`Contents::run`).
 
 `output::read(file, field, snapshot)` loads a field's values as doubles,
-whatever precision wrote them, and `read_ranges` their extrema.
+whatever precision wrote them, `read_all` a field at every snapshot (a table's
+column and a probe file's samples in one read), `read_ranges` their extrema,
+and `read_geometry` the points and cells the values are on (VTK cell types, in
+the file's order; the mesh file of XDMF output, the cells of a mesh file).
+`to_json` writes `Contents` as `mallard info --format json` prints it. A series
+index reads its members' values and cells without opening them whole.
 
 Formats: VTKHDF (unstructured grids and the poly data of probes and region
 snapshots, one file per snapshot or a series file), XDMF output (HDF5 files) and its
@@ -83,11 +88,34 @@ solver's reconstruction, gradients and gas model, in parallel with MPI and on
 GPUs: they run in the solver, so they read in C++. A second reader in Python
 would duplicate every format and drift from it.
 
-The Python package ([#517](https://github.com/MatthewBonanni/mallard/issues/517))
-binds this reader and the commands built on it; it does not reimplement them.
-Until it does, `tools/mallard/*.py` keep reading the formats with h5py and
-numpy, and `tools/dev/check_output_units.py` (run in CI) checks that
-`mallard info --format json` and the Python readers report the same fields, units
+The Python package ([Python](../guide/python.md), `tools/mallard`; its layout
+in [The Python package](python_package.md)) therefore reads through this reader. `-DMallard_ENABLE_PYTHON=ON` builds
+`libmallard2d`/`libmallard3d`, a shared library of `src/io/reader_c_api.h`: a
+C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
+with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,
+and errors as a message, so that no C++ exception or type crosses it. The
+package loads it with ctypes and copies the arrays into numpy:
+
+- **C and ctypes, not a binding library.** pybind11 or nanobind would give
+  richer types, but add a build dependency and tie the library to one Python
+  ABI. A C interface of a dozen functions is enough for files, whose contents
+  are JSON and whose values are flat arrays, and any Python 3.10+ loads it.
+- **Commands as processes.** `mallard.post.extract` and the other commands run
+  the `mallard` executable with `--format json` instead of calling the solver
+  inside the Python process: the front end picks the solver of the case's
+  dimension, `mpirun` and GPUs work as on the command line, and a command
+  cannot leave Kokkos or MPI state in the interpreter. The function and the
+  command share every line of code and option, so they cannot disagree.
+- **Position-independent code.** A shared library needs every library it links
+  compiled with `-fPIC`; the option sets `CMAKE_POSITION_INDEPENDENT_CODE` for
+  the whole build, which is why it is an option rather than always on.
+- **One version.** `tools/mallard/_version.py` holds Mallard's version, and a
+  build with the option checks it against `project(VERSION)`.
+
+`tools/mallard`'s older modules (`vtu`, `vtkhdf`, `h5`, `tables`) read the
+formats with h5py and numpy for the scripts in `tools/`, and
+`tools/dev/check_output_units.py` (run in CI) checks that
+`mallard info --format json` and those modules report the same fields, units
 and times for every format a run writes.
 
 ## What later commands need from it

@@ -27,6 +27,10 @@ A few things hold for every command:
 - **Parallel runs:** start `mallard` under `mpirun` (or `srun`); Kokkos options
   (`--kokkos-num-threads=8`, `--kokkos-device-id=1`) go after the command
   ([Running in parallel](parallel.md)).
+- **From Python:** the commands with `--format json` (`info`, `diff`, `check`,
+  `list`, `post extract`, `post convergence`) are functions of the
+  [Python package](python.md), `mallard.info(path)` and `mallard.post.extract(files, latest=True)`,
+  which run the command and return its JSON as a dict.
 
 ## Shell completion
 

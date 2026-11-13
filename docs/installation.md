@@ -12,6 +12,8 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
+The [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python, needs a build from source with `-DMallard_ENABLE_PYTHON=ON` ([Python package](#python-package)).
+
 ## Supported platforms
 
 Mallard supports the two newest major releases of GCC and of Clang, the current Xcode, the two newest CUDA minor releases, and the latest ROCm and oneAPI. Supported means tested in CI on every change that lands: each row below names its jobs, and [the support matrix](guide/support.md) says what each one builds and runs. Anything else may work but is not tested, and configuring with a compiler older than the minimum stops with a message that names it.
@@ -186,9 +188,23 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
+| `Mallard_ENABLE_PYTHON` | `OFF` | `libmallard2d` or `libmallard3d`, the output reader as a library for the [Python package](guide/python.md), installed in `lib/`; compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
 | `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
 | `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
 | `Mallard_INSTALL_COMPLETION` | `ON` | Install bash, zsh and fish completion under `share/`, printed by the built `mallard completion` (skipped, with a warning, where the build cannot run it) |
 | `USE_SYSTEM_YAML_CPP` | `OFF` | Use an installed yaml-cpp (0.8 or newer) instead of fetching it |
 | `Mallard_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings in Mallard's own code as errors (on in CI) |
 | `BUILD_DOCS` | `OFF` | Doxygen documentation target |
+
+### Python package
+
+The Python package is `tools/mallard` (`share/mallard/tools/mallard` of an install; distribution `mallard-python`, imported as `mallard`); its library comes with `-DMallard_ENABLE_PYTHON=ON`, in a build of either dimension (with HDF5 for HDF5 output):
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON \
+    -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_PYTHON=ON -DCMAKE_INSTALL_PREFIX=$HOME/mallard
+cmake --build build -j && cmake --install build
+uv venv && uv pip install $HOME/mallard/share/mallard/tools   # or: pip install, or -e tools in the repository
+```
+
+It needs Python 3.10 or newer and numpy, and finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`): [Python](guide/python.md#installing).
