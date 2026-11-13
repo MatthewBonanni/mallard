@@ -692,7 +692,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
     const char * stored = sizeof(rtype) == 8 ? "float64" : "float32";
     for (const auto & field : fields) {
         snapshot_block::Field f{field.name, field.description.units(), field.description.long_name, stored,
-                                relative_error, ""};
+                                relative_error, "", {}};
         if (format == DataFormat::RESTART) {
             const auto d = field_units::find(field.name);
             f.units = d ? d->units() : "";

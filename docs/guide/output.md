@@ -844,7 +844,7 @@ The block's fields:
 | `format`, `format_version`, `solver_precision` | The file's format and its [version](#formats-and-compatibility); the precision the solver ran in (`double`, `single`) |
 | `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
 | `reconstruction` | Snapshots with point values: how they were evaluated, `method` (`TENO`, `linear_least_squares`), its design `order`, and `fallback`, what replaces it in order where it cannot be used ([below](#cell-averages-and-point-values)); absent otherwise |
-| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)) |
+| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)), and for time-averaged fields `average` ([below](#time-averaged-fields)) |
 | `units` | The units of the block's own numbers (`time`: `s`) |
 
 Files written before 0.10 have no snapshot block. Readers then take step and
@@ -890,6 +890,35 @@ the point. Mixing the two hides an error of the scheme's order at high order.
 `mallard info FILE` lists each field's `value` and the reconstruction under
 **This snapshot**, and `value_kinds(path)` of `tools/mallard/vtu.py` returns
 them. Files written before 0.10 record none.
+
+### Time-averaged fields
+
+A `MEAN_`, `COV_` or `PHASE_` field records what it averages, as `average`
+in its field's entry of the [snapshot block](#snapshot-metadata), so a
+script never infers it from the name:
+
+| Key | Contents |
+|---|---|
+| `kind` | `reynolds` (a time mean, not weighted by density), `covariance` (`<a'b'>`) or `phase` (a [phase mean](statistics.md#phase-averages-statisticsphase)) |
+| `of` | The variables averaged: `["U_X"]`, two for a covariance (`["P", "U_X"]`) |
+| `weighting` | `time`: each sample weighs the time since the previous one (the first, since the start) |
+| `start`, `end` | The window, s: where the first sample's weight starts, and the last sample |
+| `samples`, `interval` | The samples taken, every `interval` steps |
+| `bin`, `bins`, `bin_weight`, `period` or `trigger` | Phase means: the field's bin, of how many, the time its samples weigh (s), and the fixed period (s) or the variable whose crossings set it |
+
+```json
+{"name": "COV_P_U_X", "units": "kg s-3", "value": "cell_state",
+ "average": {"kind": "covariance", "of": ["P", "U_X"], "weighting": "time",
+             "start": 0.25, "end": 1.25, "samples": 64, "interval": 2}}
+```
+
+Mallard keeps Reynolds statistics only; [Favre means follow from
+them](statistics.md#time-averages-statistics) with `RHO` among the fields.
+The averages of a probe with `average = true` record the probe's own window,
+and VTKHDF, HDF5 and XDMF datasets of time and phase means add `time: mean`
+to their `cell_methods` (`area: mean time: mean` for `MEAN_RHO`). `mallard
+info FILE` tabulates them under **This snapshot**, and `field_averages(path)`
+of `tools/mallard/vtu.py` returns them.
 
 ### Formats and compatibility
 

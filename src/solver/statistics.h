@@ -31,6 +31,7 @@
 #include "data_writer.h"
 #include "derived_fields.h"
 #include "mesh.h"
+#include "snapshot_block.h"
 #include "spectra.h"
 #include "state.h"
 
@@ -111,6 +112,8 @@ class PhaseAverage {
 
         /** @brief PHASE_<bin>_<field>, bins zero-padded, bin-major. */
         std::vector<std::string> variables() const;
+        /** @brief What each of variables() averages, for the snapshot blocks. */
+        std::vector<std::pair<std::string, snapshot_block::Average>> field_averages() const;
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
         void start(rtype t);
@@ -211,6 +214,8 @@ class Statistics {
 
         /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., CI_ of each with batches, PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
+        /** @brief What each of variables() averages, for the snapshot blocks. */
+        std::vector<std::pair<std::string, snapshot_block::Average>> field_averages() const;
         /** @brief What restart files carry: the averages, the batch state BATCH_<average>, BATCH_AVG_<average>, BATCH_M2_<average> and the phases. */
         std::vector<std::string> restart_variables() const;
         /** @brief Whether the averages have confidence intervals by batches. */

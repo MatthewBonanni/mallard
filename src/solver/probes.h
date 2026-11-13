@@ -389,7 +389,8 @@ class Probes {
                 return f;
             }
             /** @brief The snapshot block of the samples at (step, t), written now for reason. */
-            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
+            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason,
+                                              uint64_t sampled_every) const;
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file

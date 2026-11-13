@@ -18,6 +18,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace snapshot_block {
@@ -54,6 +55,25 @@ inline constexpr const char * CELL_STATE = "cell_state";
 inline constexpr const char * POINT_VALUE = "point_value";
 } // namespace value
 
+/**
+ * @brief What a time-averaged field averages: a Reynolds (unweighted) time
+ *        mean of a variable, the covariance <a'b'> of two, or a phase mean;
+ *        each sample weighted by the time since the previous one.
+ */
+struct Average {
+    std::string kind;            ///< "reynolds", "covariance", "phase"; empty: not an average
+    std::vector<std::string> of; ///< the variables averaged (two for a covariance)
+    std::string weighting;       ///< "time"
+    double start = std::numeric_limits<double>::quiet_NaN();  ///< s: where the first sample's weight starts
+    double end = std::numeric_limits<double>::quiet_NaN();    ///< s: the last sample
+    int64_t samples = -1;
+    int64_t interval = -1;       ///< steps between samples
+    int64_t bin = -1, bins = -1; ///< phase: this field's bin of bins
+    double bin_weight = std::numeric_limits<double>::quiet_NaN();  ///< phase: s of samples in the bin
+    double period = std::numeric_limits<double>::quiet_NaN();      ///< phase: s, of a fixed period
+    std::string trigger;         ///< phase: the variable whose crossings set the period, else empty
+};
+
 /** @brief A field of a snapshot. */
 struct Field {
     std::string name;
@@ -62,6 +82,7 @@ struct Field {
     std::string stored;     ///< "float64", "float32"
     double relative_error = 0.0;  ///< of lossy compression; 0: stored exactly
     std::string value;      ///< value::...; make() fills it from the name where empty
+    Average average;        ///< of averaged fields; make() fills it from set_averages where unset
 };
 
 /** @brief How point values were evaluated: method, design order, and what replaces it where it cannot be used. */
@@ -100,8 +121,11 @@ struct Block {
 /** @brief A block read back from JSON. @throws std::runtime_error if it is not a snapshot block */
 Block parse(std::string_view json);
 
-/** @brief The averaging window of the run's [statistics], for snapshots of averaged fields. */
-void set_averages(double start, double end, int64_t samples);
+/**
+ * @brief The averaging window of the run's [statistics] means, for snapshots of averaged fields, and what each
+ *        averaged field (MEAN_, COV_, PHASE_) averages, by field name.
+ */
+void set_averages(double start, double end, int64_t samples, std::vector<std::pair<std::string, Average>> fields);
 
 /** @brief Why snapshots forced now are written, while it lives (written for their interval otherwise). */
 class Reason {
@@ -122,7 +146,10 @@ std::string current_reason(bool forced);
  *         REGION_FRACTION; cell_state for every other. */
 std::string value_kind(const std::string & name);
 
-/** @brief The field's CF cell_methods attribute ("volume: mean"), or empty where no CF method fits (cell_state). */
+/**
+ * @brief The field's CF cell_methods attribute: "volume: mean" for a cell average, "volume: point" for a point
+ *        value ("area" in 2D), then "time: mean" for a time or phase mean; empty where no CF method fits.
+ */
 std::string cell_methods(const Field & field);
 
 /** @brief Whether a field holds time averages. */

@@ -2776,9 +2776,9 @@ void Solver::write_data(bool force) {
     if (!any_due) {
         return;
     }
-    if (statistics.means_enabled()) {
+    if (statistics.means_enabled() || statistics.get_phase().enabled()) {
         snapshot_block::set_averages(statistics.average_start(), statistics.average_end(),
-                                     static_cast<int64_t>(statistics.samples()));
+                                     static_cast<int64_t>(statistics.samples()), statistics.field_averages());
     }
     update_primitives();
     copy_device_to_host();

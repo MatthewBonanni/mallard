@@ -383,6 +383,17 @@ def value_kinds(path):
     return {f["name"]: f["value"] for f in blocks[-1]["fields"] if "value" in f}
 
 
+def field_averages(path):
+    """{field: average} of the last snapshot of a file, for its MEAN_, COV_ and
+    PHASE_ fields: kind ("reynolds", "covariance", "phase"), of (the variables),
+    weighting, start and end (s), samples, interval, and for phase means bin,
+    bins, bin_weight and period or trigger (docs/guide/output.md#time-averaged-fields)."""
+    blocks = snapshot_blocks(path)
+    if not blocks:
+        return {}
+    return {f["name"]: f["average"] for f in blocks[-1]["fields"] if "average" in f}
+
+
 def resolved_input(path):
     """The input with every key explicit (TOML text) that made a Mallard output
     file: its provenance's input.resolved. None for a file without provenance, or

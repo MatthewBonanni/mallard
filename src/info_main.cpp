@@ -196,6 +196,25 @@ void print_snapshot_block(const output::Contents & c) {
                                   (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
                                   " samples");
     }
+    std::vector<std::vector<std::string>> rows;
+    for (const snapshot_block::Field & f : b.fields) {
+        const snapshot_block::Average & a = f.average;
+        if (a.kind.empty()) continue;
+        std::string what = a.kind + " of " + list_text(a.of, ", ");
+        if (a.kind == "phase") {
+            what += ", bin " + std::to_string(a.bin) + " of " + std::to_string(a.bins) +
+                    (a.trigger.empty() ? " of the period " + seconds(a.period) + " s" : " of " + a.trigger + "'s cycle");
+        }
+        rows.push_back({f.name, what, a.weighting.empty() ? "-" : a.weighting,
+                        "t = " + seconds(a.start) + " to " + seconds(a.end) + " s",
+                        a.samples >= 0 ? count(static_cast<uint64_t>(a.samples)) : "-",
+                        a.interval >= 0 ? std::to_string(a.interval) : "-"});
+    }
+    if (!rows.empty()) {
+        logging::line("  Averaged fields: what each averages (Reynolds: unweighted by density), each sample weighted "
+                      "by the time since the previous one.");
+        logging::table({"field", "average", "weighting", "window", "samples", "every [steps]"}, rows);
+    }
 }
 
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
