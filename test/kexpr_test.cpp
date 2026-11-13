@@ -545,3 +545,27 @@ TEST(KexprTest, LoopsStopAtTheIterationCap) {
     EXPECT_TRUE(std::isnan(values[1]));
     EXPECT_EQ(table.stopped(), 2u);
 }
+
+/** @brief With several programs stopped in one launch, the table reports the lowest, whichever thread stopped last. */
+TEST(KexprTest, StoppedReportsTheLowestProgram) {
+    const std::string cap = std::to_string(kexpr::MAX_ITERATIONS);
+    std::vector<kexpr::Program> programs;
+    programs.emplace_back("test", "x + y", VARIABLES);
+    for (int k = 0; k < 4; k++) {
+        programs.emplace_back("test", "var i := -" + std::to_string(k) + "; while (i <= " + cap + ") { i += 1 }", VARIABLES);
+    }
+    std::vector<const kexpr::Program *> pointers;
+    for (const auto & p : programs) pointers.push_back(&p);
+    const kexpr::ProgramTable<> table(pointers);
+    Kokkos::parallel_for("evaluate", 16, KOKKOS_LAMBDA(const uint32_t i) {
+        const double v[4] = {0.0, 0.0, 0.0, 0.0};
+        const uint32_t p = 1 + i % 4;
+        if (i % 2 == 0) {
+            table(p, kexpr::ArrayVariables{v});
+        } else {
+            double out[1];
+            table.lanes<1>(p, [&](const int, const uint16_t k) { return v[k]; }, out);
+        }
+    });
+    EXPECT_EQ(table.stopped(), 2u);
+}
