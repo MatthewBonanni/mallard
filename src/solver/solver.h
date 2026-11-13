@@ -721,9 +721,16 @@ class Solver {
 
         /**
          * @brief After init: every field [[write_data]] variables accept in this case, those computed
-         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included.
+         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included, last.
          */
         std::vector<std::string> output_fields() const;
+
+        /**
+         * @brief Instead of init, without the mesh (mallard list fields and species): the input's upgrades and
+         *        numerics preset and the physics, which loads the mechanism (get_species_names).
+         * @return The output_fields() of init, decided from the input alone.
+         */
+        std::vector<std::string> init_fields(const Input & input);
 
         StateView conservatives;
         SpeciesView species;

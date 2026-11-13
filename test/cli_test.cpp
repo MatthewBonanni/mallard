@@ -867,6 +867,38 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     EXPECT_EQ(broken.status, 1);
 }
 
+TEST(CliTest, ListFieldsAndSpeciesNeedNoMesh) {
+    SKIP_UNDER_MPI();
+    ASSERT_EQ(small_run().status, 0);
+    std::string text = read_file("small.toml");
+    const std::string generated = "type = \"cartesian\"\nNx = 4\nNy = 3\nLx = 1.0\nLy = 1.0\n";
+    ASSERT_NE(text.find(generated), std::string::npos);
+    text.replace(text.find(generated), generated.size(), "type = \"file\"\nfilename = \"absent.msh\"\n");
+    std::ofstream("absent.toml") << text;
+    ASSERT_FALSE(fs::exists("absent.msh"));
+    const Result with_mesh = run({"list", "fields", "small.toml", "--format", "json"}, true);
+    const Result without = run({"list", "fields", "absent.toml", "--format", "json"}, true);
+    ASSERT_EQ(without.status, 0) << without.err;
+    std::string expected = with_mesh.out;
+    expected.replace(expected.find("small.toml"), 10, "absent.toml");
+    EXPECT_EQ(without.out, expected);
+    EXPECT_EQ(run({"list", "fields", "absent.toml"}, true).status, 0);
+
+    std::string mixture = read_file(source_dir() + "/test/data/formats/mixture.toml");
+    const std::string relative = "\"../../../mechanisms/h2o2.yaml\"";
+    mixture.replace(mixture.find(relative), relative.size(), "\"" + source_dir() + "/mechanisms/h2o2.yaml\"");
+    const std::string mesh = "type = \"cartesian\"\n";
+    ASSERT_NE(mixture.find(mesh), std::string::npos);
+    mixture.replace(mixture.find(mesh), mesh.size(), "type = \"file\"\nfilename = \"absent.msh\"\n");
+    std::ofstream("mixture_absent.toml") << mixture;
+    const Result species = run({"list", "species", "mixture_absent.toml", "--format", "json"}, true);
+    ASSERT_EQ(species.status, 0) << species.err;
+    std::vector<std::string> names;
+    const json::Value listed = json::parse(species.out);
+    for (const auto & s : listed["species"].array) names.push_back(s.string);
+    EXPECT_EQ(names, (std::vector<std::string>{"H2", "H", "O", "O2", "OH", "H2O", "HO2", "H2O2", "AR", "N2"}));
+}
+
 TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
     SKIP_UNDER_MPI();
     const Result text = run({"check", "--kokkos-num-threads=1"}, true);
