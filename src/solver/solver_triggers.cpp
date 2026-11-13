@@ -111,8 +111,7 @@ std::vector<double> Solver::trigger_values() const {
 
 bool Solver::triggers_on_device() const {
     if (triggers.empty() || defer_chemistry || !triggers.fit_device() || triggers.size() > 64) return false;
-    // Monitors written by the host stop the device at their rows anyway; probes' values are reduced by the host
-    if (triggers.reads(3)) return false;
+    // Probes' values are reduced by the host
     const size_t end = triggers.variables().size() - (convergence.enabled() ? convergence.columns().size() : 0);
     for (size_t v = end - probes.value_names().size(); v < end; v++) {
         if (triggers.reads(static_cast<uint16_t>(v))) return false;
@@ -162,17 +161,19 @@ void Solver::evaluate_triggers() {
     const kexpr::ProgramTable<> table = trigger_conditions;
     const rtype * const scalars = step_time_device();
     const rtype * const step_dt = step_dt_device();
+    const rtype * const wall = step_wall_device();
     const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
     const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
     Kokkos::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
         step_queue::Record & record = records((L.seq - 1) % n_records);
-        // trigger_values at the step: t, step, dt, and the rows the monitors wrote
+        // trigger_values at the step: t, step, dt, wall, and the rows the monitors wrote
         const double t_now = static_cast<double>(*scalars);
         vars(0) = t_now;
         vars(1) = static_cast<double>(L.step);
         vars(2) = static_cast<double>(*step_dt);
+        vars(3) = -static_cast<double>(*wall);
         for (uint32_t k = 0; k < n_sources; k++) {
             const TriggerSource & src = sources(k);
             if (!(record.monitors >> src.monitor & 1)) continue;

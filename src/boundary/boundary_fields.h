@@ -214,6 +214,15 @@ struct MassFlowProfile {
     std::vector<double> measure;   // face measures as the flux integral weighs them
 };
 
+/** @brief An error a launch found: its index (a face or a profile), kind, time and value. */
+struct LaunchError {
+    static constexpr uint32_t NONE = ~uint32_t(0);
+    uint32_t index;
+    int32_t kind;
+    double t;
+    double v;
+};
+
 /**
  * @brief The conditions of the faces whose numbers depend on t, evaluated on
  *        the device at the stage time held in a device scalar, so that a
@@ -294,8 +303,9 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> composition_program;
         kexpr::ProgramTable<> programs;
         std::vector<const kexpr::Program *> program_list;  // host, in the table's order
-        Kokkos::View<int32_t> error_face;   // 1 + the first face whose number was not positive, 0 if none
+        Kokkos::View<int32_t> error_face;   // 1 + the lowest face whose number was not positive, 0 if none
         Kokkos::View<double[3]> error;      // its time, value and slot (N_SLOTS: composition, N_SLOTS + 1: direction)
+        Kokkos::View<LaunchError> launch_error;  // the reductions' results
 
         // Mass-flow profiles: all inlet faces of profile p are [first(p), first(p + 1)), summed in chunks
         // of CHUNK in order; the faces of this rank take the scale times their value
@@ -317,7 +327,7 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> profile_bc;
         Kokkos::View<uint32_t *> profile_of;
         Kokkos::View<double *[3]> profile_x;
-        Kokkos::View<int32_t> profile_error;          // 1 + the inlet face or profile of the first error, 0 if none
+        Kokkos::View<int32_t> profile_error;          // 1 + the lowest inlet face or profile in error, 0 if none
         Kokkos::View<double[3]> profile_error_value;  // its time, value and ProfileError
 
         void finish_profiles(std::vector<const kexpr::Program *> & all);
@@ -412,8 +422,9 @@ class TimedInletTargets {
         Kokkos::View<int32_t *[N_DIM]> direction;
         Kokkos::View<double *[N_DIM]> scale;
         kexpr::ProgramTable<> programs;
-        Kokkos::View<int32_t> error_face;  // 1 + the first face whose direction was zero or outward, 0 if none
-        Kokkos::View<double[2]> error;     // its time and value along the inward normal
+        Kokkos::View<int32_t> error_face;  // 1 + the lowest face whose direction was zero or outward, 0 if none
+        Kokkos::View<double[3]> error;     // its time and value along the inward normal (and an unused kind)
+        Kokkos::View<LaunchError> launch_error;  // the reduction's result
 };
 
 #endif // BOUNDARY_FIELDS_H

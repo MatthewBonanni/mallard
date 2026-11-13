@@ -52,15 +52,15 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
 - Command-line tools ([guide](docs/guide/cli.md)):
-  - `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, and an annotated image and a ParaView file of the domain, boundaries and regions (`--view`)
+  - `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, an annotated image and a ParaView file of the domain, boundaries and regions (`--view`)
   - `mallard ctl` to steer a running job
   - `mallard diff` between two solutions
   - `mallard info` on any output file
   - `mallard new` case templates
   - `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`)
-  - `mallard post average` for the means, RMS, Reynolds and Favre covariances, plane averages, PDFs and conditional statistics of existing output
+  - `mallard post average` for its means, RMS, Reynolds and Favre covariances, plane averages, PDFs and conditional statistics
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions
-  - `mallard post derive` for the derived fields of existing output
+  - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output
   - tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics

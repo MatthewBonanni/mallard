@@ -285,11 +285,6 @@ void Statistics::sample(uint64_t step, rtype t, const CellSampler & sampler, uin
     sample_means(t_sample.data(), sampler, n_owned);
 }
 
-void Statistics::sample_device(const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
-    if (spectra.enabled()) spectra.sample_device(t, sampler);
-    if (means_enabled()) sample_means(t, sampler, n_owned);
-}
-
 void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
     const Kokkos::View<Clock> k = clock;
     const bool batches_on = batches_enabled();
