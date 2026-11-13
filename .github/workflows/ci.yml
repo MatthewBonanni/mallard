@@ -122,6 +122,8 @@ jobs:
       code: ${{ steps.check.outputs.code }}
       full: ${{ steps.check.outputs.full }}
       cuda: ${{ steps.check.outputs.cuda }}
+      cuda_shards: ${{ steps.check.outputs.cuda_shards }}
+      cuda_shard_list: ${{ steps.check.outputs.cuda_shard_list }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,6 +139,8 @@ jobs:
           BEFORE: ${{ github.event.before }}
           FULL: ${{ github.event_name == 'schedule' || inputs.full }}
           GH_TOKEN: ${{ github.token }}
+          # Each CUDA build compiles in this many jobs (the cuda job), then links (cuda-link)
+          CUDA_SHARDS: 3
         run: |
           echo "full=$FULL" >> "$GITHUB_OUTPUT"
           cuda='[
@@ -145,7 +149,8 @@ jobs:
             {"name": "cuda-13.5-arm64", "cuda": "13.5.0", "os": "ubuntu-26.04-arm", "arch": "-DKokkos_ARCH_HOPPER90=ON"}
           ]'
           if [ "$FULL" != true ]; then cuda=$(jq 'map(select(.gate))' <<< "$cuda"); fi
-          echo "cuda=$(jq -c . <<< "$cuda")" >> "$GITHUB_OUTPUT"
+          { echo "cuda=$(jq -c . <<< "$cuda")"; echo "cuda_shards=$CUDA_SHARDS"
+            echo "cuda_shard_list=$(jq -c -n "[range(1; $CUDA_SHARDS + 1)]")"; } >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
           elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
             base=$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -e schedule -s success -L 1 \
@@ -169,6 +174,7 @@ jobs:
           CHANGED: ${{ steps.check.outputs.changed }}
           FULL: ${{ steps.check.outputs.full }}
           CUDA: ${{ steps.check.outputs.cuda }}
+          CUDA_SHARDS: ${{ steps.check.outputs.cuda_shards }}
           FORCE_DEVICE: ${{ inputs.device }}
           ONLY: ${{ inputs.only }}
         run: |
@@ -183,7 +189,12 @@ jobs:
             if extra spack; then names="$names ubi8-spack ubi9-spack"; fi
           fi
           if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
-            for t in $(jq -r '.[].name' <<< "$CUDA"); do names="$names $t-2d $t-3d"; done
+            for t in $(jq -r '.[].name' <<< "$CUDA"); do
+              for d in 2d 3d; do
+                names="$names $t-$d"
+                for s in $(seq "$CUDA_SHARDS"); do names="$names $t-$d-${s}of$CUDA_SHARDS"; done
+              done
+            done
           fi
           if { [ "$CHANGED" = true ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names hip-2d hip-3d sycl-2d sycl-3d"
@@ -720,7 +731,9 @@ jobs:
 
   # CUDA builds (no GPU needed): on main, on branches whose changes touch device code (see
   # the device job), and when the dispatch asks for them (-f device=true); host code
-  # compiles with nvcc too, so main catches what branches skip.
+  # compiles with nvcc too, so main catches what branches skip. Each build compiles its
+  # objects in several jobs, <name>-<dim>d-<i>of<n>, each every n-th object, and links them
+  # in the job <name>-<dim>d (cuda-link).
   cuda:
     needs: [changelog, device]
     if: >-
@@ -734,7 +747,8 @@ jobs:
         dim: [2, 3]
         # CUDA 13.5 on x86-64 in the gate; also 13.4 and arm64 in the full tier (the device job)
         toolchain: ${{ fromJSON(needs.device.outputs.cuda) }}
-    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+        shard: ${{ fromJSON(needs.device.outputs.cuda_shard_list) }}
+    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d-${{ matrix.shard }}of${{ needs.device.outputs.cuda_shards }}
     # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
     # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
     # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH).
@@ -743,51 +757,127 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d-${{ matrix.shard }}of${{ needs.device.outputs.cuda_shards }}
     steps:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
-      - uses: actions/checkout@v4
-      - name: Install tools
+      - &cuda-checkout-tools
+        uses: actions/checkout@v4
+      - &cuda-install
+        name: Install tools
         timeout-minutes: 25
         run: >
           sh tools/dev/apt_install.sh --no-install-recommends
-          git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
-      - uses: actions/checkout@v4
+          git cmake make curl jq libopenmpi-dev openmpi-bin ca-certificates
+      - &cuda-checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Report the job as running
+      - &cuda-report-running
+        name: Report the job as running
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh running
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - name: Put sccache in front of nvcc
+      - &cuda-sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - &cuda-sccache-nvcc
+        name: Put sccache in front of nvcc
         run: |
           mkdir -p "$RUNNER_TEMP/nvcc-sccache"
           printf '#!/bin/sh\nexec sccache /usr/local/cuda/bin/nvcc "$@"\n' > "$RUNNER_TEMP/nvcc-sccache/nvcc"
           chmod +x "$RUNNER_TEMP/nvcc-sccache/nvcc"
           echo "$RUNNER_TEMP/nvcc-sccache" >> "$GITHUB_PATH"
-      - name: Configure
+      - &cuda-configure
+        name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
           -DKokkos_ENABLE_CUDA=ON ${{ matrix.toolchain.arch }} -DKokkos_ENABLE_OPENMP=ON
           -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper
           -DCUDAToolkit_ROOT=/usr/local/cuda
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
-          -DMallard_DIM=${{ matrix.dim }}
-      - name: Build
-        run: cmake --build build -j $(nproc)
-      - name: Cache statistics
+          -DMallard_DIM=${{ matrix.dim }} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      # Each object through its target's own makefile, without the targets' order, which
+      # would leave cores idle while a library's last objects compile
+      - name: Compile this job's share of the objects
+        working-directory: build
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ needs.device.outputs.cuda_shards }}
+        run: |
+          jq -r '.[].output' compile_commands.json | sort | awk -v n="$SHARDS" -v i="$SHARD" 'NR % n == i % n' > objects.txt
+          echo "$(wc -l < objects.txt) of $(jq length compile_commands.json) objects"
+          while read -r o; do echo "${o%%.dir/*}.dir/build.make $o"; done < objects.txt |
+            xargs -n 2 -P "$(nproc)" make -f
+      - &cuda-stats
+        name: Cache statistics
         if: always()
         run: sccache --show-stats
-      - name: Report the job's result
+      - name: Package the objects
+        working-directory: build
+        run: |
+          while read -r o; do echo "$o"; if [ -f "$o.d" ]; then echo "$o.d"; fi; done < objects.txt |
+            tar -cf "$RUNNER_TEMP/objects.tar" -T -
+          ls -l "$RUNNER_TEMP/objects.tar"
+      - name: Upload the objects
+        uses: actions/upload-artifact@v4
+        with:
+          name: objects-${{ matrix.toolchain.name }}-${{ matrix.dim }}d-${{ matrix.shard }}
+          path: ${{ runner.temp }}/objects.tar
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - &cuda-report-result
+        name: Report the job's result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh ${{ job.status }}
+
+  # A CUDA build's link, on the objects of its compile jobs, configured alike. Unpacked after the
+  # checkout and the configure, the objects are newer than every source, so make only links
+  # (and compiles what Kokkos regenerates at every build). It also runs when another build's
+  # compile job failed; a failure of its own leaves an archive missing.
+  cuda-link:
+    needs: [changelog, device, cuda]
+    if: ${{ !cancelled() && needs.cuda.result != 'skipped' && needs.device.result == 'success' }}
+    runs-on: ${{ matrix.toolchain.os }}
+    container: nvidia/cuda:${{ matrix.toolchain.cuda }}-devel-ubuntu26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        dim: [2, 3]
+        toolchain: ${{ fromJSON(needs.device.outputs.cuda) }}
+    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
+    steps:
+      - *cuda-checkout-tools
+      - *cuda-install
+      - *cuda-checkout
+      - *cuda-report-running
+      - *cuda-sccache
+      - *cuda-sccache-nvcc
+      - *cuda-configure
+      - name: Download the objects
+        uses: actions/download-artifact@v4
+        with:
+          pattern: objects-${{ matrix.toolchain.name }}-${{ matrix.dim }}d-*
+          path: ${{ runner.temp }}/objects
+      - name: Unpack the objects
+        env:
+          SHARDS: ${{ needs.device.outputs.cuda_shards }}
+        run: |
+          for s in $(seq "$SHARDS"); do
+            tar -xmf "$RUNNER_TEMP/objects/objects-$STATUS_NAME-$s/objects.tar" -C build
+          done
+      - name: Build
+        run: cmake --build build -j $(nproc)
+      - *cuda-stats
+      - *cuda-report-result
 
   # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
   # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
@@ -1032,7 +1122,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changelog, device, matrix, build-and-test, build, test, tutorials, cuda, portability, spack, fuzz]
+    needs: [changelog, device, matrix, build-and-test, build, test, tutorials, cuda, cuda-link, portability, spack, fuzz]
     runs-on: ubuntu-26.04
     # The workflow's permissions, and deleting caches
     permissions:

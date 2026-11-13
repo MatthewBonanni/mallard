@@ -221,7 +221,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
   runs the CUDA builds on every push (on a branch, CUDA 13.5 on x86-64; on `main`, every
-  CUDA version). `-f device=true` forces all three.
+  CUDA version). `-f device=true` forces all three. Each CUDA build compiles its objects
+  in three jobs (`CI / cuda-13.5-2d-1of3`, ...) and links them in `CI / cuda-13.5-2d`.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
