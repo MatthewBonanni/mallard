@@ -108,7 +108,9 @@ class PhaseAverage {
         bool due(uint64_t step, rtype t) const {
             return enabled() && step % interval == 0 && (trigger_cell != NO_TRIGGER || t > t_start);
         }
-        void sample(rtype t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief Add the sample at the device's time *t (collective; device only, capturable). */
+        void sample(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
+        bool triggered() const { return trigger_cell != NO_TRIGGER; }
 
         /** @brief PHASE_<bin>_<field>, bins zero-padded, bin-major. */
         std::vector<std::string> variables() const;
@@ -117,15 +119,35 @@ class PhaseAverage {
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
         void start(rtype t);
-        void set_start(rtype t) { t_start = t; }
+        void set_start(rtype t);
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
         RestartAttributes attributes() const;
         /** @brief The output as the setup banner lists it. */
         OutputSummary summary() const;
 
-        uint64_t samples() const { return n_samples; }
+        uint64_t samples() const {
+            pull();
+            return n_samples;
+        }
         uint32_t n_bins() const { return bins; }
-        const std::vector<double> & bin_weights() const { return weight; }
+        const std::vector<double> & bin_weights() const {
+            pull();
+            return weight;
+        }
+
+        /** @brief The bins' clock and the trigger's state in device memory, and the last sample's bin and weight. */
+        struct Clock {
+            rtype t_last;
+            rtype t_start;
+            rtype a;
+            uint32_t bin;
+            uint32_t use;
+            uint32_t have_signal;
+            uint64_t n_samples;
+            double t_signal, v_signal;
+            double crossing[2];
+            uint64_t n_crossings;
+        };
         /** @brief Host copy (see copy_device_to_host): (cell, bin * n_fields + field). */
         const auto & host_means() const { return h_mean; }
 
@@ -150,14 +172,20 @@ class PhaseAverage {
         Kokkos::View<rtype **, Kokkos::LayoutLeft> mean;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_mean;
 
-        std::vector<double> weight;
-        rtype t_last = 0.0;
-        uint64_t n_samples = 0;
+        Kokkos::View<Clock> clock;
+        Kokkos::View<double *> d_weight;  // per bin
+        /** @brief The device's clock and weights into the host's copies. */
+        void pull() const;
+        void push();
+        // Host copies (pull)
+        mutable std::vector<double> weight;
+        mutable rtype t_last = 0.0;
+        mutable uint64_t n_samples = 0;
         // Trigger: the previous sample of the signal and the last two crossings
-        bool have_signal = false;
-        double t_signal = 0.0, v_signal = 0.0;
-        double crossing[2] = {0.0, 0.0};
-        uint64_t n_crossings = 0;
+        mutable bool have_signal = false;
+        mutable double t_signal = 0.0, v_signal = 0.0;
+        mutable double crossing[2] = {0.0, 0.0};
+        mutable uint64_t n_crossings = 0;
 };
 
 /**
@@ -232,13 +260,18 @@ class Statistics {
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
         /**
-         * @brief Only the means sample, of primitives: in a step graph, at the device's t, when the flag due is set
-         *        (derived fields and HRR are computed by the host before a sample).
+         * @brief Every sample can be taken in a step graph (unaveraged spectra are written at each sample; derived
+         *        fields, HRR and conditional statistics are the host's).
          */
-        bool samples_only_means() const {
-            return means_enabled() && !spectra.enabled() && !phase.enabled() && conditional.empty() && !derived_sampled &&
+        bool samples_on_device() const {
+            return enabled() && (!spectra.enabled() || spectra.averaged()) && conditional.empty() && !derived_sampled &&
                    !chemistry_sampled;
         }
+        /** @brief The means' and spectra's sample at the device's time *t (device only, capturable). */
+        void sample_device(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief The phases' sample at the device's time *t, which their own clock decides (capturable). */
+        void sample_phases(const rtype * t, const CellSampler & sampler, uint32_t n_owned) { phase.sample(t, sampler, n_owned); }
+        bool phases_triggered() const { return phase.enabled() && phase.triggered(); }
         /** @brief The means' clock in device memory (its t_start is the one sampling compares with). */
         Kokkos::View<const Clock> device_clock() const { return clock; }
         /** @brief Add the means' sample at the device's time *t. */

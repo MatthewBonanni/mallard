@@ -117,6 +117,10 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     const bool use_nccl = context.distributed && context.nccl;
     if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
     if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
+    // The clock also holds the t_start the spectra and phases sample from
+    clock = Kokkos::View<Clock>("statistics_clock");
+    t_sample = Kokkos::View<rtype>("statistics_t_sample");
+    set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
     const std::vector<Input> entries = find_value_or<std::vector<Input>>(table, "conditional", {});
     conditional.resize(entries.size());
     ConditionalStatistics::Context with_derived = context;
@@ -212,9 +216,6 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         h_pairs(p, 1) = products[p].second;
     }
     Kokkos::deep_copy(pairs, h_pairs);
-    clock = Kokkos::View<Clock>("statistics_clock");
-    t_sample = Kokkos::View<rtype>("statistics_t_sample");
-    set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_mean", n_cells, fields.size());
     cov = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_cov", n_cells, products.size());
     h_mean = Kokkos::create_mirror_view(mean);
@@ -274,14 +275,19 @@ void Statistics::start_means(rtype t) {
 }
 
 void Statistics::sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned) {
-    if (spectra.due(step, t)) spectra.sample(step, t, sampler);
-    if (phase.due(step, t)) phase.sample(t, sampler, n_owned);
+    Kokkos::deep_copy(t_sample, t);
+    if (spectra.due(step, t)) spectra.sample(step, t, t_sample.data(), sampler);
+    if (phase.due(step, t)) phase.sample(t_sample.data(), sampler, n_owned);
     for (auto & c : conditional) {
         if (c.due(step, t)) c.sample(t, sampler, n_owned);
     }
     if (!(means_enabled() && step % interval == 0 && t > t_start)) return;
-    Kokkos::deep_copy(t_sample, t);
     sample_means(t_sample.data(), sampler, n_owned);
+}
+
+void Statistics::sample_device(const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
+    if (spectra.enabled()) spectra.sample_device(t, sampler);
+    if (means_enabled()) sample_means(t, sampler, n_owned);
 }
 
 void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
@@ -626,6 +632,40 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("phase_mean", n_cells, size_t(bins) * fields.size());
     h_mean = Kokkos::create_mirror_view(mean);
     weight.assign(bins, 0.0);
+    clock = Kokkos::View<Clock>("phase_clock");
+    d_weight = Kokkos::View<double *>("phase_weight", bins);
+    push();
+}
+
+void PhaseAverage::pull() const {
+    if (!clock.is_allocated()) return;
+    Clock k;
+    Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
+    t_last = k.t_last;
+    n_samples = k.n_samples;
+    have_signal = k.have_signal != 0;
+    t_signal = k.t_signal;
+    v_signal = k.v_signal;
+    crossing[0] = k.crossing[0];
+    crossing[1] = k.crossing[1];
+    n_crossings = k.n_crossings;
+    Kokkos::deep_copy(Kokkos::View<double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(weight.data(), weight.size()),
+                      d_weight);
+}
+
+void PhaseAverage::push() {
+    Clock k{t_last, t_start, 0.0_r, 0, 0, have_signal ? 1u : 0u, n_samples, t_signal, v_signal,
+            {crossing[0], crossing[1]}, n_crossings};
+    Kokkos::deep_copy(clock, Kokkos::View<Clock, Kokkos::HostSpace>(&k));
+    Kokkos::deep_copy(d_weight,
+                      Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(weight.data(), weight.size()));
+}
+
+void PhaseAverage::set_start(const rtype t) {
+    t_start = t;
+    if (!clock.is_allocated()) return;
+    pull();
+    push();
 }
 
 void PhaseAverage::start(rtype t) {
@@ -636,53 +676,72 @@ void PhaseAverage::start(rtype t) {
     have_signal = false;
     n_crossings = 0;
     Kokkos::deep_copy(mean, 0.0_r);
+    push();
 }
 
-void PhaseAverage::sample(rtype t, const CellSampler & sampler, uint32_t n_owned) {
-    double phase = 0.0;
-    bool use = t > t_start;
-    if (trigger_cell != NO_TRIGGER) {
-        const Kokkos::View<double *> value = signal;
+void PhaseAverage::sample(const rtype * const t, const CellSampler & sampler, const uint32_t n_owned) {
+    const bool triggered_ = trigger_cell != NO_TRIGGER;
+    const Kokkos::View<double *> value = signal;
+    if (triggered_) {
         const int32_t c = trigger_cell, code = trigger_code;
         // Every other rank adds an exact zero
         Kokkos::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) {
             value(0) = c >= 0 ? static_cast<double>(sampler(static_cast<uint32_t>(c), code)) : 0.0;
         });
         if (distributed) comm::allreduce_device(value, comm::Op::SUM, use_nccl);
-        double v = 0.0;
-        Kokkos::deep_copy(v, Kokkos::subview(value, 0));
-        const double tt = static_cast<double>(t);
-        if (have_signal && v_signal < level && v >= level) {
-            crossing[0] = crossing[1];
-            crossing[1] = t_signal + (level - v_signal) / (v - v_signal) * (tt - t_signal);
-            n_crossings++;
-        }
-        have_signal = true;
-        t_signal = tt;
-        v_signal = v;
-        if (n_crossings < 2) {
-            use = false;
+    }
+    const Kokkos::View<Clock> k = clock;
+    const Kokkos::View<double *> w_bin = d_weight;
+    const double level_ = level, period_ = period, t_reference_ = t_reference;
+    const uint32_t bins_ = bins;
+    Kokkos::parallel_for("phase_clock", 1, KOKKOS_LAMBDA(const int) {
+        Clock & ck = k();
+        const rtype tr = *t;
+        bool use = tr > ck.t_start;
+        double phase = 0.0;
+        if (triggered_) {
+            const double v = value(0), tt = static_cast<double>(tr);
+            if (ck.have_signal && ck.v_signal < level_ && v >= level_) {
+                ck.crossing[0] = ck.crossing[1];
+                // Each product rounded on its own, on every backend
+                volatile double since = (level_ - ck.v_signal) / (v - ck.v_signal) * (tt - ck.t_signal);
+                ck.crossing[1] = ck.t_signal + since;
+                ck.n_crossings++;
+            }
+            ck.have_signal = 1;
+            ck.t_signal = tt;
+            ck.v_signal = v;
+            if (ck.n_crossings < 2) {
+                use = false;
+            } else {
+                phase = (tt - ck.crossing[1]) / (ck.crossing[1] - ck.crossing[0]);
+            }
         } else {
-            phase = (tt - crossing[1]) / (crossing[1] - crossing[0]);
+            const double x = (static_cast<double>(tr) - t_reference_) / period_;
+            phase = x - Kokkos::floor(x);
         }
-    } else {
-        const double x = (static_cast<double>(t) - t_reference) / period;
-        phase = x - std::floor(x);
-    }
-    if (!use) {
-        if (t > t_start) t_last = t;
-        return;
-    }
-    const uint32_t b = static_cast<uint32_t>(std::min<double>(std::floor(phase * bins), bins - 1));
-    const double w = static_cast<double>(t - t_last);
-    t_last = t;
-    n_samples++;
-    weight[b] += w;
-    const rtype a = static_cast<rtype>(w / weight[b]);
+        ck.use = use;
+        if (!use) {
+            if (tr > ck.t_start) ck.t_last = tr;
+            return;
+        }
+        volatile double scaled = phase * bins_;
+        const uint32_t b = static_cast<uint32_t>(Kokkos::fmin(Kokkos::floor(scaled), double(bins_ - 1)));
+        const double w = static_cast<double>(tr - ck.t_last);
+        ck.t_last = tr;
+        ck.n_samples++;
+        w_bin(b) += w;
+        ck.a = static_cast<rtype>(w / w_bin(b));
+        ck.bin = b;
+    });
     const auto m = mean;
     const auto code = codes;
-    const uint32_t n_fields = static_cast<uint32_t>(fields.size()), offset = b * n_fields;
+    const uint32_t n_fields = static_cast<uint32_t>(fields.size());
     Kokkos::parallel_for("phase_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const Clock & ck = k();
+        if (!ck.use) return;
+        const uint32_t offset = ck.bin * n_fields;
+        const rtype a = ck.a;
         for (uint32_t i = 0; i < n_fields; i++) m(c, offset + i) += a * (sampler(c, code(i)) - m(c, offset + i));
     });
 }
@@ -700,6 +759,7 @@ std::vector<std::string> PhaseAverage::variables() const {
 
 std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
     const std::vector<std::string> names = variables();
+    pull();
     double total = 0.0;
     for (const double w : weight) total += w;
     std::vector<std::pair<std::string, snapshot_block::Average>> out;
@@ -774,6 +834,7 @@ void PhaseAverage::restore(const RestartData & restart, const std::string & file
     n_crossings = static_cast<uint64_t>(attribute(std::string(PHASE_CROSSINGS) + "_COUNT", 0.0));
     crossing[0] = attribute(std::string(PHASE_CROSSINGS) + "_PREVIOUS", 0.0);
     crossing[1] = attribute(std::string(PHASE_CROSSINGS) + "_LAST", 0.0);
+    push();
     for (size_t v = 0; v < names.size(); v++) {
         for (size_t c = 0; c < values[v]->size(); c++) h_mean(c, v) = (*values[v])[c];
     }
@@ -782,6 +843,7 @@ void PhaseAverage::restore(const RestartData & restart, const std::string & file
 
 RestartAttributes PhaseAverage::attributes() const {
     if (!enabled()) return {};
+    pull();
     RestartAttributes a = {{PHASE_T_LAST, static_cast<double>(t_last)}, {PHASE_SAMPLES, static_cast<double>(n_samples)}};
     for (uint32_t b = 0; b < bins; b++) a.emplace_back(phase_weight_name(b), weight[b]);
     if (trigger_cell != NO_TRIGGER) {
@@ -806,6 +868,7 @@ OutputSummary PhaseAverage::summary() const {
     }
     text += ": ";
     for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + fields[i];
+    pull();
     if (n_samples > 0) text += " (" + logging::count(n_samples, "sample") + " so far)";
     return {.kind = "phase averages", .file = "", .steps = interval, .contents = text};
 }

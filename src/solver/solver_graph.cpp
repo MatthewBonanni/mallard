@@ -404,18 +404,28 @@ void Solver::device_step_body() {
     }
     if (p_max.is_allocated()) device_if(advanced, [&] { update_p_max(); });
     if (statistics_on_device()) {
-        // The means' sample of steps the device goes on from, as after_step takes it
+        // The samples of steps the device goes on from, as after_step takes them
         const Kokkos::View<const Statistics::Clock> clock = statistics.device_clock();
-        const Kokkos::View<uint32_t> due = statistics_due;
+        const Kokkos::View<uint32_t *> due = statistics_due;
         const uint64_t every = statistics.sampling_interval();
+        const bool triggered = statistics.phases_triggered();
         Kokkos::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
-            due() = L.active && L.advanced && L.step % every == 0 && s(T) > clock().t_start;
+            const bool on = L.active && L.advanced && L.step % every == 0;
+            due(0) = on && s(T) > clock().t_start;
+            // Phases of a trigger signal follow it before t_start too
+            due(1) = on && (triggered || s(T) > clock().t_start);
         });
-        device_if(statistics_due.data(), [&] {
+        device_if(&statistics_due.data()[0], [&] {
             update_primitives();
-            statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            statistics.sample_device(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
         });
+        if (statistics.get_phase().enabled()) {
+            device_if(&statistics_due.data()[1], [&] {
+                update_primitives();
+                statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
     }
     if (monitors_on_device()) {
         // Forces and integrals of steps the device goes on from, staged for the host's rows; their
@@ -553,8 +563,8 @@ void Solver::write_staged_probes(const step_queue::Record & record) {
 }
 
 bool Solver::statistics_on_device() const {
-    // Spectra and phase averages sample on the host; fused chemistry is advanced by the host before a sample
-    return statistics.samples_only_means() && !defer_chemistry;
+    // Fused chemistry is advanced by the host before a sample
+    return statistics.samples_on_device() && !defer_chemistry;
 }
 
 bool Solver::monitors_on_device() const {
@@ -710,7 +720,7 @@ void Solver::begin_device_steps() {
     if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
-    if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t>("step_statistics_due");
+    if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 2);
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
     allocate_monitors();
     if (monitors_on_device()) {
