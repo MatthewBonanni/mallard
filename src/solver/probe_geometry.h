@@ -77,6 +77,13 @@ Geometry grid_geometry(const region::Grid & grid);
 /** @brief The geometry of a [[probes]] entry (key names it in errors). */
 Geometry make_geometry(const Input & entry, const std::string & key);
 
+/**
+ * @brief The part of g with the nodes and quadrature points kept (1 in keep,
+ *        keep_quad): curves split where nodes are dropped (a closed one
+ *        opens there), polygons kept whose nodes all are.
+ */
+Geometry clip(const Geometry & g, const std::vector<uint8_t> & keep, const std::vector<uint8_t> & keep_quad);
+
 /** @brief Points of a text file: rows of N_DIM coordinates split by commas or blanks; '#' starts a comment. */
 std::vector<Point> read_points(const std::string & file, const std::string & key);
 

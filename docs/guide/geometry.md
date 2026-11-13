@@ -558,8 +558,9 @@ Probes sample at points (`point`, `points`, `points_file`) or along a curve
 
 Transforms of probes are `scale`, then `rotate`, then `translate`, all about
 the origin (probes have no `pivot`): the scaled and rotated circle above is
-centered at the origin, then translated. A sample outside the domain takes the
-nearest cell's average.
+centered at the origin, then translated. A `point` or `points` probe with a
+point outside the domain is an error, and curves are clipped to the domain:
+[Samples outside the domain](probes.md#samples-outside-the-domain).
 
 Curve reductions (`mean`, `integral`, ...) integrate along the curve with three
 Gauss points between consecutive samples; points weigh each sample 1.

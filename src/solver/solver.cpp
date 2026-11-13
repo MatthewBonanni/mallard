@@ -164,6 +164,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const Input & input_in) {
     this->input = input_in;
+    run_log::hold();
     if (!input_from_file) {
         provenance::start_run();
         provenance::set_input("", toml::format(unrecorded(input)));
@@ -322,7 +323,7 @@ void Solver::write_provenance() {
         if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
         start.raw("restart", restart.str());
     }
-    run_log::write(start);
+    run_log::release(start);
 }
 
 namespace {
@@ -1659,6 +1660,7 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
+    probes.set_reconstruction(face_reconstruction.get());
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);

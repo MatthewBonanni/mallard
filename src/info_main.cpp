@@ -217,6 +217,71 @@ void print_snapshot_block(const output::Contents & c) {
     }
 }
 
+/** @brief The probe sampling block of a probe file: how its values are read, and where each located sample is. */
+void print_probe_sampling(const output::Contents & c) {
+    if (c.sampling.empty()) return;
+    json::Value b;
+    try {
+        b = json::parse(c.sampling);
+    } catch (const std::exception &) {
+        return;
+    }
+    logging::section("Probe sampling", "where the samples are read");
+    const json::Value * r = b.find("reconstruction");
+    if (r && r->type == json::Value::Type::OBJECT) {
+        std::string fallback;
+        for (const json::Value & m : (*r)["fallback"].array) fallback += (fallback.empty() ? "" : ", then ") + m.string;
+        item("Sampling", "point: " + (*r)["method"].string + ", order " +
+                             std::to_string(static_cast<int>((*r)["order"].number)) +
+                             (fallback.empty() ? "" : "; falling back to " + fallback));
+    } else {
+        item("Sampling", "cell: the value of the cell holding each sample");
+    }
+    std::string values;
+    for (const json::Value & v : b["variables"].array) {
+        values += (values.empty() ? "" : ", ") + v["name"].string + " " + v["value"].string;
+    }
+    item("Values", values.empty() ? "-" : values);
+    const json::Value * clipped = b.find("clipped");
+    std::string dropped;
+    if (clipped && clipped->type == json::Value::Type::OBJECT) {
+        dropped = count(static_cast<uint64_t>((*clipped)["dropped"].number)) + " of " +
+                  count(static_cast<uint64_t>((*clipped)["of"].number)) + " samples outside the mesh dropped";
+        for (const char * m : {"length", "area", "volume"}) {
+            if (const json::Value * f = clipped->find(std::string(m) + "_fraction")) {
+                dropped += " (" + format("%.3g", 100.0 * f->number) + "% of the " + m + ")";
+            }
+        }
+    }
+    const json::Value * points = b.find("points");
+    if (!points || points->type != json::Value::Type::OBJECT) {
+        item("Locations", "at the faces, cut cells or elements the probe is made of");
+        if (!dropped.empty()) item("Clipped", dropped);
+        return;
+    }
+    const json::Value & p = *points;
+    const uint64_t n = static_cast<uint64_t>(p["n"].number);
+    item("Located samples", count(n) + (dropped.empty() ? "" : "; " + dropped));
+    item("Distance", "requested point to where it is read: max " + format("%.6g", p["max_distance"].number) +
+                         " m, mean " + format("%.6g", p["mean_distance"].number) + " m");
+    auto xyz = [](const json::Value & x) {
+        std::string out;
+        for (const json::Value & d : x.array) out += (out.empty() ? "" : ", ") + format("%.6g", d.number);
+        return "(" + out + ")";
+    };
+    constexpr uint64_t ROWS = 12;
+    std::vector<std::vector<std::string>> rows;
+    for (uint64_t i = 0; i < n; i++) {
+        if (n > ROWS && i == ROWS / 2) {
+            rows.push_back({"...", count(n - ROWS) + " more; --format json lists every one"});
+            i = n - ROWS / 2;
+        }
+        rows.push_back({std::to_string(i), xyz(p["requested"].array[i]), format("%.0f", p["cell"].array[i].number),
+                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number)});
+    }
+    logging::table({"sample", "requested [m]", "cell", "cell centroid [m]", "distance [m]"}, rows);
+}
+
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
 std::string time_text(const output::Contents & c) {
     const output::Snapshot & first = c.snapshots.front();
@@ -405,6 +470,7 @@ void print_contents(const output::Contents & c) {
     const json::Value p = parsed_run(c);
     if (!p.is_null()) print_run(p);
     print_snapshot_block(c);
+    print_probe_sampling(c);
 }
 
 /** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */

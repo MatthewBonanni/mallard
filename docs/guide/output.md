@@ -562,8 +562,8 @@ Each record has a `type`:
 | `progress` | Every progress row | as below |
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
-| `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot` |
-| `warning`, `error` | A warning, or the error that ended the run | `message` |
+| `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot`, `units` (of `t`, `dt`, `x`, `rho`, `speed`, `p` and `T`, as the CSV files' units lines write them; `"1"` for each in a nondimensional case) |
+| `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `code` (stable: [Warnings and errors](running.md#warnings-and-errors)), `message`, `docs` (the page and anchor that explain the code) |
 | `end` | The end of the run, also on a stop signal, divergence or an error (on rank 0): a run without one was killed (`SIGKILL`, a lost node) or is still running | `outcome` (`finished`, `stopped`, `signal`, `wall_time_limit`, `diverged`, `error`), `cause` (`finished`: `n_steps` or `t_stop`; `stopped`: `stop_file`, `mallard_ctl` or `trigger`; `signal`: `SIGTERM`, `SIGINT` or `SIGUSR2`), `trigger` (the [trigger](running.md#triggers) that stopped the run, by name), `reason` (in words; the error's message), `step`, `t`, `last_snapshot` and `last_restart` (the last of each recorded complete: `step`, `t`, `path`; none if the run wrote none), `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
 Progress records:
@@ -871,7 +871,8 @@ says which of three kinds of value each field holds, as `value` in its
 
 Point values are a snapshot's `reconstruction`: with TENO its polynomials
 at the scheme's `order`, falling back to linear least squares in troubled
-cells and to the cell average outside the domain
+cells and to the cell average where neither gives a positive density and
+energy
 (`{"method": "TENO", "order": 5, "fallback": ["linear_least_squares", "cell_average"]}`);
 with MUSCL or first order, linear least squares (order 2). The same
 distinction is in the format's own metadata where it has a slot: the
@@ -919,6 +920,50 @@ and VTKHDF, HDF5 and XDMF datasets of time and phase means add `time: mean`
 to their `cell_methods` (`area: mean time: mean` for `MEAN_RHO`). `mallard
 info FILE` tabulates them under **This snapshot**, and `field_averages(path)`
 of `tools/mallard/vtu.py` returns them.
+
+### Probe sampling
+
+A probe file says where each of its samples is read, so it stands alone
+without the input or the mesh. Its probe sampling block (`schema`
+`mallard-probe-sampling`, version 1) is the line `# mallard-probe-sampling
+{...}` after each run's `# mallard-run` line of a CSV file, the root
+attribute `mallard_sampling` of an HDF5 or VTKHDF file, and an XML comment
+of each VTP file:
+
+| Key | Contents |
+|---|---|
+| `probe`, `sampling` | The probe's name and `cell` or `point` |
+| `reconstruction` | For `sampling = "point"`, the method, order and fallbacks the values are read with (as in [Cell averages and point values](#cell-averages-and-point-values)); `null` for `cell` |
+| `variables` | Each column's `name` and `value` kind, and with `average = true` its `average` (`kind`, `of`, `weighting`, window `start`) |
+| `points` | For `point` and `points` probes, curves and resampled surfaces: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane or a boundary's faces |
+| `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); `null` when nothing was dropped |
+| `units` | Units of the dimensional keys (m, s) |
+
+The distance is zero for a point value and the distance to the centroid of
+the cell for a cell sample. Every sample lies in the mesh: a point on a
+boundary face counts as inside, a `point` or `points` probe with a point
+outside is an input error, and the samples of a curve or resampled surface
+outside the mesh are dropped with a warning
+([Samples outside the domain](probes.md#samples-outside-the-domain)), absent
+from `points` and counted in `clipped`, so a clipped file never looks like
+the whole curve.
+
+```json
+{"schema": "mallard-probe-sampling", "version": 1, "probe": "wake",
+ "sampling": "point",
+ "reconstruction": {"method": "TENO", "order": 3, "fallback": ["linear_least_squares", "cell_average"]},
+ "variables": [{"name": "RHO", "value": "point_value"}, {"name": "P", "value": "point_value"}],
+ "points": {"n": 6, "max_distance": 0.0, "mean_distance": 0.0,
+            "requested": [[0.3, 0.5], [0.3, 0.6], ...], "cell": [5, 9, ...],
+            "centroid": [[0.375, 0.375], [0.375, 0.625], ...], "distance": [0.0, 0.0, ...]},
+ "clipped": {"dropped": 5, "of": 11, "length_fraction": 0.5},
+ "units": {"points.requested": "m", "points.centroid": "m", "points.distance": "m",
+           "points.max_distance": "m", "points.mean_distance": "m"}}
+```
+
+`mallard info FILE` prints it under **Probe sampling** (with `--json`, as
+`sampling`), and `probe_sampling(path)` of `tools/mallard/vtu.py` returns it
+for any probe file. Files written before 0.10 record none.
 
 ### Formats and compatibility
 

@@ -16,7 +16,9 @@
 #include "region.h"
 #include "region_mesh.h"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -273,6 +275,65 @@ Geometry grid_geometry(const region::Grid & grid) {
     Geometry g;
     add_grid_nodes(g, grid);
     return g;
+}
+
+Geometry clip(const Geometry & g, const std::vector<uint8_t> & keep, const std::vector<uint8_t> & keep_quad) {
+    constexpr uint32_t DROPPED = std::numeric_limits<uint32_t>::max();
+    Geometry c;
+    c.dim = g.dim;
+    c.type = g.type;
+    c.revolved = g.revolved;
+    std::vector<uint32_t> index(g.nodes.size(), DROPPED);
+    for (size_t i = 0; i < g.nodes.size(); i++) {
+        if (!keep[i]) continue;
+        index[i] = static_cast<uint32_t>(c.nodes.size());
+        c.nodes.push_back(g.nodes[i]);
+        if (!g.arc_length.empty()) c.arc_length.push_back(g.arc_length[i]);
+        if (!g.normals.empty()) c.normals.push_back(g.normals[i]);
+        if (!g.node_weights.empty()) c.node_weights.push_back(g.node_weights[i]);
+    }
+    for (const auto & line : g.polylines) {
+        const bool closed = line.size() > 2 && line.front() == line.back();
+        std::vector<uint32_t> order = line;
+        const auto dropped = std::find_if(line.begin(), line.end(), [&](uint32_t k) { return index[k] == DROPPED; });
+        if (closed && dropped != line.end()) {
+            order.assign(dropped, line.end() - 1);
+            order.insert(order.end(), line.begin(), dropped + 1);
+        }
+        std::vector<uint32_t> run;
+        for (size_t k = 0; k <= order.size(); k++) {
+            if (k < order.size() && index[order[k]] != DROPPED) {
+                run.push_back(index[order[k]]);
+                continue;
+            }
+            if (run.size() >= 2) c.polylines.push_back(run);
+            run.clear();
+        }
+    }
+    for (size_t i = 0; i < g.quad_points.size(); i++) {
+        if (!keep_quad[i]) continue;
+        c.quad_points.push_back(g.quad_points[i]);
+        c.quad_weights.push_back(g.quad_weights[i]);
+        if (!g.quad_normals.empty()) c.quad_normals.push_back(g.quad_normals[i]);
+    }
+    if (!g.polygon_offsets.empty()) {
+        c.vertices = g.vertices;
+        c.polygon_offsets.push_back(0);
+        for (size_t k = 0; k + 1 < g.polygon_offsets.size(); k++) {
+            const auto first = g.polygon_vertices.begin() + static_cast<std::ptrdiff_t>(g.polygon_offsets[k]);
+            const auto last = g.polygon_vertices.begin() + static_cast<std::ptrdiff_t>(g.polygon_offsets[k + 1]);
+            // With vertices, polygon k is sample k; without, its vertices are nodes
+            if (!g.vertices.empty()) {
+                if (!keep[k]) continue;
+                c.polygon_vertices.insert(c.polygon_vertices.end(), first, last);
+            } else {
+                if (std::any_of(first, last, [&](uint32_t v) { return index[v] == DROPPED; })) continue;
+                for (auto v = first; v != last; ++v) c.polygon_vertices.push_back(index[*v]);
+            }
+            c.polygon_offsets.push_back(c.polygon_vertices.size());
+        }
+    }
+    return c;
 }
 
 Vec3 Transform::point(const Vec3 & x) const { return add(vector(x), t); }

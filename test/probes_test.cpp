@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -28,6 +29,8 @@
 
 #include "comm.h"
 #include "data_paths.h"
+#include "json.h"
+#include "output_reader.h"
 #include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
@@ -222,6 +225,62 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
     EXPECT_NEAR(axes.nodes[0][1], 2.0, 1e-14);
     EXPECT_NEAR(axes.nodes[0][2], 0.5, 1e-14);
 #endif
+}
+
+TEST(ProbesTest, ProbeFilesRecordWhereEachPointIsRead) {
+    // One point off its cell's centroid and one on the domain's edge, on 8 cells per side
+    const std::string dir = fresh_dir("sampling");
+    const std::vector<std::array<double, 3>> requested = {{0.3, 0.4, 0.6}, {1.0, 0.4, 0.6}};
+    const std::vector<std::array<double, 3>> centroid = {{0.3125, 0.4375, 0.625}, {0.9375, 0.4375, 0.625}};
+    std::vector<std::pair<std::string, std::string>> files = {{"csv", "cell"}, {"vtp", "point"}};
+    if (have_hdf5()) files.insert(files.end(), {{"hdf5", "point"}, {"vtkhdf", "cell"}});
+    std::string extra;
+    for (const auto & [format, sampling] : files) {
+        extra += "[[probes]]\nname = \"" + format + "\"\nformat = \"" + format + "\"\nsampling = \"" + sampling +
+                 "\"\nfile = \"" + dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format) +
+                 "\"\ntype = \"points\"\npoints = [" + numbers3("0.3", "0.4", "0.6") + ", " + numbers3("1.0", "0.4", "0.6") +
+                 "]\nfields = [\"RHO\", \"P\"]\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"TENO\"\norder = 3\n", extra)));
+    run(solver);
+    double cell = -1.0;
+    for (const auto & [format, sampling] : files) {
+        const std::string path = dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format);
+        SCOPED_TRACE(path);
+        const output::Contents file = output::open(path);
+        ASSERT_FALSE(file.sampling.empty());
+        const json::Value b = json::parse(file.sampling);
+        EXPECT_EQ(b["schema"].string, "mallard-probe-sampling");
+        EXPECT_EQ(b["sampling"].string, sampling);
+        const bool point = sampling == "point";
+        if (point) {
+            EXPECT_EQ(b["reconstruction"]["method"].string, "TENO");
+            EXPECT_EQ(b["reconstruction"]["order"].number, 3);
+        } else {
+            EXPECT_TRUE(b["reconstruction"].is_null());
+        }
+        const auto & variables = b["variables"].array;
+        ASSERT_EQ(variables.size(), 2u);
+        EXPECT_EQ(variables[0]["value"].string, point ? "point_value" : "cell_average");
+        EXPECT_EQ(variables[1]["value"].string, point ? "point_value" : "cell_state");
+        const json::Value & p = b["points"];
+        ASSERT_EQ(p["n"].number, 2);
+        EXPECT_TRUE(b["clipped"].is_null());
+        for (size_t i = 0; i < 2; i++) {
+            double d2 = 0.0;
+            for (size_t d = 0; d < N_DIM; d++) {
+                EXPECT_DOUBLE_EQ(p["requested"].array[i].array[d].number, requested[i][d]) << i;
+                EXPECT_DOUBLE_EQ(p["centroid"].array[i].array[d].number, centroid[i][d]) << i;
+                d2 += (requested[i][d] - centroid[i][d]) * (requested[i][d] - centroid[i][d]);
+            }
+            // Point values are read at the requested point, cell values at the centroid
+            const double expected = point ? 0.0 : std::sqrt(d2);
+            EXPECT_NEAR(p["distance"].array[i].number, expected, 1e-14) << i;
+        }
+        if (cell < 0.0) cell = p["cell"].array[0].number;
+        EXPECT_EQ(p["cell"].array[0].number, cell);
+    }
 }
 
 TEST(ProbesTest, PointFilesSkipHeadersAndComments) {
@@ -616,6 +675,59 @@ std::string couette_case(uint32_t n, const std::string & extra, const std::strin
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = "
       << COUETTE_MU << "\nPr = 0.72\n[output]\ncheck_interval = 1000000\n" << extra;
     return s.str();
+}
+
+TEST(ProbesTest, PointsOutsideTheMeshAreErrorsAndCurvesAreClippedToIt) {
+    // Walls at y = 0 and 1
+    const std::string dir = fresh_dir("outside");
+    auto probe = [&](const std::string & name, const std::string & where) {
+        return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name +
+               ".csv\"\nfields = [\"RHO\"]\nsampling = \"point\"\n" + where + "\n";
+    };
+    auto error_of = [&](const std::string & probes) {
+        try {
+            Solver solver;
+            solver.init(parse_toml(couette_case(4, probes)));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string point = error_of(probe("p", "type = \"points\"\npoints = [" + numbers3("0.3", "0.5", "0.5") + ", " +
+                                                       numbers3("0.3", "1.3", "0.5") + "]"));
+    EXPECT_NE(point.find("probes[name = \"p\"]"), std::string::npos) << point;
+    EXPECT_NE(point.find("1 of 2 points lie outside the mesh: point 1 (0.3, 1.3"), std::string::npos) << point;
+    EXPECT_NE(point.find("0.3 m from boundary zone top"), std::string::npos) << point;
+    const std::string line = error_of(probe("l", "start = " + numbers3("0.3", "1.2", "0.5") + "\nend = " +
+                                                     numbers3("0.3", "1.5", "0.5") + "\nn_points = 4"));
+    EXPECT_NE(line.find("lies entirely outside the mesh"), std::string::npos) << line;
+
+    const std::string probes = "run_log = \"" + dir + "/run.jsonl\"\n" + probe("edge", "point = " + numbers3("0.3", "1.0", "0.5")) +
+                               probe("half", "start = " + numbers3("0.3", "0.5", "0.5") + "\nend = " +
+                                                 numbers3("0.3", "1.5", "0.5") + "\nn_points = 11");
+    Solver solver;
+    testing::internal::CaptureStderr();
+    solver.init(parse_toml(couette_case(4, probes)));
+    const std::string warned = testing::internal::GetCapturedStderr();
+    run(solver);
+    if (!comm::is_root()) return;
+    EXPECT_NE(warned.find("5 of 11 samples (50% of its length) lie outside the mesh"), std::string::npos) << warned;
+    std::ifstream log(dir + "/run.jsonl");
+    std::string first, second;
+    std::getline(log, first);
+    std::getline(log, second);
+    EXPECT_EQ(json::parse(first)["type"].string, "start");
+    EXPECT_EQ(json::parse(second)["type"].string, "warning") << "after its run's start record";
+    EXPECT_NE(json::parse(second)["message"].string.find("probes[name = \"half\"]"), std::string::npos) << second;
+    EXPECT_EQ(read_csv(dir + "/edge.csv").size(), 2u) << "a point on a wall is in the mesh";
+    const auto rows = read_csv(dir + "/half.csv");
+    ASSERT_EQ(rows.size(), 12u);
+    for (const auto & row : rows) EXPECT_LE(row.at("y"), 1.0);
+    const json::Value b = json::parse(output::open(dir + "/half.csv").sampling);
+    EXPECT_EQ(b["clipped"]["dropped"].number, 5);
+    EXPECT_EQ(b["clipped"]["of"].number, 11);
+    EXPECT_NEAR(b["clipped"]["length_fraction"].number, 0.5, 1e-12);
+    EXPECT_EQ(b["points"]["n"].number, 6);
 }
 
 const char * const MEASURE = N_DIM == 2 ? "length" : "area";

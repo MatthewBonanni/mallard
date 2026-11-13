@@ -1170,8 +1170,10 @@ least-squares reconstruction (second order), and failing that the cell
 average. `RHO`, `U_*` and `P` are reconstructed; `T` and `H` follow `p / rho`
 at the cell's composition (exact for a perfect gas), and mass fractions are
 cell averages. A sample on a face between cells belongs to the cell with the lowest global
-id, so any number of ranks pick the same cell; samples outside the domain take
-the nearest cell's average in both modes.
+id, so any number of ranks pick the same cell. A sample on a boundary face is
+inside; a `point` or `points` probe with a point outside the domain is an
+error, and curves and resampled surfaces drop their samples outside it with a
+warning ([Samples outside the domain](guide/probes.md#samples-outside-the-domain)).
 
 **Surfaces.** A surface region (3D) with `n_points = [n_u, n_v]`, e.g.
 `region = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}`

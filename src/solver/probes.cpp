@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
@@ -317,8 +318,9 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
  *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
-void write_vtp_file(const std::string & file, const snapshot_block::Block & block, const probe::Geometry & g,
-                    const std::vector<std::string> & names, const std::vector<double> & values, size_t n_columns) {
+void write_vtp_file(const std::string & file, const snapshot_block::Block & block, const std::string & sampling,
+                    const probe::Geometry & g, const std::vector<std::string> & names,
+                    const std::vector<double> & values, size_t n_columns) {
     struct Array {
         std::string name, type;
         int components;
@@ -368,7 +370,8 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
     }
     // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n"
-        << provenance::xml_comment(snapshot_block::NAME, block.json())
+        << provenance::xml_comment(snapshot_block::NAME, block.json()) << "\n"
+        << provenance::xml_comment(snapshot_block::PROBE_SAMPLING, sampling)
         << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n";
     out << "    <FieldData>\n      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
@@ -642,17 +645,200 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region 
     p.geometry.type = "region " + r.summary();
 }
 
+namespace {
+
+using probe::Vec3;
+
+Vec3 vec3(const auto & x) {
+    Vec3 v{0.0, 0.0, 0.0};
+    for (size_t d = 0; d < N_DIM; d++) v[d] = static_cast<double>(x[d]);
+    return v;
+}
+
+Vec3 minus(const Vec3 & a, const Vec3 & b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
+
+double dot3(const Vec3 & a, const Vec3 & b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+Vec3 cross3(const Vec3 & a, const Vec3 & b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+
+double segment_distance(const Vec3 & x, const Vec3 & a, const Vec3 & b) {
+    const Vec3 ab = minus(b, a);
+    const double l2 = dot3(ab, ab);
+    const double t = l2 > 0.0 ? std::clamp(dot3(minus(x, a), ab) / l2, 0.0, 1.0) : 0.0;
+    const Vec3 e = minus(x, {a[0] + t * ab[0], a[1] + t * ab[1], a[2] + t * ab[2]});
+    return std::sqrt(dot3(e, e));
+}
+
+double triangle_distance(const Vec3 & x, const Vec3 & a, const Vec3 & b, const Vec3 & c) {
+    const Vec3 n = cross3(minus(b, a), minus(c, a));
+    const double n2 = dot3(n, n);
+    if (n2 > 0.0) {
+        const Vec3 ax = minus(x, a);
+        const bool inside = dot3(cross3(minus(b, a), ax), n) >= 0.0 && dot3(cross3(minus(c, b), minus(x, b)), n) >= 0.0 &&
+                            dot3(cross3(minus(a, c), minus(x, c)), n) >= 0.0;
+        if (inside) return std::fabs(dot3(ax, n)) / std::sqrt(n2);
+    }
+    return std::min({segment_distance(x, a, b), segment_distance(x, b, c), segment_distance(x, c, a)});
+}
+
+/** @brief Distance from each point to the nearest boundary face of the mesh, with that face's zone (collective). */
+std::vector<std::pair<double, std::string>> boundary_distances(const Mesh & mesh, const std::vector<probe::Point> & points) {
+    std::vector<double> best(points.size(), std::numeric_limits<double>::infinity());
+    std::vector<std::string> zone(points.size());
+    for (const FaceZone & z : mesh.h_face_zones()) {
+        if (z.get_type() != FaceZoneType::BOUNDARY) continue;
+        for (uint32_t i = 0; i < z.n_faces(); i++) {
+            const uint32_t f = z.h_faces(i);
+            const uint32_t n = mesh.h_n_nodes_of_face(f);
+            std::vector<Vec3> nodes;
+            for (uint32_t k = 0; k < n; k++) {
+                const uint32_t v = mesh.h_node_of_face(f, k);
+                Vec3 y{0.0, 0.0, 0.0};
+                for (size_t d = 0; d < N_DIM; d++) y[d] = static_cast<double>(mesh.h_node_coords(v, d));
+                nodes.push_back(y);
+            }
+            Vec3 center{0.0, 0.0, 0.0};
+            for (size_t d = 0; d < N_DIM; d++) center[d] = static_cast<double>(mesh.h_face_coords(f, d));
+            for (size_t p = 0; p < points.size(); p++) {
+                const Vec3 x = vec3(points[p]);
+                double r = std::numeric_limits<double>::infinity();
+                if (N_DIM == 2 || n == 2) {
+                    r = segment_distance(x, nodes[0], nodes[n - 1]);
+                } else {
+                    for (uint32_t k = 0; k < n; k++) r = std::min(r, triangle_distance(x, center, nodes[k], nodes[(k + 1) % n]));
+                }
+                if (r < best[p]) {
+                    best[p] = r;
+                    zone[p] = z.get_name();
+                }
+            }
+        }
+    }
+    if (mesh.n_global_cells > 0) {
+        const std::vector<double> all = comm::allgatherv(best);
+        std::string names;
+        for (const auto & z : zone) names += z + "\n";
+        const std::vector<std::string> all_names = comm::allgather(names);
+        for (size_t r = 0; r < all_names.size(); r++) {
+            std::istringstream in(all_names[r]);
+            for (size_t p = 0; p < points.size(); p++) {
+                std::string name;
+                std::getline(in, name);
+                if (all[r * points.size() + p] < best[p]) {
+                    best[p] = all[r * points.size() + p];
+                    zone[p] = name;
+                }
+            }
+        }
+    }
+    std::vector<std::pair<double, std::string>> out;
+    for (size_t p = 0; p < points.size(); p++) out.emplace_back(best[p], zone[p]);
+    return out;
+}
+
+/** @brief ", 0.3 m from boundary zone right" for a boundary_distances entry. */
+std::string nearest_text(const std::pair<double, std::string> & nearest) {
+    if (!std::isfinite(nearest.first)) return ", in a mesh without boundary faces";
+    return ", " + units::with(logging::real(nearest.first), "m") + " from boundary zone " + nearest.second;
+}
+
+std::string point_text(const probe::Point & x) {
+    std::string out = "(";
+    for (size_t d = 0; d < N_DIM; d++) out += (d ? ", " : "") + logging::real(x[d]);
+    return out + ")";
+}
+
+} // namespace
+
+std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const std::string & key, size_t line) {
+    constexpr size_t SHOWN = 3;
+    std::vector<uint8_t> keep, keep_quad(g.quad_points.size(), 1);
+    locate_points(mesh, g.nodes, &keep);
+    if (!g.quad_points.empty()) locate_points(mesh, g.quad_points, &keep_quad);
+    std::vector<uint64_t> out;
+    for (uint64_t i = 0; i < keep.size(); i++) {
+        if (!keep[i]) out.push_back(i);
+    }
+    const size_t kept_quad = static_cast<size_t>(std::count(keep_quad.begin(), keep_quad.end(), uint8_t(1)));
+    if (out.empty() && kept_quad == keep_quad.size()) return "";
+    const std::string docs = "docs/guide/probes.md#samples-outside-the-domain";
+    const size_t n = g.nodes.size();
+    if (g.dim == 0) {
+        std::vector<probe::Point> shown;
+        for (size_t k = 0; k < std::min(SHOWN, out.size()); k++) shown.push_back(g.nodes[out[k]]);
+        const auto nearest = boundary_distances(mesh, shown);
+        std::string message = n == 1 ? "the point " : logging::count(out.size()) + " of " + logging::count(n) + " points lie outside the mesh: ";
+        for (size_t k = 0; k < shown.size(); k++) {
+            if (n > 1) message += std::string(k ? "; " : "") + "point " + std::to_string(out[k]) + " ";
+            message += units::with(point_text(shown[k]), "m") + (n == 1 ? " lies outside the mesh" : "") + nearest_text(nearest[k]);
+        }
+        if (out.size() > shown.size()) message += "; and " + logging::count(out.size() - shown.size()) + " more";
+        throw InputError(Diagnostic{.key = key,
+                                    .line = line,
+                                    .message = message,
+                                    .fix = "Move the points inside the domain; a point on a boundary face counts as inside",
+                                    .docs = docs});
+    }
+    if (out.size() == n || kept_quad == 0) {
+        const auto nearest = boundary_distances(mesh, {g.nodes[0]});
+        throw InputError(Diagnostic{.key = key,
+                                    .line = line,
+                                    .message = "lies entirely outside the mesh: its first sample is " +
+                                               units::with(point_text(g.nodes[0]), "m") + nearest_text(nearest[0]),
+                                    .fix = "Move or resize it so that it crosses the domain",
+                                    .docs = docs});
+    }
+    // The dropped part: its share of the length (area) the quadrature weighs, and its runs of samples
+    const std::vector<double> & weights = g.quad_points.empty() ? g.node_weights : g.quad_weights;
+    const std::vector<uint8_t> & kept = g.quad_points.empty() ? keep : keep_quad;
+    double total = 0.0, dropped = 0.0;
+    for (size_t i = 0; i < weights.size(); i++) {
+        total += weights[i];
+        dropped += kept[i] ? 0.0 : weights[i];
+    }
+    const char * measure = g.dim == 1 ? "length" : g.dim == 2 ? "area" : "volume";
+    json::Object clipped;
+    clipped.add("dropped", out.size()).add("of", n);
+    std::string share;
+    if (total > 0.0) {
+        clipped.raw(std::string(measure) + "_fraction", json::number(dropped / total));
+        share = " (" + logging::real(100.0 * dropped / total) + "% of its " + measure + ")";
+    }
+    std::string runs;
+    size_t n_runs = 0;
+    for (size_t k = 0; k < out.size();) {
+        size_t e = k;
+        while (e + 1 < out.size() && out[e + 1] == out[e] + 1) e++;
+        if (n_runs++ < SHOWN) {
+            runs += std::string(runs.empty() ? "" : ", ") +
+                    (e == k ? "sample " + std::to_string(out[k]) + " at " + point_text(g.nodes[out[k]])
+                            : "samples " + std::to_string(out[k]) + " to " + std::to_string(out[e]) + " from " +
+                                  point_text(g.nodes[out[k]]) + " to " + point_text(g.nodes[out[e]]));
+        }
+        k = e + 1;
+    }
+    if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN) + " more runs";
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
+                         " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
+    g = probe::clip(g, keep, keep_quad);
+    return clipped.str();
+}
+
 void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
                              const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
     std::vector<uint8_t> contained;
-    const std::vector<int32_t> located = locate_points(mesh, points, &contained);
+    const std::vector<int32_t> cell_of = locate_points(mesh, points, &contained);
     ids.clear();
+    located = true;
     std::vector<uint32_t> h_cells, h_inside;
     std::vector<rtype> h_offsets;
     for (uint64_t p = 0; p < points.size(); p++) {
-        if (located[p] < 0) continue;
-        const uint32_t c = static_cast<uint32_t>(located[p]);
+        if (cell_of[p] < 0) continue;
+        const uint32_t c = static_cast<uint32_t>(cell_of[p]);
         if (contained[p]) {
             h_inside.push_back(static_cast<uint32_t>(ids.size()));
             for (size_t d = 0; d < N_DIM; d++) {
@@ -669,6 +855,96 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         set_normals(local);
     }
     order(mesh);
+}
+
+void Probes::set_reconstruction(const FaceReconstruction * r) { reconstruction = point_reconstruction(r); }
+
+std::string Probes::Probe::sampling_json() const {
+    const bool point = sampling == Sampling::POINT;
+    json::Object b;
+    b.add("schema", snapshot_block::PROBE_SAMPLING).add("version", snapshot_block::PROBE_SAMPLING_VERSION);
+    b.add("probe", name).add("sampling", point ? "point" : "cell");
+    b.raw("reconstruction", point ? reconstruction.json() : "null");
+    std::string list = "[";
+    const double window_start = average_t_last - average_weight;
+    for (size_t v = 0; v < variables.size(); v++) {
+        json::Object o;
+        o.add("name", variables[v]).add("value", value_kinds[v]);
+        if (average) {
+            o.raw("average", json::Object()
+                                 .add("kind", "reynolds")
+                                 .raw("of", "[" + json::quote(variables[v].substr(5)) + "]")
+                                 .add("weighting", "time")
+                                 .raw("start", json::number(window_start))
+                                 .str());
+        }
+        list += (list.size() > 1 ? "," : "") + o.str();
+    }
+    b.raw("variables", list + "]");
+    if (locations.empty()) {
+        b.raw("points", "null");
+    } else {
+        std::string requested = "[", cell = "[", centroid = "[", distance = "[";
+        auto point_json = [](const probe::Point & x) {
+            std::string s = "[";
+            for (size_t d = 0; d < N_DIM; d++) s += (d ? "," : "") + json::number(x[d]);
+            return s + "]";
+        };
+        double max_distance = 0.0, sum = 0.0;
+        for (size_t i = 0; i < locations.size(); i++) {
+            const Location & l = locations[i];
+            const probe::Point & x = geometry.nodes[i];
+            double d2 = 0.0;
+            for (size_t d = 0; d < N_DIM; d++) d2 += (x[d] - l.centroid[d]) * (x[d] - l.centroid[d]);
+            const double r = point ? 0.0 : std::sqrt(d2);
+            const char * sep = i ? "," : "";
+            requested += sep + point_json(x);
+            cell += sep + std::to_string(l.cell);
+            centroid += sep + point_json(l.centroid);
+            distance += sep + json::number(r);
+            max_distance = std::max(max_distance, r);
+            sum += r;
+        }
+        b.raw("points", json::Object()
+                            .add("n", locations.size())
+                            .add("max_distance", max_distance)
+                            .add("mean_distance", sum / static_cast<double>(locations.size()))
+                            .raw("requested", requested + "]")
+                            .raw("cell", cell + "]")
+                            .raw("centroid", centroid + "]")
+                            .raw("distance", distance + "]")
+                            .str());
+    }
+    b.raw("clipped", clipped.empty() ? "null" : clipped);
+    json::Object units;
+    if (!locations.empty()) {
+        for (const char * k : {"points.requested", "points.centroid", "points.distance", "points.max_distance",
+                               "points.mean_distance"}) {
+            units.add(k, "m");
+        }
+    }
+    if (average) units.add("variables.average.start", "s");
+    b.raw("units", units.str());
+    return b.str();
+}
+
+std::vector<Probes::Location> Probes::Samples::locations(const Mesh & mesh) const {
+    // Per local sample: global cell, centroid
+    constexpr size_t WIDTH = N_DIM + 1;
+    std::vector<double> local;
+    for (size_t i = 0; i < host_cells.size(); i++) {
+        local.push_back(static_cast<double>(mesh.h_global_cell(host_cells[i])));
+        for (size_t d = 0; d < N_DIM; d++) local.push_back(static_cast<double>(mesh.h_cell_coords(host_cells[i], d)));
+    }
+    const std::vector<double> all = distributed ? comm::gatherv(local) : local;
+    if (distributed && !comm::is_root()) return {};
+    std::vector<Location> out(n_global);
+    for (uint64_t p = 0; p < n_global; p++) {
+        const double * row = all.data() + gathered_row[p] * WIDTH;
+        out[p].cell = static_cast<uint64_t>(row[0]);
+        for (size_t d = 0; d < N_DIM; d++) out[p].centroid[d] = row[1 + d];
+    }
+    return out;
 }
 
 void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
@@ -1411,6 +1687,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             p.geometry = probe::grid_geometry(region::sample_grid(region::surface_patches(r, key + ".region"),
                                                                   static_cast<uint32_t>(nu), static_cast<uint32_t>(nv)));
             p.geometry.type = "region " + r.summary();
+            p.clipped = clip_to_mesh(p.geometry, mesh, key + ".region", line_of(entry, "region"));
             p.nodes.locate(mesh, p.geometry.nodes, n_evaluated, p.geometry.normals);
             if (!p.reductions.empty()) {
                 p.quadrature.locate(mesh, p.geometry.quad_points, n_evaluated, p.geometry.quad_normals);
@@ -1501,6 +1778,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (p.nodes.n_global == 0) throw InputError(gkey + ": the plane misses the mesh.");
     } else {
         p.geometry = probe::make_geometry(*where, gkey);
+        p.clipped = clip_to_mesh(p.geometry, mesh, gkey, line_of(*where));
         p.nodes.locate(mesh, p.geometry.nodes, static_cast<uint32_t>(h_codes.size()), p.geometry.normals);
         if (!p.reductions.empty() && p.geometry.dim > 0) {
             p.quadrature.locate(mesh, p.geometry.quad_points, static_cast<uint32_t>(h_codes.size()),
@@ -1560,6 +1838,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                                    static_cast<double>(p.time_interval), sampled, reduction_columns,
                                                    p.geometry.nodes.size(), point_label);
     }
+    p.reconstruction = reconstruction;
+    if (p.nodes.located) p.locations = p.nodes.locations(mesh);
     on_root(distributed, [&] {
         if (p.write_samples && p.format == Format::CSV) {
             std::vector<std::pair<std::string, Dimension>> columns = {
@@ -1919,7 +2199,6 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             } else if (p.format == Format::HDF5) {
                 p.write_hdf5(step, t, nodes);
             } else {
-                p.reconstruction = point_reconstruction(fields.reconstruction);
                 const snapshot_block::Block block =
                     p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL,
                                   average_interval);
@@ -2281,12 +2560,14 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     if (k == 0) {
         make_parent(file);
         const std::string & provenance = provenance::json();
+        const std::string located = sampling_json();
         h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
-        h5::Handle fcpl(h5::file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+        h5::Handle fcpl(h5::file_creation(fapl, std::max(provenance.size(), located.size())), H5Pclose, "H5Pcreate");
         h5::Handle created(H5Fcreate(file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + file);
         {
             h5::Handle root(H5Gopen2(created, "/", H5P_DEFAULT), H5Gclose, "opening /");
             h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
+            h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {located});
             h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
         }
         h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
@@ -2334,6 +2615,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
             if (H5Aexists(root, attribute) > 0) h5::check(H5Adelete(root, attribute), "H5Adelete");
         }
         h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+        if (H5Aexists(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE) > 0) {
+            h5::check(H5Adelete(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE), "H5Adelete");
+        }
+        h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {sampling_json()});
     }
     vtkhdf_run_written = true;
     {
@@ -2388,7 +2673,7 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
     std::ostringstream piece;
     piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step << ".vtp";
     last_file = (pvd.parent_path() / piece.str()).string();
-    write_vtp_file(last_file, block, geometry, variables, values, n_evaluated());
+    write_vtp_file(last_file, block, sampling_json(), geometry, variables, values, n_evaluated());
     series.push_back({block.time, block.step, piece.str()});
     write_pvd_file(file, series);
 }
@@ -2568,7 +2853,10 @@ std::vector<case_view::Block> Probes::view_blocks() const {
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {
     if (!comm::is_root() || !output_files_enabled()) return;
     for (auto & p : probes) {
-        if (p->out) *p->out << csv_line << std::flush;
+        if (p->out) {
+            *p->out << csv_line << "# " << snapshot_block::PROBE_SAMPLING << " " << p->sampling_json() << "\n"
+                    << std::flush;
+        }
         if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
         if (p->out_spectra) *p->out_spectra << csv_line << std::flush;
         if (p->out_reduction_spectra) *p->out_reduction_spectra << csv_line << std::flush;
@@ -2581,6 +2869,10 @@ void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t st
                 if (H5Aexists(root, name) > 0) h5::check(H5Adelete(root, name), "H5Adelete");
             }
             h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+            if (H5Aexists(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE) > 0) {
+                h5::check(H5Adelete(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE), "H5Adelete");
+            }
+            h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {p->sampling_json()});
             // Each run that wrote the file, with its first row and step
             constexpr const char * RUNS = "mallard_runs";
             std::vector<std::string> runs;
