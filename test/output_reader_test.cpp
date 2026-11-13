@@ -75,11 +75,11 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
     }
     std::vector<std::string> probe_formats = {"csv", "vtp"};
     if (hdf5) {
-        writer("flow", "format = \"vtkhdf\"\n" + fields);
+        writer("flow", "format = \"vtkhdf\"\nseries = false\n" + fields);
         writer("flow", "format = \"xdmf\"\n" + fields);
-        writer("series", "series = true\n" + fields);
+        writer("series", fields);
         writer("region", "region = " + REGION + "\nfields = [\"RHO\"]\n");
-        if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\n" + fields);
+        if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\nseries = false\n" + fields);
         probe_formats.insert(probe_formats.end(), {"hdf5", "vtkhdf"});
     }
     for (const std::string & format : probe_formats) {
@@ -485,12 +485,12 @@ TEST(OutputReaderTest, RegionSnapshotsHoldTheCellsInTheRegion) {
     std::sort(inside.begin(), inside.end());
     ASSERT_GT(inside.size(), 0u);
     std::vector<std::string> files = {run.dir + "/near_000004.vtu"};
-    if (have_hdf5()) files.push_back(run.dir + "/region_000004.vtkhdf");
+    if (have_hdf5()) files.push_back(run.dir + "/region.vtkhdf");
     for (const std::string & name : files) {
         const output::Contents file = output::open(name);
         EXPECT_EQ(file.mesh.n_cells, inside.size()) << name;
         EXPECT_FALSE(file.global_order) << name;
-        std::vector<double> rho = output::read(file, "RHO", 0);
+        std::vector<double> rho = output::read(file, "RHO", file.snapshots.size() - 1);
         std::sort(rho.begin(), rho.end());
         EXPECT_EQ(rho, inside) << name;
     }

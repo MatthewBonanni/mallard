@@ -50,7 +50,7 @@ def read_vtu_cells(path):
     cell where it has cell data (boundary zones, cut planes) and per point
     otherwise. A PVTU (MPI runs) is read as the union of its pieces; an HDF5
     snapshot (.h5) is read with mallard.h5, a VTKHDF file (.vtkhdf) with
-    mallard.vtkhdf (the last snapshot of a series file).
+    mallard.vtkhdf (of a series file, a SeriesSnapshot's snapshot, else the last).
     """
     if path.endswith(".vtkhdf"):
         from .vtkhdf import read_cells
@@ -121,14 +121,16 @@ def _read_pvtu(path):
 def series(directory, pattern="*"):
     """The snapshots of a series in a directory that match pattern, in the
     order of the step and time they record (files of Mallard before 0.10 by
-    time alone): the VTKHDF files, else the PVTU files of an MPI run (not
-    their pieces), else the VTU, VTP (or HDF5) files."""
+    time alone): the VTKHDF snapshots (each snapshot of a series file),
+    else the PVTU files of an MPI run (not their pieces), else the VTU, VTP
+    (or HDF5) files."""
     import glob
     files = sorted(glob.glob(os.path.join(directory, pattern)))
     vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
     parallel = [f for f in files if f.endswith(".pvtu")]
     if vtkhdf:
-        chosen = vtkhdf
+        from .vtkhdf import snapshots
+        chosen = [s for f in vtkhdf for s in snapshots(f)]
     elif parallel:
         chosen = parallel
     else:
@@ -138,6 +140,22 @@ def series(directory, pattern="*"):
         chosen = [f for f in files if f.endswith((".vtu", ".vtp", ".h5")) and os.path.abspath(f) not in pieces
                   and not _is_mesh_h5(f)]
     return sorted(chosen, key=_recorded_order)
+
+
+def read_pyvista(path):
+    """A snapshot as a PyVista dataset, pyvista.read of any file but a VTKHDF
+    series file: of that, a SeriesSnapshot's snapshot, else the last, where
+    pyvista.read reads the first."""
+    import pyvista as pv
+    if not path.endswith(".vtkhdf"):
+        return pv.read(path)
+    from .vtkhdf import position_of
+    reader = pv.get_reader(str(path))
+    reader.reader.UpdateInformation()
+    n = reader.reader.GetNumberOfSteps()
+    if n > 0:
+        reader.reader.SetStep(range(n)[position_of(path)])
+    return reader.read()
 
 
 def _pvtu_pieces(path):
@@ -173,27 +191,37 @@ def recorded_time(path):
 
 
 def snapshot(stem):
-    """The snapshot file of a stem PREFIX_NNNNNN: its .vtkhdf (the default
-    format), else its .pvtu (an MPI run's VTU) or .vtu (builds without HDF5)."""
+    """The snapshot file of a stem PREFIX_NNNNNN: its .vtkhdf, else its .pvtu
+    (an MPI run's VTU) or .vtu (builds without HDF5); or the last snapshot of
+    a series PREFIX (its series file PREFIX.vtkhdf, the default, or index)."""
     for ext in (".vtkhdf", ".pvtu", ".vtu", ".h5"):
         if os.path.exists(stem + ext):
             return stem + ext
-    raise FileNotFoundError(f"no snapshot {stem}.vtkhdf (or .pvtu, .vtu, .h5)")
+    if os.path.exists(stem + ".vtkhdf.series") or os.path.exists(stem + ".pvd"):
+        return read_index(stem)[-1][1]
+    raise FileNotFoundError(f"no snapshot {stem}.vtkhdf (or .pvtu, .vtu, .h5) and no series {stem}")
 
 
 def read_index(series):
-    """(time, file) of every snapshot of a series: its index, PREFIX.vtkhdf.series
-    or PREFIX.pvd (VTU, builds without HDF5), or PREFIX for whichever exists.
-    read_index_steps() also gives each one's step."""
+    """(time, file) of every snapshot of a series: of its series file
+    PREFIX.vtkhdf (series = true, the default; each a SeriesSnapshot), its
+    index PREFIX.vtkhdf.series or PREFIX.pvd (VTU, builds without HDF5), or
+    of PREFIX for whichever exists. read_index_steps() also gives each one's
+    step."""
     return [(t, f) for t, _, f in read_index_steps(series)]
 
 
 def read_index_steps(series):
-    """(time, step, file) of every snapshot of a series index; step is None in
-    indexes of Mallard before 0.10, which record none."""
-    if not series.endswith((".series", ".pvd")):
-        series += ".vtkhdf.series" if os.path.exists(series + ".vtkhdf.series") else ".pvd"
-    if series.endswith(".series"):
+    """(time, step, file) of every snapshot of a series; step is None in
+    files of Mallard before 0.10, which record none."""
+    if not series.endswith((".series", ".pvd", ".vtkhdf")):
+        for ext in (".vtkhdf", ".vtkhdf.series", ".pvd"):
+            if os.path.exists(series + ext):
+                series += ext
+                break
+        else:
+            raise FileNotFoundError(f"no series {series}.vtkhdf (or .vtkhdf.series, .pvd)")
+    if series.endswith((".series", ".vtkhdf")):
         from .vtkhdf import read_series_steps
         return read_series_steps(series)
     out = []
@@ -355,12 +383,15 @@ def run_blocks(path):
 
 def snapshot_blocks(path):
     """The snapshot blocks of a file (docs/guide/output.md#snapshot-metadata),
-    one per snapshot it holds, as dicts with step, time (s), run_id,
+    one per snapshot it holds (a SeriesSnapshot's alone), as dicts with step, time (s), run_id,
     restart_of, written_at, reason and fields (units, stored precision); []
     for files before Mallard 0.10, which record none."""
     if path.endswith(".h5") or path.endswith(".vtkhdf"):
         from .h5 import snapshot_blocks as h5_blocks
-        return h5_blocks(path)
+        blocks = h5_blocks(path)
+        if hasattr(path, "position") and blocks:
+            return [blocks[path.position]]
+        return blocks
     if path.endswith(".pvtu"):
         path = sorted(_pvtu_pieces(path))[0]
     raw = open(path, "rb").read()

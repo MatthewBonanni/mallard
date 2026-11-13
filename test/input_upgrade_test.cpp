@@ -502,3 +502,18 @@ TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
         EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
     }
 }
+
+TEST(InputUpgradeTest, VtkhdfOutputWithoutSeriesGetsANotice) {
+    const std::string head = "[numerics]\npreset = \"les\"\n";
+    const std::string text = head + "[[write_data]]\nprefix = \"solut/flow\"\ninterval = 10\nfields = [\"RHO\"]\n";
+    const std::vector<std::string> notes = input_upgrade::notices(text);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("solut/flow.vtkhdf"), std::string::npos) << notes[0];
+    EXPECT_NE(notes[0].find("series = false"), std::string::npos) << notes[0];
+    // series set, another format, or a region (a boundary zone is always one file) gets none
+    for (const std::string entry : {"series = true\n", "series = false\n", "format = \"vtu\"\n", "format = \"restart\"\n",
+                                    "region = \"wall\"\n"}) {
+        const std::string other = head + "[[write_data]]\nprefix = \"p\"\ninterval = 1\n" + entry;
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
+    }
+}

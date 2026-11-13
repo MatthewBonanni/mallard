@@ -544,7 +544,9 @@ std::vector<divergence::Cause> Solver::write_divergence_report(Evidence & e, con
         table.as_table()["prefix"] = divergence_prefix + "_neighborhood";
         table.as_table()["interval"] = 1;
         table.as_table()["fields"] = names;
-        table.as_table()["format"] = std::string(have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
+        const bool vtkhdf = have_hdf5() && (comm::size() == 1 || have_parallel_hdf5());
+        table.as_table()["format"] = std::string(vtkhdf ? "vtkhdf" : "vtu");
+        if (vtkhdf) table.as_table()["series"] = false;
         DataWriter writer;
         writer.init(table, fields, mesh, {}, &subset);
         writer.write(step, t, true);

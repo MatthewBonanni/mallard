@@ -18,7 +18,7 @@ chemistry in cells below Tu + --frozen K
 can only propagate by conduction and diffusion.
 
 `make` writes RUN_DIR/input.toml. `measure` reads each run's series
-(solut/defl_*) and prints the consumption speed
+(solut/defl) and prints the consumption speed
 
     S_c = -int omega_H2 dx / (rho_u Y_H2,u)
 
@@ -33,7 +33,7 @@ import cantera as ct
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_quads, series  # noqa: E402
+from mallard.vtu import read_index, read_quads  # noqa: E402
 
 
 def make(args):
@@ -120,7 +120,7 @@ fields = ["RHO", "U", "P", "T", "HRR", "Y_H2", "OMEGA_H2"]
 
 def measure_run(run_dir):
     rows = []
-    for path in series(os.path.join(run_dir, "solut"), "defl_[0-9]*"):
+    for _, path in read_index(os.path.join(run_dir, "solut", "defl")):
         t, c, f = read_quads(path, ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])
         order = np.argsort(c[:, 0])
         xs = c[order, 0]

@@ -59,7 +59,7 @@ class Run:
         forces = mallard.open(os.path.join(path, "forces_cylinder.csv"))
         self.t = forces.read_all("t")
         self.cd = (forces.read_all("Fx_pressure") + forces.read_all("Fx_viscous")) / Q
-        snapshots = mallard.open(os.path.join(path, "solut", "wake.vtkhdf.series"))
+        snapshots = mallard.open(os.path.join(path, "solut", "wake.vtkhdf"))
         self.cells = snapshots.mesh["cells"]
 
         wall = mallard.open(os.path.join(path, "extract", "probe_wall.csv"))
@@ -82,7 +82,7 @@ class Run:
         contour = mallard.open(os.path.join(path, "extract", "probe_contour_reductions.csv"))
         self.cd_contour = -contour.read("integral_MOMENTUM_FLUX_X")[0] / Q
 
-        average = mallard.open(os.path.join(path, "average", "average.vtkhdf.series"))
+        average = mallard.open(os.path.join(path, "average", "average.vtkhdf"))
         self.rms = average.read("RMS_U_X") / U
 
 
@@ -107,8 +107,8 @@ def main():
         for q in study["quantities"]:
             print(f"{q['name']}: {q['verdict']}")
 
-    q_snap = mallard.open(os.path.join(fine.path, "derived", "derived.vtkhdf.series"))
-    u_snap = mallard.open(os.path.join(fine.path, "solut", "wake.vtkhdf.series"))
+    q_snap = mallard.open(os.path.join(fine.path, "derived", "derived.vtkhdf"))
+    u_snap = mallard.open(os.path.join(fine.path, "solut", "wake.vtkhdf"))
     polys = cells(u_snap)
     centers = u_snap.geometry().vertex_averages()
     ux = u_snap.read("U")[:, 0] / U

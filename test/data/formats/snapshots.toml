@@ -54,6 +54,7 @@ run_log = "snapshots.jsonl"
 [[write_data]]
 prefix = "snapshots_vtkhdf"
 format = "vtkhdf"
+series = false
 fields = ["RHO", "U", "P"]
 interval = 1
 

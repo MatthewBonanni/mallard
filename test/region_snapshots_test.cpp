@@ -280,8 +280,8 @@ TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) 
     std::string writers = "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\n" + variables +
                           "[[write_data]]\nprefix = \"" + dir + "/near\"\nformat = \"vtu\"\nregion = " + ball + "\n" + variables;
 #ifdef Mallard_HAS_HDF5
-    writers += "[[write_data]]\nprefix = \"" + dir + "/kflow\"\nformat = \"vtkhdf\"\n" + variables +
-               "[[write_data]]\nprefix = \"" + dir + "/knear\"\nformat = \"vtkhdf\"\nregion = " + ball + "\n" + variables;
+    writers += "[[write_data]]\nprefix = \"" + dir + "/kflow\"\nformat = \"vtkhdf\"\nseries = false\n" + variables +
+               "[[write_data]]\nprefix = \"" + dir + "/knear\"\nformat = \"vtkhdf\"\nseries = false\nregion = " + ball + "\n" + variables;
 #endif
     const std::string input = box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", writers);
     Solver solver;
@@ -496,7 +496,7 @@ TEST(RegionSnapshotsTest, RegionsThatMoveOrFollowTheSolutionWriteTheCellsTheyCov
     std::string writers = "[regions]\nwhere = " + where + "\nmoving = " + moving + "\n[[write_data]]\nprefix = \"" + dir +
                           "/v\"\nformat = \"vtu\"\nregions = [\"where\", \"moving\"]\n" + variables;
 #ifdef Mallard_HAS_HDF5
-    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nregion = \"where\"\n" + variables +
+    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nseries = false\nregion = \"where\"\n" + variables +
                "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"vtkhdf\"\nseries = true\nregion = \"where\"\n" +
                variables;
 #endif
@@ -673,7 +673,7 @@ TEST(RegionSnapshotsTest, RegionsOfTheSolutionDoNotDependOnTheRankCount) {
 #ifdef Mallard_HAS_HDF5
     if (comm::size() > 1 && !have_parallel_hdf5()) return;
     expect_vtkhdf_output_matches_serial(input, fields + "series = true\n" + dense, dir + "/series", {""});
-    expect_vtkhdf_output_matches_serial(input, fields + dense, dir + "/files", {"_000000", "_000002", "_000004"});
+    expect_vtkhdf_output_matches_serial(input, fields + "series = false\n" + dense, dir + "/files", {"_000000", "_000002", "_000004"});
     expect_vtkhdf_output_matches_serial(input, fields + front, dir + "/front", {""});
 #endif
 }

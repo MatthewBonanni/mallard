@@ -7,7 +7,7 @@ Every public function and class of the Python package `mallard`
 ```python
 import mallard
 
-f = mallard.open("solut/flow.vtkhdf.series")   # mallard.File
+f = mallard.open("solut/flow.vtkhdf")   # mallard.File
 f.read("P"), f.read_all("P"), f.geometry()
 mallard.run_record("."), mallard.run_files(".")
 mallard.info(path), mallard.diff(a, b), mallard.post.extract(files, ...), mallard.post.convergence(runs, ...)

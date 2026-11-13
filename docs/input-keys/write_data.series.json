@@ -3,5 +3,8 @@
   2,
   3
  ],
- "set_in": []
+ "set_in": [
+  "examples/volvo_bluff_body/cold.toml",
+  "examples/volvo_bluff_body/reacting.toml"
+ ]
 }

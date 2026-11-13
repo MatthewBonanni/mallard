@@ -19,7 +19,7 @@
 #
 # Run:
 #   mpirun -n 1 ../../build3d/src/mallard -i input.toml
-#   ../../build3d/src/mallard post average stats/duct.vtkhdf.series --latest --statistics --homogeneous y,z --name profile -o .
+#   ../../build3d/src/mallard post average stats/duct.vtkhdf --latest --statistics --homogeneous y,z --name profile -o .
 #
 # Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).
 

@@ -5,7 +5,7 @@
 For the outputs at 170 and 230 us of each run: the reaction front (the
 rightmost cell above 1800 K), the peak temperature and pressure, and the
 cell size; with --png, T and p at both times overlaid. A SERIES is a run's
-solut/rst.vtkhdf.series (solut/rst.pvd in builds without HDF5).
+solut/rst (solut/rst.vtkhdf, or solut/rst.pvd in builds without HDF5).
 """
 import os
 import re

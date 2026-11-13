@@ -198,8 +198,8 @@ std::string channel(const std::string & dir) {
           << "[[probes]]\nname = \"cut_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/cut_probe.h5\"\n"
           << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
           << "\nfields = [\"MASS_FLUX\"]\n"
-          << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
-          << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\n" << variables
+          << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\ninterval = 2\n"
           << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
           << "region = \"bottom\"\ninterval = 2\nfields = [\"P\", \"U\"]\n"
           << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "

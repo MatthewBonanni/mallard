@@ -5,8 +5,8 @@ inlet and for inlet_state.
 
     plot_heated_duct.py STEADY CLOSED_PREFIX CLOSED_UPT_PREFIX [--figure]
 
-STEADY is the last snapshot of input.toml (.vtkhdf, or .vtu without HDF5); the prefixes are those of the
-closed runs' series (closed.toml, closed_upt.toml). Prints the inlet pressure
+STEADY is input.toml's output, solut/duct.vtkhdf (its last snapshot; solut/duct_000001.vtu
+without HDF5); the prefixes are those of the closed runs' series (closed.toml, closed_upt.toml). Prints the inlet pressure
 and exit state against Rayleigh flow and the closed duct's mass balance;
 --figure draws docs/images/guide/{heated_duct,mass_flow_held}-{light,dark}.svg.
 """
@@ -63,7 +63,7 @@ def cells(path):
 
 
 def series(prefix):
-    files = vtu.series(os.path.dirname(prefix), os.path.basename(prefix) + "_[0-9]*")
+    files = [f for _, f in vtu.read_index(prefix)]
     t, mass, rho_in = [], [], []
     for f in files:
         x, area, a = cells(f)

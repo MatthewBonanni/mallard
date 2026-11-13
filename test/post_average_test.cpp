@@ -104,8 +104,8 @@ int average(const std::vector<std::string> & words, std::string * errors = nullp
     return post("post average", post_average, words, errors);
 }
 
-/** @brief The index of the run's snapshots of its [statistics]. */
-std::string stats_index(const std::string & dir) { return dir + (have_hdf5() ? "/stats.vtkhdf.series" : "/stats.pvd"); }
+/** @brief The series of the run's snapshots of its [statistics]. */
+std::string stats_index(const std::string & dir) { return dir + (have_hdf5() ? "/stats.vtkhdf" : "/stats.pvd"); }
 
 std::vector<std::string> restarts(const std::string & dir) {
     return {dir + "/restart_000002.restart", dir + "/restart_000004.restart", dir + "/restart_000006.restart"};

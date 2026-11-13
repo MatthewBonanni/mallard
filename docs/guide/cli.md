@@ -515,7 +515,7 @@ run come from what the file records, never from its name. Files without a run
 block (before Mallard 0.9), without snapshot blocks (before 0.10) or from a
 newer Mallard are reported with a note that says what is read instead.
 
-FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index
+FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5), a series file (.vtkhdf) or index
 (.vtkhdf.series, .pvd, .xmf), a restart file (compressed too), a probe file
 (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces or integrals, or a mesh
 file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 mesh).
@@ -567,9 +567,9 @@ Options:
   -h, --help            Show this page.
 
 Examples:
-  $ mallard info solut/flow.vtkhdf.series
+  $ mallard info solut/flow.vtkhdf
   $ mallard info solut/restart_001000.restart --format json
-  $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
+  $ mallard info solut/restart_001000.restart --input > input.toml   # rerun it
   $ mallard info wing.msh --mesh-fields wing
   $ mallard info wing.msh --view view   # view/case-light.svg: the zones, labeled
   $ mallard info runs/cylinder
@@ -798,8 +798,8 @@ Options:
 
 Examples:
   $ mallard diff run1/solut/restart_001000.restart run2/solut/restart_001000.restart
-  $ mallard diff serial/flow_000100.vtkhdf mpi/flow_000100.vtkhdf --tol 1e-12
-  $ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --step 300 --fields RHO,P
+  $ mallard diff serial/flow.vtkhdf mpi/flow.vtkhdf --tol 1e-12
+  $ mallard diff a/flow.vtkhdf b/flow.vtkhdf --step 300 --fields RHO,P
   $ mallard diff fine/restart_000500.restart coarse/restart_000500.restart --remap --tol 1e-2
   $ mallard diff a.restart b.restart --format json | jq '.fields[] | {name, status}'
 
@@ -897,12 +897,13 @@ there: the same values for restart files and for snapshots of the conservative
 variables, the same to rounding for snapshots of RHO, U and P.
 
 FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF
-output) or a series of them (.vtkhdf.series, a series file, .xmf); several
-files, or a glob, extract in the order given. The case comes from -i, else from
-FILE's run block, and its mesh must be the file's: run it where the run ran, so
-that relative paths (the mesh file) resolve. --steps, --times, --every and
---latest choose the snapshots, by the steps and times the files record (files
-written before 0.10 that record no step: by their position in FILE).
+output) or a series of them (a series file .vtkhdf, .vtkhdf.series, .xmf);
+several files, or a glob, extract in the order given. The case comes from -i,
+else from FILE's run block, and its mesh must be the file's: run it where the
+run ran, so that relative paths (the mesh file) resolve. --steps, --times,
+--every and --latest choose the snapshots, by the steps and times the files
+record (files written before 0.10 that record no step: by their position in
+FILE).
 
 Files go to the output directory under the names the input gives them, so a
 run's files are never overwritten. The report lists each file with its times and
@@ -926,8 +927,8 @@ Options:
                          or a probe type ('{type = "line", start = [0, 0], end =
                          [1, 0], n_points = 50}'). Default: none.
   --name NAME            The name of the --region probe and of --snapshot:
-                         probe_NAME.csv, probe_NAME_reductions.csv,
-                         NAME_<step>.vtkhdf. Default: extract.
+                         probe_NAME.csv, probe_NAME_reductions.csv, NAME.vtkhdf.
+                         Default: extract.
   --fields LIST          The fields of --region and --snapshot, separated by
                          commas, as [[probes]] and [[write_data]] take them
                          (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T.
@@ -939,8 +940,8 @@ Options:
                          reconstruction's point values. Default: cell.
   --snapshot vtkhdf|vtu  Also write a snapshot of --fields (of --region, if
                          given) at each step extracted, as [[write_data]] writes
-                         it: OUTPUT/NAME_<step>.vtkhdf, or .vtu files with a
-                         .pvd index. Default: none.
+                         it: OUTPUT/NAME.vtkhdf, or .vtu files with a .pvd
+                         index. Default: none.
   --steps LIST           Extract the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Extract the snapshot nearest to simulated time T, or
@@ -961,12 +962,12 @@ Options:
   -h, --help             Show this page.
 
 Examples:
-  $ mallard post extract solut/flow.vtkhdf.series      # every [[probes]] of the run
+  $ mallard post extract solut/flow.vtkhdf      # every [[probes]] of the run
   $ mallard post extract solut/restart_*.restart --probe wake -o wake
-  $ mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE
+  $ mallard post extract solut/flow.vtkhdf --latest --region domain --fields RHO,RHOE
   $ mallard post extract solut/flow.xmf --times 0.1:0.5 --fields MASS_FLUX --reductions integral \
         --region '{type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}'
-  $ mallard post extract solut/flow.vtkhdf.series --latest --snapshot vtkhdf --fields P,T
+  $ mallard post extract solut/flow.vtkhdf --latest --snapshot vtkhdf --fields P,T
 
 Exit status:
   0  every snapshot was extracted
@@ -1023,10 +1024,10 @@ Options:
                          input's [regions] or of the mesh, or an inline TOML
                          table, as [[write_data]] region takes it. Default: the
                          whole mesh.
-  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME_<step>.vtkhdf
-                         with a .vtkhdf.series, or .vtu files with a .pvd index.
+  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, every
+                         snapshot in one file, or .vtu files with a .pvd index.
                          Default: vtkhdf, or vtu in builds without HDF5.
-  --name NAME            The name of the snapshots: NAME_<step>.vtkhdf. Default:
+  --name NAME            The name of the snapshots: NAME.vtkhdf. Default:
                          derived.
   --steps LIST           Derive the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
@@ -1045,11 +1046,11 @@ Options:
   -h, --help             Show this page.
 
 Examples:
-  $ mallard post derive solut/flow.vtkhdf.series --fields MACH,P0,Q_CRITERION
+  $ mallard post derive solut/flow.vtkhdf --fields MACH,P0,Q_CRITERION
   $ mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state
-  $ mallard post derive solut/flow.vtkhdf.series --fields CP \
+  $ mallard post derive solut/flow.vtkhdf --fields CP \
         --reference '{rho = 1.2, u = [30, 0], p = 101325}'
-  $ mallard post derive solut/flame.vtkhdf.series --fields MIXTURE_FRACTION,FLAME_INDEX \
+  $ mallard post derive solut/flame.vtkhdf --fields MIXTURE_FRACTION,FLAME_INDEX \
         --mixture '{fuel = "fuel_inlet", oxidizer = "air_inlet"}'
 
 Exit status:
@@ -1080,9 +1081,9 @@ OMEGA_<species>. --conditional adds the PDFs and conditional statistics of
 [[statistics.conditional]], such as conditional means on the mixture fraction,
 written as CSV.
 
-The averages are a snapshot of the last step, OUTPUT/NAME_<step>.vtkhdf, as a
-run writes its [statistics]. --homogeneous averages them further over directions
-in which the flow is statistically uniform and writes a CSV profile (the kept
+The averages are a snapshot of the last step, OUTPUT/NAME.vtkhdf, as a run
+writes its [statistics]. --homogeneous averages them further over directions in
+which the flow is statistically uniform and writes a CSV profile (the kept
 coordinates, n_cells, then the columns), which synthetic inflow profile reads;
 --statistics does that to the [statistics] fields one snapshot already holds.
 The states are read one at a time, so memory does not grow with the number of
@@ -1157,11 +1158,10 @@ Options:
                          file, mechanism and TENO cache_file resolve from the
                          run's directory.
   --snapshot vtkhdf|vtu  The format of the snapshot of the averages:
-                         OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or a
-                         .vtu file with a .pvd index. Default: vtkhdf, or vtu in
-                         builds without HDF5.
-  --name NAME            The name of the output: NAME_<step>.vtkhdf, or
-                         NAME.csv. Default: average.
+                         OUTPUT/NAME.vtkhdf, or a .vtu file with a .pvd index.
+                         Default: vtkhdf, or vtu in builds without HDF5.
+  --name NAME            The name of the output: NAME.vtkhdf, or NAME.csv.
+                         Default: average.
   --steps LIST           Average the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Average the snapshot nearest to simulated time T, or
@@ -1180,10 +1180,10 @@ Options:
 
 Examples:
   $ mallard post average solut/restart_*.restart --t-start 40
-  $ mallard post average solut/flow.vtkhdf.series --times 40:80 --favre
-  $ mallard post average solut/flow.vtkhdf.series --fields U_X,U_Y,U_Z,MACH --homogeneous x,z
-  $ mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z
-  $ mallard post average solut/flame.vtkhdf.series --conditional \
+  $ mallard post average solut/flow.vtkhdf --times 40:80 --favre
+  $ mallard post average solut/flow.vtkhdf --fields U_X,U_Y,U_Z,MACH --homogeneous x,z
+  $ mallard post average stats/channel.vtkhdf --latest --statistics --homogeneous x,z
+  $ mallard post average solut/flame.vtkhdf --conditional \
         '{on = "MIXTURE_FRACTION", fields = ["T", "HRR"], weight = "mass"}'
 
 Exit status:

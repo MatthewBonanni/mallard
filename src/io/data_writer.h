@@ -495,7 +495,7 @@ class DataWriter {
             std::vector<uint8_t> types;                      // cells only
             GlobalOrder order;                               // of the cells
         } vtkhdf;
-        bool one_file = false;  // series = true: every snapshot in one file
+        bool one_file = false;  // vtkhdf with series = true (the default): every snapshot in one file
         uint64_t vtkhdf_steps = 0;  // snapshots in the series file
         bool vtkhdf_resumed = false;
         bool vtkhdf_run_written = false;  // this run's block is in the series file

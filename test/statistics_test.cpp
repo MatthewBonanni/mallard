@@ -156,7 +156,7 @@ TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
     solver.init(parse_toml(input));
     solver.run();
     std::vector<std::string> files = {dir + "/flow_000160.vtu"};
-    if (have_hdf5()) files.push_back(dir + "/flow_000160.vtkhdf");
+    if (have_hdf5()) files.push_back(dir + "/flow.vtkhdf");
     for (const std::string & name : files) {
         SCOPED_TRACE(name);
         const output::Contents file = output::open(name);
@@ -189,7 +189,7 @@ TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
         EXPECT_DOUBLE_EQ(phase.end, 1.25);
     }
 #ifdef Mallard_HAS_HDF5
-    const std::string path = dir + "/flow_000160.vtkhdf";
+    const std::string path = dir + "/flow.vtkhdf";
     h5::Handle file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + path);
     auto methods = [&](const std::string & field) -> std::string {
         h5::Handle d(H5Dopen2(file, ("VTKHDF/CellData/" + field).c_str(), H5P_DEFAULT), H5Dclose, "opening " + field);
