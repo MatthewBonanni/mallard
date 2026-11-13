@@ -1,1 +1,0 @@
-- Messages that print a count followed by a noun use the singular for a count of one ("1 cell", "1 step", "1 rank"), in the solver log, `mallard check`, the divergence report and the `mallard` subcommands (#869).

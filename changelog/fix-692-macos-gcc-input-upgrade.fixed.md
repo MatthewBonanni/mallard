@@ -1,1 +1,0 @@
-- `mallard input upgrade` no longer crashes when built with GCC on macOS (#692).

@@ -1,1 +1,0 @@
-- `mallard post convergence --field NAME` without `--exact`: the error norms of a field against the finest run, remapped conservatively onto each coarser run's cells, and their observed orders, for cases without an exact solution (#769).

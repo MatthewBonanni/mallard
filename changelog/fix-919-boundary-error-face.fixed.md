@@ -1,1 +1,0 @@
-- The error of a boundary value of `t` out of range (a `p`, `T`, `mass_flux`, composition or direction of `t`, a mass-flow `profile` or `mdot`) names the same face on every run: of the faces that failed together, the one with the lowest index, rather than whichever thread got there first (#919).

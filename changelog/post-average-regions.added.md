@@ -1,1 +1,0 @@
-- `mallard post average --region` takes regions defined by the solution (`where`, `isosurface`): each is placed on the state of every snapshot averaged, and the time averages of the integrals and means of the fields over it are written to `OUTPUT/NAME_reductions.csv`, as an averaged `[[probes]]` entry writes them (#799).

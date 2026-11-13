@@ -1,1 +1,0 @@
-- A run whose `t_stop` is a multiple of a `time_interval` that rounds just below it (for example 11 × 0.03 for `t_stop = 0.33`) took one more step of a round-off's length and wrote a second final snapshot. `t_stop` now counts as reached within round-off, so the run ends on the snapshot at `t_stop`.

@@ -1,2 +1,0 @@
-- The target `p` of an average-pressure outlet (`average = true`), when it depends on `t`, is evaluated on the device with the other boundary values of `t`: the outlet no longer copies its condition to the host and back at every stage. Results are bitwise unchanged.
-- Expressions that use exprtk's vector, string or bitwise functions (`dot`, `like`, `shl`, ...) or its case-insensitive names (`X` for `x`) fail with an error that names the problem and, for names, the one to use ([Expressions](docs/guide/expressions.md)).

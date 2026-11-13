@@ -1,1 +1,0 @@
-- The expression language is named kexpr (Kokkos expressions) and has its own guide page, [Expressions](docs/guide/expressions.md).

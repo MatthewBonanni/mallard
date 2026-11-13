@@ -1,1 +1,0 @@
-- Boundary probes on walls with a `wall_model` take `TRACTION_VISCOUS`, `TAU_W`, `CF`, `U_TAU`, `Y_PLUS` and `Q_W` from the model, as `[[forces]]` does, instead of the resolved wall gradients (#591).

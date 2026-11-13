@@ -1,1 +1,0 @@
-- GCC builds without a device backend no longer fuse multiplies and adds across statements (`-ffp-contract=off`), so arm64 gives the same results as x86-64.
