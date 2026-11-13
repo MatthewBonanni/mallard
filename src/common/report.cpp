@@ -176,8 +176,20 @@ void Text::note(std::string_view line_text) {
 
 void Text::blank() { add(""); }
 
-void Text::table(const std::vector<Column> & columns, const std::vector<Row> & rows, const bool status_column) {
-    validate(columns, rows);
+void Text::table(const std::vector<Column> & columns, const std::vector<Row> & input, const bool status_column) {
+    validate(columns, input);
+    std::vector<Row> rows = input;
+    for (size_t c = 0; c < columns.size(); c++) {
+        std::vector<std::string> column;
+        for (const Row & row : rows) {
+            if (c < row.cells.size()) column.push_back(row.cells[c]);
+        }
+        column = logging::align_decimals(std::move(column));
+        size_t k = 0;
+        for (Row & row : rows) {
+            if (c < row.cells.size()) row.cells[c] = column[k++];
+        }
+    }
     std::vector<std::string> header;
     for (const Column & c : columns) header.push_back(c.name);
     std::vector<size_t> width(header.size());

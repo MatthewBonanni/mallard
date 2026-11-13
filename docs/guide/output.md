@@ -591,7 +591,7 @@ or in simulated time) and contents:
   quantity        value    units  basis
   cells           460,800  cells  tri
   faces           692,400  faces
-  boundary faces  2,400    faces
+  boundary faces    2,400  faces
 
   quantity   min        max        units  basis
   x extent   0          4          m      nodes
@@ -600,9 +600,9 @@ or in simulated time) and contents:
 ...
 == Output =================================================================================
   Intervals in steps, or in simulated time:
-  output    file                 every  units  contents
-  progress  -                    200    steps  a row of the progress table
-  vtkhdf    ./solut/dmr.vtkhdf   0.002  s      RHO, U_X, U_Y, P, MACH, SCHLIEREN
+  output    file                every    units  contents
+  progress  -                   200      steps  a row of the progress table
+  vtkhdf    ./solut/dmr.vtkhdf    0.002  s      RHO, U_X, U_Y, P, MACH, SCHLIEREN
 ```
 
 Then comes one progress row every `[output] check_interval` steps (default 1).
@@ -610,12 +610,12 @@ A note above the table says what the columns are, and under the column names a
 row gives their units:
 
 ```text
-       step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
-          -           s         s      %         ms     cells/s    h:mm:ss      kg/m^3          Pa        -         %  files
-          0  0.0000e+00  8.78e-04    0.0          -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
-         10  8.6159e-03  8.53e-04   16.7       37.9    1.90e+05    0:00:02   1.399e+00   9.991e-01    1.881      5.72  2 vtu
-         20  1.7029e-02  8.28e-04   33.3       34.2    2.10e+05    0:00:02   1.399e+00   9.990e-01    1.882      5.89  3 vtu
-         30  2.4894e-02  8.08e-04   50.0       40.5    1.78e+05    0:00:02   1.399e+00   9.989e-01    1.878      6.19  2 vtu, 1 restart
+       step           t        dt   done    wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+          -           s         s      %           ms     cells/s    h:mm:ss      kg/m^3          Pa        -         %  files
+          0  0.0000e+00  8.78e-04    0.0            -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
+         10  8.6159e-03  8.53e-04   16.7        37.90    1.90e+05    0:00:02   1.399e+00   9.991e-01    1.881      5.72  2 vtu
+         20  1.7029e-02  8.28e-04   33.3        34.20    2.10e+05    0:00:02   1.399e+00   9.990e-01    1.882      5.89  3 vtu
+         30  2.4894e-02  8.08e-04   50.0        40.50    1.78e+05    0:00:02   1.399e+00   9.989e-01    1.878      6.19  2 vtu, 1 restart
 ```
 
 | Column | Units | Meaning |
