@@ -43,6 +43,9 @@ using HostMem = Kokkos::HostSpace;
 constexpr bool DEVICE_IS_HOST =
     Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
 
+// A device batch's bytes per cell to set up, so that the setup's peak stays below the memory the run allocates after it
+constexpr size_t BATCH_BYTES_PER_CELL = 2048;
+
 // The largest stencil degree's moment tables
 constexpr int MAX_NM = 2 * teno::MAX_DEGREE - 1;
 constexpr int MAX_MOMENTS = MAX_NM * (MAX_NM + 1) * (MAX_NM + 2) / 6;
@@ -3437,9 +3440,7 @@ class Setup3D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Batch outputs within about a quarter of the free device memory and
-            // BATCH_BYTES_PER_CELL per cell to set up, so that the setup's peak
-            // stays below the memory the run allocates after it
+            // Batch outputs within about a quarter of the free device memory and BATCH_BYTES_PER_CELL
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -3454,7 +3455,6 @@ class Setup3D {
         }
 
         static constexpr int TEAM_SIZE = 128;
-        static constexpr size_t BATCH_BYTES_PER_CELL = 2048;
 
         /** @brief Upper bound on the teams of the device kernel resident at once. */
         static size_t resident_teams([[maybe_unused]] const size_t shared_bytes) {
@@ -4658,8 +4658,10 @@ class Setup2D {
             if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
             d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
             d.triangle_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.triangle_rule);
-            d.rule_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_start);
-            d.rule_points = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_points);
+            if (h.curved) {
+                d.rule_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_start);
+                d.rule_points = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_points);
+            }
             d.face_gauss = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.face_gauss);
             caps.rows = std::max<uint32_t>(ns_max, nss_max);
             caps.sector = nss_max + 1;
@@ -4672,7 +4674,7 @@ class Setup2D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Scratch and outputs within about a quarter of the free device memory
+            // Scratch and outputs within about a quarter of the free device memory and BATCH_BYTES_PER_CELL
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -4680,7 +4682,7 @@ class Setup2D {
 #endif
             const size_t out_bytes = size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32;
-            size_t n = free_bytes / 4 / (out_bytes + caps.bytes(nk));
+            size_t n = std::min(free_bytes / 4, BATCH_BYTES_PER_CELL * n_target) / (out_bytes + caps.bytes(nk));
             n = std::min<size_t>(n, 65536);
             n = std::max<size_t>(n / 1024 * 1024, 1024);
             return static_cast<uint32_t>(n);

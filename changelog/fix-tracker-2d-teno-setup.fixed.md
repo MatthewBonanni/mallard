@@ -1,0 +1,1 @@
+- **2D TENO setup on GPUs**: its scratch no longer takes a quarter of the free device memory, which put the setup peak above the run's and the `check --memory` prediction, and the setup no longer makes unlabeled device allocations.

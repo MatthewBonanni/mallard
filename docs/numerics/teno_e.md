@@ -514,7 +514,8 @@ The setup runs on the device (`teno_setup::SetupHandle`): the geometry
 (scales $h_c$ and ranking metrics; the rules of curved cells in 2D; moments
 and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
-free device memory: a thread per cell in 2D, a team of threads per cell on
+free device memory and the number of cells, so that the setup's peak stays
+below the run's: a thread per cell in 2D, a team of threads per cell on
 GPUs in 3D. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
