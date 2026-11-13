@@ -549,7 +549,7 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
          << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
          << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
-         << "[chemistry]\n";
+         << "[chemistry]\nfuse_half_steps = false\n";
     reacting.body = body.str();
     reacting.extra = restarts + "[output.mixture]\nfuel_species = \"H2\"\noxidizer_species = \"O2\"\n"
                                 "[statistics]\ninterval = 2\nfields = [\"HRR\", \"MACH\"]\nproducts = [\"HRR*FLAME_INDEX\"]\n"
