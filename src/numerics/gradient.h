@@ -364,7 +364,7 @@ struct LSQVertexGradientFunctor {
                 const double C_i = double(covariance(i_cell, m));
                 if (kind == StencilPoint::CELL) return double(covariance(cells_of_cell(k), m)) - C_i;
                 if (kind == StencilPoint::IMAGE) return double(covariance(faces.boundaries.image_neighbors(k), m)) - C_i;
-                const uint32_t f = faces.faces_of_cell(k);
+                const uint32_t f = weights.ghost_faces(k);
                 // A prescribed state is a point value at the face; other ghosts mirror cell i
                 if (faces.boundaries.bcs(faces.boundaries.face_bc(f)).ghost_at_face()) {
                     return -C_i;
