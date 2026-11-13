@@ -397,10 +397,10 @@ What a snapshot holds depends on the region's dimension:
 
 | Region | Written | Values |
 |---|---|---|
-| A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
+| A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones; a [moving](geometry.md#moving-regions) region or a `where` region [of the solution](geometry.md#regions-defined-by-the-solution), the cells it covers at each write | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
 | `"domain"` | The whole mesh, as without `region` | The cells' fields |
 | A boundary zone, by its name | Its faces: polygons (3D), a polyline (2D) | Point values at the face centroids, as a [boundary probe](probes.md#boundary-data) with `sampling = "point"` writes them, wall quantities included; other cell fields (`P_MAX`, `HRR`) from each face's cell |
-| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
+| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points; an `isosurface` or another surface [of the solution](geometry.md#regions-defined-by-the-solution), the elements extracted at each write | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
 | A cut plane or other [probe type as a region](geometry.md#probe-types-as-regions) | The exact cut of the mesh, or the resampled surface, curve or points | Point values of the reconstruction, as a [probe](probes.md) of it with `sampling = "point"`; fluxes (`MASS_FLUX`, ...) through surfaces and 2D curves; other cell fields from the cell of each sample |
 
 A volume is written by every rank in global order, like the whole mesh;
@@ -425,6 +425,12 @@ Pitfalls:
   values, while cell fields such as `HRR`, `VORTICITY` or `MEAN_*` are the
   averages of the cells the samples lie in: first order across the cell.
 - A volume region much smaller than a cell can cover no cell, which is an error.
+  A region that moves or follows the solution may cover none at some write:
+  that snapshot has no cells (no elements), and the series goes on.
+- The cells or elements of a region that moves or follows the solution change
+  from one snapshot to the next: each is a mesh of its own, and ParaView's
+  filters that assume one mesh over time (Temporal Statistics, Particle
+  Tracer) do not apply to it.
 - A boundary zone's samples lie at the face centroids, on the wall: `P` is the
   reconstruction's wall pressure, not the first cell's average. Cell fields
   such as `P_MAX` are still the cell's.

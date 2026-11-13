@@ -284,7 +284,7 @@ PolyLayout poly_layout(const probe::Geometry & g) {
     const bool polygons = !g.polygon_offsets.empty();
     const bool vertices = g.dim == 0 || g.polylines.empty();
     l.cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : vertices ? "Verts" : "Lines";
-    l.cell_data = polygons && !g.vertices.empty();
+    l.cell_data = polygons && (!g.vertices.empty() || g.nodes.empty());
     const std::vector<probe::Point> & points = l.cell_data ? g.vertices : g.nodes;
     l.xyz.assign(3 * points.size(), 0.0);
     for (size_t p = 0; p < points.size(); p++) {
@@ -552,9 +552,13 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 } // namespace
 
 void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables) {
+    select_snapshot_elements(p, mesh, region::elements(mesh, r), r.dimension(), r.summary(), n_variables);
+}
+
+void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, const int dimension,
+                                      const std::string & summary, uint32_t n_variables) {
     // One sample per element, at its center, in the order of the elements' cells' global ids, then position;
     // rank 0 keeps the elements' polygons (segments; nothing for points), normals and measures
-    const region::Elements e = region::elements(mesh, r);
     constexpr size_t W = 9;  // global cell, center, direction, measure, vertex count
     probe::CellPoints set;
     std::vector<double> local, corners;
@@ -577,8 +581,12 @@ void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region
     const std::vector<double> all_corners = distributed ? comm::gatherv(corners) : corners;
     set.n_global = distributed ? comm::allreduce(uint64_t(set.cells.size()), comm::Op::SUM) : set.cells.size();
     probe::Geometry & g = p.geometry;
-    g.dim = static_cast<uint8_t>(r.dimension());
-    g.type = "region " + r.summary();
+    g.dim = static_cast<uint8_t>(dimension);
+    g.type = "region " + summary;
+    for (auto * points : {&g.nodes, &g.normals, &g.vertices}) points->clear();
+    g.node_weights.clear();
+    g.polygon_offsets.clear();
+    g.polygon_vertices.clear();
     if (!distributed || comm::is_root()) {
         const size_t n = all.size() / W;
         std::vector<size_t> first(n + 1, 0);
@@ -614,7 +622,7 @@ void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region
         }
     }
     p.nodes.in_cells(mesh, set, {}, n_variables);
-    if (r.dimension() == N_DIM - 1) {
+    if (dimension == N_DIM - 1) {
         std::vector<probe::Point> normals;
         for (size_t k = 0; k < e.size(); k++) {
             probe::Point d;
@@ -1549,6 +1557,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             if (r.kind == probe::RegionValue::Kind::ELEMENTS) {
                 elements = r.region;
                 region::require_fixed(*elements, value, rkey, "snapshots");
+                p.solution = elements->solution();
             }
         }
     }
@@ -1562,8 +1571,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     // region with n_points writes samples at the nodes of a grid inside it besides its reductions
     p.resampled = region && entry.contains("n_points") &&
                   ((region->dimension() == N_DIM - 1 && N_DIM == 3) || region->dimension() == N_DIM);
-    p.solution = region && region->solution();
-    if (p.solution && region->dimension() < N_DIM) {
+    p.solution = p.solution || (region && region->solution());
+    if (p.solution && region && region->dimension() < N_DIM) {
         for (const char * k : {"n_points", "average"}) {
             if (!entry.contains(k) || (std::string(k) == "average" && !find_value<bool>(entry, k))) continue;
             throw InputError(Diagnostic{.key = key + "." + k,
@@ -1794,7 +1803,17 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                             entry.contains("reference") ? key + ".reference" : "output.reference");
     }
 
-    if (elements) {
+    if (elements && elements->solution()) {
+        // Extracted at each write from the solution then
+        auto iso = std::make_shared<Probe::Isosurface>();
+        iso->mesh = &mesh;
+        iso->region = std::make_shared<region::Region>(elements->with_root(elements->root(), elements->copies()));
+        iso->levels = std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields);
+        iso->n_evaluated = static_cast<uint32_t>(h_codes.size());
+        p.isosurface = std::move(iso);
+        p.geometry.dim = static_cast<uint8_t>(elements->dimension());
+        p.geometry.type = "region " + elements->summary();
+    } else if (elements) {
         select_snapshot_elements(p, mesh, *elements, static_cast<uint32_t>(h_codes.size()));
         if (p.nodes.n_global == 0) throw InputError(gkey + " covers no part of any cell of the mesh.");
     } else if (p.from_region) {
@@ -2830,6 +2849,12 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     const PolyLayout layout = poly_layout(geometry);
     const std::string data = layout.cell_data ? "CellData" : "PointData";
     const std::vector<GeometryArray> fixed = geometry_arrays(geometry);
+    // Extracted at each write: each step's geometry follows the previous ones' in the file
+    const bool changing = static_cast<bool>(isosurface);
+    const char * const kinds[4] = {"Vertices", "Lines", "Polygons", "Strips"};
+    const std::string mine = layout.cells == std::string("Verts")   ? "Vertices"
+                             : layout.cells == std::string("Lines") ? "Lines"
+                                                                    : "Polygons";
     if (k == 0) {
         make_parent(file);
         const std::string & provenance = provenance::json();
@@ -2848,17 +2873,17 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         h5::write_string_scalar_attribute(top, "Type", "PolyData");
         const uint64_t n_points = layout.n_points();
         const int64_t n_points_i = static_cast<int64_t>(n_points);
-        h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points_i, H5P_DEFAULT);
-        h5::write_rows(top, "Points", n_points, 3, 0, n_points, layout.xyz.data(), H5P_DEFAULT);
-        const std::string mine = layout.cells == std::string("Verts")   ? "Vertices"
-                                 : layout.cells == std::string("Lines") ? "Lines"
-                                                                        : "Polygons";
-        for (const char * kind : {"Vertices", "Lines", "Polygons", "Strips"}) {
+        if (!changing) {
+            h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points_i, H5P_DEFAULT);
+            h5::write_rows(top, "Points", n_points, 3, 0, n_points, layout.xyz.data(), H5P_DEFAULT);
+        }
+        for (const char * kind : kinds) {
+            h5::Handle group(H5Gcreate2(top, kind, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, kind);
+            if (changing) continue;
             const std::vector<int64_t> none, zero = {0};
             const auto & o = kind == mine ? layout.offsets : zero;
             const auto & c = kind == mine ? layout.connectivity : none;
             const int64_t counts[2] = {static_cast<int64_t>(o.size() - 1), static_cast<int64_t>(c.size())};
-            h5::Handle group(H5Gcreate2(top, kind, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, kind);
             h5::write_rows<int64_t>(group, "NumberOfCells", 1, 1, 0, 1, &counts[0], H5P_DEFAULT);
             h5::write_rows<int64_t>(group, "NumberOfConnectivityIds", 1, 1, 0, 1, &counts[1], H5P_DEFAULT);
             h5::write_rows(group, "Offsets", o.size(), 1, 0, o.size(), o.data(), H5P_DEFAULT);
@@ -2870,11 +2895,11 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         h5::Handle samples(H5Gopen2(top, data.c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
         for (const auto & a : fixed) {
             const uint64_t rows = a.values.size() / static_cast<size_t>(a.components);
-            h5::write_rows(samples, a.name.c_str(), rows, a.components, 0, rows, a.values.data(),
-                           H5P_DEFAULT);
+            if (changing) continue;
+            h5::write_rows(samples, a.name.c_str(), rows, a.components, 0, rows, a.values.data(), H5P_DEFAULT);
             h5::annotate(samples, a.name, geometry_field(a.name, geometry));
         }
-        h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
+        if (!changing) h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
         h5::Handle steps(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "Steps");
         for (const char * group_name : {"CellDataOffsets", "PointDataOffsets", "FieldDataOffsets"}) {
             h5::Handle group(H5Gcreate2(steps, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
@@ -2906,21 +2931,69 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         h5::put_string_row(h5file, snapshot_block::DATASET, k + 1, k, true, text,
                            snapshot_block::dataset_width(text.size()), H5P_DEFAULT);
     }
+    // The points, and the cells and connectivity ids of each kind, of the steps before this one
+    uint64_t points_before = 0;
+    std::array<int64_t, 4> cells_before = {0, 0, 0, 0}, ids_before = {0, 0, 0, 0};
+    h5::Handle top(H5Gopen2(h5file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    if (changing) {
+        auto sum = [&](hid_t group, const char * name) {
+            int64_t total = 0;
+            if (k > 0) {
+                for (const int64_t c : h5::read_rows<int64_t>(group, name, 0, k, 1, H5P_DEFAULT)) total += c;
+            }
+            return total;
+        };
+        points_before = static_cast<uint64_t>(sum(top, "NumberOfPoints"));
+        const int64_t n_points = static_cast<int64_t>(layout.n_points());
+        h5::put_rows<int64_t>(top, "NumberOfPoints", k + 1, 1, k, 1, &n_points, H5P_DEFAULT);
+        h5::put_rows(top, "Points", points_before + layout.n_points(), 3, points_before, layout.n_points(),
+                     layout.xyz.data(), H5P_DEFAULT);
+        for (size_t i = 0; i < 4; i++) {
+            h5::Handle group(H5Gopen2(top, kinds[i], H5P_DEFAULT), H5Gclose, kinds[i]);
+            cells_before[i] = sum(group, "NumberOfCells");
+            ids_before[i] = sum(group, "NumberOfConnectivityIds");
+            const std::vector<int64_t> none, zero = {0};
+            const auto & o = kinds[i] == mine ? layout.offsets : zero;
+            const auto & c = kinds[i] == mine ? layout.connectivity : none;
+            const int64_t counts[2] = {static_cast<int64_t>(o.size() - 1), static_cast<int64_t>(c.size())};
+            h5::put_rows<int64_t>(group, "NumberOfCells", k + 1, 1, k, 1, &counts[0], H5P_DEFAULT);
+            h5::put_rows<int64_t>(group, "NumberOfConnectivityIds", k + 1, 1, k, 1, &counts[1], H5P_DEFAULT);
+            // Each step's offsets have one more row than its cells
+            const uint64_t at = static_cast<uint64_t>(cells_before[i]) + k;
+            h5::put_rows(group, "Offsets", at + o.size(), 1, at, o.size(), o.data(), H5P_DEFAULT);
+            const uint64_t ids = static_cast<uint64_t>(ids_before[i]);
+            h5::put_rows(group, "Connectivity", ids + c.size(), 1, ids, c.size(), c.data(), H5P_DEFAULT);
+        }
+        if (k == 0) h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
+    }
+    const size_t i_mine = mine == "Vertices" ? 0 : mine == "Lines" ? 1 : 2;
+    const uint64_t data_before = !changing          ? k * n
+                                 : layout.cell_data ? static_cast<uint64_t>(cells_before[i_mine])
+                                                    : points_before;
     h5::Handle samples(H5Gopen2(h5file, ("VTKHDF/" + data).c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
+    if (changing) {
+        for (const auto & a : fixed) {
+            const uint64_t rows = a.values.size() / static_cast<size_t>(a.components);
+            h5::put_rows(samples, a.name.c_str(), data_before + rows, a.components, data_before, rows, a.values.data(),
+                         H5P_DEFAULT);
+            if (k == 0) h5::annotate(samples, a.name, geometry_field(a.name, geometry));
+        }
+    }
     std::vector<double> column(n);
     for (size_t v = 0; v < variables.size(); v++) {
         for (uint64_t i = 0; i < n; i++) column[i] = values[i * n_cols + v];
-        h5::put_rows(samples, variables[v].c_str(), (k + 1) * n, 1, k * n, n, column.data(), H5P_DEFAULT);
+        h5::put_rows(samples, variables[v].c_str(), data_before + n, 1, data_before, n, column.data(), H5P_DEFAULT);
         if (k == 0) {
             h5::annotate(samples, variables[v], field_units::describe(variables[v]));
             h5::cell_methods(samples, variables[v], snapshot_block::cell_methods(field_of(v)));
         }
     }
-    // The geometry is the same at every snapshot: its offsets all stay 0
+    // A geometry the same at every snapshot keeps its offsets 0
     h5::Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
     h5::set_attribute<int64_t>(steps, "NSteps", static_cast<int64_t>(k + 1));
     const double time = block.time;
-    const int64_t zeros[4] = {0, 0, 0, 0}, one = 1, offset = static_cast<int64_t>(k * n);
+    const int64_t zeros[4] = {0, 0, 0, 0}, one = 1, offset = static_cast<int64_t>(data_before);
+    const int64_t part = changing ? static_cast<int64_t>(k) : 0, point_offset = static_cast<int64_t>(points_before);
     {
         h5::Handle field_offsets(H5Gopen2(steps, "FieldDataOffsets", H5P_DEFAULT), H5Gclose, "opening FieldDataOffsets");
         const int64_t field_offset = static_cast<int64_t>(k);
@@ -2928,15 +3001,17 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     }
     h5::put_rows(steps, "Values", k + 1, 1, k, 1, &time, H5P_DEFAULT);
     if (k == 0) h5::annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
-    h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
+    h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, &part, H5P_DEFAULT);
     h5::put_rows(steps, "NumberOfParts", k + 1, 1, k, 1, &one, H5P_DEFAULT);
-    h5::put_rows(steps, "PointOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
-    h5::put_rows(steps, "CellOffsets", k + 1, 4, k, 1, zeros, H5P_DEFAULT);
-    h5::put_rows(steps, "ConnectivityIdOffsets", k + 1, 4, k, 1, zeros, H5P_DEFAULT);
+    h5::put_rows(steps, "PointOffsets", k + 1, 1, k, 1, &point_offset, H5P_DEFAULT);
+    h5::put_rows(steps, "CellOffsets", k + 1, 4, k, 1, cells_before.data(), H5P_DEFAULT);
+    h5::put_rows(steps, "ConnectivityIdOffsets", k + 1, 4, k, 1, ids_before.data(), H5P_DEFAULT);
     h5::Handle data_offsets(H5Gopen2(steps, (data + "Offsets").c_str(), H5P_DEFAULT), H5Gclose,
                             "opening " + data + "Offsets");
     for (const auto & v : variables) h5::put_rows(data_offsets, v.c_str(), k + 1, 1, k, 1, &offset, H5P_DEFAULT);
-    for (const auto & a : fixed) h5::put_rows(data_offsets, a.name.c_str(), k + 1, 1, k, 1, zeros, H5P_DEFAULT);
+    for (const auto & a : fixed) {
+        h5::put_rows(data_offsets, a.name.c_str(), k + 1, 1, k, 1, changing ? &offset : zeros, H5P_DEFAULT);
+    }
     vtkhdf_steps = k + 1;
 #endif
 }
@@ -2967,6 +3042,11 @@ void Probes::Probe::extract(const double t) {
     const Isosurface & iso = *isosurface;
     iso.levels->update(t);
     const auto levels = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), iso.levels->levels());
+    if (snapshot) {
+        select_snapshot_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels),
+                                 iso.region->dimension(), iso.region->summary(), iso.n_evaluated);
+        return;
+    }
     select_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels), iso.region->dimension(),
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
