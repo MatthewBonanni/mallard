@@ -1,0 +1,1 @@
+- The Numerics section of the log reports the share of the cells in structured blocks far enough from the blocks' faces for their reconstruction to read only the block, and the number of distinct stencil shapes among them (cells with the same geometry around them, to 1e-9 of their size) (#440).
