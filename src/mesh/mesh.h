@@ -457,7 +457,7 @@ class Mesh {
         bool is_rotational() const { return periodic_rotation.direction >= 0; }
 
         /** @brief Whether shift row s turns vectors. */
-        bool h_rotated_row(uint8_t s) const {
+        bool h_rotated_row(uint32_t s) const {
             return is_rotational() && shift_lattice[s][static_cast<size_t>(periodic_rotation.direction)] != 0;
         }
 
@@ -465,10 +465,10 @@ class Mesh {
         PeriodicMaps periodic_maps() const { return PeriodicMaps{shifts, shift_rotations}; }
 
         /** @brief Host point x of the frame of cell 1 of face f seen from cell 0 (Q x + t). */
-        void h_forward(uint8_t s, const rtype * x, rtype * y) const;
+        void h_forward(uint32_t s, const rtype * x, rtype * y) const;
 
         /** @brief Host inverse of h_forward: Q^T (y - t). */
-        void h_backward(uint8_t s, const rtype * x, rtype * y) const;
+        void h_backward(uint32_t s, const rtype * x, rtype * y) const;
 
         /**
          * @brief Face f's centroid in the frame of cell c, one of its cells

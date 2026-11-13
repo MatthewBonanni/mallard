@@ -146,6 +146,40 @@ target_include_directories(MallardCore PUBLIC
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
+# Kokkos computes a View's offset in the common type of its indices, so indices
+# that are all narrower than int (uint8_t, uint16_t) wrap the offset and alias
+# entries. Mallard compiles against a copy of Kokkos_View.hpp that rejects them.
+if(USE_SYSTEM_KOKKOS)
+    get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
+    find_file(Mallard_KOKKOS_VIEW_HEADER Kokkos_View.hpp PATHS ${kokkos_includes} NO_DEFAULT_PATH NO_CACHE)
+else()
+    set(Mallard_KOKKOS_VIEW_HEADER ${PROJECT_SOURCE_DIR}/src/external/kokkos/core/src/Kokkos_View.hpp)
+endif()
+if(Mallard_KOKKOS_VIEW_HEADER)
+    file(READ ${Mallard_KOKKOS_VIEW_HEADER} kokkos_view)
+    string(CONCAT narrow "\"Kokkos computes this View offset in the common type of the indices, which wraps when all "
+                         "of them are narrower than int: make one index at least 32 bits (see src/CMakeLists.txt)\"")
+    set(offset_anchor "    using idx_type = std::common_type_t<IndexOffsets...>;\n")
+    set(offset_check "    static_assert(sizeof(idx_type) >= sizeof(int), ${narrow});\n")
+    set(stride_anchor "      std::index_sequence<0>, IndexOffset index_offset) const {\n")
+    string(CONCAT stride_check "    static_assert(!std::is_same_v<typename base_t::layout_type, Kokkos::layout_stride> ||\n"
+                               "                  sizeof(IndexOffset) >= sizeof(int), ${narrow});\n")
+    string(FIND "${kokkos_view}" "${offset_anchor}" offset_found)
+    string(FIND "${kokkos_view}" "${stride_anchor}" stride_found)
+    if(offset_found GREATER_EQUAL 0 AND stride_found GREATER_EQUAL 0)
+        string(REPLACE "${offset_anchor}" "${offset_anchor}${offset_check}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${stride_anchor}" "${stride_anchor}${stride_check}" kokkos_view "${kokkos_view}")
+        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded "${kokkos_view}")
+        configure_file(${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded
+                       ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard/Kokkos_View.hpp COPYONLY)
+        target_include_directories(MallardCore SYSTEM BEFORE PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${Mallard_KOKKOS_VIEW_HEADER})
+    elseif(NOT USE_SYSTEM_KOKKOS)
+        message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_View.hpp no longer computes View offsets as the "
+                            "narrow-index guard expects; update the guard for this Kokkos version.")
+    endif()
+endif()
+
 # Input (common/input.h) records the keys setup reads, and its accessors how it reads
 # them (type, default); a toml::value copy, toml::find or toml::find_or would not
 file(GLOB_RECURSE mallard_sources CONFIGURE_DEPENDS
