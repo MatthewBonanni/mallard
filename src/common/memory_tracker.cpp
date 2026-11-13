@@ -44,7 +44,7 @@ constexpr Rule RULES[] = {
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
     // Faces, gradients and reconstruction buffers
     {"face_solution", false, C::FACES}, {"face_flux", false, C::FACES}, {"face_thermo", false, C::FACES},
-    {"face_mdot", false, C::FACES}, {"face_energy_1", false, C::FACES}, {"species_slots", false, C::FACES},
+    {"face_mdot", false, C::FACES}, {"face_energy_1", false, C::FACES},
     {"gradients", false, C::FACES}, {"viscous_gradients", false, C::FACES}, {"limiters", false, C::FACES},
     {"scalar_", true, C::FACES}, {"image_point_W", false, C::FACES}, {"teno_troubled", true, C::FACES},
     {"teno_n_troubled", false, C::FACES}, {"teno_selection", false, C::FACES}, {"cell_transport", false, C::FACES},

@@ -1134,7 +1134,8 @@ class Solver {
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;  // in face_storage
+        Kokkos::View<rtype *> face_storage;  // face_solution, and in gas mixtures species_slots too
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
         LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
@@ -1204,7 +1205,7 @@ class Solver {
         Kokkos::View<rtype *>::host_mirror_type h_T_seed;
         Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])
         Kokkos::View<rtype **> face_mdot;                     // (face, q)
-        Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k), in face_storage
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)

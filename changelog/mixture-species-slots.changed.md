@@ -1,0 +1,1 @@
+- Gas mixtures keep the species' face fluxes in the face states' memory, which they no longer need by then: 48 bytes less device memory per hexahedron and species (32 per tetrahedron), up to the face states' size; results are bitwise unchanged (#552).
