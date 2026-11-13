@@ -515,8 +515,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
                                         flux_weights, species_slots);
     if (budget_pass) {
-        budget.convective = kinetic_energy_rate();
-        budget.pressure_work = pressure_work_rate();
+        budget_rates_of_fluxes(0);
     }
     bool sgs_only = false;
     auto viscous_flux = [&] {
@@ -541,7 +540,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (tfles_on) thicken_transport();
         viscous_flux();
-        if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
+        if (budget_pass) budget_rates_of_fluxes(1);
     }
 
     const uint32_t n_owned = mesh->n_owned();
@@ -585,11 +584,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
-        Kokkos::deep_copy(face_flux, 0.0_r);
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), face_flux, 0.0_r);
         sgs_only = true;
         viscous_flux();
-        budget.sgs = kinetic_energy_rate();
-        budget.viscous -= budget.sgs;
+        budget_rates_of_fluxes(2);
     }
 }
 
