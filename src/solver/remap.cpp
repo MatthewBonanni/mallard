@@ -249,6 +249,10 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
     const std::vector<uint32_t> index = exponent_index(exponents, options.degree);
     const double * Mc = &moments[size_t(c) * n_max];
     std::vector<uint32_t> stencil;
+    double binomials[MAX_DEGREE + 1][MAX_DEGREE + 1];
+    for (uint32_t a = 0; a <= options.degree; a++) {
+        for (uint32_t b = 0; b <= a; b++) binomials[a][b] = binomial(a, b);
+    }
     // The fewest rings with twice as many cells as unknowns, more while the
     // fit is rank deficient, then lower degrees
     for (uint8_t p = options.degree; p > 0; p--) {
@@ -282,6 +286,11 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
                 const double w = 1.0 / std::sqrt(dist);
                 const double rho = size[j] / size[c];
                 const double * Mj = &moments[size_t(j) * n_max];
+                double rho_pow[MAX_DEGREE + 1], delta_pow[3][MAX_DEGREE + 1];
+                for (uint32_t k = 0; k <= p; k++) {
+                    rho_pow[k] = std::pow(rho, double(k));
+                    for (size_t d = 0; d < 3; d++) delta_pow[d][k] = std::pow(delta[d], double(k));
+                }
                 for (uint32_t l = 1; l <= n; l++) {
                     const auto & al = exponents[l];
                     // Mean over j of ((x - x_c) / h_c)^al, from j's own moments
@@ -290,10 +299,9 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
                         for (uint32_t b1 = 0; b1 <= al[1]; b1++) {
                             for (uint32_t b2 = 0; b2 <= al[2]; b2++) {
                                 const uint32_t beta = index[(b0 * s + b1) * s + b2];
-                                sum += binomial(al[0], b0) * binomial(al[1], b1) * binomial(al[2], b2) *
-                                       std::pow(rho, double(b0 + b1 + b2)) * std::pow(delta[0], double(al[0] - b0)) *
-                                       std::pow(delta[1], double(al[1] - b1)) *
-                                       std::pow(delta[2], double(al[2] - b2)) * Mj[beta];
+                                sum += binomials[al[0]][b0] * binomials[al[1]][b1] * binomials[al[2]][b2] *
+                                       rho_pow[b0 + b1 + b2] * delta_pow[0][al[0] - b0] * delta_pow[1][al[1] - b1] *
+                                       delta_pow[2][al[2] - b2] * Mj[beta];
                             }
                         }
                     }
@@ -597,6 +605,32 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     report.n_nearest = comm::allreduce(local.n_nearest, comm::Op::SUM);
     report.n_limited = comm::allreduce(n_limited, comm::Op::SUM);
     report.max_uncovered = comm::allreduce(local.max_uncovered, comm::Op::MAX);
+    return out;
+}
+
+Source global_source(std::shared_ptr<const Mesh> source, const std::vector<std::vector<double>> & values,
+                     const std::vector<int> & groups, const Options & options) {
+    std::vector<std::vector<double>> local(values.size(), std::vector<double>(source->n_cells));
+    for (size_t v = 0; v < values.size(); v++) {
+        for (uint32_t c = 0; c < source->n_cells; c++) local[v][c] = values[v][source->h_global_cell(c)];
+    }
+    return Source(source, local, groups, options);
+}
+
+std::vector<std::vector<double>> remap_global(std::shared_ptr<const Mesh> source,
+                                              const std::vector<std::vector<double>> & values,
+                                              const std::vector<int> & groups, const Options & options,
+                                              const Mesh & target, Report & report) {
+    return remap_global(global_source(source, values, groups, options), target, report);
+}
+
+std::vector<std::vector<double>> remap_global(const Source & field, const Mesh & target, Report & report) {
+    const std::vector<std::vector<double>> on_target = field.to(target, target.n_owned(), report);
+    const uint64_t n = target.n_global_cells > 0 ? target.n_global_cells : target.n_cells;
+    std::vector<std::vector<double>> out(on_target.size(), std::vector<double>(n, 0.0));
+    for (size_t v = 0; v < on_target.size(); v++) {
+        for (uint32_t c = 0; c < target.n_owned(); c++) out[v][target.h_global_cell(c)] = on_target[v][c];
+    }
     return out;
 }
 

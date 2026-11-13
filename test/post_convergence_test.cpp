@@ -97,6 +97,17 @@ TEST(ConvergenceTest, ErrorsOfKnownOrderGiveItPairwiseAndFitted) {
     EXPECT_NEAR(convergence::fitted_order(h, e), 2.5, 1e-12);
 }
 
+TEST(ConvergenceTest, ErrorsAgainstTheFinestGridGiveTheOrderOfTheirModel) {
+    const std::vector<double> h = {0.4, 0.2, 0.1, 0.05};
+    const double h_ref = 0.025;
+    std::vector<double> e;
+    for (const double x : h) e.push_back(3.0 * (std::pow(x, 2.5) - std::pow(h_ref, 2.5)));
+    EXPECT_NEAR(convergence::reference_order(h[2], h[3], h_ref, e[2], e[3]), 2.5, 1e-9);
+    EXPECT_NEAR(convergence::fitted_reference_order(h, e, h_ref), 2.5, 1e-6);
+    // Errors that shrink slower than any positive order allows
+    EXPECT_TRUE(std::isnan(convergence::reference_order(h[2], h[3], h_ref, 1.0, 0.9)));
+}
+
 // Celik et al. (2008), Table 1: N1, N2, N3 cells of a 2D backward-facing step, h = (1 / N)^(1/2)
 TEST(ConvergenceTest, CelikTable1) {
     struct Column {
@@ -256,6 +267,20 @@ TEST(PostConvergenceTest, RunsInAnyOrderGiveTheirTablesAndTheSchemesOrder) {
     EXPECT_GT(l1["errors"].array[0].number, l1["errors"].array[2].number);
     EXPECT_NEAR(l1["orders"].array[1].number, 2.0, 0.4);
 
+    // Against the finest run instead: the order of the two coarser runs is the exact solution's, within its spread
+    const Result finest = convergence_cmd({fine, coarse, medium, "--field", "RHO", "--format", "json"});
+    ASSERT_EQ(finest.status, 0) << finest.out << finest.err;
+    const json::Value f = json::parse(finest.out);
+    EXPECT_EQ(f["field"]["reference"].string, "finest");
+    EXPECT_EQ(f["status"].string, "ok") << finest.out;
+    for (size_t k = 0; k < 3; k++) {
+        const json::Value & exact = n["field"]["norms"].array[k];
+        const json::Value & reference = f["field"]["norms"].array[k];
+        ASSERT_EQ(reference["errors"].array.size(), 2u);
+        ASSERT_EQ(reference["orders"].array.size(), 1u);
+        EXPECT_NEAR(reference["orders"].array[0].number, exact["orders"].array[0].number, 0.15) << finest.out;
+    }
+
     // The default: every column; those that vanish (no vorticity in this flow) are zero, not divergent noise
     const Result all = convergence_cmd({coarse, medium, fine, "--format", "json"});
     ASSERT_EQ(all.status, 0) << all.out << all.err;
@@ -296,7 +321,7 @@ TEST(PostConvergenceTest, MisuseIsAUsageErrorAndOneRunTwiceAnError) {
     const std::string coarse = wave_run(8);
     const Result field = convergence_cmd({coarse, coarse, "--field", "RHO"});
     EXPECT_EQ(field.status, 2);
-    EXPECT_NE(field.err.find("planned"), std::string::npos) << field.err;
+    EXPECT_NE(field.err.find("three or more runs"), std::string::npos) << field.err;
     const Result twice = convergence_cmd({coarse, coarse});
     EXPECT_EQ(twice.status, 1);
     EXPECT_NE(twice.err.find("same"), std::string::npos) << twice.err;
