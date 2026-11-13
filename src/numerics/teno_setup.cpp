@@ -4658,8 +4658,10 @@ class Setup2D {
             if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
             d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
             d.triangle_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.triangle_rule);
-            d.rule_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_start);
-            d.rule_points = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_points);
+            if (h.curved) {
+                d.rule_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_start);
+                d.rule_points = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_points);
+            }
             d.face_gauss = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.face_gauss);
             caps.rows = std::max<uint32_t>(ns_max, nss_max);
             caps.sector = nss_max + 1;
@@ -4672,7 +4674,7 @@ class Setup2D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Scratch and outputs within about a quarter of the free device memory
+            // Scratch and outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -4681,10 +4683,13 @@ class Setup2D {
             const size_t out_bytes = size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32;
             size_t n = free_bytes / 4 / (out_bytes + caps.bytes(nk));
-            n = std::min<size_t>(n, 65536);
+            n = std::min<size_t>(n, MAX_BATCH);
             n = std::max<size_t>(n / 1024 * 1024, 1024);
             return static_cast<uint32_t>(n);
         }
+
+        // The initial solution's chunk of cells: meshes larger than it share the setup's workspace, sized by the device
+        static constexpr size_t MAX_BATCH = 16384;
 
         void compute(const Kokkos::View<uint32_t *> & cells, const uint32_t n, TableBatch & out) {
             Kokkos::Timer timer;
