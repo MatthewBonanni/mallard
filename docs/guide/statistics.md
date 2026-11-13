@@ -326,9 +326,8 @@ outside the ranges.
   on any number of ranks, and restart files continue them bitwise. They hold
   each entry by its position in the list: a restart file whose entry there has
   other variables, bins or fields is an error unless `statistics.reset = true`.
-- On GPUs, entries of the solution's own variables are sampled without
-  stopping the steps queued ahead of the host; entries reading derived fields,
-  `HRR` or `OMEGA_<species>` stop them at each sampling step.
+- On GPUs, entries are sampled without stopping the steps queued ahead of the
+  host, including those reading derived fields, `HRR` or `OMEGA_<species>`.
 - `mallard post average --conditional` computes the same files from saved
   snapshots of a run without them; from restart files of the run's sampling
   steps, they are the run's to the digit (below).

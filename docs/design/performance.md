@@ -473,12 +473,15 @@ monitors itself, with the same device reduction, so rows match at any depth. Mon
 kinetic-energy budget or fused chemistry stay on the host.
 
 The statistics sample in the graph too (means, spectra, phase averages and conditional statistics), unless
-they read derived fields or the chemistry's rates, or chemistry is fused. Each part is due by its own interval and
+chemistry is fused. Each part is due by its own interval and
 `t_start`, which its clock in device memory holds. The means' clock (weight, last sample time, `t_start`, sample count) lives
 in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
 (`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
 match the host's bit for bit. The host reads the clock when it writes a snapshot or a restart.
-Spectra, phases and `[[statistics.conditional]]` entries sample under flags of their own; the conditional
+Spectra, phases and `[[statistics.conditional]]` entries sample under flags of their own. Under a flag for any
+of them, the fields they read are computed once, as the host's `sample_statistics` computes them: the
+primitives, or the cell states, velocity gradients and derived fields, and the heat release rate and
+production rates. Every derived field is computed on the device, at the device's `t` for the boundary states. The conditional
 entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra written at each sample (`average =
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.

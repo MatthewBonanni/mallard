@@ -852,6 +852,8 @@ class Solver {
         region::CellFields cell_fields() const;
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
+        /** @brief The fields [statistics] sample: the primitives, and the derived fields and HRR they read (capturable). */
+        void update_statistics_fields();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -905,7 +907,7 @@ class Solver {
         Kokkos::View<double *> monitor_results;  // columns of every monitor
         Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
-        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry]
+        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry, any]
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
