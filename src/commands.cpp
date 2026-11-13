@@ -177,7 +177,8 @@ constexpr Option DIFF_OPTIONS[] = {
 constexpr Option EXTRACT_OPTIONS[] = {
     {"-i", "", "FILE",
      "The input file of the case: its mesh, physics, numerics, [regions] and [[probes]]. Default: the input in "
-     "the run block of FILE (Mallard 0.10 and later record it resolved)."},
+     "the run block of FILE (Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
     {"--probe", "", "NAMES",
      "The [[probes]] of the input to extract, by name, separated by commas (--probe wake,box). Default: every "
      "one, unless --region or --snapshot is given."},
@@ -222,7 +223,8 @@ constexpr Option DERIVE_OPTIONS[] = {
      "post derive writes. Required."},
     {"-i", "", "FILE",
      "The input file of the case: its mesh, physics, numerics and [output] reference and mixture. Default: the "
-     "input in the run block of FILE (Mallard 0.10 and later record it resolved)."},
+     "input in the run block of FILE (Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
     {"--reference", "", "TABLE",
      "The [output] reference of CP, as an inline TOML table ('{rho = 1.2, u = [30, 0], p = 101325}'), in place "
      "of the input's. Default: the input's."},
@@ -296,7 +298,8 @@ constexpr Option AVERAGE_OPTIONS[] = {
      "derive. Default: the input's."},
     {"-i", "", "FILE",
      "The input file of the case: its mesh, physics and numerics. Default: the input in the run block of FILE "
-     "(Mallard 0.10 and later record it resolved)."},
+     "(Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
     {"--snapshot", "", "vtkhdf|vtu",
      "The format of the snapshot of the averages: OUTPUT/NAME_<step>.vtkhdf with a .vtkhdf.series, or a .vtu "
      "file with a .pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
@@ -742,7 +745,7 @@ constexpr Command COMMANDS[] = {
         .summary = "The input keys there are, or exactly those of one case: type, units, default, values",
         .synopsis = "mallard list keys [SECTION] [INPUT] [--format text|json]",
         .description =
-            "Without an input file, lists the key catalog docs/input-keys.json: every key the examples and "
+            "Without an input file, lists the key catalog docs/input-keys/: every key the examples and "
             "tutorials read, by table, with its type, units (of a number with a physical dimension), default "
             "(or required) and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
             "\n"

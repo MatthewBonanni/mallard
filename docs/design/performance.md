@@ -445,15 +445,16 @@ host decides as before.
 
 The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
 Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
-time-step reduction reads, as before. The step body sits under a conditional IF node on a device flag: after
+time-step reduction reads, as before, with minus rank 0's wall time (the other ranks post the largest value),
+which the reduction's minimum gives every rank for the triggers that read `wall`. The step body sits under a conditional IF node on a device flag: after
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers stop the device at every step (triggers read probe values and the wall time on the
-host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
+Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
+the host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
 expressions' errors on the host, or follow the half step the host completes). Outputs stop the device at
 their steps.
 
@@ -471,11 +472,19 @@ writes the rows from the record as it takes it. At a step where the device stops
 monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
 kinetic-energy budget or fused chemistry stay on the host.
 
-The statistics means sample in the graph too, when they are the only statistics (no spectra or phase
-averages) and chemistry is not fused. Their clock (weight, last sample time, `t_start`, sample count) lives
+The statistics sample in the graph too (means, spectra, phase averages and conditional statistics), unless
+chemistry is fused. Each part is due by its own interval and
+`t_start`, which its clock in device memory holds. The means' clock (weight, last sample time, `t_start`, sample count) lives
 in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
 (`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
 match the host's bit for bit. The host reads the clock when it writes a snapshot or a restart.
+Spectra, phases and `[[statistics.conditional]]` entries sample under flags of their own. Under a flag for any
+of them, the fields they read are computed once, as the host's `sample_statistics` computes them: the
+primitives, or the cell states, velocity gradients and derived fields, and the heat release rate and
+production rates. Every derived field is computed on the device, at the device's `t` for the boundary states. The conditional
+entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra written at each sample (`average =
+false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
+the file from it as it takes the record.
 
 Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
 evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
@@ -484,6 +493,92 @@ derived fields the due probes read are updated (the cell states, transport and g
 array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
+
+### 11. Read-only loads (#641, not kept)
+
+No View in `src/` carries `Kokkos::RandomAccess` or `Kokkos::Restrict`. Those traits would not change anything
+either: Mallard builds Kokkos 5.2 with its mdspan-based View (`Kokkos_ENABLE_IMPL_MDSPAN`, the default, so not
+`Kokkos_ENABLE_IMPL_VIEW_LEGACY`), whose accessor depends only on the `Unmanaged` and `Atomic` traits. The
+`__ldg` loads for const `RandomAccess` Views belong to the legacy View only. To measure what read-only loads
+are worth, `__ldg` was tried explicitly (the read-only, non-coherent path that `const __restrict__` pointers allow
+in CUDA) on the reads of data that no thread writes during the kernel. It was applied cumulatively: (a) TENO's
+packed stencil tables (pseudo-inverses, stencil cells and faces), (b) the stencil states (W) that the smooth and
+troubled passes gather, (c) the face states the convective flux reads and the face fluxes that `face_flux_sum`
+gathers. Each change multiplied the 3D build's `LDG.E.*.CONSTANT` instructions (345 on `main`, then 2434, 3298 and
+3466), and results stayed bitwise identical (`mallard diff` of the restart files after 30 steps of `teno5_3d`).
+
+| `teno5_3d` (A100, CUDA 13.5), best of 3, interleaved | main | (a) | (a, b) | (a, b, c) |
+|---|---|---|---|---|
+| throughput, cells/s | 6.06M | 6.06M | 6.06M | 6.06M |
+| wall time per step | 146 ms | 146 ms | 146 ms | 146 ms |
+| `teno_smooth` (team pass), per launch (Nsight Systems) | 42.09 ms | | | 42.12 ms |
+| `convective_flux` (HLLC), per launch | 3.432 ms | | | 3.430 ms |
+| `face_flux_sum`, per launch | 179.2 us | | | 179.3 us |
+
+None of them won, so none was kept. On the A100, ordinary global loads are already cached in L1, which is also
+where the read-only path caches. The smooth pass waits on the latency of its dependent loads (section 1),
+not on cache capacity, and the flux kernels stream their face data once.
+
+### 12. Staged stencil entries in the 3D smooth pass (#641, not kept)
+
+The team smooth pass (TENO5 on hexahedra, conservative variables) compiles to 168 registers and a 320 B stack. Its
+launch bounds leave room for 10 warps per SM. Over the stencil, each entry is a chain of dependent loads (the
+stencil cell, then its 5 values of W, scattered), and the 5 threads of a cell all load the same entries. Nsight
+Compute's counters were not available, so these figures come from the compiled kernel (`cuobjdump`).
+
+The tried change: each team stages its stencil entries in team scratch, in rounds of STAGE entries. Each of a cell's
+threads loads every fifth entry, issuing all its loads of the round before using any, then every thread takes the
+round's entries in order. This was tried in two forms. Times are for `teno5_3d` on one A100, interleaved best of 3:
+
+| | ms/step | cells/s | bitwise |
+|---|---|---|---|
+| main | 146-147 | 6.05M | |
+| loader converts to conservative variables, STAGE = 10 | 136 | 6.50M | no |
+| the same, STAGE = 15 | 137 | 6.46M | not checked |
+| the same, STAGE = 25 | 146 | 6.08M | not checked |
+| loader stages the raw loads (stencil cell, face field, W) only, STAGE = 10 | 157-158 | 5.61M | yes (`teno5_3d`, 30 steps) |
+
+- With the conversion in the loading thread, U goes through shared memory. nvcc can then no longer fuse `W0 * W1 - U0`
+  into one FMA as it does on main, and 6 of 8 cases differ from main by about 3e-16 relative.
+- Order 6 does not fit two teams per SM with the staged entries (Kokkos caps the team size at 32).
+- STAGE = 25 (78 KB of scratch per team) leaves the SM about 28 KB of L1, against 92 KB on main, and loses the gain.
+- Staging only the raw loads keeps the arithmetic and the results, but every thread then repeats the conversion and
+  reads 5 doubles of shared memory per entry, which costs more than the loads it overlaps.
+- A run of main against itself on a gas-mixture case was bitwise identical, so the differences above come from
+  the change.
+
+Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
+
+### 13. TENO setup on CPUs (#916)
+
+A start without a TENO cache, and `mallard post derive` or `post extract` of a run without one, spend nearly
+all their setup in the per-cell tables. Profiled on the host (`sample`, 2 Threads), the 2D setup was mostly
+the monomial means over each stencil cell's quadrature points (36 per triangle at order 5) and the
+smoothness-indicator integrals, the 3D setup the central least-squares fit (QR and pseudo-inverse), its
+Lebesgue constant, the cells' moments and the 3D monomial means.
+
+- **Powers by recurrence.** `teno::monomials` and the 2D smoothness integrals formed each power with
+  `ipow` and each monomial's exponents by a search, at every point; they now take the powers from a table
+  built by the same repeated multiplication, and the exponents and falling factorials once per cell.
+- **Sector means from the central ones.** In 2D, the degree-2 means of a sector stencil's cell are the
+  first of the degree-r means the central fit already has (the same sums, term by term), so they are
+  copied instead of integrated again; mirror images, whose line face may change with the deeper gather,
+  are still integrated.
+- **Lebesgue constant along memory.** The sums over the stencil's cells read the pseudo-inverse
+  transposed into the free least-squares matrix, so they run over contiguous memory and vectorize.
+
+Every value takes the same sequence of operations, so the tables are bitwise unchanged: the TENO cache
+files of the cases below and of the 2D and 3D cylinder test meshes (triangles and quadrilaterals with
+curved walls, tetrahedra and pyramids, symmetry planes) are byte for byte those of the previous code.
+Apple M4 Pro, 2 Threads, TENO5, `numerics` setup phase, the better of 2 alternating runs:
+
+| case | tables before | tables after | instructions |
+|---|---|---|---|
+| 2D double Mach reflection, 115,200 triangles | 6.2 s | 3.7 s | -36% |
+| 3D Taylor-Green vortex, 64³ hexahedra | 26.0 s | 23.4 s | -19% |
+
+The 3D moments (5.6 s for 64³, the same before and after), the QR and the search are left: their
+operations are already in order, and changing their order would change the tables.
 
 ## Scaling (one node)
 

@@ -18,6 +18,8 @@
 
 #include <Kokkos_Macros.hpp>
 
+#include "lock_arrays.h"
+
 #ifndef Mallard_DIM
 #define Mallard_DIM 2
 #endif

@@ -52,13 +52,14 @@
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
+#include "run_control.h"
 #include "exact_sums.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
+#include "face_exchange.h"
 #include "partition.h"
 #include "halo_exchange.h"
 #include "log.h"
-#include "run_control.h"
 #include "check.h"
 #include "run_report.h"
 #include "memory_tracker.h"
@@ -138,6 +139,9 @@ bool writes_variable(const Input & input, const std::string & name);
 
 class Solver {
     public:
+        /** @brief Values of the step's time-step reduction: dt_cfl1, the run-control requests and minus the wall time. */
+        static constexpr int N_STEP_REDUCE = 2 + run_control::N_REQUESTS;
+
         Solver();
         ~Solver();
 
@@ -325,6 +329,8 @@ class Solver {
         const rtype * step_dt_device() const;
         /** @brief The step's start time on the device, inside a step graph. */
         const rtype * step_time_device() const;
+        /** @brief Minus rank 0's wall time as the host posted it before the step, reduced over the ranks; in a step graph. */
+        const rtype * step_wall_device() const;
         /** @brief bc.data[0] of each average-pressure outlet: its target p (of t, from timed_fields) less the mean p. */
         void update_average_pressure_outlets(StateView solution);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
@@ -652,8 +658,13 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
-        /** @brief Fences the device inside the step's conditional body, so a step graph's capture fails (tests). */
-        void set_fence_in_step_body(bool on) { fence_in_step_body = on; }
+        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
+        enum class CaptureFault {
+            NONE,
+            FENCE,         // fails while the stream captures
+            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+        };
+        void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -849,6 +860,8 @@ class Solver {
         region::CellFields cell_fields() const;
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
+        /** @brief The fields [statistics] sample: the primitives, and the derived fields and HRR they read (capturable). */
+        void update_statistics_fields();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -881,7 +894,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
-        bool fence_in_step_body = false;
+        CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         void * capture_graph = nullptr;        // cudaGraph_t being captured
@@ -889,7 +902,7 @@ class Solver {
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
-        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> requests_posted;  // pinned: written by the host any time
@@ -902,7 +915,7 @@ class Solver {
         Kokkos::View<double *> monitor_results;  // columns of every monitor
         Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
-        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means and spectra, the phases]
+        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry, any]
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
@@ -960,6 +973,14 @@ class Solver {
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
+        /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
+        void start_reconstruction(StateView solution);
+        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
+        void exchange_halo(const State & state);
+        /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
+        void discard_reconstruction();
+        /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
+        void exchange_for_first_stage();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /** @brief kinetic_energy_rate into *out on the device. */
@@ -977,7 +998,9 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
-        void launch_flux_functor();
+        void launch_flux_functor(Kokkos::View<uint32_t *> faces);
+        /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
+        bool exchanges_partition_faces() const;
         /**
          * @brief Blend the convective face fluxes toward first order where the
          *        update would leave a cell without positive density or pressure
@@ -997,8 +1020,14 @@ class Solver {
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
         Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
+        // another rank, and those that do (partition faces, transmissive faces with a remote image)
+        FaceExchange face_exchange;
+        Kokkos::View<uint32_t *> local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
+        bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
+        Kokkos::DefaultExecutionSpace comm_space;      // high priority: exchanges and the work around them
 
         Input input;
         bool check_only = false;  // within check()

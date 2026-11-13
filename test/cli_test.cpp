@@ -937,6 +937,19 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     const Result typo = run({"list", "keys", "numerix"}, true);
     EXPECT_EQ(typo.status, 2);
     EXPECT_TRUE(contains(typo.err, "did you mean \"numerics\"")) << typo.err;
+    // Every file of the catalog is a key, including those whose file names are percent-encoded
+    const Result all = run({"list", "keys", "--format", "json"}, true);
+    ASSERT_EQ(all.status, 0) << all.err;
+    const json::Value catalog = json::parse(all.out)["keys"];
+    for (const fs::path & dir : data_dirs()) {
+        if (!fs::is_directory(dir / "docs" / "input-keys")) continue;
+        const auto files = std::distance(fs::directory_iterator(dir / "docs" / "input-keys"), fs::directory_iterator());
+        EXPECT_EQ(catalog.keys().size(), static_cast<size_t>(files));
+        break;
+    }
+    for (const char * key : {"boundaries.nscbc.sigma_t", "boundaries.nscbc.sigma_T", "regions.<name>.type"}) {
+        EXPECT_TRUE(catalog.has(key)) << key;
+    }
 
     ASSERT_EQ(small_run().status, 0);
     const Result text = run({"list", "keys", "[write_data]", "small.toml"}, true);

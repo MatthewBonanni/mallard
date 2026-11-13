@@ -169,6 +169,18 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - Pull requests are squash-merged: the PR title becomes the commit subject on
   `main`, so make it descriptive. Intermediate commits on the branch need not be
   tidy; push new commits rather than rewriting history once a review has started.
+- Pull requests open at the same time edit the same docs, so write them to merge
+  without conflicts:
+  - in the README and the docs, one item per line (a bullet or a table row): a new
+    item is a line of its own, not more text on another item's line;
+  - where the order of a list carries no meaning (the README's command-line tools,
+    the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
+    items in their place, so that additions of different pull requests land on
+    different lines;
+  - in a merge, generated text is regenerated, not merged by hand: the "Used in"
+    lines (`python tools/docs/used_in.py`), the feature matrix
+    (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
+    (`python tools/dev/input_catalog.py build ...`).
 - **Before asking for CI**, run `tools/dev/precheck.sh`: in a few seconds and without a
   build, it checks that the branch merges into `main` and runs CI's checks that need no
   build (spelling, docs, feature matrix, changelog) on the merge.
@@ -180,9 +192,13 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
   x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
-  suites are split across several jobs (`CI / mpi-3d-1of4`, ...), each running a share of
-  the tests, so a test must not depend on another having run in the same process, and a
-  test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
+  suites are split across several jobs (`CI / mpi-3d-1of4`, ...) on one build
+  (`CI / build-mpi-3d`), each running a share of the tests of about equal duration
+  (`tools/dev/test_split.py`, from the durations of `main`'s newest passed run, or else
+  `tools/dev/test_times.json`, which `test_split.py refresh` rewrites), and the suites without MPI run as several processes at once, so a test must
+  not depend on another having run in the same process nor share a file path with another,
+  and a test that reruns the test binary passes its own `--gtest_filter` (CI sets
+  `GTEST_FILTER`) and unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
 - **`main` runs everything every 3 hours** when it has changed: every supported compiler
   on x86-64 and arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and
@@ -199,6 +215,11 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;
   any other name fails the run). The `CI` status records the subset. A resolution in build files,
   shared headers or anything the whole suite exercises needs the full run.
+- **Only the tests a change can affect**: `-f gtest_filter=<pattern>` runs only those tests
+  in the backend jobs (`-*` for none), which still build and run their other checks in full.
+  Each push to `main` maps every test to the files it depends on (`coverage.yml`,
+  `tools/dev/test_coverage.py`), and each backend job uploads its results as JUnit XML
+  (`junit-<job>`), so the tooling that dispatches CI can pick the filter.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
