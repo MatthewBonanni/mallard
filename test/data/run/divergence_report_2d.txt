@@ -1,13 +1,13 @@
 == Divergence report ================================================================ ERROR
   Run RUN-ID.
   SI units. Invalid: a non-finite value, or a non-positive density or pressure.
-  status  quantity                    value    units  basis
-  ERROR   failing step                120      -
-          t                           0.00025  s
-  ERROR   invalid cells               3        cells  of 4,096
-            pressure failed first     1        cells
-            temperature failed first  2        cells
-          last valid step             119      -      t = 0.000248 s, in restart_000119.restart
+  status  quantity                    value      units  basis
+  ERROR   failing step                120        -
+          t                             0.00025  s
+  ERROR   invalid cells                 3        cells  of 4,096
+            pressure failed first       1        cells
+            temperature failed first    2        cells
+          last valid step             119        -      t = 0.000248 s, in restart_000119.restart
   The invalid cells lie within (0.01, 0.02) - (0.015, 0.025) m.
   Closest to failing at the last valid state: cell 812 at (0.01, 0.02) m (its temperature
   failed).
@@ -55,9 +55,9 @@
                                                                             480 chemistry sub-steps
   closest: the invalid cell closest to failing at that state; neighbor: its face neighbors;
   other: the next invalid cells.
-  quantity       value   units
-  mean density   1.05    kg/m^3
-  mean pressure  101000  Pa
+  quantity       value      units
+  mean density        1.05  kg/m^3
+  mean pressure  101000     Pa
 
 == Progress rows before the failure =======================================================
   step  t [s]    dt [s]  CFL   min rho [kg/m^3]  min p [Pa]  min T [K]
@@ -76,13 +76,13 @@
   Run RUN-ID.
   Nondimensional case (physics.units): no units. Invalid: a non-finite value, or a
   non-positive density or pressure.
-  status  quantity                    value    units  basis
-  ERROR   failing step                120      -
-          t                           0.00025  -
-  ERROR   invalid cells               3        cells  of 4,096
-            pressure failed first     1        cells
-            temperature failed first  2        cells
-          last valid step             119      -      t = 0.000248, in restart_000119.restart
+  status  quantity                    value      units  basis
+  ERROR   failing step                120        -
+          t                             0.00025  -
+  ERROR   invalid cells                 3        cells  of 4,096
+            pressure failed first       1        cells
+            temperature failed first    2        cells
+          last valid step             119        -      t = 0.000248, in restart_000119.restart
   The invalid cells lie within (0.01, 0.02) - (0.015, 0.025).
   Closest to failing at the last valid state: cell 812 at (0.01, 0.02) (its temperature
   failed).
@@ -128,9 +128,9 @@
                                                               480 chemistry sub-steps
   closest: the invalid cell closest to failing at that state; neighbor: its face neighbors;
   other: the next invalid cells.
-  quantity       value   units
-  mean density   1.05    -
-  mean pressure  101000  -
+  quantity       value      units
+  mean density        1.05  -
+  mean pressure  101000     -
 
 == Progress rows before the failure =======================================================
   step  t        dt     CFL   min rho  min p  min T

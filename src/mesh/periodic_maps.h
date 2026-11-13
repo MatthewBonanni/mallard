@@ -34,7 +34,7 @@ struct PeriodicMaps {
 
     /** @brief v <- Q_s v. */
     KOKKOS_INLINE_FUNCTION
-    void rotate(const uint8_t s, rtype * v) const {
+    void rotate(const uint32_t s, rtype * v) const {
         rtype r[N_DIM];
         FOR_I_DIM {
             r[i] = 0.0_r;
@@ -45,7 +45,7 @@ struct PeriodicMaps {
 
     /** @brief v <- Q_s^T v. */
     KOKKOS_INLINE_FUNCTION
-    void unrotate(const uint8_t s, rtype * v) const {
+    void unrotate(const uint32_t s, rtype * v) const {
         rtype r[N_DIM];
         FOR_I_DIM {
             r[i] = 0.0_r;
@@ -60,7 +60,7 @@ struct PeriodicMaps {
      */
     template <bool ROTATIONS = true>
     KOKKOS_INLINE_FUNCTION
-    void forward(const uint8_t s, const rtype * x, rtype * y) const {
+    void forward(const uint32_t s, const rtype * x, rtype * y) const {
         FOR_I_DIM y[i] = x[i];
         if (ROTATIONS && rotated()) rotate(s, y);
         FOR_I_DIM y[i] = y[i] + shifts(s, i);
@@ -69,14 +69,14 @@ struct PeriodicMaps {
     /** @brief y = Q_s^T (x - t_s): the inverse of forward. */
     template <bool ROTATIONS = true>
     KOKKOS_INLINE_FUNCTION
-    void backward(const uint8_t s, const rtype * x, rtype * y) const {
+    void backward(const uint32_t s, const rtype * x, rtype * y) const {
         FOR_I_DIM y[i] = x[i] - shifts(s, i);
         if (ROTATIONS && rotated()) unrotate(s, y);
     }
 
     /** @brief The velocity (or momentum) of a state vector u, components [1, N_DIM], by Q_s or Q_s^T. */
     KOKKOS_INLINE_FUNCTION
-    void rotate_state(const uint8_t s, rtype * u, const bool inverse = false) const {
+    void rotate_state(const uint32_t s, rtype * u, const bool inverse = false) const {
         if (inverse) {
             unrotate(s, u + 1);
         } else {
@@ -90,7 +90,7 @@ struct PeriodicMaps {
      *        (none if v0 < 0), so that block turns as Q G Q^T.
      */
     KOKKOS_INLINE_FUNCTION
-    void rotate_gradients(const uint8_t s, rtype (*g)[N_DIM], const uint8_t n, const int v0,
+    void rotate_gradients(const uint32_t s, rtype (*g)[N_DIM], const uint8_t n, const int v0,
                           const bool inverse = false) const {
         for (uint8_t k = 0; k < n; k++) {
             if (inverse) {

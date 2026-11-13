@@ -79,7 +79,8 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
         if (c1_index < 0) continue;
         const uint32_t c1 = static_cast<uint32_t>(c1_index);
         double shift[3] = {0.0, 0.0, 0.0};
-        FOR_I_DIM shift[i] = double(mesh.h_shifts(mesh.h_face_shift(f), i));
+        const uint32_t s = mesh.h_face_shift(f);
+        FOR_I_DIM shift[i] = double(mesh.h_shifts(s, i));
         n_shifted += mesh.h_face_shift(f) != 0;
         std::vector<uint32_t> face_nodes;
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_face(f); k++) face_nodes.push_back(mesh.h_node_of_face(f, k));
@@ -108,11 +109,12 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
             const uint32_t nb = neighbors(k);
+            const uint32_t s = neighbor_shifts(k);
             bool touch = false;
             for (uint32_t a = 0; a < mesh.h_n_nodes_of_cell(c); a++) {
                 for (uint32_t b = 0; b < mesh.h_n_nodes_of_cell(nb); b++) {
                     auto q = node_point(mesh, mesh.h_node_of_cell(nb, b));
-                    FOR_I_DIM q[i] += double(mesh.h_shifts(neighbor_shifts(k), i));
+                    FOR_I_DIM q[i] += double(mesh.h_shifts(s, i));
                     touch = touch || close(node_point(mesh, mesh.h_node_of_cell(c, a)), q);
                 }
             }

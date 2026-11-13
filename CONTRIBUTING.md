@@ -92,6 +92,9 @@ cmake --build build -j
   - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
     calls, no allocation, no I/O. Functions called from kernels are
     `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
+  - Kokkos computes a View's offset in the common type of the indices, so at
+    least one index is 32 bits or wider: indices that are all `uint8_t` or
+    `uint16_t` wrap the offset, and the build rejects them.
   - Data lives in `Kokkos::View`s in the default memory space; copy to the host
     with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
   - Results must not depend on the backend, thread count or rank count: reductions
