@@ -1,1 +1,0 @@
-- Time-averaged probes of moving regions and of isosurfaces keep their means only for the cells the region or isosurface has covered, instead of for every cell of the mesh, on rank 0 and in each restart file, which records the list of those cells with their means (#836).

@@ -1,1 +1,0 @@
-- `mallard post derive` writes `VORTICITY` (`VORTICITY_X`, `_Y`, `_Z` in 3D), which `mallard list fields` lists among the derived fields; `mallard list fields` now names the fields `mallard post derive` writes (`post_derive` in its JSON), from the same catalog that `post derive` checks `--fields` against (#858).

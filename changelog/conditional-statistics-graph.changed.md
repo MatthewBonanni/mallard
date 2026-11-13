@@ -1,1 +1,0 @@
-- `[[statistics.conditional]]` entries of the solution's own variables are sampled inside the step graph, so the steps queued ahead of the host no longer stop at every sampling step (#906).

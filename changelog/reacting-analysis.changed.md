@@ -1,1 +1,1 @@
-- Gas mixtures: `[statistics]` sampling, point probes and `mallard post` solve each cell's temperature once per sample, where they solved it twice (three times in `mallard post`). `mallard post average` with only conditional statistics skips preparing snapshot output. On a 262,144-cell H2/air series, `post average --conditional` takes 35% less CPU time (#513).
+- Gas mixtures: `[statistics]` sampling and point probes solve each cell's temperature once per sample, where they solved it twice (#513).

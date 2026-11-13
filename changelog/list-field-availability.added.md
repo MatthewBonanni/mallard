@@ -1,1 +1,0 @@
-- `mallard list fields` says where each field can be had: written by `[[write_data]]`, sampled by `[[probes]]`, averaged by `[statistics]`, or derived after the run by `mallard post derive`, as each of them decides (`available` in `--format json`); the field table of the output guide is made from it (`tools/docs/fields.py`) and a test fails when the two differ (#502).

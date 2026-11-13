@@ -1,1 +1,0 @@
-- `[statistics]` and `[[statistics.conditional]]` entries reading derived fields, `HRR` or `OMEGA_<species>` are sampled inside the step graph: those fields are computed on the device, and the steps queued ahead of the host no longer stop at every sampling step (#914).

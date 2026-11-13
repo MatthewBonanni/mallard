@@ -819,7 +819,7 @@ Before 0.10 the block was named the provenance block: schema
 `"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
 `provenance` and the CSV line `# provenance {...}`, without `run_id` and
 `restart_of`. Every reader (`mallard info`, the post-processing commands,
-the [Python package](python.md)) reads those names too, and says so. Version 2 (development builds after 0.9.1) added
+the [Python package](python.md)) reads those names too, and says so. Version 2, which no release wrote, added
 `input.resolved`; version 1 (0.9) had none, its preset values were plain text
 (`"HLLC"`), and a `setup` object held the terminal output's setup summary as
 `[key, value]` pairs per section.
@@ -1003,7 +1003,7 @@ build reads. It is never misread.
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, the [Python package](python.md) |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, the [Python package](python.md) |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9), 2: `run_id`, `restart_of`, `output` records (0.10) | Your scripts (records only gain fields within a version) |
-| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (development builds after 0.9.1), 1 (0.9) | `mallard info`, the [Python package](python.md) (`File.run`, every version) |
+| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (no release), 1 (0.9) | `mallard info`, the [Python package](python.md) (`File.run`, every version) |
 | [Snapshot block](#snapshot-metadata) (every snapshot) | its `version` | 1 (0.10) | `mallard info`, the [Python package](python.md) (`Snapshot.block`) |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |

@@ -1,1 +1,0 @@
-- The TENO setup on CPUs is faster, with bitwise the same tables: 1.7 times in 2D, 1.1 times in 3D at order 5 (#916).
