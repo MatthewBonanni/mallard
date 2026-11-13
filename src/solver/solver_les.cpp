@@ -790,7 +790,7 @@ void Solver::init_dynamic_efficiency() {
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
-    tfles_dynamic_sums = ExactSums<4>(n_owned, is_distributed(), halo.uses_nccl());
+    tfles_dynamic_sums = ExactSums(4, n_owned, is_distributed(), halo.uses_nccl());
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
     // average over the thickened cells (gamma >= sqrt(2); 4 passes on uniform hexahedra at n_res = 5)
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
@@ -930,7 +930,7 @@ void Solver::init_les() {
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
-        dynamic_sums = ExactSums<2>(mesh->n_owned(), is_distributed(), halo.uses_nccl());
+        dynamic_sums = ExactSums(2, mesh->n_owned(), is_distributed(), halo.uses_nccl());
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
