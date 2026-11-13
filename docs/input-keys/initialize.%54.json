@@ -12,6 +12,7 @@
   "examples/heated_duct/closed_upt.toml",
   "examples/heated_duct/input.toml",
   "examples/heated_wall/input.toml",
+  "examples/moving_heaters/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/pulsed_jet/input.toml",
   "examples/reactive_shock_tube/input.toml",

@@ -1957,3 +1957,72 @@ TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
     ASSERT_EQ(denser.size(), own.size());
     for (size_t i = 0; i < own.size(); i++) EXPECT_EQ(rtype(denser[i]), rtype(0.5) * rtype(own[i]));
 }
+
+TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMeasures) {
+    // A disk (sphere) sweeping x at 1e5 over four steps of 1e-6, where the
+    // flow barely changes: rho = 1 + 0.5 x averages to its value at the mean
+    // center, x = 0.55, a constant to itself, and the extremes are those of
+    // the cells it covered
+    const std::string dir = fresh_dir("region_moving_average");
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             (N_DIM == 2 ? "[\"0.3 + 1e5 * t\", 0.5]" : "[\"0.3 + 1e5 * t\", 0.5, 0.5]") +
+                             ", radius = 0.15}";
+    auto probe = [&](const std::string & name) {
+        return "[[probes]]\nname = \"" + name + "\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\n"
+               "average = true\ninterval = 4\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+               "reductions_file = \"" + dir + "/" + name + ".csv\"\n";
+    };
+    Solver solver;
+    solver.init(parse_toml(box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n",
+                                    "[statistics]\ninterval = 1\n" + probe("disk"), "n_steps = 4\ndt = 1.0e-6\n")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/disk.csv");
+        ASSERT_EQ(rows.size(), 1u);
+        const auto & row = rows.at(0);
+        const char * volume = N_DIM == 2 ? "area" : "volume";
+        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, rounding_or(1e-9));
+        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), rounding_or(1e-9) * row.at(volume));
+        EXPECT_NEAR(row.at("integral_MEAN_RHO"), row.at("mean_MEAN_RHO") * row.at(volume), 1e-12);
+        EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
+        EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
+        EXPECT_GT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach) {
+    // Two disks (spheres) moving across the periodic boundary at x = 1: each
+    // copy's probe measures its part in the domain where it is at each write
+    const std::string dir = fresh_dir("region_moving");
+    const std::string disks = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                              (N_DIM == 2 ? "[\"0.7 + 2 * t\", 0.3]" : "[\"0.7 + 2 * t\", 0.3, 0.5]") +
+                              ", radius = 0.15, repeat = {count = 2, translate = " +
+                              (N_DIM == 2 ? "[0, 0.4]" : "[0, 0.4, 0]") + "}}";
+    const std::string probes = "[[probes]]\nname = \"disks\"\nregion = " + disks + "\nfields = [\"RHO\"]\n"
+                               "copies = \"each\"\nreductions_file = \"" + dir + "/disks.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(16, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 4\ndt = 0.05\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    const region::MeshRegions automatic(mesh);
+    const region::Region array = region::read(parse_toml("r = " + disks).at("r"), "r", nullptr, &automatic);
+    run(solver);
+    const char * volume = N_DIM == 2 ? "area" : "volume";
+    for (uint32_t k = 0; k < 2; k++) {
+        const std::string file = dir + "/disks_copy" + std::to_string(k) + ".csv";
+        const auto rows = read_csv(file);
+        ASSERT_EQ(rows.size(), 5u) << file;
+        const region::Region copy = array.copy(k);
+        for (const auto & row : rows) {
+            const std::vector<double> f = region::cell_fractions(mesh, copy.at(row.at("t")));
+            double expected = 0.0;
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) expected += f[c] * double(mesh.h_cell_measure(c));
+            if (mesh.n_global_cells > 0) expected = comm::allreduce(expected, comm::Op::SUM);
+            EXPECT_NEAR(row.at(volume), expected, 1e-13 * expected) << file << " t " << row.at("t");
+            EXPECT_NEAR(row.at("mean_RHO"), 1.0, 1e-12) << file;
+        }
+        // It keeps its shape, so its own measures are those of where it starts
+        const json::Value b = json::parse(output::open(file).sampling);
+        EXPECT_EQ(b["measures"]["region"][volume].number, region::measures(copy.at(0.0), false).volume);
+    }
+}

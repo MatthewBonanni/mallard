@@ -29,19 +29,21 @@ class Mesh;
 
 namespace region {
 
-/** @brief Implicit shapes from a table of kexpr programs of x, y, z: shape i is program i. */
+/** @brief Implicit shapes from a table of kexpr programs of x, y, z, t: shape i is program i, at time t. */
 template <typename Table>
 struct ImplicitPrograms {
     const Table & programs;
+    double t = 0.0;
 
     KOKKOS_INLINE_FUNCTION double operator()(const uint32_t i, const double q[3]) const {
-        return programs(i, kexpr::ArrayVariables{q});
+        const double v[4] = {q[0], q[1], q[2], t};
+        return programs(i, kexpr::ArrayVariables{v});
     }
 };
 
 template <typename Table>
-KOKKOS_INLINE_FUNCTION ImplicitPrograms<Table> implicit_programs(const Table & programs) {
-    return ImplicitPrograms<Table>{programs};
+KOKKOS_INLINE_FUNCTION ImplicitPrograms<Table> implicit_programs(const Table & programs, const double t = 0.0) {
+    return ImplicitPrograms<Table>{programs, t};
 }
 
 /** @brief A region's data in one memory space, copyable by value into kernels. */
@@ -51,15 +53,26 @@ struct RegionView {
     Kokkos::View<const double *, MemorySpace> vertices;  // polygons: x0, y0, x1, y1, ...
     kexpr::ProgramTable<MemorySpace> programs;
     double edge = 0.0;
+    double time = 0.0;  // of implicit shapes
 
     /** @brief Signed distance at x (z = 0 in 2D). */
     KOKKOS_INLINE_FUNCTION double distance(const double x[3]) const {
         return region::distance(nodes.data(), static_cast<uint32_t>(nodes.extent(0)), vertices.data(),
-                                implicit_programs(programs), x);
+                                implicit_programs(programs, time), x);
     }
 
     /** @brief Indicator at x: 1 inside, 0 outside, smooth across the edge. */
     KOKKOS_INLINE_FUNCTION double weight(const double x[3]) const { return indicator(distance(x), edge); }
+};
+
+/**
+ * @brief Where a region is copied (its repeat): copy k is the filled region
+ *        filled (lower dimensions: the pieces [first, first + count)), and
+ *        own its filled region before it wraps across periodic boundaries.
+ */
+struct Copy {
+    uint32_t filled = 0, own = 0;
+    uint32_t first = 0, count = 0;
 };
 
 /** @brief A region as plain data: what parsing a region gives (see region_input.h). */
@@ -69,7 +82,12 @@ struct Definition {
     std::vector<kexpr::Program> programs;  // of implicit shapes, by index
     std::vector<Filled> filled;
     std::vector<Piece> pieces;             // lower dimensions: the parts it is the union of
+    std::vector<Step> steps;               // of moving nodes' frames
+    std::vector<Motion> motions;           // the moving nodes
+    std::vector<kexpr::Program> times;     // programs of t of the steps and motions
+    std::vector<Copy> copies;              // of its repeat, or none
     uint32_t root = 0;                     // filled regions: the whole one
+    uint32_t own = 0;                      // filled regions: the whole one before it wraps
     int dimension = N_DIM;
     bool bounded = true;                   // no implicit shapes
     bool closed = false;
@@ -147,12 +165,38 @@ class Region {
          */
         Region surface_in_domain() const;
 
-        /** @brief The nodes of every filled region of shapes, and the polygons' vertices. */
+        /** @brief Every node of its filled parts, and the polygons' vertices. */
         const std::vector<Node> & nodes() const { return m_nodes; }
         const std::vector<double> & vertices() const { return m_vertices; }
 
         /** @brief The compiled functions of implicit regions, by index. */
         const std::vector<kexpr::Program> & programs() const { return m_programs; }
+
+        /** @brief Whether it moves: expressions of t in its transforms, centers or sizes, or implicit f of t. */
+        bool moving() const { return m_moving; }
+
+        /** @brief Its moving nodes, the steps of their frames, and the programs of t they read. */
+        const std::vector<Motion> & motions() const { return m_motions; }
+        const std::vector<Step> & steps() const { return m_steps; }
+        const std::vector<kexpr::Program> & times() const { return m_times; }
+
+        /** @brief The copies of its repeat (none without one). */
+        const std::vector<Copy> & copies() const { return m_copies; }
+
+        /** @brief Copy k of its repeat, as a region of its own. */
+        Region copy(uint32_t k) const;
+
+        /** @brief A filled region's whole filled part before it wraps across periodic boundaries (root() if it does not). */
+        uint32_t own() const { return m_own; }
+
+        /** @brief Whether it moves without changing shape: only translations and rotations of t. */
+        bool rigid() const;
+
+        /** @brief The region where it is at time t, which does not move. */
+        Region at(double t) const;
+
+        /** @brief The region with root i, of its filled parts, with the copies cs. */
+        Region with_root(uint32_t i, std::vector<Copy> cs = {}) const;
 
     private:
         std::vector<Node> m_nodes;
@@ -160,6 +204,13 @@ class Region {
         std::vector<kexpr::Program> m_programs;
         std::vector<Filled> m_filled;
         std::vector<Piece> m_pieces;
+        std::vector<Step> m_steps;
+        std::vector<Motion> m_motions;
+        std::vector<kexpr::Program> m_times;
+        std::vector<Copy> m_copies;
+        bool m_moving = false;
+        double m_time = 0.0;  // of implicit shapes
+        uint32_t m_own = 0;
         uint32_t m_root = 0;
         RegionView<Kokkos::HostSpace> m_host;
         bool m_bounded = true;

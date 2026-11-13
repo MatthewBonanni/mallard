@@ -38,10 +38,10 @@ interval = 10
 *Used in:*
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
-[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct)
-and 2 more.
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180)
+and 3 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -368,7 +368,8 @@ interval = 10
 ```
 
 *Used in:*
-[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions).
+[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters).
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not
@@ -426,6 +427,19 @@ curved shapes, and the surface's part on the wall is the curved faces'.
 
 ![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-light.svg#gh-light-mode-only)
 ![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-dark.svg#gh-dark-mode-only)
+
+**Moving regions and copies.** A filled region that
+[moves](geometry.md#moving-regions) is placed where it is at each write: its
+fractions, and so the third column, are those of that time, the region's part
+in the domain as it enters or leaves it. Its own measures are recorded while it
+only translates and rotates (`null` once it changes shape), and its part in
+the domain is the third column of each row (`in_domain` is `null`). With
+`average = true` its reductions are those of the time averages over the cells
+it sweeps, each cell weighed by its mean `f V`: the integral is the mean of
+the integrals, the mean that integral over the mean measure in the domain
+(the third column), and the extremes those of the cells it has covered. With
+`copies = "each"`, a region with [`repeat`](geometry.md#arrays-of-copies) gives
+one probe per copy, `<name>_copy<k>`, each with its own reductions file.
 
 Give the region by name to measure exactly where a source or sponge acts:
 

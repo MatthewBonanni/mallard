@@ -10,6 +10,7 @@
  */
 
 #include "region.h"
+#include "region_sampler.h"
 
 #include <algorithm>
 #include <array>
@@ -36,6 +37,12 @@ double dot(const Vec & a, const Vec & b) { return a[0] * b[0] + a[1] * b[1] + a[
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
 
+/** @brief The values of programs of t for move: values[p]. */
+struct ProgramValues {
+    const double * values;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t p) const { return values[p]; }
+};
+
 } // namespace
 
 std::vector<uint32_t> owned_zone_faces(const Mesh & mesh, const std::vector<std::string> & zones) {
@@ -56,10 +63,85 @@ Region::Region(Definition d) :
     m_filled(std::move(d.filled)), m_pieces(std::move(d.pieces)), m_root(d.root), m_bounded(d.bounded),
     m_closed(d.closed), m_dimension(d.dimension), m_resolution(d.resolution), m_name(std::move(d.name)),
     m_summary(std::move(d.summary)) {
+    m_steps = std::move(d.steps);
+    m_motions = std::move(d.motions);
+    m_times = std::move(d.times);
+    m_copies = std::move(d.copies);
+    m_own = d.dimension == N_DIM ? d.own : 0;
+    m_moving = !m_motions.empty() ||
+               std::any_of(m_programs.begin(), m_programs.end(), [](const kexpr::Program & p) { return p.uses(3); });
+    m_host.edge = d.edge;
     if (analytic()) {
         m_host = host(m_filled[m_root]);
         m_host.edge = d.edge;
     }
+}
+
+Region Region::with_root(const uint32_t i, std::vector<Copy> cs) const {
+    Definition d;
+    d.nodes = m_nodes;
+    d.vertices = m_vertices;
+    d.programs = m_programs;
+    d.filled = m_filled;
+    d.pieces = m_pieces;
+    d.steps = m_steps;
+    d.motions = m_motions;
+    d.times = m_times;
+    d.copies = std::move(cs);
+    d.root = d.own = i;
+    d.dimension = m_dimension;
+    d.bounded = m_bounded;
+    d.closed = m_closed;
+    d.resolution = m_resolution;
+    d.edge = m_host.edge;
+    d.name = m_name;
+    d.summary = m_summary;
+    return Region(std::move(d));
+}
+
+bool Region::rigid() const {
+    if (std::any_of(m_programs.begin(), m_programs.end(), [](const kexpr::Program & p) { return p.uses(3); })) return false;
+    for (const Motion & m : m_motions) {
+        for (const int32_t p : m.program) {
+            if (p >= 0) return false;
+        }
+        for (uint32_t i = 0; i < m.count; i++) {
+            if (m_steps[m.first + i].kind == Step::Kind::SCALE && !m_steps[m.first + i].fixed()) return false;
+        }
+    }
+    return true;
+}
+
+Region Region::at(const double t) const {
+    Region r = with_root(m_root, m_copies);
+    r.m_own = m_own;
+    std::vector<double> values(m_times.size());
+    for (size_t p = 0; p < m_times.size(); p++) values[p] = m_times[p](&t);
+    for (const Motion & m : m_motions) move(m, m_steps.data(), ProgramValues{values.data()}, r.m_nodes[m.node]);
+    r.m_motions.clear();
+    r.m_steps.clear();
+    r.m_moving = false;
+    r.m_time = t;
+    if (r.analytic()) {
+        r.m_host = r.host(r.m_filled[r.m_root]);
+        r.m_host.edge = m_host.edge;
+    }
+    return r;
+}
+
+Region Region::copy(const uint32_t k) const {
+    const Copy & c = m_copies.at(k);
+    const std::string summary = m_summary + ", copy " + std::to_string(k);
+    if (m_dimension == N_DIM) {
+        Region r = with_root(c.filled);
+        r.m_own = c.own;
+        r.m_summary = summary;
+        return r;
+    }
+    Region r = with_root(0);
+    r.m_pieces.assign(m_pieces.begin() + c.first, m_pieces.begin() + c.first + c.count);
+    r.m_summary = summary;
+    return r;
 }
 
 std::vector<Piece> boundary_pieces(const std::vector<Filled> & filled, const uint32_t i, const bool flip) {
@@ -150,6 +232,7 @@ RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
     std::vector<const kexpr::Program *> programs;
     for (const auto & p : m_programs) programs.push_back(&p);
     r.programs = kexpr::ProgramTable<Kokkos::HostSpace>(programs);
+    r.time = m_time;
     return r;
 }
 
@@ -169,184 +252,53 @@ RegionView<> Region::device() const {
     r.vertices = vertices;
     r.programs = kexpr::ProgramTable<>(programs);
     r.edge = m_host.edge;
+    r.time = m_time;
     return r;
 }
 
 namespace {
 
-/**
- * @brief Integral of the indicator (times r in axisymmetric runs) and of 1
- *        over a simplex of N_DIM + 1 vertices, subdivided into 2^N_DIM
- *        children where the surface or edge may cross it.
- */
-struct Sampler {
-    const RegionView<Kokkos::HostSpace> & region;
-    bool bounded;
-    bool axisymmetric;
-    int max_level;
+/** @brief Cone k of a curved cell on the host: its point at box coordinates p and the volume per unit p. */
+struct HostCone {
+    const Mesh & mesh;
+    uint32_t c;
 
-    void integrate(const std::array<Vec, 4> & v, const double measure, const int level, double & inside,
-                   double & total) const {
-        constexpr size_t n_vertices = N_DIM + 1;
-        Vec c = {0.0, 0.0, 0.0};
-        for (size_t k = 0; k < n_vertices; k++) {
-            for (size_t i = 0; i < 3; i++) c[i] += v[k][i] / double(n_vertices);
-        }
-        double radius = 0.0;
-        for (size_t k = 0; k < n_vertices; k++) {
-            Vec d;
-            for (size_t i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
-            radius = std::max(radius, norm(d));
-        }
-        const double phi = region.distance(c.data());
-        const double half_edge = 0.5 * region.edge;
-        bool uniform = level >= max_level;
-        if (bounded) {
-            if (std::abs(phi) >= radius + half_edge) uniform = true;
-            if (half_edge > 0.0 && radius < 0.125 * region.edge && std::abs(phi) < half_edge - radius) uniform = true;
-        } else if (!uniform) {
-            // Implicit regions: subdivide unless f keeps its sign over the simplex by twice its slope there
-            double slope = 0.0;
-            for (size_t k = 0; k < n_vertices; k++) {
-                Vec d;
-                for (size_t i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
-                slope = std::max(slope, std::abs(region.distance(v[k].data()) - phi) / norm(d));
-            }
-            uniform = std::abs(phi) > 2.0 * slope * radius && half_edge == 0.0;
-        }
-        if (uniform) {
-            const double w = measure * (axisymmetric ? c[1] : 1.0);
-            inside += w * indicator(phi, region.edge);
-            total += w;
-            return;
-        }
-        // Midpoint subdivision: 4 triangles, or 8 tetrahedra (4 corners and an octahedron split along a diagonal)
-        auto mid = [&](const size_t a, const size_t b) {
-            Vec m;
-            for (size_t i = 0; i < 3; i++) m[i] = 0.5 * (v[a][i] + v[b][i]);
-            return m;
-        };
-        if constexpr (N_DIM == 2) {
-            const Vec m01 = mid(0, 1), m12 = mid(1, 2), m02 = mid(0, 2);
-            const std::array<std::array<Vec, 4>, 4> children = {{{v[0], m01, m02, {}}, {m01, v[1], m12, {}},
-                                                                  {m02, m12, v[2], {}}, {m01, m12, m02, {}}}};
-            for (const auto & child : children) integrate(child, 0.25 * measure, level + 1, inside, total);
-        } else {
-            const Vec m01 = mid(0, 1), m02 = mid(0, 2), m03 = mid(0, 3), m12 = mid(1, 2), m13 = mid(1, 3),
-                      m23 = mid(2, 3);
-            const std::array<std::array<Vec, 4>, 8> children = {{{v[0], m01, m02, m03}, {m01, v[1], m12, m13},
-                                                                 {m02, m12, v[2], m23}, {m03, m13, m23, v[3]},
-                                                                 {m01, m23, m02, m03}, {m01, m23, m03, m13},
-                                                                 {m01, m23, m13, m12}, {m01, m23, m12, m02}}};
-            for (const auto & child : children) integrate(child, 0.125 * measure, level + 1, inside, total);
-        }
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t k, const double * p, double * x) const {
+        KOKKOS_IF_ON_HOST((
+            const curved::Geometry & geometry = *mesh.curved_geometry;
+            const uint32_t f = mesh.h_face_of_cell(c, k);
+            double xi[2] = {0.0, 0.0};
+            const double j = geometry.face_coordinates(f, p, xi);
+            curved::Vec3 y, dx[3];
+            const double dv = geometry.cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
+            for (size_t i = 0; i < 3; i++) x[i] = y[i];
+            return dv * j;
+        ))
+        KOKKOS_IF_ON_DEVICE(((void)k; (void)p; (void)x; Kokkos::abort("HostCone is host-only"); return 0.0;))
     }
 };
 
-/**
- * @brief Integral of the indicator (times r in axisymmetric runs) and of 1
- *        over a curved cell: over each of its cones (curved::Geometry::
- *        cone_eval), in boxes of face and radial coordinates subdivided into
- *        2^N_DIM children where the surface or edge may cross them.
- */
-struct ConeSampler {
+/** @brief The signed distance of a region on the host. */
+struct HostDistance {
+    const RegionView<Kokkos::HostSpace> & view;
+
+    KOKKOS_INLINE_FUNCTION double operator()(const double * x) const { return view.distance(x); }
+};
+
+/** @brief Node k of a straight cell on the host. */
+struct HostNodes {
     const Mesh & mesh;
-    const RegionView<Kokkos::HostSpace> & region;
-    bool bounded;
-    int max_level;
+    uint32_t c;
 
-    const curved::Geometry & geometry = *mesh.curved_geometry;
-
-    void integrate(const uint32_t c, double & inside, double & total) const {
-        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
-            std::array<double, 2> lo, hi;
-            geometry.box_of(face(c, k), lo, hi);
-            box(c, k, {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0}, 0, inside, total);
-        }
-    }
-
-    uint32_t face(const uint32_t c, const uint32_t k) const { return mesh.h_face_of_cell(c, k); }
-
-    /** @brief The point at box coordinates p (face coordinates, then t last) and the volume per unit p. */
-    double at(const uint32_t c, const uint32_t k, const Vec & p, Vec & x) const {
-        double xi[2] = {0.0, 0.0};
-        const double j = geometry.face_coordinates(face(c, k), p.data(), xi);
-        curved::Vec3 y, dx[3];
-        const double dv = geometry.cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
-        x = {y[0], y[1], y[2]};
-        return dv * j;
-    }
-
-    void box(const uint32_t c, const uint32_t k, const Vec & lo, const Vec & hi, const int level, double & inside,
-             double & total) const {
-        Vec mid, x_mid;
-        for (size_t i = 0; i < 3; i++) mid[i] = 0.5 * (lo[i] + hi[i]);
-        at(c, k, mid, x_mid);
-        double radius = 0.0;
-        for (int corner = 0; corner < (1 << N_DIM); corner++) {
-            Vec p = mid, x;
-            for (size_t i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? hi[i] : lo[i];
-            at(c, k, p, x);
-            Vec d;
-            for (size_t i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
-            radius = std::max(radius, norm(d));
-        }
-        radius *= 1.25;  // the box's image is curved
-        const double phi = region.distance(x_mid.data());
-        const double half_edge = 0.5 * region.edge;
-        bool uniform = level >= max_level;
-        if (bounded) {
-            if (std::abs(phi) >= radius + half_edge) uniform = true;
-        } else if (!uniform) {
-            double slope = 0.0;
-            for (int corner = 0; corner < (1 << N_DIM); corner++) {
-                Vec p = mid, x;
-                for (size_t i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? hi[i] : lo[i];
-                at(c, k, p, x);
-                Vec d;
-                for (size_t i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
-                if (norm(d) > 0.0) slope = std::max(slope, std::abs(region.distance(x.data()) - phi) / norm(d));
-            }
-            uniform = std::abs(phi) > 2.0 * slope * radius && half_edge == 0.0;
-        }
-        if (uniform) {
-            // Gauss points: 3 per direction, exact for the cones' radial factor and smooth faces
-            constexpr double G[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
-            constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
-            const int n = N_DIM == 2 ? 9 : 27;
-            for (int q = 0; q < n; q++) {
-                Vec p = mid, x;
-                double w = 1.0;
-                int rest = q;
-                for (size_t i = 0; i < N_DIM; i++) {
-                    const int g = rest % 3;
-                    rest /= 3;
-                    p[i] = mid[i] + 0.5 * (hi[i] - lo[i]) * G[g];
-                    w *= 0.5 * (hi[i] - lo[i]) * W[g];
-                }
-                w *= at(c, k, p, x) * (mesh.axisymmetric ? x[1] : 1.0);
-                inside += w * indicator(region.distance(x.data()), region.edge);
-                total += w;
-            }
-            return;
-        }
-        for (int child = 0; child < (1 << N_DIM); child++) {
-            Vec a = lo, b = hi;
-            for (size_t i = 0; i < N_DIM; i++) {
-                if ((child >> i) & 1) {
-                    a[i] = mid[i];
-                } else {
-                    b[i] = mid[i];
-                }
-            }
-            box(c, k, a, b, level + 1, inside, total);
-        }
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * x) const {
+        const uint32_t n = mesh.h_nodes_of_cell(mesh.h_offsets_nodes_of_cell(c) + k);
+        for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh.h_node_coords(n, i)) : 0.0;
     }
 };
 
 /** @brief The fractions of a filled region of shapes. */
 std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view) {
-    const Sampler sampler{view, region.bounded(), mesh.axisymmetric, N_DIM == 2 ? 8 : 5};
+    const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     Kokkos::parallel_for("region_cell_fractions",
@@ -354,31 +306,16 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
         if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell)) {
-            const ConeSampler cones{mesh, view, region.bounded(), N_DIM == 2 ? 8 : 5};
-            cones.integrate(i_cell, inside, total);
-        } else if constexpr (N_DIM == 2) {
-            const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
-            auto node = [&](const uint32_t k) {
-                const uint32_t n = mesh.h_node_of_cell(i_cell, k);
-                return Vec{double(mesh.h_node_coords(n, 0)), double(mesh.h_node_coords(n, 1)), 0.0};
-            };
-            const Vec v0 = node(0);
-            for (uint32_t k = 1; k + 1 < n_nodes; k++) {
-                const Vec v1 = node(k), v2 = node(k + 1);
-                const double area = 0.5 * std::abs((v1[0] - v0[0]) * (v2[1] - v0[1]) - (v1[1] - v0[1]) * (v2[0] - v0[0]));
-                sampler.integrate({v0, v1, v2, Vec{}}, area, 0, inside, total);
+            const HostCone cone{mesh, i_cell};
+            for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i_cell); k++) {
+                std::array<double, 2> lo, hi;
+                mesh.curved_geometry->box_of(mesh.h_face_of_cell(i_cell, k), lo, hi);
+                const double a[3] = {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, b[3] = {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0};
+                sampler::cone(shape, mesh.axisymmetric, cone, k, a, b, inside, total);
             }
         } else {
-            std::vector<std::array<std::array<double, 3>, 4>> tets;
-            mesh.h_cell_tetrahedra(i_cell, tets);
-            for (const auto & t : tets) {
-                Vec e[3];
-                for (size_t k = 0; k < 3; k++) {
-                    for (size_t i = 0; i < 3; i++) e[k][i] = t[k + 1][i] - t[0][i];
-                }
-                const double volume = std::abs(dot(e[0], cross(e[1], e[2]))) / 6.0;
-                sampler.integrate({t[0], t[1], t[2], t[3]}, volume, 0, inside, total);
-            }
+            sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell}, inside,
+                                   total);
         }
         fractions[i_cell] = total > 0.0 ? inside / total : 0.0;
     });
@@ -959,6 +896,38 @@ struct Subdivision {
 } // namespace
 
 Measures measures(const Region & region, const bool axisymmetric) {
+    if (region.dimension() == N_DIM && region.own() != region.root()) {
+        // Wrapped across periodic boundaries: the region itself, before its images
+        std::vector<Copy> copies = region.copies();
+        for (Copy & c : copies) c.filled = c.own;
+        return measures(region.with_root(region.own(), copies), axisymmetric);
+    }
+    const std::vector<Copy> & copies = region.copies();
+    if (region.analytic() && copies.size() > 1) {
+        // Copies apart from each other: the sum of theirs
+        std::vector<Box> boxes;
+        for (const Copy & c : copies) boxes.push_back(filled_bounds(region, c.filled));
+        bool apart = true;
+        for (size_t a = 0; a < boxes.size() && apart; a++) {
+            for (size_t b = a + 1; b < boxes.size() && apart; b++) {
+                bool overlap = true;
+                for (size_t i = 0; i < N_DIM; i++) {
+                    overlap = overlap && boxes[a][0][i] < boxes[b][1][i] && boxes[b][0][i] < boxes[a][1][i];
+                }
+                apart = !overlap;
+            }
+        }
+        if (apart) {
+            Measures sum{0.0, 0.0, 0.0};
+            for (uint32_t k = 0; k < copies.size(); k++) {
+                const Measures m = measures(region.copy(k), axisymmetric);
+                sum.volume += m.volume;
+                sum.surface += m.surface;
+                sum.tolerance = std::max(sum.tolerance, m.tolerance);
+            }
+            return sum;
+        }
+    }
     Measures out;
     if (!region.analytic()) return out;
     const Box b = bounds(region);

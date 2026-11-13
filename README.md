@@ -31,7 +31,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Compressible Euler and Navier-Stokes
 - Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
 - Detailed transport, Soret diffusion, optically thin radiation
-- Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions)
+- Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions); arrays of copies, regions that move with `t`, and regions that wrap across periodic boundaries
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux

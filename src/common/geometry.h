@@ -51,6 +51,108 @@ struct Node {
     double p[4] = {0.0, 0.0, 0.0, 0.0};  // primitive parameters (see region.cpp)
 };
 
+/**
+ * @brief One step of a region's frame, local' = L (local - o), distances
+ *        times s, whose values may be expressions of t (programs of a
+ *        kexpr::ProgramTable of t, -1 for the constant). AFFINE: L and s
+ *        fixed, o_i = program[i](t) or o[i]; ROTATE: by -(program[0](t) or
+ *        c[0]) degrees about axis, o fixed; SCALE: L = diag(1 / v), s the
+ *        least v_i of the run's axes, v_i = program[i](t) or c[i], o fixed.
+ */
+struct Step {
+    enum class Kind : uint8_t { AFFINE, ROTATE, SCALE };
+    Kind kind = Kind::AFFINE;
+    double L[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    double o[3] = {0.0, 0.0, 0.0};
+    double s = 1.0;
+    double axis[3] = {0.0, 0.0, 1.0};
+    double c[3] = {0.0, 0.0, 0.0};
+    int32_t program[3] = {-1, -1, -1};
+
+    bool fixed() const { return program[0] < 0 && program[1] < 0 && program[2] < 0; }
+};
+
+/** @brief Rows of the rotation by -angle degrees about the unit axis (world to rotated coordinates). */
+KOKKOS_INLINE_FUNCTION void inverse_rotation(const double axis[3], const double angle, double L[9]) {
+    const double a = -angle * 3.14159265358979323846 / 180.0, c = Kokkos::cos(a), s = Kokkos::sin(a), C = 1.0 - c;
+    const double x = axis[0], y = axis[1], z = axis[2];
+    L[0] = c + x * x * C;
+    L[1] = x * y * C - z * s;
+    L[2] = x * z * C + y * s;
+    L[3] = y * x * C + z * s;
+    L[4] = c + y * y * C;
+    L[5] = y * z * C - x * s;
+    L[6] = z * x * C - y * s;
+    L[7] = z * y * C + x * s;
+    L[8] = c + z * z * C;
+}
+
+/** @brief The frame local = M x + d (distances times k) followed by local' = L (local - o), distances times s. */
+KOKKOS_INLINE_FUNCTION void compose(const double L[9], const double o[3], const double s, double M[9], double d[3],
+                                    double & k) {
+    double M2[9], d2[3];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            double v = 0.0;
+            for (int l = 0; l < 3; l++) v += L[3 * i + l] * M[3 * l + j];
+            M2[3 * i + j] = v;
+        }
+        double v = 0.0;
+        for (int l = 0; l < 3; l++) v += L[3 * i + l] * (d[l] - o[l]);
+        d2[i] = v;
+    }
+    for (int i = 0; i < 9; i++) M[i] = M2[i];
+    for (int i = 0; i < 3; i++) d[i] = d2[i];
+    k *= s;
+}
+
+/** @brief The frame (M, d, k) followed by step, with value(p) the value of program p at the time. */
+template <typename Value>
+KOKKOS_INLINE_FUNCTION void apply(const Step & step, const Value & value, double M[9], double d[3], double & k) {
+    double v[3];
+    for (int i = 0; i < 3; i++) {
+        const double fixed = step.kind == Step::Kind::AFFINE ? step.o[i] : step.c[i];
+        v[i] = step.program[i] >= 0 ? value(static_cast<uint32_t>(step.program[i])) : fixed;
+    }
+    if (step.kind == Step::Kind::AFFINE) {
+        compose(step.L, v, step.s, M, d, k);
+    } else if (step.kind == Step::Kind::ROTATE) {
+        double L[9];
+        inverse_rotation(step.axis, v[0], L);
+        compose(L, step.o, 1.0, M, d, k);
+    } else {
+        const double L[9] = {1.0 / v[0], 0.0, 0.0, 0.0, 1.0 / v[1], 0.0, 0.0, 0.0, 1.0 / v[2]};
+        double least = v[0] < v[1] ? v[0] : v[1];
+        if (N_DIM == 3 && v[2] < least) least = v[2];
+        compose(L, step.o, least, M, d, k);
+    }
+}
+
+/**
+ * @brief How a moving primitive's node follows t: its frame, the steps
+ *        [first, first + count) from the world's, and parameters p[i] =
+ *        factor[i] * program[i](t) where program[i] >= 0.
+ */
+struct Motion {
+    uint32_t node = 0;
+    uint32_t first = 0, count = 0;
+    int32_t program[4] = {-1, -1, -1, -1};
+    double factor[4] = {1.0, 1.0, 1.0, 1.0};
+};
+
+/** @brief Node n of a moving region at the time whose program values value(p) gives. */
+template <typename Value>
+KOKKOS_INLINE_FUNCTION void move(const Motion & motion, const Step * steps, const Value & value, Node & n) {
+    double M[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}, d[3] = {0.0, 0.0, 0.0}, k = 1.0;
+    for (uint32_t i = 0; i < motion.count; i++) apply(steps[motion.first + i], value, M, d, k);
+    for (int i = 0; i < 9; i++) n.m[i] = M[i];
+    for (int i = 0; i < 3; i++) n.d[i] = d[i];
+    n.scale = k;
+    for (int i = 0; i < 4; i++) {
+        if (motion.program[i] >= 0) n.p[i] = motion.factor[i] * value(static_cast<uint32_t>(motion.program[i]));
+    }
+}
+
 namespace detail {
 
 KOKKOS_INLINE_FUNCTION double max(const double a, const double b) { return a < b ? b : a; }

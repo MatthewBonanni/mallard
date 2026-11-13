@@ -1740,6 +1740,7 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
         } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
             const region::Region & region = regions.get(*value, key);
             region::require_full_dimension(region, *value, key);
+            region::require_fixed(region, *value, key, "data files");
             CellSubset subset{region.summary(), {}, regions.fractions(*value, key)};
             for (uint32_t c = 0; c < mesh->n_owned(); c++) {
                 if (subset.fractions[c] > 0.0) subset.cells.push_back(c);

@@ -4,6 +4,7 @@
  ],
  "required": true,
  "set_in": [
+  "examples/moving_heaters/input.toml",
   "examples/source_regions/input.toml"
  ],
  "type": "string",

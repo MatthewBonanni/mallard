@@ -36,6 +36,7 @@
 #include "provenance.h"
 #include "json.h"
 #include "region_input.h"
+#include "region_motion.h"
 #include "run_log.h"
 #include "snapshot_block.h"
 #include "viscous_flux.h"
@@ -1443,7 +1444,25 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
     average_start = statistics.sampling_start();
     if (!input.contains("probes")) return;
     for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
-        add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, &cell_data);
+        const std::string copies = find_value_or<std::string>(entry, "copies", "combined");
+        record_options("probes.copies", {"combined", "each"});
+        if (copies == "combined") {
+            add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, &cell_data);
+            continue;
+        }
+        const std::string key = "probes[name = \"" + find_value_or<std::string>(entry, "name", "") + "\"].copies";
+        if (copies != "each") throw not_accepted(entry, key, copies, {"combined", "each"});
+        const size_t n = entry.contains("region") ? regions.get(entry.at("region"), key).copies().size() : 0;
+        if (n == 0) {
+            throw InputError(Diagnostic{.key = key,
+                                        .line = line_of(entry, "copies"),
+                                        .message = "= \"each\" needs a region with copies (a repeat)",
+                                        .fix = "Give the probe a region with repeat, or remove copies",
+                                        .docs = "docs/guide/geometry.md#arrays-of-copies"});
+        }
+        for (size_t k = 0; k < n; k++) {
+            add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, &cell_data, static_cast<int32_t>(k));
+        }
     }
 }
 
@@ -1457,7 +1476,7 @@ void Probes::add_snapshot(const Input & input, const Mesh & mesh, region::Region
 
 void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data) {
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, const int32_t copy) {
     auto probe_ptr = std::make_unique<Probe>();
     Probe & p = *probe_ptr;
     std::string key;
@@ -1469,6 +1488,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (!entry.contains("name")) throw InputError("probes: every probe needs a name.");
         p.name = find_value<std::string>(entry, "name");
         key = "probes[name = \"" + p.name + "\"]";
+        if (copy >= 0) p.name += "_copy" + std::to_string(copy);
     }
     for (const auto & other : probes) {
         if (other->name == p.name && other->snapshot == p.snapshot) throw InputError(key + ": name is used twice.");
@@ -1507,6 +1527,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     p.from_region = !snapshot && where == &entry && entry.contains("region");
     const region::Region * region = p.from_region ? &regions.get(entry.at("region"), key + ".region") : nullptr;
+    if (copy >= 0) {
+        p.copy = std::make_shared<region::Region>(region->copy(static_cast<uint32_t>(copy)));
+        region = p.copy.get();
+    }
     // A surface region with n_points is resampled on a grid of samples, written like a curve's
     p.resampled = region && region->dimension() == N_DIM - 1 && N_DIM == 3 && entry.contains("n_points");
     for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
@@ -1568,6 +1592,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     if (!p.write_samples && p.reductions.empty()) throw InputError(key + ": samples = false needs reductions.");
     p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
+    if (copy >= 0 && entry.contains("reductions_file")) {
+        const std::filesystem::path f(p.reductions_file);
+        p.reductions_file = (f.parent_path() / (f.stem().string() + "_copy" + std::to_string(copy) + f.extension().string())).string();
+    }
     }
 
     if (!entry.contains("fields")) throw InputError(key + ": fields not specified.");
@@ -1714,10 +1742,37 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     } else if (p.from_region) {
         const region::Region & r = *region;
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
-        if (r.dimension() == N_DIM) {
+        if (r.dimension() == N_DIM && r.moving()) {
+            // Every owned cell, weighed by f V at each write
+            std::vector<double> weights(mesh.n_owned(), 0.0);
+            auto motion = std::make_shared<Probe::Motion>();
+            motion->fractions = std::make_shared<region::MovingFractions>(mesh, r);
+            motion->distributed = mesh.n_global_cells > 0;
+            std::vector<uint64_t> global;
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+                weights[c] = double(mesh.h_cell_measure(c));
+                motion->cells.push_back(c);
+                motion->volumes.push_back(weights[c]);
+                global.push_back(mesh.h_global_cell(c));
+            }
+            if (motion->distributed) global = comm::allgatherv(global);
+            motion->order.resize(global.size());
+            for (size_t i = 0; i < global.size(); i++) motion->order[i] = i;
+            std::sort(motion->order.begin(), motion->order.end(),
+                      [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+            select_region(p, mesh, r, weights, n_evaluated);
+            p.motion = std::move(motion);
+            // Its own measures hold while it keeps its shape; the part in the domain is the measure of each write
+            const auto [volume, surface] = measure_names(mesh.axisymmetric);
+            const region::Measures own = r.rigid() ? region::measures(r.at(0.0), mesh.axisymmetric) : region::Measures{};
+            json::Object o;
+            o.add(volume, own.volume).add(surface, own.surface).add("tolerance", own.tolerance);
+            p.measures = json::Object().raw("region", std::isfinite(own.volume) ? o.str() : "null").raw("in_domain", "null").str();
+        } else if (r.dimension() == N_DIM) {
             // Filled regions weigh each cell by f V
             std::vector<double> weights(mesh.n_owned(), 0.0);
-            const std::vector<double> & f = regions.fractions(entry.at("region"), key + ".region");
+            const std::vector<double> & f = copy >= 0 ? region::cell_fractions(mesh, r)
+                                                      : regions.fractions(entry.at("region"), key + ".region");
             for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
             select_region(p, mesh, r, weights, n_evaluated);
             region_measures(p, mesh, r, f, key + ".region");
@@ -2206,9 +2261,14 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
         sampled_quad.clear();
-        if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        if (p.motion && p.average) {
+            p.mean_fields(sampled_quad);
+        } else {
+            if (p.motion) p.move(double(t));
+            if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        }
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
-        const std::vector<double> & quad = p.average ? p.mean_quadrature : sampled_quad;
+        const std::vector<double> & quad = p.average && !p.motion ? p.mean_quadrature : sampled_quad;
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
@@ -2429,11 +2489,19 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         const double w = static_cast<double>(t) - p.average_t_last;
         if (!(w > 0.0)) continue;
         std::vector<double> nodes, quad;
+        if (p.motion) p.move(static_cast<double>(t));
         p.sample(fields, nodes, quad);
         p.average_weight += w;
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;
         if (distributed && !comm::is_root()) continue;
+        if (p.motion) {
+            const size_t n_cols = p.n_evaluated();
+            for (size_t i = 0; i < p.geometry.quad_weights.size(); i++) {
+                for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] *= p.geometry.quad_weights[i];
+            }
+            accumulate(p.mean_weights, p.geometry.quad_weights, w / p.average_weight);
+        }
         accumulate(p.mean_nodes, nodes, w / p.average_weight);
         accumulate(p.mean_quadrature, quad, w / p.average_weight);
     }
@@ -2447,6 +2515,7 @@ void Probes::start_averages(rtype t) {
         p->average_samples = 0;
         p->mean_nodes.clear();
         p->mean_quadrature.clear();
+        p->mean_weights.clear();
     }
 }
 
@@ -2464,15 +2533,19 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         // Every rank reads them (arrays of no values are not written)
         const std::vector<double> * nodes = restart.array(name + "_NODES");
         const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
+        const std::vector<double> * weights = restart.array(name + "_WEIGHTS");
         const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
         const uint64_t n_quad = p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated() : 0;
-        if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad) {
+        const uint64_t n_weights = p.motion ? p.quadrature.n_global : 0;
+        if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad ||
+            (weights ? weights->size() : 0) != n_weights) {
             throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
                              " holds the averages of other samples or variables; set statistics.reset = true "
                              "to start them afresh.");
         }
         if (nodes) p.mean_nodes = *nodes;
         if (quad) p.mean_quadrature = *quad;
+        if (weights) p.mean_weights = *weights;
         p.average_weight = *w;
         p.average_t_last = *t_last;
         p.average_samples = static_cast<uint64_t>(*n);
@@ -2515,6 +2588,7 @@ RestartArrays Probes::arrays() const {
         if (!p->average) continue;
         add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
         add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
+        add(AVERAGE_PREFIX + p->name + "_WEIGHTS", p->mean_weights);
     }
     for (const auto & p : probes) {
         if (!p->spectra) continue;
@@ -2729,6 +2803,28 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
     write_pvd_file(file, series);
 }
 
+void Probes::Probe::move(const double t) {
+    motion->fractions->update(t);
+    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), motion->fractions->fractions());
+    std::vector<double> local(motion->cells.size());
+    for (size_t i = 0; i < local.size(); i++) local[i] = f(motion->cells[i]) * motion->volumes[i];
+    if (motion->distributed) local = comm::allgatherv(local);
+    geometry.quad_weights.clear();
+    for (const size_t i : motion->order) {
+        if (comm::is_root() || !motion->distributed) geometry.quad_weights.push_back(local[i]);
+    }
+}
+
+void Probes::Probe::mean_fields(std::vector<double> & quad) {
+    geometry.quad_weights = mean_weights;
+    const size_t n_cols = n_evaluated();
+    quad.assign(mean_quadrature.size(), 0.0);
+    for (size_t i = 0; i < mean_weights.size(); i++) {
+        if (!(mean_weights[i] > 0.0)) continue;
+        for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] = mean_quadrature[i * n_cols + v] / mean_weights[i];
+    }
+}
+
 void Probes::Probe::reduce(const std::vector<double> & node_values, const std::vector<double> & quad) {
     // Point sets and boundaries reduce their samples; curves their quadrature points
     const bool points = quadrature.n_global == 0;
@@ -2791,6 +2887,7 @@ void Probes::Probe::reduce(const std::vector<double> & node_values, const std::v
                 case Reduction::MAX: {
                     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
                     for (size_t i = 0; i < n_q; i++) {
+                        if (motion && !(weights[i] > 0.0)) continue;
                         lo = std::min(lo, value(i));
                         hi = std::max(hi, value(i));
                     }

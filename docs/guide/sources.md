@@ -77,14 +77,17 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 |---|---|---|
 | `name` | `sources[i]` | Name in the terminal output |
 | `region` | everywhere | Where the source acts (below), or the name of a region in `[regions]`; values are multiplied by each cell's volume fraction |
-| `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
+| `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` and `copy` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
 | `rhoY` | none | Mixtures: species sources by name, `{H2 = "1e-3"}`; they also add to the mass |
 
 Expressions read `x`, `y`, `z`, `t`, the local state `rho`, `u_x`, `u_y`,
 `u_z`, `p`, `T` (and `Y_<species>`, `X_<species>` in mixtures), and domain
-averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`. Region
-lengths take units too (`radius = "5 mm"`). Write
+averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`, and
+`copy`, the index of a copy of a region with
+[`repeat`](geometry.md#arrays-of-copies). Regions may
+[move](geometry.md#moving-regions), with centers, sizes and transforms of `t`.
+Region lengths take units too (`radius = "5 mm"`). Write
 `SOURCE_RHOE` (and `SOURCE_RHO`, `SOURCE_RHOU_X`, ...) to see where sources
 act.
 
