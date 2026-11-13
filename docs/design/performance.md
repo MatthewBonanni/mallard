@@ -494,7 +494,32 @@ array per record slot. The host gathers them over the ranks, reduces and writes 
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
-### 11. TENO setup on CPUs (#916)
+### 11. Read-only loads (#641, not kept)
+
+No View in `src/` carries `Kokkos::RandomAccess` or `Kokkos::Restrict`. Those traits would not change anything
+either: Mallard builds Kokkos 5.2 with its mdspan-based View (`Kokkos_ENABLE_IMPL_MDSPAN`, the default, so not
+`Kokkos_ENABLE_IMPL_VIEW_LEGACY`), whose accessor depends only on the `Unmanaged` and `Atomic` traits. The
+`__ldg` loads for const `RandomAccess` Views belong to the legacy View only. To measure what read-only loads
+are worth, `__ldg` was tried explicitly (the read-only, non-coherent path that `const __restrict__` pointers allow
+in CUDA) on the reads of data that no thread writes during the kernel. It was applied cumulatively: (a) TENO's
+packed stencil tables (pseudo-inverses, stencil cells and faces), (b) the stencil states (W) that the smooth and
+troubled passes gather, (c) the face states the convective flux reads and the face fluxes that `face_flux_sum`
+gathers. Each change multiplied the 3D build's `LDG.E.*.CONSTANT` instructions (345 on `main`, then 2434, 3298 and
+3466), and results stayed bitwise identical (`mallard diff` of the restart files after 30 steps of `teno5_3d`).
+
+| `teno5_3d` (A100, CUDA 13.5), best of 3, interleaved | main | (a) | (a, b) | (a, b, c) |
+|---|---|---|---|---|
+| throughput, cells/s | 6.06M | 6.06M | 6.06M | 6.06M |
+| wall time per step | 146 ms | 146 ms | 146 ms | 146 ms |
+| `teno_smooth` (team pass), per launch (Nsight Systems) | 42.09 ms | | | 42.12 ms |
+| `convective_flux` (HLLC), per launch | 3.432 ms | | | 3.430 ms |
+| `face_flux_sum`, per launch | 179.2 us | | | 179.3 us |
+
+None of them won, so none was kept. On the A100, ordinary global loads are already cached in L1, which is also
+where the read-only path caches. The smooth pass waits on the latency of its dependent loads (section 1),
+not on cache capacity, and the flux kernels stream their face data once.
+
+### 12. TENO setup on CPUs (#916)
 
 A start without a TENO cache, and `mallard post derive` or `post extract` of a run without one, spend nearly
 all their setup in the per-cell tables. Profiled on the host (`sample`, 2 Threads), the 2D setup was mostly

@@ -1,0 +1,11 @@
+{
+ "dimension": "mass flow (kg s^-1)",
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/heated_duct/closed.toml"
+ ],
+ "type": "number"
+}
