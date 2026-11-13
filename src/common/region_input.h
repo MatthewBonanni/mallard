@@ -77,6 +77,13 @@ Region boundary(const Region & filled);
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 
+/**
+ * @brief Whether a condition or isosurface field anywhere in the input reads
+ *        CONDITION_GRADIENT_FIELDS, without counting any key as read: the
+ *        vertex neighbors of their cells then need velocity gradients too.
+ */
+bool conditions_read_gradients(const Input & input);
+
 /** @brief An error unless the region given at where is fixed: what, the key's use, does not follow moving regions. */
 void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what);
 
