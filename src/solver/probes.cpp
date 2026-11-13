@@ -1816,6 +1816,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         iso->levels = std::make_shared<region::CrossedLevels>(
             mesh, *iso->region,
             std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields));
+        iso->extraction = std::make_shared<region::Extraction>(mesh, *iso->region);
         iso->n_evaluated = static_cast<uint32_t>(h_codes.size());
         p.isosurface = std::move(iso);
         p.geometry.dim = static_cast<uint8_t>(elements->dimension());
@@ -1928,6 +1929,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             iso->region = std::make_shared<region::Region>(r.with_root(r.root(), r.copies()));
             iso->levels = std::make_shared<region::CrossedLevels>(
                 mesh, *iso->region, std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields));
+            iso->extraction = std::make_shared<region::Extraction>(mesh, *iso->region);
             iso->n_evaluated = n_evaluated;
             iso->per_cell = p.sampling == Sampling::CELL && !normals && !p.gradients;
             iso->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
@@ -3130,11 +3132,11 @@ void Probes::Probe::extract(const double t) {
     const Isosurface & iso = *isosurface;
     const region::Levels levels = iso.levels->update(t);
     if (snapshot) {
-        select_snapshot_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels),
-                                 iso.region->dimension(), iso.region->summary(), iso.n_evaluated);
+        select_snapshot_elements(*this, *iso.mesh, iso.extraction->elements(levels), iso.region->dimension(),
+                                 iso.region->summary(), iso.n_evaluated);
         return;
     }
-    select_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels), iso.region->dimension(),
+    select_elements(*this, *iso.mesh, iso.extraction->elements(levels), iso.region->dimension(),
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
 

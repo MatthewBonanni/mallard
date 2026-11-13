@@ -49,6 +49,7 @@ class Regions;
 class MovingFractions;
 class CrossedLevels;
 class SolutionLevels;
+class Extraction;
 struct Elements;
 }
 struct ProbeFluxes;
@@ -427,6 +428,7 @@ class Probes {
                 const Mesh * mesh = nullptr;
                 std::shared_ptr<region::Region> region;
                 std::shared_ptr<region::CrossedLevels> levels;
+                std::shared_ptr<region::Extraction> extraction;  // of region on mesh
                 uint32_t n_evaluated = 0;
                 bool per_cell = false;
                 uint64_t n_cells = 0;              // of the mesh, which its averages are kept per

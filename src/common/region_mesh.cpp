@@ -456,48 +456,23 @@ const Mesh & no_mesh() {
     return mesh;
 }
 
+/** @brief The fractions of clipping region i of whole cells, and of those it is made of, into cells. Collective. */
+void need_cells(const Mesh & mesh, const Region & region, const uint32_t i, std::vector<std::vector<double>> & cells) {
+    const Filled & f = region.filled()[i];
+    if (f.kind == Filled::Kind::SHAPES || !cells[i].empty()) return;
+    if (f.cells) {
+        cells[i] = cell_fractions(mesh, region, i);
+    } else {
+        for (const uint32_t part : f.parts) need_cells(mesh, region, part, cells);
+    }
+}
+
 class Builder {
     public:
-        /** @brief For the patches of a region alone: no mesh, so no extent for unbounded surfaces. */
-        explicit Builder(const Region & region) : m_mesh(no_mesh()), m_region(region) {
-            m_lo = m_hi = {0.0, 0.0, 0.0};
-            for (const auto & f : region.filled()) m_views.push_back(region.host(f));
-        }
-
-        Builder(const Mesh & mesh, const Region & region, const Levels * levels = nullptr) :
-            m_mesh(mesh), m_region(region), m_levels(levels) {
-            if (region.solution() && !levels) throw std::logic_error("region::elements: the region's conditions need levels.");
-            const bool distributed = mesh.n_global_cells > 0;
-            double volume = 0.0;
-            for (uint32_t c = 0; c < mesh.n_owned(); c++) volume += double(mesh.h_cell_volume(c));
-            for (size_t i = 0; i < 3; i++) {
-                m_lo[i] = i < N_DIM ? std::numeric_limits<double>::max() : 0.0;
-                m_hi[i] = i < N_DIM ? std::numeric_limits<double>::lowest() : 0.0;
-            }
-            for (uint32_t n = 0; n < mesh.n_nodes; n++) {
-                for (size_t i = 0; i < N_DIM; i++) {
-                    m_lo[i] = std::min(m_lo[i], double(mesh.h_node_coords(n, i)));
-                    m_hi[i] = std::max(m_hi[i], double(mesh.h_node_coords(n, i)));
-                }
-            }
-            double n_cells = double(mesh.n_owned());
-            if (distributed) {
-                volume = comm::allreduce(volume, comm::Op::SUM);
-                n_cells = double(mesh.n_global_cells);
-                m_lo = comm::allreduce(m_lo, comm::Op::MIN);
-                m_hi = comm::allreduce(m_hi, comm::Op::MAX);
-            }
-            m_h = std::pow(volume / std::max(n_cells, 1.0), 1.0 / N_DIM);
-            for (const auto & f : region.filled()) m_views.push_back(region.host(f));
-            // Clipping regions of whole cells: their cells, computed collectively up front
-            m_cells.resize(region.filled().size());
-            for (const Piece & p : region.pieces()) {
-                for (const auto * masks : {&p.inside, &p.outside}) {
-                    for (const uint32_t i : *masks) need_cells(i);
-                }
-                if (p.cells >= 0) need_cells(static_cast<uint32_t>(p.cells));
-            }
-        }
+        Builder(const Mesh & mesh, const Region & region, const Extraction::Constants & constants,
+                const Levels * levels = nullptr) :
+            m_mesh(mesh), m_region(region), m_levels(levels), m_views(constants.views), m_cells(constants.cells),
+            m_lo(constants.lo), m_hi(constants.hi), m_h(constants.h) {}
 
         Elements build() {
             m_out.dimension = m_region.dimension();
@@ -519,22 +494,13 @@ class Builder {
         const Mesh & m_mesh;
         const Region & m_region;
         const Levels * m_levels = nullptr;
-        std::vector<RegionView<Kokkos::HostSpace>> m_views;
-        std::vector<std::vector<double>> m_cells;
-        Vec m_lo, m_hi;
-        double m_h = 1.0;
+        const std::vector<RegionView<Kokkos::HostSpace>> & m_views;
+        const std::vector<std::vector<double>> & m_cells;
+        const Vec & m_lo;
+        const Vec & m_hi;
+        const double m_h;
         Elements m_out;
         std::vector<std::array<std::array<double, 3>, 4>> m_tets;  // a cell's, reused
-
-        void need_cells(const uint32_t i) {
-            const Filled & f = m_region.filled()[i];
-            if (f.kind == Filled::Kind::SHAPES || !m_cells[i].empty()) return;
-            if (f.cells) {
-                m_cells[i] = cell_fractions(m_mesh, m_region, i);
-            } else {
-                for (const uint32_t part : f.parts) need_cells(part);
-            }
-        }
 
         bool is_condition(const uint32_t i) const { return region::is_condition(m_region, i); }
         bool conditional(const Piece & p) const { return region::conditional(m_region, p); }
@@ -1568,7 +1534,9 @@ class Builder {
 } // namespace
 
 std::vector<SurfacePatch> surface_patches(const Region & region, const std::string & where) {
-    const Builder builder(region);
+    Extraction::Constants constants;  // no mesh, so no extent for unbounded surfaces
+    for (const auto & f : region.filled()) constants.views.push_back(region.host(f));
+    const Builder builder(no_mesh(), region, constants);
     std::vector<Patch> patches;
     const Node * frame = nullptr;
     Piece rest, piece;
@@ -1661,14 +1629,53 @@ Grid sample_grid(const std::vector<SurfacePatch> & patches, const uint32_t nu, c
     return g;
 }
 
-Elements elements(const Mesh & mesh, const Region & region) {
+Extraction::Extraction(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
     if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
-    return Builder(mesh, region).build();
+    Constants & c = m_constants;
+    const bool distributed = mesh.n_global_cells > 0;
+    double volume = 0.0;
+    for (uint32_t cell = 0; cell < mesh.n_owned(); cell++) volume += double(mesh.h_cell_volume(cell));
+    for (size_t i = 0; i < 3; i++) {
+        c.lo[i] = i < N_DIM ? std::numeric_limits<double>::max() : 0.0;
+        c.hi[i] = i < N_DIM ? std::numeric_limits<double>::lowest() : 0.0;
+    }
+    for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+        for (size_t i = 0; i < N_DIM; i++) {
+            c.lo[i] = std::min(c.lo[i], double(mesh.h_node_coords(n, i)));
+            c.hi[i] = std::max(c.hi[i], double(mesh.h_node_coords(n, i)));
+        }
+    }
+    double n_cells = double(mesh.n_owned());
+    if (distributed) {
+        volume = comm::allreduce(volume, comm::Op::SUM);
+        n_cells = double(mesh.n_global_cells);
+        c.lo = comm::allreduce(c.lo, comm::Op::MIN);
+        c.hi = comm::allreduce(c.hi, comm::Op::MAX);
+    }
+    c.h = std::pow(volume / std::max(n_cells, 1.0), 1.0 / N_DIM);
+    for (const auto & f : region.filled()) c.views.push_back(region.host(f));
+    c.cells.resize(region.filled().size());
+    for (const Piece & p : region.pieces()) {
+        for (const auto * masks : {&p.inside, &p.outside}) {
+            for (const uint32_t i : *masks) need_cells(mesh, region, i, c.cells);
+        }
+        if (p.cells >= 0) need_cells(mesh, region, static_cast<uint32_t>(p.cells), c.cells);
+    }
 }
 
+Elements Extraction::elements() const {
+    if (m_region.solution()) throw std::logic_error("region::elements: the region's conditions need levels.");
+    return Builder(m_mesh, m_region, m_constants).build();
+}
+
+Elements Extraction::elements(const Levels & levels) const {
+    return Builder(m_mesh, m_region, m_constants, &levels).build();
+}
+
+Elements elements(const Mesh & mesh, const Region & region) { return Extraction(mesh, region).elements(); }
+
 Elements elements(const Mesh & mesh, const Region & region, const Levels & levels) {
-    if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
-    return Builder(mesh, region, &levels).build();
+    return Extraction(mesh, region).elements(levels);
 }
 
 LevelCells level_cells(const Mesh & mesh, const Region & region) {
