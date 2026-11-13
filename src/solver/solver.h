@@ -459,6 +459,13 @@ class Solver {
         /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
         void captured_launch();
         void device_step_body();
+        /**
+         * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
+         *        flags is set and the launch has not yet flushed, for the parts of the step's end that read the state.
+         */
+        void flush_chemistry_if(const uint32_t * flags, uint32_t n);
+        /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
+        void unflush_chemistry_on_device();
         void capture_step_graph();
         /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
         bool conditional_nodes_work();
@@ -493,8 +500,6 @@ class Solver {
         void write_staged_probes(const step_queue::Record & record);
         /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
         void after_step(Kokkos::Timer & step_timer, bool on_device);
-        /** @brief Whether the device writes progress rows' local values, which the host reports later. */
-        bool progress_on_device() const;
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -587,6 +592,10 @@ class Solver {
         void flush_chemistry();
         /** @brief Puts back the state flush_chemistry kept: the run goes on as if no output had read it. */
         void unflush_chemistry();
+        void allocate_unflushed();
+        /** @brief Copies what a flush changes (state, T seeds, last sub-steps, costs, tallies) to the kept buffers. */
+        void keep_unflushed();
+        void restore_unflushed();
         /**
          * @brief Exchanges the state with the one flush_chemistry kept, also on the host: restart files hold the
          *        state the run continues from. Called again, it puts them back.
@@ -929,6 +938,7 @@ class Solver {
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
         Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry, any]
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
+        Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
