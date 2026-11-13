@@ -370,11 +370,13 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V;
-            // isosurfaces: per cell, the means of the sums of w q and of w over its quadrature points
+            // gathered node and quadrature values; kept per cell (cell_means), for the cells covered so far
+            // (mean_cells, sorted): moving regions, the means of f V q and of f V; isosurfaces, the means of
+            // the sums of w q and of w over each cell's quadrature points
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
             std::vector<double> mean_nodes, mean_quadrature, mean_weights;
+            std::vector<uint64_t> mean_cells;
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
@@ -430,15 +432,19 @@ class Probes {
             void extract(double t);
             /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
             bool cell_means() const { return average && (motion || isosurface); }
-            /** @brief The cells its time averages are kept per (cell_means), every cell of the mesh. */
+            /** @brief The cells its time averages may cover (cell_means): those of the mesh. */
             uint64_t n_mean_cells() const { return motion ? quadrature.n_global : isosurface ? isosurface->n_cells : 0; }
             /**
              * @brief Rank 0 of time averages kept per cell: the weights and values of the cells, mean w q /
              *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).
              */
             void mean_fields(std::vector<double> & quad);
-            /** @brief Rank 0 of a time-averaged isosurface: the sums of w q and of w per cell of its latest extraction. */
-            void cell_sums(const std::vector<double> & quad, std::vector<double> & sums, std::vector<double> & weights) const;
+            /**
+             * @brief Rank 0 of time averages kept per cell: the cells its latest samples cover (sorted), with
+             *        their sums of w q and of w.
+             */
+            void cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells, std::vector<double> & sums,
+                           std::vector<double> & weights) const;
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */

@@ -2631,6 +2631,34 @@ void accumulate(std::vector<double> & mean, const std::vector<double> & x, doubl
     for (size_t i = 0; i < x.size(); i++) mean[i] += a * (x[i] - mean[i]);
 }
 
+/**
+ * @brief accumulate over the union of the cells covered so far and those of a sample (both sorted), each absent
+ *        one counting as zero: the means of every cell of the mesh, without the cells never covered.
+ */
+void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_weights, std::vector<double> & mean_values,
+                      const std::vector<uint64_t> & x_cells, const std::vector<double> & x_weights,
+                      const std::vector<double> & x_values, size_t n_cols, double a) {
+    std::vector<uint64_t> all;
+    std::vector<double> weights, values;
+    all.reserve(cells.size() + x_cells.size());
+    size_t i = 0, j = 0;
+    while (i < cells.size() || j < x_cells.size()) {
+        const bool old = i < cells.size() && (j == x_cells.size() || cells[i] <= x_cells[j]);
+        const bool sampled = j < x_cells.size() && (i == cells.size() || x_cells[j] <= cells[i]);
+        all.push_back(old ? cells[i] : x_cells[j]);
+        auto mean = [&](double m, double x) { return m + a * (x - m); };
+        weights.push_back(mean(old ? mean_weights[i] : 0.0, sampled ? x_weights[j] : 0.0));
+        for (size_t v = 0; v < n_cols; v++) {
+            values.push_back(mean(old ? mean_values[i * n_cols + v] : 0.0, sampled ? x_values[j * n_cols + v] : 0.0));
+        }
+        i += old ? 1 : 0;
+        j += sampled ? 1 : 0;
+    }
+    cells = std::move(all);
+    mean_weights = std::move(weights);
+    mean_values = std::move(values);
+}
+
 } // namespace
 
 bool Probes::averages_due(uint64_t step, rtype t) const {
@@ -2666,20 +2694,16 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;
         if (distributed && !comm::is_root()) continue;
-        if (p.motion) {
-            const size_t n_cols = p.n_evaluated();
-            for (size_t i = 0; i < p.geometry.quad_weights.size(); i++) {
-                for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] *= p.geometry.quad_weights[i];
-            }
-            accumulate(p.mean_weights, p.geometry.quad_weights, w / p.average_weight);
-        } else if (p.isosurface) {
-            std::vector<double> sums, weights;
-            p.cell_sums(quad, sums, weights);
-            quad = std::move(sums);
-            accumulate(p.mean_weights, weights, w / p.average_weight);
-        }
         accumulate(p.mean_nodes, nodes, w / p.average_weight);
-        accumulate(p.mean_quadrature, quad, w / p.average_weight);
+        if (p.cell_means()) {
+            std::vector<uint64_t> cells;
+            std::vector<double> sums, weights;
+            p.cell_sums(quad, cells, sums, weights);
+            accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, cells, weights, sums, p.n_evaluated(),
+                             w / p.average_weight);
+        } else {
+            accumulate(p.mean_quadrature, quad, w / p.average_weight);
+        }
     }
 }
 
@@ -2692,6 +2716,7 @@ void Probes::start_averages(rtype t) {
         p->mean_nodes.clear();
         p->mean_quadrature.clear();
         p->mean_weights.clear();
+        p->mean_cells.clear();
     }
 }
 
@@ -2710,13 +2735,22 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         const std::vector<double> * nodes = restart.array(name + "_NODES");
         const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
         const std::vector<double> * weights = restart.array(name + "_WEIGHTS");
+        const std::vector<double> * cells = restart.array(name + "_CELLS");
+        std::vector<uint64_t> mean_cells;
+        bool cells_valid = true;
+        for (size_t i = 0; cells && i < cells->size() && cells_valid; i++) {
+            const double c = (*cells)[i];
+            cells_valid = c >= 0.0 && c < static_cast<double>(p.n_mean_cells()) && c == std::floor(c) &&
+                          (mean_cells.empty() || static_cast<uint64_t>(c) > mean_cells.back());
+            if (cells_valid) mean_cells.push_back(static_cast<uint64_t>(c));
+        }
         const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
-        const uint64_t n_quad = p.isosurface         ? p.n_mean_cells() * p.n_evaluated()
+        const uint64_t n_quad = p.cell_means()           ? mean_cells.size() * p.n_evaluated()
                                 : p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated()
                                                          : 0;
-        const uint64_t n_weights = p.cell_means() ? p.n_mean_cells() : 0;
+        const uint64_t n_weights = p.cell_means() ? mean_cells.size() : 0;
         if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad ||
-            (weights ? weights->size() : 0) != n_weights) {
+            (weights ? weights->size() : 0) != n_weights || !cells_valid || (!p.cell_means() && cells)) {
             throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
                              " holds the averages of other samples or variables; set statistics.reset = true "
                              "to start them afresh.");
@@ -2724,6 +2758,7 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         if (nodes) p.mean_nodes = *nodes;
         if (quad) p.mean_quadrature = *quad;
         if (weights) p.mean_weights = *weights;
+        p.mean_cells = std::move(mean_cells);
         p.average_weight = *w;
         p.average_t_last = *t_last;
         p.average_samples = static_cast<uint64_t>(*n);
@@ -2767,6 +2802,7 @@ RestartArrays Probes::arrays() const {
         add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
         add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
         add(AVERAGE_PREFIX + p->name + "_WEIGHTS", p->mean_weights);
+        add(AVERAGE_PREFIX + p->name + "_CELLS", std::vector<double>(p->mean_cells.begin(), p->mean_cells.end()));
     }
     for (const auto & p : probes) {
         if (!p->spectra) continue;
@@ -3062,14 +3098,32 @@ void Probes::Probe::extract(const double t) {
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
 
-void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<double> & sums,
-                              std::vector<double> & weights) const {
+void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells,
+                              std::vector<double> & sums, std::vector<double> & weights) const {
     const size_t n_cols = n_evaluated();
-    sums.assign(isosurface->n_cells * n_cols, 0.0);
-    weights.assign(isosurface->n_cells, 0.0);
-    if (quad.empty()) return;
-    for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
-        const uint64_t c = isosurface->quad_cells[i];
+    const size_t n_q = quad.empty() ? 0 : geometry.quad_weights.size();
+    cells.clear();
+    sums.clear();
+    weights.clear();
+    if (motion) {
+        // One sample per cell of the mesh, in global cell order
+        for (size_t i = 0; i < n_q; i++) {
+            const double w = geometry.quad_weights[i];
+            if (!(w > 0.0)) continue;
+            cells.push_back(i);
+            weights.push_back(w);
+            for (size_t v = 0; v < n_cols; v++) sums.push_back(quad[i * n_cols + v] * w);
+        }
+        return;
+    }
+    cells.assign(isosurface->quad_cells.begin(), isosurface->quad_cells.begin() + static_cast<std::ptrdiff_t>(n_q));
+    std::sort(cells.begin(), cells.end());
+    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+    sums.assign(cells.size() * n_cols, 0.0);
+    weights.assign(cells.size(), 0.0);
+    for (size_t i = 0; i < n_q; i++) {
+        const size_t c = static_cast<size_t>(std::lower_bound(cells.begin(), cells.end(), isosurface->quad_cells[i]) -
+                                             cells.begin());
         const double w = geometry.quad_weights[i];
         weights[c] += w;
         for (size_t v = 0; v < n_cols; v++) sums[c * n_cols + v] += w * quad[i * n_cols + v];
