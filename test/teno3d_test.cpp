@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -643,7 +644,7 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
             largest = std::max(largest, std::abs(double(own[k])));
             difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
         }
-        EXPECT_LT(difference, 1e-12 * largest) << "order " << order;
+        EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
         // A shape's table is its cell's with the lowest global id, however many cells a slice packs
         for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
             EXPECT_TRUE(face_values(true, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
@@ -652,9 +653,9 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
 }
 
 TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
-    // Two slots of width 2: tables equal on the grid but not bitwise, as on a lattice
+    // Two slots of width 2: two tables, bitwise different, under one key
     const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
-    const std::vector<rtype> b = {1.0_r + 1e-14_r, 0.5_r, 0.25_r, 0.125_r};
+    const std::vector<rtype> b = {1.0_r + 4 * std::numeric_limits<rtype>::epsilon(), 0.5_r, 0.25_r, 0.125_r};
     const teno::CanonicalTable ta(a.data(), 2, {2}), tb(b.data(), 2, {2});
     teno::TableStore store(2);
     const uint32_t k = store.add_keyed(7, ta, a.data(), 9);
