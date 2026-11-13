@@ -670,12 +670,12 @@ std::string describe(const Report & report, const std::vector<std::string> & nam
         const double scale = std::max(report.source_magnitude[v], std::numeric_limits<double>::min());
         worst = std::max(worst, std::abs(report.target_total[v] - report.source_total[v]) / scale);
     }
-    std::string text = logging::count(report.n_source) + " -> " + logging::count(report.n_target) +
-                       " cells, integrals kept to " + logging::format("%.1e", worst);
-    if (report.n_reduced > 0) text += ", " + logging::count(report.n_reduced) + " source cells at a lower degree";
+    std::string text = logging::count(report.n_source) + " -> " + logging::count(report.n_target, "cell") +
+                       ", integrals kept to " + logging::format("%.1e", worst);
+    if (report.n_reduced > 0) text += ", " + logging::count(report.n_reduced, "source cell") + " at a lower degree";
     if (report.n_limited > 0) text += ", " + logging::count(report.n_limited) + " limited";
     if (report.n_partial > 0) {
-        text += ", " + logging::count(report.n_partial) + " target cells partly outside the source mesh (up to " +
+        text += ", " + logging::count(report.n_partial, "target cell") + " partly outside the source mesh (up to " +
                 logging::format("%.1e", report.max_uncovered) + " of a cell)";
     }
     if (report.n_nearest > 0) text += ", " + logging::count(report.n_nearest) + " outside it (nearest source cell)";

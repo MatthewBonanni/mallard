@@ -466,7 +466,7 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
     const bool distributed = mesh.n_global_cells > 0;
     const uint64_t n_global = distributed ? mesh.n_global_cells : mesh.n_cells;
     const auto wrong_mesh = [&](uint64_t n) {
-        return std::runtime_error("has " + count(n) + " cells, but the case's mesh has " +
+        return std::runtime_error("has " + count(n, "cell") + ", but the case's mesh has " +
                                   count(n_global) + ": give the input of the run that wrote it (-i)");
     };
     if (c.kind == output::Kind::restart) {
@@ -1278,7 +1278,7 @@ std::string directions_text(const std::string & directions) {
 
 void print_profile(const homogeneous::Profile & p, const std::string & path, const std::string & homogeneous,
                    const std::string & weights) {
-    logging::section("Profile", count(p.rows()) + " rows");
+    logging::section("Profile", count(p.rows(), "row"));
     item("Averaged over", directions_text(homogeneous) + ", weighted by " + weights + "; a row per position in " +
                               list_text(p.axes));
     item("Columns", list_text(p.names));
@@ -1360,7 +1360,7 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
             if (!f.name.starts_with(prefix)) continue;
             const std::vector<double> values = output::read(c, f.name, e.index);
             if (values.size() != n_global * f.components) {
-                throw std::runtime_error(c.path + " has " + count(values.size() / f.components) + " cells, but the "
+                throw std::runtime_error(c.path + " has " + count(values.size() / f.components, "cell") + ", but the "
                                          "case's mesh has " + count(n_global) + ": give the input of the run that "
                                          "wrote it (-i)");
             }
@@ -1700,7 +1700,7 @@ int average(const cli::Args & args) {
     }
     for (const ConditionalStatistics & c : statistics.get_conditional()) {
         const OutputSummary o = c.summary();
-        item("Conditional", o.contents + ", every " + count(o.steps) + " steps -> " + o.file);
+        item("Conditional", o.contents + ", every " + count(o.steps, "step") + " -> " + o.file);
     }
     logging::section("Snapshots", count(selected.size()) + " averaged");
     std::vector<std::vector<std::string>> rows;
@@ -1719,7 +1719,7 @@ int average(const cli::Args & args) {
         for (const std::string & path : plan.conditional) item("Written", path);
         return 0;
     }
-    logging::section("Written", count(paths.size()) + " files");
+    logging::section("Written", count(paths.size(), "file"));
     for (const auto & p : paths) logging::line("  " + p);
     print_last(written);
     return 0;

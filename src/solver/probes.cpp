@@ -894,9 +894,9 @@ std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const s
         }
         k = e + 1;
     }
-    if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN) + " more runs";
+    if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN, "more run");
     logging::warning(diagnostic_code::PROBE_OUTSIDE,
-                     key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
+                     key + ": " + logging::count(out.size()) + " of " + logging::count(n, "sample") + share +
                          " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
     g = probe::clip(g, keep, keep_quad);
     return clipped.str();
@@ -3361,9 +3361,8 @@ std::vector<OutputSummary> Probes::summary() const {
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
-        const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
         const std::string extent = p.solution ? std::string(" from the solution")
-                                              : (p.from_region ? " over " : " of ") + logging::count(n) + unit;
+                                              : (p.from_region ? " over " : " of ") + logging::count(n, cells ? "cell" : "point");
         std::string text = p.geometry.type + extent +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;

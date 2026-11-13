@@ -407,10 +407,10 @@ int pack(const cli::Args & args) {
     }
     logging::section("Packed " + out_path, count(entries.size() + 1, "file"));
     item("Run", text(run.start.find("run_id")));
-    item("Case", count(by_role["input"] + by_role["mesh"] + by_role["read"]) + " files: the input, mesh and files "
+    item("Case", count(by_role["input"] + by_role["mesh"] + by_role["read"], "file") + ": the input, mesh and files "
                  "the run read");
-    item("Outputs", count(by_role["output"] + by_role["run_log"]) + " files (--with-outputs " + with + ")");
-    item("Size", count(total) + " bytes before compression");
+    item("Outputs", count(by_role["output"] + by_role["run_log"], "file") + " (--with-outputs " + with + ")");
+    item("Size", count(total, "byte") + " before compression");
     item("Rerun", "tar -xf " + fs::path(out_path).filename().string() + " && cd " + top + "/" +
                       rerun_dir.generic_string() + " && " + command);
     item("Verify", "mallard pack --verify " + out_path);
@@ -464,7 +464,7 @@ int verify(const cli::Args & args) {
             continue;
         }
         if (double(it->second->bytes) != f["bytes"].number) {
-            problems.push_back({text(f.find("path")), count(it->second->bytes) + " bytes, the manifest says " +
+            problems.push_back({text(f.find("path")), count(it->second->bytes, "byte") + ", the manifest says " +
                                                           text(f.find("bytes"))});
         } else if (it->second->sha256 != text(f.find("sha256"))) {
             problems.push_back({text(f.find("path")), "its SHA-256 differs from the manifest's"});
@@ -508,7 +508,7 @@ int verify(const cli::Args & args) {
     item("Run", text(m.find("run_id")));
     item("Packed", text(m.find("created")) + ", by Mallard " + text(m.find("mallard")));
     item("Files", count(m["files"].array.size()) + " in the manifest, size and SHA-256 checked");
-    item("Against the run", count(against_run) + " files checked against the SHA-256 the run recorded");
+    item("Against the run", count(against_run, "file") + " checked against the SHA-256 the run recorded");
     item("Rerun", "cd " + top + "/" + text(m["rerun"].find("directory")) + " && " + text(m["rerun"].find("command")));
     for (const json::Value & note : m["notes"].array) item("Note", note.string);
     if (problems.empty()) {

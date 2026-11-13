@@ -311,7 +311,7 @@ void Solver::init_solution_constant() {
     if (u.size() != N_DIM) {
         throw InputError({.key = "initialize.u",
                           .line = line_of(init, "u"),
-                          .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                          .message = "has " + logging::count(u.size(), "component") + ", but this build is " +
                                      std::to_string(N_DIM) + "D",
                           .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
     }
