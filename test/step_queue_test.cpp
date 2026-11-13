@@ -504,6 +504,20 @@ TEST(StepQueueTest, ConditionalStatisticsAreSampledWithoutStoppingTheDevice) {
     expect_queue_invariant("conditional_alone", alone);
 }
 
+namespace {
+
+/** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
+void expect_graphed(const Outcome & o, const std::string & what) {
+#ifdef KOKKOS_ENABLE_CUDA
+    EXPECT_GT(o.graph_steps, 0u) << what;
+#endif
+    for (const std::string & w : o.warnings) {
+        EXPECT_EQ(w.find("no CUDA graph of the step"), std::string::npos) << what << ": " << w;
+    }
+}
+
+} // namespace
+
 TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
     // Means and conditional statistics of derived fields, computed under the sampling's conditional node
     const std::string restarts = "check_interval = 1000\n"
@@ -518,7 +532,9 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
     expect_queue_invariant("derived", c);
     Case bare = c;
     bare.extra = restarts;
-    EXPECT_EQ(run_case("derived", c, 3).queued, run_case("bare", bare, 3).queued);
+    const Outcome queued = run_case("derived", c, 3);
+    expect_graphed(queued, "derived");
+    EXPECT_EQ(queued.queued, run_case("bare", bare, 3).queued);
 
     // HRR and OMEGA_<species> of a reacting mixture, with a flame index of its species gradients
     Case reacting;
@@ -547,7 +563,9 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
     }
     Case reacting_bare = reacting;
     reacting_bare.extra = restarts;
-    EXPECT_EQ(run_case("rates", reacting, 3).queued, run_case("rates_bare", reacting_bare, 3).queued);
+    const Outcome reacting_queued = run_case("rates", reacting, 3);
+    expect_graphed(reacting_queued, "rates");
+    EXPECT_EQ(reacting_queued.queued, run_case("rates_bare", reacting_bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
