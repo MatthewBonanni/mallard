@@ -139,7 +139,8 @@ class DistributedMesh {
         // After distribute()
         std::vector<int> owner;                         // per block cell
         std::vector<uint64_t> directory_offsets{0};     // per block node: cells using it (by node key)
-        std::vector<std::pair<uint64_t, int>> directory;  // (cell, owner)
+        std::vector<uint64_t> directory_cells;
+        std::vector<int> directory_owners;
         Cells cells;
         std::unordered_map<uint64_t, uint32_t> halo_index;  // halo cell -> index in cells
         std::vector<uint64_t> owned_nodes;                   // keys of the owned cells' nodes, sorted

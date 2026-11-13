@@ -48,6 +48,7 @@ void Solver::init_error_control() {
         for (size_t i = 0; i < 3; i++) beta[i] = static_cast<rtype>(b[i]);
     }
     step_controller.init(abs_tol, rel_tol, beta, time_integrator->get_error_order());
+    characteristic_start = Kokkos::View<rtype *[2]>("char_state_start", boundary_data.char_faces.extent(0));
 }
 
 void Solver::check_rejections(const int tries) const {
