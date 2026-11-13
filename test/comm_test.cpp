@@ -14,7 +14,10 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "comm.h"
@@ -132,3 +135,55 @@ TEST(CommTest, AllgatherReturnsEveryRanksString) {
     ASSERT_EQ(all.size(), size_t(comm::size()));
     for (int r = 0; r < comm::size(); r++) EXPECT_EQ(all[size_t(r)], text(r));
 }
+
+#ifdef Mallard_HAS_MPI
+TEST(CommTest, FileWritesGoInPieces) {
+    const auto count = [](int r) { return r == 1 ? uint64_t(0) : uint64_t(r) + 3; };
+    uint64_t first = 0, n_total = 0;
+    for (int r = 0; r < comm::size(); r++) {
+        if (r < comm::rank()) first += count(r);
+        n_total += count(r);
+    }
+    const uint64_t n = count(comm::rank());
+    std::vector<uint64_t> keys(n);
+    std::vector<double> values(n);
+    std::vector<MPI_Aint> displacements(n);
+    for (uint64_t i = 0; i < n; i++) {
+        keys[i] = 10 * (first + i) + 1;
+        values[i] = 0.5 * double(first + i);
+        displacements[i] = MPI_Aint(2 * (first + i) * sizeof(double));
+    }
+    const std::string header = "head!";
+    const std::string filename =
+        (std::filesystem::temp_directory_path() / ("mallard_comm_test_" + comm::broadcast(std::to_string(getpid()))))
+            .string();
+    MPI_File fh;
+    ASSERT_EQ(MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh),
+              MPI_SUCCESS);
+    const MPI_Offset keys_at = MPI_Offset(header.size()), values_at = keys_at + MPI_Offset(n_total * sizeof(uint64_t));
+    bool ok = MPI_File_set_size(fh, 0) == MPI_SUCCESS;
+    if (comm::is_root()) ok = comm::write_at(fh, 0, header.data(), header.size(), MPI_BYTE, 2) && ok;
+    ok = comm::write_at_all(fh, keys_at + MPI_Offset(first * sizeof(uint64_t)), keys.data(), n, MPI_UINT64_T, 2) && ok;
+    ok = comm::write_all_hindexed(fh, values_at, values.data(), displacements.data(), n, MPI_DOUBLE, 2) && ok;
+    ok = MPI_File_close(&fh) == MPI_SUCCESS && ok;
+    EXPECT_TRUE(ok);
+    comm::barrier();
+    if (comm::is_root()) {
+        std::ifstream in(filename, std::ios::binary);
+        std::string head(header.size(), '\0');
+        std::vector<uint64_t> read_keys(n_total);
+        std::vector<double> read_values(2 * n_total, -1.0);
+        in.read(head.data(), std::streamsize(head.size()));
+        in.read(reinterpret_cast<char *>(read_keys.data()), std::streamsize(n_total * sizeof(uint64_t)));
+        in.read(reinterpret_cast<char *>(read_values.data()), std::streamsize((2 * n_total - 1) * sizeof(double)));
+        EXPECT_TRUE(in.good());
+        EXPECT_EQ(head, header);
+        for (uint64_t g = 0; g < n_total; g++) {
+            EXPECT_EQ(read_keys[g], 10 * g + 1);
+            EXPECT_EQ(read_values[2 * g], 0.5 * double(g));
+        }
+        std::filesystem::remove(filename);
+    }
+    comm::barrier();
+}
+#endif
