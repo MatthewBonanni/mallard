@@ -225,8 +225,10 @@ struct AdvanceFunctor {
     SpeciesView rate{};
     StateView U_end{};
     SpeciesView rhoY_end{};
-    // Repair audit (recorder active): cell volumes, flags and the run's sub-step counters
+    // Repair audit (recorder active): the clipped species masses of the launch's slots (summed by ClipSumFunctor),
+    // cell volumes, flags and the run's sub-step counters
     RepairRecorder repair{};
+    Kokkos::View<double **, Kokkos::LayoutRight> clipped_mass{};
     Kokkos::View<rtype *> volume{};
     Kokkos::View<uint8_t *> repaired{};
     Kokkos::View<uint64_t[2]> counters{};
@@ -238,23 +240,26 @@ struct AdvanceFunctor {
     bool skipped(const uint32_t slot) const { return offset + slot < *begin || offset + slot >= *end; }
 
     /**
-     * @brief Adds the mass a clipping changed: species k of cell c, at the
-     *        initial (0) or final (1) density. It holds only values the cell
-     *        keeps anyway, so that it adds no live state across the integration.
+     * @brief Adds the mass a clipping changed, species k of cell c (in the
+     *        launch's slot) at the initial (0) or final (1) density, to the
+     *        slot's. It holds only values the cell keeps anyway, so that it
+     *        adds no live state across the integration.
      */
     struct Clip {
         const AdvanceFunctor * f;
-        uint32_t c;
+        uint32_t c, slot;
         double rho0, rho1;
 
         KOKKOS_INLINE_FUNCTION void operator()(const int which, const uint32_t k, const double dY) const {
             if (dY != 0.0 && f->repair.active())
-                f->repair.add(k, (which ? rho1 : rho0) * static_cast<double>(f->volume(c)) * dY);
+                f->clipped_mass(slot, k) += (which ? rho1 : rho0) * static_cast<double>(f->volume(c)) * dY;
         }
     };
 
     KOKKOS_INLINE_FUNCTION
-    Clip clip(const uint32_t c, const double rho, const double rho_end) const { return Clip{this, c, rho, rho_end}; }
+    Clip clip(const uint32_t c, const uint32_t slot, const double rho, const double rho_end) const {
+        return Clip{this, c, slot, rho, rho_end};
+    }
 
     /** @brief After cell c's integration: its sub-steps, and its flag if a clipping happened. */
     KOKKOS_INLINE_FUNCTION
@@ -323,7 +328,7 @@ struct AdvanceFunctor {
             for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
             const chemistry::SerialLanes one;
             const double rho_end = static_cast<double>(U_end(c, 0));
-            const Clip clipped = clip(c, rho, rho_end);
+            const Clip clipped = clip(c, i, rho, rho_end);
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
                                                           nullptr, g, clipped)
@@ -333,7 +338,7 @@ struct AdvanceFunctor {
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
         } else {
             const chemistry::SerialLanes one;
-            const Clip clipped = clip(c, rho, rho);
+            const Clip clipped = clip(c, i, rho, rho);
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
                                                           nullptr, nullptr, clipped)
@@ -376,7 +381,7 @@ struct AdvanceFunctor {
         const chemistry::RosenbrockResult r = chemistry::advance_reactor<Sparse>(
             team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(slot, 0),
             chemistry::NoObserver(), &pattern, fast, g,
-            clip(c, rho, forcing_offset > 0 ? static_cast<double>(U_end(c, 0)) : rho));
+            clip(c, slot, rho, forcing_offset > 0 ? static_cast<double>(U_end(c, 0)) : rho));
         if (forcing_offset > 0) {
             const double rho_end = static_cast<double>(U_end(c, 0));
             team.for_each(ns, [&](const uint32_t k) { rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]); });
@@ -397,6 +402,34 @@ struct AdvanceFunctor {
     }
 };
 
+/**
+ * @brief Adds the clipped species masses of a launch's slots to the repair
+ *        site's changes, and clears them: a reduction adds them in the same
+ *        order in every run, where atomics would follow the threads' timing.
+ */
+struct ClipSumFunctor {
+    using value_type = double[];
+    using size_type = uint32_t;
+    const uint32_t value_count;
+    Kokkos::View<double **, Kokkos::LayoutRight> clipped_mass;
+    Kokkos::View<double *> change;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t slot, double * sum) const {
+        for (uint32_t k = 0; k < value_count; k++) {
+            sum[k] += clipped_mass(slot, k);
+            clipped_mass(slot, k) = 0.0;
+        }
+    }
+    KOKKOS_INLINE_FUNCTION void init(double * sum) const {
+        for (uint32_t k = 0; k < value_count; k++) sum[k] = 0.0;
+    }
+    KOKKOS_INLINE_FUNCTION void join(double * dst, const double * src) const {
+        for (uint32_t k = 0; k < value_count; k++) dst[k] += src[k];
+    }
+    KOKKOS_INLINE_FUNCTION void final(double * sum) const {
+        for (uint32_t k = 0; k < value_count; k++) change(k) += sum[k];
+    }
+};
 
 /**
  * @brief Integrates queued cells [functor.offset, functor.offset + league) by teams of
@@ -701,6 +734,8 @@ CellChemistry::Statistics CellChemistry::statistics() const {
 void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
                           const Kokkos::View<uint8_t *> & repaired) {
     clip_recorder = recorder;
+    clipped_mass = Kokkos::View<double **, Kokkos::LayoutRight>("chem_clipped_mass", work.extent(0), gas.n_species);
+    clip_sum = Kokkos::View<double *>("chem_clip_sum", gas.n_species);
     cell_volume = volume;
     cell_repaired = repaired;
     counters = Kokkos::View<uint64_t[2]>("chemistry_substeps");
@@ -741,8 +776,10 @@ void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<u
                                work,    pivot,              q,            first,
                                options.reactor, dt,         n_lanes,      pattern,
                                sparse,  static_cast<uint32_t>(fast_bytes / sizeof(double)), cells.time_scale};
-        if (clip_recorder.active() && cells.volume.extent(0) > 0) {
+        const bool audited = clip_recorder.active() && cells.volume.extent(0) > 0;
+        if (audited) {
             functor.repair = clip_recorder;
+            functor.clipped_mass = clipped_mass;
             functor.volume = cells.volume;
             functor.repaired = cells.repaired;
             functor.counters = counters;
@@ -788,6 +825,10 @@ void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<u
             comm::enqueue_wait(main, narrow_space);
             add_failures(team_failures[1]);
             add_failures(team_failures[0]);
+        }
+        if (audited) {
+            Kokkos::parallel_reduce("chemistry_clip_sum", Kokkos::RangePolicy<>(0, m),
+                                    ClipSumFunctor{gas.n_species, clipped_mass, clip_recorder.change}, clip_sum);
         }
     }
 }
