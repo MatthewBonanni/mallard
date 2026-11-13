@@ -217,6 +217,23 @@ The Taylor–Green vortex (viscous) on hexahedra with fifth-order TENO-E and HLL
 - **Slimmer halo exchanges** ([#258](https://github.com/MatthewBonanni/mallard/pull/258)): 3D TENO5 at 12 GPUs went from 85% to 88% weak and from 68% to 72% strong scaling.
 - **Small meshes per GPU:** there the step is latency-bound. The CUDA graph and NCCL exchange ([#217](https://github.com/MatthewBonanni/mallard/pull/217)) take 262,000 MUSCL cells on 4 GPUs from 667 to 523 µs per step, and a 4,000-cell MUSCL step from 286 to 230 µs.
 
+### 3D weak scaling, owner-computes partition faces {#weak-scaling-3d}
+
+The Taylor–Green vortex of the 0.8.0 measurements, on the same hardware, with 64³ hexahedra per GPU and multi-jagged partitions; median of the steady intervals of 160-step runs (one GPU: 46.8 ms per step):
+
+| GPUs | time per step | efficiency vs 1 GPU | vs 4 GPUs (one node) |
+|---:|---:|---:|---:|
+| 4 | 47.0 ms | 99.6% | |
+| 8 | 48.6 ms | 96% | 97% |
+| 12 | 48.9 ms | 96% | 96% |
+| 16 | 48.5 ms | 96.5% | 97% |
+
+With 128³ cells per GPU, 4 GPUs take 346 ms per step and one takes 344 ms (99.4%).
+
+- **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures and meshes with rotational periodicity ([#911](https://github.com/MatthewBonanni/mallard/issues/911)) also reconstruct the first halo layer.
+- **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own. LES with `gradients = "reconstruction"` starts the first stage after the time step ([#912](https://github.com/MatthewBonanni/mallard/issues/912)).
+- **What is left at 8–16 GPUs** (busiest rank, about 1.7 ms per step): the halo-dependent cells and the faces are taken from index lists rather than contiguous ranges (TENO and flux kernels 2–8% slower per item), the gradients of halo-layer-1 cells that the viscous fluxes read, and packing face states. Numbering each rank's cells and faces as [interior | near the partition] (#277) would turn the lists into ranges.
+
 ### 2D, Mallard 0.3.0 {#scaling-2d}
 
 The 2D Riemann problem (configuration 3) on Cartesian quadrilaterals, fifth-order TENO-E, HLLC, SSPRK3, double precision, with Mallard 0.3.0 on NVIDIA A100-80GB GPUs, one MPI rank per GPU, the Hilbert partition and GPU-aware MPI. Builds use `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON`. Up to 8 GPUs share one node over NVLink; 16 GPUs are 4 nodes of 4, connected by HDR InfiniBand with GPUDirect RDMA. Times are seconds of wall time for 50 time steps, excluding setup; efficiency is relative to one GPU (for 16M cells, to 8).

@@ -64,7 +64,8 @@ constexpr Rule RULES[] = {
     {"face_normals", false, C::MESH}, {"face_coords", false, C::MESH}, {"face_measure", false, C::MESH},
     {"face_quad_", true, C::MESH}, {"face_image", true, C::MESH}, {"image_", true, C::MESH},
     {"face_bc", false, C::MESH}, {"face_shift", false, C::MESH}, {"shift", true, C::MESH},
-    {"rotated_faces", false, C::MESH}, {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
+    {"rotated_faces", false, C::MESH}, {"local_faces", false, C::MESH}, {"partition_faces", false, C::MESH},
+    {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
     {"vertex_gradient_weights", true, C::MESH}, {"points", false, C::MESH}, {"weights", false, C::MESH},
     // Boundaries, sources, sponges, LES and wall models
     {"face_char", false, C::MODELS}, {"face_state", true, C::MODELS}, {"bc_", true, C::MODELS},
@@ -89,7 +90,7 @@ constexpr Rule RULES[] = {
     {"D", false, C::OUTPUT}, {"X", false, C::OUTPUT}, {"Y", false, C::OUTPUT}, {"QRAD", false, C::OUTPUT},
     {"REGION_FRACTION", false, C::OUTPUT}, {"output_", true, C::OUTPUT},
     // Halo exchange
-    {"halo_", true, C::HALO},
+    {"halo_", true, C::HALO}, {"face_exchange_", true, C::HALO},
     // Setup
     {"init_", true, C::SETUP}, {"data_", true, C::SETUP}, {"region_", true, C::SETUP}, {"expression_", true, C::SETUP},
     // Kokkos
