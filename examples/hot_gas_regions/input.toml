@@ -1,0 +1,104 @@
+# Regions defined by the solution: a hot spot in a closed box expands, and the
+# gas hotter than T = 3 cools at a rate proportional to its excess
+# temperature.
+#
+# - The cooling source acts in {type = "where", condition = "T > 3"}: its
+#   cells' fractions follow the temperature at every stage, from a linear
+#   reconstruction of T - 3 in each cell.
+# - The probe "hot" writes the area, mass and mean temperature of the gas
+#   hotter than T = 1.5, and the probe "front" the length of its edge, the
+#   isosurface T = 1.5, with the mean pressure on it and the mass flux through
+#   it, every 20 steps. An isosurface faces toward increasing T, here into the
+#   hot gas: flip = true turns it outward, so the flux of the expanding gas is
+#   positive. The front is also {type = "boundary", of = "hot"}.
+# - At t = 0 the hot gas is the disk r^2 < ln(8) / 80: area 0.081661 (the
+#   probe: 0.081656) and edge length 1.01299 (the probe: 1.01090). It grows to
+#   about 0.145 by t = 0.13 as it expands, while the cooling and the expansion
+#   bring its mean temperature from 2.68 down to 2.16.
+# - The same regions work on saved output: mallard post extract
+#   solut/restart_*.restart --region '{type = "isosurface", field = "T",
+#   value = 2}' --fields P --name core writes the length of T = 2 and the
+#   pressure on it at each restart file to extract/probe_core_reductions.csv.
+
+[run]
+t_stop = 0.15
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 128
+Ny = 128
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+u = ["0", "0"]
+p = "1 + 4 * exp(-80 * ((x - 0.45)^2 + (y - 0.5)^2))"
+T = "1 + 4 * exp(-80 * ((x - 0.45)^2 + (y - 0.5)^2))"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[regions]
+hot = {type = "where", condition = "T > 1.5"}
+
+[[sources]]
+name = "cooling"
+rhoE = "-20 * rho * (T - 3)"
+region = {type = "where", condition = "T > 3"}
+
+[output]
+check_interval = 100
+
+[[probes]]
+name = "hot"
+fields = ["RHO", "T"]
+region = "hot"
+reductions = ["integral", "mean"]
+interval = 20
+
+[[probes]]
+name = "front"
+fields = ["P", "MASS_FLUX"]
+region = {type = "isosurface", field = "T", value = 1.5, flip = true}
+reductions = ["mean", "integral"]
+interval = 20
+
+[[write_data]]
+prefix = "solut/hot_gas"
+time_interval = 0.05
+fields = ["RHO", "U", "P", "T", "SOURCE_RHOE"]
+
+[[write_data]]
+prefix = "solut/restart"
+format = "restart"
+time_interval = 0.05

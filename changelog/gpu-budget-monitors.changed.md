@@ -1,0 +1,1 @@
+- Integral monitors with the kinetic-energy budget are evaluated in the step graph: the budget's right-hand side and its rates over the ranks (NCCL in NCCL builds) run on the device at the monitor's steps, so these rows no longer stop the step queue (#730).

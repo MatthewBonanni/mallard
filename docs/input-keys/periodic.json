@@ -22,6 +22,7 @@
   "examples/flame_turbulence/les.toml",
   "examples/forced_isotropic_turbulence/input.toml",
   "examples/isotropic_turbulence/input.toml",
+  "examples/moving_heaters/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/rotational_sector/annulus_3d.toml",
   "examples/rotational_sector/sector.toml",

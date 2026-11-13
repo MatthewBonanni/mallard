@@ -980,6 +980,151 @@ void Geometry::cell_rule(uint32_t c, int degree, std::vector<Vec3> & x, std::vec
 }
 
 
+double Geometry::face_coordinates(uint32_t f, const double * p, double * xi) const {
+    if (N_DIM == 3 && mesh.h_n_nodes_of_face(f) == 3) {
+        xi[0] = p[0];
+        xi[1] = p[1] * (1.0 - p[0]);
+        return 1.0 - p[0];
+    }
+    for (size_t j = 0; j + 1 < N_DIM; j++) xi[j] = p[j];
+    return 1.0;
+}
+
+void Geometry::box_of(uint32_t f, std::array<double, 2> & lo, std::array<double, 2> & hi) const {
+    const bool triangle = N_DIM == 3 && mesh.h_n_nodes_of_face(f) == 3;
+    lo = {triangle ? 0.0 : -1.0, triangle ? 0.0 : -1.0};
+    hi = {1.0, 1.0};
+}
+
+double Geometry::cone_eval(uint32_t c, uint32_t k, const double * xi, double t, Vec3 & x, Vec3 * dx) const {
+    const uint32_t f = mesh.h_face_of_cell(c, k);
+    const bool own = mesh.h_cells_of_face(f, 0) == int32_t(c);
+    const uint8_t s = own ? 0 : mesh.h_face_shift(f);
+    const bool turn = !own && mesh.h_rotated_row(s);
+    auto vector = [&](const Vec3 & u) {
+        if (!turn) return u;
+        Vec3 r = {0.0, 0.0, 0.0};
+        FOR_I_DIM {
+            for (uint8_t j = 0; j < N_DIM; j++) r[i] += double(mesh.h_shift_rotations(s, j, i)) * u[j];
+        }
+        return r;
+    };
+    Vec3 o = {0.0, 0.0, 0.0};
+    const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
+    for (uint32_t j = 0; j < n_nodes; j++) {
+        FOR_I_DIM o[i] += double(mesh.h_node_coords(mesh.h_node_of_cell(c, j), i));
+    }
+    o = scale(1.0 / n_nodes, o);
+    Vec3 F, dF[2];
+    eval(f, xi, F, dF);
+    FOR_I_DIM F[i] -= double(mesh.h_shifts(s, i));
+    F = vector(F);
+    for (size_t j = 0; j + 1 < N_DIM; j++) dF[j] = vector(dF[j]);
+    const Vec3 d = sub(F, o);
+    x = add(o, scale(t, d));
+    for (size_t j = 0; j + 1 < N_DIM; j++) dx[j] = scale(t, dF[j]);
+    dx[N_DIM - 1] = d;
+    const Vec3 N = N_DIM == 2 ? rot(dF[0]) : cross(dF[0], dF[1]);
+    return (own ? 1.0 : -1.0) * dot(d, N) * (N_DIM == 2 ? t : t * t);
+}
+
+namespace {
+
+/** @brief The solution y of J y = r for the N_DIM x N_DIM matrix of columns J; false if singular. */
+bool solve(const Vec3 * J, const Vec3 & r, Vec3 & y) {
+    if constexpr (N_DIM == 2) {
+        const double det = J[0][0] * J[1][1] - J[1][0] * J[0][1];
+        if (det == 0.0) return false;
+        y = {(r[0] * J[1][1] - J[1][0] * r[1]) / det, (J[0][0] * r[1] - r[0] * J[0][1]) / det, 0.0};
+    } else {
+        const double det = dot(J[0], cross(J[1], J[2]));
+        if (det == 0.0) return false;
+        y = {dot(r, cross(J[1], J[2])) / det, dot(J[0], cross(r, J[2])) / det, dot(J[0], cross(J[1], r)) / det};
+    }
+    return true;
+}
+
+} // namespace
+
+bool Geometry::contains(uint32_t c, const Vec3 & x, double tol) const {
+    Vec3 lo, hi;
+    bounds(c, lo, hi);
+    double size = 0.0;
+    FOR_I_DIM size = std::max(size, hi[i] - lo[i]);
+    FOR_I_DIM {
+        if (x[i] < lo[i] - tol * size || x[i] > hi[i] + tol * size) return false;
+    }
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+        const uint32_t f = mesh.h_face_of_cell(c, k);
+        std::array<double, 2> b_lo, b_hi;
+        box_of(f, b_lo, b_hi);
+        const bool triangle = N_DIM == 3 && mesh.h_n_nodes_of_face(f) == 3;
+        double xi[2] = {triangle ? 1.0 / 3.0 : 0.0, triangle ? 1.0 / 3.0 : 0.0};
+        double t = 0.5;
+        bool converged = false;
+        for (int it = 0; it < 30; it++) {
+            Vec3 y, dx[3];
+            cone_eval(c, k, xi, t, y, dx);
+            const Vec3 r = sub(x, y);
+            if (std::sqrt(dot(r, r)) <= 1e-12 * size) {
+                converged = true;
+                break;
+            }
+            Vec3 step;
+            if (!solve(dx, r, step)) break;
+            for (size_t j = 0; j + 1 < N_DIM; j++) xi[j] += step[j];
+            t += step[N_DIM - 1];
+            if (std::abs(t) < 1e-9) t = 1e-9;  // the apex: every cone's xi gives o
+            if (std::abs(t) > 10.0 || std::abs(xi[0]) > 10.0 || std::abs(xi[1]) > 10.0) break;
+        }
+        if (!converged || t < -tol || t > 1.0 + tol) continue;
+        if (triangle) {
+            if (xi[0] >= -tol && xi[1] >= -tol && xi[0] + xi[1] <= 1.0 + tol) return true;
+        } else if (std::abs(xi[0]) <= 1.0 + tol && (N_DIM == 2 || std::abs(xi[1]) <= 1.0 + tol)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Geometry::bounds(uint32_t c, Vec3 & lo, Vec3 & hi) const {
+    lo = {0.0, 0.0, 0.0};
+    hi = {0.0, 0.0, 0.0};
+    FOR_I_DIM {
+        lo[i] = std::numeric_limits<double>::max();
+        hi[i] = std::numeric_limits<double>::lowest();
+    }
+    auto extend = [&](const Vec3 & x) {
+        FOR_I_DIM {
+            lo[i] = std::min(lo[i], x[i]);
+            hi[i] = std::max(hi[i], x[i]);
+        }
+    };
+    constexpr int SAMPLES = 6;
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+        const uint32_t f = mesh.h_face_of_cell(c, k);
+        std::array<double, 2> b_lo, b_hi;
+        box_of(f, b_lo, b_hi);
+        for (int a = 0; a <= SAMPLES; a++) {
+            for (int b = 0; b <= (N_DIM == 2 ? 0 : SAMPLES); b++) {
+                const double p[2] = {b_lo[0] + (b_hi[0] - b_lo[0]) * a / SAMPLES, b_lo[1] + (b_hi[1] - b_lo[1]) * b / SAMPLES};
+                double xi[2];
+                face_coordinates(f, p, xi);
+                Vec3 x, dx[3];
+                cone_eval(c, k, xi, 1.0, x, dx);
+                extend(x);
+            }
+        }
+    }
+    // Between the samples a curved face bulges by a fraction of the samples' spacing squared
+    double size = 0.0;
+    FOR_I_DIM size = std::max(size, hi[i] - lo[i]);
+    FOR_I_DIM {
+        lo[i] -= 0.02 * size;
+        hi[i] += 0.02 * size;
+    }
+}
+
 double Geometry::max_shape_offset() const {
     double out = 0.0;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {

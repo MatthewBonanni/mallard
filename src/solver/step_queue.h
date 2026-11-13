@@ -43,13 +43,15 @@ enum Outcome : uint32_t {
 /** @brief Why the host must act after a step, as bits. */
 enum Reason : uint32_t {
     REQUEST = 1,       // a run-control request reached the step's reduction
-    STEP_DUE = 2,      // a step limit: output, n_steps, control files
+    STEP_DUE = 2,      // a step limit: output, n_steps
     TIME_DUE = 4,      // a time limit: output by time, t_stop
     NONFINITE = 8,     // [numerics] check_nan found a non-finite value
     REJECTIONS = 16,   // MAX_TRIES rejections of the same step
     INVALID_DT = 32,   // an accepted step of dt <= 0
     DIVERGENCE = 64,
     CHEMISTRY = 128,   // the chemistry failed in some cell, or its balancing across ranks must grow
+    BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
+    TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
 };
 
 /**
@@ -136,7 +138,11 @@ struct Record {
     int32_t reduced;      // of every rank
     uint32_t tries;       // rejections of this step so far
     uint32_t progress;    // progress holds the step's progress row
-    uint64_t chemistry_ns;  // of the step's chemistry calls, on the device's clock
+    uint64_t chemistry_ns;   // of the step's chemistry calls, on the device's clock
+    uint64_t monitors;       // bit k: monitor k (forces of each zone, then the integrals) staged its row
+    uint64_t probes;         // bit k: staged probe k is written
+    uint64_t probe_samples;  // bit k: staged averaging probe k staged a sample for its averages
+    uint32_t spectra;        // the unaveraged spectra staged their sample
     ProgressLocals progress_locals;
 };
 

@@ -37,8 +37,17 @@ bool is_open();
 /** @brief Rank 0: the step of the last record of the log appended to, if it has one. */
 std::optional<uint64_t> last_step();
 
-/** @brief Writes a record as one line and flushes it, and adds it to the report; nothing if neither is open. */
-void write(const json::Object & record);
+/**
+ * @brief Writes a record as one line and flushes it, and adds it to the
+ *        report; nothing if neither is open. A held record (a warning) waits
+ *        while hold() is in effect.
+ */
+void write(const json::Object & record, bool held = false);
+
+/** @brief Keeps the held records written from now on (a run's setup warnings) until release(). */
+void hold();
+/** @brief Stops holding: writes the run's start record, then the held records. */
+void release(const json::Object & start);
 
 /**
  * @brief Where progress records also go, one per line (mallard -i ... --log-format jsonl): written by rank 0,

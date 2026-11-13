@@ -16,6 +16,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -178,27 +179,34 @@ struct Case {
     std::string extra;            // after [output]'s first key; {dir} stands for the run's directory
     std::string numerics;         // [numerics] keys
     std::string integrator = "SSPRK3";
+    std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
+    Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
+    std::string body;             // the mesh, state, boundaries, numerics and physics of another case than the box
 };
 
 std::string box_input(const Case & c, const std::string & dir, int depth) {
     std::ostringstream s;
-    s << "[run]\n" << c.run << "step_queue = " << depth << "\n"
-      << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
-    s << "[initialize]\ntype = \"analytical\"\n"
-      << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
-      << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
-    if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
-    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n" << c.numerics
-      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-      << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\n";
+    s << "[run]\n" << c.run << "step_queue = " << depth << "\n";
+    if (!c.body.empty()) {
+        s << c.body;
+    } else {
+        s << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+        if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
+        s << "[initialize]\ntype = \"analytical\"\n"
+          << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
+          << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
+          << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\n" << c.right
+          << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
+        if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+        s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n" << c.numerics
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+          << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    }
+    s << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\n";
     std::string extra = c.extra;
     for (size_t at; (at = extra.find("{dir}")) != std::string::npos;) extra.replace(at, 5, dir);
     s << extra;
@@ -269,39 +277,6 @@ std::string without_timing(const json::Value & v) {
     return "";
 }
 
-json::Value * member(json::Value & v, const std::string & key) {
-    for (size_t i = 0; i < v.names.size(); i++) {
-        if (v.names[i] == key) return &v.members[i];
-    }
-    return nullptr;
-}
-
-/**
- * @brief A progress row without timing, and without the repairs' changes and what derives from them: atomic sums
- *        whose last bits vary between runs (#782).
- */
-std::string comparable_row(json::Value row) {
-    const auto clear = [](json::Value & v, const char * key) {
-        if (json::Value * m = member(v, key)) *m = json::Value{};
-    };
-    if (json::Value * health = member(row, "health")) {
-        for (const char * key : {"repairs", "repairs_run"}) {
-            if (json::Value * sites = member(*health, key)) {
-                for (json::Value & site : sites->members) clear(site, "change");
-            }
-        }
-        for (const char * key : {"balance", "balance_run"}) {
-            if (json::Value * components = member(*health, key)) {
-                for (json::Value & component : components->members) {
-                    for (const char * term : {"repairs", "residual", "relative"}) clear(component, term);
-                }
-            }
-        }
-        clear(*health, "element_drift");
-    }
-    return without_timing(row);
-}
-
 /** @brief What a run shows: its state, step, time and rejections, its files, and its run log's rows and events. */
 struct Outcome {
     std::vector<rtype> U;
@@ -309,9 +284,11 @@ struct Outcome {
     rtype t = 0.0;
     uint64_t rejected = 0;
     uint64_t queued = 0;
+    uint64_t graph_steps = 0;
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
+    std::vector<std::string> warnings;
 };
 
 /**
@@ -337,17 +314,21 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         Solver solver;
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
+        solver.set_capture_fault(c.capture_fault);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0) expect_capturable(guard, solver);
+        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
         solver.copy_device_to_host();
+        const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
             for (uint8_t v = 0; v < N_CONSERVATIVE; v++) o.U.push_back(solver.h_conservatives(i, v));
+            for (size_t k = 0; k < n_species; k++) o.U.push_back(solver.h_species(i, k));
         }
+        o.graph_steps = solver.get_graph_steps();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -369,6 +350,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             for (std::string line; std::getline(in, line);) {
                 const json::Value v = json::parse(line);
                 if (v["type"].string == "progress" || v["type"].string == "event") o.log.push_back(strip(without_timing(v)));
+                if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
             }
         } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos) {
             o.files[file] = without_records(read_file(entry.path()));
@@ -399,8 +381,8 @@ void expect_same(const Outcome & a, const Outcome & b, const std::string & what)
 
 /**
  * @brief The run stepped by the host (step_queue = 0), one step per launch
- *        (1) and enqueued ahead (3): the same state, files and log. Runs with
- *        triggers stop for the host after every step.
+ *        (1) and enqueued ahead (3): the same state, files and log. Runs the
+ *        host stops at every step (runs_ahead false) take no step ahead.
  */
 Outcome expect_queue_invariant(const std::string & name, const Case & c, const bool runs_ahead = true) {
     const Outcome host = run_case(name, c, 0);
@@ -437,6 +419,261 @@ TEST(StepQueueTest, OutputsByStep) {
     EXPECT_TRUE(o.files.count("restart_000028.restart"));
 }
 
+TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 2\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\n";
+    expect_queue_invariant("monitors", c);
+    // As many steps run ahead as without the monitors
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("monitors", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, KineticEnergyBudgetIsStagedWithoutStoppingTheDevice) {
+    // The budget's extra right-hand side runs in the step graph at the monitor's steps, at the device's t
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\nbudget = true\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("budget", c);
+    if (comm::is_root()) {
+        EXPECT_NE(o.files.at("integrals.csv").find("eps_numerical"), std::string::npos);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("budget", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    // The restart carries the means and their clock
+    expect_queue_invariant("means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n";
+    EXPECT_EQ(run_case("means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, BatchMeansAreSampledWithoutStoppingTheDevice) {
+    // Batches of the means close on the device; the restart carries their averages and clock
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    expect_queue_invariant("batch_means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n";
+    EXPECT_EQ(run_case("batch_means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ConditionalStatisticsAreSampledWithoutStoppingTheDevice) {
+    // Entries with [statistics]' clock, their own interval and t_start, a joint PDF, and one started by a trigger
+    // between restarts; the files and restarts carry their accumulators and clocks
+    const std::string restarts = "check_interval = 1000\n"
+                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
+    const std::string entries =
+        "[[statistics.conditional]]\non = \"RHO\"\nbins = 8\nrange = [0.7, 1.3]\nfields = [\"P\", \"U_X\"]\n"
+        "file = \"{dir}/conditional_rho.csv\"\n"
+        "[[statistics.conditional]]\non = [\"RHO\", \"P\"]\nbins = [6, 4]\nrange = [[0.6, 1.4], [0.8, 1.2]]\n"
+        "fields = [\"T\"]\nweight = \"mass\"\ninterval = 3\nt_start = 0.05\nfile = \"{dir}/conditional_joint.csv\"\n";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = restarts + "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\"]\n" + entries;
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("conditional", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"conditional_rho.csv", "conditional_joint.csv"}) {
+            ASSERT_TRUE(o.files.count(file)) << file;
+            EXPECT_FALSE(o.files.at(file).empty()) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = restarts;
+    EXPECT_EQ(run_case("conditional", c, 3).queued, run_case("bare", bare, 3).queued);
+
+    Case alone = c;
+    alone.extra = restarts + "[statistics]\ninterval = 2\n" + entries +
+                  "[[triggers]]\nname = \"begin\"\nwhen = \"step >= 12\"\ndo = \"start statistics\"\n";
+    expect_queue_invariant("conditional_alone", alone);
+}
+
+namespace {
+
+/** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
+void expect_graphed(const Outcome & o, const std::string & what) {
+#ifdef KOKKOS_ENABLE_CUDA
+    EXPECT_GT(o.graph_steps, 0u) << what;
+#endif
+    for (const std::string & w : o.warnings) {
+        EXPECT_EQ(w.find("no CUDA graph of the step"), std::string::npos) << what << ": " << w;
+    }
+}
+
+} // namespace
+
+TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
+    // Means and conditional statistics of derived fields, computed under the sampling's conditional node
+    const std::string restarts = "check_interval = 1000\n"
+                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = restarts + "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"MACH\", \"Q_CRITERION\"]\n"
+                         "products = [\"MACH*SCHLIEREN\"]\n"
+                         "[[statistics.conditional]]\non = \"MACH\"\nbins = 6\nrange = [0.0, 0.6]\n"
+                         "fields = [\"DILATATION\", \"P\"]\ninterval = 3\nfile = \"{dir}/conditional_mach.csv\"\n";
+    c.distributed = comm::size() > 1;
+    expect_queue_invariant("derived", c);
+    Case bare = c;
+    bare.extra = restarts;
+    const Outcome queued = run_case("derived", c, 3);
+    expect_graphed(queued, "derived");
+    EXPECT_EQ(queued.queued, run_case("bare", bare, 3).queued);
+
+    // HRR and OMEGA_<species> of a reacting mixture, with a flame index of its species gradients
+    Case reacting;
+    reacting.run = "n_steps = 12\ndt = 1.0e-8\n";
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 4\nLx = 1.0e-3\nLy = 1.0e-3\n";
+    if (N_DIM == 3) body << "Nz = 3\nLz = 1.0e-3\n";
+    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if (N_DIM == 3) body << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    body << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1100.0 + 400.0 * sin(pi * x / 1.0e-3)\"\n"
+         << "u = " << vector_of("0.0", "0.0", "0.0")
+         << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+         << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
+         << "[chemistry]\n";
+    reacting.body = body.str();
+    reacting.extra = restarts + "[output.mixture]\nfuel_species = \"H2\"\noxidizer_species = \"O2\"\n"
+                                "[statistics]\ninterval = 2\nfields = [\"HRR\", \"MACH\"]\nproducts = [\"HRR*FLAME_INDEX\"]\n"
+                                "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1100.0, 1500.0]\n"
+                                "fields = [\"HRR\", \"OMEGA_H2O\"]\nfile = \"{dir}/conditional_T.csv\"\n";
+    reacting.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("rates", reacting);
+    if (comm::is_root()) {
+        ASSERT_TRUE(o.files.count("conditional_T.csv"));
+        EXPECT_FALSE(o.files.at("conditional_T.csv").empty());
+    }
+    Case reacting_bare = reacting;
+    reacting_bare.extra = restarts;
+    const Outcome reacting_queued = run_case("rates", reacting, 3);
+    expect_graphed(reacting_queued, "rates");
+    EXPECT_EQ(reacting_queued.queued, run_case("rates_bare", reacting_bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    const std::string probes =
+        "[[probes]]\nname = \"point\"\nfile = \"{dir}/point.csv\"\ninterval = 2\npoint = " + point_of("0.4", "0.5", "0.2") +
+        "\nfields = [\"RHO\", \"U\", \"P\", \"T\"]\n"
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+        "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
+        "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"wall\"\nfile = \"{dir}/wall.csv\"\ninterval = 4\nboundary = \"bottom\"\n"
+        "fields = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+        "reductions_file = \"{dir}/wall_reductions.csv\"\n";
+    c.extra = "check_interval = 1000\n" + probes;
+    expect_queue_invariant("probes", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, RowsOfRunsWithBoundariesOfTRunAhead) {
+    // A row every step, with an outlet pressure of t: its range is checked on the device at each row
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    c.extra = "check_interval = 1\n";
+    c.right = "type = \"outlet_pressure\"\np = \"1.0 + 0.5 * t\"\n";
+    expect_queue_invariant("boundary_rows", c);
+}
+
+TEST(StepQueueTest, BoundaryOfTOutOfRangeStopsAtTheHostsRow) {
+    // The outlet pressure turns negative between rows: every depth stops with its error at the next row
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    c.extra = "check_interval = 4\n";
+    c.right = "type = \"outlet_pressure\"\np = \"1.0 - 2.0 * t\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("boundary_error", c);
+    EXPECT_NE(o.error.find("must be positive"), std::string::npos) << o.error;
+    EXPECT_EQ(o.step % 4, 0u);
+}
+
+TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
+    // A probe written by time (the device shortens the steps to its output times) and a line's time averages
+    // with reductions; the restart carries their clocks and averages
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    const std::string restart = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 24\n";
+    c.extra = "check_interval = 1000\n" + restart +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ntime_interval = 0.013\nfields = [\"RHO\", \"P\"]\n"
+              "point = " + point_of("0.5", "0.5", "0.2") + "\n"
+              "[[probes]]\nname = \"mean_line\"\nfile = \"{dir}/mean_line.csv\"\ninterval = 5\naverage = true\n"
+              "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") +
+              "\nn_points = 5\nfields = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"rms\"]\n"
+              "reductions_file = \"{dir}/mean_line_reductions.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("time_probes", c);
+    if (comm::is_root()) {
+        EXPECT_GT(std::count(o.files.at("pt.csv").begin(), o.files.at("pt.csv").end(), '\n'), 5);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + restart;
+    EXPECT_EQ(run_case("time_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
+    // An integral, a force and a probe's value, each sampled at its own monitor's steps while steps run ahead
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    c.extra = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 25\n"
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"forces_bottom_Fy_pressure\", "
+              "\"pt_P\"]\nmin_samples = 10\nbatches = 4\nfile = \"{dir}/convergence.csv\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence", c);
+    if (!comm::is_root()) return;
+    ASSERT_TRUE(o.files.count("convergence.csv"));
+    // A row at each step where one of the three monitors wrote
+    size_t rows = 0, expected = 0;
+    std::istringstream in(o.files.at("convergence.csv"));
+    for (std::string line; std::getline(in, line);) rows += !line.empty() && std::isdigit(static_cast<unsigned char>(line[0]));
+    for (uint64_t s = 0; s <= 60; s++) expected += s % 2 == 0 || s % 3 == 0 || s % 5 == 0;
+    EXPECT_EQ(rows, expected);
+}
+
+TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
+    // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
+    // evaluates a trigger on them between those rows, where the host updates them. MSER-5 finds both
+    // signals stationary at step 57 in 2D, at step 117 in 3D
+    Case c;
+    c.run = "n_steps = 200\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+              "batches = 4\nfile = \"{dir}/convergence.csv\"\n"
+              "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence_triggers", c);
+    EXPECT_LT(o.step, 200u);
+    EXPECT_EQ(o.step % 3, 0u);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";
@@ -471,24 +708,65 @@ TEST(StepQueueTest, RejectedStepsAreRetriedAsTheHostRetriesThem) {
     EXPECT_EQ(o.t, 0.3_r);
 }
 
-TEST(StepQueueTest, ControlFilesActAtTheirSteps) {
-    // A STOP file found at step 5 stops the run after step 6, with a restart
+TEST(StepQueueTest, ControlFilesStopAsRequests) {
+    // A STOP file found at step 5 stops the run after step 6 when the host takes every step; with steps queued
+    // ahead, at the first step that reads the request, without a stop of the queue at step 5. Either way with a
+    // restart, and the state the host's steps reach at that step
     Case c;
     c.run = "n_steps = 40\ncfl = 0.5\ncontrol_file_interval = 5\ncontrol_socket = false\n";
     c.extra = RESTARTS;
     c.stop_file = true;
     c.distributed = comm::size() > 1;
-    const Outcome o = expect_queue_invariant("control_files", c);
-    EXPECT_EQ(o.step, 6u);
-    EXPECT_TRUE(o.files.count("restart_000006.restart"));
+    for (const int depth : {0, 1, 3}) {
+        const Outcome o = run_case("control_files", c, depth);
+        if (depth == 0) {
+            EXPECT_EQ(o.step, 6u);
+        }
+        EXPECT_GE(o.step, 6u) << depth;
+        EXPECT_LE(o.step, 6u + 3) << depth;
+        if (comm::is_root()) {
+            char name[64];
+            std::snprintf(name, sizeof name, "restart_%06llu.restart", static_cast<unsigned long long>(o.step));
+            EXPECT_TRUE(o.files.count(name)) << depth << ": " << name;
+        }
+        Case host = c;
+        host.stop_file = false;
+        host.run = "n_steps = " + std::to_string(o.step) + "\ncfl = 0.5\ncontrol_socket = false\n";
+        const Outcome reached = run_case("control_files_host", host, 0);
+        EXPECT_EQ(o.t, reached.t) << depth;
+        EXPECT_TRUE(o.U == reached.U) << depth;
+    }
 }
 
-TEST(StepQueueTest, TriggersActAtTheirSteps) {
+TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
+    // Conditions of t with a hold, of the integrals' rows, repeated, and of the step: evaluated on the device,
+    // which stops for the host only at a step one fires at
     Case c;
     c.run = "n_steps = 40\ncfl = 0.5\n";
-    c.extra = RESTARTS + "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9\"\ndo = \"stop\"\n";
-    const Outcome o = expect_queue_invariant("triggers", c, false);
-    EXPECT_EQ(o.step, 9u);
+    c.extra = RESTARTS + "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[[triggers]]\nname = \"held\"\nwhen = \"t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"energy\"\nwhen = \"integrals_kinetic_energy > 0 and step % 6 < 3\"\nrepeat = true\n"
+              "do = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"late\"\nwhen = \"step >= 31\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("triggers", c);
+    EXPECT_EQ(o.step, 31u);
+    if (comm::is_root()) {
+        size_t firings = 0;
+        for (const auto & line : o.log) firings += line.find("trigger") != std::string::npos;
+        EXPECT_GT(firings, 3u);
+    }
+}
+
+TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {
+    // The wall time rides along the step's reduction: the device stops for the host only at the step one fires at
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = RESTARTS + "[[triggers]]\nname = \"held\"\nwhen = \"wall > 0 and t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"late\"\nwhen = \"(step >= 15 and wall > 0) or wall > 1e9\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("wall_triggers", c);
+    EXPECT_EQ(o.step, 15u);
 }
 
 TEST(StepQueueTest, DivergenceWritesTheLastValidStateAsTheHostDoes) {
@@ -508,11 +786,37 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     c.extra = "check_interval = 2\n"
               "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 9\n"
               "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
-              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n"
+              "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
+              "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     c.numerics = "check_nan = true\n";
     c.distributed = true;
     const Outcome o = expect_queue_invariant("distributed", c);
     EXPECT_EQ(o.step, 24u);
+}
+
+TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "step graphs are captured in CUDA builds only";
+#else
+    // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
+    // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    const Outcome host = run_case("failed_capture", c, 0);
+    for (const auto & [fault, reported_by] : {std::pair{Solver::CaptureFault::FENCE, "cudaDeviceSynchronize"},
+                                              std::pair{Solver::CaptureFault::LEGACY_STREAM, "cudaStreamEndCapture"}}) {
+        c.capture_fault = fault;
+        const Outcome fallback = run_case("failed_capture", c, 3);
+        expect_same(host, fallback, reported_by);
+        EXPECT_EQ(fallback.graph_steps, 0u) << reported_by;
+        ASSERT_EQ(fallback.warnings.size(), 1u) << reported_by;
+        EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+        EXPECT_NE(fallback.warnings[0].find(reported_by), std::string::npos) << fallback.warnings[0];
+    }
+#endif
 }
 
 namespace {
@@ -552,11 +856,14 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
-    o.rows_on_device = solver.progress_on_device();
+    // Rows of runs with fused chemistry follow the host's half step
+    const bool fused = input.contains("chemistry") && input.at("chemistry").contains("fuse_half_steps") &&
+                       input.at("chemistry").at("fuse_half_steps").as_boolean();
+    o.rows_on_device = solver.progress_on_device() && !fused;
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
-        if (v["type"].string == "progress") o.rows.push_back(comparable_row(v));
+        if (v["type"].string == "progress") o.rows.push_back(without_timing(v));
     }
     return o;
 }

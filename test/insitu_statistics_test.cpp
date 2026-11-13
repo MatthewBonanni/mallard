@@ -12,12 +12,14 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <span>
 #include <sstream>
 #include <string>
@@ -31,6 +33,7 @@
 #include "provenance.h"
 #include "scratch.h"
 #include "snapshot_block.h"
+#include "step_graph_guard.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -401,6 +404,117 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
         for (uint32_t bin = 0; bin < 3; bin++) EXPECT_EQ(pb.host_means()(c, bin), pa.host_means()(c, bin));
     }
+}
+
+// Averaged spectra and phase averages (by period and by a trigger signal), each at its own interval and t_start, are
+// sampled in the step graph: the
+// same spectra, bins and means bit for bit with the host's steps (step_queue = 0), one step per launch and steps
+// enqueued ahead, which run ahead of the host. Fails if a sample stops the queue, is taken at another step or time,
+// or the device's clock of the bins or the trigger's crossings differs from the host's.
+TEST(InsituStatisticsTest, SpectraAndPhasesAreSampledInTheStepGraph) {
+    const std::string box_dirs = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
+    for (const std::string & phase : {std::string("period = 0.013\n"),
+                                      "variable = \"U_X\"\nlevel = 0.05\nprobe = " + std::string(N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") + "\n"}) {
+        const std::string extra = "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\n"
+                                  "products = [\"U_X*U_Y\"]\ninterval = 3\nt_start = 0.004\n"
+                                  "file = \"" + (rank_scratch_dir() / "queued_spectra.csv").string() + "\"\n"
+                                  "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\ninterval = 4\n" + phase;
+        std::vector<std::unique_ptr<Solver>> runs;
+        for (const int depth : {0, 1, 3}) {
+            std::string input = box(box_dirs, 0.0, 24, extra);
+            input.insert(input.find("[mesh]"), "step_queue = " + std::to_string(depth) + "\n");
+            const StepGraphGuard guard;
+            auto solver = std::make_unique<Solver>();
+            solver->set_distributed(false);
+            solver->set_uncaptured_step_graphs(depth > 0);
+            solver->init(parse_toml(input));
+            solver->run();
+            solver->copy_device_to_host();
+            for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+            runs.push_back(std::move(solver));
+        }
+        EXPECT_GT(runs[2]->get_queued_steps(), 0u) << phase;
+        const Spectra & ref = runs[0]->get_statistics().get_spectra();
+        const PhaseAverage & ref_phase = runs[0]->get_statistics().get_phase();
+        EXPECT_GT(ref.samples(), 0u);
+        // A trigger signal crosses its level twice before its first sample: its state is compared below
+        if (phase.find("period") != std::string::npos) {
+            EXPECT_GT(ref_phase.samples(), 0u);
+        }
+        for (size_t r = 1; r < runs.size(); r++) {
+            const Spectra & s = runs[r]->get_statistics().get_spectra();
+            const PhaseAverage & ph = runs[r]->get_statistics().get_phase();
+            EXPECT_EQ(s.samples(), ref.samples());
+            for (uint32_t p = 0; p < 2; p++) {
+                for (uint32_t h = 0; h < N_DIM; h++) EXPECT_EQ(s.spectrum(0, p, h), ref.spectrum(0, p, h)) << phase;
+                EXPECT_EQ(s.shell(p), ref.shell(p)) << phase;
+            }
+            EXPECT_EQ(ph.samples(), ref_phase.samples()) << phase;
+            EXPECT_EQ(ph.bin_weights(), ref_phase.bin_weights()) << phase;
+            EXPECT_EQ(ph.attributes(), ref_phase.attributes()) << phase;
+            size_t differ = 0;
+            for (uint32_t c = 0; c < runs[r]->get_mesh()->n_owned(); c++) {
+                for (uint32_t bin = 0; bin < 3; bin++) differ += ph.host_means()(c, bin) != ref_phase.host_means()(c, bin);
+            }
+            EXPECT_EQ(differ, 0u) << phase;
+        }
+    }
+}
+
+// Spectra written at each sample (average = false) are staged in the step graph and written by the host from the
+// records: the same files bit for bit with the host's steps, one step per launch and steps enqueued ahead, which run
+// as far ahead as without them. Fails if a sample stops the queue or a file holds another step's sample.
+TEST(InsituStatisticsTest, UnaveragedSpectraAreStagedWithoutStoppingTheDevice) {
+    const std::string box_dirs = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
+    const auto files_of = [](const std::filesystem::path & dir) {
+        std::vector<std::string> files;
+        for (const auto & entry : std::filesystem::directory_iterator(dir)) {
+            std::ifstream in(entry.path());
+            std::string text = entry.path().filename().string() + "\n";
+            for (std::string line; std::getline(in, line);) {
+                if (line.empty() || line[0] != '#') text += line + "\n";
+            }
+            files.push_back(text);
+        }
+        std::sort(files.begin(), files.end());
+        return files;
+    };
+    // Over the ranks, rank 0 writes the files
+    const bool distributed = comm::size() > 1;
+    std::vector<std::vector<std::string>> files;
+    std::vector<uint64_t> queued;
+    for (const bool spectra : {true, false}) {
+        for (const int depth : {0, 1, 3}) {
+            if (!spectra && depth != 3) continue;
+            const std::filesystem::path dir = scratch_dir() / ("unaveraged_spectra_" + std::to_string(depth));
+            if (comm::is_root()) std::filesystem::remove_all(dir);
+            comm::barrier();
+            const std::string extra =
+                spectra ? "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\n"
+                          "products = [\"U_X*U_Y\"]\naverage = false\ninterval = 3\nt_start = 0.004\n"
+                          "file = \"" + (dir / "spectra.csv").string() + "\"\n"
+                        : "";
+            std::string input = box(box_dirs, 0.0, 24, extra);
+            input.insert(input.find("[mesh]"), "step_queue = " + std::to_string(depth) + "\n");
+            const StepGraphGuard guard;
+            Solver solver;
+            solver.set_distributed(distributed);
+            solver.set_uncaptured_step_graphs(depth > 0);
+            solver.init(parse_toml(input));
+            solver.run();
+            for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+            queued.push_back(solver.get_queued_steps());
+            comm::barrier();
+            if (spectra && comm::is_root()) files.push_back(files_of(dir));
+        }
+    }
+    EXPECT_GT(queued[2], 0u);
+    EXPECT_EQ(queued[2], queued[3]);
+    if (!comm::is_root()) return;
+    ASSERT_EQ(files.size(), 3u);
+    EXPECT_GT(files[0].size(), 3u);
+    EXPECT_EQ(files[1], files[0]);
+    EXPECT_EQ(files[2], files[0]);
 }
 
 namespace {

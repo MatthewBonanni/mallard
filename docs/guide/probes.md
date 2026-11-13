@@ -38,10 +38,10 @@ interval = 10
 *Used in:*
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
-[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
-[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct)
-and 2 more.
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions),
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
+and 4 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -69,13 +69,37 @@ reductions = ["mean", "rms"]
 | `fields` | required | `[statistics]` fields; `U`, `RHOU`, `Y_*` and `RHOY_*` expand to all components and species |
 | `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
-| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
+| `n_points` | per type | Samples on a curve; `"cells"`: one per cell it crosses ([below](#curves-on-their-cells)); `[n_u, n_v]` on a surface; on a region, a grid ([below](#grids-in-regions)) |
+| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample (a filled region: its integral over the region, [below](#region-probes)) |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry; boundaries also `moment` (about `moment_center`, default the origin) |
 | `samples` | `true` | `false` writes only the reductions |
 | `spectra` | none | Time spectra of the samples or reductions ([below](#time-spectra)) |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Curves on their cells
+
+With `n_points = "cells"`, a `line`, `polyline`, `circle`, `arc` or `curve` is
+cut exactly by the cells it crosses: one sample per cell and crossing, at the
+middle of its length in the cell, weighing that length. The samples are
+written as segments with their values as cell data, and each crossing
+integrates with three Gauss points, so the `integral` of a line is exact for
+the reconstruction polynomials up to degree 5, on any mesh and resolution. A
+curve along a face between two cells is sampled once, in one of them; one along
+a boundary face, in its cell. Curved cells cut it by their curved shapes.
+
+```toml
+[[probes]]
+name = "cut"
+type = "line"
+start = [0.0, -1.0]
+end = [0.0, 1.0]
+n_points = "cells"
+fields = ["U", "MASS_FLUX"]
+sampling = "point"
+reductions = ["integral"]
+```
 
 ### Cut planes and surfaces
 
@@ -138,7 +162,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
 | `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
 | `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
-| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
+| `CF`, `CP` | Skin friction and pressure coefficients of `reference` (the probe's, else `[output] reference`) |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
 | `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain |
@@ -187,13 +211,17 @@ the sample, so a probe converges at the scheme's order (fifth order for
 centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
 page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
 each type, where its samples go and how to read the files, with figures:
-[Geometry](geometry.md#points-and-curves).
+[Geometry](geometry.md#points-and-curves). Each probe file records where every sample is read (owning
+cell, centroid, distance) and how: [Probe sampling](output.md#probe-sampling).
 
 Pitfalls:
 
 - Point values fall back to the linear least-squares reconstruction in cells
   the TENO indicator flags troubled (shocks, and coarse meshes of smooth
-  fields), and to the cell average outside the domain.
+  fields), and to the cell average where neither gives a positive density
+  and energy. VTP and VTKHDF
+  probe files record the method and each variable's kind of value
+  ([Cell averages and point values](output.md#cell-averages-and-point-values)).
 - Mass fractions are cell averages in both modes; `T` and `H` follow the
   reconstructed `p / rho` at the cell's composition.
 - CSV is for small probes: it repeats the coordinates every output. Use `vtkhdf`, `hdf5`
@@ -208,7 +236,39 @@ Pitfalls:
   ones are the scheme's own (molecular: without the SGS part of LES); walls
   carry no species flux, outflows without an image face none at all.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
-  integrate with three Gauss points per element between samples.
+  integrate with three Gauss points per element between samples, or per
+  crossing of a cell with `n_points = "cells"`.
+
+### Samples outside the domain
+
+Every sample a probe writes lies in the mesh. A point on a boundary face, to
+round-off relative to the cell size, counts as inside, so a line from wall to
+wall keeps its ends.
+
+- `point` and `points` probes: a point outside the domain is an input error
+  at setup (in a run, `mallard check` and `mallard post extract` alike) that
+  names the probe, how many points are outside, and for the first few the
+  point's index, its coordinates and its distance to the nearest boundary
+  zone.
+- Curves (`line`, `polyline`, `arc`, `circle`, `curve`) and resampled
+  surfaces: the samples outside the domain are dropped, and a warning names
+  the probe, how many samples and what share of the length or area were
+  dropped, and where (the runs of dropped samples). The warning is printed and
+  written to `mallard.jsonl`, and the file records it as `clipped` in its
+  [probe sampling block](output.md#probe-sampling). A curve or surface
+  entirely outside the domain is an error. A line drawn past a curved wall
+  ([`[[mesh.curved]]`](meshes.md#curved-boundaries)) is clipped at the curved
+  wall, and at its faceted surface without one.
+- Cut planes sample the cells they cut, so they are always clipped to the
+  mesh; one that misses the mesh is an error.
+- Region probes cover the region's part in the domain. Where part of a filled
+  region lies outside the domain (more than 0.1% of its volume, or area in
+  planar 2D), a warning gives that share and the volumes inside and in all,
+  and the file records it as `clipped` (`volume_fraction`, or
+  `area_fraction` in planar 2D). One that misses the mesh is an error.
+
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-light.svg#gh-light-mode-only)
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-dark.svg#gh-dark-mode-only)
 
 ### Time averages
 
@@ -333,7 +393,9 @@ interval = 10
 ```
 
 *Used in:*
-[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions).
+[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions).
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not
@@ -360,8 +422,105 @@ step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
 ```
 
 The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
-radian), `area` in planar 2D runs (per unit depth). Give the region by name to
-measure exactly where a source or sponge acts:
+radian), `area` in planar 2D runs (per unit depth).
+
+**Measures.** A filled region probe records the region's own volume and
+surface area (planar 2D: area and perimeter; axisymmetric: per radian, of the
+solid its part at r >= 0 sweeps), independent of the mesh, and those of its
+part in the domain, in the `measures` of its
+[probe sampling block](output.md#probe-sampling), which heads its reductions
+file and is written to `mallard.jsonl` as a `probe` record:
+
+- Its own: in closed form for one primitive, moved, rotated and scaled
+  (`tolerance` 0); otherwise, as for booleans, polygons that cross themselves,
+  ellipses and ellipsoids of unequal axes, smooth edges and implicit regions,
+  by subdividing a box around it, extrapolated in the subdivision's size,
+  with `tolerance` the estimated relative error (larger for the surface area
+  of sharp edges and corners, which converges at first order). `null` for a
+  region of the mesh or one without a bounded box.
+- In the domain: the volume `sum f V`, the reductions' third column, and the
+  area of its surface: the region's own surface inside the domain and the
+  domain's boundary inside the region, the closed surface
+  `{type = "boundary", of = {type = "intersection", regions = ["domain", ...]}}`
+  that a control-volume balance integrates over.
+
+On a mesh with [curved boundaries](meshes.md#curved-boundaries), both follow
+the curved walls: the fractions `f` of the cells at a curved wall are of their
+curved shapes, and the surface's part on the wall is the curved faces'.
+
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-light.svg#gh-light-mode-only)
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-dark.svg#gh-dark-mode-only)
+
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-light.svg#gh-light-mode-only)
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-dark.svg#gh-dark-mode-only)
+
+**Moving regions and copies.** A filled region that
+[moves](geometry.md#moving-regions) is placed where it is at each write: its
+fractions, and so the third column, are those of that time, the region's part
+in the domain as it enters or leaves it. Its own measures are recorded while it
+only translates and rotates (`null` once it changes shape), and its part in
+the domain is the third column of each row (`in_domain` is `null`). Each
+write selects the cells it covers then (`f > 0`) on the device of each rank,
+and evaluates and gathers only those, so the cost of a write follows the
+region, not the mesh; a `where` region does the same. With
+`average = true` its reductions are those of the time averages over the cells
+it sweeps, each cell weighed by its mean `f V`: the integral is the mean of
+the integrals, the mean that integral over the mean measure in the domain
+(the third column), and the extremes those of the cells it has covered. The
+means are kept, and written to restart files, for the cells it has covered
+only, so their memory follows the region's sweep, not the mesh. With
+`copies = "each"`, a region with [`repeat`](geometry.md#arrays-of-copies) gives
+one probe per copy, `<name>_copy<k>`, each with its own reductions file.
+
+**Regions defined by the solution.** A `where` region and an `isosurface`
+([Regions defined by the solution](geometry.md#regions-defined-by-the-solution))
+are placed on the solution at each write: a `where` region's fractions, and an
+isosurface's elements, extracted anew from the cells' levels. The reductions
+file's measure column is the region's at that time, and its `measures` are
+`null`. With `average = true`, an isosurface is extracted anew at each
+sample, and its reductions are those of the time averages per cell it
+crosses, each cell weighed by the mean area (2D: length) of the isosurface in
+it: the integral is the mean of the integrals, the mean that integral over
+the mean area (the third column), and the extremes those of the cells it has
+crossed; like a moving region's, its means are kept for those cells only.
+Isosurfaces take no `n_points`: their elements have no parameters to
+place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
+entry with the isosurface as its region writes the values on its elements at
+each write.
+
+**Point sampling.** With `sampling = "point"`, a static filled region
+integrates the reconstruction over its own shape instead of `f V` times the
+cell averages: a cell entirely inside is one sample of its cell value weighing
+its volume (the integral of its reconstruction polynomial), and a cell the
+region's surface cuts has quadrature points over its part inside, high-order
+for curved surfaces and fitted to a few points of the reconstruction's
+degree. On a mesh with [curved boundaries](meshes.md#curved-boundaries), the
+cells at curved walls are integrated over their curved shapes. `integral` is
+then exact for the reconstruction polynomials, and the third column is the
+volume of that quadrature: the region's part in the domain to round-off for a
+smooth surface.
+
+### Grids in regions
+
+A filled region with `n_points = [n_x, n_y]` (3D: `[n_x, n_y, n_z]`, each at
+least 2) also writes samples at the nodes of a grid over the box around the
+region and the mesh, those inside both, in grid order: the same values as
+`points` probes at those nodes, in `format` (`csv`, `hdf5`, `vtkhdf` or `vtp`,
+as vertices) with `sampling` as for points. Its reductions stay those of the
+region's cells.
+
+```toml
+[[probes]]
+name = "plume"
+region = {type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.2}
+n_points = [32, 32, 32]
+fields = ["T"]
+sampling = "point"
+format = "vtkhdf"
+time_interval = 0.01
+```
+
+Give the region by name to measure exactly where a source or sponge acts:
 
 **Control-volume balances.** The conserved variables and the flux variables
 of the region's boundary give a region's instantaneous balances: with a
@@ -391,10 +550,15 @@ region = "heater"
 
 Pitfalls:
 
-- Values are cell averages, so `min` and `max` are those of the cells, not of
-  the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `sampling`, `format`, `file` and
-  `samples` do not apply to it.
+- Values are cell averages (with `sampling = "point"`, point values at the
+  quadrature points and cell values inside), so `min` and `max` are those of
+  the samples, not of the field between them; with cell averages they
+  include cells the region only touches.
+- Only a surface or a filled region with `n_points` has samples: otherwise
+  `type`, `format`, `file` and `samples` do not apply to a region probe.
+- A [moving](geometry.md#moving-regions) region and one
+  [defined by the solution](geometry.md#regions-defined-by-the-solution) take
+  neither `sampling = "point"` nor `n_points`.
 
 ### Probes of existing output
 
@@ -421,8 +585,11 @@ a probe type; its files are `probe_extract.csv` and
 also writes the chosen fields (`--fields`, of `--region` if given) as
 `[[write_data]]` would have. Files go to `extract/` (`-o DIR`) under the names
 the input gives them, every probe at every snapshot chosen whatever its
-`interval`. The report lists what it wrote and the reductions of the last
-snapshot, each with its units:
+`interval`. [Regions defined by the solution](geometry.md#regions-defined-by-the-solution)
+are placed on each file's state, as the run places them on its own: `--region
+'{type = "isosurface", field = "T", value = 1500}'` gives the flame's area and
+the flux through it at every snapshot. The report lists what it wrote and the
+reductions of the last snapshot, each with its units:
 
 ```
 $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart

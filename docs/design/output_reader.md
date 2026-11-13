@@ -21,7 +21,12 @@ page is [Command line](../guide/cli.md#mallard-info).
 - its run block (`Contents::run`).
 
 `output::read(file, field, snapshot)` loads a field's values as doubles,
-whatever precision wrote them, and `read_ranges` their extrema.
+whatever precision wrote them, `read_all` a field at every snapshot (a table's
+column and a probe file's samples in one read), `read_ranges` their extrema,
+and `read_geometry` the points and cells the values are on (VTK cell types, in
+the file's order; the mesh file of XDMF output, the cells of a mesh file).
+`to_json` writes `Contents` as `mallard info --format json` prints it. A series
+index reads its members' values and cells without opening them whole.
 
 Formats: VTKHDF (unstructured grids and the poly data of probes and region
 snapshots, one file per snapshot or a series file), XDMF output (HDF5 files) and its
@@ -83,11 +88,35 @@ solver's reconstruction, gradients and gas model, in parallel with MPI and on
 GPUs: they run in the solver, so they read in C++. A second reader in Python
 would duplicate every format and drift from it.
 
-The Python package ([#517](https://github.com/MatthewBonanni/mallard/issues/517))
-binds this reader and the commands built on it; it does not reimplement them.
-Until it does, `tools/mallard/*.py` keep reading the formats with h5py and
-numpy, and `tools/dev/check_output_units.py` (run in CI) checks that
-`mallard info --format json` and the Python readers report the same fields, units
+The Python package ([Python](../guide/python.md), `tools/mallard`; its layout
+in [The Python package](python_package.md)) therefore reads through this reader. `Mallard_ENABLE_PYTHON` (on by default) builds
+`libmallard2d`/`libmallard3d`, a shared library of `src/io/reader_c_api.h`: a
+C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
+with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,
+and errors as a message, so that no C++ exception or type crosses it. The
+package loads it with ctypes and copies the arrays into numpy:
+
+- **C and ctypes, not a binding library.** pybind11 or nanobind would give
+  richer types, but add a build dependency and tie the library to one Python
+  ABI. A C interface of a dozen functions is enough for files, whose contents
+  are JSON and whose values are flat arrays, and any Python 3.10+ loads it.
+- **Commands as processes.** `mallard.post.extract` and the other commands run
+  the `mallard` executable with `--format json` instead of calling the solver
+  inside the Python process: the front end picks the solver of the case's
+  dimension, `mpirun` and GPUs work as on the command line, and a command
+  cannot leave Kokkos or MPI state in the interpreter. The function and the
+  command share every line of code and option, so they cannot disagree.
+- **Position-independent code.** A shared library needs every library it links
+  compiled with `-fPIC`; the option sets `CMAKE_POSITION_INDEPENDENT_CODE` for
+  the whole build. It is on by default, so that every installer installs the
+  package; `-DMallard_ENABLE_PYTHON=OFF` (Spack: `~python`) leaves it out.
+- **One version.** `tools/mallard/_version.py` holds Mallard's version, and a
+  build with the option checks it against `project(VERSION)`.
+
+`tools/mallard`'s older modules (`vtu`, `vtkhdf`, `h5`, `tables`) read the
+formats with h5py and numpy for the scripts in `tools/`, and
+`tools/dev/check_output_units.py` (run in CI) checks that
+`mallard info --format json` and those modules report the same fields, units
 and times for every format a run writes.
 
 ## What later commands need from it
@@ -181,3 +210,67 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   ranks (`PostExtractTest`); snapshots of primitives agree to rounding.
 - **The front end** runs it on the solver of `-i`'s dimension, else of the
   file's (restart files) or its run block's build (`Case::output_case`).
+
+## `mallard post derive`
+
+`post derive` sets the case up as `post extract` does (the same input
+rewrite, state reader and skipped time stepping) and writes the derived fields
+of each snapshot with the run's `[[write_data]]` writer, so a field is computed
+by the run's own reconstruction, gradients and kernels.
+
+- **Same values.** From restart files the fields equal the run's bit for bit
+  (`PostDerive.RestartFilesGiveTheRunsDerivedFieldsBitForBit`); from VTKHDF
+  snapshots of `RHO`, `U`, `P` and `T` the gradient fields were bitwise too
+  in both cases of the benchmark below, and `MACH` differs in the last bit, from converting
+  the stored primitives back to the conservative variables.
+- **Cost.** The case's setup is the reconstruction's: for TENO its stencils,
+  pseudo-inverses and smoothness matrices, the same tables as a run's
+  (`[numerics.face_reconstruction] cache_file` stores them), and their memory. Each snapshot then costs one gradient pass and the write.
+
+### Cost against ParaView
+
+`benchmarks/post_derive` (described in `benchmarks/README.md`) derives
+`MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` and `VORTICITY` with
+`mallard post derive` and with the equivalent `pvbatch` pipeline: ParaView's
+`Gradient` filter on the cell data (with its Q-criterion and vorticity),
+`Calculator` for `MACH` and `SCHLIEREN`, and numpy for λ₂, reading the same
+VTKHDF snapshots and writing VTKHDF. Apple M4 Pro, macOS, 2 threads each
+(Kokkos Threads; `VTK_SMP_MAX_THREADS=2`), ParaView 6.0.1; wall time and peak
+memory (`/usr/bin/time -l`), the best of 3 (2D) or 2 (3D) runs:
+
+| Case | Files | `post derive` | `post derive`, TENO cache | `pvbatch` |
+|---|---|---|---|---|
+| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 4.6 s, 1.1 GB | 0.64 s, 1.0 GB | 3.8 s, 0.21 GB |
+|  | 11 | 5.0 s, 1.1 GB | 1.0 s, 1.0 GB | 4.4 s, 0.24 GB |
+| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 32 s, 9.6 GB | 4.5 s, 9.5 GB | 3.3 s, 0.32 GB |
+|  | 11 | 33 s, 9.6 GB | 7.2 s, 9.5 GB | 5.8 s, 0.37 GB |
+
+- **Setup dominates.** Without a cache, the TENO setup is about 4 s in 2D and
+  28 s in 3D, against ParaView's 3-4 s start (Python, the reader and the
+  pipeline). Each further snapshot costs about 0.04 s in 2D and 0.27 s in 3D
+  for `post derive` (the TENO gradient pass), 0.06 s and 0.24 s for `pvbatch`:
+  in 2D `post derive` is faster from about 40 snapshots on, in 3D not at all.
+- **With the run's cache.** Reading the TENO cache (0.76 GB in 2D, 8.4 GB in
+  3D) instead of computing it makes `post derive` 6 and 4 times faster than
+  `pvbatch` in 2D; in 3D it is slower by a quarter to a third.
+- **Memory** is the TENO tables' (about 32 KB per hexahedron at order 5):
+  5 times ParaView's in 2D, 30 times in 3D.
+
+Agreement, as relative L2 norms of the difference over the norm of
+`post derive`'s field:
+
+| Field | against the run's `[[write_data]]` | against `pvbatch`, 3D, interior | against `pvbatch`, 2D |
+|---|---|---|---|
+| `MACH` | bitwise (restart files); last bit (snapshots) | 1e-16 | 1e-16 |
+| `Q_CRITERION` | bitwise | 1.5e-2 | 0.87 |
+| `LAMBDA2` | bitwise | 1.4e-2 | 0.69 |
+| `SCHLIEREN` | bitwise | 1.1e-2 | 0.21 |
+| `VORTICITY` | bitwise | 8.4e-3 | 0.57 |
+
+`MACH` is pointwise and agrees to rounding. The gradient fields differ by
+discretization: ParaView's cell-data gradient is a linear least-squares fit of
+the neighbors' values, `post derive`'s the TENO5 polynomials of the run. On
+the smooth Taylor-Green vortex they agree to 1-2% away from the box's faces
+(2 cells), which ParaView does not know are periodic (14% for `Q_CRITERION`
+over the whole box); behind the shocks of the double Mach reflection the
+gradient of a discontinuity depends on the method, and they differ at order one.

@@ -1,0 +1,1 @@
+- Triggers that read `wall` are evaluated on the GPU with the rest, so the steps queued ahead of the host no longer stop at every step: the wall time rides along the step's time-step reduction (#906).

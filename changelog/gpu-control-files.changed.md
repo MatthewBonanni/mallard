@@ -1,0 +1,1 @@
+- `[run] control_file_interval`: the host looks for `STOP` and `CHECKPOINT` files while steps run ahead of it, without stopping the step queue at every interval; a file found acts at the first step that reads the request, as `mallard ctl stop` and signals do (#730).

@@ -22,14 +22,18 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "case_view.h"
+#include "check.h"
 #include "comm.h"
 #include "commands.h"
+#include "input.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
 #include "mesh_quality.h"
 #include "output_reader.h"
 #include "provenance.h"
+#include "region_input.h"
 #include "run_page.h"
 #include "snapshot_block.h"
 #include "diagnostic_code.h"
@@ -181,11 +185,101 @@ void print_snapshot_block(const output::Contents & c) {
     }
     item("Format", b.format + (b.format_version >= 0 ? ", version " + std::to_string(b.format_version) : ""));
     item("Solver precision", b.solver_precision.empty() ? "-" : b.solver_precision);
+    if (!b.reconstruction.method.empty()) {
+        std::string fallback;
+        for (const std::string & m : b.reconstruction.fallback) fallback += (fallback.empty() ? "" : ", then ") + m;
+        item("Point values", b.reconstruction.method + ", order " + std::to_string(b.reconstruction.order) +
+                                 (fallback.empty() ? "" : "; falling back to " + fallback));
+    }
     if (b.averaged) {
         item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
-                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
-                                  " samples");
+                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples), "sample")
+                                                   : std::string("- samples")));
     }
+    std::vector<std::vector<std::string>> rows;
+    for (const snapshot_block::Field & f : b.fields) {
+        const snapshot_block::Average & a = f.average;
+        if (a.kind.empty()) continue;
+        std::string what = a.kind + " of " + list_text(a.of, ", ");
+        if (a.kind == "phase") {
+            what += ", bin " + std::to_string(a.bin) + " of " + std::to_string(a.bins) +
+                    (a.trigger.empty() ? " of the period " + seconds(a.period) + " s" : " of " + a.trigger + "'s cycle");
+        }
+        rows.push_back({f.name, what, a.weighting.empty() ? "-" : a.weighting,
+                        "t = " + seconds(a.start) + " to " + seconds(a.end) + " s",
+                        a.samples >= 0 ? count(static_cast<uint64_t>(a.samples)) : "-",
+                        a.interval >= 0 ? std::to_string(a.interval) : "-"});
+    }
+    if (!rows.empty()) {
+        logging::line("  Averaged fields: what each averages (Reynolds: unweighted by density), each sample weighted "
+                      "by the time since the previous one.");
+        logging::table({"field", "average", "weighting", "window", "samples", "every [steps]"}, rows);
+    }
+}
+
+/** @brief The probe sampling block of a probe file: how its values are read, and where each located sample is. */
+void print_probe_sampling(const output::Contents & c) {
+    if (c.sampling.empty()) return;
+    json::Value b;
+    try {
+        b = json::parse(c.sampling);
+    } catch (const std::exception &) {
+        return;
+    }
+    logging::section("Probe sampling", "where the samples are read");
+    const json::Value * r = b.find("reconstruction");
+    if (r && r->type == json::Value::Type::OBJECT) {
+        std::string fallback;
+        for (const json::Value & m : (*r)["fallback"].array) fallback += (fallback.empty() ? "" : ", then ") + m.string;
+        item("Sampling", "point: " + (*r)["method"].string + ", order " +
+                             std::to_string(static_cast<int>((*r)["order"].number)) +
+                             (fallback.empty() ? "" : "; falling back to " + fallback));
+    } else {
+        item("Sampling", "cell: the value of the cell holding each sample");
+    }
+    std::string values;
+    for (const json::Value & v : b["variables"].array) {
+        values += (values.empty() ? "" : ", ") + v["name"].string + " " + v["value"].string;
+    }
+    item("Values", values.empty() ? "-" : values);
+    const json::Value * clipped = b.find("clipped");
+    std::string dropped;
+    if (clipped && clipped->type == json::Value::Type::OBJECT) {
+        dropped = count(static_cast<uint64_t>((*clipped)["dropped"].number)) + " of " +
+                  count(static_cast<uint64_t>((*clipped)["of"].number)) + " samples outside the mesh dropped";
+        for (const char * m : {"length", "area", "volume"}) {
+            if (const json::Value * f = clipped->find(std::string(m) + "_fraction")) {
+                dropped += " (" + format("%.3g", 100.0 * f->number) + "% of the " + m + ")";
+            }
+        }
+    }
+    const json::Value * points = b.find("points");
+    if (!points || points->type != json::Value::Type::OBJECT) {
+        item("Locations", "at the faces, cut cells or elements the probe is made of");
+        if (!dropped.empty()) item("Clipped", dropped);
+        return;
+    }
+    const json::Value & p = *points;
+    const uint64_t n = static_cast<uint64_t>(p["n"].number);
+    item("Located samples", count(n) + (dropped.empty() ? "" : "; " + dropped));
+    item("Distance", "requested point to where it is read: max " + format("%.6g", p["max_distance"].number) +
+                         " m, mean " + format("%.6g", p["mean_distance"].number) + " m");
+    auto xyz = [](const json::Value & x) {
+        std::string out;
+        for (const json::Value & d : x.array) out += (out.empty() ? "" : ", ") + format("%.6g", d.number);
+        return "(" + out + ")";
+    };
+    constexpr uint64_t ROWS = 12;
+    std::vector<std::vector<std::string>> rows;
+    for (uint64_t i = 0; i < n; i++) {
+        if (n > ROWS && i == ROWS / 2) {
+            rows.push_back({"...", count(n - ROWS) + " more; --format json lists every one"});
+            i = n - ROWS / 2;
+        }
+        rows.push_back({std::to_string(i), xyz(p["requested"].array[i]), format("%.0f", p["cell"].array[i].number),
+                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number)});
+    }
+    logging::table({"sample", "requested [m]", "cell", "cell centroid [m]", "distance [m]"}, rows);
 }
 
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
@@ -272,7 +366,7 @@ constexpr size_t SNAPSHOT_ROWS = 12;
 
 void print_snapshots(const output::Contents & c) {
     const size_t n = c.snapshots.size();
-    logging::section("Snapshots", count(n) + " snapshots");
+    logging::section("Snapshots", count(n, "snapshot"));
     bool steps = false;
     for (const auto & s : c.snapshots) steps = steps || s.step >= 0;
     std::vector<std::vector<std::string>> rows;
@@ -313,16 +407,22 @@ void print_fields(const output::Contents & c) {
                                         range ? format("%.6g", f.min) : "-", range ? format("%.6g", f.max) : "-"};
         if (block) {
             const snapshot_block::Field * stored = block->field(f.name);
+            row.push_back(stored && !stored->value.empty() ? stored->value : "-");
             row.push_back(stored && !stored->stored.empty() ? stored->stored : "-");
         }
         row.push_back(f.long_name.empty() ? "-" : f.long_name);
         rows.push_back(std::move(row));
     }
-    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "stored", "description"}
+    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "value", "stored",
+                                                    "description"}
                          : std::vector<std::string>{"field", "units", "components", "min", "max", "description"},
                    rows);
     unrecorded_note(rows);
     if (vectors) logging::line("  min and max of fields with several components are of their magnitude.");
+    if (block) {
+        logging::line("  value: cell_average, the cell's average; cell_state, computed from the cell's averaged state; "
+                      "point_value, the reconstruction's value at the sample.");
+    }
 }
 
 void print_restart(const output::Contents & c) {
@@ -337,7 +437,7 @@ void print_restart(const output::Contents & c) {
         logging::section("Restart arrays");
         std::vector<std::vector<std::string>> rows;
         for (const auto & [name, values] : r.arrays) rows.push_back({name, count(values.size())});
-        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces) + " faces"});
+        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces, "face")});
         logging::table({"array", "values"}, rows);
     }
 }
@@ -370,71 +470,7 @@ void print_contents(const output::Contents & c) {
     const json::Value p = parsed_run(c);
     if (!p.is_null()) print_run(p);
     print_snapshot_block(c);
-}
-
-std::string zones_json(const std::vector<std::pair<std::string, uint64_t>> & list) {
-    json::Object o;
-    for (const auto & [name, n] : list) o.add(name, n);
-    return o.str();
-}
-
-std::string strings_json(const std::vector<std::string> & list) {
-    std::string out = "[";
-    for (const auto & s : list) out += (out.size() > 1 ? "," : "") + json::quote(s);
-    return out + "]";
-}
-
-std::string contents_json(const output::Contents & c) {
-    json::Object o;
-    o.add("path", c.path).add("kind", std::string(output::kind_name(c.kind))).add("format", c.format);
-    o.raw("version", c.version >= 0 ? std::to_string(c.version) : "null");
-    o.raw("dim", c.dim ? std::to_string(c.dim) : "null");
-    o.raw("precision", c.real_size == 8 ? "\"double\"" : c.real_size == 4 ? "\"single\"" : "null");
-    o.add("compressed", c.compressed).add("global_order", c.global_order);
-    const output::MeshSummary & m = c.mesh;
-    json::Object mesh;
-    mesh.add("cells", m.n_cells).add("points", m.n_points).add("faces", m.n_faces).add("boundary_faces", m.n_boundary_faces);
-    mesh.raw("cell_types", zones_json(m.cell_types));
-    if (m.has_bounds) {
-        std::string box = "[";
-        for (size_t i = 0; i < 3; i++) box += std::string(i ? "," : "") + "[" + json::number(m.lo[i]) + "," + json::number(m.hi[i]) + "]";
-        mesh.raw("bounds", box + "]");
-    } else {
-        mesh.raw("bounds", "null");
-    }
-    mesh.raw("boundary_zones", zones_json(m.boundary_zones)).raw("cell_zones", zones_json(m.cell_zones));
-    mesh.raw("file", c.mesh_file.empty() ? "null" : json::quote(c.mesh_file));
-    o.raw("mesh", mesh.str());
-    std::string snapshots = "[";
-    for (const auto & s : c.snapshots) {
-        json::Object e;
-        e.add("t", s.t).raw("step", s.step >= 0 ? std::to_string(s.step) : "null").add("file", s.file).add("index", s.index);
-        e.raw("run_id", s.run_id.empty() ? "null" : json::quote(s.run_id));
-        e.raw("snapshot", s.has_block ? s.block.json() : "null");
-        snapshots += (snapshots.size() > 1 ? "," : "") + e.str();
-    }
-    o.raw("snapshots", snapshots + "]");
-    std::string fields = "[";
-    for (const auto & f : c.fields) {
-        json::Object e;
-        e.add("name", f.name).add("components", f.components).add("units", f.units).add("long_name", f.long_name);
-        e.add("location", f.location).add("min", f.min).add("max", f.max);
-        fields += (fields.size() > 1 ? "," : "") + e.str();
-    }
-    o.raw("fields", fields + "]");
-    o.raw("species", strings_json(c.species()));
-    if (c.kind == output::Kind::restart) {
-        std::vector<std::string> arrays;
-        for (const auto & a : c.restart.arrays) arrays.push_back(a.first);
-        o.raw("restart", json::Object()
-                             .add_numbers("attributes", c.restart.attributes)
-                             .raw("arrays", strings_json(arrays))
-                             .add("boundary_faces", c.restart.n_faces)
-                             .str());
-    }
-    o.raw("run", parsed_run(c).is_null() ? "null" : c.run);
-    o.raw("notes", strings_json(c.notes));
-    return o.str();
+    print_probe_sampling(c);
 }
 
 /** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */
@@ -536,7 +572,7 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
         if (error) {
             problems.emplace_back(path, "missing: removed or moved since the run wrote it");
         } else if (uint64_t(size) != recorded.bytes) {
-            problems.emplace_back(path, count(uint64_t(size)) + " bytes, the run wrote " + count(recorded.bytes) +
+            problems.emplace_back(path, count(uint64_t(size), "byte") + ", the run wrote " + count(recorded.bytes) +
                                             ": changed or cut short since");
         } else if (verify && !recorded.sha256.empty() && provenance::sha256_file(file.string()) != recorded.sha256) {
             problems.emplace_back(path, "its contents differ from what the run wrote (SHA-256)");
@@ -587,7 +623,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
             o.raw("outcome", "null");
         }
         std::string list = "[";
-        for (const auto & c : files) list += (list.size() > 1 ? "," : "") + contents_json(c);
+        for (const auto & c : files) list += (list.size() > 1 ? "," : "") + output::to_json(c);
         o.raw("files", list + "]");
         std::string bad = "[";
         for (const auto & [f, e] : errors) bad += (bad.size() > 1 ? "," : "") + json::Object().add("path", f).add("error", e).str();
@@ -616,9 +652,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         }
     }
     if (record.found) {
-        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
+        std::cout << "\n" << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
-    logging::section("Output files", count(files.size()) + " files");
+    logging::section("Output files", count(files.size(), "file"));
     std::vector<std::vector<std::string>> rows;
     for (const auto & c : files) {
         const bool timed = !c.snapshots.empty() && c.kind != output::Kind::mesh;
@@ -729,16 +765,26 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         }
         std::cout.rdbuf(out);
     }
+    std::vector<std::string> view;
+    if (const std::string dir = args.value_or("--view", ""); !dir.empty()) {
+        if (!mesh->high_order_faces.empty()) mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_input_string("")));
+        view = case_view::write_view(dir, mesh_view(*mesh, region::MeshRegions(*mesh)).blocks,
+                                     std::filesystem::path(path).filename().string());
+    }
     if (args.value_or("--format", "text") == "json") {
-        std::string out = contents_json(c);
+        std::string out = output::to_json(c);
         out.pop_back();
+        std::string files;
+        for (const std::string & f : view) files += (files.empty() ? "" : ",") + json::quote(f);
         std::cout << out << ",\"quality\":" << quality_json(summary)
-                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written)) << "}\n";
+                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written))
+                  << ",\"case_view\":[" << files << "]}\n";
         return 0;
     }
     print_contents(c);
     print_quality_table(summary);
     if (!written.empty()) item("Mesh fields", written);
+    for (size_t k = 0; k < view.size(); k++) item(k == 0 ? "Case view" : "Case view image", view[k]);
     return 0;
 }
 
@@ -755,8 +801,10 @@ int info_main(const cli::Args & args) {
     try {
         std::error_code error;
         const bool mesh_file = output::is_mesh_file(path);
-        if (!mesh_file && (args.has("--mesh-fields") || args.has("--quality"))) {
-            return cli::usage_error(*cli::command("info"), "--mesh-fields takes a mesh file, not " + path);
+        for (const char * option : {"--mesh-fields", "--quality", "--view"}) {
+            if (!mesh_file && args.has(option)) {
+                return cli::usage_error(*cli::command("info"), std::string(option) + " takes a mesh file, not " + path);
+            }
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
@@ -767,7 +815,7 @@ int info_main(const cli::Args & args) {
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
         if (args.value_or("--format", "text") == "json") {
-            std::cout << contents_json(c) << "\n";
+            std::cout << output::to_json(c) << "\n";
         } else {
             print_contents(c);
         }
