@@ -12,7 +12,6 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <span>
 #include <stdexcept>
 
 #include "comm.h"
@@ -229,42 +228,16 @@ void ConditionalStatistics::set_clock(const Clock & k) {
 }
 
 void ConditionalStatistics::start(rtype t) {
-    set_clock({0.0, double(std::max(t, t_start)), 0.0, 0});
+    set_clock({0.0, double(std::max(t, t_start)), 0.0, 0, double(t_start)});
     Kokkos::deep_copy(acc, 0.0);
 }
 
-void ConditionalStatistics::set_start(rtype t) { t_start = t; }
-
-void ConditionalStatistics::reduce(const Kokkos::View<double *> & values, const bool max) const {
-    if (!distributed) return;
-#ifdef Mallard_HAS_NCCL
-    if (nccl) {
-        if (ncclAllReduce(values.data(), values.data(), values.extent(0), ncclDouble, max ? ncclMax : ncclSum,
-                          comm::nccl(), Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
-            throw std::runtime_error("NCCL: conditional statistics reduction failed");
-        }
-        return;
-    }
-#endif
-    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
-    comm::allreduce(std::span<double>(host.data(), host.extent(0)), max ? comm::Op::MAX : comm::Op::SUM);
-    Kokkos::deep_copy(values, host);
-}
-
-void ConditionalStatistics::reduce(const Kokkos::View<int64_t *> & values) const {
-    if (!distributed) return;
-#ifdef Mallard_HAS_NCCL
-    if (nccl) {
-        if (ncclAllReduce(values.data(), values.data(), values.extent(0), ncclInt64, ncclSum, comm::nccl(),
-                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
-            throw std::runtime_error("NCCL: conditional statistics reduction failed");
-        }
-        return;
-    }
-#endif
-    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
-    comm::allreduce(std::span<int64_t>(host.data(), host.extent(0)), comm::Op::SUM);
-    Kokkos::deep_copy(values, host);
+void ConditionalStatistics::set_start(rtype t) {
+    t_start = t;
+    if (!clock.is_allocated()) return;
+    Clock k = host_clock();
+    k.t_start = double(t);
+    set_clock(k);
 }
 
 void ConditionalStatistics::sample(rtype t, const CellSampler & sampler, uint32_t n_owned) {
@@ -292,7 +265,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
             m = Kokkos::fmax(m, Kokkos::fabs(terms.term(c, q)));
         }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(largest.data() + q)));
     }
-    reduce(largest, true);
+    if (distributed) comm::allreduce_device(largest, comm::Op::MAX, nccl);
 
     const Kokkos::View<double *> big = largest;
     const Kokkos::View<int64_t *> s = sums;
@@ -333,7 +306,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
     } else {
         Kokkos::parallel_for("conditional_bins", n_owned, KOKKOS_LAMBDA(const uint32_t c) { add(c, s.data()); });
     }
-    reduce(sums);
+    if (distributed) comm::allreduce_device(sums, comm::Op::SUM, nccl);
 
     // Each bin's sample (weight, mean and M2 of each field) joins its accumulators (Chan et al. 1979)
     const Kokkos::View<double *> a = acc;
@@ -378,7 +351,7 @@ void ConditionalStatistics::restore(const RestartData & restart, const std::stri
     Kokkos::deep_copy(acc, Kokkos::View<const double *, Kokkos::HostSpace>(values->data(), values->size()));
     const double * tl = restart.attribute(restart_prefix + "T_LAST");
     const double * n = restart.attribute(restart_prefix + "SAMPLES");
-    set_clock({*w, tl ? *tl : double(t), 0.0, n ? static_cast<uint64_t>(*n) : 0});
+    set_clock({*w, tl ? *tl : double(t), 0.0, n ? static_cast<uint64_t>(*n) : 0, double(t_start)});
 }
 
 RestartAttributes ConditionalStatistics::attributes() const {

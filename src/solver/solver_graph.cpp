@@ -474,6 +474,20 @@ void Solver::device_step_body() {
                 statistics.sample_phases(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
             });
         }
+        // Each conditional entry has its own interval and t_start, as ConditionalStatistics::due
+        for (size_t i = 0; i < statistics.get_conditional().size(); i++) {
+            const ConditionalStatistics & entry = statistics.get_conditional()[i];
+            const Kokkos::View<const ConditionalStatistics::Clock> entry_clock = entry.device_clock();
+            const uint64_t entry_every = entry.sampling_interval();
+            Kokkos::parallel_for("conditional_due", 1, KOKKOS_LAMBDA(const int) {
+                const step_queue::Loop & L = loop();
+                due(2 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
+            });
+            device_if(&statistics_due.data()[2 + i], [&] {
+                update_primitives();
+                statistics.sample_conditional(i, step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+            });
+        }
     }
     if (!staged_probes.empty()) {
         // Probes of steps the device goes on from, staged for the host's writes; boundary states at the step's end
@@ -747,7 +761,9 @@ void Solver::begin_device_steps() {
     if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
-    if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 2);
+    if (statistics_on_device()) {
+        statistics_due = Kokkos::View<uint32_t *>("step_statistics_due", 2 + statistics.get_conditional().size());
+    }
     if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
     if (triggers_on_device()) {
         trigger_vars = Kokkos::View<double *>("step_trigger_vars", triggers.variables().size());
