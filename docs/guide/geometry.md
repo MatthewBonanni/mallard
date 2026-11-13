@@ -353,17 +353,38 @@ intervals between the clipping region's roots, found to round-off, so a clipped
 area or flux converges at high order (in the tests, errors fall by over 8 per
 halving of the cells, to round-off); patches where the clipping boundary is not
 a graph over one parameter, or that several clipping regions cross, are
-subdivided. Extracted elements and mesh faces are cut linearly between their
-vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
-domain count. In axisymmetric runs measures are those of the r-z plane, not
-of the revolved surface.
+subdivided. Extracted elements and mesh faces are cut along their edges at the
+roots of the clipping region's distance. Only the parts inside the domain
+count. In axisymmetric runs measures are those of the r-z plane, not of the
+revolved surface.
+
+On a mesh with [curved boundaries](meshes.md#curved-boundaries), every kind
+follows the curved walls:
+
+- Exact surfaces' Gauss points are located in the cells' curved shapes, so
+  the slivers between a straight face and the wall count, and points beyond
+  the wall do not. A patch the wall crosses is halved until its kept part ends
+  within 2^-30 (curves) or 2^-6 (surfaces) of the patch at the wall.
+- Boundary zones, and the faces around regions of the mesh where they lie on
+  a curved wall, are the curved faces, with Gauss points, normals and areas
+  of the curved geometry; clipped, their pieces are cut on the curved face.
+- Extracted surfaces and planes are cut from the curved cells, split into
+  cones from the cell's vertex average to each face, each curved face in 8
+  (3D: 4 x 4) flat pieces.
+
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-light.svg#gh-light-mode-only)
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-dark.svg#gh-dark-mode-only)
 
 ### Checking regions
 
 `mallard check` lists every region a case uses, and the mesh's own, with its
 kind, measure and cells; surfaces and curves say whether they are exact
-or extracted. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
-`E-REGION-EMPTY`) naming it with its extent and the domain's:
+or extracted. Filled regions of the case also get their own volume and
+surface area (2D: area and perimeter), independent of the mesh, against those
+of their part in the domain, and the share outside it, as
+[region probes](probes.md#region-probes) record them. A region that covers no
+cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
+extent and the domain's:
 
 ```
 == Regions =========================================================================== ERROR
@@ -377,6 +398,13 @@ or extracted. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
   ok      top                           curve   2        m      16     the mesh's
   ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
   ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+  Filled regions: their part in the domain (its surface: theirs inside the domain and the
+  domain's boundary inside them) and their own measures, independent of the mesh ("-" for
+  regions of the mesh or unbounded ones), exact or within a relative tolerance; outside: the
+  share outside the domain.
+  status  region             quantity   in domain  own  units  tolerance  outside
+  ok      sponges[0].region  area       0          2    m^2    exact      100%
+  ok      sponges[0].region  perimeter  0          6    m      exact
 ...
   ERROR   E-REGION-OUTSIDE  region sponges[0].region lies outside the domain: it spans (4.5, 4) to (5.5, 6) m, the
                             domain (0, 0) to (2, 1) m: move or resize it (--view shows both)
@@ -504,7 +532,11 @@ region = {type = "union", regions = [
 ![Volume fractions of a shell and a tilted wake box on the O-grid around a cylinder](../images/guide/geometry-mesh-region-dark.svg#gh-dark-mode-only)
 
 In axisymmetric runs the fractions are weighted by the radius, so they are true
-volume fractions of the revolved cells.
+volume fractions of the revolved cells. Cells at a
+[curved wall](meshes.md#curved-boundaries) are sampled in their curved shapes,
+as cones from the cell's vertex average to each face, subdivided the same way,
+so the fractions are of the curved cells and `sum f V` counts the slivers
+between the straight faces and the wall.
 
 ### Probe types as regions
 

@@ -282,6 +282,66 @@ TEST(RegionTest, VolumeFractionsIntegrateToTheVolumeOnCoarseUnstructuredMeshes) 
     }
 }
 
+TEST(RegionTest, RegionsMeasureThemselvesInClosedFormOrWithinTheirTolerance) {
+    struct Measured {
+        std::string table;
+        double volume, surface;
+        bool closed_form;
+    };
+    std::vector<Measured> cases;
+    if constexpr (N_DIM == 2) {
+        cases = {{"{type = \"disk\", center = [0.5, 0.5], radius = 0.35, scale = 2}", PI * 0.49, 1.4 * PI, true},
+                 {"{type = \"rectangle\", center = [0, 0], size = [0.5, 0.3], rotate = 30, translate = [0.5, 0.5]}",
+                  0.15, 1.6, true},
+                 {"{type = \"polygon\", vertices = [[0, 0], [2, 0], [2, 1], [0, 1]]}", 2.0, 6.0, true},
+                 {"{type = \"difference\", a = {type = \"disk\", center = [0.5, 0.5], radius = 0.4}, "
+                  "b = {type = \"rectangle\", center = [0.5, 0.5], size = [0.3, 0.2], rotate = 45, pivot = [0.5, 0.5]}}",
+                  PI * 0.16 - 0.06, 0.8 * PI + 1.0, false}};
+    } else {
+        cases = {{"{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.35}", 4.0 / 3.0 * PI * std::pow(0.35, 3),
+                  4.0 * PI * 0.35 * 0.35, true},
+                 {"{type = \"box\", center = [0, 0, 0], size = [0.5, 0.3, 0.2], rotate = {axis = [1, 2, 3], angle = 40}, "
+                  "translate = [0.5, 0.5, 0.5]}",
+                  0.03, 0.62, true},
+                 {"{type = \"cone\", base = [0, 0, 0], axis = [0, 0, 1], length = 2, base_radius = 1, top_radius = 0.5}",
+                  PI * 2.0 / 3.0 * 1.75, PI * 1.5 * std::sqrt(4.25) + PI * 1.25, true},
+                 {"{type = \"difference\", a = {type = \"box\", center = [0, 0, 0], size = [0.6, 0.6, 0.6]}, "
+                  "b = {type = \"sphere\", center = [0, 0, 0], radius = 0.2}}",
+                  0.216 - 4.0 / 3.0 * PI * 0.008, 2.16 + 4.0 * PI * 0.04, false}};
+    }
+    for (const Measured & c : cases) {
+        const region::Measures m = region::measures(make_region(c.table), false);
+        if (c.closed_form) {
+            EXPECT_EQ(m.tolerance, 0.0) << c.table;
+            EXPECT_NEAR(m.volume, c.volume, 1e-14 * c.volume) << c.table;
+            EXPECT_NEAR(m.surface, c.surface, 1e-14 * c.surface) << c.table;
+        } else {
+            EXPECT_GT(m.tolerance, 0.0) << c.table;
+            EXPECT_LT(m.tolerance, N_DIM == 2 ? 1e-3 : 1e-2) << c.table;
+            EXPECT_NEAR(m.volume, c.volume, m.tolerance * c.volume) << c.table;
+            EXPECT_NEAR(m.surface, c.surface, m.tolerance * c.surface) << c.table;
+        }
+    }
+    // Unbounded regions have none
+    EXPECT_TRUE(std::isnan(region::measures(make_region("{type = \"half_space\", normal = " +
+                                                         std::string(N_DIM == 2 ? "[0, 1]" : "[0, 0, 1]") + "}"),
+                                            false)
+                               .volume));
+#if N_DIM == 2
+    // Axisymmetric: per radian, of the solid the region sweeps about the x axis (Pappus), also numerically
+    const region::Measures torus = region::measures(make_region("{type = \"disk\", center = [0, 2], radius = 1}"), true);
+    EXPECT_NEAR(torus.volume, 2.0 * PI, 1e-14);
+    EXPECT_NEAR(torus.surface, 4.0 * PI, 1e-14);
+    const region::Measures numeric = region::measures(
+        make_region("{type = \"union\", regions = [{type = \"disk\", center = [0, 2], radius = 1}, "
+                    "{type = \"disk\", center = [0, 2], radius = 0.5}]}"),
+        true);
+    EXPECT_GT(numeric.tolerance, 0.0);
+    EXPECT_NEAR(numeric.volume, 2.0 * PI, numeric.tolerance * 2.0 * PI);
+    EXPECT_NEAR(numeric.surface, 4.0 * PI, numeric.tolerance * 4.0 * PI);
+#endif
+}
+
 TEST(RegionTest, FractionsAreExactlyOneInsideAndZeroOutside) {
     const auto mesh = coarse_unstructured_mesh();
     const region::Region r = make_region(N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.4}"

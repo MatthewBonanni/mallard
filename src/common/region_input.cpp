@@ -306,55 +306,8 @@ class Parser {
             return p;
         }
 
-    public:
-        /** @brief The pieces of the boundary of filled region i, oriented out of it (into it if flip). */
-        std::vector<Piece> boundary_of(const uint32_t i, const bool flip) {
-            const Filled f = filled[i];
-            auto with = [](std::vector<Piece> pieces, const std::vector<uint32_t> & inside,
-                           const std::vector<uint32_t> & outside) {
-                for (Piece & p : pieces) {
-                    p.inside.insert(p.inside.end(), inside.begin(), inside.end());
-                    p.outside.insert(p.outside.end(), outside.begin(), outside.end());
-                }
-                return pieces;
-            };
-            Piece piece;
-            piece.flip = flip;
-            if (f.kind == Filled::Kind::SHAPES) {
-                piece.carriers = {i};
-                return {piece};
-            }
-            if (f.kind == Filled::Kind::INSIDE) {
-                piece.zones = f.zones;
-                return {piece};
-            }
-            if (f.cells) {
-                piece.cells = static_cast<int32_t>(i);
-                return {piece};
-            }
-            // A boolean of shapes and regions of the mesh: each part's boundary where it bounds the whole
-            std::vector<Piece> out;
-            for (size_t k = 0; k < f.parts.size(); k++) {
-                std::vector<uint32_t> others;
-                for (size_t j = 0; j < f.parts.size(); j++) {
-                    if (j != k && !(f.kind == Filled::Kind::DIFFERENCE && j == 0)) others.push_back(f.parts[j]);
-                }
-                std::vector<Piece> sub;
-                if (f.kind == Filled::Kind::UNION) {
-                    sub = with(boundary_of(f.parts[k], flip), {}, others);
-                } else if (f.kind == Filled::Kind::INTERSECTION) {
-                    sub = with(boundary_of(f.parts[k], flip), others, {});
-                } else if (k == 0) {
-                    sub = with(boundary_of(f.parts[0], flip), {}, others);
-                } else {
-                    sub = with(boundary_of(f.parts[k], !flip), {f.parts[0]}, others);
-                }
-                out.insert(out.end(), sub.begin(), sub.end());
-            }
-            return out;
-        }
+        std::vector<Piece> boundary_of(const uint32_t i, const bool flip) const { return boundary_pieces(filled, i, flip); }
 
-    private:
         Parsed boundary(Parsed p, const std::string & where, const std::size_t line) {
             const std::string what = "boundary(" + p.text + ")";
             if (p.dimension == 0) fail(where, line, "points have no boundary");
@@ -1084,17 +1037,17 @@ Region read(const Input & value, const std::string & where, const Input * names,
 }
 
 Region boundary(const Region & filled) {
-    Parser parser;
-    parser.filled = filled.filled();
     Definition d;
-    d.pieces = parser.boundary_of(filled.root(), false);
+    d.pieces = boundary_pieces(filled.filled(), filled.root(), false);
     d.dimension = N_DIM - 1;
     d.closed = true;
     d.nodes = filled.nodes();
     d.vertices = filled.vertices();
     d.programs = filled.programs();
     d.filled = filled.filled();
+    d.conditions = filled.conditions();
     d.bounded = filled.bounded();
+    d.resolution = filled.resolution();
     d.summary = "boundary(" + filled.summary() + ")";
     return Region(std::move(d));
 }

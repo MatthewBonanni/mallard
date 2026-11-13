@@ -231,10 +231,19 @@ wall keeps its ends.
   dropped, and where (the runs of dropped samples). The warning is printed and
   written to `mallard.jsonl`, and the file records it as `clipped` in its
   [probe sampling block](output.md#probe-sampling). A curve or surface
-  entirely outside the domain is an error. A line drawn past a curved wall is
-  clipped at the wall's faceted surface.
-- Cut planes and region probes sample the cells they cut or cover, so they
-  are always clipped to the mesh; one that misses the mesh is an error.
+  entirely outside the domain is an error. A line drawn past a curved wall
+  ([`[[mesh.curved]]`](meshes.md#curved-boundaries)) is clipped at the curved
+  wall, and at its faceted surface without one.
+- Cut planes sample the cells they cut, so they are always clipped to the
+  mesh; one that misses the mesh is an error.
+- Region probes cover the region's part in the domain. Where part of a filled
+  region lies outside the domain (more than 0.1% of its volume, or area in
+  planar 2D), a warning gives that share and the volumes inside and in all,
+  and the file records it as `clipped` (`volume_fraction`, or
+  `area_fraction` in planar 2D). One that misses the mesh is an error.
+
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-light.svg#gh-light-mode-only)
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-dark.svg#gh-dark-mode-only)
 
 ### Time averages
 
@@ -386,8 +395,39 @@ step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
 ```
 
 The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
-radian), `area` in planar 2D runs (per unit depth). Give the region by name to
-measure exactly where a source or sponge acts:
+radian), `area` in planar 2D runs (per unit depth).
+
+**Measures.** A filled region probe records the region's own volume and
+surface area (planar 2D: area and perimeter; axisymmetric: per radian, of the
+solid its part at r >= 0 sweeps), independent of the mesh, and those of its
+part in the domain, in the `measures` of its
+[probe sampling block](output.md#probe-sampling), which heads its reductions
+file and is written to `mallard.jsonl` as a `probe` record:
+
+- Its own: in closed form for one primitive, moved, rotated and scaled
+  (`tolerance` 0); otherwise, as for booleans, polygons that cross themselves,
+  ellipses and ellipsoids of unequal axes, smooth edges and implicit regions,
+  by subdividing a box around it, extrapolated in the subdivision's size,
+  with `tolerance` the estimated relative error (larger for the surface area
+  of sharp edges and corners, which converges at first order). `null` for a
+  region of the mesh or one without a bounded box.
+- In the domain: the volume `sum f V`, the reductions' third column, and the
+  area of its surface: the region's own surface inside the domain and the
+  domain's boundary inside the region, the closed surface
+  `{type = "boundary", of = {type = "intersection", regions = ["domain", ...]}}`
+  that a control-volume balance integrates over.
+
+On a mesh with [curved boundaries](meshes.md#curved-boundaries), both follow
+the curved walls: the fractions `f` of the cells at a curved wall are of their
+curved shapes, and the surface's part on the wall is the curved faces'.
+
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-light.svg#gh-light-mode-only)
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-dark.svg#gh-dark-mode-only)
+
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-light.svg#gh-light-mode-only)
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-dark.svg#gh-dark-mode-only)
+
+Give the region by name to measure exactly where a source or sponge acts:
 
 **Control-volume balances.** The conserved variables and the flux variables
 of the region's boundary give a region's instantaneous balances: with a

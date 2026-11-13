@@ -36,6 +36,7 @@
 #include "provenance.h"
 #include "json.h"
 #include "region_input.h"
+#include "run_log.h"
 #include "snapshot_block.h"
 #include "viscous_flux.h"
 
@@ -98,6 +99,18 @@ const std::unordered_map<std::string, Reduction> REDUCTIONS = {
     {"integral", Reduction::INTEGRAL}, {"mean", Reduction::MEAN}, {"favre", Reduction::FAVRE},
     {"min", Reduction::MIN},           {"max", Reduction::MAX},   {"rms", Reduction::RMS},
     {"moment", Reduction::MOMENT}};
+
+/** @brief A share of a region outside the domain small enough to be the cell fractions' error: no warning. */
+constexpr double CLIPPED_SHARE = 1e-3;
+
+/** @brief The units of a filled region's volume (2D: area; axisymmetric: volume per radian) and of its surface. */
+const char * volume_units(const bool revolved) { return N_DIM == 3 ? "m^3" : revolved ? "m^3 rad^-1" : "m^2"; }
+const char * surface_units(const bool revolved) { return N_DIM == 3 ? "m^2" : revolved ? "m^2 rad^-1" : "m"; }
+
+/** @brief The names of a filled region's measures: volume and surface_area, or in 2D area and perimeter. */
+std::pair<const char *, const char *> measure_names(const bool revolved) {
+    return N_DIM == 3 || revolved ? std::pair{"volume", "surface_area"} : std::pair{"area", "perimeter"};
+}
 
 /** @brief The name of the measure of g's elements: a revolved boundary's per radian is an area. */
 const char * measure_name(const probe::Geometry & g) {
@@ -422,6 +435,32 @@ void write_pvd_file(const std::string & file, const Series & series) {
 }
 
 } // namespace
+
+void Probes::region_measures(Probe & p, const Mesh & mesh, const region::Region & r, const std::vector<double> & f,
+                             const std::string & key) {
+    const region::Measures own = region::measures(r, mesh.axisymmetric);
+    const region::Measures in = region::measures_in_domain(mesh, r, f);
+    const auto [volume, surface] = measure_names(mesh.axisymmetric);
+    auto object = [&](const region::Measures & m, const bool tolerance) {
+        json::Object o;
+        o.add(volume, m.volume).add(surface, m.surface);
+        if (tolerance) o.add("tolerance", m.tolerance);
+        return o.str();
+    };
+    json::Object m;
+    m.raw("region", std::isfinite(own.volume) ? object(own, true) : "null").raw("in_domain", object(in, false));
+    p.measures = m.str();
+    if (!(own.volume > 0.0)) return;
+    // Its part outside the domain, beyond what the cell fractions and its own measure resolve
+    const double share = std::max(0.0, 1.0 - in.volume / own.volume);
+    if (share <= CLIPPED_SHARE + own.tolerance) return;
+    p.clipped = json::Object().add(std::string(volume) + "_fraction", share).str();
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::real(100.0 * share) + "% of its " + volume +
+                         " lies outside the domain, and the probe covers only its part inside (" +
+                         units::with(logging::real(in.volume), volume_units(mesh.axisymmetric)) + " of " +
+                         units::with(logging::real(own.volume), volume_units(mesh.axisymmetric)) + ").");
+}
 
 void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                            const std::vector<double> & cell_weights, uint32_t n_variables) {
@@ -916,6 +955,7 @@ std::string Probes::Probe::sampling_json() const {
                             .str());
     }
     b.raw("clipped", clipped.empty() ? "null" : clipped);
+    b.raw("measures", measures.empty() ? "null" : measures);
     json::Object units;
     if (!locations.empty()) {
         for (const char * k : {"points.requested", "points.centroid", "points.distance", "points.max_distance",
@@ -924,6 +964,13 @@ std::string Probes::Probe::sampling_json() const {
         }
     }
     if (average) units.add("variables.average.start", "s");
+    if (!measures.empty()) {
+        const auto [volume, surface] = measure_names(geometry.revolved);
+        for (const char * part : {"region", "in_domain"}) {
+            units.add(std::string("measures.") + part + "." + volume, volume_units(geometry.revolved));
+            units.add(std::string("measures.") + part + "." + surface, surface_units(geometry.revolved));
+        }
+    }
     b.raw("units", units.str());
     return b.str();
 }
@@ -1673,6 +1720,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             const std::vector<double> & f = regions.fractions(entry.at("region"), key + ".region");
             for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
             select_region(p, mesh, r, weights, n_evaluated);
+            region_measures(p, mesh, r, f, key + ".region");
         } else if (p.resampled) {
             const Input & n = entry.at("n_points");
             const int64_t nu = n.is_array() && n.as_array().size() == 2 ? n.as_array()[0].as_integer() : 0;
@@ -1840,6 +1888,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     p.reconstruction = reconstruction;
     if (p.nodes.located) p.locations = p.nodes.locations(mesh);
+    if (!p.measures.empty()) {
+        run_log::write(json::Object().add("type", "probe").add("probe", p.name).raw("sampling", p.sampling_json()), true);
+    }
     on_root(distributed, [&] {
         if (p.write_samples && p.format == Format::CSV) {
             std::vector<std::pair<std::string, Dimension>> columns = {
@@ -2857,7 +2908,12 @@ void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t st
             *p->out << csv_line << "# " << snapshot_block::PROBE_SAMPLING << " " << p->sampling_json() << "\n"
                     << std::flush;
         }
-        if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
+        if (p->out_reductions) {
+            *p->out_reductions << csv_line;
+            // Without a samples file, the reductions file carries the sampling block
+            if (!p->write_samples) *p->out_reductions << "# " << snapshot_block::PROBE_SAMPLING << " " << p->sampling_json() << "\n";
+            *p->out_reductions << std::flush;
+        }
         if (p->out_spectra) *p->out_spectra << csv_line << std::flush;
         if (p->out_reduction_spectra) *p->out_reduction_spectra << csv_line << std::flush;
 #ifdef Mallard_HAS_HDF5

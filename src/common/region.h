@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -138,6 +139,14 @@ class Region {
         /** @brief One-line description for the run log. */
         const std::string & summary() const { return m_summary; }
 
+        /**
+         * @brief A filled region's surface in the domain, the boundary of its
+         *        intersection with the domain: its own surface inside the
+         *        domain and the domain's boundary inside it (each face once,
+         *        where a part of the mesh's cells already has it).
+         */
+        Region surface_in_domain() const;
+
         /** @brief The nodes of every filled region of shapes, and the polygons' vertices. */
         const std::vector<Node> & nodes() const { return m_nodes; }
         const std::vector<double> & vertices() const { return m_vertices; }
@@ -160,6 +169,9 @@ class Region {
         std::string m_name;
         std::string m_summary;
 };
+
+/** @brief The pieces of the boundary of filled region i of filled, facing out of it (into it if flip). */
+std::vector<Piece> boundary_pieces(const std::vector<Filled> & filled, uint32_t i, bool flip);
 
 /**
  * @brief A box around a region, from its primitives: [lo, hi] per axis,
@@ -184,6 +196,24 @@ std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
 
 /** @brief The fractions of one of the region's filled parts (an index into filled()). Collective. */
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, uint32_t filled);
+
+/**
+ * @brief The volume and surface area of a filled region (2D: area and
+ *        perimeter; axisymmetric runs: per radian, of the solid its part at
+ *        r >= 0 sweeps), NaN unless it is of shapes alone with a finite box.
+ */
+struct Measures {
+    double volume = std::numeric_limits<double>::quiet_NaN();
+    double surface = std::numeric_limits<double>::quiet_NaN();
+    double tolerance = 0.0;  // relative error bound: 0 in closed form
+};
+
+/**
+ * @brief A filled region's own measures, independent of any mesh: in closed
+ *        form for a primitive scaled, rotated and moved, otherwise by
+ *        subdividing a box around it (Measures::tolerance estimated).
+ */
+Measures measures(const Region & region, bool axisymmetric);
 
 } // namespace region
 

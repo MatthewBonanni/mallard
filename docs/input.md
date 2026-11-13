@@ -1405,7 +1405,11 @@ rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
 A region probe has no samples: `type`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell.
+`samples` do not apply. The region must cover part of some cell. A filled
+region's own volume and surface area, and those of its part in the domain,
+are recorded in the probe sampling block that heads `reductions_file` and in
+`mallard.jsonl`, with a warning when more than 0.1% of it lies outside the
+domain ([Measures](guide/probes.md#region-probes)).
 
 ```toml
 # Fuel mass and the extreme temperatures in the combustor
