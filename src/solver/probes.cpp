@@ -1375,15 +1375,18 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
         host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
         host_values = Kokkos::create_mirror_view(values);
     }
-    Kokkos::deep_copy(host_values, values);
+    // The first rows: the samples (a moving region's covered cells, of all its owned ones)
+    const auto rows = Kokkos::make_pair(size_t(0), size_t(cells.extent(0)));
+    Kokkos::deep_copy(Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
     const auto & h = host_values;
     for (const auto & [column, data] : columns) {
         for (size_t i = 0; i < host_cells.size(); i++) h(i, column) = (*data)[host_cells[i]];
     }
     const size_t n_vars = values.extent(1);
+    const size_t n_local = cells.extent(0) * n_vars;
     std::vector<double> all;
     if (distributed) {
-        std::vector<double> local(h.size());
+        std::vector<double> local(n_local);
         for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h.data()[i]);
         all = comm::gatherv(local);
         if (!comm::is_root()) {
@@ -1391,7 +1394,7 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
             return;
         }
     }
-    out.resize(distributed ? all.size() : h.size());
+    out.resize(distributed ? all.size() : n_local);
     for (uint64_t p = 0; p < n_global; p++) {
         const size_t row = gathered_row[p] * n_vars;
         for (size_t v = 0; v < n_vars; v++) {
@@ -1822,27 +1825,21 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         const region::Region & r = *region;
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (r.dimension() == N_DIM && (r.moving() || r.solution())) {
-            // Every owned cell, weighed by f V at each write
+            // The owned cells it covers, with their f V, selected at each write
             std::vector<double> weights(mesh.n_owned(), 0.0);
             auto motion = std::make_shared<Probe::Motion>();
             std::shared_ptr<const region::SolutionLevels> levels;
             if (r.solution()) {
                 levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
             }
+            motion->mesh = &mesh;
             motion->fractions = std::make_shared<region::MovingFractions>(mesh, r, levels);
             motion->distributed = mesh.n_global_cells > 0;
-            std::vector<uint64_t> global;
-            for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-                weights[c] = double(mesh.h_cell_measure(c));
-                motion->cells.push_back(c);
-                motion->volumes.push_back(weights[c]);
-                global.push_back(mesh.h_global_cell(c));
-            }
-            if (motion->distributed) global = comm::allgatherv(global);
-            motion->order.resize(global.size());
-            for (size_t i = 0; i < global.size(); i++) motion->order[i] = i;
-            std::sort(motion->order.begin(), motion->order.end(),
-                      [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+            motion->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = double(mesh.h_cell_measure(c));
+            motion->volumes = to_device(weights, "probe_motion_volumes");
+            motion->covered = Kokkos::View<uint32_t *>("probe_motion_cells", mesh.n_owned());
+            motion->weights = Kokkos::View<double *>("probe_motion_weights", mesh.n_owned());
             select_region(p, mesh, r, weights, n_evaluated);
             p.motion = std::move(motion);
             // Its own measures hold while it keeps its shape; the part in the domain is the measure of each write
@@ -3073,16 +3070,57 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
     write_pvd_file(file, series);
 }
 
+namespace {
+
+/** @brief The cells c with w = f(c) V(c) > 0, in order, into the first of cells, with w into weights; their count. */
+uint32_t covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<const double *> & volumes,
+                       const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights) {
+    uint32_t n = 0;
+    Kokkos::parallel_scan("probe_covered_cells", static_cast<uint32_t>(volumes.extent(0)),
+                          KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
+        const double w = f(c) * volumes(c);
+        if (!(w > 0.0)) return;
+        if (final) {
+            cells(k) = c;
+            weights(k) = w;
+        }
+        k++;
+    }, n);
+    return n;
+}
+
+} // namespace
+
 void Probes::Probe::move(const double t) {
     motion->fractions->update(t);
-    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), motion->fractions->fractions());
-    std::vector<double> local(motion->cells.size());
-    for (size_t i = 0; i < local.size(); i++) local[i] = f(motion->cells[i]) * motion->volumes[i];
-    if (motion->distributed) local = comm::allgatherv(local);
-    geometry.quad_weights.clear();
-    for (const size_t i : motion->order) {
-        if (comm::is_root() || !motion->distributed) geometry.quad_weights.push_back(local[i]);
+    const uint32_t n = covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights);
+    const auto rows = Kokkos::make_pair(uint32_t(0), n);
+    quadrature.cells = Kokkos::subview(motion->covered, rows);
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), quadrature.cells);
+    const auto h_weights =
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->weights, rows));
+    quadrature.host_cells.assign(h_cells.data(), h_cells.data() + n);
+    std::vector<double> local;  // global cell, f V
+    local.reserve(2 * size_t(n));
+    for (uint32_t i = 0; i < n; i++) {
+        local.push_back(double(motion->mesh->h_global_cell(h_cells(i))));
+        local.push_back(h_weights(i));
     }
+    const std::vector<double> all = motion->distributed ? comm::gatherv(local) : local;
+    quadrature.n_global = motion->distributed ? comm::allreduce(uint64_t(n), comm::Op::SUM) : n;
+    geometry.quad_weights.clear();
+    motion->cells.clear();
+    quadrature.gathered_row.clear();
+    if (motion->distributed && !comm::is_root()) return;
+    std::vector<uint64_t> order(all.size() / 2);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(),
+              [&all](const uint64_t a, const uint64_t b) { return all[2 * a] < all[2 * b]; });
+    for (const uint64_t i : order) {
+        motion->cells.push_back(static_cast<uint64_t>(all[2 * i]));
+        geometry.quad_weights.push_back(all[2 * i + 1]);
+    }
+    quadrature.gathered_row = std::move(order);
 }
 
 void Probes::Probe::extract(const double t) {
@@ -3106,11 +3144,10 @@ void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<uint
     sums.clear();
     weights.clear();
     if (motion) {
-        // One sample per cell of the mesh, in global cell order
+        // One sample per covered cell, in global cell order
         for (size_t i = 0; i < n_q; i++) {
             const double w = geometry.quad_weights[i];
-            if (!(w > 0.0)) continue;
-            cells.push_back(i);
+            cells.push_back(motion->cells[i]);
             weights.push_back(w);
             for (size_t v = 0; v < n_cols; v++) sums.push_back(quad[i * n_cols + v] * w);
         }

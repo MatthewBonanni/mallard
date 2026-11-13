@@ -459,7 +459,10 @@ curved shapes, and the surface's part on the wall is the curved faces'.
 fractions, and so the third column, are those of that time, the region's part
 in the domain as it enters or leaves it. Its own measures are recorded while it
 only translates and rotates (`null` once it changes shape), and its part in
-the domain is the third column of each row (`in_domain` is `null`). With
+the domain is the third column of each row (`in_domain` is `null`). Each
+write selects the cells it covers then (`f > 0`) on the device of each rank,
+and evaluates and gathers only those, so the cost of a write follows the
+region, not the mesh; a `where` region does the same. With
 `average = true` its reductions are those of the time averages over the cells
 it sweeps, each cell weighed by its mean `f V`: the integral is the mean of
 the integrals, the mean that integral over the mean measure in the domain
