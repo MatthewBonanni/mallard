@@ -429,12 +429,17 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
         if (partitioner == "graph" && !have_graph_partitioner()) continue;
         for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 5\n"}) {
             Annulus a;
-            a.n_theta = 8;
+            a.n_theta = 16;
+            a.n_r = 3;
             a.n_steps = 5;
             a.recon = recon;
             a.physics = "type = \"navier_stokes\"\nmu = 0.01\n";
             a.extra = "[parallel]\npartitioner = \"" + partitioner + "\"\n";
             std::string input = annulus_input(a);
+            // A thin ring: multijagged's equal slabs along x or y put the sector's two
+            // ends, at x = 0 and y = 0, on different ranks on any rank count
+            const std::string radii = "r_inner = 1.0\n";
+            input.replace(input.find(radii), radii.size(), "r_inner = 1.8\n");
             const std::string init = "[initialize]\ntype = \"constant\"\nu = [" +
                                      std::string(N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") + "]\np = 1.0\nT = 1.0\n";
             input.replace(input.find(init), init.size(), swirl_initializer(a.sectors));
@@ -442,7 +447,7 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
                 expect_matches_serial(input);
                 continue;
             }
-            expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
+            expect_matches_serial_with_and_without_step_graphs(input, [&](const Solver & s) {
                 const Mesh & mesh = *s.get_mesh();
                 uint64_t cut = 0;
                 for (uint32_t f = 0; f < mesh.n_faces; f++) {
@@ -450,8 +455,9 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
                     if (c1 < 0 || !mesh.h_rotated_row(mesh.h_face_shift(f))) continue;
                     cut += (uint32_t(c0) < mesh.n_owned()) != (uint32_t(c1) < mesh.n_owned());
                 }
-                if (comm::size() > 1) {
-                    EXPECT_GT(comm::allreduce(cut, comm::Op::SUM), 0u);
+                cut = comm::allreduce(cut, comm::Op::SUM);
+                if (comm::size() > 1 && partitioner == "multijagged") {
+                    EXPECT_GT(cut, 0u);
                 }
             });
         }
