@@ -13,11 +13,21 @@ mkdir -p "$out"
 # The inputs refer to ../../../mechanisms, so they run from this directory
 cd "$here"
 tmp=$(mktemp -d "$here/.generate.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+# The cases' run log and report land here
+trap 'rm -rf "$tmp" mallard.jsonl report.html' EXIT
+host=$(hostname)
+# Replaces the directory and the host in the run blocks of text and restart files:
+# same length, so the restart files' trailer lengths hold
+scrub() {
+  DIR="$1" HOST="$host" perl -pe 'BEGIN { $d = substr("/fixtures/" . "x" x 4096, 0, length $ENV{DIR});
+    $h = substr("fixture-host" . "x" x 256, 0, length $ENV{HOST}) } s/\Q$ENV{DIR}\E/$d/g; s/\Q$ENV{HOST}\E/$h/g' \
+    "$2" > "$3"
+}
+root=$(cd "$here/../../.." && pwd -P)
 for case in gas statistics mixture nscbc; do
   sed "s|^prefix = \"$case\"|prefix = \"$tmp/$case\"|" $case.toml > "$tmp/$case.toml"
   "$build/src/mallard" -i "$tmp/$case.toml" --kokkos-num-threads=1 > "$tmp/$case.log"
-  cp "$tmp/${case}_000000.restart" "$tmp/${case}_000002.restart" "$out/"
+  for step in 000000 000002; do scrub "$root" "$tmp/${case}_$step.restart" "$out/${case}_$step.restart"; done
 done
 "$build/src/mallard" mesh convert gas.toml "$out/mesh.h5"
 "$build/src/mallard" mesh convert annulus.msh "$out/curved_mesh.h5"
@@ -30,13 +40,13 @@ case "$2" in
 esac
 (cd "$tmp/snapshots" && "$build/src/mallard" -i snapshots.toml --kokkos-num-threads=1 > ../snapshots.log)
 dir=$(cd "$tmp/snapshots" && pwd -P)
-host=$(hostname)
 for f in "$tmp"/snapshots/snapshots*; do
   case "$f" in *.toml) continue ;; esac
   name=$(basename "$f")
   case "$f" in
     *.h5|*.vtkhdf)
-      python3 - "$f" "$dir" "$host" <<'EOF'
+      # Prints h5repack options that shrink the extendible datasets' chunks to their extent
+      layout=$(python3 - "$f" "$dir" "$host" <<'EOF'
 import sys
 import h5py
 import numpy as np
@@ -48,14 +58,17 @@ with h5py.File(path, "r+") as f:
         text = [v.decode().replace(directory, "/fixtures/run").replace(host, "fixture-host") for v in value]
         del f["/"].attrs[name]
         f["/"].attrs[name] = np.array([t.encode() for t in text])
+    def chunk(name, obj):
+        if isinstance(obj, h5py.Dataset) and obj.chunks and obj.chunks != obj.shape:
+            print(f"-l/{name}:CHUNK={'x'.join(str(max(n, 1)) for n in obj.shape)}")
+    f.visititems(chunk)
 EOF
-      h5repack "$f" "$out/$name"
+      )
+      # shellcheck disable=SC2086
+      h5repack $layout "$f" "$out/$name"
       ;;
     *)
-      # Same length, so the restart files' trailer lengths hold
-      DIR="$dir" HOST="$host" perl -pe 'BEGIN { $d = substr("/fixtures/" . "x" x 4096, 0, length $ENV{DIR});
-        $h = substr("fixture-host" . "x" x 256, 0, length $ENV{HOST}) } s/\Q$ENV{DIR}\E/$d/g; s/\Q$ENV{HOST}\E/$h/g' \
-        "$f" > "$out/$name"
+      scrub "$dir" "$f" "$out/$name"
       ;;
   esac
 done
