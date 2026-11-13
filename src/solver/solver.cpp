@@ -2301,6 +2301,7 @@ int Solver::run_loop() {
                 n_queued_steps++;
                 t_wall_stepping += step_timer.seconds();
                 Kokkos::Timer output_timer;
+                if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
                 write_staged_monitors(record);
                 write_staged_probes(record);
                 update_convergence();

@@ -472,14 +472,16 @@ writes the rows from the record as it takes it. At a step where the device stops
 monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
 kinetic-energy budget or fused chemistry stay on the host.
 
-The statistics means sample in the graph too, when they are the only statistics (no spectra or phase
-averages) and chemistry is not fused. Their clock (weight, last sample time, `t_start`, sample count) lives
+The statistics sample in the graph too (means, spectra, phase averages and conditional statistics), unless
+they read derived fields or the chemistry's rates, or chemistry is fused. Each part is due by its own interval and
+`t_start`, which its clock in device memory holds. The means' clock (weight, last sample time, `t_start`, sample count) lives
 in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
 (`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
 match the host's bit for bit. The host reads the clock when it writes a snapshot or a restart.
-`[[statistics.conditional]]` entries sample in the graph the same way, each under its own flag from its own
-clock (its interval and `t_start`); their fixed-point sums are reduced with `comm::allreduce_device`. Entries
-reading derived fields or the chemistry's rates stay on the host.
+Spectra, phases and `[[statistics.conditional]]` entries sample under flags of their own; the conditional
+entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra written at each sample (`average =
+false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
+the file from it as it takes the record.
 
 Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
 evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
