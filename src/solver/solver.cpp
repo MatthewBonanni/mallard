@@ -584,13 +584,12 @@ void Solver::trim_halo() {
     std::vector<uint8_t> reconstructed(mesh->n_cells, 0);
     std::fill_n(reconstructed.begin(), own_faces ? mesh->n_owned() : mesh->n_reconstructed(), uint8_t(1));
     if (own_faces) {
-        const auto image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image);
-        const auto image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_face);
+        const BoundaryData::HostImages images = boundary_data.host_images();
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             const int32_t c0 = mesh->h_cells_of_face(f, 0);
             if (mesh->h_cells_of_face(f, 1) < 0 && c0 >= 0 && c0 < static_cast<int32_t>(mesh->n_owned()) &&
-                image(f) >= 0 && image_face(f) < 0) {
-                reconstructed[static_cast<size_t>(image(f))] = 1;
+                images.cell[f] >= 0 && images.face[f] < 0) {
+                reconstructed[static_cast<size_t>(images.cell[f])] = 1;
             }
         }
     }
@@ -687,8 +686,7 @@ void Solver::init_rhs_split() {
     if (own_faces) {
         // Fluxes read the halo side of partition faces, and transmissive
         // boundary faces read a side of their image face, which may be a halo cell's
-        const auto image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_face);
-        const auto image_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_side);
+        const BoundaryData::HostImages images = boundary_data.host_images();
         std::vector<uint32_t> local, remote;
         std::vector<RemoteFaceSide> needed;
         std::vector<bool> requested(2 * size_t(mesh->n_faces), false);
@@ -702,9 +700,9 @@ void Solver::init_rhs_split() {
             const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
             bool waits = c1 >= 0 && owned(c0) != owned(c1);
             if (waits) need(f, owned(c0) ? c1 : c0);
-            if (c1 < 0 && image_face(f) >= 0) {
-                const uint32_t g = static_cast<uint32_t>(image_face(f));
-                const int32_t c = mesh->h_cells_of_face(g, image_side(f));
+            if (c1 < 0 && images.face[f] >= 0) {
+                const uint32_t g = static_cast<uint32_t>(images.face[f]);
+                const int32_t c = mesh->h_cells_of_face(g, images.side[f]);
                 if (!owned(c)) {
                     need(g, c);
                     waits = true;

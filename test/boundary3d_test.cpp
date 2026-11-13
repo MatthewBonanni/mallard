@@ -201,19 +201,20 @@ TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
 TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
     auto mesh = make_mesh_3d("cartesian", 3, 4, 5, 1.5, 1.0, 2.0);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
-    auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
-    auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
-    auto h_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_side);
+    const BoundaryData::HostImages images = bd.host_images();
+    const auto & h_image = images.cell;
+    const auto & h_image_face = images.face;
+    const auto & h_side = images.side;
     const rtype h[3] = {0.5_r, 0.25_r, 0.4_r};
     uint32_t n_boundary = 0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (mesh->h_cells_of_face(f, 1) >= 0) continue;
         n_boundary++;
         const int32_t c = mesh->h_cells_of_face(f, 0);
-        EXPECT_EQ(h_image(f), c);
-        const int32_t g = h_image_face(f);
+        EXPECT_EQ(h_image[f], c);
+        const int32_t g = h_image_face[f];
         ASSERT_GE(g, 0) << "face " << f;
-        EXPECT_EQ(mesh->h_cells_of_face(g, h_side(f)), c);
+        EXPECT_EQ(mesh->h_cells_of_face(g, h_side[f]), c);
         for (int d = 0; d < 3; d++) {
             const rtype n_in = -mesh->h_face_normals(f, d) / mesh->h_face_area(f);
             EXPECT_NEAR(mesh->h_face_coords(g, d), mesh->h_face_coords(f, d) + h[d] * n_in, 1e-12);
@@ -253,8 +254,9 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
     for (const char * type : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
         auto mesh = make_mesh_3d(type, 3, 3, 3);
         BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
-        auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
-        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
+        const BoundaryData::HostImages images = bd.host_images();
+        const auto & h_image = images.cell;
+        const auto & h_image_face = images.face;
         uint32_t n_moved = 0;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             if (mesh->h_cells_of_face(f, 1) >= 0) continue;
@@ -267,12 +269,12 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
                 for (int k = 0; k < 3; k++) d += (mesh->h_node_coords(node, k) - mesh->h_face_coords(f, k)) * n_in[k];
                 depth = std::max(depth, d);
             }
-            const int32_t img_index = h_image(f);
+            const int32_t img_index = h_image[f];
             ASSERT_GE(img_index, 0) << type;
             const uint32_t img = static_cast<uint32_t>(img_index);
             if (img != c) n_moved++;
             // Every face of these meshes has an image face, the face translated along the normal
-            const int32_t g = h_image_face(f);
+            const int32_t g = h_image_face[f];
             ASSERT_GE(g, 0) << type << " face " << f;
             rtype L = 0.0;
             for (int k = 0; k < 3; k++) L += (mesh->h_face_coords(static_cast<uint32_t>(g), k) - mesh->h_face_coords(f, k)) * n_in[k];

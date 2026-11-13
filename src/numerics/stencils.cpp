@@ -295,7 +295,7 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     auto neighbor_shift = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift);
     auto image_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbor_offsets);
     auto images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbors);
-    auto face_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image);
+    const std::vector<int32_t> face_image = boundaries.host_images().cell;
     auto lattice_of = [&](const uint8_t s) { return !zero_lattice({mesh.shift_lattice[s][0], mesh.shift_lattice[s][1],
                                                                    mesh.shift_lattice[s][2]}); };
     const rtype no_weight[N_DIM] = {};
@@ -333,7 +333,7 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
                     const uint32_t j = static_cast<uint32_t>(c0 == static_cast<int32_t>(c) ? c1 : c0);
                     add(j, lattice_of(mesh.h_face_shift(f)) ? PERIODIC : 0, -1, h_face_fit, k);
                 } else if (h_flags(f) & 4) {
-                    add(static_cast<uint32_t>(face_image(f)), MIRROR, static_cast<int32_t>(f), h_face_fit, k);
+                    add(static_cast<uint32_t>(face_image[f]), MIRROR, static_cast<int32_t>(f), h_face_fit, k);
                 } else {
                     add(c, MIRROR, static_cast<int32_t>(f), h_face_fit, k);
                 }

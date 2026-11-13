@@ -176,7 +176,7 @@ void Solver::init_health() {
     const uint32_t n_owned = mesh->n_owned();
     const auto face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_bc);
     const auto bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.bcs);
-    const auto image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_image_face);
+    const std::vector<int32_t> image_face = boundary_data.host_images().face;
     std::vector<uint32_t> list;
     bool permeable = false;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -184,7 +184,7 @@ void Solver::init_health() {
         if (c1 >= 0 || c0 < 0 || static_cast<uint32_t>(c0) >= n_owned) continue;
         list.push_back(f);
         const BoundaryCondition & bc = bcs(face_bc(f));
-        const bool image = image_face.extent(0) > 0 && image_face(f) >= 0;
+        const bool image = image_face[f] >= 0;
         if (!bc.is_wall() && bc.type != BoundaryType::SYMMETRY && !image) permeable = true;
     }
     permeable = comm::allreduce(static_cast<uint32_t>(permeable), comm::Op::MAX) > 0;
