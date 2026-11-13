@@ -259,7 +259,7 @@ time_interval = 0.05
 $ mallard post convergence n16 n32 n64 --quantity density_squared,kinetic_energy,enstrophy
 == Runs ===================================================================================
   run  cells  h / h_fine  run id
-  n16  256    4           9bc1ba6b-7635-4738-8b28-adabd49875cb
+  n16    256  4           9bc1ba6b-7635-4738-8b28-adabd49875cb
   n32  1,024  2           a5f2cab1-a77c-435e-ab3a-6f05102b55d0
   n64  4,096  1           494054ce-9a8a-4f5d-a668-e1aaafb12721
   design order 2: the runs' [numerics.face_reconstruction]
@@ -286,7 +286,7 @@ $ mallard post convergence n16 n32 n64 --field RHO \
       --exact '1 + 0.2 * sin(2 * pi * (x - t)) * sin(2 * pi * (y - 0.5 * t))'
 == Runs ===================================================================================
   run  cells  h / h_fine  run id
-  n16  256    4           9bc1ba6b-7635-4738-8b28-adabd49875cb
+  n16    256  4           9bc1ba6b-7635-4738-8b28-adabd49875cb
   n32  1,024  2           a5f2cab1-a77c-435e-ab3a-6f05102b55d0
   n64  4,096  1           494054ce-9a8a-4f5d-a668-e1aaafb12721
   design order 2: the runs' [numerics.face_reconstruction]
