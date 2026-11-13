@@ -513,14 +513,14 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
                          Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, requests.size()),
                          [&](const size_t q) {
                              Box box;
-                             const overlap::Region target = target_region(q, box);
+                             const overlap::Region region = target_region(q, box);
                              std::vector<uint32_t> candidates;
                              tree.overlapping(box, candidates, true);
                              std::vector<Simplex> pieces;
                              std::vector<double> integrals(1 + n_vars);
                              for (uint32_t c : candidates) {
                                  pieces.clear();
-                                 overlap::intersect(target.simplices, regions[c], pieces);
+                                 overlap::intersect(region.simplices, regions[c], pieces);
                                  double volume = 0.0;
                                  for (const auto & piece : pieces) volume += overlap::volume(piece);
                                  if (!(volume > 0.0)) continue;
@@ -545,12 +545,12 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
                          [&](const size_t q) {
                              if (cut[q].empty()) return;
                              Box box;
-                             const overlap::Region target = target_region(q, box);
+                             const overlap::Region region = target_region(q, box);
                              std::vector<Simplex> pieces;
                              std::vector<double> integrals(1 + n_vars);
                              for (uint32_t c : cut[q]) {
                                  pieces.clear();
-                                 overlap::intersect(target.simplices, regions[c], pieces);
+                                 overlap::intersect(region.simplices, regions[c], pieces);
                                  integrate(c, pieces, integrals.data());
                                  if (integrals[0] > 0.0) add(q, c, integrals);
                              }
