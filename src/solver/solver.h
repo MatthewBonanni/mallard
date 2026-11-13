@@ -374,7 +374,7 @@ class Solver {
         /** @brief Throws once the same step has been rejected too many times. */
         void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output. */
-        rtype next_target_time() const;
+        rtype next_target_time(bool unstaged_probes = false) const;
         void check_fields();
 
         // Run control and divergence (see run_control.h)
@@ -876,7 +876,9 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
-        Kokkos::View<uint64_t *> probe_intervals;
+        Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
+        Kokkos::View<rtype> probe_target;  // next_target_time of all but the staged probes
+        bool staged_time_probes = false;
         Kokkos::View<uint64_t *> monitor_intervals;
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)
 

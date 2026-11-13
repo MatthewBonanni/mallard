@@ -3021,12 +3021,12 @@ void Solver::update_p_max() {
     });
 }
 
-rtype Solver::next_target_time() const {
+rtype Solver::next_target_time(const bool unstaged_probes) const {
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
     for (const auto & writer : data_writers) {
         t_target = std::min(t_target, writer->next_time());
     }
-    return std::min(t_target, probes.next_time());
+    return std::min(t_target, probes.next_time(unstaged_probes));
 }
 
 void Solver::calc_dt() {

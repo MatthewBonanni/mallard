@@ -2347,14 +2347,12 @@ bool Probes::Probe::due(uint64_t step, rtype t) const {
     return t >= due_time();
 }
 
-rtype Probes::Probe::due_time() const {
-    return static_cast<rtype>(n_written) * time_interval - precision_tol(1e-9, 1e-5) * time_interval;
-}
+rtype Probes::Probe::due_time() const { return probe_clock::due_time(n_written, time_interval, time_tol()); }
 
 void Probes::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
     bool average = false;
     for (const auto & p : probes) {
-        if (p->staged && p->interval > 0) continue;
+        if (p->staged) continue;
         if (p->interval > 0) {
             step_limit = std::min(step_limit, (step / p->interval + 1) * p->interval);
         } else {
@@ -2417,10 +2415,11 @@ bool Probes::any_point_values() const {
     return std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->sampling == Sampling::POINT; });
 }
 
-rtype Probes::next_time() const {
+rtype Probes::next_time(const bool unstaged) const {
     rtype t = std::numeric_limits<rtype>::infinity();
     for (const auto & p : probes) {
-        if (p->time_interval > 0.0_r) t = std::min(t, static_cast<rtype>(p->n_written) * p->time_interval);
+        if (unstaged && p->staged) continue;
+        if (p->time_interval > 0.0_r) t = std::min(t, probe_clock::next_time(p->n_written, p->time_interval));
     }
     return t;
 }
@@ -2437,8 +2436,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
 
 bool Probes::can_stage(const size_t k) const {
     const Probe & p = *probes[k];
-    return !p.snapshot && !p.average && !p.motion && !p.isosurface && !p.solution && p.cell_columns.empty() &&
-           p.interval > 0;
+    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && p.cell_columns.empty() &&
+           (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
 void Probes::stage(const size_t k, const uint64_t n_records) {
@@ -2448,7 +2447,15 @@ void Probes::stage(const size_t k, const uint64_t n_records) {
     if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
 }
 
-uint64_t Probes::staged_interval(const size_t k) const { return probes[k]->staged ? probes[k]->interval : 0; }
+Probes::StagedClock Probes::staged_clock(const size_t k) const {
+    const Probe & p = *probes[k];
+    return {p.interval, p.time_interval, p.time_tol(), p.n_written, p.average ? 1u : 0u};
+}
+
+void Probes::sample_staged_average(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
+    if (!averages_due(step, t)) return;
+    sample_average(*probes[k], t, nullptr, static_cast<int64_t>(slot));
+}
 
 std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_model) const {
     bool cell_W = false, transport = false, all_gradients = false;
@@ -2482,12 +2489,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
     {
         if (!p.due_or_forced(step, t, force)) return;
         p.step_last = step;
-        if (p.time_interval > 0.0_r) {
-            while (static_cast<rtype>(p.n_written) * p.time_interval <=
-                   t + precision_tol(1e-9, 1e-5) * p.time_interval) {
-                p.n_written++;
-            }
-        }
+        if (p.time_interval > 0.0_r) p.n_written = probe_clock::written_after(p.n_written, p.time_interval, p.time_tol(), t);
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) return;
         p.step_last_value = step;
@@ -2757,30 +2759,32 @@ std::tuple<bool, bool, bool> Probes::average_needs(bool wall_model) const {
 void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields) {
     if (!averages_due(step, t)) return;
     for (auto & pp : probes) {
-        Probe & p = *pp;
-        if (!p.average) continue;
-        const double w = static_cast<double>(t) - p.average_t_last;
-        if (!(w > 0.0)) continue;
-        std::vector<double> nodes, quad;
-        Kokkos::Timer timer;
-        if (p.motion) p.move(static_cast<double>(t));
-        if (p.isosurface) p.extract(static_cast<double>(t));
-        if (p.solution) m_region_seconds += timer.seconds();
-        p.sample(&fields, nodes, quad);
-        p.average_weight += w;
-        p.average_t_last = static_cast<double>(t);
-        p.average_samples++;
-        if (distributed && !comm::is_root()) continue;
-        accumulate(p.mean_nodes, nodes, w / p.average_weight);
-        if (p.cell_means()) {
-            std::vector<uint64_t> cells;
-            std::vector<double> sums, weights;
-            p.cell_sums(quad, cells, sums, weights);
-            accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, p.mean_products, cells, weights, sums,
-                             p.product_sums(quad, cells), p.n_evaluated(), p.products.size(), w / p.average_weight);
-        } else {
-            accumulate(p.mean_quadrature, quad, w / p.average_weight);
-        }
+        if (pp->average) sample_average(*pp, t, &fields, -1);
+    }
+}
+
+void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields, const int64_t slot) {
+    const double w = static_cast<double>(t) - p.average_t_last;
+    if (!(w > 0.0)) return;
+    std::vector<double> nodes, quad;
+    Kokkos::Timer timer;
+    if (p.motion) p.move(static_cast<double>(t));
+    if (p.isosurface) p.extract(static_cast<double>(t));
+    if (p.solution) m_region_seconds += timer.seconds();
+    p.sample(fields, nodes, quad, slot);
+    p.average_weight += w;
+    p.average_t_last = static_cast<double>(t);
+    p.average_samples++;
+    if (distributed && !comm::is_root()) return;
+    accumulate(p.mean_nodes, nodes, w / p.average_weight);
+    if (p.cell_means()) {
+        std::vector<uint64_t> cells;
+        std::vector<double> sums, weights;
+        p.cell_sums(quad, cells, sums, weights);
+        accumulate_cells(p.mean_cells, p.mean_weights, p.mean_quadrature, p.mean_products, cells, weights, sums,
+                         p.product_sums(quad, cells), p.n_evaluated(), p.products.size(), w / p.average_weight);
+    } else {
+        accumulate(p.mean_quadrature, quad, w / p.average_weight);
     }
 }
 

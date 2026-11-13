@@ -454,18 +454,42 @@ void Solver::device_step_body() {
         recording_step = true;
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
         const Kokkos::View<uint32_t *> due = probe_due;
-        const Kokkos::View<uint64_t *> intervals = probe_intervals;
+        const Kokkos::View<Probes::StagedClock *> clocks = probe_clocks;
+        const Kokkos::View<rtype> target = probe_target;
         const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
+        const uint64_t average_interval = probes.get_average_interval();
+        const rtype average_start = probes.get_average_start();
+        const bool timed = staged_time_probes;
         Kokkos::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
-            record.probes = 0;
+            record.probes = record.probe_samples = 0;
             due(n_probes) = 0;
+            const bool on = L.active && L.advanced;
+            const rtype t_now = s(T);
+            const bool averages = on && L.step % average_interval == 0 && t_now > average_start;
+            rtype t_target = target();
             for (uint32_t k = 0; k < n_probes; k++) {
-                due(k) = L.active && L.advanced && intervals(k) > 0 && L.step % intervals(k) == 0;
-                if (due(k)) record.probes |= uint64_t(1) << k;
+                Probes::StagedClock & c = clocks(k);
+                bool written = false;
+                if (on && c.interval > 0) {
+                    written = L.step % c.interval == 0;
+                } else if (on && c.time_interval > 0.0_r) {
+                    written = t_now >= probe_clock::due_time(c.n_written, c.time_interval, c.tol);
+                    if (written) c.n_written = probe_clock::written_after(c.n_written, c.time_interval, c.tol, t_now);
+                }
+                if (c.time_interval > 0.0_r) {
+                    const rtype next = probe_clock::next_time(c.n_written, c.time_interval);
+                    if (next < t_target) t_target = next;
+                }
+                if (written) record.probes |= uint64_t(1) << k;
+                // Averaging probes write their means from the host's averages, and sample at their own steps
+                due(k) = c.average ? averages : written;
+                if (c.average && averages) record.probe_samples |= uint64_t(1) << k;
                 due(n_probes) |= due(k);
             }
+            // The next step ends at the next output time, as next_target_time has it
+            if (timed && on) s(T_TARGET) = t_target;
         });
         device_if(&probe_due.data()[n_probes], [&] {
             const auto [cell_W, transport, all_gradients] = probes.staged_needs(wall_model_on);
@@ -520,9 +544,10 @@ void Solver::captured_launch() {
 }
 
 void Solver::write_staged_probes(const step_queue::Record & record) {
-    if (staged_probes.empty() || record.probes == 0) return;
+    if (staged_probes.empty() || (record.probes | record.probe_samples) == 0) return;
     const uint64_t slot = (record.seq - 1) % step_records.extent(0);
     for (size_t k = 0; k < staged_probes.size(); k++) {
+        if (record.probe_samples >> k & 1) probes.sample_staged_average(staged_probes[k], step, t, slot);
         if (record.probes >> k & 1) probes.write_staged(staged_probes[k], step, t, slot);
     }
 }
@@ -707,7 +732,8 @@ void Solver::begin_device_steps() {
     }
     if (!staged_probes.empty()) {
         probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + 1);
-        probe_intervals = Kokkos::View<uint64_t *>("step_probe_intervals", staged_probes.size());
+        probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
+        probe_target = Kokkos::View<rtype>("step_probe_target");
     }
     n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
@@ -761,9 +787,14 @@ void Solver::resume_device_steps() {
     Kokkos::deep_copy(step_loop, Kokkos::View<step_queue::Loop, Kokkos::HostSpace>(&loop));
     if (!staged_probes.empty()) {
         // Control commands change probe intervals at the host's steps
-        const auto intervals = Kokkos::create_mirror_view(probe_intervals);
-        for (size_t k = 0; k < staged_probes.size(); k++) intervals(k) = probes.staged_interval(staged_probes[k]);
-        Kokkos::deep_copy(probe_intervals, intervals);
+        const auto clocks = Kokkos::create_mirror_view(probe_clocks);
+        staged_time_probes = false;
+        for (size_t k = 0; k < staged_probes.size(); k++) {
+            clocks(k) = probes.staged_clock(staged_probes[k]);
+            staged_time_probes = staged_time_probes || clocks(k).time_interval > 0.0_r;
+        }
+        Kokkos::deep_copy(probe_clocks, clocks);
+        Kokkos::deep_copy(probe_target, next_target_time(true));
     }
     rtype times[2] = {t, next_target_time()};
     Kokkos::deep_copy(Kokkos::subview(step_scalars, Kokkos::make_pair(T, T_TARGET + 1)),

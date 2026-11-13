@@ -140,6 +140,35 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
  *        A probe with `spectra` keeps a history of its samples (or reductions)
  *        on rank 0 and writes their time spectra (ProbeSpectra).
  */
+/**
+ * @brief The clock of a probe written by time: due at its n-th write once t is at least due_time, after which it
+ *        has written written_after outputs. One function for the host and the step graph, each product and sum
+ *        rounded on its own, so that their decisions are the same bit for bit.
+ */
+namespace probe_clock {
+
+/** @brief n time_interval - tol, tol the round-off allowance of the interval. */
+KOKKOS_INLINE_FUNCTION rtype due_time(const uint64_t n, const rtype time_interval, const rtype tol) {
+    volatile rtype at = static_cast<rtype>(n) * time_interval;
+    return at - tol;
+}
+
+KOKKOS_INLINE_FUNCTION rtype next_time(const uint64_t n, const rtype time_interval) {
+    return static_cast<rtype>(n) * time_interval;
+}
+
+/** @brief The outputs written once the one due at time t is: every n with n time_interval <= t + tol. */
+KOKKOS_INLINE_FUNCTION uint64_t written_after(uint64_t n, const rtype time_interval, const rtype tol, const rtype t) {
+    volatile rtype end = t + tol;
+    for (;;) {
+        volatile rtype at = static_cast<rtype>(n) * time_interval;
+        if (!(at <= end)) return n;
+        n++;
+    }
+}
+
+} // namespace probe_clock
+
 class Probes {
     public:
         /**
@@ -241,18 +270,31 @@ class Probes {
                                bool force = false) const;
         bool transport_due(uint64_t step, rtype t) const;
         bool any_gradients() const;
-        /** @brief Earliest output time of the time-based probes (infinity if none). */
-        rtype next_time() const;
+        /** @brief Earliest output time of the time-based probes (infinity if none); with unstaged, of those the step
+         *         graph does not evaluate. */
+        rtype next_time(bool unstaged = false) const;
         /** @brief Writes the probes, or the snapshots, due; with force, every snapshot not yet written at this step. */
         void write(uint64_t step, rtype t, const ProbeFields & fields, bool snapshots = false, bool force = false);
 
         size_t size() const { return probes.size(); }
-        /** @brief Whether a step graph can evaluate probe k: every few steps, sampled afresh, from device fields only. */
+        /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
+         *         fields only. */
         bool can_stage(size_t k) const;
         /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
         void stage(size_t k, uint64_t n_records);
-        /** @brief Probe k's step interval while the step graph evaluates it (0: the host's). */
-        uint64_t staged_interval(size_t k) const;
+        /** @brief When a staged probe is due, as the host decides it (time_interval 0: by step). */
+        struct StagedClock {
+            uint64_t interval = 0;
+            rtype time_interval = 0.0;
+            rtype tol = 0.0;        // the round-off allowance of time_interval
+            uint64_t n_written = 0;
+            uint32_t average = 0;   // samples for its time averages every average_interval steps after average_start
+        };
+        StagedClock staged_clock(size_t k) const;
+        uint64_t get_average_interval() const { return average_interval; }
+        rtype get_average_start() const { return average_start; }
+        /** @brief Adds staged averaging probe k's samples at (step, t) from record slot `slot` (collective). */
+        void sample_staged_average(size_t k, uint64_t step, rtype t, uint64_t slot);
         /** @brief As average_needs, of the staged probes. */
         std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
         /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory. */
@@ -509,6 +551,7 @@ class Probes {
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
             rtype due_time() const;
+            rtype time_tol() const { return precision_tol<rtype>(1e-9, 1e-5) * time_interval; }
             bool due_or_forced(uint64_t step, rtype t, bool force) const {
                 return due(step, t) || (force && snapshot && step != step_last);
             }
@@ -570,6 +613,8 @@ class Probes {
         static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
                                     const std::string & summary, uint32_t n_variables, bool per_cell);
 
+        /** @brief Adds probe p's samples to its time averages (collective): sampled with fields, or from a slot. */
+        void sample_average(Probe & p, rtype t, const ProbeFields * fields, int64_t slot);
         /** @brief Writes probe p if due (or forced): sampled with fields, or from a record slot's staged values. */
         void write_probe(Probe & p, uint64_t step, rtype t, const ProbeFields * fields, bool force, int64_t slot);
 
