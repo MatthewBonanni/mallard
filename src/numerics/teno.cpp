@@ -1292,7 +1292,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
     options.stencil_factor = double(stencil_factor);
     for (size_t q = 0; q < quadrature_face.h_points.extent(0); q++) options.face_points.push_back(double(quadrature_face.h_points(q, 0)));
-    teno_setup::SetupHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
+    auto handle = std::make_unique<teno_setup::SetupHandle>(*mesh, boundaries, face_quad_points, face_quad_weights, options);
+    teno_setup::SetupHandle & setup = *handle;
 
     // Cells per batch: whole slices of the packed stencils
     const uint32_t slice = 1u << slice_shift;
@@ -1331,16 +1332,20 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
         t_pack += pack_timer.seconds();
     }
+    // Every cell's moments are a function of its geometry alone
+    if (N_DIM == 3 && n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
+    Kokkos::fence();
+    const teno_setup::Timings t = setup.timings();
+    // The packed tables are allocated after the setup's workspace is freed, so that they do not add to its peak
+    out = teno_setup::TableBatch();
+    cells = Kokkos::View<uint32_t *>();
+    handle.reset();
     if (subset == nullptr) {
         if (n_failed_large == 0) builder->finish();
         largest_stencil = largest;
     } else if (share_tables) {
         share_again(*this);
     }
-    // Every cell's moments are a function of its geometry alone
-    if (N_DIM == 3 && n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
-    Kokkos::fence();
-    const teno_setup::Timings & t = setup.timings();
     setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
                                    t.tables, t_pack);
