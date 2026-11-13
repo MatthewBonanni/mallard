@@ -1827,6 +1827,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) continue;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1890,6 +1891,33 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const auto & [name, dimension] : p.monitored) dimensions.push_back(dimension);
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {

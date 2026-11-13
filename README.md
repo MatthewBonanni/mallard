@@ -67,6 +67,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
 - Probes on points, curves, surfaces, boundaries and regions
 - Statistics, spectra and phase averages
+- The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 - 40 [examples](examples), compared with exact solutions, other codes, DNS and experiments

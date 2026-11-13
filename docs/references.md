@@ -336,6 +336,19 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
   Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
 
+## Statistics of time series
+
+- <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)
+  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/statistical_convergence.h`).
+- <a id="hoad-2010"></a>K. Hoad, S. Robinson and R. Davies, Automating warm-up length estimation, *J. Oper. Res. Soc.* 61, 1389–1403 (2010). [doi:10.1057/jors.2009.87](https://doi.org/10.1057/jors.2009.87)
+  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/statistical_convergence.h`).
+- <a id="schmeiser-1982"></a>B. Schmeiser, Batch size effects in the analysis of simulation output, *Oper. Res.* 30, 556–568 (1982). [doi:10.1287/opre.30.3.556](https://doi.org/10.1287/opre.30.3.556)
+  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/statistical_convergence.h`).
+- <a id="madras-sokal-1988"></a>N. Madras and A. D. Sokal, The pivot algorithm: a highly efficient Monte Carlo method for the self-avoiding walk, *J. Stat. Phys.* 50, 109–186 (1988). [doi:10.1007/BF01022990](https://doi.org/10.1007/BF01022990)
+  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/statistical_convergence.h`).
+- <a id="abramowitz-stegun-1964"></a>M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, National Bureau of Standards (1964), 26.7.3–4.
+  Used in: Student's t distribution for integer degrees of freedom (`src/solver/statistical_convergence.cpp`).
+
 ## Validation cases and reference data
 
 - <a id="comte-bellot-corrsin-1971"></a>G. Comte-Bellot and S. Corrsin, Simple Eulerian time correlation of full- and narrow-band velocity signals in grid-generated, 'isotropic' turbulence, *J. Fluid Mech.* 48, 273–337 (1971). [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)
