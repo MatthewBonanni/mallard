@@ -420,12 +420,12 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
   By category, of the same rank; per cell: per owned and halo cell of the rank (460,800);
   categories below 0.05% of the peak are left out.
   category               at the setup's peak  per cell   after setup  per cell   proportional to the cells
-  solution and stages     95.8 MB             208 B       95.8 MB     208 B      yes
-  faces and gradients    658 MB                 1.43 kB  658 MB         1.43 kB  yes
+  solution and stages     95.8  MB            208    B    95.8  MB    208    B   yes
+  faces and gradients    658    MB              1.43 kB  658    MB      1.43 kB  yes
   reconstruction tables    3.07 GB              6.66 kB    3.07 GB      6.66 kB  yes
-  mesh and geometry      127 MB               275 B      127 MB       275 B      yes
-  boundaries and models    5.62 MB             12 B        5.62 MB     12 B      yes
-  setup                    3.43 MB              -          0 B          -        no
+  mesh and geometry      127    MB            275    B   127    MB    275    B   yes
+  boundaries and models    5.62 MB             12    B     5.62 MB     12    B   yes
+  setup                    3.43 MB              -          0    B       -        no
   total                    3.96 GB              -          3.96 GB      -
 
 == GPU sizing =========================================================================== ok

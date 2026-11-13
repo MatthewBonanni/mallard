@@ -95,10 +95,15 @@ const char * micro() {
 
 bool digit(const char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
 
-/// Offset in a number cell of its decimal point, or of where the point would be; npos if the cell is no number.
-size_t decimal_point(std::string_view s) {
+/// Where a number cell's decimal point is (or would be) and where its number ends and its unit or "%" begins;
+/// point is npos if the cell is no number.
+struct NumberCell {
+    size_t point, end;
+};
+
+NumberCell number_cell(std::string_view s) {
     constexpr size_t NONE = std::string_view::npos;
-    if (s == "-") return 1;
+    if (s == "-") return {1, 1};
     size_t i = 0;
     if (i < s.size() && (s[i] == '-' || s[i] == '+')) i++;
     size_t point = NONE;
@@ -114,19 +119,21 @@ size_t decimal_point(std::string_view s) {
         if (i < s.size() && s[i] == '.') {
             for (i++; i < s.size() && digit(s[i]); i++) digits++;
         }
-        if (digits == 0) return NONE;
+        if (digits == 0) return {NONE, NONE};
         if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
             i++;
             if (i < s.size() && (s[i] == '+' || s[i] == '-')) i++;
             const size_t exponent = i;
             while (i < s.size() && digit(s[i])) i++;
-            if (i == exponent) return NONE;
+            if (i == exponent) return {NONE, NONE};
         }
     }
     const std::string_view rest = s.substr(i);
     const bool word = rest.size() > 1 && rest[0] == ' ' && rest.find_first_of(" \n", 1) == NONE;
-    return rest.empty() || rest == "%" || word ? point : NONE;
+    return rest.empty() || rest == "%" || word ? NumberCell{point, i} : NumberCell{NONE, NONE};
 }
+
+size_t decimal_point(std::string_view s) { return number_cell(s).point; }
 
 void close_phase() {
     if (phase_open) {
@@ -151,18 +158,22 @@ std::string format(const char * fmt, ...) {
 }
 
 std::vector<std::string> align_decimals(std::vector<std::string> column) {
-    std::vector<size_t> point(column.size());
-    size_t left = 0, right = 0;
+    // The decimal points share a column, and so do the first letters of the units after the numbers
+    std::vector<NumberCell> cell(column.size());
+    size_t left = 0, right = 0, unit = 0;
     for (size_t i = 0; i < column.size(); i++) {
-        point[i] = decimal_point(column[i]);
-        if (point[i] == std::string_view::npos) continue;
-        left = std::max(left, point[i]);
-        right = std::max(right, columns(column[i]) - point[i]);
+        cell[i] = number_cell(column[i]);
+        if (cell[i].point == std::string_view::npos) continue;
+        left = std::max(left, cell[i].point);
+        right = std::max(right, cell[i].end - cell[i].point);
+        unit = std::max(unit, columns(column[i]) - cell[i].end);
     }
     for (size_t i = 0; i < column.size(); i++) {
-        if (point[i] == std::string_view::npos) continue;
-        const size_t after = columns(column[i]) - point[i];
-        column[i] = std::string(left - point[i], ' ') + column[i] + std::string(right - after, ' ');
+        const auto [point, end] = cell[i];
+        if (point == std::string_view::npos) continue;
+        const size_t tail = columns(column[i]) - end;
+        column[i] = std::string(left - point, ' ') + column[i].substr(0, end) + std::string(right - (end - point), ' ') +
+                    column[i].substr(end) + std::string(unit - tail, ' ');
     }
     return column;
 }

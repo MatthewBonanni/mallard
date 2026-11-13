@@ -134,8 +134,15 @@ TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
 TEST(RunReport, NumbersOfAColumnShareTheirDecimalPoint) {
     const std::vector<std::string> column = logging::align_decimals(
         {"1.5", "-12.25", "1,024", "3e-05", "27.1 kB", "-", "nan", "HLLC", "1 key: see E-KEY-UNUSED"});
-    const std::vector<std::string> expected = {"    1.5   ", "  -12.25  ", "1,024     ", "    3e-05 ", "   27.1 kB",
-                                               "    -     ", "  nan     ", "HLLC",       "1 key: see E-KEY-UNUSED"};
+    const std::vector<std::string> expected = {"    1.5     ", "  -12.25    ", "1,024       ",
+                                               "    3e-05   ", "   27.1   kB", "    -       ",
+                                               "  nan       ", "HLLC",         "1 key: see E-KEY-UNUSED"};
+    EXPECT_EQ(column, expected);
+}
+
+TEST(RunReport, UnitsOfAColumnStartInOneColumn) {
+    const std::vector<std::string> column = logging::align_decimals({"27.1 kB", "212 B", "0 B", "80.0 GB", "1.60 GB"});
+    const std::vector<std::string> expected = {" 27.1  kB", "212    B ", "  0    B ", " 80.0  GB", "  1.60 GB"};
     EXPECT_EQ(column, expected);
 }
 

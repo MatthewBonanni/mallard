@@ -76,8 +76,8 @@
   category             at the setup's peak  per cell  after setup  per cell  proportional to the cells
   solution and stages   27.1 kB             212 B     27.1 kB      212 B     yes
   mesh and geometry     42.9 kB             335 B     42.9 kB      335 B     yes
-  setup                 58.1 kB               -        0 B           -       no
-  total                128 kB                 -       70.0 kB        -
+  setup                 58.1 kB               -        0   B         -       no
+  total                128   kB               -       70.0 kB        -
 
 == GPU sizing ========================================================================== ok
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
