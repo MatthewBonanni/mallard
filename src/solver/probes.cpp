@@ -694,6 +694,10 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, region::Elements e, c
         });
         set.gathered_row = order;
         for (const uint64_t i : order) p.geometry.quad_weights.push_back(all[W * i + 4]);
+        if (p.isosurface) {
+            p.isosurface->quad_cells.clear();
+            for (const uint64_t i : order) p.isosurface->quad_cells.push_back(static_cast<uint64_t>(all[W * i]));
+        }
     }
     p.quadrature.in_cells(mesh, set, {}, n_variables);
     if (!per_cell) p.quadrature.set_normals(normals);
@@ -1572,17 +1576,15 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     p.resampled = region && entry.contains("n_points") &&
                   ((region->dimension() == N_DIM - 1 && N_DIM == 3) || region->dimension() == N_DIM);
     p.solution = p.solution || (region && region->solution());
-    if (p.solution && region && region->dimension() < N_DIM) {
-        for (const char * k : {"n_points", "average"}) {
-            if (!entry.contains(k) || (std::string(k) == "average" && !find_value<bool>(entry, k))) continue;
-            throw InputError(Diagnostic{.key = key + "." + k,
-                                        .line = line_of(entry, k),
-                                        .message = std::string(k == std::string("average") ? "averages" : "resamples") +
-                                                   " a surface or curve, and this one follows the solution, extracted "
-                                                   "anew at each write; that is not supported yet",
-                                        .fix = std::string("Remove ") + k,
-                                        .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
-        }
+    if (p.solution && region && region->dimension() < N_DIM && entry.contains("n_points")) {
+        throw InputError(Diagnostic{.key = key + ".n_points",
+                                    .line = line_of(entry, "n_points"),
+                                    .message = "places a fixed grid of samples on a surface or curve by its "
+                                               "parameters, and this one follows the solution: its elements are "
+                                               "extracted anew at each write and have no parameters",
+                                    .fix = "Remove n_points; for values on the surface at each write, give it to a "
+                                           "[[write_data]] entry as its region",
+                                    .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
     }
     for (const char * k : {"type", "boundary", "boundary_type", "format", "file", "samples"}) {
         const std::string name = k;
@@ -1928,6 +1930,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             iso->levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
             iso->n_evaluated = n_evaluated;
             iso->per_cell = p.sampling == Sampling::CELL && !normals && !p.gradients;
+            iso->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
             p.isosurface = std::move(iso);
             p.geometry.dim = static_cast<uint8_t>(r.dimension());
             p.geometry.type = "region " + r.summary();
@@ -2423,7 +2426,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
         sampled_quad.clear();
-        if (p.motion && p.average) {
+        if (p.cell_means()) {
             p.mean_fields(sampled_quad);
         } else {
             Kokkos::Timer timer;
@@ -2433,7 +2436,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
         }
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
-        const std::vector<double> & quad = p.average && !p.motion ? p.mean_quadrature : sampled_quad;
+        const std::vector<double> & quad = p.average && !p.cell_means() ? p.mean_quadrature : sampled_quad;
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
@@ -2656,6 +2659,7 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         std::vector<double> nodes, quad;
         Kokkos::Timer timer;
         if (p.motion) p.move(static_cast<double>(t));
+        if (p.isosurface) p.extract(static_cast<double>(t));
         if (p.solution) m_region_seconds += timer.seconds();
         p.sample(fields, nodes, quad);
         p.average_weight += w;
@@ -2668,6 +2672,11 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
                 for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] *= p.geometry.quad_weights[i];
             }
             accumulate(p.mean_weights, p.geometry.quad_weights, w / p.average_weight);
+        } else if (p.isosurface) {
+            std::vector<double> sums, weights;
+            p.cell_sums(quad, sums, weights);
+            quad = std::move(sums);
+            accumulate(p.mean_weights, weights, w / p.average_weight);
         }
         accumulate(p.mean_nodes, nodes, w / p.average_weight);
         accumulate(p.mean_quadrature, quad, w / p.average_weight);
@@ -2702,8 +2711,10 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
         const std::vector<double> * weights = restart.array(name + "_WEIGHTS");
         const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
-        const uint64_t n_quad = p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated() : 0;
-        const uint64_t n_weights = p.motion ? p.quadrature.n_global : 0;
+        const uint64_t n_quad = p.isosurface         ? p.n_mean_cells() * p.n_evaluated()
+                                : p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated()
+                                                         : 0;
+        const uint64_t n_weights = p.cell_means() ? p.n_mean_cells() : 0;
         if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad ||
             (weights ? weights->size() : 0) != n_weights) {
             throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
@@ -3051,6 +3062,20 @@ void Probes::Probe::extract(const double t) {
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
 
+void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<double> & sums,
+                              std::vector<double> & weights) const {
+    const size_t n_cols = n_evaluated();
+    sums.assign(isosurface->n_cells * n_cols, 0.0);
+    weights.assign(isosurface->n_cells, 0.0);
+    if (quad.empty()) return;
+    for (size_t i = 0; i < geometry.quad_weights.size(); i++) {
+        const uint64_t c = isosurface->quad_cells[i];
+        const double w = geometry.quad_weights[i];
+        weights[c] += w;
+        for (size_t v = 0; v < n_cols; v++) sums[c * n_cols + v] += w * quad[i * n_cols + v];
+    }
+}
+
 void Probes::Probe::mean_fields(std::vector<double> & quad) {
     geometry.quad_weights = mean_weights;
     const size_t n_cols = n_evaluated();
@@ -3063,7 +3088,7 @@ void Probes::Probe::mean_fields(std::vector<double> & quad) {
 
 void Probes::Probe::reduce(const std::vector<double> & node_values, const std::vector<double> & quad) {
     // Point sets and boundaries reduce their samples; curves their quadrature points
-    const bool points = quadrature.n_global == 0;
+    const bool points = !cell_means() && quadrature.n_global == 0;
     const double * q = points ? node_values.data() : quad.data();
     const size_t n_cols = n_evaluated();
     const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
@@ -3123,7 +3148,7 @@ void Probes::Probe::reduce(const std::vector<double> & node_values, const std::v
                 case Reduction::MAX: {
                     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
                     for (size_t i = 0; i < n_q; i++) {
-                        if (motion && !(weights[i] > 0.0)) continue;
+                        if ((motion || cell_means()) && !(weights[i] > 0.0)) continue;
                         lo = std::min(lo, value(i));
                         hi = std::max(hi, value(i));
                     }

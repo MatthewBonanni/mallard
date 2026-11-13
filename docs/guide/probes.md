@@ -472,7 +472,15 @@ one probe per copy, `<name>_copy<k>`, each with its own reductions file.
 are placed on the solution at each write: a `where` region's fractions, and an
 isosurface's elements, extracted anew from the cells' levels. The reductions
 file's measure column is the region's at that time, and its `measures` are
-`null`. Isosurfaces take no `n_points` or `average`.
+`null`. With `average = true`, an isosurface is extracted anew at each
+sample, and its reductions are those of the time averages per cell it
+crosses, each cell weighed by the mean area (2D: length) of the isosurface in
+it: the integral is the mean of the integrals, the mean that integral over
+the mean area (the third column), and the extremes those of the cells it has
+crossed. Isosurfaces take no `n_points`: their elements have no parameters to
+place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
+entry with the isosurface as its region writes the values on its elements at
+each write.
 
 **Point sampling.** With `sampling = "point"`, a static filled region
 integrates the reconstruction over its own shape instead of `f V` times the

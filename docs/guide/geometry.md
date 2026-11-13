@@ -636,8 +636,9 @@ Who follows the solution, and when:
   divided by the integral of the fractions at the stage, and is zero while the
   region is empty.
 - `[[probes]]`: at each write, a `where` region's fractions and an
-  isosurface's elements, extracted anew. The measure column of the reductions
-  file is the region's at that time. The run-health timing row `regions` is
+  isosurface's elements, extracted anew, and at each sample of a probe with
+  `average = true`. The measure column of the reductions file is the region's
+  at that time. The run-health timing row `regions` is
   the time this takes.
 - `[[write_data]]`: at each write, a `where` region's cells (those of positive
   fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
@@ -649,8 +650,8 @@ Who follows the solution, and when:
 - `mallard check` lists them, with no measure or cells: the solution places
   them during the run.
 
-They take no transforms, `repeat` or `edge`. Averaged probes and probes of `n_points` on isosurfaces
-([#798](https://github.com/MatthewBonanni/mallard/issues/798)),
+They take no transforms, `repeat` or `edge`. Probes of `n_points` on
+isosurfaces, whose elements have no parameters to place a grid of samples on,
 `[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 ### Periodic boundaries
