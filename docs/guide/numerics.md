@@ -323,6 +323,7 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
+| `share_tables` | `false` | Store the pseudo-inverses of cells with equal ones (same stencil shape: lattices, extruded and uniformly graded meshes) once: up to 18 times less table memory on hexahedral and Kuhn-tetrahedral boxes, results change at round-off |
 | `troubled_capacity` | 0.5 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 
@@ -334,7 +335,9 @@ Pitfalls:
   recomputed if they differ. Its size is several KB per cell (tens in 3D).
 - **Memory.** 3D TENO5 needs about 40 KB per hexahedron on the device (an
   A100-80GB holds about 2.1M); `single_precision_tables` stretches that to
-  about 3.4M.
+  about 3.4M, and `share_tables` on a uniform box to about 10M. Sharing helps
+  where many cells have the same stencil shape; on unstructured tetrahedra no
+  two tables are equal, and it changes nothing but the setup time.
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 

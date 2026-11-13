@@ -119,11 +119,15 @@ constexpr uint8_t SLICE_SHIFT =
  *        2 (-1 - e) and 2 (-1 - e) + 1: images are rare, so the face field
  *        is stored only for them. Consecutive cells form slices of 2^shift
  *        cells; a slice is padded to its largest stencil and interleaves its
- *        cells' slots. With single, pinv holds the pseudo-inverse entries as
- *        floats, two to an element, at the same indices.
+ *        cells' slots. The pseudo-inverse entries of a slice start at slot
+ *        pinv_start(slice) of pinv, which is slice_start unless slices share
+ *        them (TENO's share_tables). With single, pinv holds the
+ *        pseudo-inverse entries as floats, two to an element, at the same
+ *        indices.
  */
 struct PackedStencils {
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
+    Kokkos::View<uint64_t *> pinv_start;   // (slice): first slot of the slice's pseudo-inverse entries
     Kokkos::View<int32_t *> cells;
     Kokkos::View<int32_t *> images;        // (2 image + {0: cell, 1: face field})
     Kokkos::View<rtype *> pinv;
@@ -177,8 +181,9 @@ struct PackedStencils {
     KOKKOS_INLINE_FUNCTION
     RowT<T> row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
+        const uint64_t start_pinv = pinv_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
-        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start * width) << shift) + lane,
+        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start_pinv * width) << shift) + lane,
                        cells.data() + (start << shift) + lane, images.data(), shift};
     }
 };

@@ -603,3 +603,49 @@ TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy)
     }
 }
 
+
+TEST(TENO3DSetup, SharedTablesStoreEqualPseudoInversesOnceAndChangeFaceValuesOnlyByRoundOff) {
+    // A blast on hexahedra with walls (mirror images, smooth and troubled cells):
+    // interior cells share their tables, cells along the walls keep their own
+    auto mesh = make_mesh_3d("cartesian", 8, 8, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.4, 2);
+        const bool inside = r2 < 0.09;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+    }
+    Kokkos::deep_copy(W, h_W);
+    const std::string share = "share_tables = true\n";
+    for (const int order : {3, 5}) {
+        auto face_values = [&](const std::string & extra, const uint8_t shift) {
+            auto teno = std::make_unique<TENO>();
+            teno->set_mesh(mesh);
+            teno->set_boundaries(bd);
+            teno->slice_shift = shift;
+            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n" + extra));
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::make_pair(std::vector<rtype>(h.data(), h.data() + h.span()),
+                                  teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span());
+        };
+        const auto [own, own_entries] = face_values("", teno::SLICE_SHIFT);
+        const auto [shared, shared_entries] = face_values(share, teno::SLICE_SHIFT);
+        EXPECT_LT(4 * shared_entries, own_entries) << "order " << order;
+        double largest = 0.0, difference = 0.0;
+        for (size_t k = 0; k < own.size(); k++) {
+            largest = std::max(largest, std::abs(double(own[k])));
+            difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
+        }
+        EXPECT_LT(difference, 1e-12 * largest) << "order " << order;
+        // A cell takes the first equal cell's table, however many cells a slice packs
+        for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
+            EXPECT_TRUE(face_values(share, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
+        }
+    }
+}
