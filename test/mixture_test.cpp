@@ -800,8 +800,15 @@ TEST(MixtureTest, FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts) {
             }
         }
     }
-    const output::Contents mid = output::open(dir + "/busy_000028.vtu");
-    const output::Contents end = output::open(dir + "/ending_000028.vtu");
+    // This rank's own cells: its piece of a distributed run
+    auto own_cells = [&](const std::string & prefix) {
+        std::ostringstream path;
+        path << dir << "/" << prefix << "_000028";
+        if (comm::size() > 1) path << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+        return output::open(path.str() + ".vtu");
+    };
+    const output::Contents mid = own_cells("busy");
+    const output::Contents end = own_cells("ending");
     for (const char * field : {"RHO", "T", "RHOY_OH"}) {
         EXPECT_EQ(output::read(mid, field, 0), output::read(end, field, 0)) << field;
     }
@@ -810,7 +817,8 @@ TEST(MixtureTest, FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts) {
     const uint32_t oh = static_cast<uint32_t>(std::find(names.begin(), names.end(), "OH") - names.begin());
     const std::vector<double> rhoY_OH = output::read(end, "RHOY_OH", 0);
     ending.copy_device_to_host();
-    for (uint32_t c = 0; c < ending.get_mesh()->n_cells; c++) ASSERT_EQ(double(ending.h_species(c, oh)), rhoY_OH[c]);
+    ASSERT_EQ(rhoY_OH.size(), ending.get_mesh()->n_owned());
+    for (uint32_t c = 0; c < ending.get_mesh()->n_owned(); c++) ASSERT_EQ(double(ending.h_species(c, oh)), rhoY_OH[c]);
     // The chemistry moves only the species at constant volume and energy
     EXPECT_LT(max_relative_difference(unfused, fused), tol(1e-5, 1e-3));
     double rho = 0.0, species = 0.0;
