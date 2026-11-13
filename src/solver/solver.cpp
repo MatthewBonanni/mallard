@@ -730,7 +730,11 @@ void Solver::init_rhs_split() {
     // Host backends run kernels to completion anyway; on devices the early cells get their own stream
     if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                               Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
-        overlap_space = Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0];
+        // Without early cells nothing forks overlap_space into a step graph's capture, and joining a stream
+        // outside the capture invalidates it
+        overlap_space = n_early_cells > 0
+                            ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
+                            : Kokkos::DefaultExecutionSpace();
         if (own_faces) comm_space = comm::high_priority_space();
     }
 }
