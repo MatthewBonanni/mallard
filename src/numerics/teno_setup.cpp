@@ -4751,7 +4751,8 @@ class Setup2D {
             size_t n = workspace / (out_bytes + caps.bytes(nk));
 #if defined(KOKKOS_ENABLE_CUDA)
             // At most one wave of threads: a multiprocessor holds at least a thread per 256 of its registers
-            const cudaDeviceProp & prop = Kokkos::DefaultExecutionSpace().cuda_device_prop();
+            const Kokkos::DefaultExecutionSpace space;
+            const cudaDeviceProp & prop = space.cuda_device_prop();
             n = std::min(n, size_t(prop.multiProcessorCount) * size_t(prop.regsPerMultiprocessor) / 256);
 #endif
             n = std::max<size_t>(n / 1024 * 1024, 1024);
