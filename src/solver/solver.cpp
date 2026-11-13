@@ -2049,6 +2049,8 @@ void Solver::copy_device_to_host() {
 
 void Solver::output_arrays_to_host() {
     const auto copy = [&](const auto & mirror, const auto & v) { copy_to_pinned(pinned_mirrors, mirror, v); };
+    // The mirrors are copies, also off GPUs: their ghost cells hold the current state too
+    halo.exchange(state());
     copy(h_conservatives, conservatives);
     copy(h_species, species);
     if (is_mixture()) {
@@ -2071,7 +2073,6 @@ void Solver::output_arrays_to_host() {
     copy(h_primitives, primitives);
     copy(h_cfl_local, cfl_local);
     if (les_on) {
-        halo.exchange(state());
         eddy_viscosity_of_state(mesh->n_cells);
         copy(h_les_coefficients, les_coefficients);
     }
