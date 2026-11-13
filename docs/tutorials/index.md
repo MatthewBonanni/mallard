@@ -18,8 +18,9 @@ the commands stay working.
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
 | 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
 | 8 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
+| 9 | [From run to figure](post_processing.md) | What a run wrote (`mallard info`), probes and fields after the run (`mallard post extract`), a grid convergence study (`mallard post convergence`), figures with the Python package | 40 minutes, laptop | Steady wake at Re = 40: reference computations and experiment |
 
-Tutorials 1 to 4, 7 and 8 run on a laptop CPU; 8 follows on from 3. For more cases, the
+Tutorials 1 to 4 and 7 to 9 run on a laptop CPU; 8 and 9 follow on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
 each with what it demonstrates and how long it takes, and the
 [verification and validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.
@@ -28,9 +29,9 @@ The tutorials assume a build of Mallard (see the
 [first simulation](first_simulation.md)), here with MPI for the
 multi-rank runs, and Python 3 with the packages of
 `tutorials/requirements.txt` (numpy, scipy, matplotlib, h5py, gmsh, cantera), which
-also provide the `gmsh` command. The tutorials' scripts read the output with
-`tools/mallard`'s h5py readers; for your own analysis, the [Python package](../guide/python.md)
-reads it through Mallard's own reader, whose library the builds below make:
+also provide the `gmsh` command, and the [Python package](../guide/python.md) of `tools/`, which reads
+the output through Mallard's own reader: tutorial 9's scripts use it, and so can your own analysis.
+The builds below make its library:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -40,7 +41,7 @@ cmake -S . -B build-3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
       -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
 cmake --build build-3d -j
 python3 -m venv .venv
-.venv/bin/pip install -r tutorials/requirements.txt
+.venv/bin/pip install -r tutorials/requirements.txt -e tools
 export PATH=$PWD/.venv/bin:$PATH
 ```
 
