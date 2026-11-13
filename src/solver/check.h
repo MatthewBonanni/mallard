@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "binding.h"
+#include "case_view.h"
 #include "diagnostic_code.h"
 #include "input.h"
 #include "json.h"
@@ -82,6 +83,13 @@ struct CheckRegion {
     uint64_t cells = 0;       // owned cells it touches, over every rank
     bool exact = true;        // a surface or curve of the case: exact, else extracted at resolution
     int resolution = 0;
+    // Filled regions of the case: the surface of their part in the domain (2D: its perimeter), and their own
+    // measures, independent of the mesh (NaN unless of shapes alone and bounded)
+    double surface = std::numeric_limits<double>::quiet_NaN();
+    double own_measure = std::numeric_limits<double>::quiet_NaN();
+    double own_surface = std::numeric_limits<double>::quiet_NaN();
+    double own_tolerance = 0.0;  // relative; 0 in closed form
+    bool solution = false;       // defined by the solution: measured and counted on the initial solution
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */
@@ -121,7 +129,8 @@ struct CheckReport {
 
     std::vector<CheckBoundary> boundaries;
     std::vector<CheckRegion> regions;
-    std::string view_file;     // the case view written, or empty
+    std::string view_file;     // the case view's ParaView file written, or empty
+    std::vector<std::string> view_images;  // and its images
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 
@@ -212,6 +221,22 @@ struct CheckReport {
  *        (a100-40, a100-80, h100-80, h200, mi250x, mi300x). Returns an error, or empty.
  */
 std::string set_memory_target(const std::string & text, CheckOptions & options);
+
+class Mesh;
+namespace region {
+struct MeshRegions;
+}
+
+/** @brief The case view of a mesh alone, and the check's entries of its own regions (the domain's first). */
+struct MeshView {
+    std::vector<case_view::Block> blocks;  // the domain's cells, the boundary zones, cell zones and periodic pairs
+    std::vector<CheckRegion> regions;
+    std::array<std::array<double, 3>, 2> domain{};  // its box
+};
+
+/** @brief The case view of the mesh and of its regions (automatic); with outlines, the cell zones' boundaries
+ *         for the images. Collective. */
+MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, bool outlines = true);
 
 /**
  * @brief The peak of Kokkos allocations predicted for a rank of local_cells owned and halo cells: the largest

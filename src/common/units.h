@@ -36,6 +36,8 @@ struct Dimension {
     std::string udunits() const;
     /** @brief Units of this dimension to suggest, e.g. "Pa, kPa, bar, atm, psi", or empty. */
     std::string examples() const;
+    /** @brief The unit of a plain number of this dimension: "Pa", "kg/s", "deg", "kg m^-1" without a name; "" if dimensionless. */
+    std::string symbol() const;
 };
 
 namespace dim {

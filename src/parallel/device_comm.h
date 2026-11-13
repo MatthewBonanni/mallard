@@ -104,6 +104,13 @@ void send_receive_device(const std::vector<DeviceMessage> & sends, const std::ve
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done);
 
 /**
+ * @brief A new execution space instance whose kernels the device schedules
+ *        ahead of other instances' (CUDA stream priority), for short work that
+ *        communication waits for; the default instance on other backends.
+ */
+Kokkos::DefaultExecutionSpace high_priority_space();
+
+/**
  * @brief While alive, marks for Kokkos Tools (profiling section "host_staged")
  *        host round trips that a CUDA graph's step does not make: MPI's
  *        messages, which it sends with NCCL, and host fences off CUDA.

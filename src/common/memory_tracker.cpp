@@ -64,7 +64,8 @@ constexpr Rule RULES[] = {
     {"face_normals", false, C::MESH}, {"face_coords", false, C::MESH}, {"face_measure", false, C::MESH},
     {"face_quad_", true, C::MESH}, {"face_image", true, C::MESH}, {"image_", true, C::MESH},
     {"face_bc", false, C::MESH}, {"face_shift", false, C::MESH}, {"shift", true, C::MESH},
-    {"rotated_faces", false, C::MESH}, {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
+    {"rotated_faces", false, C::MESH}, {"local_faces", false, C::MESH}, {"partition_faces", false, C::MESH},
+    {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
     {"vertex_gradient_weights", true, C::MESH}, {"points", false, C::MESH}, {"weights", false, C::MESH},
     // Boundaries, sources, sponges, LES and wall models
     {"face_char", false, C::MODELS}, {"face_state", true, C::MODELS}, {"bc_", true, C::MODELS},
@@ -74,6 +75,7 @@ constexpr Rule RULES[] = {
     {"les_", true, C::MODELS}, {"dynamic_halo", true, C::HALO}, {"dynamic_", true, C::MODELS},
     {"tfles_halo", true, C::HALO}, {"tfles_", true, C::MODELS}, {"budget_", true, C::MODELS}, {"mass_flow_", true, C::MODELS},
     {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
+    {"region_moving_", true, C::MODELS}, {"region_motions", false, C::MODELS}, {"region_steps", false, C::MODELS},
     // Chemistry, thermodynamics and transport
     {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},
@@ -88,7 +90,7 @@ constexpr Rule RULES[] = {
     {"D", false, C::OUTPUT}, {"X", false, C::OUTPUT}, {"Y", false, C::OUTPUT}, {"QRAD", false, C::OUTPUT},
     {"REGION_FRACTION", false, C::OUTPUT}, {"output_", true, C::OUTPUT},
     // Halo exchange
-    {"halo_", true, C::HALO},
+    {"halo_", true, C::HALO}, {"face_exchange_", true, C::HALO},
     // Setup
     {"init_", true, C::SETUP}, {"data_", true, C::SETUP}, {"region_", true, C::SETUP}, {"expression_", true, C::SETUP},
     // Kokkos
