@@ -64,16 +64,38 @@ struct Elements {
  */
 Elements elements(const Mesh & mesh, const Region & region);
 
-/** @brief The levels of a region's conditions in each local cell: SolutionLevels::levels() mirrored on the host. */
-using Levels = Kokkos::View<const double **[N_DIM + 1], Kokkos::DefaultExecutionSpace::array_layout, Kokkos::HostSpace>;
+/**
+ * @brief The levels of a region's conditions (SolutionLevels::levels()) on
+ *        the host in some owned cells, ascending: row i is cells[i]'s.
+ */
+struct Levels {
+    std::vector<uint32_t> cells;
+    Kokkos::View<const double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> values;
+};
 
 /**
  * @brief The elements of a region defined by the solution, with its
  *        conditions' levels: where a condition bounds or clips it, each cell's
  *        linear level is cut on the cell's simplices (exact for it, without
- *        subdividing). Collective.
+ *        subdividing). Pieces cut from conditions' levels are cut in the cells
+ *        of levels; any other piece reads the levels of the cells it is in,
+ *        which levels must hold (level_cells). Collective.
  */
 Elements elements(const Mesh & mesh, const Region & region, const Levels & levels);
+
+/**
+ * @brief The owned cells elements(mesh, region, levels) reads levels in. For
+ *        each piece cut from conditions' levels, its carriers' conditions: it
+ *        is cut in the cells where none of their linear levels keeps its sign
+ *        within radii of the cell's centroid (a bound of its distance to the
+ *        cell's points). every: another piece reads levels in any owned cell.
+ */
+struct LevelCells {
+    std::vector<std::vector<uint32_t>> conditions;
+    std::vector<double> radii;
+    bool every = false;
+};
+LevelCells level_cells(const Mesh & mesh, const Region & region);
 
 /**
  * @brief The measures of a filled region's intersection with the domain:

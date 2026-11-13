@@ -1813,7 +1813,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         auto iso = std::make_shared<Probe::Isosurface>();
         iso->mesh = &mesh;
         iso->region = std::make_shared<region::Region>(elements->with_root(elements->root(), elements->copies()));
-        iso->levels = std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields);
+        iso->levels = std::make_shared<region::CrossedLevels>(
+            mesh, *iso->region,
+            std::make_shared<region::SolutionLevels>(mesh, elements->conditions(), species_names, cell_fields));
         iso->n_evaluated = static_cast<uint32_t>(h_codes.size());
         p.isosurface = std::move(iso);
         p.geometry.dim = static_cast<uint8_t>(elements->dimension());
@@ -1924,7 +1926,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             auto iso = std::make_shared<Probe::Isosurface>();
             iso->mesh = &mesh;
             iso->region = std::make_shared<region::Region>(r.with_root(r.root(), r.copies()));
-            iso->levels = std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields);
+            iso->levels = std::make_shared<region::CrossedLevels>(
+                mesh, *iso->region, std::make_shared<region::SolutionLevels>(mesh, r.conditions(), species_names, cell_fields));
             iso->n_evaluated = n_evaluated;
             iso->per_cell = p.sampling == Sampling::CELL && !normals && !p.gradients;
             iso->n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned();
@@ -2980,10 +2983,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     std::array<int64_t, 4> cells_before = {0, 0, 0, 0}, ids_before = {0, 0, 0, 0};
     h5::Handle top(H5Gopen2(h5file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
     if (changing) {
-        auto sum = [&](hid_t group, const char * name) {
+        auto sum = [&](hid_t group, const char * dataset) {
             int64_t total = 0;
             if (k > 0) {
-                for (const int64_t c : h5::read_rows<int64_t>(group, name, 0, k, 1, H5P_DEFAULT)) total += c;
+                for (const int64_t c : h5::read_rows<int64_t>(group, dataset, 0, k, 1, H5P_DEFAULT)) total += c;
             }
             return total;
         };
@@ -3125,8 +3128,7 @@ void Probes::Probe::move(const double t) {
 
 void Probes::Probe::extract(const double t) {
     const Isosurface & iso = *isosurface;
-    iso.levels->update(t);
-    const auto levels = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), iso.levels->levels());
+    const region::Levels levels = iso.levels->update(t);
     if (snapshot) {
         select_snapshot_elements(*this, *iso.mesh, region::elements(*iso.mesh, *iso.region, levels),
                                  iso.region->dimension(), iso.region->summary(), iso.n_evaluated);

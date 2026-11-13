@@ -47,6 +47,7 @@ namespace region {
 class Region;
 class Regions;
 class MovingFractions;
+class CrossedLevels;
 class SolutionLevels;
 struct Elements;
 }
@@ -425,7 +426,7 @@ class Probes {
             struct Isosurface {
                 const Mesh * mesh = nullptr;
                 std::shared_ptr<region::Region> region;
-                std::shared_ptr<region::SolutionLevels> levels;
+                std::shared_ptr<region::CrossedLevels> levels;
                 uint32_t n_evaluated = 0;
                 bool per_cell = false;
                 uint64_t n_cells = 0;              // of the mesh, which its averages are kept per
