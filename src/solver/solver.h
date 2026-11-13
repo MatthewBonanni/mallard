@@ -411,6 +411,24 @@ class Solver {
         /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;
         void act_on_triggers();
+        /** @brief Whether the step graph evaluates the triggers: none reads the wall time or a probe's value. */
+        bool triggers_on_device() const;
+        /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
+        bool convergence_on_device() const;
+        /** @brief Where the queue stops for those rows: the monitors' steps, and whether probe k is left to the host. */
+        void convergence_due_limits(step_queue::Horizon & h) const;
+        bool convergence_reads_probe(size_t k) const;
+        /** @brief In the step graph: the triggers' variables and states at the step; stops the device before one fires. */
+        void evaluate_triggers();
+        /** @brief The device's trigger states into the host's, after the queue drained. */
+        void pull_trigger_states();
+        /** @brief Variable i of the triggers from monitor_results' column (rtype: as the row rounds it), by monitor bit. */
+        struct TriggerSource {
+            uint32_t variable;
+            uint32_t monitor;
+            uint32_t column;
+            uint32_t rounded;
+        };
         /** @brief Adds the samples of the convergence signals written at this step; collective where a probe's is. */
         void update_convergence();
         /** @brief Start of the [statistics] averages, -inf before they run. */
@@ -1234,6 +1252,11 @@ class Solver {
         Statistics statistics;
         Probes probes;
         Triggers triggers;
+        Kokkos::View<double *> trigger_vars;                   // the triggers' variables at the device's step
+        Kokkos::View<Triggers::DeviceState *> trigger_states;  // between firings
+        Kokkos::View<TriggerSource *> trigger_sources;
+        kexpr::ProgramTable<> trigger_conditions;
+        bool triggers_evaluated_by_host = true;  // since the device's states were last pushed or pulled
         Convergence convergence;
         RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;

@@ -51,6 +51,7 @@ enum Reason : uint32_t {
     DIVERGENCE = 64,
     CHEMISTRY = 128,   // the chemistry failed in some cell, or its balancing across ranks must grow
     BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
+    TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
 };
 
 /**

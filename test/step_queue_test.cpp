@@ -368,8 +368,8 @@ void expect_same(const Outcome & a, const Outcome & b, const std::string & what)
 
 /**
  * @brief The run stepped by the host (step_queue = 0), one step per launch
- *        (1) and enqueued ahead (3): the same state, files and log. Runs with
- *        triggers stop for the host after every step.
+ *        (1) and enqueued ahead (3): the same state, files and log. Runs the
+ *        host stops at every step (runs_ahead false) take no step ahead.
  */
 Outcome expect_queue_invariant(const std::string & name, const Case & c, const bool runs_ahead = true) {
     const Outcome host = run_case(name, c, 0);
@@ -547,6 +547,25 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     EXPECT_EQ(rows, expected);
 }
 
+TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
+    // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
+    // evaluates a trigger on them between those rows, where the host updates them. MSER-5 finds both
+    // signals stationary at step 57 in 2D, at step 117 in 3D
+    Case c;
+    c.run = "n_steps = 200\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+              "batches = 4\nfile = \"{dir}/convergence.csv\"\n"
+              "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence_triggers", c);
+    EXPECT_LT(o.step, 200u);
+    EXPECT_EQ(o.step % 3, 0u);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";
@@ -611,12 +630,33 @@ TEST(StepQueueTest, ControlFilesStopAsRequests) {
     }
 }
 
-TEST(StepQueueTest, TriggersActAtTheirSteps) {
+TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
+    // Conditions of t with a hold, of the integrals' rows, repeated, and of the step: evaluated on the device,
+    // which stops for the host only at a step one fires at
     Case c;
     c.run = "n_steps = 40\ncfl = 0.5\n";
-    c.extra = RESTARTS + "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9\"\ndo = \"stop\"\n";
-    const Outcome o = expect_queue_invariant("triggers", c, false);
+    c.extra = RESTARTS + "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[[triggers]]\nname = \"held\"\nwhen = \"t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"energy\"\nwhen = \"integrals_kinetic_energy > 0 and step % 6 < 3\"\nrepeat = true\n"
+              "do = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"late\"\nwhen = \"step >= 31\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("triggers", c);
+    EXPECT_EQ(o.step, 31u);
+    if (comm::is_root()) {
+        size_t firings = 0;
+        for (const auto & line : o.log) firings += line.find("trigger") != std::string::npos;
+        EXPECT_GT(firings, 3u);
+    }
+}
+
+TEST(StepQueueTest, TriggersOfTheWallTimeStopAtEveryStep) {
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    c.extra = "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9 or wall > 1e9\"\ndo = \"stop\"\n";
+    const Outcome o = expect_queue_invariant("wall_triggers", c, false);
     EXPECT_EQ(o.step, 9u);
+    EXPECT_EQ(run_case("wall_triggers", c, 3).queued, 0u);
 }
 
 TEST(StepQueueTest, DivergenceWritesTheLastValidStateAsTheHostDoes) {
