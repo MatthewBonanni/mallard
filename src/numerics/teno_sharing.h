@@ -146,6 +146,31 @@ class TableStore {
         }
 
         /**
+         * @brief The shape a caller keys by its own stencil-shape key (e.g. a
+         *        structured block's offset pattern) instead of by equality of
+         *        the tables, for a cell with table v (canonical order of t)
+         *        and global id gid: created at its first cell, it takes the
+         *        table of the lowest global id, and agree() matches it over
+         *        the ranks by its key.
+         */
+        uint32_t add_keyed(const uint64_t key, const CanonicalTable & t, const rtype * v, const uint64_t gid) {
+            uint32_t k = find_keyed(key);
+            if (k == NONE) return create(t, v, gid, true, keyed_hash(key));
+            Shape & s = shapes[k];
+            if (gid < s.gid) {
+                s.gid = gid;
+                s.values.assign(v, v + s.values.size());
+            }
+            return k;
+        }
+
+        /** @brief The shape registered under a caller's key, or NONE. */
+        uint32_t find_keyed(const uint64_t key) const {
+            const auto it = keys.find(keyed_hash(key));
+            return it == keys.end() ? NONE : it->second;
+        }
+
+        /**
          * @brief Every shape takes the table of its cell with the lowest
          *        global id over the ranks (collective).
          */
@@ -214,7 +239,7 @@ class TableStore {
                     const rtype * v = replies[size_t(r)].data() + at;
                     at += s.values.size();
                     // A hash shared by two shapes keeps this rank's table
-                    if (!same_shape(i, s.canonical, v)) continue;
+                    if (!(s.keyed || same_shape(i, s.canonical, v))) continue;
                     s.values.assign(v, v + s.values.size());
                     s.gid = best.at(s.hash).first;
                 }
@@ -236,18 +261,34 @@ class TableStore {
             uint64_t gid;
             CanonicalTable canonical;  // order unused; segments and exponent compared
             std::vector<rtype> values;
+            bool keyed;                // by a caller's key, not by equality
         };
 
-        uint32_t create(const CanonicalTable & t, const rtype * v, const uint64_t gid) {
+        static uint64_t keyed_hash(const uint64_t key) {
+            uint64_t h = key + 0x9e3779b97f4a7c15ULL;
+            h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+            return h ^ (h >> 31);
+        }
+
+        uint32_t create(const CanonicalTable & t, const rtype * v, const uint64_t gid, const bool keyed = false,
+                        const uint64_t hash = 0) {
             const size_t n = t.order.size() * width;
             CanonicalTable kept;
             kept.order.resize(t.order.size());
             kept.segments = t.segments;
             kept.exponent = t.exponent;
             kept.hash = t.hash;
-            shapes.push_back(Shape{t.hash, gid, std::move(kept), std::vector<rtype>(v, v + n)});
-            index.emplace(t.hash, shapes.size() - 1);
-            return uint32_t(shapes.size() - 1);
+            const uint64_t h = keyed ? hash : t.hash;
+            kept.hash = h;
+            shapes.push_back(Shape{h, gid, std::move(kept), std::vector<rtype>(v, v + n), keyed});
+            const uint32_t k = uint32_t(shapes.size() - 1);
+            if (keyed) {
+                keys.emplace(h, k);
+            } else {
+                index.emplace(h, k);
+            }
+            return k;
         }
 
         uint32_t find(const CanonicalTable & t, const rtype * v) const {
@@ -271,7 +312,8 @@ class TableStore {
 
         uint32_t width;
         std::vector<Shape> shapes;
-        std::unordered_multimap<uint64_t, size_t> index;
+        std::unordered_multimap<uint64_t, size_t> index;  // equality hash: shapes
+        std::unordered_map<uint64_t, uint32_t> keys;      // hash of a caller's key: shape
 };
 
 } // namespace teno

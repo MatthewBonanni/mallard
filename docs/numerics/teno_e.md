@@ -533,7 +533,7 @@ whose entries are interleaved, so that a warp reads consecutive words.
 precision on the device.
 
 **Shared tables.** The cells of one stencil shape share one table of
-pseudo-inverses (`share_tables`, default on; `teno_sharing.h`). The slots of a
+pseudo-inverses (`teno_sharing.h`). The slots of a
 stencil are ranked by their columns of $\mathbf{P}$ on a grid of $2^{-30}$ of
 its largest entry, within the central stencil and within each sector, so that
 equal stencils of a lattice, whose equidistant entries the search ranks
@@ -547,6 +547,9 @@ which costs memory only. The tables of the shapes are packed like the cells'
 stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
 own through `pinv_index` (block and lane); on a mesh with a shape per cell this
 is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+A caller that knows its stencil shapes, such as a structured block's offset
+pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
+tables; such shapes are agreed over the ranks by their key in the same way.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used

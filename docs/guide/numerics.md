@@ -323,7 +323,6 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
-| `share_tables` | `true` | Cells of one stencil shape (lattices, extruded and uniformly graded meshes) share one table: up to 18 times less table memory on hexahedral and Kuhn-tetrahedral boxes; `false` keeps a table per cell (results differ at round-off) |
 | `troubled_capacity` | 0.5 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 

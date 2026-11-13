@@ -1140,7 +1140,6 @@ void TENO::read_options(const Input & input) {
     // Single-precision builds store their tables so anyway
     single_tables = find_value_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);
     if (single_tables && N_DIM != 3) throw std::runtime_error("TENO: single_precision_tables is for 3D runs.");
-    share_tables = find_value_or<bool>(input, "share_tables", true);
     // The cache then holds the tables as the runs use them
     cache_single = find_value_or<bool>(input, "cache_single_precision", false) || single_tables;
     // One file per rank, made for this partition

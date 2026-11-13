@@ -389,7 +389,8 @@ class TENO : public FaceReconstruction {
         // Pseudo-inverses stored in single precision (opt-in: halves the
         // largest tables, and changes results at single-precision round-off)
         bool single_tables = false;
-        // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore)
+        // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore);
+        // false (tests only) keeps a table per cell
         bool share_tables = true;
         /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
         const uint64_t * global_cell_ids() const {

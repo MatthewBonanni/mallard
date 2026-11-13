@@ -123,7 +123,7 @@ constexpr uint8_t SLICE_SHIFT =
  *        in blocks of 2^shift tables, and a cell finds its own through
  *        pinv_index: (first slot of its block) << shift | its lane. Without
  *        shared tables, a cell's block is its slice and its lane its own;
- *        with them (TENO's share_tables), the cells of a stencil shape point
+ *        with them (always, outside tests), the cells of a stencil shape point
  *        to one table. With single, pinv holds the pseudo-inverse entries as
  *        floats, two to an element, at the same indices.
  */

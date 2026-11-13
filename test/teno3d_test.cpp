@@ -25,6 +25,7 @@
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "solver.h"
+#include "teno_sharing.h"
 
 namespace {
 
@@ -620,22 +621,22 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
         h_W(c, 4) = inside ? 1.0_r : 0.1_r;
     }
     Kokkos::deep_copy(W, h_W);
-    const std::string own_tables = "share_tables = false\n";
     for (const int order : {3, 5}) {
-        auto face_values = [&](const std::string & extra, const uint8_t shift) {
+        auto face_values = [&](const bool share, const uint8_t shift) {
             auto teno = std::make_unique<TENO>();
             teno->set_mesh(mesh);
             teno->set_boundaries(bd);
             teno->slice_shift = shift;
-            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n" + extra));
+            teno->share_tables = share;
+            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
             teno->calc_face_values(W, face_W);
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
             return std::make_pair(std::vector<rtype>(h.data(), h.data() + h.span()),
                                   teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span());
         };
-        const auto [own, own_entries] = face_values(own_tables, teno::SLICE_SHIFT);
-        const auto [shared, shared_entries] = face_values("", teno::SLICE_SHIFT);
+        const auto [own, own_entries] = face_values(false, teno::SLICE_SHIFT);
+        const auto [shared, shared_entries] = face_values(true, teno::SLICE_SHIFT);
         EXPECT_LT(4 * shared_entries, own_entries) << "order " << order;
         double largest = 0.0, difference = 0.0;
         for (size_t k = 0; k < own.size(); k++) {
@@ -645,7 +646,29 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
         EXPECT_LT(difference, 1e-12 * largest) << "order " << order;
         // A shape's table is its cell's with the lowest global id, however many cells a slice packs
         for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
-            EXPECT_TRUE(face_values("", shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
+            EXPECT_TRUE(face_values(true, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
         }
     }
+}
+
+TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
+    // Two slots of width 2: tables equal on the grid but not bitwise, as on a lattice
+    const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
+    const std::vector<rtype> b = {1.0_r + 1e-14_r, 0.5_r, 0.25_r, 0.125_r};
+    const teno::CanonicalTable ta(a.data(), 2, {2}), tb(b.data(), 2, {2});
+    teno::TableStore store(2);
+    const uint32_t k = store.add_keyed(7, ta, a.data(), 9);
+    EXPECT_EQ(store.find_keyed(7), k);
+    EXPECT_EQ(store.find_keyed(8), teno::TableStore::NONE);
+    EXPECT_EQ(store.add_keyed(7, tb, b.data(), 3), k);
+    EXPECT_TRUE(store.values(k) == b);
+    EXPECT_EQ(store.owner(k), 3u);
+    EXPECT_EQ(store.add_keyed(7, ta, a.data(), 5), k);
+    EXPECT_TRUE(store.values(k) == b);
+    EXPECT_NE(store.add_keyed(8, ta, a.data(), 1), k);
+    const uint64_t gid = 2;
+    const rtype * values = a.data();
+    const auto shape = store.add(1, &ta, [&](uint32_t) { return values; }, &gid);
+    EXPECT_EQ(store.size(), 3u);
+    EXPECT_NE(shape[0], k);
 }

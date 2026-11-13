@@ -79,7 +79,7 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
 TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
     // Every rank's cells of a stencil shape read the table of the shape's cell
     // with the lowest global id, which another rank may own
-    expect_matches_serial(blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\nshare_tables = true\n"));
+    expect_matches_serial(blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n"));
 }
 
 TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {

@@ -600,7 +600,7 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
 - **Compact stencil entries.** Each stencil slot held its cell and its mirror face (or -1), 8 bytes. Mirror
   images are rare (cells next to straight walls and symmetry planes), so a slot now holds one word: the cell, or,
   for an image, its index in a per-rank list of (cell, face) pairs. Results are bitwise unchanged.
-- **Shared tables** (`share_tables`, on by default). The pseudo-inverses are 90% of the tables, and on a lattice
+- **Shared tables.** The pseudo-inverses are 90% of the tables, and on a lattice
   every cell's differ only in the order of their equidistant entries and at round-off (5e-14), so no two are
   bitwise equal. Ranked by their own columns on a grid of 2^-30 of their magnitude, the entries of one stencil
   shape come in one order; the cells of a shape then read the table of its cell with the lowest global id,
@@ -620,7 +620,7 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
 
   What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
   states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
-  per-cell tables (`share_tables = false`): restart files after 5 steps of a blast on hexahedra, tetrahedra and
+  per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
   mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
   count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
 
