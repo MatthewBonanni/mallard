@@ -89,6 +89,13 @@ namespace probe {
 ProbeReference read_reference(const Input & ref, const std::string & key);
 
 /**
+ * @brief Whether [[probes]] fields take a field of a case with these species
+ *        (a cell field statistics samples, or a boundary field); the averages of
+ *        [statistics] are the other fields it takes.
+ */
+bool samples(const std::string & name, const std::vector<std::string> & species_names);
+
+/**
  * @brief What a region key of [[write_data]] gives: the whole mesh
  *        (`"domain"`), a filled region, boundary zones, another region of
  *        lower dimension (sampled at its elements), or a probe type as a
