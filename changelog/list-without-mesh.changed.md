@@ -1,1 +1,0 @@
-- `mallard list fields` and `mallard list species` with an input read only the input and its mechanism, not the mesh, which need not exist yet; the fields that setup computes only when a writer asks for them (P_MAX, Q_CRITERION, VORTICITY, ...) are listed last.
