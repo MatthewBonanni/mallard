@@ -650,6 +650,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     | order 6, walls, 4³ | 4.7e-3 | 8.5e-6 |
 
     Order 4 on that lattice is stable only from 85 stencil entries
-    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Mixed meshes with
-    pyramids improve with the bound (table above). Pure pyramid lattices are
-    rare in practice; prefer orders 3 or 5 there.
+    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Thin pyramids grow
+    faster: a 6 × 6 × 4 box of aspect ratio 6.25, with side walls and periodic
+    in z, grows at $+0.033$ through the solver at order 4 and is bounded at
+    orders 3 and 5 ([order of `high_order`](../design/teno4_robustness.md#linear-stability)).
+    Mixed meshes with pyramids improve with the bound (table above). Pure
+    pyramid lattices are rare in practice; prefer orders 3 or 5 there.

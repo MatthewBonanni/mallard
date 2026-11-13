@@ -454,8 +454,7 @@ before 12.4, or a failed capture of NCCL operations under one, tried on every ra
 launch one step at a time with the IF bodies always run.
 
 Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
-expressions' errors on the host, or follow the half step the host completes).
+the host).
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -484,11 +483,9 @@ monitor (the step is accepted, the device goes on, and the step is a multiple of
 each monitor's reduction sits under an IF node on its flag and is reduced over the ranks on the device
 (NCCL in NCCL builds), then copied into a pinned array per record slot with a bit in the record. The host
 writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
-monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
-kinetic-energy budget or fused chemistry stay on the host.
+monitors itself, with the same device reduction, so rows match at any depth.
 
-The statistics sample in the graph too (means, spectra, phase averages and conditional statistics), unless
-chemistry is fused. Each part is due by its own interval and
+The statistics sample in the graph too (means, spectra, phase averages and conditional statistics). Each part is due by its own interval and
 `t_start`, which its clock in device memory holds. The means' clock (weight, last sample time, `t_start`, sample count) lives
 in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
 (`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
@@ -508,6 +505,17 @@ derived fields the due probes read are updated (the cell states, transport and g
 array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
+
+With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
+host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
+of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
+flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
+last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
+audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code
+on the same inputs, so the samples are the host-flushed ones bit for bit, and since the kept buffers include
+the integrator's counts and costs, a flush leaves no trace in the steps after it: a step the device flushed
+for and the host then takes (a trigger fires) is flushed again by the host from the same state. A failed
+flush stops the device and the host's own flush reports it.
 
 ### 11. Read-only loads (#641, not kept)
 

@@ -120,6 +120,8 @@ struct CharacteristicTransverseFunctor {
  *        contacts, and the outgoing wave comes from the reconstructed interior
  *        state averaged over the face. Faces of supersonic outflow follow the
  *        interior; with initialize, the face starts from the interior state.
+ *        Under error control each try of a step starts from the faces' state at
+ *        the step's start, as the solution does: a rejected try's wave is undone.
  */
 struct CharacteristicStateFunctor {
     BoundaryData boundaries;
@@ -131,6 +133,8 @@ struct CharacteristicStateFunctor {
     rtype dt_host;
     bool initialize;
     const rtype * dt_device = nullptr;  // the step's dt on the device, inside a step graph
+    Kokkos::View<rtype *[2]> state_start;  // error control: char_state at the step's start
+    const rtype * accepted = nullptr;      // error control: the previous try was accepted (device)
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t k) const {
@@ -170,10 +174,23 @@ struct CharacteristicStateFunctor {
         const rtype Z = W[0] * c;
         const rtype u_n = dot<N_DIM>(W + 1, n);
         const rtype w_out = W[E] + Z * u_n;
-        if (initialize || u_n >= c) {
+        if (accepted && *accepted == 0.0_r) {
+            boundaries.char_state(k, 0) = state_start(k, 0);
+            boundaries.char_state(k, 1) = state_start(k, 1);
+        } else {
+            if (initialize) {
+                boundaries.char_state(k, 0) = W[E];
+                boundaries.char_state(k, 1) = u_n;
+            }
+            if (accepted) {
+                state_start(k, 0) = boundaries.char_state(k, 0);
+                state_start(k, 1) = boundaries.char_state(k, 1);
+            }
+        }
+        if (u_n >= c) {
             boundaries.char_state(k, 0) = W[E];
             boundaries.char_state(k, 1) = u_n;
-            if (u_n >= c) return;
+            return;
         }
         const bool inlet = bc.type == BoundaryType::INLET_STATE;
         rtype u_target[N_DIM], du_target[N_DIM];
