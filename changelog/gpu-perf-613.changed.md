@@ -1,1 +1,0 @@
-- GPU performance: boundary conditions dispatch on a case per condition chosen at setup (teno5_3d +0.9% on A100); the mixture scalar kernels leave the rotational-periodicity code out on meshes without rotational pairs, and the chemistry clipping audit adds no live state to the reactor integration (flame_3d +3.3% together) (#613).

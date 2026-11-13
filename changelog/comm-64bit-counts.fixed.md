@@ -1,1 +1,0 @@
-- Runs whose ranks exchange, gather or write more than 2^31 values at once no longer fail or corrupt data: distributed setup, halo exchanges, chemistry load balancing, string broadcasts and gathers, MPI-IO restart writes and the rank placement report send long messages in pieces, and collectives take 64-bit totals (#775, #876, #894).

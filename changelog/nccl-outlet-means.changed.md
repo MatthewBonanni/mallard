@@ -1,2 +1,0 @@
-- Average-pressure outlets and sources of domain averages no longer keep steps out of CUDA graphs: their sums over the ranks run on the device, with NCCL on the GPU's stream in NCCL builds.
-- The area-averaged pressure of `average = true` outlets is an exact (fixed-point) sum: results differ from earlier versions in the last digits.

@@ -1,1 +1,0 @@
-- `[run] control_file_interval`: a `STOP` or `CHECKPOINT` file acts at the first step whose time-step reduction reads the request, up to `[run] step_queue` steps after the step at which the host found it, as `mallard ctl` requests and signals do (#730).

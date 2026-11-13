@@ -1,1 +1,0 @@
-- Gas mixtures: `[statistics]` sampling and point probes solve each cell's temperature once per sample, where they solved it twice (#513).

@@ -1,1 +1,0 @@
-- `mallard check --quality PREFIX` is renamed `--mesh-fields PREFIX`; `--quality` still works, with a warning (#521).

@@ -1,1 +1,0 @@
-- Snapshot metadata: covariances of a y component with another field (`COV_U_Y_U_Y`, `COV_RHOU_Y_P`) carry the units and long name of their two fields, not of a vector and a mass fraction, and a region's `REGION_FRACTION` is listed once (#795).

@@ -1,2 +1,0 @@
-- `physics.units = "SI" | "nondimensional"` (default `SI`): a nondimensional case says so, and its output labels no number with an SI unit (the progress table's units row shows `-`). Every nondimensional example and tutorial sets it; a gas mixture is always SI (#659).
-- `mallard -i input.toml --verbose`: a line for every file written, between the progress rows (#675).

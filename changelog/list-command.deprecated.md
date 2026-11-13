@@ -1,1 +1,0 @@
-- `mallard new --list`: use `mallard list templates`. It still lists them, with a notice.

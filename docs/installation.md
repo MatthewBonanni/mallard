@@ -67,8 +67,8 @@ Each release, from 0.9.1 on, publishes images to the GitHub Container Registry:
 
 | Image | For |
 |---|---|
-| `ghcr.io/matthewbonanni/mallard` (`:latest`, or a version: `:0.9.1`) | CPUs: OpenMP, MPI with dKaMinPar; x86-64 and ARM (also Apple Silicon) |
-| `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.9.1-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R580 or newer); MPI with NCCL |
+| `ghcr.io/matthewbonanni/mallard` (`:latest`, or a version: `:0.10.0`) | CPUs: OpenMP, MPI with dKaMinPar; x86-64 and ARM (also Apple Silicon) |
+| `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.10.0-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R580 or newer); MPI with NCCL |
 
 Both have HDF5, CGNS, zlib, the Python tools and the [Python package](guide/python.md) `mallard` (in the image's `python3`, with numpy), and set `MALLARD_SHARE` to the examples' directory.
 
