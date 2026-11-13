@@ -665,8 +665,7 @@ bool Solver::halo_too_shallow() {
 }
 
 bool Solver::exchanges_partition_faces() const {
-    // Rotational periodic faces rotate their cell 1 side before it would be exchanged
-    return is_distributed() && !is_mixture() && !mesh->is_rotational() && face_reconstruction->exchanges_partition_faces();
+    return is_distributed() && !is_mixture() && face_reconstruction->exchanges_partition_faces();
 }
 
 void Solver::init_rhs_split() {

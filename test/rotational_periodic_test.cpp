@@ -423,7 +423,8 @@ TEST(RotationalPeriodicSetup, SectorConservesMassAndEnergy) {
 }
 
 TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
-    // Halos and stencils across the turned seam, cut by each partitioner
+    // Halos and stencils across the turned seam, cut by each partitioner. TENO's
+    // owners send the turned sides of seam faces cut by the partition
     for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
         if (partitioner == "graph" && !have_graph_partitioner()) continue;
         for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 5\n"}) {
@@ -437,7 +438,20 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
             const std::string init = "[initialize]\ntype = \"constant\"\nu = [" +
                                      std::string(N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") + "]\np = 1.0\nT = 1.0\n";
             input.replace(input.find(init), init.size(), swirl_initializer(a.sectors));
-            expect_matches_serial(input);
+            if (recon == "type = \"MUSCL\"\n") {
+                expect_matches_serial(input);
+                continue;
+            }
+            expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
+                const Mesh & mesh = *s.get_mesh();
+                uint64_t cut = 0;
+                for (uint32_t f = 0; f < mesh.n_faces; f++) {
+                    const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+                    if (c1 < 0 || !mesh.h_rotated_row(mesh.h_face_shift(f))) continue;
+                    cut += (uint32_t(c0) < mesh.n_owned()) != (uint32_t(c1) < mesh.n_owned());
+                }
+                if (comm::size() > 1) EXPECT_GT(comm::allreduce(cut, comm::Op::SUM), 0u);
+            });
         }
     }
 }
