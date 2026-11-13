@@ -3102,6 +3102,8 @@ void Solver::take_step() {
     for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
         n_rejected++;
         check_rejections(tries);
+        // The retry advances the characteristic faces again, from the step's start
+        t_characteristic = -std::numeric_limits<rtype>::infinity();
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }

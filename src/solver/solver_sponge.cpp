@@ -233,7 +233,11 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            face_reconstruction->face_quad_weights,
                                            dt,
                                            !characteristic_state_set,
-                                           recording_step ? step_dt_device() : nullptr};
+                                           recording_step ? step_dt_device() : nullptr,
+                                           characteristic_start,
+                                           step_controller.enabled()
+                                               ? step_controller.slots().data() + StepController::ACCEPTED
+                                               : nullptr};
     Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
     characteristic_state_set = true;

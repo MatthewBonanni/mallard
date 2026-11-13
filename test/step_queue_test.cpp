@@ -720,6 +720,19 @@ TEST(StepQueueTest, RejectedStepsAreRetriedAsTheHostRetriesThem) {
     EXPECT_EQ(o.t, 0.3_r);
 }
 
+TEST(StepQueueTest, RejectedStepsOfCharacteristicOutletsStartFromTheStep) {
+    // A retry advances the faces' incoming waves from the step's start, with its own dt
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1\n";
+    c.integrator = "RDPK3Sp35";
+    c.numerics = "[numerics.error_control]\ntolerance = 1e-3\n";
+    c.right = "type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0 }\n";
+    const Outcome o = expect_queue_invariant("characteristic_rejections", c);
+    EXPECT_GT(o.rejected, 0u);
+    EXPECT_EQ(o.step, 30u);
+}
+
 TEST(StepQueueTest, ControlFilesStopAsRequests) {
     // A STOP file found at step 5 stops the run after step 6 when the host takes every step; with steps queued
     // ahead, at the first step that reads the request, without a stop of the queue at step 5. Either way with a
