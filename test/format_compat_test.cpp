@@ -13,7 +13,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -49,18 +51,30 @@ struct Fixture {
     {"v0.6.0", "gas", 2},   {"v0.6.0", "statistics", 3}, {"v0.6.0", "mixture", 2},
     {"v0.7.0", "gas", 2},   {"v0.7.0", "statistics", 3}, {"v0.7.0", "mixture", 2}, {"v0.7.0", "nscbc", 4},
     {"v0.8.0", "gas", 2},   {"v0.8.0", "statistics", 3}, {"v0.8.0", "mixture", 2}, {"v0.8.0", "nscbc", 4},
+    {"v0.10.0", "gas", 7},  {"v0.10.0", "statistics", 7}, {"v0.10.0", "mixture", 7}, {"v0.10.0", "nscbc", 7},
 };
 
-/** @brief The fixture's input, without output; from a restart file if one is given. */
-[[maybe_unused]] Input fixture_input(const std::string & name, const fs::path & restart = {}) {
+/** @brief Whether a release (vX.Y.Z) is older than another. */
+[[maybe_unused]] bool older(const std::string & release, const std::string & than) {
+    const auto parts = [](const std::string & r) {
+        std::array<int, 3> v{};
+        std::sscanf(r.c_str(), "v%d.%d.%d", &v[0], &v[1], &v[2]);
+        return v;
+    };
+    return parts(release) < parts(than);
+}
+
+/** @brief The fixture's input, without output; from a restart file if one is given, as that release ran it. */
+[[maybe_unused]] Input fixture_input(const std::string & name, const fs::path & restart = {},
+                                     const std::string & release = "") {
     Input input = parse_input((FORMATS / (name + ".toml")).string());
     input.as_table().erase("write_data");
     auto & physics = input.at("physics");
     if (physics.contains("mechanism")) {
         physics["mechanism"] = (FORMATS / physics.at("mechanism").as_string()).lexically_normal().string();
     }
-    // The releases that wrote the fixtures took the chemistry's half steps separately
-    if (input.contains("chemistry")) input["chemistry"]["fuse_half_steps"] = false;
+    // Releases before 0.10.0 took the chemistry's half steps separately
+    if (input.contains("chemistry") && older(release, "v0.10.0")) input["chemistry"]["fuse_half_steps"] = false;
     if (!restart.empty()) {
         Input init(Input::table_type{});
         init["type"] = "restart";
@@ -122,11 +136,12 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
 
             // Step 0 holds the analytical initial state, which 2D builds compute the same since 0.5 up
             // to the quadrature error of quadrilaterals (averaged from their vertex average since 0.9,
-            // #436); step 2 the two steps this build takes from it, up to the round-off of scheme changes
+            // #436); step 2 the two steps this build takes from it, up to the round-off of scheme changes.
+            // Running to step 2 from step 2 applies a pending chemistry half step (fused since 0.10.0).
             const auto analytical = solver_state(fixture_input(f.name), false);
             const auto from_first = solver_state(fixture_input(f.name, first), false);
-            const auto from_last = solver_state(fixture_input(f.name, last), false);
-            const auto rerun = solver_state(fixture_input(f.name, first), true);
+            const auto from_last = solver_state(fixture_input(f.name, last, f.release), true);
+            const auto rerun = solver_state(fixture_input(f.name, first, f.release), true);
             ASSERT_EQ(from_first.size(), analytical.size());
             auto size_of = [](const std::vector<double> & x) {
                 double m = 0;
@@ -219,14 +234,18 @@ TEST(FormatCompatTest, MeshFilesOfPastReleasesAreRead) {
         GTEST_SKIP() << "2D fixtures, compared with double-precision meshes";
     } else {
         const MeshBlock generated = read_mesh_block(fixture_input("gas"));
-        for (const std::string release : {"v0.6.0", "v0.7.0", "v0.8.0"}) {
+        for (const std::string release : {"v0.6.0", "v0.7.0", "v0.8.0", "v0.10.0"}) {
             SCOPED_TRACE(release);
             expect_same_mesh(read_mesh_h5((FORMATS / release / "mesh.h5").string(), true), generated);
         }
         // Curved boundaries: the second-order nodes of the walls
-        const MeshBlock curved = read_mesh_h5((FORMATS / "v0.8.0" / "curved_mesh.h5").string(), true);
-        ASSERT_FALSE(curved.face_high_order_nodes.empty());
-        expect_same_mesh(curved, read_file_block((FORMATS / "annulus.msh").string()));
+        const MeshBlock annulus = read_file_block((FORMATS / "annulus.msh").string());
+        for (const std::string release : {"v0.8.0", "v0.10.0"}) {
+            SCOPED_TRACE(release);
+            const MeshBlock curved = read_mesh_h5((FORMATS / release / "curved_mesh.h5").string(), true);
+            ASSERT_FALSE(curved.face_high_order_nodes.empty());
+            expect_same_mesh(curved, annulus);
+        }
     }
 }
 

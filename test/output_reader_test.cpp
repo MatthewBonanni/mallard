@@ -449,6 +449,30 @@ TEST(OutputReaderTest, SnapshotsOfMallard091AreReadWithTheStatedFallback) {
     }
 }
 
+TEST(OutputReaderTest, SnapshotsOfMallard0100AreReadFromTheirBlocks) {
+    const std::string dir = source_dir() + "/test/data/formats/v0.10.0/";
+    std::vector<std::string> files = {"snapshots_vtu.pvd", "snapshots_vtu_000001.vtu", "snapshots_000001.restart",
+                                      "snapshots_probe.csv", "snapshots_forces.csv"};
+    if (have_hdf5()) {
+        files.insert(files.end(), {"snapshots_vtkhdf.vtkhdf.series", "snapshots_series.vtkhdf", "snapshots_xdmf.xmf",
+                                   "snapshots_xdmf_000001.h5", "snapshots_probe.h5"});
+    }
+    std::string run_id;
+    for (const std::string & name : files) {
+        const output::Contents c = output::open(dir + name);
+        EXPECT_EQ(json::parse(c.run)["schema"].string, provenance::SCHEMA) << name;
+        EXPECT_TRUE(c.notes.empty()) << name << ": " << c.notes.front();
+        ASSERT_FALSE(c.snapshots.empty()) << name;
+        const output::Snapshot & s = c.snapshots.back();
+        EXPECT_EQ(s.step, 1) << name;
+        EXPECT_NEAR(s.t, 0.0144306461, 1e-9) << name;
+        if (c.kind == output::Kind::snapshot || c.kind == output::Kind::restart) EXPECT_TRUE(s.has_block) << name;
+        if (run_id.empty()) run_id = s.run_id;
+        EXPECT_FALSE(s.run_id.empty()) << name;
+        EXPECT_EQ(s.run_id, run_id) << name;
+    }
+}
+
 TEST(OutputReaderTest, PiecesOfARunOnSeveralRanksHoldEveryCellOnce) {
     if (comm::size() == 1) GTEST_SKIP() << "a run on several ranks";
     const std::string dir = (scratch_dir() / "output_reader_pieces").string();
