@@ -173,6 +173,7 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
     // The clock also holds the t_start the spectra and phases sample from
     clock = Kokkos::View<Clock>("statistics_clock");
+    h_clock = pinned_mirrors(clock);
     t_sample = Kokkos::View<rtype>("statistics_t_sample");
     set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
     const std::vector<Input> entries = find_value_or<std::vector<Input>>(table, "conditional", {});
@@ -224,11 +225,12 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         batch_value = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_batch", n_cells, n);
         batch_avg = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_batch_avg", n_cells, n);
         batch_m2 = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_batch_m2", n_cells, n);
-        h_batch_value = Kokkos::create_mirror_view(batch_value);
-        h_batch_avg = Kokkos::create_mirror_view(batch_avg);
-        h_batch_m2 = Kokkos::create_mirror_view(batch_m2);
+        h_batch_value = pinned_mirrors(batch_value);
+        h_batch_avg = pinned_mirrors(batch_avg);
+        h_batch_m2 = pinned_mirrors(batch_m2);
         h_ci = decltype(h_ci)("statistics_ci", n_cells, n);
         batch_clock = Kokkos::View<BatchClock>("statistics_batch_clock");
+        h_batch_clock = pinned_mirrors(batch_clock);
     }
 
     std::vector<int32_t> h_codes;
@@ -248,8 +250,8 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     Kokkos::deep_copy(pairs, h_pairs);
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_mean", n_cells, fields.size());
     cov = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_cov", n_cells, products.size());
-    h_mean = Kokkos::create_mirror_view(mean);
-    h_cov = Kokkos::create_mirror_view(cov);
+    h_mean = pinned_mirrors(mean);
+    h_cov = pinned_mirrors(cov);
 }
 
 void Statistics::start(rtype t) {
@@ -398,17 +400,18 @@ std::vector<std::string> Statistics::restart_variables() const {
     return names;
 }
 
-std::vector<std::pair<std::string, snapshot_block::Average>> Statistics::field_averages() const {
+std::vector<std::pair<std::string, snapshot_block::Average>> Statistics::field_averages(const Clock & k) const {
     const std::vector<std::string> names = variables();
     std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
     auto average = [&](const char * kind, std::vector<std::string> of) {
         snapshot_block::Average a;
         a.kind = kind;
         a.of = std::move(of);
         a.weighting = "time";
-        a.start = average_start();
-        a.end = average_end();
-        a.samples = static_cast<int64_t>(samples());
+        a.start = k.n_samples ? double(k.t_last - k.weight) : nan;
+        a.end = k.n_samples ? double(k.t_last) : nan;
+        a.samples = static_cast<int64_t>(k.n_samples);
         a.interval = static_cast<int64_t>(interval);
         return a;
     };
@@ -439,15 +442,35 @@ void Statistics::register_data(std::vector<Data> & data) const {
 }
 
 void Statistics::copy_device_to_host() {
-    phase.copy_device_to_host();
+    stage_output();
+    Kokkos::fence("statistics_copy");
+    finish_output();
+}
+
+void Statistics::stage_output() {
+    for (auto & c : conditional) c.stage_output();
+    if (clock.is_allocated()) copy_to_pinned(pinned_mirrors, h_clock, clock);
     if (!means_enabled()) return;
-    Kokkos::deep_copy(h_mean, mean);
-    Kokkos::deep_copy(h_cov, cov);
+    copy_to_pinned(pinned_mirrors, h_mean, mean);
+    copy_to_pinned(pinned_mirrors, h_cov, cov);
     if (!batches_enabled()) return;
-    Kokkos::deep_copy(h_batch_value, batch_value);
-    Kokkos::deep_copy(h_batch_avg, batch_avg);
-    Kokkos::deep_copy(h_batch_m2, batch_m2);
-    const uint64_t n_batches = batches();
+    copy_to_pinned(pinned_mirrors, h_batch_clock, batch_clock);
+    copy_to_pinned(pinned_mirrors, h_batch_value, batch_value);
+    copy_to_pinned(pinned_mirrors, h_batch_avg, batch_avg);
+    copy_to_pinned(pinned_mirrors, h_batch_m2, batch_m2);
+}
+
+void Statistics::set_snapshot_averages() const {
+    const Clock k = h_clock();
+    snapshot_block::set_averages(k.n_samples ? double(k.t_last - k.weight) : std::numeric_limits<double>::quiet_NaN(),
+                                 k.n_samples ? double(k.t_last) : std::numeric_limits<double>::quiet_NaN(),
+                                 static_cast<int64_t>(k.n_samples), field_averages(k));
+}
+
+void Statistics::finish_output() {
+    phase.copy_device_to_host();
+    if (!means_enabled() || !batches_enabled()) return;
+    const uint64_t n_batches = h_batch_clock().n_closed;
     const double t = n_batches >= 2 ? time_series::student_t(confidence, static_cast<uint32_t>(n_batches - 1)) : 0.0;
     for (size_t c = 0; c < h_ci.extent(0); c++) {
         for (size_t q = 0; q < h_ci.extent(1); q++) {
@@ -531,12 +554,12 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
 RestartAttributes Statistics::attributes() const {
     RestartAttributes all;
     if (means_enabled()) {
-        const Clock k = host_clock();
+        const Clock k = h_clock();
         all = {{WEIGHT, static_cast<double>(k.weight)},
                {T_LAST, static_cast<double>(k.t_last)},
                {SAMPLES, static_cast<double>(k.n_samples)}};
         if (batches_enabled()) {
-            const BatchClock b = host_batch_clock();
+            const BatchClock b = h_batch_clock();
             all.insert(all.end(), {{BATCHES, static_cast<double>(b.n_closed)},
                                    {BATCH_INDEX, static_cast<double>(b.index)},
                                    {BATCH_WEIGHT, static_cast<double>(b.weight)},

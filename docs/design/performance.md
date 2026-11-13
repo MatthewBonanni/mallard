@@ -455,8 +455,23 @@ launch one step at a time with the IF bodies always run.
 
 Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
 the host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
-expressions' errors on the host, or follow the half step the host completes). Outputs stop the device at
-their steps.
+expressions' errors on the host, or follow the half step the host completes).
+
+Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
+`DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
+step the device goes on from and advances their clocks, and the step's target time (the next output time, as
+`next_target_time` has it) follows them. Under an IF node on that decision the graph does `write_data`'s
+device work at the device's `t` (the primitives, the transport, the heat release, the eddy viscosity, the
+gradients and derived fields) and copies every array the files read, with the statistics' clocks, the step
+controller's slots, the characteristic faces' state and the triggers' states, into the host's mirrors. The
+mirrors are pinned (never the device's own arrays, also off GPUs), so the copies are kernels, and the host
+writes the files from them as it takes the record, after the step's probes and before its progress row, as
+`after_step` orders them. One set of mirrors serves every output: each rank posts the number of staged outputs
+it has written in the step's time-step reduction, whose minimum the device compares with the number it
+staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
+`[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
+spectra, phase averages (whose files and restart arrays read the device) stop the
+device at their steps, as do all outputs of builds without conditional nodes.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values

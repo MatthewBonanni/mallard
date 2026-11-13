@@ -42,8 +42,8 @@
 namespace {
 
 // step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests,
-// -wall], the posted values from index 1 on
-constexpr int N_REDUCE = Solver::N_STEP_REDUCE, N_POSTED = N_REDUCE - 1, WALL = N_REDUCE - 1;
+// staged outputs the host wrote, -wall], the posted values from index 1 on
+constexpr int N_REDUCE = Solver::N_STEP_REDUCE, N_POSTED = N_REDUCE - 1, WALL = N_REDUCE - 1, OUTPUTS = N_REDUCE - 2;
 constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), T_HALF = DT_SCALES + int(N_DT_SCALES),
               HALF_SCALES = T_HALF + 1, HALF_DT = HALF_SCALES + int(DT), N_STEP_SCALARS = HALF_SCALES + int(N_DT_SCALES);
 using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
@@ -450,6 +450,7 @@ void Solver::device_step_body() {
     }
     // Before the samples and probes, so that a step a trigger fires at is the host's alone
     if (triggers_on_device()) evaluate_triggers();
+    if (staged_outputs) decide_outputs();
     if (statistics_on_device()) {
         // The samples of steps the device goes on from, as after_step takes them: each part by its own interval
         // and t_start, as Statistics::due
@@ -520,11 +521,9 @@ void Solver::device_step_body() {
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
         const Kokkos::View<uint32_t *> due = probe_due;
         const Kokkos::View<Probes::StagedClock *> clocks = probe_clocks;
-        const Kokkos::View<rtype> target = probe_target;
         const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
         const uint64_t average_interval = probes.get_average_interval();
         const rtype average_start = probes.get_average_start();
-        const bool timed = staged_time_probes;
         Kokkos::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
@@ -533,7 +532,6 @@ void Solver::device_step_body() {
             const bool on = L.active && L.advanced;
             const rtype t_now = s(T);
             const bool averages = on && L.step % average_interval == 0 && t_now > average_start;
-            rtype t_target = target();
             for (uint32_t k = 0; k < n_probes; k++) {
                 Probes::StagedClock & c = clocks(k);
                 bool written = false;
@@ -543,18 +541,12 @@ void Solver::device_step_body() {
                     written = t_now >= probe_clock::due_time(c.n_written, c.time_interval, c.tol);
                     if (written) c.n_written = probe_clock::written_after(c.n_written, c.time_interval, c.tol, t_now);
                 }
-                if (c.time_interval > 0.0_r) {
-                    const rtype next = probe_clock::next_time(c.n_written, c.time_interval);
-                    if (next < t_target) t_target = next;
-                }
                 if (written) record.probes |= uint64_t(1) << k;
                 // Averaging probes write their means from the host's averages, and sample at their own steps
                 due(k) = c.average ? averages : written;
                 if (c.average && averages) record.probe_samples |= uint64_t(1) << k;
                 due(n_probes) |= due(k);
             }
-            // The next step ends at the next output time, as next_target_time has it
-            if (timed && on) s(T_TARGET) = t_target;
         });
         device_if(&probe_due.data()[n_probes], [&] {
             const auto [cell_W, transport, all_gradients] = probes.staged_needs(wall_model_on);
@@ -574,6 +566,43 @@ void Solver::device_step_body() {
         }
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
         recording_step = false;
+    }
+    if (staged_outputs) {
+        // write_data's work on the device, into the host's mirrors; boundary states at the step's end
+        device_if(output_due.data(), [&] {
+            recording_step = true;
+            t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+            update_primitives();
+            output_arrays_to_host();
+            if (triggers_on_device()) copy_to_pinned(pinned_mirrors, h_trigger_states, trigger_states);
+            t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+            recording_step = false;
+        });
+    }
+    if (staged_time_probes || staged_time_outputs) {
+        // The next step ends at the next output time, as next_target_time has it
+        const Kokkos::View<const Probes::StagedClock *> probe_clock_view = probe_clocks;
+        const Kokkos::View<const OutputClock *> output_clock_view = output_clocks;
+        const Kokkos::View<const rtype> target = step_target;
+        const uint32_t n_probes = static_cast<uint32_t>(probe_clocks.extent(0));
+        const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
+        Kokkos::parallel_for("step_target", 1, KOKKOS_LAMBDA(const int) {
+            const step_queue::Loop & L = loop();
+            if (!L.active || !L.advanced) return;
+            rtype t_target = target();
+            for (uint32_t k = 0; k < n_probes; k++) {
+                const Probes::StagedClock & c = probe_clock_view(k);
+                if (c.time_interval > 0.0_r) {
+                    const rtype next = probe_clock::next_time(c.n_written, c.time_interval);
+                    if (next < t_target) t_target = next;
+                }
+            }
+            for (uint32_t k = 0; k < n_writers; k++) {
+                const rtype next = output_clock_view(k).next_time();
+                if (next < t_target) t_target = next;
+            }
+            s(T_TARGET) = t_target;
+        });
     }
     device_if(&step_loop.data()->progress, [&] {
         if (timed_boundaries) flag_timed_boundaries();
@@ -626,6 +655,73 @@ void Solver::write_staged_probes(const step_queue::Record & record) {
         if (record.probe_samples >> k & 1) probes.sample_staged_average(staged_probes[k], step, t, slot);
         if (record.probes >> k & 1) probes.write_staged(staged_probes[k], step, t, slot);
     }
+}
+
+void Solver::decide_outputs() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<rtype *> r = step_reduce, s = step_scalars;
+    const Kokkos::View<OutputClock *> clocks = output_clocks;
+    const Kokkos::View<uint32_t> due = output_due;
+    const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
+    Kokkos::parallel_for("outputs_due", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        step_queue::Record & record = records((L.seq - 1) % n_records);
+        record.outputs = 0;
+        due() = 0;
+        if (!L.active || !L.advanced) return;
+        uint64_t bits = 0;
+        for (uint32_t k = 0; k < n_writers; k++) {
+            if (clocks(k).due(L.step, s(T))) bits |= uint64_t(1) << k;
+        }
+        if (bits == 0) return;
+        // The mirrors hold an output every rank's host has yet to write (the minimum over the ranks of what they wrote)
+        if (static_cast<uint64_t>(r(OUTPUTS)) != L.outputs_staged) {
+            record.reasons |= step_queue::OUTPUT;
+            L.active = 0;
+            L.progress = 0;
+            return;
+        }
+        for (uint32_t k = 0; k < n_writers; k++) {
+            if (bits >> k & 1) clocks(k).written(s(T));
+        }
+        L.outputs_staged++;
+        record.outputs = bits;
+        due() = 1;
+    });
+}
+
+void Solver::write_staged_outputs(const step_queue::Record & record) {
+    if (record.outputs == 0) return;
+    for (size_t k = 0; k < data_writers.size(); k++) {
+        if ((record.outputs >> k & 1) != uint64_t(data_writers[k]->due(step, t))) {
+            throw std::logic_error("the step graph staged the outputs due at step " + std::to_string(step) +
+                                   " differently from the host");
+        }
+        data_writers[k]->publish_written();
+    }
+    finish_output_arrays();
+    if (triggers_on_device()) {
+        // The states of the staged step, which its restart files carry
+        triggers.set_states(std::vector<Triggers::DeviceState>(h_trigger_states.data(),
+                                                                h_trigger_states.data() + h_trigger_states.extent(0)));
+    }
+    write_outputs(false);
+    // Every rank's host wrote it: the device may stage the next one
+    n_staged_outputs++;
+    requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);
+}
+
+bool Solver::outputs_stageable() const {
+    // Not staged: what the host computes at its t or step (sources, regions that move or follow the solution, fused
+    // chemistry), and the averaged spectra and phases, whose files and restart arrays read the device
+    if (data_writers.empty() || data_writers.size() > 64 || defer_chemistry || source_terms || output_data) return false;
+    for (const auto & writer : data_writers) {
+        if (writer->moving_subset()) return false;
+    }
+    const Spectra & spectra = statistics.get_spectra();
+    return !(spectra.enabled() && spectra.averaged()) && !statistics.get_phase().enabled();
 }
 
 bool Solver::statistics_on_device() const {
@@ -701,6 +797,7 @@ void Solver::step_prologue() {
         record.reasons = 0;
         record.progress = 0;
         record.spectra = 0;
+        record.outputs = 0;
     });
 }
 
@@ -841,7 +938,6 @@ void Solver::begin_device_steps() {
     if (!staged_probes.empty()) {
         probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + 1);
         probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
-        probe_target = Kokkos::View<rtype>("step_probe_target");
     }
     n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
@@ -858,6 +954,22 @@ void Solver::begin_device_steps() {
     conditional_steps = true;
     queue_depth = n_records;
 #endif
+    // Graphs without conditional nodes run every IF body: outputs are then the host's
+    staged_outputs = conditional_steps && outputs_stageable();
+    staged_time_outputs = false;
+    requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);
+    if (staged_outputs) {
+        output_clocks = Kokkos::View<OutputClock *>("step_output_clocks", data_writers.size());
+        output_due = Kokkos::View<uint32_t>("step_output_due");
+        for (const auto & writer : data_writers) staged_time_outputs = staged_time_outputs || writer->output_clock().interval == 0;
+        allocate_restart_mirrors();
+        if (triggers_on_device() && h_trigger_states.extent(0) != trigger_states.extent(0)) {
+            h_trigger_states = pinned_mirrors(trigger_states);
+        }
+    }
+    if ((staged_outputs || !staged_probes.empty()) && !step_target.is_allocated()) {
+        step_target = Kokkos::View<rtype>("step_target");
+    }
 }
 
 step_queue::Horizon Solver::step_horizon() const {
@@ -870,7 +982,9 @@ step_queue::Horizon Solver::step_horizon() const {
         for (const auto & monitor : force_monitors) h.at_multiple(step, monitor.interval);
         h.at_multiple(step, integral_monitor.interval);
     }
-    for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
+    if (!staged_outputs) {
+        for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
+    }
     probes.due_limits(step, h.step_limit, h.t_limit);
     if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
     convergence_due_limits(h);
@@ -888,6 +1002,7 @@ void Solver::resume_device_steps() {
     loop.active = 1;
     loop.check_interval = progress_on_device() ? check_interval : 0;
     loop.horizon = step_horizon();
+    loop.outputs_staged = n_staged_outputs;
     if (reacting) {
         loop.chemistry_failures = static_cast<double>(chem_failures_seen);
         chem_io(0) = chemistry_pending;
@@ -902,8 +1017,14 @@ void Solver::resume_device_steps() {
             staged_time_probes = staged_time_probes || clocks(k).time_interval > 0.0_r;
         }
         Kokkos::deep_copy(probe_clocks, clocks);
-        Kokkos::deep_copy(probe_target, next_target_time(true));
     }
+    if (staged_outputs) {
+        // Control commands change output intervals at the host's steps
+        const auto clocks = Kokkos::create_mirror_view(output_clocks);
+        for (size_t k = 0; k < data_writers.size(); k++) clocks(k) = data_writers[k]->output_clock();
+        Kokkos::deep_copy(output_clocks, clocks);
+    }
+    if (step_target.is_allocated()) Kokkos::deep_copy(step_target, next_target_time(true));
     if (triggers_on_device() && triggers_evaluated_by_host) {
         // The values and states the host's last evaluation left; else the device's own are current
         triggers_evaluated_by_host = false;
