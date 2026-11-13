@@ -656,13 +656,15 @@ TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
     }
 }
 
-TEST(StepQueueTest, TriggersOfTheWallTimeStopAtEveryStep) {
+TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {
+    // The wall time rides along the step's reduction: the device stops for the host only at the step one fires at
     Case c;
-    c.run = "n_steps = 12\ncfl = 0.5\n";
-    c.extra = "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9 or wall > 1e9\"\ndo = \"stop\"\n";
-    const Outcome o = expect_queue_invariant("wall_triggers", c, false);
-    EXPECT_EQ(o.step, 9u);
-    EXPECT_EQ(run_case("wall_triggers", c, 3).queued, 0u);
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = RESTARTS + "[[triggers]]\nname = \"held\"\nwhen = \"wall > 0 and t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"late\"\nwhen = \"(step >= 15 and wall > 0) or wall > 1e9\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("wall_triggers", c);
+    EXPECT_EQ(o.step, 15u);
 }
 
 TEST(StepQueueTest, DivergenceWritesTheLastValidStateAsTheHostDoes) {

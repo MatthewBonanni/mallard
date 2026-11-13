@@ -52,13 +52,13 @@
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
+#include "run_control.h"
 #include "exact_sums.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
 #include "partition.h"
 #include "halo_exchange.h"
 #include "log.h"
-#include "run_control.h"
 #include "check.h"
 #include "run_report.h"
 #include "memory_tracker.h"
@@ -138,6 +138,9 @@ bool writes_variable(const Input & input, const std::string & name);
 
 class Solver {
     public:
+        /** @brief Values of the step's time-step reduction: dt_cfl1, the run-control requests and minus the wall time. */
+        static constexpr int N_STEP_REDUCE = 2 + run_control::N_REQUESTS;
+
         Solver();
         ~Solver();
 
@@ -325,6 +328,8 @@ class Solver {
         const rtype * step_dt_device() const;
         /** @brief The step's start time on the device, inside a step graph. */
         const rtype * step_time_device() const;
+        /** @brief Minus rank 0's wall time as the host posted it before the step, reduced over the ranks; in a step graph. */
+        const rtype * step_wall_device() const;
         /** @brief bc.data[0] of each average-pressure outlet: its target p (of t, from timed_fields) less the mean p. */
         void update_average_pressure_outlets(StateView solution);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
@@ -887,7 +892,7 @@ class Solver {
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
-        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> requests_posted;  // pinned: written by the host any time
