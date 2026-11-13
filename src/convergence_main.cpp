@@ -715,6 +715,7 @@ std::vector<Norms> finest_norms(Study & study, const Selection & sel) {
     options.degree = REFERENCE_DEGREE;
     options.limit = false;
     options.axisymmetric = recorded_axisymmetric(finest);
+    const remap::Source source = remap::global_source(fine_mesh, {reference.values}, {-1}, options);
     const overlap::Rule & rule = overlap::simplex_rule(options.axisymmetric ? 1u : 0u);
     std::vector<Norms> out;
     for (size_t i = 0; i + 1 < study.runs.size(); i++) {
@@ -728,8 +729,7 @@ std::vector<Norms> finest_norms(Study & study, const Selection & sel) {
                                       number(reference.t) + " s: compare them at one time with --time");
         }
         remap::Report report;
-        const std::vector<double> on_run =
-            remap::remap_global(fine_mesh, {reference.values}, {-1}, options, *mesh, report)[0];
+        const std::vector<double> on_run = remap::remap_global(source, *mesh, report)[0];
         if (report.n_partial > 0 || report.n_nearest > 0) {
             study.runs_status = report::worse(study.runs_status, Status::WARNING);
             study.run_notes.push_back(finest.arg + "'s mesh covers " + count(report.n_partial + report.n_nearest) +

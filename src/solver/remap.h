@@ -111,11 +111,17 @@ class Source {
         uint64_t n_reduced = 0, n_limited = 0;
 };
 
+/** @brief The source of cell averages [variable][global cell] in source's global cell order. */
+Source global_source(std::shared_ptr<const Mesh> source, const std::vector<std::vector<double>> & values,
+                     const std::vector<int> & groups, const Options & options);
+
 /**
- * @brief Cell averages [variable][global cell] in source's global cell order, remapped onto target's owned
- *        cells (collective): [variable][global cell] in target's global cell order, zero where another rank
- *        owns the cell.
+ * @brief field remapped onto target's owned cells (collective): [variable][global cell] in target's global
+ *        cell order, zero where another rank owns the cell.
  */
+std::vector<std::vector<double>> remap_global(const Source & field, const Mesh & target, Report & report);
+
+/** @brief remap_global of global_source(source, values, groups, options). */
 std::vector<std::vector<double>> remap_global(std::shared_ptr<const Mesh> source,
                                               const std::vector<std::vector<double>> & values,
                                               const std::vector<int> & groups, const Options & options,
