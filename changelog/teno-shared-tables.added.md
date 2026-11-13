@@ -1,1 +1,0 @@
-- `share_tables` (TENO, opt-in): cells with equal pseudo-inverses (lattices, extruded and uniformly graded meshes) store them once, about 18 times less table memory at order 5 on hexahedral and Kuhn-tetrahedral boxes (5 times the cells per A100-80GB); results change at round-off (#431).

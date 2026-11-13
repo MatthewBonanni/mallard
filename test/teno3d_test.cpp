@@ -604,7 +604,7 @@ TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy)
 }
 
 
-TEST(TENO3DSetup, SharedTablesStoreEqualPseudoInversesOnceAndChangeFaceValuesOnlyByRoundOff) {
+TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRoundOff) {
     // A blast on hexahedra with walls (mirror images, smooth and troubled cells):
     // interior cells share their tables, cells along the walls keep their own
     auto mesh = make_mesh_3d("cartesian", 8, 8, 8);
@@ -620,7 +620,7 @@ TEST(TENO3DSetup, SharedTablesStoreEqualPseudoInversesOnceAndChangeFaceValuesOnl
         h_W(c, 4) = inside ? 1.0_r : 0.1_r;
     }
     Kokkos::deep_copy(W, h_W);
-    const std::string share = "share_tables = true\n";
+    const std::string own_tables = "share_tables = false\n";
     for (const int order : {3, 5}) {
         auto face_values = [&](const std::string & extra, const uint8_t shift) {
             auto teno = std::make_unique<TENO>();
@@ -634,8 +634,8 @@ TEST(TENO3DSetup, SharedTablesStoreEqualPseudoInversesOnceAndChangeFaceValuesOnl
             return std::make_pair(std::vector<rtype>(h.data(), h.data() + h.span()),
                                   teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span());
         };
-        const auto [own, own_entries] = face_values("", teno::SLICE_SHIFT);
-        const auto [shared, shared_entries] = face_values(share, teno::SLICE_SHIFT);
+        const auto [own, own_entries] = face_values(own_tables, teno::SLICE_SHIFT);
+        const auto [shared, shared_entries] = face_values("", teno::SLICE_SHIFT);
         EXPECT_LT(4 * shared_entries, own_entries) << "order " << order;
         double largest = 0.0, difference = 0.0;
         for (size_t k = 0; k < own.size(); k++) {
@@ -643,9 +643,9 @@ TEST(TENO3DSetup, SharedTablesStoreEqualPseudoInversesOnceAndChangeFaceValuesOnl
             difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
         }
         EXPECT_LT(difference, 1e-12 * largest) << "order " << order;
-        // A cell takes the first equal cell's table, however many cells a slice packs
+        // A shape's table is its cell's with the lowest global id, however many cells a slice packs
         for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
-            EXPECT_TRUE(face_values(share, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
+            EXPECT_TRUE(face_values("", shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
         }
     }
 }

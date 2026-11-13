@@ -389,9 +389,12 @@ class TENO : public FaceReconstruction {
         // Pseudo-inverses stored in single precision (opt-in: halves the
         // largest tables, and changes results at single-precision round-off)
         bool single_tables = false;
-        // Slices with equal pseudo-inverses (up to SHARE_TOLERANCE) store them once (opt-in: changes
-        // results at round-off)
-        bool share_tables = false;
+        // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore)
+        bool share_tables = true;
+        /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
+        const uint64_t * global_cell_ids() const {
+            return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();
+        }
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
@@ -488,7 +491,7 @@ class TENO : public FaceReconstruction {
          *        coordinates moved, geometry recomputed and on the device).
          *        Each cell's tables are a function of the mesh alone, so with
          *        the cells of cells_within_reach() the result is bitwise that
-         *        of a full setup.
+         *        of a full setup. Collective when tables are shared.
          */
         void rebuild_cells(const std::vector<uint32_t> & cells);
 

@@ -532,21 +532,21 @@ whose entries are interleaved, so that a warp reads consecutive words.
 `single_precision_tables` (3D, single gas) keeps $\mathbf{P}$, and the moments' values, in single
 precision on the device.
 
-**Shared tables.** With `share_tables`, cells with equal pseudo-inverses
-store them once (`teno_sharing.h`). The slots of a stencil are ranked by its
-columns of $\mathbf{P}$, rounded to $2^{-25}$ of its largest entry, within the
-central stencil and within each sector, so that equal stencils of a lattice,
-whose equidistant entries the search ranks differently from cell to cell, list
-their entries in the same order. A cell then takes the table of the first
-earlier cell whose table, in that order, differs from its own by at most
-$10^{-10}$ of the largest entry (round-off on a lattice is about
-$5\times 10^{-14}$), and keeps only its entries' cells. On GPUs a slice of 32
-cells shares a slice's tables when every one of its cells has the same table as
-that slice's; each slice reaches its tables through `pinv_start`. Equal tables
-are found by a hash of the rounded entries and checked entry by entry: tables
-whose entries straddle a rounding boundary are not shared, which costs memory
-only. A cell's table is that of the first equal cell of its rank whatever the
-slice width, thread count or batch, but it depends on the partition.
+**Shared tables.** The cells of one stencil shape share one table of
+pseudo-inverses (`share_tables`, default on; `teno_sharing.h`). The slots of a
+stencil are ranked by their columns of $\mathbf{P}$ on a grid of $2^{-30}$ of
+its largest entry, within the central stencil and within each sector, so that
+equal stencils of a lattice, whose equidistant entries the search ranks
+differently from cell to cell, list their entries in the same order. Two cells
+have the same shape if their tables are equal on that grid in that order (on a
+lattice they differ by about $5\times 10^{-14}$); the shape's table is that of
+its cell with the lowest global id, agreed over the ranks at setup, so a cell's
+table does not depend on the partition, the batches, the thread count or the
+slice width. A shape whose entries straddle a grid line becomes two shapes,
+which costs memory only. The tables of the shapes are packed like the cells'
+stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
+own through `pinv_index` (block and lane); on a mesh with a shape per cell this
+is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used

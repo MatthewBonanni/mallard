@@ -166,6 +166,7 @@
 
 [mpi3d_test]
 "MPI3DTest.TENOOnHexahedraMatchesSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3"]
+"MPI3DTest.SharedTENOTablesOnTetrahedraMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3"]
 "MPI3DTest.NavierStokesOnTetrahedraMatchesSerial" = ["mpi", "navier_stokes", "muscl", "hllc", "ssprk3"]
 "MPI3DTest.LargeEddySimulationOnTetrahedraMatchesSerial" = [
     ["mpi", "navier_stokes", "les", "muscl", "hllc", "ssprk3"],

@@ -76,6 +76,12 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
+    // Every rank's cells of a stencil shape read the table of the shape's cell
+    // with the lowest global id, which another rank may own
+    expect_matches_serial(blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\nshare_tables = true\n"));
+}
+
 TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     // Cell averages, region layers and nearest-point searches are per cell
     const std::string rank = std::to_string(comm::rank());

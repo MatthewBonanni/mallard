@@ -600,29 +600,29 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
 - **Compact stencil entries.** Each stencil slot held its cell and its mirror face (or -1), 8 bytes. Mirror
   images are rare (cells next to straight walls and symmetry planes), so a slot now holds one word: the cell, or,
   for an image, its index in a per-rank list of (cell, face) pairs. Results are bitwise unchanged.
-- **Shared tables** (`share_tables`, opt-in). The pseudo-inverses are 90% of the tables, and on a lattice every
-  cell's differ only in the order of their equidistant entries and at round-off (5e-14), so no two are bitwise
-  equal. Ranked by their own rounded columns, the entries of equal stencils come in one order; a cell then
-  takes the first equal cell's table and keeps only its entries' cells. A slice of 32 cells on GPUs shares when
-  all of its cells' tables are those of an earlier slice. Bytes per cell of the tables and cells per A100-80GB
-  (`mallard check`; the GPU's slices measured with the CPU build packing slices of 32):
+- **Shared tables** (`share_tables`, on by default). The pseudo-inverses are 90% of the tables, and on a lattice
+  every cell's differ only in the order of their equidistant entries and at round-off (5e-14), so no two are
+  bitwise equal. Ranked by their own columns on a grid of 2^-30 of their magnitude, the entries of one stencil
+  shape come in one order; the cells of a shape then read the table of its cell with the lowest global id,
+  agreed over the ranks, through a per-cell index. Bytes per cell of the tables and cells per A100-80GB
+  (`mallard check`; the GPU's packing in blocks of 32 tables measured with the CPU build packing slices of 32):
 
-  | case | compact entries | shared, per cell | shared, slices of 32 | cells per A100-80GB |
+  | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
   |---|---|---|---|---|
-  | TENO3, hexahedra | 9.77 kB | 721 B | 1.11 kB | 5.85M / 17.9M |
-  | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.25 kB | 3.69M / 15.6M |
-  | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.96 kB | 2.12M / 10.3M |
-  | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.20 kB | 1.12M / 8.70M |
-  | TENO3, tetrahedra | 8.10 kB | 638 B | 760 B | 6.69M / 18.3M |
-  | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.25 kB | 4.43M / 16.1M |
-  | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.71 kB | 1.66M / 12.5M |
-  | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 4.15 kB | 1.04M / 10.4M |
+  | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
+  | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
+  | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
+  | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
+  | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
+  | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
+  | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
+  | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
 
-  What a shared TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the
-  face states and gradients (4 kB) now dominate the memory per cell. Results change at round-off: restart files
-  after 5 steps of a blast on hexahedra, tetrahedra and mixed cells with walls differ from unshared tables by at
-  most 9e-16 (absolute, fields of order 1), and do not depend on the slice width or thread count. Unstructured
-  meshes have no equal tables and keep one per cell.
+  What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
+  states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
+  per-cell tables (`share_tables = false`): restart files after 5 steps of a blast on hexahedra, tetrahedra and
+  mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
+  count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
 
 ## Scaling (one node)
 
