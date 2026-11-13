@@ -466,7 +466,9 @@ TEST(OutputReaderTest, SnapshotsOfMallard0100AreReadFromTheirBlocks) {
         const output::Snapshot & s = c.snapshots.back();
         EXPECT_EQ(s.step, 1) << name;
         EXPECT_NEAR(s.t, 0.0144306461, 1e-9) << name;
-        if (c.kind == output::Kind::snapshot || c.kind == output::Kind::restart) EXPECT_TRUE(s.has_block) << name;
+        if (c.kind == output::Kind::snapshot || c.kind == output::Kind::restart) {
+            EXPECT_TRUE(s.has_block) << name;
+        }
         if (run_id.empty()) run_id = s.run_id;
         EXPECT_FALSE(s.run_id.empty()) << name;
         EXPECT_EQ(s.run_id, run_id) << name;
