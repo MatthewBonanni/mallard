@@ -155,6 +155,15 @@ class CellChemistry {
         /** @brief Starts a step (see ChemistryBalance::begin_step). */
         void begin_step();
 
+        /** @brief Allocates what keep() saves. */
+        void allocate_kept();
+        /**
+         * @brief Saves the tallies, the sub-step counts and the cells' last costs, which restore() puts back: calls
+         *        between the two leave no trace in the next calls or the run's counts.
+         */
+        void keep();
+        void restore();
+
         /**
          * @brief Between steps, after a fence: adapts the balancing's
          *        capacities to the last calls. Returns whether the calls' work
@@ -253,6 +262,9 @@ class CellChemistry {
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<uint8_t *> cell_repaired;
         Kokkos::View<uint64_t[2]> counters;  // sub-steps, rejected sub-steps
+        Kokkos::View<uint64_t *> kept_tally;  // keep()'s copies
+        Kokkos::View<uint64_t[2]> kept_counters;
+        Kokkos::View<float *> kept_cost;
 };
 
 #endif // CELL_CHEMISTRY_H
