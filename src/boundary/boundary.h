@@ -359,24 +359,16 @@ struct BoundaryData {
         const int32_t k = image_rows(i_face);
         return k < 0 ? -1 : image_faces(k);
     }
+    // The image face's side, orientation and points, of a face with an image face (face_image_face(i_face) >= 0)
     /** @brief The side of face_image_face(i_face) belonging to the image cell. */
     KOKKOS_INLINE_FUNCTION
-    uint8_t face_image_side(const uint32_t i_face) const {
-        const int32_t k = image_rows(i_face);
-        return k < 0 ? 0 : image_sides(k);
-    }
+    uint8_t face_image_side(const uint32_t i_face) const { return image_sides(image_rows(i_face)); }
     /** @brief 2D: whether the image face of i_face runs opposite to it. */
     KOKKOS_INLINE_FUNCTION
-    uint8_t face_image_flip(const uint32_t i_face) const {
-        const int32_t k = image_rows(i_face);
-        return k < 0 ? 0 : image_flips(k);
-    }
+    uint8_t face_image_flip(const uint32_t i_face) const { return image_flips(image_rows(i_face)); }
     /** @brief 3D: the quadrature point of the image face of i_face matching its point q. */
     KOKKOS_INLINE_FUNCTION
-    uint8_t face_image_quad(const uint32_t i_face, const uint8_t q) const {
-        const int32_t k = image_rows(i_face);
-        return k < 0 ? q : image_quads(k, q);
-    }
+    uint8_t face_image_quad(const uint32_t i_face, const uint8_t q) const { return image_quads(image_rows(i_face), q); }
     /** @brief Component i of the offset moving the image face of i_face onto it (zero without one). */
     KOKKOS_INLINE_FUNCTION
     rtype face_image_offset(const uint32_t i_face, const uint8_t i) const {
