@@ -52,7 +52,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
 - Command-line tools ([guide](docs/guide/cli.md)):
-  - `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file
+  - `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, an annotated image and a ParaView file of the domain, boundaries and regions (`--view`)
   - `mallard ctl` to steer a running job
   - `mallard diff` between two solutions
   - `mallard info` on any output file

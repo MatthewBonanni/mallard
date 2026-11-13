@@ -22,14 +22,18 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "case_view.h"
+#include "check.h"
 #include "comm.h"
 #include "commands.h"
+#include "input.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
 #include "mesh_quality.h"
 #include "output_reader.h"
 #include "provenance.h"
+#include "region_input.h"
 #include "run_page.h"
 #include "snapshot_block.h"
 #include "diagnostic_code.h"
@@ -664,16 +668,26 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         }
         std::cout.rdbuf(out);
     }
+    std::vector<std::string> view;
+    if (const std::string dir = args.value_or("--view", ""); !dir.empty()) {
+        if (!mesh->high_order_faces.empty()) mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_input_string("")));
+        view = case_view::write_view(dir, mesh_view(*mesh, region::MeshRegions(*mesh)).blocks,
+                                     std::filesystem::path(path).filename().string());
+    }
     if (args.value_or("--format", "text") == "json") {
         std::string out = output::to_json(c);
         out.pop_back();
+        std::string files;
+        for (const std::string & f : view) files += (files.empty() ? "" : ",") + json::quote(f);
         std::cout << out << ",\"quality\":" << quality_json(summary)
-                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written)) << "}\n";
+                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written))
+                  << ",\"case_view\":[" << files << "]}\n";
         return 0;
     }
     print_contents(c);
     print_quality_table(summary);
     if (!written.empty()) item("Mesh fields", written);
+    for (size_t k = 0; k < view.size(); k++) item(k == 0 ? "Case view" : "Case view image", view[k]);
     return 0;
 }
 
@@ -690,8 +704,10 @@ int info_main(const cli::Args & args) {
     try {
         std::error_code error;
         const bool mesh_file = output::is_mesh_file(path);
-        if (!mesh_file && (args.has("--mesh-fields") || args.has("--quality"))) {
-            return cli::usage_error(*cli::command("info"), "--mesh-fields takes a mesh file, not " + path);
+        for (const char * option : {"--mesh-fields", "--quality", "--view"}) {
+            if (!mesh_file && args.has(option)) {
+                return cli::usage_error(*cli::command("info"), std::string(option) + " takes a mesh file, not " + path);
+            }
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);

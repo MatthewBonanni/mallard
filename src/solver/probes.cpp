@@ -2472,6 +2472,47 @@ std::vector<OutputSummary> Probes::summary() const {
     return items;
 }
 
+std::vector<case_view::Block> Probes::view_blocks() const {
+    std::vector<case_view::Block> blocks;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.from_region || p.snapshot) continue;
+        const probe::Geometry & g = p.geometry;
+        case_view::Block b;
+        b.name = "probes[name = \"" + p.name + "\"]";
+        b.kind = case_view::Kind::PROBE;
+        b.label = b.name + ": " + g.type + ", " + logging::count(g.nodes.size()) +
+                  (g.nodes.size() == 1 ? " point" : " points");
+        if (comm::is_root()) {
+            auto at = [](const probe::Point & q) {
+                std::array<double, 3> x = {0.0, 0.0, 0.0};
+                for (size_t i = 0; i < N_DIM; i++) x[i] = q[i];
+                return x;
+            };
+            const std::vector<probe::Point> & corners = g.vertices.empty() ? g.nodes : g.vertices;
+            if (g.polygon_offsets.size() > 1) {
+                for (size_t k = 0; k + 1 < g.polygon_offsets.size(); k++) {
+                    std::vector<std::array<double, 3>> v;
+                    for (uint64_t j = g.polygon_offsets[k]; j < g.polygon_offsets[k + 1]; j++) {
+                        v.push_back(at(corners[g.polygon_vertices[j]]));
+                    }
+                    b.add_cell(v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+                }
+            } else if (!g.polylines.empty()) {
+                for (const auto & line : g.polylines) {
+                    for (size_t k = 0; k + 1 < line.size(); k++) {
+                        b.add_cell(case_view::LINE, {at(g.nodes[line[k]]), at(g.nodes[line[k + 1]])});
+                    }
+                }
+            } else {
+                for (const probe::Point & q : g.nodes) b.add_cell(case_view::VERTEX, {at(q)});
+            }
+        }
+        blocks.push_back(std::move(b));
+    }
+    return blocks;
+}
+
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {
     if (!comm::is_root() || !output_files_enabled()) return;
     for (auto & p : probes) {

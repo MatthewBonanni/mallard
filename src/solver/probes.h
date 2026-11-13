@@ -32,6 +32,7 @@
 #include "mesh.h"
 #include "physics.h"
 #include "boundary.h"
+#include "case_view.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
 #include "common_io.h"
@@ -244,6 +245,11 @@ class Probes {
 
         /** @brief The outputs as the setup banner lists them, one per probe. */
         std::vector<OutputSummary> summary() const;
+        /**
+         * @brief The case view's blocks of the probes on geometries of their own (not regions, which the
+         *        view has already): their points, polylines or polygons, on rank 0 (empty elsewhere).
+         */
+        std::vector<case_view::Block> view_blocks() const;
         std::vector<std::string> files() const;
         /**
          * @brief Rank 0 adds the run block of a run starting at step to the files written so

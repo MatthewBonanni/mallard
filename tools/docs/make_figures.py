@@ -16,6 +16,7 @@ Each module's figures are drawn by one call below, in alphabetical order.
 import argparse
 import sys
 
+import case_view
 import domains
 import effective_resolution
 import geometry
@@ -53,6 +54,7 @@ def main():
     theory.figures()
     time_integrators.figures()
     if args.mallard:
+        case_view.figures(args.mallard, args.mallard3d)
         mesh_fields.figures(args.mallard, args.mallard3d)
         sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
         probes.main()
