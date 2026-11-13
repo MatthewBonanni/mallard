@@ -190,6 +190,7 @@ struct FieldResult {
     std::string name, units, location;
     uint32_t components = 1;
     std::string problem;  ///< why it is not compared (units or components differ), else empty
+    std::string value_a, value_b;  ///< what the values are (snapshot block), empty where unrecorded
     Stats stats;
     double tol = 0.0;
     Status result = Status::same;
@@ -574,6 +575,19 @@ RestartResult compare_restart(const Side & a, const Side & b, const Tolerance & 
     return r;
 }
 
+/** @brief What a field's values are at the snapshot compared (cell_average, ...), empty where unrecorded. */
+std::string value_kind(const Side & s, const std::string & name) {
+    const output::Snapshot & snapshot = s.c.snapshots[s.snapshot];
+    if (!snapshot.has_block) return "";
+    const snapshot_block::Field * f = snapshot.block.field(name);
+    return f ? f->value : "";
+}
+
+/** @brief Whether A and B record different kinds of values of a field (a cell average against a point value). */
+bool values_differ(const FieldResult & f) {
+    return !f.value_a.empty() && !f.value_b.empty() && f.value_a != f.value_b;
+}
+
 /** @brief Which snapshot of each file to compare: by --step, --time or --snapshot, else the last. */
 struct Selection {
     std::string option = "--snapshot", value = "last";
@@ -670,6 +684,8 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         f.location = fa.location;
         f.components = fa.components;
         f.tol = r.tolerance.of(name);
+        f.value_a = value_kind(a, name);
+        f.value_b = value_kind(b, name);
         if (!fa.units.empty() && !fb.units.empty() && fa.units != fb.units) {
             f.problem = "units differ: " + fa.units + " in A, " + fb.units + " in B";
         } else if (fa.components != fb.components) {
@@ -741,6 +757,7 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         }
         f.stats = compare(va, vb, f.components);
         f.result = status(f.stats, f.tol);
+        if (values_differ(f)) f.result = worst(f.result, Status::within);
         if (f.stats.d.linf > 0.0) {
             const size_t i = f.stats.at * f.components;
             f.a_at.assign(va.begin() + static_cast<std::ptrdiff_t>(i), va.begin() + static_cast<std::ptrdiff_t>(i + f.components));
@@ -803,7 +820,15 @@ std::string result_line(const Comparison & r) {
         case Status::same:
             what = r.restart ? "identical, the same state bit for bit" : "identical, every value compared bit for bit";
             break;
-        case Status::within: what = "within tolerance, differences but none beyond it"; break;
+        case Status::within: {
+            what = "within tolerance, differences but none beyond it";
+            std::vector<std::string> kinds;
+            for (const FieldResult & f : r.fields) {
+                if (values_differ(f)) kinds.push_back(f.name);
+            }
+            if (!kinds.empty()) what += "; different kinds of values of " + list_text(kinds);
+            break;
+        }
         case Status::beyond: {
             std::vector<std::string> beyond;
             for (const FieldResult & f : r.fields) {
@@ -881,6 +906,18 @@ void fields_section(report::Text & text, const Comparison & r) {
     text.table({"field", {"units", Kind::UNITS}, "differing " + entries + "s", {"L1", Kind::VALUE},
                 {"L2", Kind::VALUE}, {"Linf", Kind::VALUE}},
                rows);
+
+    std::vector<report::Row> kinds;
+    for (const FieldResult & f : r.fields) {
+        if (values_differ(f)) kinds.push_back({report::Status::WARNING, {f.name, f.value_a, f.value_b}});
+    }
+    if (!kinds.empty()) {
+        text.section("Value kinds", report::Status::WARNING);
+        text.note("A and B hold different kinds of values of these fields, as their snapshot metadata records: their "
+                  "difference includes that of a cell average and a point value, which at high order is of the "
+                  "scheme's truncation error.");
+        text.table({"field", "A", "B"}, kinds);
+    }
 
     text.section("Relative differences", s);
     text.note("A norm of B - A over the same norm of A; a field passes if its Linf is at most its tolerance.");
@@ -1063,6 +1100,8 @@ std::string comparison_json(const Comparison & r, const Side & a, const Side & b
         e.add("name", f.name).add("units", f.units).add("components", f.components).add("location", f.location);
         e.add("status", std::string(status_name(f.result))).add("tolerance", f.tol);
         e.raw("problem", f.problem.empty() ? "null" : json::quote(f.problem));
+        e.raw("value_a", f.value_a.empty() ? "null" : json::quote(f.value_a));
+        e.raw("value_b", f.value_b.empty() ? "null" : json::quote(f.value_b));
         if (f.stats.d.linf > 0.0) {
             std::string x = "null";
             if (f.has_x) x = numbers_json(std::vector<double>(f.x.begin(), f.x.begin() + N_DIM));

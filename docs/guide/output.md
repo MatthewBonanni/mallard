@@ -710,7 +710,7 @@ units by definition, for Mallard to read back.
 
 | File | Where the units are |
 |---|---|
-| VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres) |
+| VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres); `cell_methods` for [cell averages and point values](#cell-averages-and-point-values) |
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
 | CSV (forces, integrals, probes) | A line `# units: ...` after the header, one entry per column |
@@ -843,7 +843,8 @@ The block's fields:
 | `reason` | `interval` (its `interval` or `time_interval`), `start` (the initial state), `end` (the run's end), `stop` (a stop request or signal), `checkpoint` (a [run control](running.md) request), `divergence` (the last valid state, written as the run diverged), `trigger` (a [trigger](running.md#triggers)'s `write`) |
 | `format`, `format_version`, `solver_precision` | The file's format and its [version](#formats-and-compatibility); the precision the solver ran in (`double`, `single`) |
 | `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
-| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`) |
+| `reconstruction` | Snapshots with point values: how they were evaluated, `method` (`TENO`, `linear_least_squares`), its design `order`, and `fallback`, what replaces it in order where it cannot be used ([below](#cell-averages-and-point-values)); absent otherwise |
+| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)) |
 | `units` | The units of the block's own numbers (`time`: `s`) |
 
 Files written before 0.10 have no snapshot block. Readers then take step and
@@ -853,6 +854,42 @@ index, from 0; their run is that of the file's run block, and their reason
 and stored precision are unknown. In Python, `mallard.open(path).snapshots[k].block`
 is a snapshot's block as a dict (`None` for older files), and
 `mallard info FILE` prints the last one under **This snapshot**.
+
+### Cell averages and point values
+
+A finite-volume solution is a set of cell averages: a cell's `RHO` is the
+mean density over the cell, not the density at its centroid, and above
+second order the two differ by the scheme's truncation error. Every snapshot
+says which of three kinds of value each field holds, as `value` in its
+[snapshot block](#snapshot-metadata):
+
+| `value` | What it is | Fields |
+|---|---|---|
+| `cell_average` | The average of the quantity over the cell | The solver's unknowns `RHO`, `RHOU`, `RHOE`, `RHOY_<s>` (restart files hold only these), their `MEAN_` and `PHASE_` averages, `REGION_FRACTION` |
+| `cell_state` | Computed pointwise from the cell's averaged state: at high order neither the cell average nor the centroid value of that quantity (the pressure of the mean state is not the mean pressure) | Every other cell field: `P`, `T`, `U`, `MACH`, gradient fields such as `VORTICITY`, `COV_`; probes and boundary samples with `sampling = "cell"` other than the unknowns; mass fractions in every mode |
+| `point_value` | The reconstruction evaluated at the sample | [Probes](probes.md) with `sampling = "point"` and [snapshots of regions](#snapshots-of-regions) of lower dimension, except mass fractions and the cell fields they copy |
+
+Point values are a snapshot's `reconstruction`: with TENO its polynomials
+at the scheme's `order`, falling back to linear least squares in troubled
+cells and to the cell average outside the domain
+(`{"method": "TENO", "order": 5, "fallback": ["linear_least_squares", "cell_average"]}`);
+with MUSCL or first order, linear least squares (order 2). The same
+distinction is in the format's own metadata where it has a slot: the
+[CF](https://cfconventions.org/) attribute `cell_methods` of each VTKHDF and
+HDF5 dataset and an `<Information Name="cell_methods">` of each XDMF
+attribute, `area: mean` (3D: `volume: mean`) for a cell average and
+`area: point` (`volume: point`) for a point value, and none for a
+`cell_state`, which no CF method describes.
+
+Compare like with like. An error norm against an exact solution, or a
+convergence study, of cell averages takes the exact solution's cell averages
+(or `RHO` against `RHO`); a point value is compared with the exact value at
+the point. Mixing the two hides an error of the scheme's order at high order.
+`mallard diff` warns when A and B hold different kinds of values of a field
+(a **Value kinds** table, `value_a` and `value_b` per field in its JSON),
+`mallard info FILE` lists each field's `value` and the reconstruction under
+**This snapshot**, and `value_kinds(path)` of `tools/mallard/vtu.py` returns
+them. Files written before 0.10 record none.
 
 ### Formats and compatibility
 

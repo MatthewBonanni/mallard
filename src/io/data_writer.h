@@ -332,6 +332,8 @@ class DataWriter {
 
         /** @brief The snapshot block of the snapshot at (step, t), written now. */
         Block snapshot_of(uint64_t step, rtype t, bool force) const;
+        /** @brief The CF cell_methods of a field of the snapshots (empty without snapshot blocks or a fitting method). */
+        std::string cell_methods(const std::string & name) const;
 
         /** @brief The values of the first n_cells cells (by_id: of the owned cells by global id), or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;

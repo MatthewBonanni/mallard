@@ -12,6 +12,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "common_typedef.h"
 #include "json.h"
 #include "provenance.h"
 
@@ -78,10 +79,20 @@ std::string Block::json() const {
                                 .add("samples", samples)
                                 .str());
     }
+    if (!reconstruction.method.empty()) {
+        std::string fallback = "[";
+        for (const std::string & m : reconstruction.fallback) fallback += (fallback.size() > 1 ? ",\"" : "\"") + m + "\"";
+        b.raw("reconstruction", json::Object()
+                                    .add("method", reconstruction.method)
+                                    .add("order", reconstruction.order)
+                                    .raw("fallback", fallback + "]")
+                                    .str());
+    }
     std::string list = "[";
     for (const Field & f : fields) {
         json::Object o;
         o.add("name", f.name).add("units", f.units).add("long_name", f.long_name).add("stored", f.stored);
+        if (!f.value.empty()) o.add("value", f.value);
         if (f.relative_error > 0.0) o.add("relative_error", f.relative_error);
         list += (list.size() > 1 ? "," : "") + o.str();
     }
@@ -128,9 +139,18 @@ Block parse(std::string_view text) {
         const double n = number(*s, "samples");
         b.samples = std::isfinite(n) ? static_cast<int64_t>(n) : -1;
     }
+    if (const json::Value * r = v.find("reconstruction"); r && r->type == json::Value::Type::OBJECT) {
+        b.reconstruction.method = string(*r, "method");
+        const double order = number(*r, "order");
+        b.reconstruction.order = std::isfinite(order) ? static_cast<int>(order) : 0;
+        if (const json::Value * fallback = r->find("fallback")) {
+            for (const json::Value & m : fallback->array) b.reconstruction.fallback.push_back(m.string);
+        }
+    }
     if (const json::Value * fields = v.find("fields")) {
         for (const json::Value & f : fields->array) {
-            Field field{string(f, "name"), string(f, "units"), string(f, "long_name"), string(f, "stored"), 0.0};
+            Field field{string(f, "name"), string(f, "units"), string(f, "long_name"), string(f, "stored"), 0.0,
+                        string(f, "value")};
             const double e = number(f, "relative_error");
             if (std::isfinite(e)) field.relative_error = e;
             b.fields.push_back(field);
@@ -148,6 +168,26 @@ Reason::~Reason() { forced_reason() = previous; }
 std::string current_reason(bool forced) {
     if (!forced) return reason::INTERVAL;
     return forced_reason().empty() ? reason::END : forced_reason();
+}
+
+std::string value_kind(const std::string & name) {
+    std::string base = name;
+    if (base.starts_with("MEAN_")) {
+        base = base.substr(5);
+    } else if (base.starts_with("PHASE_")) {
+        const size_t end = base.find('_', 6);
+        base = end == std::string::npos ? "" : base.substr(end + 1);
+    }
+    const bool conserved = base == "RHO" || base == "RHOE" || base == "RHOU" || base == "RHOU_X" ||
+                           base == "RHOU_Y" || base == "RHOU_Z" || (base.starts_with("RHOY_") && base.size() > 5);
+    return conserved || name == "REGION_FRACTION" ? value::CELL_AVERAGE : value::CELL_STATE;
+}
+
+std::string cell_methods(const Field & field) {
+    const char * cell = N_DIM == 2 ? "area" : "volume";
+    if (field.value == value::CELL_AVERAGE) return std::string(cell) + ": mean";
+    if (field.value == value::POINT_VALUE) return std::string(cell) + ": point";
+    return "";
 }
 
 bool is_averaged(const std::string & name) {
@@ -181,9 +221,10 @@ Block make(uint64_t step, double t, const std::string & reason, const std::strin
     b.solver_precision = "single";
 #endif
     std::set<std::string> names;
-    for (const Field & f : fields) {
+    for (Field & f : fields) {
         if (!names.insert(f.name).second) throw std::logic_error("snapshot_block: the field " + f.name + " is listed twice");
         b.averaged = b.averaged || is_averaged(f.name);
+        if (f.value.empty()) f.value = value_kind(f.name);
     }
     if (b.averaged) {
         b.average_start = averages().start;

@@ -193,7 +193,9 @@ Pitfalls:
 
 - Point values fall back to the linear least-squares reconstruction in cells
   the TENO indicator flags troubled (shocks, and coarse meshes of smooth
-  fields), and to the cell average outside the domain.
+  fields), and to the cell average outside the domain. VTP and VTKHDF
+  probe files record the method and each variable's kind of value
+  ([Cell averages and point values](output.md#cell-averages-and-point-values)).
 - Mass fractions are cell averages in both modes; `T` and `H` follow the
   reconstructed `p / rho` at the cell's composition.
 - CSV is for small probes: it repeats the coordinates every output. Use `vtkhdf`, `hdf5`

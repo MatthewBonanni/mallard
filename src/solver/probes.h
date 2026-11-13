@@ -37,6 +37,7 @@
 #include "probe_spectra.h"
 #include "common_io.h"
 #include "probe_surface.h"
+#include "snapshot_block.h"
 #include "data.h"
 #include "statistics.h"
 #include "wall_exchange.h"
@@ -324,6 +325,8 @@ class Probes {
             bool write_samples = true;
             std::vector<Reduction> reductions;
             std::vector<std::string> variables;  // written
+            std::vector<std::string> value_kinds; // snapshot_block::value of each written variable
+            snapshot_block::Reconstruction reconstruction;  // of the point values, set at each write
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
@@ -378,6 +381,13 @@ class Probes {
             /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
             void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
+            /** @brief The snapshot block entry of written variable v (no units). */
+            snapshot_block::Field field_of(size_t v) const {
+                snapshot_block::Field f;
+                f.name = variables[v];
+                f.value = value_kinds[v];
+                return f;
+            }
             /** @brief The snapshot block of the samples at (step, t), written now for reason. */
             snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
