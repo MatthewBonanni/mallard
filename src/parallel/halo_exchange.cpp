@@ -87,10 +87,10 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
         ncclComm_t c = comm::nccl();
         ncclGroupStart();
         for (size_t n = 0; n < ranks.size(); n++) {
-            ncclRecv(recv_buffer.data() + recv_offsets[n] * stride, (recv_offsets[n + 1] - recv_offsets[n]) * stride, type,
-                     ranks[n], c, stream);
-            ncclSend(s_buf.data() + send_offsets[n] * stride, (send_offsets[n + 1] - send_offsets[n]) * stride, type,
-                     ranks[n], c, stream);
+            ncclRecv(recv_buffer.data() + size_t(recv_offsets[n]) * stride,
+                     size_t(recv_offsets[n + 1] - recv_offsets[n]) * stride, type, ranks[n], c, stream);
+            ncclSend(s_buf.data() + size_t(send_offsets[n]) * stride, size_t(send_offsets[n + 1] - send_offsets[n]) * stride,
+                     type, ranks[n], c, stream);
         }
         if (ncclGroupEnd() != ncclSuccess) throw std::runtime_error("HaloExchange: NCCL exchange failed");
         return;
@@ -106,14 +106,14 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
         recv_ptr = h_recv_buffer.data();
     }
     const MPI_Datatype type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
-    requests.assign(2 * ranks.size(), MPI_REQUEST_NULL);
+    requests.clear();
     for (size_t n = 0; n < ranks.size(); n++) {
-        MPI_Irecv(recv_ptr + recv_offsets[n] * stride, static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * stride),
-                  type, ranks[n], 0, comm::world(), &requests[n]);
+        comm::irecv(recv_ptr + size_t(recv_offsets[n]) * stride, uint64_t(recv_offsets[n + 1] - recv_offsets[n]) * stride,
+                    type, ranks[n], 0, comm::world(), requests);
     }
     for (size_t n = 0; n < ranks.size(); n++) {
-        MPI_Isend(send_ptr + send_offsets[n] * stride, static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * stride),
-                  type, ranks[n], 0, comm::world(), &requests[ranks.size() + n]);
+        comm::isend(send_ptr + size_t(send_offsets[n]) * stride, uint64_t(send_offsets[n + 1] - send_offsets[n]) * stride,
+                    type, ranks[n], 0, comm::world(), requests);
     }
 #else
     (void)U;
