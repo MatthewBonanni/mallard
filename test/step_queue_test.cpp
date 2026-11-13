@@ -581,16 +581,34 @@ TEST(StepQueueTest, RejectedStepsAreRetriedAsTheHostRetriesThem) {
     EXPECT_EQ(o.t, 0.3_r);
 }
 
-TEST(StepQueueTest, ControlFilesActAtTheirSteps) {
-    // A STOP file found at step 5 stops the run after step 6, with a restart
+TEST(StepQueueTest, ControlFilesStopAsRequests) {
+    // A STOP file found at step 5 stops the run after step 6 when the host takes every step; with steps queued
+    // ahead, at the first step that reads the request, without a stop of the queue at step 5. Either way with a
+    // restart, and the state the host's steps reach at that step
     Case c;
     c.run = "n_steps = 40\ncfl = 0.5\ncontrol_file_interval = 5\ncontrol_socket = false\n";
     c.extra = RESTARTS;
     c.stop_file = true;
     c.distributed = comm::size() > 1;
-    const Outcome o = expect_queue_invariant("control_files", c);
-    EXPECT_EQ(o.step, 6u);
-    EXPECT_TRUE(o.files.count("restart_000006.restart"));
+    for (const int depth : {0, 1, 3}) {
+        const Outcome o = run_case("control_files", c, depth);
+        if (depth == 0) {
+            EXPECT_EQ(o.step, 6u);
+        }
+        EXPECT_GE(o.step, 6u) << depth;
+        EXPECT_LE(o.step, 6u + 3) << depth;
+        if (comm::is_root()) {
+            char name[64];
+            std::snprintf(name, sizeof name, "restart_%06llu.restart", static_cast<unsigned long long>(o.step));
+            EXPECT_TRUE(o.files.count(name)) << depth << ": " << name;
+        }
+        Case host = c;
+        host.stop_file = false;
+        host.run = "n_steps = " + std::to_string(o.step) + "\ncfl = 0.5\ncontrol_socket = false\n";
+        const Outcome reached = run_case("control_files_host", host, 0);
+        EXPECT_EQ(o.t, reached.t) << depth;
+        EXPECT_TRUE(o.U == reached.U) << depth;
+    }
 }
 
 TEST(StepQueueTest, TriggersActAtTheirSteps) {

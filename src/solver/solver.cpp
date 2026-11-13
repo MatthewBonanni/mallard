@@ -2254,6 +2254,7 @@ int Solver::run_loop() {
     publishing = control_enabled && control_socket && comm::is_root() && server.start();
     control_stop = {};
     trigger_stop = {};
+    if (control_file_interval > 0) control_files_polled = step / control_file_interval;
     wall_time_reached = false;
     checkpoint_requested = false;
 

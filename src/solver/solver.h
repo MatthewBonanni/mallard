@@ -886,6 +886,7 @@ class Solver {
         bool control_enabled = false;
         bool control_socket = true;              // [run] control_socket
         uint64_t control_file_interval = 0;      // [run] control_file_interval
+        uint64_t control_files_polled = 0;       // step / control_file_interval at the last look
         int control_contributed = 0;             // this rank's requests in the last time-step reduction
         int control_reduced = 0;                 // every rank's
         bool checkpoint_requested = false;
