@@ -1,6 +1,6 @@
 # Design: structured blocks of hexahedra
 
-Status: proposed (#440, Stage 1), for review before implementation. Stages 2
+Status: accepted (#440, Stage 1; decisions below, recorded on #440), in implementation. Stages 2
 and 3 (octree and Voronoi bulk; a dimension-by-dimension scheme in blocks) are
 #957.
 
@@ -65,7 +65,7 @@ counts fully only if its block wraps its index across the periodic faces
 (`explosion_3d`, `sedov_3d`, `detonation_3d`, `shock_bubble_3d`) are uniform
 boxes like `teno5_3d`.
 
-Partitions cut blocks. With the layout proposed [below](#data-layout), the
+Partitions cut blocks. With the layout chosen [below](#data-layout), the
 cells within $R$ of a partition face take the unstructured path, as they would at
 a wall. On the cuboid parts of the multi-jagged partitioner, TENO5 on `teno5_3d`
 keeps 84.2, 80.5, 77.0 and 70.0% of the cells on 2, 4, 8 and 16 ranks (88.0% on
@@ -179,7 +179,7 @@ takes 1-3 s per million cells; it is part of the mesh setup, not of the step.
 
 ## Data layout
 
-**Proposed: blocks as a cell numbering.** The block path adds no state arrays
+**Blocks as a cell numbering.** The block path adds no state arrays
 and no input keys: it is automatic. With `[mesh] cell_order = "auto"` (the
 default), a rank that has blocks numbers each block's owned cells
 lexicographically ($i$ fastest), then its other owned cells as `auto` decides
@@ -199,16 +199,15 @@ faces rely on.
   the block kernels write face states through `faces_of_cell`, as the
   prototype does. Implicit face indices would need block faces numbered by
   direction and one orientation per direction, which holds for generated meshes
-  but not for files; not proposed for Stage 1.
+  but not for files; not in Stage 1.
 
-**Alternative: padded blocks with ghost layers.** Each block's states in their
+**Not chosen: padded blocks with ghost layers.** Each block's states in their
 own array with $R$ layers of ghost cells, filled every stage: halo cells by
 the exchange's unpack (into the ghost slots), other ghost cells by a copy from
 the cells they stand for. Every lattice cell, partition shells included, takes
 the block path (88% instead of 70% for TENO5 on 16 ranks of `teno5_3d`), at the
 cost of a second copy of the block cells' states, a copy kernel per stage, and
-an exchange plan that writes into two layouts. Deferred until the partition
-shells are shown to matter on the GPU.
+an exchange plan that writes into two layouts.
 
 **Tables.** One table store holds a table set per stencil shape: the central
 and sector pseudo-inverses in a canonical entry order (by lattice offset), the
@@ -257,8 +256,8 @@ shape of the interior with mirror images in place of the cells beyond the plane
 (measured above). The block kernel can serve it with the interior shape's table
 if it evaluates each image's ghost state as `entry_W` does (the boundary
 condition applied to the reflected cell's state at the nearest face of the
-plane). This lifts `teno5_3d` from 88% to 99.5% of the cells. Proposed as a
-second step of Stage 1, after the interior.
+plane). This lifts `teno5_3d` from 88% to 99.5% of the cells. Part of Stage 1,
+after the interior.
 
 ## MPI, NCCL and the step graph
 
@@ -276,7 +275,7 @@ second step of Stage 1, after the interior.
 
 ## Results contract
 
-Following #429's proposed split:
+Following #429's split, as decided for this change:
 
 - **Independent of rank count, thread count and restarts (kept).** A cell's
   result must not depend on which path reconstructed it, since that depends on
@@ -363,16 +362,31 @@ path):
 - Performance: `perf_suite.py` on an A100 (`teno5_3d`, `air_3d`, a channel
   case), interleaved best of 3, and device memory per cell from `mallard check`.
 
-## Open questions
+## Decisions
 
-1. **Layout.** Blocks as a numbering, with partition shells on the unstructured
-   path (proposed), or padded blocks with ghost layers?
-2. **Results.** Shared tables for every cell of a shape and bitwise
-   path-independence through explicit rounding, with a one-time change of the
-   last bits against `main` (proposed)?
-3. **Scope of a block.** Identical cells only (one table set per block), or also
-   stretched and graded structured blocks (tables per line, plane or cell, index
-   arithmetic for all)? The channel cases need the second.
-4. **Mirror images** at straight walls in Stage 1, after the interior?
-5. **#431.** The table store, its canonical entry order and the cells' index
-   are #431's; the block path builds on them. Does #431 land first?
+Decided by the maintainer on this note (#967), recorded on #440:
+
+1. **Layout.** Blocks are a cell numbering. Cells near partition faces stay on
+   the unstructured path; there are no new state arrays and owned cells stay
+   first.
+2. **Results.** Every cell of a stencil shape reads one shared table set on
+   either path, through one kernel body with explicit `fma()`, with the tables
+   agreed over the ranks at setup. Results stay bitwise independent of the rank
+   count; the one-time change of the last bits against `main` is accepted.
+3. **Scope.** Stretched and graded structured blocks are in Stage 1, with
+   tables per plane, column or cell as the mesh requires.
+4. **Mirror images** at straight walls are in Stage 1.
+5. **Order.** The shared table store (canonical entry order, a table set per
+   stencil shape, the cells' index) is #431's and lands first. #440 adds the
+   block numbering, the $(i, j, k)$ to shape map and the kernels.
+
+## Implementation
+
+One pull request per step, as a stack on #431:
+
+1. Detection and the block numbering.
+2. The $(i, j, k)$ to stencil shape map, on #431's table store.
+3. The TENO and MUSCL block kernels.
+4. Mirror images at straight walls.
+5. `mallard check` reporting.
+6. The documentation of [Documentation](#documentation).
