@@ -1,20 +1,25 @@
 # Distribution of a release: the container images (CPU for amd64 and arm64, CUDA) and
 # the Spack package, each smoke-tested by running examples and comparing them with
-# reference solutions (docker/smoke/run.sh). A version tag (v*) pushes the images to
-# ghcr.io/matthewbonanni/mallard:
+# reference solutions (docker/smoke/run.sh). A release is dispatched on main once the
+# release PR has landed, and creates the tag v<version> only after every image and the
+# Spack package pass, so a broken build leaves no tag behind:
+#   gh workflow run release.yml --ref main -f version=X.Y.Z
+# It pushes the images to ghcr.io/matthewbonanni/mallard:
 #   <version>, latest            CPU (OpenMP + MPI), amd64 and arm64
 #   <version>-cuda, cuda         NVIDIA GPUs (CUDA + OpenMP + MPI), sm_80, 86, 89 and 90
-# To test a branch, run it by hand; it pushes nothing unless asked:
+# To test a branch, run it without a version; it pushes nothing unless asked:
 #   gh workflow run release.yml --ref <branch>
 name: Release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
+      version:
+        description: Release this version (X.Y.Z, on main) and tag it v<version> once everything passes
+        type: string
+        default: ''
       push:
-        description: Push the images, tagged with the branch name
+        description: Without a version, push the images, tagged with the branch name
         type: boolean
         default: false
 
@@ -24,7 +29,8 @@ permissions:
 
 env:
   IMAGE: ghcr.io/matthewbonanni/mallard
-  PUSH: ${{ github.ref_type == 'tag' || inputs.push }}
+  RELEASE: ${{ inputs.version != '' }}
+  PUSH: ${{ inputs.version != '' || inputs.push }}
 
 jobs:
   meta:
@@ -32,11 +38,22 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
+        if: env.RELEASE == 'true'
       - id: v
         env:
           REF: ${{ github.ref_name }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then version="${REF#v}"; else version="$(tr -c 'a-zA-Z0-9.\n-' - <<< "$REF")"; fi
+          if [ "$RELEASE" = true ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Release from main, not $REF"; exit 1; }
+            grep -q "^project(Mallard VERSION $VERSION " CMakeLists.txt || { echo "::error::CMakeLists.txt is not at version $VERSION"; exit 1; }
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" > /dev/null 2>&1; then echo "::error::Tag v$VERSION exists"; exit 1; fi
+            version="$VERSION"
+          else
+            version="$(tr -c 'a-zA-Z0-9.\n-' - <<< "$REF")"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   cpu:
@@ -52,6 +69,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 src/external/kokkos src/external/toml11
+      # The images report git describe, which the tag created at the end gives
+      - name: Tag the checkout
+        if: env.RELEASE == 'true'
+        run: git tag "v${{ needs.meta.outputs.version }}"
       - name: Build
         run: docker build -f docker/Dockerfile -t mallard:test .
       - name: Smoke test
@@ -85,6 +106,9 @@ jobs:
           df -h /
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 src/external/kokkos src/external/toml11
+      - name: Tag the checkout
+        if: env.RELEASE == 'true'
+        run: git tag "v${{ needs.meta.outputs.version }}"
       - name: Build
         run: docker build -f docker/Dockerfile.cuda --build-arg JOBS=3 -t mallard:cuda .
       # No GPU here: the build checks the machine code for each architecture; this
@@ -112,10 +136,14 @@ jobs:
   # spack install of this checkout (CPU: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D) with
   # the package in spack/, then its standalone test and the smoke test
   spack:
+    needs: meta
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 src/external/toml11
+      - name: Tag the checkout
+        if: env.RELEASE == 'true'
+        run: git tag "v${{ needs.meta.outputs.version }}"
       - name: Install MPI and Python packages
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq
@@ -184,16 +212,18 @@ jobs:
           eval "$(spack -e "$RUNNER_TEMP/env" load --sh mallard)"
           docker/smoke/run.sh "$(spack -e "$RUNNER_TEMP/env" location -i mallard)"
 
-  # The version's tags, once every image and the Spack package pass
+  # The version's image tags, once every image and the Spack package pass, then the git tag
   publish:
     needs: [meta, cpu, cuda, spack]
-    if: github.ref_type == 'tag' || inputs.push
+    if: inputs.version != '' || inputs.push
     runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      packages: write
     steps:
-      - name: Tag
+      - name: Tag the images
         env:
           V: ${{ needs.meta.outputs.version }}
-          RELEASE: ${{ github.ref_type == 'tag' }}
         run: |
           docker login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
           tags=(-t "$IMAGE:$V")
@@ -201,3 +231,9 @@ jobs:
           docker buildx imagetools create "${tags[@]}" "$IMAGE:$V-cpu-amd64" "$IMAGE:$V-cpu-arm64"
           [ "$RELEASE" = true ] && docker buildx imagetools create -t "$IMAGE:cuda" "$IMAGE:$V-cuda"
           true
+      - name: Tag the release
+        if: env.RELEASE == 'true'
+        env:
+          V: ${{ needs.meta.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$V" -f sha="$GITHUB_SHA"
