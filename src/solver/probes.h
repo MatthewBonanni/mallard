@@ -475,10 +475,11 @@ class Probes {
         /**
          * @brief A filled region probe's measures: its own and of its part in
          *        the domain, with a warning and p.clipped where part of it is
-         *        outside. Collective.
+         *        outside. Collective. quadrature_volume: the part in the domain from a quadrature (rank 0), not f V.
          */
         static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
-                                    const std::vector<double> & f, const std::string & key);
+                                    const std::vector<double> & f, const std::string & key,
+                                    const double * quadrature_volume = nullptr);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);

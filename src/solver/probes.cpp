@@ -10,6 +10,7 @@
  */
 
 #include "probes.h"
+#include "probe_cells.h"
 #include "probe_fluxes.h"
 
 #include <algorithm>
@@ -274,14 +275,15 @@ struct PolyLayout {
 };
 
 /**
- * @brief Point sets as vertices, curves as polylines over the samples; polygons
+ * @brief Point sets (and grids in volumes) as vertices, curves as polylines over the samples; polygons
  *        (segments in 2D) over vertices each a sample (faces, cut planes), or
  *        over the samples (resampled surfaces).
  */
 PolyLayout poly_layout(const probe::Geometry & g) {
     PolyLayout l;
     const bool polygons = !g.polygon_offsets.empty();
-    l.cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : g.dim == 0 ? "Verts" : "Lines";
+    const bool vertices = g.dim == 0 || g.polylines.empty();
+    l.cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : vertices ? "Verts" : "Lines";
     l.cell_data = polygons && !g.vertices.empty();
     const std::vector<probe::Point> & points = l.cell_data ? g.vertices : g.nodes;
     l.xyz.assign(3 * points.size(), 0.0);
@@ -292,7 +294,7 @@ PolyLayout poly_layout(const probe::Geometry & g) {
     if (polygons) {
         l.connectivity.assign(g.polygon_vertices.begin(), g.polygon_vertices.end());
         l.offsets.assign(g.polygon_offsets.begin(), g.polygon_offsets.end());
-    } else if (g.dim == 0) {
+    } else if (vertices) {
         for (size_t p = 0; p < g.nodes.size(); p++) {
             l.connectivity.push_back(static_cast<int64_t>(p));
             l.offsets.push_back(static_cast<int64_t>(p + 1));
@@ -438,9 +440,10 @@ void write_pvd_file(const std::string & file, const Series & series) {
 } // namespace
 
 void Probes::region_measures(Probe & p, const Mesh & mesh, const region::Region & r, const std::vector<double> & f,
-                             const std::string & key) {
+                             const std::string & key, const double * quadrature_volume) {
     const region::Measures own = region::measures(r, mesh.axisymmetric);
-    const region::Measures in = region::measures_in_domain(mesh, r, f);
+    region::Measures in = region::measures_in_domain(mesh, r, f);
+    if (quadrature_volume) in.volume = *quadrature_volume;
     const auto [volume, surface] = measure_names(mesh.axisymmetric);
     auto object = [&](const region::Measures & m, const bool tolerance) {
         json::Object o;
@@ -797,6 +800,21 @@ std::string point_text(const probe::Point & x) {
 
 } // namespace
 
+namespace {
+
+/** @brief A curve sampled on its cells: its share outside the mesh, with a warning, as JSON ("" if none). */
+std::string clip_curves(const probe::Geometry & g, const double length, const std::string & key) {
+    double kept = 0.0;
+    for (const double w : g.node_weights) kept += w;
+    const double share = length > 0.0 ? 1.0 - kept / length : 0.0;
+    if (!(share > CLIPPED_SHARE)) return "";
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::real(100.0 * share) + "% of its length lies outside the mesh and is not sampled.");
+    return json::Object().add("length_fraction", share).str();
+}
+
+} // namespace
+
 std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const std::string & key, size_t line) {
     constexpr size_t SHOWN = 3;
     std::vector<uint8_t> keep, keep_quad(g.quad_points.size(), 1);
@@ -1068,6 +1086,7 @@ void Probes::Samples::in_cells(const Mesh & mesh, const probe::CellPoints & set,
     std::vector<uint32_t> h_inside;
     std::vector<rtype> h_offsets;
     for (size_t i = 0; i < set.cells.size(); i++) {
+        if (!set.averages.empty() && set.averages[i]) continue;
         h_inside.push_back(static_cast<uint32_t>(i));
         for (size_t d = 0; d < N_DIM; d++) {
             h_offsets.push_back(static_cast<rtype>(set.points[i][d] - static_cast<double>(mesh.h_cell_coords(set.cells[i], d))));
@@ -1539,8 +1558,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         p.copy = std::make_shared<region::Region>(region->copy(static_cast<uint32_t>(copy)));
         region = p.copy.get();
     }
-    // A surface region with n_points is resampled on a grid of samples, written like a curve's
-    p.resampled = region && region->dimension() == N_DIM - 1 && N_DIM == 3 && entry.contains("n_points");
+    // A surface region with n_points is resampled on a grid of samples, written like a curve's; a filled
+    // region with n_points writes samples at the nodes of a grid inside it besides its reductions
+    p.resampled = region && entry.contains("n_points") &&
+                  ((region->dimension() == N_DIM - 1 && N_DIM == 3) || region->dimension() == N_DIM);
     p.solution = region && region->solution();
     if (p.solution && region->dimension() < N_DIM) {
         for (const char * k : {"n_points", "average"}) {
@@ -1554,19 +1575,36 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                         .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
         }
     }
-    for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
-        // Surfaces and curves sample at their quadrature points: cell averages or point values there
+    for (const char * k : {"type", "boundary", "boundary_type", "format", "file", "samples"}) {
         const std::string name = k;
-        const bool allowed = name == "sampling" ? region && region->dimension() < N_DIM
-                                                : p.resampled && name != "type" && !name.starts_with("boundary");
+        const bool allowed = p.resampled && name != "type" && !name.starts_with("boundary");
         if (region && entry.contains(k) && !allowed) {
             throw InputError(Diagnostic{.key = key + "." + k,
                                         .line = line_of(entry, k),
-                                        .message = "applies to probes of points, curves and resampled surfaces "
-                                                   "(n_points), but a region probe writes only its reductions, "
-                                                   "to reductions_file",
-                                        .fix = "Remove " + name + ", or give the probe a type instead of a region",
+                                        .message = "applies to probes of points, curves and regions resampled on "
+                                                   "a grid (n_points), but this region probe writes only its "
+                                                   "reductions, to reductions_file",
+                                        .fix = "Remove " + name + ", give the region n_points, or give the probe a "
+                                               "type instead of a region",
                                         .docs = "docs/guide/probes.md#region-probes"});
+        }
+    }
+    if (region && region->dimension() == N_DIM && (region->moving() || region->solution())) {
+        for (const char * k : {"sampling", "n_points"}) {
+            if (!entry.contains(k) || (std::string(k) == "sampling" && entry.at(k).is_string() &&
+                                       entry.at(k).as_string() == "cell")) {
+                continue;
+            }
+            throw InputError(Diagnostic{.key = key + "." + k,
+                                        .line = line_of(entry, k),
+                                        .message = std::string(k == std::string("sampling") ? "= \"point\"" : "") +
+                                                   (region->moving() ? " is not supported for a moving region"
+                                                                     : " is not supported for a region defined by the "
+                                                                       "solution") +
+                                                   ", whose cells change at every write",
+                                        .fix = std::string("Remove ") + k + ", or give a fixed region",
+                                        .docs = region->moving() ? "docs/guide/probes.md#region-probes"
+                                                                 : "docs/guide/geometry.md#regions-defined-by-the-solution"});
         }
     }
     if (snapshot) {
@@ -1576,8 +1614,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     } else {
     // Keys that do not apply to a region probe are not read, so its resolved input does not set them
     const bool reductions_only = region && !p.resampled;
-    const bool sampled_region = !region || region->dimension() < N_DIM;
-    const std::string sampling = sampled_region ? find_value_or<std::string>(entry, "sampling", "cell") : "cell";
+    const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
     record_options(key + ".sampling", {"cell", "point"});
     if (sampling == "point") {
         p.sampling = Sampling::POINT;
@@ -1794,13 +1831,56 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             o.add(volume, own.volume).add(surface, own.surface).add("tolerance", own.tolerance);
             p.measures = json::Object().raw("region", std::isfinite(own.volume) ? o.str() : "null").raw("in_domain", "null").str();
         } else if (r.dimension() == N_DIM) {
-            // Filled regions weigh each cell by f V
-            std::vector<double> weights(mesh.n_owned(), 0.0);
             const std::vector<double> & f = copy >= 0 ? region::cell_fractions(mesh, r)
                                                       : regions.fractions(entry.at("region"), key + ".region");
-            for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
-            select_region(p, mesh, r, weights, n_evaluated);
-            region_measures(p, mesh, r, f, key + ".region");
+            if (p.sampling == Sampling::POINT) {
+                // The reconstruction integrated over each cell's part inside
+                const uint32_t degree = static_cast<uint32_t>(std::max(reconstruction.order - 1, 0));
+                probe::VolumeQuadrature q = probe::volume_quadrature(mesh, r, degree, mesh.n_global_cells > 0);
+                p.quadrature.in_cells(mesh, q.points, {}, n_evaluated);
+                p.geometry.dim = static_cast<uint8_t>(r.dimension());
+                p.geometry.revolved = mesh.axisymmetric;
+                p.geometry.type = "region " + r.summary();
+                p.geometry.quad_weights = std::move(q.weights);
+                double volume = 0.0;
+                for (const double w : p.geometry.quad_weights) volume += w;
+                region_measures(p, mesh, r, f, key + ".region", &volume);
+            } else {
+                // Filled regions weigh each cell by f V
+                std::vector<double> weights(mesh.n_owned(), 0.0);
+                for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
+                select_region(p, mesh, r, weights, n_evaluated);
+                region_measures(p, mesh, r, f, key + ".region");
+            }
+            if (p.resampled) {
+                const Input & n = entry.at("n_points");
+                std::array<uint32_t, N_DIM> counts{};
+                bool valid = n.is_array() && n.as_array().size() == N_DIM;
+                for (size_t d = 0; valid && d < N_DIM; d++) {
+                    valid = n.as_array()[d].is_integer() && n.as_array()[d].as_integer() >= 2;
+                    if (valid) counts[d] = static_cast<uint32_t>(n.as_array()[d].as_integer());
+                }
+                if (!valid) {
+                    throw InputError(Diagnostic{.key = key + ".n_points",
+                                                .line = line_of(entry, "n_points"),
+                                                .message = N_DIM == 3 ? "must be [n_x, n_y, n_z], each at least 2, "
+                                                                        "for a filled region's grid"
+                                                                      : "must be [n_x, n_y], each at least 2, for "
+                                                                        "a filled region's grid",
+                                                .fix = N_DIM == 3 ? "e.g. n_points = [32, 32, 16]" : "e.g. n_points = [64, 32]",
+                                                .docs = "docs/guide/probes.md#grids-in-regions"});
+                }
+                p.geometry.nodes = probe::volume_grid(mesh, r, counts, mesh.n_global_cells > 0);
+                if (p.geometry.nodes.empty()) {
+                    throw InputError(Diagnostic{.key = key + ".n_points",
+                                                .line = line_of(entry, "n_points"),
+                                                .message = "places no node of its grid inside both the region and "
+                                                           "the mesh",
+                                                .fix = "Give more points, or a region that overlaps the domain",
+                                                .docs = "docs/guide/probes.md#grids-in-regions"});
+                }
+                p.nodes.locate(mesh, p.geometry.nodes, n_evaluated);
+            }
         } else if (p.resampled) {
             const Input & n = entry.at("n_points");
             const int64_t nu = n.is_array() && n.as_array().size() == 2 ? n.as_array()[0].as_integer() : 0;
@@ -1917,8 +1997,27 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {unit_n}, static_cast<uint32_t>(h_codes.size()));
         p.geometry = std::move(set.geometry);
         if (p.nodes.n_global == 0) throw InputError(gkey + ": the plane misses the mesh.");
+    } else if (probe::Geometry g = probe::make_geometry(*where, gkey); !g.curves.empty()) {
+        // One sample per cell each curve crosses
+        probe::CurveCells set = probe::curve_cells(mesh, g, mesh.n_global_cells > 0);
+        const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
+        p.nodes.in_cells(mesh, set.nodes, {}, n_evaluated);
+        if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {}, n_evaluated);
+        if (N_DIM == 2) {
+            p.nodes.set_normals(set.node_normals);
+            if (!p.reductions.empty()) p.quadrature.set_normals(set.quad_normals);
+        }
+        p.geometry = std::move(set.geometry);
+        if (p.nodes.n_global == 0) {
+            throw InputError(Diagnostic{.key = gkey,
+                                        .line = line_of(*where),
+                                        .message = "crosses no cell of the mesh",
+                                        .fix = "Move or resize it so that it crosses the domain",
+                                        .docs = "docs/guide/probes.md#samples-outside-the-domain"});
+        }
+        p.clipped = clip_curves(p.geometry, set.length, gkey);
     } else {
-        p.geometry = probe::make_geometry(*where, gkey);
+        p.geometry = std::move(g);
         p.clipped = clip_to_mesh(p.geometry, mesh, gkey, line_of(*where));
         p.nodes.locate(mesh, p.geometry.nodes, static_cast<uint32_t>(h_codes.size()), p.geometry.normals);
         if (!p.reductions.empty() && p.geometry.dim > 0) {
@@ -1991,7 +2090,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string(1, "xyz"[d]), dim::length);
             if (!p.geometry.node_weights.empty()) {
                 if (!p.geometry.arc_length.empty()) columns.emplace_back("s", dim::length);
-                for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string("n") + "xyz"[d], dim::none);
+                for (size_t d = 0; d < N_DIM && !p.geometry.normals.empty(); d++) {
+                    columns.emplace_back(std::string("n") + "xyz"[d], dim::none);
+                }
                 columns.emplace_back("area", geometry_field("measure", p.geometry).dimension);
             }
             for (const auto & v : p.variables) columns.emplace_back(v, field_units::describe(v).dimension);
@@ -2047,10 +2148,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                 for (const auto & x : p.geometry.normals) normals.insert(normals.end(), x.begin(), x.end());
                 h5::write_rows(file, "normals", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
                 h5::annotate(file, "normals", geometry_field("normal", p.geometry));
-                if (!p.geometry.node_weights.empty()) {
-                    h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
-                    h5::annotate(file, "area", geometry_field("measure", p.geometry));
-                }
+            }
+            if (!p.geometry.node_weights.empty()) {
+                h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
+                h5::annotate(file, "area", geometry_field("measure", p.geometry));
             }
             if (!p.geometry.polygon_offsets.empty()) {
                 const auto & g = p.geometry;
@@ -2342,7 +2443,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                     for (size_t d = 0; d < N_DIM; d++) out << "," << p.geometry.nodes[i][d];
                     if (!p.geometry.node_weights.empty()) {
                         if (!p.geometry.arc_length.empty()) out << "," << p.geometry.arc_length[i];
-                        for (size_t d = 0; d < N_DIM; d++) out << "," << p.geometry.normals[i][d];
+                        for (size_t d = 0; d < N_DIM && !p.geometry.normals.empty(); d++) out << "," << p.geometry.normals[i][d];
                         out << "," << p.geometry.node_weights[i];
                     }
                     out << std::setprecision(std::numeric_limits<rtype>::max_digits10);

@@ -54,6 +54,7 @@ add_library(MallardCore STATIC
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
     numerics/overlap.cpp
+    numerics/cut_quadrature.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
@@ -75,6 +76,7 @@ add_library(MallardCore STATIC
     solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
+    solver/probe_cells.cpp
     solver/probe_geometry.cpp
     solver/probe_surface.cpp
     solver/probe_spectra.cpp

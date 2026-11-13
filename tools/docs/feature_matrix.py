@@ -176,6 +176,7 @@ OTHER_GUARDS = [
     ("src/chemistry/mechanism.cpp", "transport model"),
     ("src/chemistry/mechanism.cpp", "(NASA7, NASA9, constant-cp)"),
     ("src/mesh/mesh_io.cpp", "parametric nodes are not supported"),
+    ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")
