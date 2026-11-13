@@ -549,7 +549,7 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
          << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
          << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
-         << "[chemistry]\n";
+         << "[chemistry]\nfuse_half_steps = false\n";
     reacting.body = body.str();
     reacting.extra = restarts + "[output.mixture]\nfuel_species = \"H2\"\noxidizer_species = \"O2\"\n"
                                 "[statistics]\ninterval = 2\nfields = [\"HRR\", \"MACH\"]\nproducts = [\"HRR*FLAME_INDEX\"]\n"
@@ -856,9 +856,13 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
-    // Rows of runs with fused chemistry follow the host's half step
-    const bool fused = input.contains("chemistry") && input.at("chemistry").contains("fuse_half_steps") &&
-                       input.at("chemistry").at("fuse_half_steps").as_boolean();
+    // Rows of runs with fused chemistry (Strang's default) follow the host's half step
+    bool fused = false;
+    if (input.contains("chemistry")) {
+        const Input & chemistry = input.at("chemistry");
+        const bool simpler = chemistry.contains("coupling") && chemistry.at("coupling").as_string() == "simpler";
+        fused = chemistry.contains("fuse_half_steps") ? chemistry.at("fuse_half_steps").as_boolean() : !simpler;
+    }
     o.rows_on_device = solver.progress_on_device() && !fused;
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {

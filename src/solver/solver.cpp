@@ -2317,6 +2317,9 @@ int Solver::run_loop() {
 
     RunEnd stop;
     try {
+        // A restart's pending half step, where this run does not fuse it into its first step
+        if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
+        if (!reacting || simpler) chemistry_pending = 0.0;
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
@@ -2329,10 +2332,11 @@ int Solver::run_loop() {
             update_convergence();
             t_wall_output += output_timer.seconds();
         }
+        flush_chemistry();
         print_progress();
+        unflush_chemistry();
         publish_status();
-        // Strang splitting with the half steps of consecutive steps fused into one
-        // chemistry call, except where output, checks or the end read the state
+        // Strang splitting with the half steps of consecutive steps fused into one chemistry call
         defer_chemistry = reacting && fuse_chemistry;
         use_device_steps = device_steps_unsupported().empty();
         use_step_graph = use_device_steps && step_graph_unsupported().empty();
@@ -2383,6 +2387,7 @@ int Solver::run_loop() {
             after_step(step_timer, false);
         }
     } catch (const DivergedError &) {
+        unflush_chemistry();
         defer_chemistry = false;
         destroy_step_graph();
         check_timed_boundaries();
@@ -2391,6 +2396,7 @@ int Solver::run_loop() {
     defer_chemistry = false;
     destroy_step_graph();
     check_timed_boundaries();
+    flush_chemistry();
     const bool row_due = step != step_last_check;
     Kokkos::Timer output_timer;
     probes.finish(step, t);
@@ -2400,6 +2406,9 @@ int Solver::run_loop() {
     const std::string restart_file =
         control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
     t_wall_output += output_timer.seconds();
+    // The solver is left at the state of t
+    chemistry_flushed = false;
+    chemistry_pending = 0.0;
     // Files written at the step of the last row get a row of their own (rank 0 counts them)
     if (row_due || comm::allreduce(int(logging::written_pending()), comm::Op::MAX) > 0) print_progress();
     output_timer.reset();
@@ -2418,14 +2427,10 @@ int Solver::run_loop() {
 
 void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     act_on_requests();
-    if (chemistry_pending > 0.0 && state_needed()) {
-        advance_chemistry(chemistry_pending);
-        chemistry_pending = 0.0;
-        halo_current = false;
-    }
     check_fields();
     // Steps on the device update p_max themselves
     if (p_max.is_allocated() && !on_device) update_p_max();
+    if (state_needed()) flush_chemistry();
     if (statistics.due(step, t)) sample_statistics();
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
@@ -2448,6 +2453,8 @@ void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
     }
     poll_control_files();
     publish_status();
+    // The end of the run reads the state too
+    if (stop_reason().empty()) unflush_chemistry();
 }
 
 RunEnd Solver::stop_reason() const {
@@ -2855,6 +2862,7 @@ RestartAttributes Solver::restart_attributes() const {
     }
     for (const auto & a : triggers.attributes()) attributes.push_back(a);
     for (const auto & a : convergence.attributes()) attributes.push_back(a);
+    if (chemistry_pending > 0.0) attributes.emplace_back("CHEMISTRY_PENDING", chemistry_pending);
     return attributes;
 }
 
@@ -2885,9 +2893,11 @@ void Solver::write_data(bool force) {
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = restart_arrays();
+    swap_unflushed();
     for (auto & writer : data_writers) {
         if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
+    swap_unflushed();
     statistics.write(step, t, snapshot_block::current_reason(force));
     if (snapshots) {
         // Regions of lower dimension: point values, written as probes write them
@@ -2901,6 +2911,7 @@ void Solver::write_data(bool force) {
 
 void Solver::write_output_of_state(bool next) {
     if (next) apply_output_state(state_reader(*mesh));
+    flush_chemistry();
     write_data(true);
     write_probes();
     for (auto & writer : data_writers) writer->finish();

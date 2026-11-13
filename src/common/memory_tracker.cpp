@@ -35,7 +35,8 @@ constexpr Rule RULES[] = {
     // Solution, stages and cell fields
     {"conservatives", false, C::STATE}, {"species", false, C::STATE}, {"primitives", false, C::STATE},
     {"W_cells", false, C::STATE}, {"cfl_local", false, C::STATE}, {"solution", true, C::STATE},
-    {"rhs_faces", false, C::MESH}, {"rhs", true, C::STATE}, {"last_good", true, C::STATE}, {"T_seed", false, C::STATE},
+    {"rhs_faces", false, C::MESH}, {"rhs", true, C::STATE}, {"last_good", true, C::STATE},
+    {"unflushed", true, C::STATE}, {"T_seed", false, C::STATE},
     {"cell_scalars", false, C::STATE}, {"cell_molar_mass", false, C::STATE}, {"p_max", false, C::STATE},
     {"vortex_fields", false, C::STATE}, {"derived_fields", false, C::STATE},
     {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},

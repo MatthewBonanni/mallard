@@ -281,11 +281,14 @@ void Solver::act_on_triggers() {
                     const auto writer = std::find_if(data_writers.begin(), data_writers.end(),
                                                      [&](const auto & w) { return w->get_prefix() == act.writer; });
                     const snapshot_block::Reason reason(snapshot_block::reason::TRIGGER);
+                    flush_chemistry();
                     update_primitives();
                     copy_device_to_host();
                     if ((*writer)->get_format() == DataFormat::RESTART) {
+                        swap_unflushed();
                         (*writer)->write(step, t, true, restart_attributes(), characteristic_restart_faces(),
                                          statistics.arrays());
+                        swap_unflushed();
                     } else {
                         (*writer)->write(step, t, true);
                     }

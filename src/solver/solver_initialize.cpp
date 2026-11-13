@@ -184,6 +184,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     step = restart.step;
     t = static_cast<rtype>(restart.t);
+    // Fused half steps: the state is that before the chemistry's pending half step
+    const double * pending = restart.attribute("CHEMISTRY_PENDING");
+    chemistry_pending = pending ? *pending : 0.0;
+    chemistry_flushed = false;
     if (resume_output) {
         triggers.restore(restart.attributes);
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
