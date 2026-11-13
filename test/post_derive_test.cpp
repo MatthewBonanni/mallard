@@ -56,7 +56,7 @@ std::string case_input(const std::string & dir, const std::string & physics, con
     return s.str();
 }
 
-int derive(const std::vector<std::string> & words, std::string * errors = nullptr) {
+int derive(const std::vector<std::string> & words, std::string * errors = nullptr, std::string * printed = nullptr) {
     cli::Args args;
     std::string error;
     EXPECT_TRUE(cli::parse(*cli::command("post derive"), words, args, error)) << error;
@@ -67,6 +67,7 @@ int derive(const std::vector<std::string> & words, std::string * errors = nullpt
     std::cout.rdbuf(out);
     std::cerr.rdbuf(err);
     if (errors) *errors = messages.str();
+    if (printed) *printed = report.str();
     comm::barrier();
     return status;
 }
@@ -148,9 +149,15 @@ TEST(PostDeriveTest, FieldsThatNeedInputTheRunLacksSayHowToGiveIt) {
     EXPECT_EQ(derive({run + "/restart_000004.restart", "--fields", "MACHH"}, &errors), 2);
     // With the reference given, CP = (p - p_inf) / q_inf of the stored state, whose divergence-free flow keeps p = 1
     const std::string out = fresh_dir("given");
+    std::string printed;
     ASSERT_EQ(derive({run + "/restart_000004.restart", "--fields", "CP", "--reference",
-                      "{rho = 2.0, u = " + vector_of("1.0", "0.0", "0.0") + ", p = 0.5}", "--snapshot", "vtu", "-o", out}),
+                      "{rho = 2.0, u = " + vector_of("1.0", "0.0", "0.0") + ", p = 0.5}", "--snapshot", "vtu", "-o", out},
+                     nullptr, &printed),
               0);
+    if (comm::is_root()) {
+        EXPECT_NE(printed.find("== Written"), std::string::npos) << printed;
+        EXPECT_NE(printed.find(" 1 file\n"), std::string::npos) << printed;
+    }
     const output::Contents derived = output::open(out + "/derived.pvd");
     for (const double cp : output::read(derived, "CP", 0)) EXPECT_NEAR(cp, 0.5, 1e-3);
 }
