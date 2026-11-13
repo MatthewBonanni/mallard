@@ -23,23 +23,27 @@
  */
 struct StencilShapes {
     static constexpr uint32_t NONE = UINT32_MAX;
-    // For each of the blocks' cells [0, structured_block_cells()): its shape, NONE within reach of a face of its block
+    // For each of the blocks' cells [0, structured_block_cells()): its shape, or NONE
     std::vector<uint32_t> shape;
     // For each shape: its lowest cell
     std::vector<uint32_t> first;
 };
 
 /**
- * @brief Stencil shapes of the blocks' cells at least `reach` cells from every
- *        face of their block: two such cells have one shape if the cells within
- *        reach along every axis around them have the same geometry relative to
- *        the cell, to rounding: each cell's nodes relative to its vertex
- *        average and the offset and size of the next cell along each axis, in
- *        units of its h = V^(1/N_DIM), rounded to 1e-9, and the cell's h, to
- *        1e-9 relative. Round-off can split a shape in two; cells whose
- *        geometry within reach differs by more than the rounding never share
- *        one. `reach` must cover all the cells the reconstruction's setup
- *        reads (TENO: its gather depth).
+ * @brief Stencil shapes of the blocks' cells: two cells have one shape if
+ *        everything within `reach` vertex layers around them has the same
+ *        geometry relative to the cell, to rounding (1e-9 of the cell's
+ *        h = V^(1/N_DIM), and h to 1e-9 relative): the cells, by their nodes,
+ *        and the boundary faces of those cells, by their nodes and zone. A cell
+ *        whose reach lies in its block is keyed through the block's indices;
+ *        the others through their vertex neighbors, across periodic
+ *        translations; the two ways never give one shape. Round-off can split
+ *        a shape in two; cells whose
+ *        surroundings differ by more than the rounding never share one. A cell
+ *        has none if its reach leaves the cells on this rank, crosses a
+ *        periodic rotation, or reaches a cell across two periodic shifts.
+ *        `reach` must cover all the cells the reconstruction's setup reads
+ *        (TENO: its gather depth).
  */
 StencilShapes stencil_shapes(const Mesh & mesh, uint32_t reach);
 

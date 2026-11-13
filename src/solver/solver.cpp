@@ -1567,11 +1567,10 @@ void Solver::describe_stencil_shapes() {
         comm::Op::SUM);
     if (interior == 0) return;
     const uint64_t most = comm::allreduce(uint64_t(shapes.first.size()), comm::Op::MAX);
-    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks, at least ",
+    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks with a stencil shape, ",
                                              100.0 * double(interior) / double(n_cells_global)) +
-                             logging::count(uint64_t(reach), "cell") + " from their faces, " +
-                             (is_distributed() ? "up to " + logging::count(most, "stencil shape") + " per rank"
-                                               : logging::count(most, "stencil shape"));
+                             (is_distributed() ? "up to " + logging::count(most, "shape") + " per rank"
+                                               : logging::count(most, "shape"));
 }
 
 void Solver::init_axisymmetric_weights() {

@@ -36,66 +36,80 @@ std::shared_ptr<Mesh> box(const std::string & extra = "", uint32_t m = M) {
     return mesh;
 }
 
-uint32_t interior(uint32_t reach) {
+uint32_t power(uint32_t base) {
     uint32_t n = 1;
-    for (uint32_t a = 0; a < N_DIM; a++) n *= M - 2 * reach;
+    for (uint32_t a = 0; a < N_DIM; a++) n *= base;
     return n;
 }
 
 } // namespace
 
-/** @brief A uniform box has one shape; cells within reach of its faces have none. */
-TEST(StencilShapes, AUniformBoxHasOneShape) {
+/**
+ * @brief In a uniform box every cell has a shape: one for the cells whose
+ *        reach has no boundary face, and one per distance (up to the reach)
+ *        from each face along each axis.
+ */
+TEST(StencilShapes, AUniformBoxHasAShapePerDistanceFromItsFaces) {
     const auto mesh = box();
     ASSERT_EQ(mesh->structured_blocks.size(), 1u);
     for (uint32_t reach : {1u, 2u}) {
         const StencilShapes shapes = stencil_shapes(*mesh, reach);
-        ASSERT_EQ(shapes.first.size(), 1u);
-        EXPECT_EQ(shapes.first[0], reach * (1 + M + (N_DIM == 3 ? M * M : 0)));
-        EXPECT_EQ(uint32_t(std::count(shapes.shape.begin(), shapes.shape.end(), 0u)), interior(reach));
+        EXPECT_EQ(std::count(shapes.shape.begin(), shapes.shape.end(), StencilShapes::NONE), 0);
+        EXPECT_EQ(shapes.first.size(), power(2 * reach + 3));
+        const uint32_t center = (reach + 1) * (1 + M + (N_DIM == 3 ? M * M : 0));
+        EXPECT_EQ(uint32_t(std::count(shapes.shape.begin(), shapes.shape.end(), shapes.shape[center])),
+                  power(M - 2 * reach - 2));
     }
 }
 
-/** @brief Stretched along y, a box has one shape per plane of constant j, mirror planes included. */
-TEST(StencilShapes, AStretchedBoxHasOneShapePerPlane) {
+/** @brief Stretched along y, a box has a shape per plane of constant y and distance from the other faces. */
+TEST(StencilShapes, AStretchedBoxHasAShapePerPlane) {
     const auto mesh = box(N_DIM == 2 ? "stretching = [0.0, 1.7]\n" : "stretching = [0.0, 1.7, 0.0]\n");
     const uint32_t reach = 2;
     const StencilShapes shapes = stencil_shapes(*mesh, reach);
-    EXPECT_EQ(shapes.first.size(), M - 2 * reach);
+    EXPECT_EQ(shapes.first.size(), M * power(2 * reach + 3) / (2 * reach + 3));
     std::map<double, std::set<uint32_t>> by_plane;
     for (uint32_t c = 0; c < shapes.shape.size(); c++) {
-        if (shapes.shape[c] != StencilShapes::NONE) by_plane[std::round(1e9 * double(mesh->h_cell_coords(c, 1)))].insert(shapes.shape[c]);
+        by_plane[std::round(1e9 * double(mesh->h_cell_coords(c, 1)))].insert(shapes.shape[c]);
     }
-    EXPECT_EQ(by_plane.size(), M - 2 * reach);
-    for (const auto & [j, set] : by_plane) EXPECT_EQ(set.size(), 1u) << "plane " << j;
+    EXPECT_EQ(by_plane.size(), M);
+    for (const auto & [y, set] : by_plane) EXPECT_EQ(set.size(), power(2 * reach + 3) / (2 * reach + 3)) << "plane " << y;
 }
 
-/** @brief A node moved 1e-6 of a cell from where it was changes the shapes of the cells whose reach includes it, and only those. */
-TEST(StencilShapes, GeometryAtTheEdgeOfTheReachChangesTheShape) {
+/**
+ * @brief A periodic box has two shapes, one per way of keying, across its
+ *        periodic faces. A node moved 1e-6 of a cell changes the shapes of the
+ *        cells whose reach includes a cell around it, and only those.
+ */
+TEST(StencilShapes, APeriodicBoxHasTwoShapesAndANodeMovedChangesTheShapesWithinReach) {
     const uint32_t m = 16, reach = 5;
-    const auto mesh = box("", m);
-    // The corner node at (1, 1[, 1]): in the cells along the far faces only
-    uint32_t corner = 0;
+    std::string periodic = "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if constexpr (N_DIM == 3) periodic += "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    const auto mesh = box(periodic, m);
+    // One shape keyed through the block's indices, one through the vertex neighbors across the periodic faces
+    const StencilShapes whole = stencil_shapes(*mesh, reach);
+    EXPECT_EQ(std::count(whole.shape.begin(), whole.shape.end(), StencilShapes::NONE), 0);
+    ASSERT_EQ(whole.first.size(), 2u);
+    // The node at (8, 8[, 8]) / m, in the cells (7..8, 7..8[, 7..8])
+    uint32_t middle = 0;
     for (uint32_t v = 0; v < mesh->n_nodes; v++) {
-        bool far = true;
-        FOR_I_DIM far = far && mesh->h_node_coords(v, i) > 0.999_r;
-        if (far) corner = v;
+        bool at = true;
+        FOR_I_DIM at = at && std::abs(mesh->h_node_coords(v, i) - 0.5_r) < 1e-6_r;
+        if (at) middle = v;
     }
-    ASSERT_EQ(stencil_shapes(*mesh, reach).first.size(), 1u);
-    mesh->h_node_coords(corner, 0) += 1e-6_r / rtype(m);
-    const StencilShapes shapes = stencil_shapes(*mesh, reach);
-    // Cells by their position: the corner cell (m - 1, m - 1[, m - 1]) is within reach of (m - 1 - reach, ...)
+    mesh->h_node_coords(middle, 0) += 1e-6_r / rtype(m);
+    const StructuredBlock & block = mesh->structured_blocks.at(0);
     auto cell_at = [&](uint32_t i, uint32_t j) {
-        const StructuredBlock & block = mesh->structured_blocks.at(0);
         uint32_t l = i + block.n[0] * j;
         if constexpr (N_DIM == 3) l += block.n[0] * block.n[1] * j;
         return block.first + l;
     };
-    const uint32_t near = m - 1 - reach, far = reach;
-    EXPECT_NE(shapes.shape[cell_at(near, near)], shapes.shape[cell_at(far, far)]);
-    EXPECT_EQ(shapes.shape[cell_at(far, far)], shapes.shape[cell_at(far + 1, far)]);
-    EXPECT_EQ(stencil_shapes(*mesh, reach - 1).shape[cell_at(near, near)],
-              stencil_shapes(*mesh, reach - 1).shape[cell_at(far, far)]);
+    for (const uint32_t r : {reach, reach - 1}) {
+        const StencilShapes shapes = stencil_shapes(*mesh, r);
+        const uint32_t unchanged = shapes.shape[cell_at(0, 0)];
+        EXPECT_EQ(shapes.shape[cell_at(7 - r - 1, 7)], unchanged) << "reach " << r;
+        EXPECT_NE(shapes.shape[cell_at(7 - r, 7)], unchanged) << "reach " << r;
+    }
 }
 
 #if Mallard_DIM == 3
@@ -134,8 +148,11 @@ TEST(StencilShapes, CellsOfOneShapeHaveOneTENOTable) {
     uint32_t compared = 0;
     int32_t reach_seen = 0;
     teno.for_each_stencil([&](uint32_t c, const TENO::CellStencils & s) {
-        if (c >= shapes.shape.size() || shapes.shape[c] == StencilShapes::NONE) return;
+        if (c >= shapes.shape.size()) return;
         const Offset x = index_of(*mesh, c);
+        for (uint32_t a = 0; a < N_DIM; a++) {
+            if (uint32_t(x[a]) <= depth || uint32_t(x[a]) + depth + 1 >= 14u) return;  // images near the walls
+        }
         std::map<Offset, std::vector<double>> entries;
         for (uint32_t slot = 0; slot < s.cells.size(); slot++) {
             ASSERT_GE(s.cells[slot], 0);
