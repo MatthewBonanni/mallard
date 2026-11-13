@@ -44,9 +44,9 @@ std::filesystem::path from_root(const std::filesystem::path & path) {
 #ifdef Mallard_HAS_MPI
     std::string s = path.string();
     int n = static_cast<int>(s.size());
-    MPI_Bcast(&n, 1, MPI_INT, 0, comm::world());
+    MPI_Bcast(&n, 1, MPI_INT, 0, comm::communicator());
     s.resize(static_cast<size_t>(n));
-    MPI_Bcast(s.data(), n, MPI_CHAR, 0, comm::world());
+    MPI_Bcast(s.data(), n, MPI_CHAR, 0, comm::communicator());
     return s;
 #else
     return path;

@@ -42,6 +42,7 @@
 #include "device_comm.h"
 #include "json.h"
 #include "run_control.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -184,6 +185,21 @@ TEST(RunControlTest, StopRequestEndsTheRunAfterTheNextStepWithARestart) {
         EXPECT_EQ(end["last_restart"]["path"].string, restart_file(dir, 1));
     }
     expect_restart_continues_exactly(dir, restart_file(dir, 1), 5);
+}
+
+TEST(RunControlTest, UndistributedSolverStopsAloneOnTheRankAsked) {
+    // Every rank runs the whole mesh on its own; only rank 0 is asked to stop
+    const std::string dir = (rank_scratch_dir() / "undistributed_stop").string();
+    fs::create_directories(dir);
+    clear_requests();
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 8\ncfl = 0.25\ncontrol_socket = false\n", 1000), dir)));
+    const bool asked = comm::is_root();
+    if (asked) run_control::request(run_control::STOP);
+    EXPECT_EQ(solver.run(), asked ? EXIT_STOPPED : 0);
+    EXPECT_EQ(solver.get_step(), asked ? 1u : 8u);
+    EXPECT_EQ(run_control::pending(), 0);
 }
 
 TEST(RunControlTest, CommandsChangeRuntimeSettingsAtTheNextStep) {

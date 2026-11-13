@@ -540,7 +540,7 @@ void select_device([[maybe_unused]] int argc, [[maybe_unused]] char ** argv) {
     MPI_Comm node = MPI_COMM_NULL;
     std::vector<std::string> pools;
     int node_rank = -1;
-    if (MPI_Comm_split_type(comm::world(), MPI_COMM_TYPE_SHARED, comm::rank(), MPI_INFO_NULL, &node) ==
+    if (MPI_Comm_split_type(comm::communicator(), MPI_COMM_TYPE_SHARED, comm::rank(), MPI_INFO_NULL, &node) ==
         MPI_SUCCESS) {
         MPI_Comm_rank(node, &node_rank);
         pools = allgather(node, device_pool(env) + "\t" + ints(my_numa));

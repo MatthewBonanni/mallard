@@ -1,0 +1,1 @@
+- A solver that is not distributed over the ranks (a test's serial reference) communicates with its own rank alone, so a request that reaches one rank, such as a stop signal, no longer leaves the others waiting in a collective (#948).

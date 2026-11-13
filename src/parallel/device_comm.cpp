@@ -33,7 +33,7 @@ ncclComm_t nccl() {
     if (nccl_comm) return nccl_comm;
     ncclUniqueId id;
     if (rank() == 0 && ncclGetUniqueId(&id) != ncclSuccess) throw std::runtime_error("NCCL: ncclGetUniqueId failed");
-    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, world());
+    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, communicator());
     // NCCL's graph mixing support adds event nodes to captured graphs, which the step's conditional node cannot
     // hold. Mallard needs no mixing: its NCCL calls share one stream, and the host drains the step queue before
     // it calls NCCL outside a step graph.

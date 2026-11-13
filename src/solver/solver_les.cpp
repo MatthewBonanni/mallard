@@ -1144,6 +1144,7 @@ void Solver::enqueue_kinetic_energy_budget() {
 }
 
 KineticEnergyBudget Solver::kinetic_energy_budget() {
+    const comm::SelfScope scope = communication_scope();
     enqueue_kinetic_energy_budget();
     rtype total[4];
     Kokkos::deep_copy(Kokkos::View<rtype *, Kokkos::HostSpace>(total, 4), budget_rates);

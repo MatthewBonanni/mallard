@@ -164,6 +164,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 }
 
 int Solver::init(const Input & input_in) {
+    const comm::SelfScope scope = communication_scope();
     this->input = input_in;
     run_log::hold();
     if (!input_from_file) {
@@ -1324,6 +1325,7 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
 }
 
 double Solver::get_mass_flow_force() const {
+    const comm::SelfScope scope = communication_scope();
     if (!hold_mass_flow) return 0.0;
     double force = 0.0;
     Kokkos::deep_copy(force, Kokkos::subview(mass_flow_totals, 2));
@@ -2344,6 +2346,7 @@ constexpr int HEADER_EVERY = 25;
 } // namespace
 
 int Solver::run() {
+    const comm::SelfScope scope = communication_scope();
     end_recorded = false;
     try {
         return run_loop();
@@ -2973,6 +2976,7 @@ void Solver::write_data(bool force) {
 }
 
 void Solver::write_output_of_state(bool next) {
+    const comm::SelfScope scope = communication_scope();
     if (next) apply_output_state(state_reader(*mesh));
     flush_chemistry();
     write_data(true);
@@ -2996,6 +3000,7 @@ void Solver::update_statistics_fields() {
 }
 
 CellSampler Solver::sample_statistics_of_state(bool next) {
+    const comm::SelfScope scope = communication_scope();
     if (next) apply_output_state(state_reader(*mesh));
     sample_statistics();
     if (probes.averages_due(step, t)) sample_probe_averages();
@@ -3072,6 +3077,7 @@ ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
 }
 
 void Solver::take_step() {
+    const comm::SelfScope scope = communication_scope();
     if (simpler) {
         cell_chemistry.begin_step();
         take_simpler_step();
@@ -3440,6 +3446,7 @@ struct ForceFunctor {
 };
 
 void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) {
+    const comm::SelfScope scope = communication_scope();
     // The gradients and the wall model read the halo, stale after the last stage
     update_cell_W();
     if (is_viscous()) {
@@ -3463,6 +3470,7 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
 }
 
 std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    const comm::SelfScope scope = communication_scope();
     allocate_monitors();
     reduce_force(faces, monitor_results.data());
     const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
@@ -3494,6 +3502,7 @@ void Solver::write_forces() {
 }
 
 std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
+    const comm::SelfScope scope = communication_scope();
     std::array<rtype, N_CONSERVATIVE> total;
     StateView U = conservatives;
     Kokkos::View<rtype *> vol = mesh->cell_measure;
@@ -3593,6 +3602,7 @@ void Solver::update_cell_W() {
 }
 
 void Solver::reduce_flow_statistics(double * out) {
+    const comm::SelfScope scope = communication_scope();
     update_velocity_gradients();
     FlowStatisticsFunctor functor{W_cells, primitives, viscous_gradients, mesh->cell_measure,
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
@@ -3610,6 +3620,7 @@ void Solver::reduce_flow_statistics(double * out) {
 }
 
 std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
+    const comm::SelfScope scope = communication_scope();
     allocate_monitors();
     reduce_flow_statistics(monitor_results.data());
     const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
