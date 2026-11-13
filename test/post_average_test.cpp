@@ -84,19 +84,24 @@ void run_case(const std::string & dir, bool axisymmetric = false) {
     comm::barrier();
 }
 
-int average(const std::vector<std::string> & words, std::string * errors = nullptr) {
+int post(const char * command, int (*run)(const cli::Args &), const std::vector<std::string> & words,
+         std::string * errors = nullptr) {
     cli::Args args;
     std::string error;
-    EXPECT_TRUE(cli::parse(*cli::command("post average"), words, args, error)) << error;
+    EXPECT_TRUE(cli::parse(*cli::command(command), words, args, error)) << error;
     std::ostringstream report, messages;
     std::streambuf * out = std::cout.rdbuf(report.rdbuf());
     std::streambuf * err = std::cerr.rdbuf(messages.rdbuf());
-    const int status = post_average(args);
+    const int status = run(args);
     std::cout.rdbuf(out);
     std::cerr.rdbuf(err);
     if (errors) *errors = messages.str();
     comm::barrier();
     return status;
+}
+
+int average(const std::vector<std::string> & words, std::string * errors = nullptr) {
+    return post("post average", post_average, words, errors);
 }
 
 /** @brief The index of the run's snapshots of its [statistics]. */
@@ -110,12 +115,13 @@ std::vector<std::string> restarts(const std::string & dir) {
 std::map<std::string, std::vector<double>> read_csv(const std::string & path) {
     std::ifstream in(path);
     std::string line;
-    std::getline(in, line);
+    while (std::getline(in, line) && line.starts_with("#")) {}
     std::vector<std::string> names;
     std::stringstream header(line);
     for (std::string name; std::getline(header, name, ',');) names.push_back(name);
     std::map<std::string, std::vector<double>> columns;
     while (std::getline(in, line)) {
+        if (line.starts_with("#")) continue;
         std::stringstream row(line);
         std::string value;
         for (size_t j = 0; j < names.size() && std::getline(row, value, ','); j++) columns[names[j]].push_back(std::stod(value));
@@ -308,5 +314,59 @@ TEST(PostAverageTest, ChoicesItCannotAverageAreUsageErrors) {
               1);
     if (comm::is_root()) {
         EXPECT_NE(errors.find("increasing time"), std::string::npos) << errors;
+    }
+}
+
+TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSnapshot) {
+    // The mean over the snapshots, each weighing the time since the previous one, of what
+    // post extract reduces over the region on each snapshot's own state
+    const std::string run = fresh_dir("solution_run");
+    run_case(run);
+    const std::string dense = "{type = \"where\", condition = \"RHO > 1.1\"}";
+    const std::string front = "{type = \"isosurface\", field = \"RHO\", value = 1.1}";
+    for (const auto & [name, region] : {std::pair{"dense", dense}, std::pair{"front", front}}) {
+        SCOPED_TRACE(name);
+        const std::string extracted = fresh_dir(std::string("solution_extract_") + name);
+        std::vector<std::string> words = restarts(run);
+        words.insert(words.end(), {"--region", region, "--fields", "RHO,P", "--reductions", "integral,mean", "--name",
+                                   name, "-o", extracted});
+        ASSERT_EQ(post("post extract", post_extract, words), 0);
+        const std::string averaged = fresh_dir(std::string("solution_average_") + name);
+        words = restarts(run);
+        words.insert(words.end(), {"--region", region, "--fields", "RHO,P", "--t-start", "1.0e-2", "--name", name,
+                                   "-o", averaged});
+        ASSERT_EQ(average(words), 0);
+        if (!comm::is_root()) continue;
+        const auto each = read_csv(extracted + "/probe_" + name + "_reductions.csv");
+        const auto mean = read_csv(averaged + "/" + name + "_reductions.csv");
+        const std::string measure = std::string(name) == "dense" ? (N_DIM == 2 ? "area" : "volume")
+                                                                 : (N_DIM == 2 ? "length" : "area");
+        ASSERT_EQ(each.at("t").size(), 3u);
+        ASSERT_EQ(mean.at("t").size(), 1u);
+        EXPECT_EQ(mean.at("t")[0], each.at("t")[2]);
+        double t_last = 1.0e-2, total = 0.0, m = 0.0, rho = 0.0, p = 0.0;
+        for (size_t k = 0; k < 3; k++) {
+            const double w = each.at("t")[k] - t_last;
+            t_last = each.at("t")[k];
+            total += w;
+            m += w * each.at(measure)[k];
+            rho += w * each.at("integral_RHO")[k];
+            p += w * each.at("integral_P")[k];
+        }
+        // The region changes between snapshots
+        EXPECT_NE(each.at(measure)[0], each.at(measure)[2]);
+        const double tolerance = roundoff(1e-13);
+        EXPECT_NEAR(mean.at(measure)[0], m / total, tolerance * m / total);
+        EXPECT_NEAR(mean.at("integral_MEAN_RHO")[0], rho / total, tolerance * rho / total);
+        EXPECT_NEAR(mean.at("integral_MEAN_P")[0], p / total, tolerance * p / total);
+        EXPECT_NEAR(mean.at("mean_MEAN_RHO")[0], rho / m, tolerance * rho / m);
+    }
+    // Their averages are integrals over the region, not fields on cells
+    std::string errors;
+    std::vector<std::string> words = restarts(run);
+    words.insert(words.end(), {"--region", dense, "--homogeneous", "x", "-o", fresh_dir("solution_homogeneous")});
+    EXPECT_EQ(average(words, &errors), 2);
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("defined by the solution"), std::string::npos) << errors;
     }
 }

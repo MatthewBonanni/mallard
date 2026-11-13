@@ -124,7 +124,7 @@ with the series. The result is one snapshot at the last step,
 | `--t-start` | as long before the first snapshot as the second is after it | Where the first snapshot's weight starts |
 | `--homogeneous` | none | Also average over these directions (`x,z`): a CSV profile instead of a snapshot |
 | `--statistics` | off | Average over `--homogeneous` the `[statistics]` fields one snapshot holds |
-| `--region` | the whole mesh | Average over a region only: as `[[write_data]]` `region`; with `--homogeneous`, a filled region, cells weighted by their fraction in it |
+| `--region` | the whole mesh | Average over a region only: as `[[write_data]]` `region`; with `--homogeneous`, a filled region, cells weighted by their fraction in it; a region defined by the solution: its integrals and means (below) |
 | `--reference`, `--mixture` | the input's | `[output]` `reference` and `mixture` of derived fields, as for [`post derive`](output.md#derived-fields-after-the-run) |
 
 The full list is under `mallard post average --help` and in the
@@ -157,6 +157,26 @@ holds the kept coordinates, `n_cells`, then each column, and is the `profile`
 reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
 `FAVRE_`) fields a snapshot of a run's `[statistics]` holds, pairing
 `COV_<a>_<b>` with `MEAN_<a>` and `MEAN_<b>` where both are there.
+
+**Regions defined by the solution.** With a `--region` that follows the
+solution ([Regions defined by the solution](geometry.md#regions-defined-by-the-solution)),
+a `where` region or an isosurface, the region is placed on each snapshot's
+own state, as `mallard post extract` places it, and the result is the time
+average of the fields over it, as a `[[probes]]` entry with `average = true`
+writes it: `average/average_reductions.csv`, with the time-weighted mean
+measure of the region, the time-weighted means of the integrals of the fields
+over it (`integral_MEAN_<a>`) and their ratio (`mean_MEAN_<a>`, the mean
+integral over the mean measure). A snapshot where the region is empty counts
+with zero measure.
+
+```sh
+mallard post average solut/restart_*.restart --fields RHO,T \
+    --region '{type = "where", condition = "T > 1500"}'
+```
+
+It takes the fields only: `--products`, `--favre`, `--homogeneous`,
+`--snapshot` and `--conditional` are errors with such a region
+([#851](https://github.com/MatthewBonanni/mallard/issues/851)).
 
 - Snapshots of `RHO`, `U` and `P` give the run's averages to their stored
   precision; restart files and snapshots of the conservative variables, bit for bit.

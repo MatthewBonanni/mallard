@@ -2856,6 +2856,7 @@ void Solver::sample_statistics() {
 CellSampler Solver::sample_statistics_of_state(bool next) {
     if (next) apply_output_state(state_reader(*mesh));
     sample_statistics();
+    if (probes.averages_due(step, t)) sample_probe_averages();
     statistics.copy_device_to_host();
     return cell_sampler();
 }

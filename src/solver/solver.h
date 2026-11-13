@@ -187,9 +187,9 @@ class Solver {
 
         /**
          * @brief Post-processing (`mallard post average`): with next, takes the next state from the
-         *        reader; then adds it to the [statistics] means as a sample at its step and time (the
-         *        means start at statistics.t_start, not from the files'), updates their host copies,
-         *        and returns the cell values sampled.
+         *        reader; then adds it to the [statistics] means, and to the time averages of probes, as a
+         *        sample at its step and time (both start at statistics.t_start, not from the files'),
+         *        updates the means' host copies, and returns the cell values sampled.
          */
         CellSampler sample_statistics_of_state(bool next);
 

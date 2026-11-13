@@ -2057,6 +2057,31 @@ TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
               std::string::npos);
 }
 
+TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
+    // [output] reference is the default of every probe's; a probe's own replaces it
+    const std::string reference = "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
+    const auto cf = [&](const std::string & output, const std::string & own) {
+        const std::string dir = fresh_dir("output_reference");
+        const std::string probe = output + "[[probes]]\nname = \"walls\"\nfile = \"" + dir +
+                                  "/walls.csv\"\nboundary_type = \"wall\"\nfields = [\"CF\", \"CP\"]\n" + own;
+        Solver solver;
+        solver.init(parse_toml(couette_case(8, probe)));
+        run(solver);
+        std::vector<double> out;
+        for (const auto & row : read_csv(dir + "/walls.csv")) {
+            if (row.at("step") == 0.0) out.push_back(row.at("CF"));
+        }
+        return out;
+    };
+    const std::vector<double> own = cf("", reference), shared = cf(reference, "");
+    ASSERT_FALSE(own.empty());
+    EXPECT_EQ(shared, own);
+    const std::vector<double> denser =
+        cf(reference, "reference = {rho = 2.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n");
+    ASSERT_EQ(denser.size(), own.size());
+    for (size_t i = 0; i < own.size(); i++) EXPECT_EQ(rtype(denser[i]), rtype(0.5) * rtype(own[i]));
+}
+
 TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMeasures) {
     // A disk (sphere) sweeping x at 1e5 over four steps of 1e-6, where the
     // flow barely changes: rho = 1 + 0.5 x averages to its value at the mean
@@ -2578,29 +2603,4 @@ TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingAndSolutionRegionsAndUnknow
     const std::string cells = error_of("start = " + numbers3("0.1", "0.1", "0.5") + "\nend = " + numbers3("0.9", "0.9", "0.5") +
                                        "\nn_points = \"faces\"\n");
     EXPECT_NE(cells.find("n_points = \"cells\""), std::string::npos) << cells;
-}
-
-TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
-    // [output] reference is the default of every probe's; a probe's own replaces it
-    const std::string reference = "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
-    const auto cf = [&](const std::string & output, const std::string & own) {
-        const std::string dir = fresh_dir("output_reference");
-        const std::string probe = output + "[[probes]]\nname = \"walls\"\nfile = \"" + dir +
-                                  "/walls.csv\"\nboundary_type = \"wall\"\nfields = [\"CF\", \"CP\"]\n" + own;
-        Solver solver;
-        solver.init(parse_toml(couette_case(8, probe)));
-        run(solver);
-        std::vector<double> out;
-        for (const auto & row : read_csv(dir + "/walls.csv")) {
-            if (row.at("step") == 0.0) out.push_back(row.at("CF"));
-        }
-        return out;
-    };
-    const std::vector<double> own = cf("", reference), shared = cf(reference, "");
-    ASSERT_FALSE(own.empty());
-    EXPECT_EQ(shared, own);
-    const std::vector<double> denser =
-        cf(reference, "reference = {rho = 2.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n");
-    ASSERT_EQ(denser.size(), own.size());
-    for (size_t i = 0; i < own.size(); i++) EXPECT_EQ(rtype(denser[i]), rtype(0.5) * rtype(own[i]));
 }

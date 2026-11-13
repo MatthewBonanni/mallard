@@ -283,7 +283,9 @@ constexpr Option AVERAGE_OPTIONS[] = {
     {"--region", "", "REGION",
      "Average over a region only: a name of the input's [regions] or of the mesh, or an inline TOML table, as "
      "[[write_data]] region takes it; with --homogeneous, a region of the mesh's dimension, its cells weighted "
-     "by the fraction of them in it. Default: the whole mesh."},
+     "by the fraction of them in it. A region defined by the solution (where, isosurface) is placed on each "
+     "snapshot's state, and the time averages of the integrals and means of the fields over it are written "
+     "to OUTPUT/NAME_reductions.csv instead of a snapshot. Default: the whole mesh."},
     {"--reference", "", "TABLE",
      "The [output] reference of CP, as an inline TOML table, in place of the input's, as for mallard post "
      "derive. Default: the input's."},
