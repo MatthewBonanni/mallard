@@ -246,6 +246,20 @@ class Probes {
         /** @brief Writes the probes, or the snapshots, due; with force, every snapshot not yet written at this step. */
         void write(uint64_t step, rtype t, const ProbeFields & fields, bool snapshots = false, bool force = false);
 
+        size_t size() const { return probes.size(); }
+        /** @brief Whether a step graph can evaluate probe k: every few steps, sampled afresh, from device fields only. */
+        bool can_stage(size_t k) const;
+        /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
+        void stage(size_t k, uint64_t n_records);
+        /** @brief Probe k's step interval while the step graph evaluates it (0: the host's). */
+        uint64_t staged_interval(size_t k) const;
+        /** @brief As average_needs, of the staged probes. */
+        std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
+        /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory. */
+        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
+        /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
+        void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
+
         /** @brief Changes the step interval of the probe of that name; an error message, or empty. */
         std::string set_interval(const std::string & name, uint64_t steps, bool snapshot = false);
         /** @brief Changes the time interval of the probe of that name, the next output due after t. */
@@ -328,6 +342,8 @@ class Probes {
             Kokkos::View<uint32_t *> unique_cells;  // cells of the inside samples, once each
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
+            // Staged probes: values of each record slot, (slot, local sample * variables)
+            Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
 
             /** @brief Locate points (the same on every rank) in the owned cells. */
             void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
@@ -342,8 +358,15 @@ class Probes {
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                           const ProbeReference & reference, bool gradients, bool diffusive = false);
-            /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
-            void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
+            /**
+             * @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. From
+             *        values, or a record slot's staged values.
+             */
+            void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
+            void allocate_staging(uint64_t n_records);
+            /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
+            void copy_to_staging(const uint64_t * seq) const;
+            const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
             /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
             std::vector<Location> locations(const Mesh & mesh) const;
 
@@ -406,6 +429,7 @@ class Probes {
             bool from_region = false;
             bool resampled = false;  // a surface region on an n_points grid
             bool snapshot = false;   // of a [[write_data]] entry
+            bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
@@ -491,8 +515,12 @@ class Probes {
             uint64_t n_evaluated() const { return codes.extent(0); }
             bool samples_nodes() const;
             bool samples_quadrature() const;
-            /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
-            void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
+            /**
+             * @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values.
+             *        With a record slot, the slot's staged values instead.
+             */
+            void sample(const ProbeFields * fields, std::vector<double> & nodes, std::vector<double> & quad,
+                        int64_t slot = -1);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
             /** @brief The snapshot block entry of written variable v (no units). */
             snapshot_block::Field field_of(size_t v) const {
@@ -541,6 +569,9 @@ class Probes {
                                     bool per_cell);
         static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
                                     const std::string & summary, uint32_t n_variables, bool per_cell);
+
+        /** @brief Writes probe p if due (or forced): sampled with fields, or from a record slot's staged values. */
+        void write_probe(Probe & p, uint64_t step, rtype t, const ProbeFields * fields, bool force, int64_t slot);
 
         std::vector<std::unique_ptr<Probe>> probes;
         snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};

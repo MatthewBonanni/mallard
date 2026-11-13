@@ -437,10 +437,11 @@ they were, so the next launch takes it again with the controller's dt), adds the
 ledger, updates p_max, counts non-finite values (`check_nan`) and, at progress rows, reduces the row's and the
 run health's local values into a pinned record. The host computes, at each step it acts on, the first step
 and the first time at which it must act again (`Solver::step_horizon`: `n_steps`, `t_stop`, output and sample
-intervals, time-based outputs, monitors, control files). Each such condition is `step >= s` or `t >= t_x`
+intervals, time-based outputs, control files). Each such condition is `step >= s` or `t >= t_x`
 (intervals: their next multiple; times: the threshold `due` compares with), so the device's comparison with
-their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (statistics
-after `t_start`) stops it at every step where it may hold, and the host decides as before.
+their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (spectra,
+phase averages and time-averaged probes after `t_start`) stops it at every step where it may hold, and the
+host decides as before.
 
 The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
 Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
@@ -452,8 +453,37 @@ before 12.4, or a failed capture of NCCL operations under one, tried on every ra
 launch one step at a time with the IF bodies always run.
 
 Runs with triggers stop the device at every step (triggers read probe values and the wall time on the
-host), and runs with boundary conditions of `t` at every progress row (the rows check the expressions'
-errors on the host). Outputs stop the device at their steps.
+host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
+expressions' errors on the host, or follow the half step the host completes). Outputs stop the device at
+their steps.
+
+A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
+the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
+go into a pinned array per record slot: the ledger's totals, the element drift over chemistry calls and
+each repair site's counts. The repair sites' cells start their next interval in the same kernels. The host
+reduces them over the ranks as it takes the record.
+
+Force and integral monitors are evaluated in the graph. After a step's end, a kernel sets one flag per
+monitor (the step is accepted, the device goes on, and the step is a multiple of the monitor's interval);
+each monitor's reduction sits under an IF node on its flag and is reduced over the ranks on the device
+(NCCL in NCCL builds), then copied into a pinned array per record slot with a bit in the record. The host
+writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
+monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
+kinetic-energy budget or fused chemistry stay on the host.
+
+The statistics means sample in the graph too, when they are the only statistics (no spectra or phase
+averages) and chemistry is not fused. Their clock (weight, last sample time, `t_start`, sample count) lives
+in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
+(`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
+match the host's bit for bit. The host reads the clock when it writes a snapshot or a restart.
+
+Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
+evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
+`write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
+array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
+them take effect at the host's next step.
 
 ### 11. Read-only loads (#641, not kept)
 

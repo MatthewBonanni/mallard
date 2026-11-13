@@ -259,6 +259,8 @@ class Solver {
          *        modeled walls), then the modeled heat flux into the fluid.
          */
         std::array<rtype, 2 * N_DIM + 1> calc_force(const Kokkos::View<uint32_t *> & faces);
+        /** @brief calc_force's values, as doubles, into out on the device (capturable). */
+        void reduce_force(const Kokkos::View<uint32_t *> & faces, double * out);
 
         /**
          * @brief Sum of each conservative variable integrated over the domain.
@@ -279,6 +281,8 @@ class Solver {
          *        else least-squares ones.
          */
         std::array<rtype, N_FLOW_STATISTICS> integrate_flow_statistics();
+        /** @brief integrate_flow_statistics' values, as doubles, into out on the device (capturable). */
+        void reduce_flow_statistics(double * out);
 
         /**
          * @brief W = [rho, u, p] in W_cells and its gradients in
@@ -447,6 +451,18 @@ class Solver {
         uint32_t n_progress_values() const;
         void mixture_reductions(step_queue::MixtureDiagnostics * out);
         void chemistry_reductions(step_queue::Chemistry * out);
+        /** @brief The means sampled in the step graph. */
+        bool statistics_on_device() const;
+        /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
+        bool monitors_on_device() const;
+        void allocate_monitors();
+        /** @brief Monitor k's columns (forces of zone k, or the integrals after the zones) into monitor_results. */
+        void monitor_reductions(size_t k);
+        void write_force_row(ForceMonitor & monitor, const double * values);
+        void write_integral_row(const double * values);
+        void write_staged_monitors(const step_queue::Record & record);
+        /** @brief Writes the probes the record staged (collective). */
+        void write_staged_probes(const step_queue::Record & record);
         /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
         void after_step(Kokkos::Timer & step_timer, bool on_device);
         /** @brief Whether the device writes progress rows' local values, which the host reports later. */
@@ -848,6 +864,16 @@ class Solver {
         Kokkos::View<step_queue::ProgressLocals> progress_device;
         Kokkos::View<double *> progress_values;  // run health: ledger totals, element drift, repairs (rank's values)
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> progress_staging;  // (record, value)
+        Kokkos::View<double *> monitor_results;  // columns of every monitor
+        Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
+        std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
+        Kokkos::View<uint32_t> statistics_due;  // the current launch samples the means
+        Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
+        std::vector<size_t> staged_probes;       // probes the step graph evaluates
+        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint64_t *> probe_intervals;
+        Kokkos::View<uint64_t *> monitor_intervals;
+        Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)
 
         // Run control
         bool control_enabled = false;

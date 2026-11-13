@@ -438,6 +438,64 @@ TEST(StepQueueTest, OutputsByStep) {
     EXPECT_TRUE(o.files.count("restart_000028.restart"));
 }
 
+TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 2\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\n";
+    expect_queue_invariant("monitors", c);
+    // As many steps run ahead as without the monitors
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("monitors", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    // The restart carries the means and their clock
+    expect_queue_invariant("means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n";
+    EXPECT_EQ(run_case("means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, BatchMeansAreSampledWithoutStoppingTheDevice) {
+    // Batches of the means close on the device; the restart carries their averages and clock
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    expect_queue_invariant("batch_means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n";
+    EXPECT_EQ(run_case("batch_means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    const std::string probes =
+        "[[probes]]\nname = \"point\"\nfile = \"{dir}/point.csv\"\ninterval = 2\npoint = " + point_of("0.4", "0.5", "0.2") +
+        "\nfields = [\"RHO\", \"U\", \"P\", \"T\"]\n"
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+        "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
+        "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"wall\"\nfile = \"{dir}/wall.csv\"\ninterval = 4\nboundary = \"bottom\"\n"
+        "fields = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+        "reductions_file = \"{dir}/wall_reductions.csv\"\n";
+    c.extra = "check_interval = 1000\n" + probes;
+    expect_queue_invariant("probes", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     // An integral, a force and a probe's value, each sampled at its own monitor's steps while steps run ahead
     Case c;
@@ -532,7 +590,11 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     c.extra = "check_interval = 2\n"
               "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 9\n"
               "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
-              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n"
+              "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
+              "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     c.numerics = "check_nan = true\n";
     c.distributed = true;
     const Outcome o = expect_queue_invariant("distributed", c);
@@ -576,7 +638,10 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
-    o.rows_on_device = solver.progress_on_device();
+    // Rows of runs with fused chemistry follow the host's half step
+    const bool fused = input.contains("chemistry") && input.at("chemistry").contains("fuse_half_steps") &&
+                       input.at("chemistry").at("fuse_half_steps").as_boolean();
+    o.rows_on_device = solver.progress_on_device() && !fused;
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
