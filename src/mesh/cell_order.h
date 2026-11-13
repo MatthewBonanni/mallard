@@ -14,12 +14,27 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "common_typedef.h"
 #include "input.h"
+
+/** @brief The nodes of every cell (CSR: cell c holds nodes[offsets[c]] to nodes[offsets[c + 1] - 1]). */
+struct CellNodes {
+    std::vector<uint32_t> offsets{0};
+    std::vector<uint32_t> nodes;
+
+    uint32_t size() const { return static_cast<uint32_t>(offsets.size() - 1); }
+    std::span<const uint32_t> operator[](uint32_t c) const { return {nodes.data() + offsets[c], offsets[c + 1] - offsets[c]}; }
+    template <typename Range>
+    void add(const Range & cell) {
+        nodes.insert(nodes.end(), std::begin(cell), std::end(cell));
+        offsets.push_back(static_cast<uint32_t>(nodes.size()));
+    }
+};
 
 /** @brief How a rank numbers its cells (see docs/design/mpi.md, section 6). */
 enum class CellOrder {
@@ -62,6 +77,6 @@ struct LocalityOrder {
  *        only if it needs a tenth fewer.
  */
 LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const std::vector<std::vector<uint32_t>> & cells, const std::vector<uint32_t> & group_ends);
+                             const CellNodes & cells, const std::vector<uint32_t> & group_ends);
 
 #endif // CELL_ORDER_H
