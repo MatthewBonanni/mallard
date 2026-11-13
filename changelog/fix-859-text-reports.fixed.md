@@ -1,1 +1,0 @@
-- `mallard info RUN_DIR` puts a blank line before its `Outcome` section, as before every other section, and `mallard info`, `mallard post derive` and `mallard pack` count one file or snapshot in the singular ("1 file") (#859).

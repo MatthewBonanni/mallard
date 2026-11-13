@@ -1,1 +1,0 @@
-- Progress rows of runs with boundary conditions of `t` are computed on the device: the check that a boundary value of `t` stayed in range runs on the device at each row, reduced over the ranks with NCCL in NCCL builds, so these rows no longer stop the step queue (#730).

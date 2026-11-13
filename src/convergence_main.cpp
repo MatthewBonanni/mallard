@@ -223,7 +223,7 @@ Run open_file(const std::string & path) {
     return run;
 }
 
-/** @brief The resolved input of a run's block (its input as written, for blocks before 0.9.1). */
+/** @brief The resolved input of a run's block (its input as written, for blocks before 0.10.0). */
 std::string recorded_input(const Run & run) {
     std::string text = string_at(run.block, {"input", "resolved"});
     return text.empty() ? string_at(run.block, {"input", "text"}) : text;

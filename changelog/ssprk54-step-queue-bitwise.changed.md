@@ -1,0 +1,1 @@
+- **Runs with time-dependent boundaries, inflows, sources or sponges under `SSPRK54`, `RDPK3Sp35` or `CK45` change in the last bits**: each stage time t + c dt is rounded once, the same on CPUs and GPUs and whether or not steps are queued ahead. The earlier rounding cannot be restored (#944).

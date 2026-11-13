@@ -1,1 +1,0 @@
-- Probes written by time and time-averaged probes are evaluated in the step graph: the device decides their output times (and shortens the steps to them) as the host does, and stages their samples, which the host writes or adds to the averages from each launch's record, so their steps no longer stop the step queue (#730).

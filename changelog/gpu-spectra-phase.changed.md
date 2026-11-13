@@ -1,1 +1,0 @@
-- Averaged spectra and phase averages are sampled in the step graph: their averages, the bins' weights and the trigger signal's crossings live in device memory, with the same arithmetic at any `[run] step_queue`, so their samples no longer stop the step queue (#730).

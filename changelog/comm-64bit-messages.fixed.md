@@ -1,1 +1,0 @@
-- MPI halo exchanges, chemistry load balancing and string broadcasts and gathers no longer overflow when one message holds more than 2^31 values: they send it in pieces (#876).

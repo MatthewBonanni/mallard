@@ -967,7 +967,7 @@ std::string Page::html() const {
         h += "<details><summary>The resolved input: every key the run read, defaults filled in</summary><pre>" +
              escape(resolved) + "</pre></details>\n";
     } else if (start.type == Type::OBJECT) {
-        h += "<p class=\"note\">The run block records no resolved input (runs before Mallard 0.9.1).</p>";
+        h += "<p class=\"note\">The run block records no resolved input (runs before Mallard 0.10.0).</p>";
     }
     h += "</section>\n";
 

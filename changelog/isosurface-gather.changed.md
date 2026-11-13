@@ -1,1 +1,0 @@
-- Isosurface probes and snapshots select the cells the surface may cross on the device at each write and `[statistics]` sample, and copy only those cells' levels to the host and extract the surface from them, instead of every cell of the mesh (#863).

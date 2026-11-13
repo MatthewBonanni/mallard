@@ -1,1 +1,0 @@
-- `n_points` on an isosurface probe stays an error, now saying why (its elements have no parameters to place a grid of samples on) and pointing to `[[write_data]]` snapshots of the isosurface for values on it (#798).

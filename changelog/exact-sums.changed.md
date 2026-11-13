@@ -1,1 +1,0 @@
-- Exact sums on the device have one implementation, `ExactSums`, with the number of columns set at run time: domain averages of sources, totals over moving regions, average-pressure outlets and dynamic LES constants all use it. Results are unchanged bit for bit.
