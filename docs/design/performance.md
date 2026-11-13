@@ -580,6 +580,28 @@ Apple M4 Pro, 2 Threads, TENO5, `numerics` setup phase, the better of 2 alternat
 The 3D moments (5.6 s for 64³, the same before and after), the QR and the search are left: their
 operations are already in order, and changing their order would change the tables.
 
+### 14. Working set beyond the TENO tables (#552)
+
+`mallard check --memory a100-80` (CPU, 2 Threads, one step) of 3D TENO5 cases, HLLC, SSPRK3: the Taylor-Green
+vortex of the performance set on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra (perfect gas, viscous; LES adds
+the Sigma model), and the propane flame of `flame_3d` with TENO5 on $48 \times 24^2$ hexahedra and
+$24 \times 12^2 \times 6$ tetrahedra (two-step mechanism, 6 species), and with GRI-Mech 3.0 (53 species) on
+$32 \times 16^2$ hexahedra. Bytes per cell at the steady state, and the cells that fit on an A100-80GB. The
+reconstruction tables are 32.0 KB per hexahedron and 43.4 KB per tetrahedron (#431); next come the face states
+(2.2 KB per hexahedron, 1.2 KB per tetrahedron), the troubled passes' scratch (1.8 KB) and the vertex
+gradient's weights (0.6 / 1.5 KB). Results are bitwise unchanged (restart files after 4 steps of each case,
+and of MUSCL, double-flux and `outlet_extrapolation` variants).
+
+| bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
+|---|---|---|---|---|---|---|---|
+| main | 38,791 / 2,026,731 | 49,475 / 1,589,048 | 38,831 / 2,024,643 | 49,515 / 1,587,764 | 41,211 / 1,881,073 | 51,515 / 1,504,820 | 47,998 / 1,615,983 |
+| ghost weights of boundary faces | 38,656 / 2,033,796 | 49,387 / 1,591,896 | 38,696 / 2,031,706 | 49,427 / 1,590,590 | 41,073 / 1,887,378 | 51,425 / 1,507,453 | 47,862 / 1,620,574 |
+
+- **Ghost weights of boundary faces.** The vertex gradient (viscous fluxes, the hybrid flux's sensor, MUSCL)
+  kept a weight for every face of every cell, though only boundary faces have ghosts; it keeps them for those
+  faces alone, with each cell's list of them: 135 bytes less per hexahedron and 88 per tetrahedron here, about
+  140 and 92 on large meshes.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
