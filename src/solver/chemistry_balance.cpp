@@ -354,14 +354,12 @@ void ChemistryBalance::transfer(const std::vector<comm::DeviceMessage> & out,
     }
 #ifdef Mallard_HAS_MPI
     for (const comm::DeviceMessage & m : in) {
-        requests.push_back(MPI_REQUEST_NULL);
-        MPI_Irecv(m.data, static_cast<int>(m.bytes / sizeof(rtype)), rtype_mpi(), m.rank, tag, comm::world(),
-                  &requests.back());
+        comm::irecv(static_cast<rtype *>(m.data), m.bytes / sizeof(rtype), rtype_mpi(), m.rank, tag, comm::world(),
+                    requests);
     }
     for (const comm::DeviceMessage & m : out) {
-        requests.push_back(MPI_REQUEST_NULL);
-        MPI_Isend(m.data, static_cast<int>(m.bytes / sizeof(rtype)), rtype_mpi(), m.rank, tag, comm::world(),
-                  &requests.back());
+        comm::isend(static_cast<const rtype *>(m.data), m.bytes / sizeof(rtype), rtype_mpi(), m.rank, tag, comm::world(),
+                    requests);
     }
 #endif
 }

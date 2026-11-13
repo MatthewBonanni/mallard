@@ -87,9 +87,12 @@ constexpr Option CHECK_OPTIONS[] = {
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
     {"--view", "", "DIR",
-     "Write the case view to DIR/case.vtkhdf for ParaView: every region the case uses (filled regions as their "
-     "cells with their fractions, surfaces and curves with their normals or tangents and measures) and every "
-     "boundary zone, one block each (builds without HDF5: DIR/case.vtm). Default: none."},
+     "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
+     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
     KOKKOS,
 };
 
@@ -126,6 +129,10 @@ constexpr Option INFO_OPTIONS[] = {
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --mesh-fields does; the stencil fields need the case, from mallard check. "
      "Default: none."},
+    {"--view", "", "DIR",
+     "Mesh files: write the case view of the mesh alone (its cells, boundary and cell zones and periodic "
+     "pairs) to DIR, as mallard check --view does: DIR/case.vtkhdf (DIR/case.vtm without HDF5), "
+     "DIR/case-light.svg and DIR/case-dark.svg. Default: none."},
     {"--quality", "", "PREFIX", "Deprecated: --mesh-fields PREFIX."},
     {"--verify", "", "",
      "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
@@ -170,7 +177,8 @@ constexpr Option DIFF_OPTIONS[] = {
 constexpr Option EXTRACT_OPTIONS[] = {
     {"-i", "", "FILE",
      "The input file of the case: its mesh, physics, numerics, [regions] and [[probes]]. Default: the input in "
-     "the run block of FILE (Mallard 0.10 and later record it resolved)."},
+     "the run block of FILE (Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
     {"--probe", "", "NAMES",
      "The [[probes]] of the input to extract, by name, separated by commas (--probe wake,box). Default: every "
      "one, unless --region or --snapshot is given."},
@@ -181,7 +189,7 @@ constexpr Option EXTRACT_OPTIONS[] = {
      "start = [0, 0], end = [1, 0], n_points = 50}'). Default: none."},
     {"--name", "", "NAME",
      "The name of the --region probe and of --snapshot: probe_NAME.csv, probe_NAME_reductions.csv, "
-     "NAME_<step>.vtkhdf. Default: extract."},
+     "NAME.vtkhdf. Default: extract."},
     {"--fields", "", "LIST",
      "The fields of --region and --snapshot, separated by commas, as [[probes]] and [[write_data]] take "
      "them (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T."},
@@ -192,7 +200,7 @@ constexpr Option EXTRACT_OPTIONS[] = {
      "Whether --region samples cell averages or the reconstruction's point values. Default: cell."},
     {"--snapshot", "", "vtkhdf|vtu",
      "Also write a snapshot of --fields (of --region, if given) at each step extracted, as [[write_data]] "
-     "writes it: OUTPUT/NAME_<step>.vtkhdf, or .vtu files with a .pvd index. Default: none."},
+     "writes it: OUTPUT/NAME.vtkhdf, or .vtu files with a .pvd index. Default: none."},
     {"--steps", "", "LIST",
      "Extract the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
     {"--times", "", "T|T1:T2",
@@ -206,6 +214,106 @@ constexpr Option EXTRACT_OPTIONS[] = {
     {"--format", "", "text|json",
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
+    KOKKOS,
+};
+
+constexpr Option DERIVE_OPTIONS[] = {
+    {"--fields", "", "LIST",
+     "The fields to write, separated by commas (MACH,P0,Q_CRITERION): those mallard list fields says mallard "
+     "post derive writes. Required."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics, numerics and [output] reference and mixture. Default: the "
+     "input in the run block of FILE (Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
+    {"--reference", "", "TABLE",
+     "The [output] reference of CP, as an inline TOML table ('{rho = 1.2, u = [30, 0], p = 101325}'), in place "
+     "of the input's. Default: the input's."},
+    {"--mixture", "", "TABLE",
+     "The [output.mixture] table of the mixture fields, inline ('{fuel = \"fuel_inlet\", oxidizer = {X = {O2 = 1, "
+     "N2 = 3.76}}}'), in place of the input's. Default: the input's."},
+    {"--with-state", "", "", "Also write RHO, U, P and T in each snapshot, so that it stands alone."},
+    {"--region", "", "REGION",
+     "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
+     "table, as [[write_data]] region takes it. Default: the whole mesh."},
+    {"--snapshot", "", "vtkhdf|vtu",
+     "The format of the snapshots: OUTPUT/NAME.vtkhdf, every snapshot in one file, or .vtu files with a "
+     ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
+    {"--steps", "", "LIST",
+     "Derive the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Derive the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: "
+     "every snapshot."},
+    {"--every", "", "N", "Derive every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Derive only the last snapshot selected."},
+    {"--output", "-o", "DIR", "The directory the snapshots go to. Default: derived."},
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts. Default: text."},
+    KOKKOS,
+};
+
+constexpr Option AVERAGE_OPTIONS[] = {
+    {"--fields", "", "LIST",
+     "The variables to average, separated by commas, as [statistics] fields takes them, derived fields "
+     "included (RHO,U_X,P,MACH). Default: RHO, U_X, U_Y, U_Z (3D), P and T."},
+    {"--products", "", "LIST",
+     "The covariances to keep, as pairs A*B separated by commas (U_X*U_Y,P*U_X), or none; a variable not in "
+     "--fields is averaged too. Default: the variance of every field and the covariances of the velocity "
+     "components (the Reynolds stresses)."},
+    {"--favre", "", "",
+     "Also Favre (density-weighted) means FAVRE_MEAN_<a> and covariances FAVRE_COV_<a>_<b> of the fields and "
+     "products other than RHO, exactly, the triple correlations included; adds RHO to the fields."},
+    {"--t-start", "", "T",
+     "Where the averaging window starts, in s: the first snapshot weighs the time since then (each other, the "
+     "time since the previous one). The run's [statistics] t_start reproduces its averages. Default: as long "
+     "before the first snapshot as the second is after it, so that evenly spaced snapshots weigh the same."},
+    {"--homogeneous", "", "DIRS",
+     "Also average over these directions, separated by commas (x,z: profiles in y of a channel), weighted by "
+     "cell volume, and write a CSV profile, OUTPUT/NAME.csv, instead of a snapshot. Covariances include the "
+     "dispersive part, the spatial variation of the time means. Default: none."},
+    {"--conditional", "", "TABLE",
+     "Also the PDF of one or two variables and conditional means and variances of fields on them, as an "
+     "inline TOML table or an array of them, as [[statistics.conditional]] takes them ({on = "
+     "\"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"]}), written to OUTPUT/conditional_<on>.csv unless the table "
+     "gives a file. Without --fields and --products, only these. Default: none."},
+    {"--statistics", "", "",
+     "Average over --homogeneous directions the [statistics] fields (MEAN_, COV_) that one snapshot of FILE "
+     "holds, instead of averaging its states in time."},
+    {"--rtol", "", "R",
+     "With --homogeneous: cells share a row where their centers agree to R times the mesh's extent in each "
+     "kept direction. Default: 1e-6."},
+    {"--region", "", "REGION",
+     "Average over a region only: a name of the input's [regions] or of the mesh, or an inline TOML table, as "
+     "[[write_data]] region takes it; with --homogeneous, a region of the mesh's dimension, its cells weighted "
+     "by the fraction of them in it. A region defined by the solution (where, isosurface, or a boolean of "
+     "them) is placed on each snapshot's state, and the time averages of the integrals, means, covariances and "
+     "Favre averages over it are written to OUTPUT/NAME_reductions.csv instead of a snapshot, or with "
+     "--homogeneous their profile, each cell weighted by the time average of its measure in it. Default: the "
+     "whole mesh."},
+    {"--reference", "", "TABLE",
+     "The [output] reference of CP, as an inline TOML table, in place of the input's, as for mallard post "
+     "derive. Default: the input's."},
+    {"--mixture", "", "TABLE",
+     "The [output.mixture] table of the mixture fields, inline, in place of the input's, as for mallard post "
+     "derive. Default: the input's."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics and numerics. Default: the input in the run block of FILE "
+     "(Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO "
+     "cache_file resolve from the run's directory."},
+    {"--snapshot", "", "vtkhdf|vtu",
+     "The format of the snapshot of the averages: OUTPUT/NAME.vtkhdf, or a .vtu file with a .pvd index. "
+     "Default: vtkhdf, or vtu in builds without HDF5."},
+    {"--name", "", "NAME", "The name of the output: NAME.vtkhdf, or NAME.csv. Default: average."},
+    {"--steps", "", "LIST",
+     "Average the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Average the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: "
+     "every snapshot."},
+    {"--every", "", "N", "Average every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Only the last snapshot selected (with --statistics)."},
+    {"--output", "-o", "DIR", "The directory the output goes to. Default: average."},
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts. Default: text."},
     KOKKOS,
 };
 
@@ -230,10 +338,11 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
      "not uniform, or time-step studies. Default: (1 / cells)^(1/dim) from each run's cell count."},
     {"--field", "", "NAME",
      "Instead of quantities, the L1, L2 and Linf errors of this field of each run's last snapshot (NAME[k] for "
-     "a component of a vector) against --exact. Needs --exact."},
+     "a component of a vector) against --exact, or without it against the finest run's, remapped "
+     "conservatively onto each coarser run's cells (three or more runs)."},
     {"--exact", "", "EXPR",
      "The exact solution of --field, an expression of x, y, z and t, averaged over each cell (quadrature exact "
-     "to degree 6) at the snapshot's time."},
+     "to degree 6) at the snapshot's time. Default: the finest run is the reference."},
     {"--format", "", "text|json",
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
@@ -530,7 +639,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -541,7 +650,7 @@ constexpr Command COMMANDS[] = {
         .name = "info",
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
-        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]\n"
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX] [--view DIR]\n"
                     "mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
@@ -554,8 +663,8 @@ constexpr Command COMMANDS[] = {
             "run block (before Mallard 0.9), without snapshot blocks (before 0.10) or from a newer Mallard are "
             "reported with a note that says what is read instead.\n"
             "\n"
-            "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index (.vtkhdf.series, .pvd, .xmf), "
-            "a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
+            "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5), a series file (.vtkhdf) or index (.vtkhdf.series, .pvd, "
+            ".xmf), a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
             "or integrals, or a mesh file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 "
             "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
             "of its dimension, which also reports its quality as mallard check does.\n"
@@ -569,10 +678,11 @@ constexpr Command COMMANDS[] = {
             "configuration, health, monitors, cost and output, built from mallard.jsonl alone.",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
-        .examples = "$ mallard info solut/flow.vtkhdf.series\n"
+        .examples = "$ mallard info solut/flow.vtkhdf\n"
                     "$ mallard info solut/restart_001000.restart --format json\n"
-                    "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
+                    "$ mallard info solut/restart_001000.restart --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --mesh-fields wing\n"
+                    "$ mallard info wing.msh --view view   # view/case-light.svg: the zones, labeled\n"
                     "$ mallard info runs/cylinder\n"
                     "$ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html",
         .exit_status = "0  the file was read\n"
@@ -591,18 +701,22 @@ constexpr Command COMMANDS[] = {
         .description =
             "Without an input file, lists every field the [[write_data]], [[probes]] and [statistics] fields "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
-            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
+            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...). Its \"available in\" column says where each one can be had: "
+            "written by [[write_data]], sampled by [[probes]], averaged by [statistics], or derived after the run "
+            "by mallard post derive.\n"
             "\n"
-            "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
-            "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
-            "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
+            "With an input file, reads it and its mechanism (not its mesh, which need not exist yet) and lists "
+            "exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, LES and "
+            "statistics, and its dimension (mallard --dim 3 list fields for a 3D case whose mesh file does not "
+            "exist yet), with where each one can be had; then the common fields it does not have, with what they "
+            "need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard list fields\n"
                     "$ mallard list fields input.toml\n"
                     "$ mallard list fields input.toml --format json",
         .exit_status = "0  listed\n"
-                       "1  the case cannot be set up (the errors are printed)\n"
+                       "1  the input or its mechanism cannot be read (the errors are printed)\n"
                        "2  usage error",
         .dim = Case::input,
         .run = list_fields_main,
@@ -613,14 +727,15 @@ constexpr Command COMMANDS[] = {
         .summary = "The species of a case",
         .synopsis = "mallard list species INPUT [--format text|json]",
         .description =
-            "Sets the case up as mallard check does and lists its species, one table row each, in the order "
-            "of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.",
+            "Reads the input and its mechanism (not its mesh, which need not exist yet) and lists its species, one "
+            "table row each, in the order of the mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A "
+            "single gas has none.",
         .options = LIST_OPTIONS,
         .arguments = INPUT_ARGUMENT,
         .examples = "$ mallard list species flame.toml\n"
                     "$ mallard list species flame.toml --format json",
         .exit_status = "0  listed\n"
-                       "1  the case cannot be set up (the errors are printed)\n"
+                       "1  the input or its mechanism cannot be read (the errors are printed)\n"
                        "2  usage error",
         .dim = Case::input,
         .run = list_species_main,
@@ -692,8 +807,8 @@ constexpr Command COMMANDS[] = {
         .options = DIFF_OPTIONS,
         .arguments = DIFF_ARGUMENTS,
         .examples = "$ mallard diff run1/solut/restart_001000.restart run2/solut/restart_001000.restart\n"
-                    "$ mallard diff serial/flow_000100.vtkhdf mpi/flow_000100.vtkhdf --tol 1e-12\n"
-                    "$ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --step 300 --fields RHO,P\n"
+                    "$ mallard diff serial/flow.vtkhdf mpi/flow.vtkhdf --tol 1e-12\n"
+                    "$ mallard diff a/flow.vtkhdf b/flow.vtkhdf --step 300 --fields RHO,P\n"
                     "$ mallard diff fine/restart_000500.restart coarse/restart_000500.restart --remap --tol 1e-2\n"
                     "$ mallard diff a.restart b.restart --format json | jq '.fields[] | {name, status}'",
         .exit_status = "0  identical, or every difference within tolerance\n"
@@ -741,7 +856,7 @@ constexpr Command COMMANDS[] = {
             "rounding for snapshots of RHO, U and P.\n"
             "\n"
             "FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF output) or a series "
-            "of them (.vtkhdf.series, a series file, .xmf); several files, or a glob, extract in the order given. "
+            "of them (a series file .vtkhdf, .vtkhdf.series, .xmf); several files, or a glob, extract in the order given. "
             "The case comes from -i, else from FILE's run block, and its mesh must be the file's: run it where "
             "the run ran, so that relative paths (the mesh file) resolve. --steps, --times, --every and --latest "
             "choose the snapshots, by the steps and times the files record (files written before 0.10 that "
@@ -752,17 +867,97 @@ constexpr Command COMMANDS[] = {
             "snapshot with its units. Under mpirun -n N the probes are evaluated on N ranks.",
         .options = EXTRACT_OPTIONS,
         .arguments = FILES_ARGUMENTS,
-        .examples = "$ mallard post extract solut/flow.vtkhdf.series      # every [[probes]] of the run\n"
+        .examples = "$ mallard post extract solut/flow.vtkhdf      # every [[probes]] of the run\n"
                     "$ mallard post extract solut/restart_*.restart --probe wake -o wake\n"
-                    "$ mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE\n"
+                    "$ mallard post extract solut/flow.vtkhdf --latest --region domain --fields RHO,RHOE\n"
                     "$ mallard post extract solut/flow.xmf --times 0.1:0.5 --fields MASS_FLUX --reductions integral \\\n"
                     "      --region '{type = \"cut_plane\", point = [0.5, 0, 0], normal = [1, 0, 0]}'\n"
-                    "$ mallard post extract solut/flow.vtkhdf.series --latest --snapshot vtkhdf --fields P,T",
+                    "$ mallard post extract solut/flow.vtkhdf --latest --snapshot vtkhdf --fields P,T",
         .exit_status = "0  every snapshot was extracted\n"
                        "1  a file cannot be read, the case cannot be set up, or the file is not of its mesh\n"
                        "2  usage error",
         .dim = Case::output_case,
         .run = extract_main,
+    },
+    {
+        .name = "post derive",
+        .group = "Post",
+        .summary = "Derived fields of existing output (MACH, P0, Q_CRITERION, ...), as the run would have written them",
+        .synopsis = "mallard post derive FILE... --fields LIST [-i input.toml] [--with-state] [-o DIR]\n"
+                    "mallard post derive FILE... --fields CP --reference TABLE\n"
+                    "mallard post derive FILE... --fields MIXTURE_FRACTION --mixture TABLE",
+        .description =
+            "Sets up the case of a restart file, snapshot or series and writes snapshots of derived fields of its "
+            "stored state, without rerunning, so the fields need not be chosen before a long run. It runs the "
+            "run's own code, with its reconstruction and gradients: a field is what [[write_data]] would have "
+            "written at that step, the same values for restart files and snapshots of the conservative "
+            "variables, the same to rounding for snapshots of RHO, U and P. --fields takes the fields "
+            "mallard list fields says it writes, the gradient fields VORTICITY and Q_CRITERION among them, not "
+            "what only the run itself records (CFL, P_MAX, TENO_SIGMA); those that need input the run did not give "
+            "(the reference of CP, the streams of MIXTURE_FRACTION) take it from --reference and --mixture.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; --steps, --times, --every and --latest "
+            "choose the snapshots by the steps and times the files record. The snapshots go to the output "
+            "directory, so a run's files are never overwritten. Under mpirun -n N the fields are computed on N "
+            "ranks.",
+        .options = DERIVE_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post derive solut/flow.vtkhdf --fields MACH,P0,Q_CRITERION\n"
+                    "$ mallard post derive solut/restart_*.restart --latest --fields ENTROPY,DILATATION --with-state\n"
+                    "$ mallard post derive solut/flow.vtkhdf --fields CP \\\n"
+                    "      --reference '{rho = 1.2, u = [30, 0], p = 101325}'\n"
+                    "$ mallard post derive solut/flame.vtkhdf --fields MIXTURE_FRACTION,FLAME_INDEX \\\n"
+                    "      --mixture '{fuel = \"fuel_inlet\", oxidizer = \"air_inlet\"}'",
+        .exit_status = "0  every snapshot was derived\n"
+                       "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
+                       "file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = derive_main,
+    },
+    {
+        .name = "post average",
+        .group = "Post",
+        .summary = "Means, RMS, covariances, PDFs and conditional statistics over saved snapshots, as [statistics] "
+                   "keeps them",
+        .synopsis = "mallard post average FILE... [--fields LIST] [--products LIST] [--favre] [--t-start T] [-o DIR]\n"
+                    "mallard post average FILE... --homogeneous DIRS [--region REGION]\n"
+                    "mallard post average FILE... --conditional TABLE\n"
+                    "mallard post average FILE --statistics --homogeneous DIRS",
+        .description =
+            "Sets up the case of a series of restart files or snapshots and averages their states in time, for runs "
+            "without [statistics]: per cell, the means MEAN_<a> and covariances COV_<a>_<b> that [statistics] keeps, "
+            "by its own code, RMS_<a> (the square root of a variance) and with --favre the Favre means and "
+            "covariances. Each snapshot weighs the time since the previous one, as a run's samples do, so restart "
+            "files at the run's sampling steps, with --t-start at its t_start, give the run's averages bit for bit. "
+            "--fields takes what [statistics] fields takes, derived fields included (mallard list fields), and "
+            "in reacting runs HRR and OMEGA_<species>. --conditional adds the PDFs and conditional statistics of "
+            "[[statistics.conditional]], such as conditional means on the mixture fraction, written as CSV.\n"
+            "\n"
+            "The averages are a snapshot of the last step, OUTPUT/NAME.vtkhdf, as a run writes its "
+            "[statistics]. --homogeneous averages them further over directions in which the flow is statistically "
+            "uniform and writes a CSV profile (the kept coordinates, n_cells, then the columns), which synthetic "
+            "inflow profile reads; --statistics does that to the [statistics] fields one snapshot already holds. "
+            "The states are read one at a time, so memory does not grow with the number of snapshots.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; the snapshots' steps and times are those "
+            "the files record, in increasing time. Under mpirun -n N the cells are split over N ranks.",
+        .options = AVERAGE_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post average solut/restart_*.restart --t-start 40\n"
+                    "$ mallard post average solut/flow.vtkhdf --times 40:80 --favre\n"
+                    "$ mallard post average solut/flow.vtkhdf --fields U_X,U_Y,U_Z,MACH --homogeneous x,z\n"
+                    "$ mallard post average stats/channel.vtkhdf --latest --statistics --homogeneous x,z\n"
+                    "$ mallard post average solut/flame.vtkhdf --conditional \\\n"
+                    "      '{on = \"MIXTURE_FRACTION\", fields = [\"T\", \"HRR\"], weight = \"mass\"}'",
+        .exit_status = "0  the averages were written\n"
+                       "1  a file cannot be read, the case cannot be set up, a field needs input it lacks, or the "
+                       "file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = average_main,
     },
     {
         .name = "post convergence",
@@ -771,7 +966,7 @@ constexpr Command COMMANDS[] = {
                    "resolutions",
         .synopsis = "mallard post convergence RUN_DIR RUN_DIR [RUN_DIR...] [--quantity NAMES] [--time T | --average "
                     "T0:T1]\n"
-                    "mallard post convergence RUN_DIR|FILE... --field NAME --exact EXPR",
+                    "mallard post convergence RUN_DIR|FILE... --field NAME [--exact EXPR]",
         .description =
             "Estimates the discretization error of a case from runs of it at several resolutions: for each "
             "quantity, the order of accuracy the runs show, the value extrapolated to zero cell size and the fine "
@@ -788,14 +983,16 @@ constexpr Command COMMANDS[] = {
             "\n"
             "Three runs give an observed order; more give one per three successive runs, which agree once the "
             "runs are in the asymptotic range. Two runs assume the design order with a factor of safety of 3, a "
-            "warning. With --field and --exact the report is the error norms of a field against an exact solution "
-            "and their observed orders; then FILE can also be a snapshot or restart file of the whole mesh.",
+            "warning. With --field the report is the error norms of a field against an exact solution (--exact), "
+            "or against the finest run, and their observed orders; then FILE can also be a snapshot or restart file "
+            "of the whole mesh.",
         .options = CONVERGENCE_OPTIONS,
         .arguments = CONVERGENCE_ARGUMENTS,
         .examples = "$ mallard post convergence coarse medium fine          # every force, integral and probe\n"
                     "$ mallard post convergence coarse medium fine --quantity forces_cylinder:F_x\n"
                     "$ mallard post convergence n32 n64 n128 --average 10:20 --quantity F_x,F_y\n"
                     "$ mallard post convergence n16 n32 n64 --field RHO --exact '1 + 0.2 * sin(2 * pi * (x - t))'\n"
+                    "$ mallard post convergence n16 n32 n64 n128 --field RHO\n"
                     "$ mallard post convergence coarse fine --order 2 --format json",
         .exit_status = "0  no errors (there may be warnings: oscillating, two runs, an order far from the design's)\n"
                        "1  a quantity diverges, a run cannot be read, or the runs are not of one case\n"
@@ -913,7 +1110,7 @@ constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals and snapshots of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

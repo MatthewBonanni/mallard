@@ -13,11 +13,13 @@
 #ifndef COMM_H
 #define COMM_H
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <type_traits>
@@ -158,6 +160,99 @@ void alltoallv(const T * send, std::span<const uint64_t> send_counts, std::span<
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */
 MPI_Comm world();
+
+/**
+ * @brief Posts a nonblocking send of n values to rank `to`, in messages of at
+ *        most max_count values each, and appends their requests. The matching
+ *        irecv splits the same n the same way.
+ */
+template <typename T>
+void isend(const T * data, const uint64_t n, const MPI_Datatype type, const int to, const int tag, const MPI_Comm c,
+           std::vector<MPI_Request> & requests, const uint64_t max_count = detail::mpi_max_count) {
+    for (uint64_t at = 0; at < n; at += max_count) {
+        requests.push_back(MPI_REQUEST_NULL);
+        if (MPI_Isend(data + at, static_cast<int>(std::min(max_count, n - at)), type, to, tag, c, &requests.back()) !=
+            MPI_SUCCESS) {
+            throw std::runtime_error("MPI error in MPI_Isend");
+        }
+    }
+}
+
+/** @brief Posts the nonblocking receive of n values from rank `from` that matches isend. */
+template <typename T>
+void irecv(T * data, const uint64_t n, const MPI_Datatype type, const int from, const int tag, const MPI_Comm c,
+           std::vector<MPI_Request> & requests, const uint64_t max_count = detail::mpi_max_count) {
+    for (uint64_t at = 0; at < n; at += max_count) {
+        requests.push_back(MPI_REQUEST_NULL);
+        if (MPI_Irecv(data + at, static_cast<int>(std::min(max_count, n - at)), type, from, tag, c, &requests.back()) !=
+            MPI_SUCCESS) {
+            throw std::runtime_error("MPI error in MPI_Irecv");
+        }
+    }
+}
+
+/**
+ * @brief Writes n values at byte offset `at` of fh (independent), in pieces of
+ *        at most max_count values each. Whether every piece succeeded.
+ */
+template <typename T>
+bool write_at(const MPI_File fh, const MPI_Offset at, const T * data, const uint64_t n, const MPI_Datatype type,
+              const uint64_t max_count = detail::mpi_max_count) {
+    bool ok = true;
+    for (uint64_t i = 0; i < n; i += max_count) {
+        const int count = static_cast<int>(std::min(max_count, n - i));
+        if (MPI_File_write_at(fh, at + MPI_Offset(i * sizeof(T)), data + i, count, type, MPI_STATUS_IGNORE) !=
+            MPI_SUCCESS) {
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+/**
+ * @brief Collective write_at on a file of the world communicator: each rank
+ *        writes its own n values, and every rank calls MPI_File_write_at_all
+ *        as often as the rank with the most pieces needs.
+ */
+template <typename T>
+bool write_at_all(const MPI_File fh, const MPI_Offset at, const T * data, const uint64_t n, const MPI_Datatype type,
+                  const uint64_t max_count = detail::mpi_max_count) {
+    const uint64_t n_pieces = allreduce((n + max_count - 1) / max_count, Op::MAX);
+    bool ok = true;
+    for (uint64_t p = 0; p < n_pieces; p++) {
+        const uint64_t i = std::min(n, p * max_count);
+        const int count = static_cast<int>(std::min(max_count, n - i));
+        if (MPI_File_write_at_all(fh, at + MPI_Offset(i * sizeof(T)), data + i, count, type, MPI_STATUS_IGNORE) !=
+            MPI_SUCCESS) {
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+/**
+ * @brief Collective write of n values on a file of the world communicator,
+ *        value i at byte displacements[i] (increasing) past `at`, through file
+ *        views of at most max_count values each. Leaves the last view on fh.
+ */
+template <typename T>
+bool write_all_hindexed(const MPI_File fh, const MPI_Offset at, const T * data, const MPI_Aint * displacements,
+                        const uint64_t n, const MPI_Datatype type, const uint64_t max_count = detail::mpi_max_count) {
+    const uint64_t n_pieces = allreduce((n + max_count - 1) / max_count, Op::MAX);
+    bool ok = true;
+    for (uint64_t p = 0; p < n_pieces; p++) {
+        const uint64_t i = std::min(n, p * max_count);
+        const int count = static_cast<int>(std::min(max_count, n - i));
+        MPI_Datatype file_type;
+        MPI_Type_create_hindexed_block(count, 1, displacements + i, type, &file_type);
+        MPI_Type_commit(&file_type);
+        // Both collectives on every rank, even after a failure
+        if (MPI_File_set_view(fh, at, type, file_type, "native", MPI_INFO_NULL) != MPI_SUCCESS) ok = false;
+        if (MPI_File_write_all(fh, data + i, count, type, MPI_STATUS_IGNORE) != MPI_SUCCESS) ok = false;
+        MPI_Type_free(&file_type);
+    }
+    return ok;
+}
 #endif
 
 } // namespace comm

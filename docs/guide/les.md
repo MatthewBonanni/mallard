@@ -29,7 +29,8 @@ model = "sigma"            # the default in 3D
 
 [numerics]
 preset = "les"             # hybrid flux: central where smooth, HLLC at
-                           # shocks; unlimited MUSCL states; CFL 0.8
+                           # shocks; unlimited MUSCL states; SSPRK54
+                           # at CFL 2.0
 
 [integrals]
 budget = true              # model vs numerical dissipation in integrals.csv

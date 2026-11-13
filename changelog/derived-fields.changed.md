@@ -1,1 +1,0 @@
-- The Q-criterion output variable `Q` is renamed `Q_CRITERION`, with no alias: `variables = ["Q"]` is now an input error that names `Q_CRITERION`. The examples, the `channel_les` tutorial and the example scripts write and read `Q_CRITERION` (part of #511).

@@ -75,6 +75,17 @@ double pair_order(double h_coarse, double h_fine, double e_coarse, double e_fine
 /** @brief The least-squares slope of ln e against ln h; NaN with fewer than two positive errors. */
 double fitted_order(const std::vector<double> & h, const std::vector<double> & e);
 
+/**
+ * @brief The observed order of errors against a reference grid of size h_ref < h_fine < h_coarse, rather
+ *        than an exact solution: the p of e = C (h^p - h_ref^p), which errors u_h - u_ref of a solution with
+ *        error C h^p g(x) on every grid follow. NaN where no positive order fits.
+ */
+double reference_order(double h_coarse, double h_fine, double h_ref, double e_coarse, double e_fine);
+
+/** @brief The least-squares p (and C) of ln e = ln C + ln(h^p - h_ref^p), each h > h_ref; NaN with fewer than two
+ *         positive errors or no positive order. */
+double fitted_reference_order(const std::vector<double> & h, const std::vector<double> & e, double h_ref);
+
 } // namespace convergence
 
 #endif // CONVERGENCE_H

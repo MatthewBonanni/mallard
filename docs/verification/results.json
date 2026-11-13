@@ -1,6 +1,6 @@
 {
- "commit": "6961ca7d",
- "date": "2026-10-23",
+ "commit": "3765aa8",
+ "date": "2026-11-13",
  "studies": [
   {
    "section": "time",
@@ -15,7 +15,7 @@
    ],
    "errors": [
     3.861866e-09,
-    2.38949e-10
+    2.389489e-10
    ],
    "design": 4.0,
    "min_order": 3.8,
@@ -36,12 +36,12 @@
    ],
    "errors": [
     3.68568e-10,
-    2.170253e-11
+    2.170275e-11
    ],
    "design": 4.0,
    "min_order": 3.85,
    "max_order": null,
-   "order": 4.085996,
+   "order": 4.085981,
    "pass": true
   },
   {
@@ -57,7 +57,7 @@
    ],
    "errors": [
     5.225191e-09,
-    3.251873e-10
+    3.251872e-10
    ],
    "design": 3.0,
    "min_order": 2.85,
@@ -1337,13 +1337,13 @@
     16.0
    ],
    "errors": [
-    0.007776257,
+    0.007792706,
     0.0001158139
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 6.069195,
+   "order": 6.072244,
    "pass": true
   },
   {
@@ -1673,7 +1673,7 @@
     16.0
    ],
    "errors": [
-    0.009819672,
+    0.00981967,
     0.0007295685
    ],
    "design": 4.0,
@@ -2377,6 +2377,27 @@
   },
   {
    "section": "curved",
+   "method": "TENO3, curved walls (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0005888833,
+    8.008716e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.878339,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO3, straight-sided cells",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
@@ -2398,11 +2419,32 @@
   },
   {
    "section": "curved",
-   "method": "TENO4, curved walls",
+   "method": "TENO3, straight-sided cells (ellipses)",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01167943,
+    0.005787429
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.012976,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO4, curved walls",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
    "n": [
     4.0,
     8.0
@@ -2419,11 +2461,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO4, curved walls (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0002509141,
+    1.064263e-05
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 4.559268,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO4, straight-sided cells",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
    "n": [
     4.0,
     8.0
@@ -2440,11 +2503,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO4, straight-sided cells (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.008908883,
+    0.004244199
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.069752,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO5, curved walls",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
    "n": [
     4.0,
     8.0
@@ -2457,6 +2541,27 @@
    "min_order": 4.5,
    "max_order": null,
    "order": 6.170082,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO5, curved walls (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    3.465932e-05,
+    1.046841e-06
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 5.049129,
    "pass": true
   },
   {
@@ -2507,7 +2612,7 @@
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/2",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
    "n": [
     4.0,
     8.0
@@ -2524,11 +2629,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO5, straight-sided cells (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01175602,
+    0.005763838
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.028299,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO6, curved walls",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
    "n": [
     4.0,
     8.0
@@ -2545,23 +2671,65 @@
   },
   {
    "section": "curved",
+   "method": "TENO6, curved walls (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    5.507084e-05,
+    8.210636e-07
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 6.067651,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO6, straight-sided cells",
    "cells": "quadrilaterals",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
    "n": [
     4.0,
     8.0
    ],
    "errors": [
-    0.01803264,
+    0.01929217,
     0.008964985
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.008238,
+   "order": 1.105642,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, straight-sided cells (ellipses)",
+   "cells": "quadrilaterals",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.009997985,
+    0.004529054
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.142428,
    "pass": true
   },
   {
@@ -2570,7 +2738,7 @@
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/8",
    "n": [
     4.0,
     8.0
@@ -2587,11 +2755,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO3, curved walls (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/9",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0003475847,
+    5.105839e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.5,
+   "max_order": null,
+   "order": 2.767145,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO3, straight-sided cells",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/4",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/8",
    "n": [
     4.0,
     8.0
@@ -2608,11 +2797,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO3, straight-sided cells (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/9",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01026775,
+    0.005226749
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 0.9741335,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO4, curved walls",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/10",
    "n": [
     4.0,
     8.0
@@ -2629,11 +2839,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO4, curved walls (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/11",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    9.560244e-05,
+    6.142606e-06
+   ],
+   "design": 4.0,
+   "min_order": 3.5,
+   "max_order": null,
+   "order": 3.960125,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO4, straight-sided cells",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/10",
    "n": [
     4.0,
     8.0
@@ -2650,11 +2881,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO4, straight-sided cells (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/11",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.01043429,
+    0.005508512
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 0.9215981,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO5, curved walls",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/12",
    "n": [
     4.0,
     8.0
@@ -2671,11 +2923,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO5, curved walls (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/13",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    1.598195e-05,
+    5.443669e-07
+   ],
+   "design": 5.0,
+   "min_order": 4.5,
+   "max_order": null,
+   "order": 4.87572,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO5, straight-sided cells",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/6",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/12",
    "n": [
     4.0,
     8.0
@@ -2692,11 +2965,32 @@
   },
   {
    "section": "curved",
+   "method": "TENO5, straight-sided cells (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/13",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.0104128,
+    0.005672206
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 0.8763759,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO6, curved walls",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/14",
    "n": [
     4.0,
     8.0
@@ -2713,23 +3007,65 @@
   },
   {
    "section": "curved",
+   "method": "TENO6, curved walls (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/15",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    3.74363e-06,
+    5.557727e-08
+   ],
+   "design": 6.0,
+   "min_order": 5.5,
+   "max_order": null,
+   "order": 6.073799,
+   "pass": true
+  },
+  {
+   "section": "curved",
    "method": "TENO6, straight-sided cells",
    "cells": "triangles",
    "error": "max wall-value error",
    "dim": 2,
-   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/14",
    "n": [
     4.0,
     8.0
    ],
    "errors": [
-    0.01972374,
+    0.01712072,
     0.009246782
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.09291,
+   "order": 0.8887204,
+   "pass": true
+  },
+  {
+   "section": "curved",
+   "method": "TENO6, straight-sided cells (ellipses)",
+   "cells": "triangles",
+   "error": "max wall-value error",
+   "dim": 2,
+   "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/15",
+   "n": [
+    6.0,
+    12.0
+   ],
+   "errors": [
+    0.009524491,
+    0.004758454
+   ],
+   "design": 2.0,
+   "min_order": null,
+   "max_order": 2.3,
+   "order": 1.001149,
    "pass": true
   },
   {
@@ -2933,7 +3269,7 @@
     32.0
    ],
    "errors": [
-    8.146797e-06,
+    8.146796e-06,
     1.861906e-06
    ],
    "design": 2.0,
@@ -3038,7 +3374,7 @@
     32.0
    ],
    "errors": [
-    0.000263082,
+    0.0002630819,
     6.439274e-05
    ],
    "design": 2.0,

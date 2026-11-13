@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
-project(Mallard VERSION 0.9.1 LANGUAGES CXX)
+project(Mallard VERSION 0.10.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
 set(mallard_compiler_minimums GNU 15 Clang 22 AppleClang 21)
@@ -98,6 +98,20 @@ if(NOT ${PROJECT_NAME}_DIM MATCHES "^[23]$")
 endif()
 message(STATUS "Mallard: Dimension: ${${PROJECT_NAME}_DIM}")
 add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
+
+# libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
+# every library it links is compiled position independent
+option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" ON)
+set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
+    "A site-packages directory to install the Python package into, besides share/mallard/tools")
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
+    if(NOT python_version STREQUAL "__version__ = \"${PROJECT_VERSION}\"")
+        message(FATAL_ERROR "tools/mallard/_version.py has ${python_version}, not Mallard's version "
+                            "${PROJECT_VERSION}: set it to \"${PROJECT_VERSION}\"")
+    endif()
+endif()
 
 option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
 if(${PROJECT_NAME}_ENABLE_MPI)
@@ -282,6 +296,12 @@ endif()
 include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+    if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
+        install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
+    endif()
+endif()
 # mallard links to either solver; installs of both dimensions share it
 install(CODE "
     set(bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")

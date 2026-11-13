@@ -24,6 +24,13 @@
 #include "input.h"
 #include "kexpr.h"
 
+/** @brief The time until which a condition true since `since` must hold for `hold` (within round-off), the same
+ *         on the host and the device: each product rounded on its own. */
+KOKKOS_INLINE_FUNCTION double trigger_hold_end(const double since, const double hold) {
+    volatile double h = hold * (1.0 - 1e-9);
+    return since + h;
+}
+
 /**
  * @brief The [[triggers]] of a run. Each step the solver evaluates every
  *        condition on the host from values already reduced (where only rank 0
@@ -81,6 +88,25 @@ class Triggers {
 
         /** @brief Advance every trigger with its condition (from evaluate) at time t; those that fire. */
         std::vector<size_t> advance(const std::string & conditions, double t);
+
+        /** @brief A trigger's state between firings, as a step graph advances it (firings stay the host's). */
+        struct DeviceState {
+            uint32_t armed;
+            uint32_t holding;
+            uint32_t repeat;
+            uint32_t n_used;
+            double since;
+            double hold;
+            uint16_t used[32];  // the variables its condition reads (n_used of them)
+        };
+        /** @brief Whether some condition reads variable v. */
+        bool reads(uint16_t v) const;
+        /** @brief Whether every condition reads at most 32 variables (the step graph's limit). */
+        bool fit_device() const;
+        std::vector<const kexpr::Program *> conditions() const;
+        std::vector<DeviceState> device_states() const;
+        /** @brief The armed, holding and since of each trigger, from a step graph's states. */
+        void set_states(const std::vector<DeviceState> & states);
 
         /** @brief Whether a trigger starts the statistics (which wait for it). */
         bool starts_statistics() const;

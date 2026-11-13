@@ -1,2 +1,0 @@
-- Every warning and error of a run has a stable code (`W-HEALTH-MARGIN`, `E-DIVERGED`, `E-INPUT`, ...) from the catalog `mallard check` uses, and a line with the docs that explain it; the run record's `warning` and `error` records give `code` and `docs`, and `report.html` lists warnings with their codes (#659).
-- The chemistry benchmark's CSV (`mallard reactor` with `[benchmark]`) has a units line under its header, as every other CSV output (#659).

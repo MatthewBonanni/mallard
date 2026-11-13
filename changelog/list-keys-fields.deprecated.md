@@ -1,1 +1,0 @@
-- `[[write_data]] variables` and `[[probes]] variables` are renamed `fields`, the name `[statistics]` already uses: the old name is read with a warning until 0.11.0, and `mallard input upgrade` rewrites it. The examples, tutorials, templates and docs use `fields`; `[[probes]] spectra` (new in this release) takes `fields` too (#502).

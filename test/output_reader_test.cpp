@@ -10,8 +10,11 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -20,6 +23,9 @@
 
 #include "comm.h"
 #include "compression.h"
+#ifdef Mallard_HAS_HDF5
+#include "hdf5_util.h"
+#endif
 #include "data_paths.h"
 #include "mesh_block.h"
 #include "json.h"
@@ -69,11 +75,11 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
     }
     std::vector<std::string> probe_formats = {"csv", "vtp"};
     if (hdf5) {
-        writer("flow", "format = \"vtkhdf\"\n" + fields);
+        writer("flow", "format = \"vtkhdf\"\nseries = false\n" + fields);
         writer("flow", "format = \"xdmf\"\n" + fields);
-        writer("series", "series = true\n" + fields);
+        writer("series", fields);
         writer("region", "region = " + REGION + "\nfields = [\"RHO\"]\n");
-        if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\n" + fields);
+        if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\nseries = false\n" + fields);
         probe_formats.insert(probe_formats.end(), {"hdf5", "vtkhdf"});
     }
     for (const std::string & format : probe_formats) {
@@ -190,6 +196,74 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheSameValuesAndUnits) {
     }
 }
 
+TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    const auto mesh = run.solver.get_mesh();
+    // Vertex averages of the box's cells, which are their centroids, in the global order
+    std::vector<double> centroids(3 * run.rho.size(), 0.0);
+    // Both from the rtype coordinates of the unit box, which the files hold as rtype values
+    const double rounding = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        for (size_t i = 0; i < N_DIM; i++) centroids[3 * run.global[c] + i] = double(mesh->h_cell_coords(c, i));
+    }
+    std::vector<std::string> files = snapshot_files(run.dir, "000004");
+    files.push_back(run.dir + "/flow.pvd");
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/flow.xmf", run.dir + "/series.vtkhdf"});
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        const output::Geometry g = output::read_geometry(file, file.snapshots.size() - 1);
+        ASSERT_EQ(g.types.size(), run.rho.size()) << name;
+        ASSERT_EQ(g.offsets.size(), run.rho.size() + 1) << name;
+        EXPECT_EQ(g.offsets.back(), g.connectivity.size()) << name;
+        std::vector<double> mine(3 * run.rho.size(), 0.0);
+        for (size_t c = 0; c < g.types.size(); c++) {
+            EXPECT_EQ(g.types[c], N_DIM == 2 ? 9 : 12) << name << " " << c;
+            const uint64_t n = g.offsets[c + 1] - g.offsets[c];
+            for (uint64_t k = g.offsets[c]; k < g.offsets[c + 1]; k++) {
+                for (size_t i = 0; i < 3; i++) mine[3 * c + i] += g.points[3 * g.connectivity[k] + i] / double(n);
+            }
+        }
+        mine = run.in_global_order(file, mine, 3);
+        for (size_t i = 0; i < mine.size(); i++) EXPECT_NEAR(mine[i], centroids[i], rounding) << name << " " << i;
+    }
+}
+
+TEST(OutputReaderTest, ReadAllHoldsEverySnapshot) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    std::vector<std::string> files = {run.dir + "/flow.pvd", run.dir + "/probe_csv.csv", run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/series.vtkhdf", run.dir + "/probe_hdf5.h5"});
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        std::vector<double> each;
+        for (size_t k = 0; k < file.snapshots.size(); k++) {
+            const std::vector<double> v = output::read(file, "RHO", k);
+            each.insert(each.end(), v.begin(), v.end());
+        }
+        EXPECT_EQ(output::read_all(file, "RHO"), each) << name;
+    }
+}
+
+TEST(OutputReaderTest, ProbeFilesHoldTheirSamplePoints) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    std::vector<std::string> files = {run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) files.insert(files.end(), {run.dir + "/probe_hdf5.h5", run.dir + "/probe_vtkhdf.vtkhdf"});
+    const std::array<double, 3> start = {0.13, 0.27, 0.41}, end = {0.88, 0.62, 0.55};
+    for (const std::string & name : files) {
+        const output::Geometry g = output::read_geometry(output::open(name), 0);
+        ASSERT_EQ(g.points.size(), 18u) << name;
+        for (size_t p = 0; p < 6; p++) {
+            for (size_t i = 0; i < N_DIM; i++) {
+                EXPECT_NEAR(g.points[3 * p + i], start[i] + (end[i] - start[i]) * double(p) / 5.0, 1e-12) << name;
+            }
+        }
+    }
+    EXPECT_THROW(output::read_geometry(output::open(run.dir + "/restart_000004.restart"), 0), std::runtime_error);
+    EXPECT_THROW(output::read_geometry(output::open(run.dir + "/probe_csv.csv"), 0), std::runtime_error);
+}
+
 TEST(OutputReaderTest, SeriesIndexesListEverySnapshotOfTheirFiles) {
     SKIP_UNDER_MPI();
     const CaseRun run;
@@ -264,6 +338,74 @@ TEST(OutputReaderTest, EverySnapshotFormatRecordsItsStepTimeAndRun) {
             EXPECT_EQ(file.snapshots[i].run_id, run_id) << name << " " << i;
         }
     }
+}
+
+TEST(OutputReaderTest, TimeAndPhaseMeansOfTheUnknownsAreCellAverages) {
+    for (const char * name : {"RHO", "RHOU_Y", "RHOE", "RHOY_O2", "MEAN_RHOU_X", "PHASE_03_RHO", "REGION_FRACTION"}) {
+        EXPECT_EQ(snapshot_block::value_kind(name), snapshot_block::value::CELL_AVERAGE) << name;
+    }
+    for (const char * name : {"P", "U_X", "T", "Y_O2", "MEAN_P", "PHASE_03_U_X", "COV_RHO_U_X"}) {
+        EXPECT_EQ(snapshot_block::value_kind(name), snapshot_block::value::CELL_STATE) << name;
+    }
+}
+
+TEST(OutputReaderTest, EverySnapshotFormatRecordsWhetherItsValuesAreCellAverages) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    auto value = [](const output::Contents & file, const std::string & field) {
+        const snapshot_block::Field * f = file.snapshots.back().block.field(field);
+        return f ? f->value : "not recorded";
+    };
+    std::vector<std::string> files = snapshot_files(run.dir, "000004");
+    files.push_back(run.dir + "/near_000004.vtu");
+    files.push_back(run.dir + "/restart_000004.restart");
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        ASSERT_TRUE(file.snapshots.back().has_block) << name;
+        EXPECT_EQ(value(file, "RHO"), "cell_average") << name;
+        EXPECT_TRUE(file.snapshots.back().block.reconstruction.method.empty()) << name;
+        if (name.ends_with(".restart")) {
+            EXPECT_EQ(value(file, "RHOE"), "cell_average") << name;
+        } else if (name.find("near_") != std::string::npos) {
+            EXPECT_EQ(value(file, "REGION_FRACTION"), "cell_average") << name;
+        } else {
+            EXPECT_EQ(value(file, "P"), "cell_state") << name;
+            EXPECT_EQ(value(file, "U"), "cell_state") << name;
+        }
+    }
+    // Probes sample the cell holding each point here (sampling = "cell")
+    std::vector<std::string> probes = {run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) probes.push_back(run.dir + "/probe_vtkhdf.vtkhdf");
+    for (const std::string & name : probes) {
+        const output::Contents file = output::open(name);
+        ASSERT_TRUE(file.snapshots.back().has_block) << name;
+        EXPECT_EQ(value(file, "RHO"), "cell_average") << name;
+        EXPECT_EQ(value(file, "U_X"), "cell_state") << name;
+    }
+#ifdef Mallard_HAS_HDF5
+    const std::string mean = N_DIM == 2 ? "area: mean" : "volume: mean";
+    const std::vector<std::pair<std::string, std::string>> datasets = {
+        {"/flow_000004.vtkhdf", "VTKHDF/CellData/"}, {"/series.vtkhdf", "VTKHDF/CellData/"},
+        {"/flow_000004.h5", "fields/"}, {"/probe_hdf5.h5", "fields/"}, {"/probe_vtkhdf.vtkhdf", "VTKHDF/PointData/"}};
+    for (const auto & [file_name, group] : datasets) {
+        const std::string path = run.dir + file_name;
+        h5::Handle file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + path);
+        h5::Handle rho(H5Dopen2(file, (group + "RHO").c_str(), H5P_DEFAULT), H5Dclose, "opening RHO");
+        EXPECT_EQ(h5::read_string_attribute(rho, "cell_methods"), mean) << path;
+        const std::string other = file_name.starts_with("/probe") ? "U_X" : "P";
+        h5::Handle state(H5Dopen2(file, (group + other).c_str(), H5P_DEFAULT), H5Dclose, "opening " + other);
+        EXPECT_LE(H5Aexists(state, "cell_methods"), 0) << path << " " << other;
+    }
+    std::ifstream xmf(run.dir + "/flow_000004.xmf");
+    const std::string text((std::istreambuf_iterator<char>(xmf)), std::istreambuf_iterator<char>());
+    const std::string tag = "<Information Name=\"cell_methods\" Value=\"" + mean + "\"/>";
+    const size_t rho = text.find("<Attribute Name=\"RHO\"");
+    ASSERT_NE(rho, std::string::npos) << text;
+    const size_t at = text.find(tag);
+    EXPECT_GT(at, rho) << text;
+    EXPECT_LT(at, text.find("</Attribute>", rho)) << text;
+    EXPECT_EQ(text.find("cell_methods", at + tag.size()), std::string::npos) << text;
+#endif
 }
 
 TEST(OutputReaderTest, SnapshotsOfMallard091AreReadWithTheStatedFallback) {
@@ -343,12 +485,12 @@ TEST(OutputReaderTest, RegionSnapshotsHoldTheCellsInTheRegion) {
     std::sort(inside.begin(), inside.end());
     ASSERT_GT(inside.size(), 0u);
     std::vector<std::string> files = {run.dir + "/near_000004.vtu"};
-    if (have_hdf5()) files.push_back(run.dir + "/region_000004.vtkhdf");
+    if (have_hdf5()) files.push_back(run.dir + "/region.vtkhdf");
     for (const std::string & name : files) {
         const output::Contents file = output::open(name);
         EXPECT_EQ(file.mesh.n_cells, inside.size()) << name;
         EXPECT_FALSE(file.global_order) << name;
-        std::vector<double> rho = output::read(file, "RHO", 0);
+        std::vector<double> rho = output::read(file, "RHO", file.snapshots.size() - 1);
         std::sort(rho.begin(), rho.end());
         EXPECT_EQ(rho, inside) << name;
     }

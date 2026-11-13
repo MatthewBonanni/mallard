@@ -269,6 +269,14 @@ TEST(DivergenceReportTest, TheReportMatchesTheGolden) {
     expect_golden(text, "divergence_report_2d.txt");
 }
 
+TEST(DivergenceReportTest, OneInvalidCellIsCountedInTheSingular) {
+    divergence::Evidence e = evidence();
+    e.n_invalid = 1, e.zones[0].near = 1;
+    const std::string text = report_text(e);
+    EXPECT_NE(text.find("the failure is confined to 1 cell\n"), std::string::npos) << text;
+    EXPECT_NE(text.find("1 of the 1 invalid cell is within two cells of inlet"), std::string::npos) << text;
+}
+
 TEST(DivergenceReportTest, TheRecordGivesTheUnitsOfItsValues) {
     const divergence::Evidence e = evidence();
     const json::Value si = json::parse(divergence::record(e, divergence::rank_causes(e)).str());

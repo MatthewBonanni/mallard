@@ -550,7 +550,7 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGra
 TEST(MPITest, SourcesInRegionsMatchSerial) {
     // Totals over regions are normalized by integrals summed in global cell
     // order, domain averages by exact sums; sources of t and of the solution
-    // are local to each cell
+    // are local to each cell, and so are the levels of regions of the solution
     const std::string ring =
         "[[sources]]\ntotal = true\nrhoE = \"2 + sin(20 * t)\"\n"
         "region = {type = \"annulus\", center = [0.4, 0.4], radius = 0.25, inner_radius = 0.1, edge = 0.05}\n";
@@ -560,7 +560,8 @@ TEST(MPITest, SourcesInRegionsMatchSerial) {
     const std::string plain = "[[sources]]\nrhoE = \"0.1 * x\"\n";
     const std::string forcing = "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
                                 "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
-    for (const std::string & sources : {plain, ring, relax, forcing}) {
+    const std::string hot = "[[sources]]\ntotal = true\nrhoE = 2.0\nregion = {type = \"where\", condition = \"P > 2.0\"}\n";
+    for (const std::string & sources : {plain, ring, relax, forcing, hot}) {
         SCOPED_TRACE(sources);
         expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", "type = \"euler\"\n",
                                         bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
@@ -862,7 +863,8 @@ std::vector<double> gather_statistics(Solver & solver) {
 TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     // Averages are per cell; probe points on faces between ranks take the same
     // cell on every rank count; averages written by all ranks continue on one,
-    // and so do the time averages of probes (rank 0 sums them in sample order)
+    // and so do the time averages of probes (rank 0 sums them in sample order),
+    // those of a moving region and of an isosurface kept for the cells covered
     const std::string dir = io_dir() + "_statistics";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
@@ -876,7 +878,13 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
                "[[probes]]\nname = \"outflow\"\nfile = \"" + dir + "/out_" + file + "\"\n"
                "boundary_type = \"outlet_extrapolation\"\nfields = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
                "average = true\ninterval = 5\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
-               "/out_red_" + file + "\"\n";
+               "/out_red_" + file + "\"\n"
+               "[[probes]]\nname = \"disk\"\nregion = {type = \"disk\", center = [\"0.3 + 5 * t\", 0.4], radius = 0.12}\n"
+               "fields = [\"RHO\", \"P\"]\naverage = true\ninterval = 5\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+               "reductions_file = \"" + dir + "/disk_red_" + file + "\"\n"
+               "[[probes]]\nname = \"front\"\nregion = {type = \"isosurface\", field = \"RHO\", value = 1.3}\n"
+               "fields = [\"RHO\", \"P\"]\naverage = true\ninterval = 5\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+               "reductions_file = \"" + dir + "/front_red_" + file + "\"\n";
     };
     Solver reference;
     reference.set_distributed(false);
@@ -908,7 +916,7 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        for (const char * prefix : {"", "mean_", "mean_red_", "out_", "out_red_"}) {
+        for (const char * prefix : {"", "mean_", "mean_red_", "out_", "out_red_", "disk_red_", "front_red_"}) {
             const std::string a = without_comment_lines(read(dir + "/" + prefix + "reference.csv"));
             EXPECT_FALSE(a.empty()) << prefix;
             EXPECT_EQ(without_comment_lines(read(dir + "/" + prefix + "distributed.csv")), a) << prefix;
@@ -1161,15 +1169,15 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
     expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                        "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        "interval = 3\nseries = false\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
                                         io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
-    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nfields = [\"RHO\", \"U\"]\n",
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nfields = [\"RHO\", \"U\"]\n",
                                         io_dir() + "_vtkhdf_series", {""});
     expect_vtkhdf_output_matches_serial(input,
                                         "interval = 3\nfields = [\"P\", \"U\"]\n" + zlib +
                                             "regions = [{type = \"disk\", center = [0.5, 0.4], radius = 0.25}, \"bottom\", "
                                             "{type = \"cut_plane\", point = [0.45, 0.4], normal = [1.0, 0.3]}]\n",
-                                        io_dir() + "_vtkhdf_regions", {"_0_000000", "_0_000006", "_bottom", "_2"});
+                                        io_dir() + "_vtkhdf_regions", {"_0", "_bottom", "_2"});
     const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"
@@ -1180,7 +1188,7 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
-        "interval = 2\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+        "interval = 2\nseries = false\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
 #endif
 }
 

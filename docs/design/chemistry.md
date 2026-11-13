@@ -483,7 +483,7 @@ U^{n+1} = U(t_n + dt)  of  dU/dt = T(U) + c,  U(t_n + dt/2) = U*   (transport su
   still growing at step 3000.
 - **Cost.** One more evaluation of `T` per step (four with SSPRK3) and one
   chemistry call per step instead of two half steps (no fused half steps
-  needed, and none to restart).
+  needed).
 
 As implemented: `Solver::take_simpler_step` evaluates `T(U^n)` into one
 extra state (`transport_rate`), then `CellChemistry::advance` with a
@@ -1088,18 +1088,32 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   bitwise against elimination column by column), up to the sign of zeros.
   n-hexane: 203 stages instead of 1269 pivots, a chain of 145 (573 padded
   entries), 59 + 58 levels in the solves outside it.
-- **Fused half steps** (`[chemistry] fuse_half_steps`, default off): the
-  half steps of consecutive steps are one chemistry call, except where output,
-  checks or the end of the run read the state (and the next step's `dt` comes
-  from the state before the pending half step). One
-  chemistry call per step instead of two halves the chemistry's cost where
-  cells take one or two sub-steps per call: on the H2 flame (V8, one CPU
-  core) chemistry falls from 7.7 to 3.8 s over 3000 steps and the step from
-  3.8 to 2.5 ms. It is off by default because the result then depends on the
-  output schedule (`check_interval`, writers, monitors): a run stopped by
-  `t_wall_stop`, or restarted from a step at which the uninterrupted run wrote
-  nothing, no longer reproduces that run bitwise. Making it the default needs
-  the pending half step in the restart file and output from a flushed copy.
+- **Fused half steps** (`[chemistry] fuse_half_steps`, default on with
+  Strang splitting): the closing half step of a step and the opening one of
+  the next are one chemistry call over `(dt^n + dt^(n+1)) / 2`; the reactor
+  equations are autonomous, so the splitting is the same and only the
+  integrator's error differs. One chemistry call per step instead of two
+  halves the chemistry's cost where cells take one or two sub-steps per call:
+  on the H2 flame (V8, one CPU core) chemistry falls from 7.7 to 3.8 s over
+  3000 steps and the step from 3.8 to 2.5 ms. The run continues from the
+  state before the pending half step (`chemistry_pending`), which also gives
+  the next step's `dt`. Whatever reads the state at the end of a step (output,
+  checks, progress rows, probes, statistics, triggers, the end of the run)
+  reads it with the pending half step applied: `Solver::flush_chemistry`
+  keeps the conservatives, species, temperature seeds and last sub-steps and
+  applies the half step (outside the repair audit, which counts it in the
+  call it is fused into), and `unflush_chemistry` puts them back before the
+  next step. Restart files hold the kept state with the attribute
+  `CHEMISTRY_PENDING` (`stage_unflushed_restart`), so a restarted run takes
+  the same fused call as the uninterrupted one. Results thus depend neither
+  on the output schedule nor on restarts or `t_wall_stop`
+  (`MixtureTest.FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts`); the
+  extra call at an output step costs what the separate half step there would.
+  These steps stop the device's step queue anyway, so the step graph holds no
+  host work for it. A restart file read without fusing applies the pending
+  half step in the first step's opening call (Strang) or before the first
+  step (SIMPLER); a run without chemistry ignores it. At its end the run
+  leaves the solver at the flushed state.
 - **Layout**: `SpeciesLayout` is a CMake option (`Mallard_SPECIES_LAYOUT_LEFT`);
   every kernel indexes through the view. On the full-solver benchmark (A100)
   `LayoutLeft` (cells contiguous per species) takes 58.7 ms per step and the

@@ -1,1 +1,0 @@
-- Gas mixtures without chemistry (also with double flux and LES) take their steps in the CUDA graph (CUDA builds): their time step is reduced on the device, and double flux freezes and resets the cells' energy inside the graph.

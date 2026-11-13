@@ -291,9 +291,13 @@ void DataWriter::init(const Input & input,
                               .fix = "Use format = \"vtu\", run on one rank, or rebuild against a parallel HDF5"});
         }
     }
+    one_file = format == DataFormat::VTKHDF;
     if (input.contains("series")) {
-        if (format != DataFormat::VTKHDF) throw InputError("write_data.series is for format = \"vtkhdf\".");
-        one_file = find_value<bool>(input, "series");
+        if (input.contains("format") && format != DataFormat::VTKHDF) {
+            throw InputError("write_data.series is for format = \"vtkhdf\".");
+        }
+        const bool series = find_value<bool>(input, "series");
+        one_file = one_file && series;
     }
 
     if (cell_subset) {
@@ -305,22 +309,13 @@ void DataWriter::init(const Input & input,
         }
         subset = true;
         region_name = cell_subset->name;
-        subset_cells = cell_subset->cells;
-        std::sort(subset_cells.begin(), subset_cells.end(),
-                  [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
-        std::vector<uint64_t> global;
-        for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
-        std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
-        std::sort(all.begin(), all.end());
-        n_subset = all.size();
-        for (uint64_t g : global) {
-            subset_ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
-        }
-        Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type values(
-            "REGION_FRACTION", Kokkos::LayoutStride(cell_subset->fractions.size(), 1));
-        for (size_t c = 0; c < cell_subset->fractions.size(); c++) values(c) = static_cast<rtype>(cell_subset->fractions[c]);
-        fraction = std::make_unique<Data>("REGION_FRACTION", values);
+        subset_at = cell_subset->at;
+        subset_solution = cell_subset->solution;
+        fraction_values = Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type(
+            "REGION_FRACTION", Kokkos::LayoutStride(subset_at ? mesh->n_cells : cell_subset->fractions.size(), 1));
+        fraction = std::make_unique<Data>("REGION_FRACTION", fraction_values);
         fields.push_back(Field{"REGION_FRACTION", {fraction.get()}, field_units::describe("REGION_FRACTION")});
+        if (!subset_at) select_subset(cell_subset->cells, cell_subset->fractions);
     }
 
     const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
@@ -359,13 +354,33 @@ void DataWriter::init(const Input & input,
     if (output_files_enabled()) create_parent_directories("the output", prefix);
 }
 
+void DataWriter::select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions) {
+    subset_cells = cells;
+    subset_ids.clear();
+    std::sort(subset_cells.begin(), subset_cells.end(),
+              [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
+    std::vector<uint64_t> global;
+    for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
+    std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
+    std::sort(all.begin(), all.end());
+    n_subset = all.size();
+    for (uint64_t g : global) {
+        subset_ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
+    }
+    for (size_t c = 0; c < fraction_values.extent(0); c++) fraction_values(c) = static_cast<rtype>(fractions[c]);
+    vtkhdf.built = false;
+    vtu_mesh.clear();
+}
+
 OutputSummary DataWriter::summary() const {
     const std::string file = prefix + (format == DataFormat::RESTART  ? "_*.restart"
                                        : format == DataFormat::HDF5   ? "_*.h5"
                                        : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
                                                                       : "_*.vtu");
     std::vector<std::string> parts;
-    if (subset) parts.push_back(region_name + ", " + logging::count(n_subset) + " cells");
+    if (subset) {
+        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset, "cell")));
+    }
     if (compression == Compression::ZLIB) {
         parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");
     }
@@ -590,6 +605,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     const bool root = comm::is_root();
     const std::string stem = snapshot_stem(interval > 0 || format == DataFormat::RESTART ? step : n_snapshots);
     const Block block = snapshot_of(step, t, force);
+    if (subset_at) {
+        const std::vector<double> fractions = subset_at(double(t));
+        std::vector<uint32_t> cells;
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            if (fractions[c] > 0.0) cells.push_back(c);
+        }
+        select_subset(cells, fractions);
+    }
     if (format == DataFormat::RESTART) {
         // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
@@ -692,7 +715,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
     const char * stored = sizeof(rtype) == 8 ? "float64" : "float32";
     for (const auto & field : fields) {
         snapshot_block::Field f{field.name, field.description.units(), field.description.long_name, stored,
-                                relative_error};
+                                relative_error, "", {}};
         if (format == DataFormat::RESTART) {
             const auto d = field_units::find(field.name);
             f.units = d ? d->units() : "";
@@ -707,6 +730,14 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
                                                            : file_format::VTU_OUTPUT.version;
     return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
                                 version, std::move(list));
+}
+
+std::string DataWriter::cell_methods(const std::string & name) const {
+    if (!snapshot_blocks) return "";
+    snapshot_block::Field f;
+    f.name = name;
+    f.value = snapshot_block::value_kind(name);
+    return snapshot_block::cell_methods(f);
 }
 
 std::string DataWriter::set_interval(uint64_t steps) {
@@ -1218,12 +1249,12 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
         throw cannot_write("the restart file", filename);
     }
     int32_t failed = 0;
-    const auto check = [&failed](int code) { failed = failed || code != MPI_SUCCESS; };
-    check(MPI_File_set_size(fh, 0));
+    const auto check = [&failed](bool ok) { failed = failed || !ok; };
+    check(MPI_File_set_size(fh, 0) == MPI_SUCCESS);
     const std::vector<char> header =
         restart_header(n_global, step, double(t), names, attributes, ordered.total, 0, arrays);
     if (comm::is_root()) {
-        check(MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE));
+        check(comm::write_at(fh, 0, header.data(), header.size(), MPI_BYTE));
     }
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
@@ -1232,33 +1263,27 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
     for (uint32_t i = 0; i < n_owned; i++) {
         displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[owned_by_id[i]] * sizeof(rtype));
     }
-    MPI_Datatype file_type;
-    MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
-    MPI_Type_commit(&file_type);
     std::vector<rtype> values(n_owned);
     for (size_t v = 0; v < fields.size(); v++) {
         for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(owned_by_id[i], 0);
-        MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
-                          MPI_INFO_NULL);
-        check(MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE));
+        check(comm::write_all_hindexed(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), values.data(),
+                                       displacements.data(), n_owned, real_type));
     }
-    MPI_Type_free(&file_type);
     // Each rank's faces are a contiguous run of the keys and of the values
     const MPI_Offset faces_at = header_size + MPI_Offset(fields.size() * n_global * sizeof(rtype));
     MPI_File_set_view(fh, 0, MPI_BYTE, MPI_BYTE, "native", MPI_INFO_NULL);
-    check(MPI_File_write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
-                                static_cast<int>(ordered.part.keys.size()), MPI_UINT64_T, MPI_STATUS_IGNORE));
-    check(MPI_File_write_at_all(fh,
-                                faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
-                                ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
-                                MPI_STATUS_IGNORE));
+    check(comm::write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
+                             ordered.part.keys.size(), MPI_UINT64_T));
+    check(comm::write_at_all(fh,
+                             faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
+                             ordered.part.values.data(), ordered.part.values.size(), real_type));
     if (comm::is_root()) {
         const std::vector<char> trailer = restart_trailers(snapshot.json());
-        check(MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
-                                trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE));
+        check(comm::write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
+                             trailer.data(), trailer.size(), MPI_BYTE));
     }
-    check(MPI_File_sync(fh));
-    check(MPI_File_close(&fh));
+    check(MPI_File_sync(fh) == MPI_SUCCESS);
+    check(MPI_File_close(&fh) == MPI_SUCCESS);
     if (comm::allreduce(failed, comm::Op::MAX)) throw cannot_write("the restart file", filename);
     if (comm::is_root()) n_bytes += file_bytes(filename);
     t_writing += seconds_since(start);

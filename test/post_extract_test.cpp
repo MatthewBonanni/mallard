@@ -15,6 +15,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "cli.h"
@@ -26,6 +27,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 constexpr double ROUNDING = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
 
@@ -46,6 +48,10 @@ bool vtkhdf() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()
 const std::string BOX = N_DIM == 3 ? "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.4, 0.2, 0.6]}"
                                    : "{type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.2]}";
 
+const std::string FRONT = "{type = \"isosurface\", field = \"RHO\", value = 1.1}";
+
+const std::string DENSE = "{type = \"where\", condition = \"RHO > 1.1\"}";
+
 /** @brief A periodic box with a curve probe of point values, a region probe and restart files and snapshots every 2 steps. */
 std::string case_input(const std::string & dir, uint32_t n) {
     std::ostringstream s;
@@ -65,7 +71,14 @@ std::string case_input(const std::string & dir, uint32_t n) {
       << "file = \"" << dir << "/probe_line.csv\"\n"
       << "[[probes]]\nname = \"box\"\nregion = " << BOX << "\nfields = [\"RHO\", \"T\", \"P\"]\n"
       << "time_interval = 0.002\nreductions_file = \"" << dir << "/probe_box_reductions.csv\"\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+      << "[[probes]]\nname = \"front\"\nregion = " << FRONT << "\nfields = [\"RHO\", \"MASS_FLUX\"]\n"
+      << "reductions = [\"integral\", \"mean\"]\ninterval = 2\nreductions_file = \"" << dir
+      << "/probe_front_reductions.csv\"\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/dense\"\nformat = \"vtu\"\nregion = " << DENSE
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/front\"\nformat = \"vtu\"\nregion = " << FRONT
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
     if (vtkhdf()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nfields = [\"RHO\", \"U\", \"P\"]\n"
           << "interval = 2\n";
@@ -120,6 +133,13 @@ int extract(const std::vector<std::string> & words, std::string * errors = nullp
     return status;
 }
 
+std::string slurp(const std::string & file) {
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream s;
+    s << in.rdbuf();
+    return s.str();
+}
+
 std::vector<double> numbers(const std::string & row) {
     std::vector<double> out;
     std::stringstream s(row);
@@ -146,13 +166,39 @@ TEST(PostExtractTest, RestartFilesGiveTheRunsProbesBitForBit) {
                        region}),
               0);
     EXPECT_EQ(rows(region + "/probe_b_reductions.csv"), std::vector<std::string>{rows(run + "/probe_box_reductions.csv").back()});
+
+    // Regions of the solution are those of the file's solution
+    EXPECT_EQ(rows(out + "/probe_front_reductions.csv"), after_step_0(run + "/probe_front_reductions.csv"));
+    const std::string front = fresh_dir("front");
+    ASSERT_EQ(extract({run + "/restart_000002.restart", "--region", FRONT, "--fields", "RHO,MASS_FLUX", "--reductions",
+                       "integral,mean", "--name", "f", "-o", front}),
+              0);
+    EXPECT_EQ(rows(front + "/probe_f_reductions.csv"), std::vector<std::string>{after_step_0(run + "/probe_front_reductions.csv").front()});
+}
+
+TEST(PostExtractTest, SnapshotsOfRegionsOfTheSolutionAreTheRunsBitForBit) {
+    // The cells of a where region and the elements of an isosurface, placed on each restart file's state
+    const std::string run = run_dir();
+    if (comm::size() > 1) GTEST_SKIP() << "VTU snapshots of several ranks are pieces in each run's own order";
+    for (const auto & [name, region, piece] : {std::tuple{"dense", DENSE, ".vtu"}, std::tuple{"front", FRONT, ".vtp"}}) {
+        const std::string out = fresh_dir(std::string("snapshot_") + name);
+        ASSERT_EQ(extract({run + "/restart_000002.restart", run + "/restart_000004.restart", "--snapshot", "vtu",
+                           "--region", region, "--fields", "RHO,U,P", "--name", name, "-o", out}),
+                  0);
+        for (const char * step : {"_000002", "_000004"}) {
+            const std::string mine = slurp(out + "/" + name + step + piece);
+            EXPECT_GT(mine.size(), 1000u) << name << step;
+            EXPECT_EQ(without_run_metadata(mine), without_run_metadata(slurp(run + "/" + name + step + piece)))
+                << name << step;
+        }
+    }
 }
 
 TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {
     if (!vtkhdf()) GTEST_SKIP() << "VTKHDF snapshots need HDF5, parallel HDF5 on several ranks";
     const std::string run = run_dir();
     const std::string out = fresh_dir("snapshots");
-    ASSERT_EQ(extract({run + "/flow.vtkhdf.series", "--times", "0.001:0.005", "--probe", "line", "-o", out}), 0);
+    ASSERT_EQ(extract({run + "/flow.vtkhdf", "--times", "0.001:0.005", "--probe", "line", "-o", out}), 0);
     const std::vector<std::string> expected = after_step_0(run + "/probe_line.csv");
     const std::vector<std::string> got = rows(out + "/probe_line.csv");
     ASSERT_EQ(got.size(), expected.size());
@@ -171,18 +217,18 @@ TEST(PostExtractTest, StepsAndTimesAreThoseTheFilesRecordNotTheirNames) {
     const std::string renamed = fresh_dir("renamed");
     if (comm::is_root()) fs::create_directories(renamed);
     std::vector<std::string> files = {"restart_000004.restart"};
-    if (vtkhdf()) files.push_back("flow_000004.vtkhdf");
+    if (vtkhdf()) files.push_back("flow.vtkhdf");
     std::string at_step_4;
     for (const std::string & r : rows(run + "/probe_line.csv")) {
         if (r.starts_with("4,")) at_step_4 = r;
     }
     ASSERT_FALSE(at_step_4.empty());
     for (const std::string & file : files) {
-        const std::string misnamed = renamed + "/" + file.substr(0, file.find('_')) + "_000099" + fs::path(file).extension().string();
+        const std::string misnamed = renamed + "/" + file.substr(0, file.find_first_of("_.")) + "_000099" + fs::path(file).extension().string();
         if (comm::is_root()) fs::copy_file(run + "/" + file, misnamed, fs::copy_options::overwrite_existing);
         comm::barrier();
         const std::string out = fresh_dir("renamed_out_" + fs::path(file).extension().string().substr(1));
-        ASSERT_EQ(extract({misnamed, "--probe", "line", "-o", out}), 0) << file;
+        ASSERT_EQ(extract({misnamed, "--latest", "--probe", "line", "-o", out}), 0) << file;
         const std::vector<std::string> got = rows(out + "/probe_line.csv");
         ASSERT_FALSE(got.empty()) << file;
         const std::vector<double> a = numbers(got[0]), b = numbers(at_step_4);

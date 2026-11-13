@@ -1,1 +1,0 @@
-- The output guide says how to open XDMF output in ParaView 6.0.1, whose reader fails on a bare `.xmf` file name (`flow.xmf`) but reads `./flow.xmf` or any path with a directory (#682).

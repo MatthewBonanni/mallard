@@ -429,7 +429,8 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     for (const char * format : {"vtu", "vtkhdf"}) {
         DataWriter writer;
         writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
-                               "\"\ninterval = 1\nfields = [\"RHO\", \"U\"]\n"),
+                               "\"\ninterval = 1\nfields = [\"RHO\", \"U\"]\n" +
+                               (std::string(format) == "vtkhdf" ? "series = false\n" : "")),
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
@@ -475,7 +476,7 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
             "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n"
-            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nfields = [\"RHO\"]\n"));
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\nfields = [\"RHO\"]\n"));
         solver.run();
         const std::string out = dir + "/f_000000.vtkhdf";
         const auto points = h5_values<double>(out, "VTKHDF/Points");
@@ -544,7 +545,9 @@ TEST(IO3DTest, RegionOutputWritesItsCellsAndOnlyTheirNodes) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d_subset").string();
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
-    CellSubset prisms{"prisms", {}, std::vector<double>(mesh->n_cells, 0.0)};
+    CellSubset prisms;
+    prisms.name = "prisms";
+    prisms.fractions.assign(mesh->n_cells, 0.0);
     std::set<uint32_t> nodes;
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         if (mesh->h_n_nodes_of_cell(c) != 6) continue;

@@ -1,1 +1,0 @@
-- `mallard list keys [SECTION] [INPUT]`: the key catalog as tables, by input table, with each key's type, units, default and accepted values; with an input file, the keys that case's setup reads and whether the input sets each (what `mallard check --catalog` writes); `--format json` for scripts (#502).

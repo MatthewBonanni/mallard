@@ -451,6 +451,13 @@ jobs:
         run: |
           python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
           python3 tools/dev/check_output_units.py build/src/mallard
+      - name: Python package
+        if: matrix.backend.name == 'openmp'
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          python3 -m pip install -q --break-system-packages ./tools pytest
+          PATH="$PWD/build/src:$PATH" python3 -m pytest -q test/python
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
@@ -653,14 +660,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Python packages
-        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg
+        run: pip install -r tutorials/requirements.txt imageio imageio-ffmpeg ./tools
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/tutorials/${{ github.sha }}
           restore-keys: ccache/tutorials/
-      # With HDF5, so that the tutorials and templates write the default VTKHDF output
+      # With HDF5, so that the tutorials and templates write the default VTKHDF output, and
+      # the Python package's library, which the post-processing tutorial reads it with
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -673,7 +681,7 @@ jobs:
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
               -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target mallard
+            cmake --build build-$dim -j $(nproc) --target mallard MallardReader
           done
           ccache --show-stats
           if [ "$GITHUB_REF" = refs/heads/main ]; then

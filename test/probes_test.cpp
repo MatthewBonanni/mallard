@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -21,18 +22,28 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <numeric>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "comm.h"
+#include "cut_quadrature.h"
+#include "data_writer.h"
 #include "data_paths.h"
+#include "json.h"
+#include "output_reader.h"
 #include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
 #include "mechanism.h"
+#include "curved.h"
+#include "mesh.h"
+#include "probe_cells.h"
 #include "probe_geometry.h"
+#include "region.h"
 #include "probe_spectra.h"
 #include "region_input.h"
 #include "region_mesh.h"
@@ -51,6 +62,11 @@
 namespace {
 
 const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+
+/** @brief A relative tolerance, no tighter than the rounding of single-precision fields and mesh geometry. */
+double rounding_or(const double tolerance) {
+    return std::max(tolerance, 64.0 * static_cast<double>(std::numeric_limits<rtype>::epsilon()));
+}
 
 std::string numbers3(const char * x, const char * y, const char * z) {
     return std::string("[") + x + ", " + y + (N_DIM == 3 ? std::string(", ") + z : "") + "]";
@@ -222,6 +238,62 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
     EXPECT_NEAR(axes.nodes[0][1], 2.0, 1e-14);
     EXPECT_NEAR(axes.nodes[0][2], 0.5, 1e-14);
 #endif
+}
+
+TEST(ProbesTest, ProbeFilesRecordWhereEachPointIsRead) {
+    // One point off its cell's centroid and one on the domain's edge, on 8 cells per side
+    const std::string dir = fresh_dir("sampling");
+    const std::vector<std::array<double, 3>> requested = {{0.3, 0.4, 0.6}, {1.0, 0.4, 0.6}};
+    const std::vector<std::array<double, 3>> centroid = {{0.3125, 0.4375, 0.625}, {0.9375, 0.4375, 0.625}};
+    std::vector<std::pair<std::string, std::string>> files = {{"csv", "cell"}, {"vtp", "point"}};
+    if (have_hdf5()) files.insert(files.end(), {{"hdf5", "point"}, {"vtkhdf", "cell"}});
+    std::string extra;
+    for (const auto & [format, sampling] : files) {
+        extra += "[[probes]]\nname = \"" + format + "\"\nformat = \"" + format + "\"\nsampling = \"" + sampling +
+                 "\"\nfile = \"" + dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format) +
+                 "\"\ntype = \"points\"\npoints = [" + numbers3("0.3", "0.4", "0.6") + ", " + numbers3("1.0", "0.4", "0.6") +
+                 "]\nfields = [\"RHO\", \"P\"]\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"TENO\"\norder = 3\n", extra)));
+    run(solver);
+    double cell = -1.0;
+    for (const auto & [format, sampling] : files) {
+        const std::string path = dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format);
+        SCOPED_TRACE(path);
+        const output::Contents file = output::open(path);
+        ASSERT_FALSE(file.sampling.empty());
+        const json::Value b = json::parse(file.sampling);
+        EXPECT_EQ(b["schema"].string, "mallard-probe-sampling");
+        EXPECT_EQ(b["sampling"].string, sampling);
+        const bool point = sampling == "point";
+        if (point) {
+            EXPECT_EQ(b["reconstruction"]["method"].string, "TENO");
+            EXPECT_EQ(b["reconstruction"]["order"].number, 3);
+        } else {
+            EXPECT_TRUE(b["reconstruction"].is_null());
+        }
+        const auto & variables = b["variables"].array;
+        ASSERT_EQ(variables.size(), 2u);
+        EXPECT_EQ(variables[0]["value"].string, point ? "point_value" : "cell_average");
+        EXPECT_EQ(variables[1]["value"].string, point ? "point_value" : "cell_state");
+        const json::Value & p = b["points"];
+        ASSERT_EQ(p["n"].number, 2);
+        EXPECT_TRUE(b["clipped"].is_null());
+        for (size_t i = 0; i < 2; i++) {
+            double d2 = 0.0;
+            for (size_t d = 0; d < N_DIM; d++) {
+                EXPECT_DOUBLE_EQ(p["requested"].array[i].array[d].number, requested[i][d]) << i;
+                EXPECT_DOUBLE_EQ(p["centroid"].array[i].array[d].number, centroid[i][d]) << i;
+                d2 += (requested[i][d] - centroid[i][d]) * (requested[i][d] - centroid[i][d]);
+            }
+            // Point values are read at the requested point, cell values at the centroid
+            const double expected = point ? 0.0 : std::sqrt(d2);
+            EXPECT_NEAR(p["distance"].array[i].number, expected, 1e-14) << i;
+        }
+        if (cell < 0.0) cell = p["cell"].array[0].number;
+        EXPECT_EQ(p["cell"].array[0].number, cell);
+    }
 }
 
 TEST(ProbesTest, PointFilesSkipHeadersAndComments) {
@@ -469,8 +541,8 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
     const std::string region = "region = {type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") +
                                ", radius = 0.2}\n";
-    for (const std::string key : {"sampling = \"point\"\n", "format = \"vtp\"\n", "samples = true\n",
-                                  "file = \"x.csv\"\n", "type = \"circle\"\n"}) {
+    for (const std::string key : {"format = \"vtp\"\n", "samples = true\n", "file = \"x.csv\"\n",
+                                  "type = \"circle\"\n", "n_points = [4]\n"}) {
         Solver solver;
         EXPECT_ANY_THROW(solver.init(parse_toml(
             box_case(8, "1.0", "type = \"MUSCL\"\n", "[[probes]]\nname = \"r\"\nfields = [\"P\"]\n" + region + key))))
@@ -618,6 +690,92 @@ std::string couette_case(uint32_t n, const std::string & extra, const std::strin
     return s.str();
 }
 
+TEST(ProbesTest, PointsOutsideTheMeshAreErrorsAndCurvesAreClippedToIt) {
+    // Walls at y = 0 and 1
+    const std::string dir = fresh_dir("outside");
+    auto probe = [&](const std::string & name, const std::string & where) {
+        return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name +
+               ".csv\"\nfields = [\"RHO\"]\nsampling = \"point\"\n" + where + "\n";
+    };
+    auto error_of = [&](const std::string & probes) {
+        try {
+            Solver solver;
+            solver.init(parse_toml(couette_case(4, probes)));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string point = error_of(probe("p", "type = \"points\"\npoints = [" + numbers3("0.3", "0.5", "0.5") + ", " +
+                                                       numbers3("0.3", "1.3", "0.5") + "]"));
+    EXPECT_NE(point.find("probes[name = \"p\"]"), std::string::npos) << point;
+    EXPECT_NE(point.find("1 of 2 points lie outside the mesh: point 1 (0.3, 1.3"), std::string::npos) << point;
+    EXPECT_NE(point.find("0.3 m from boundary zone top"), std::string::npos) << point;
+    const std::string line = error_of(probe("l", "start = " + numbers3("0.3", "1.2", "0.5") + "\nend = " +
+                                                     numbers3("0.3", "1.5", "0.5") + "\nn_points = 4"));
+    EXPECT_NE(line.find("lies entirely outside the mesh"), std::string::npos) << line;
+
+    const std::string probes = "run_log = \"" + dir + "/run.jsonl\"\n" + probe("edge", "point = " + numbers3("0.3", "1.0", "0.5")) +
+                               probe("half", "start = " + numbers3("0.3", "0.5", "0.5") + "\nend = " +
+                                                 numbers3("0.3", "1.5", "0.5") + "\nn_points = 11");
+    Solver solver;
+    testing::internal::CaptureStderr();
+    solver.init(parse_toml(couette_case(4, probes)));
+    const std::string warned = testing::internal::GetCapturedStderr();
+    run(solver);
+    if (!comm::is_root()) return;
+    EXPECT_NE(warned.find("5 of 11 samples (50% of its length) lie outside the mesh"), std::string::npos) << warned;
+    std::ifstream log(dir + "/run.jsonl");
+    std::string first, second;
+    std::getline(log, first);
+    std::getline(log, second);
+    EXPECT_EQ(json::parse(first)["type"].string, "start");
+    EXPECT_EQ(json::parse(second)["type"].string, "warning") << "after its run's start record";
+    EXPECT_NE(json::parse(second)["message"].string.find("probes[name = \"half\"]"), std::string::npos) << second;
+    EXPECT_EQ(read_csv(dir + "/edge.csv").size(), 2u) << "a point on a wall is in the mesh";
+    const auto rows = read_csv(dir + "/half.csv");
+    ASSERT_EQ(rows.size(), 12u);
+    for (const auto & row : rows) EXPECT_LE(row.at("y"), 1.0);
+    const json::Value b = json::parse(output::open(dir + "/half.csv").sampling);
+    EXPECT_EQ(b["clipped"]["dropped"].number, 5);
+    EXPECT_EQ(b["clipped"]["of"].number, 11);
+    EXPECT_NEAR(b["clipped"]["length_fraction"].number, 0.5, 1e-12);
+    EXPECT_EQ(b["points"]["n"].number, 6);
+}
+
+TEST(ProbesTest, RegionsPartlyOutsideTheDomainRecordTheShareOutside) {
+    // A disk (sphere) through the top wall at y = 1, its center 0.1 below it
+    const double r = 0.2, h = 0.1, a = std::sqrt(r * r - (r - h) * (r - h)), pi = std::numbers::pi;
+    const double own = N_DIM == 2 ? pi * r * r : 4.0 / 3.0 * pi * r * r * r;
+    const double outside = N_DIM == 2 ? r * r * std::acos((r - h) / r) - (r - h) * a : pi * h * h * (3.0 * r - h) / 3.0;
+    // Its surface in the domain: its own below the wall and the wall inside it
+    const double surface = N_DIM == 2 ? 2.0 * r * (pi - std::acos((r - h) / r)) + 2.0 * a
+                                      : 4.0 * pi * r * r - 2.0 * pi * r * h + pi * a * a;
+    const std::string dir = fresh_dir("region_outside");
+    const std::string probes = "[regions]\nball = {type = \"" + std::string(N_DIM == 2 ? "disk" : "sphere") +
+                               "\", center = " + numbers3("0.5", "0.9", "0.5") + ", radius = 0.2}\n"
+                               "[[probes]]\nname = \"ball\"\nregion = \"ball\"\nfields = [\"RHO\"]\n"
+                               "reductions_file = \"" + dir + "/ball.csv\"\n";
+    Solver solver;
+    testing::internal::CaptureStderr();
+    solver.init(parse_toml(couette_case(8, probes)));
+    const std::string warned = testing::internal::GetCapturedStderr();
+    run(solver);
+    if (!comm::is_root()) return;
+    const char * volume = N_DIM == 2 ? "area" : "volume";
+    const char * area = N_DIM == 2 ? "perimeter" : "surface_area";
+    const json::Value b = json::parse(output::open(dir + "/ball.csv").sampling);
+    EXPECT_EQ(b["measures"]["region"][volume].number, own);
+    // The cell fractions' sampling error
+    const double tol = N_DIM == 2 ? 1e-4 : 1e-3;
+    EXPECT_NEAR(b["measures"]["in_domain"][volume].number, own - outside, tol * own);
+    // The surface: exact patches split 30 (3D: 6) times where the domain's boundary crosses them
+    EXPECT_NEAR(b["measures"]["in_domain"][area].number, surface, rounding_or(N_DIM == 2 ? 1e-6 : 1e-4) * surface);
+    EXPECT_NEAR(b["clipped"][std::string(volume) + "_fraction"].number, outside / own, tol);
+    EXPECT_NE(warned.find("probes[name = \"ball\"].region: "), std::string::npos) << warned;
+    EXPECT_NE(warned.find("% of its " + std::string(volume) + " lies outside the domain"), std::string::npos) << warned;
+}
+
 const char * const MEASURE = N_DIM == 2 ? "length" : "area";
 
 } // namespace
@@ -748,7 +906,7 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" << PERFECT_GAS
       << "[output]\ncheck_interval = 1000000\n";
     for (const char * zone : {"left", "right"}) {
-        s << "[[probes]]\nname = \"" << zone << "\"\nboundary = \"" << zone << "\"\nsampling = \"point\"\nsamples = false\n"
+        s << "[[probes]]\nname = \"" << zone << "\"\nboundary = \"" << zone << "\"\nsampling = \"point\"\n"
           << "fields = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\"]\nreductions = [\"integral\"]\n"
           << "reductions_file = \"" << dir << "/" << zone << ".csv\"\n";
     }
@@ -830,6 +988,89 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
 }
 #endif
 
+#if N_DIM == 2
+TEST(ProbesTest, RegionsCutByCurvedWallsMeasureAndBalanceTheirPartInTheDomain) {
+    // A disk across the outer wall (r = 1.384) of a solid-body rotation
+    // between curved slip walls, a steady flow whose momentum the
+    // reconstruction reproduces: its part in the domain, its lens with the
+    // wall's circle, and the closed surface of that part, through which no
+    // net mass flows. The straight cells leave out the slivers between their
+    // faces and the wall, whose share of the area and perimeter is 1e-3, and
+    // the surface's arc then ends short of its part on the wall
+    const double R = 1.384, rho_r = 0.3, d = 1.384, pi = std::numbers::pi;
+    const double alpha = std::acos((d * d + R * R - rho_r * rho_r) / (2.0 * d * R));
+    const double beta = std::acos((d * d + rho_r * rho_r - R * R) / (2.0 * d * rho_r));
+    const double area = R * R * alpha + rho_r * rho_r * beta -
+                        0.5 * std::sqrt((-d + R + rho_r) * (d + R - rho_r) * (d - R + rho_r) * (d + R + rho_r));
+    const double perimeter = 2.0 * R * alpha + 2.0 * rho_r * beta, own = pi * rho_r * rho_r;
+    const std::string file = write_temp_shared("probes_annulus_measures.msh", annulus_gmsh(4, 48));
+    const std::string dir = fresh_dir("annulus_measures");
+    auto input = [&](const std::string & u, const std::string & p) {
+        return
+        "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = " + u + "\np = \"" + p + "\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+        "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\ntroubled_threshold = 1.0\n" + PERFECT_GAS +
+        "[output]\ncheck_interval = 1000000\nrun_log = \"" + dir + "/run.jsonl\"\n"
+        "[regions]\ndisk = {type = \"disk\", center = [1.384, 0.0], radius = 0.3}\n"
+        "[[probes]]\nname = \"disk\"\nregion = \"disk\"\nfields = [\"RHO\"]\nreductions = [\"integral\"]\n"
+        "reductions_file = \"" + dir + "/disk.csv\"\n"
+        "[[probes]]\nname = \"surface\"\nregion = {type = \"boundary\", of = {type = \"intersection\", "
+        "regions = [\"domain\", \"disk\"]}}\nfields = [\"MASS_FLUX\"]\nsampling = \"point\"\n"
+        "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/surface.csv\"\n";
+    };
+    Solver solver;
+    testing::internal::CaptureStderr();
+    solver.init(parse_toml(input("[\"-0.3 * y\", \"0.3 * x\"]", "1 / 1.4 + 0.045 * (x^2 + y^2)")));
+    const std::string warned = testing::internal::GetCapturedStderr();
+    run(solver);
+    const auto steady = comm::is_root() ? read_csv(dir + "/surface.csv").front() : std::map<std::string, double>{};
+    // A uniform expansion, div u = 0.2: the net outflow is 0.2 times the area inside, which a surface around the
+    // wrong part, closed or not, misses
+    Solver expanding;
+    testing::internal::CaptureStderr();
+    expanding.init(parse_toml(input("[\"0.1 * x\", \"0.1 * y\"]", "1 / 1.4")));
+    testing::internal::GetCapturedStderr();
+    run(expanding);
+    if (!comm::is_root()) return;
+    EXPECT_NEAR(read_csv(dir + "/surface.csv").front().at("integral_MASS_FLUX"), 0.2 * area, rounding_or(1e-8) * area);
+    const auto disk = read_csv(dir + "/disk.csv").front();
+    const auto & surface = steady;
+    EXPECT_NEAR(disk.at("area"), area, 1e-5 * area);
+    EXPECT_NEAR(surface.at("length"), perimeter, 1e-5 * perimeter);
+    // The mass flow in and out across the disk's diameter
+    const double through = 0.3 * (1.384 * 1.384 - 1.084 * 1.084) / 2.0;
+    EXPECT_NEAR(surface.at("integral_MASS_FLUX"), 0.0, rounding_or(1e-10) * through);
+    const json::Value b = json::parse(output::open(dir + "/disk.csv").sampling);
+    EXPECT_EQ(b["measures"]["region"]["area"].number, own);
+    EXPECT_EQ(b["measures"]["region"]["perimeter"].number, 2.0 * pi * rho_r);
+    EXPECT_EQ(b["measures"]["region"]["tolerance"].number, 0.0);
+    EXPECT_NEAR(b["measures"]["in_domain"]["area"].number, area, 1e-5 * area);
+    EXPECT_NEAR(b["measures"]["in_domain"]["perimeter"].number, perimeter, 1e-5 * perimeter);
+    EXPECT_NEAR(b["clipped"]["area_fraction"].number, 1.0 - area / own, 1e-5);
+    EXPECT_EQ(b["units"]["measures.in_domain.perimeter"].string, "m");
+    char share[16];
+    std::snprintf(share, sizeof(share), "%.3g", 100.0 * (1.0 - area / own));
+    EXPECT_NE(warned.find("probes[name = \"disk\"].region: " + std::string(share)), std::string::npos) << warned;
+    EXPECT_NE(warned.find("% of its area lies outside the domain, and the probe covers only its part inside"),
+              std::string::npos)
+        << warned;
+    std::ifstream log(dir + "/run.jsonl");
+    bool recorded = false;
+    for (std::string line; std::getline(log, line);) {
+        const json::Value r = json::parse(line);
+        if (r["type"].string != "probe") continue;
+        recorded = true;
+        EXPECT_EQ(r["probe"].string, "disk");
+        EXPECT_EQ(r["sampling"]["measures"]["in_domain"]["area"].number, b["measures"]["in_domain"]["area"].number);
+    }
+    EXPECT_TRUE(recorded);
+}
+#endif
+
 #ifdef Mallard_HAS_HDF5
 TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
     // The probe writes its file on the main thread while the writer's
@@ -869,7 +1110,7 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
                                          : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.0, 1.0]\n"
                                            "bounds = [[0.3, 0.32, 0.3], [0.7, 0.68, 0.7]]\n";
     const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\n" + plane +
-                              "fields = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "fields = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\n"
                               "reductions = [\"integral\", \"favre\"]\nreductions_file = \"" + dir + "/cut.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(20, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe)));
@@ -947,7 +1188,7 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [0.5, 0.5], radius = 0.2}"
                                            : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}";
     const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
-                              "fields = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "fields = [\"MASS_FLUX\"]\nsampling = \"point\"\n"
                               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n"
                               "[[probes]]\nname = \"region\"\nregion = " + surface + "\n"
                               "fields = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
@@ -966,6 +1207,122 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
         EXPECT_NEAR(read_csv(dir + file).front().at("integral_MASS_FLUX"), expected,
                     precision_tol<double>(tol, 1e-5) * expected)
             << file;
+    }
+}
+
+TEST(ProbesTest, FluxesThroughIsosurfacesFollowTheDivergence) {
+    // rho = 1 + r^2: its isosurface rho = 1 + R^2 is the circle (sphere) of radius R, with normals toward
+    // increasing rho, outward; the flux of rho u through it, with u linear, is 1 + R^2 times the integral
+    // of div u over the disk (ball), and its area and flux converge at second order
+    const double R = 0.2, pi = std::numbers::pi, div = N_DIM == 2 ? 0.3 : 0.25;
+    const double area = N_DIM == 2 ? 2.0 * pi * R : 4.0 * pi * R * R;
+    const double flux = (1.0 + R * R) * div * (N_DIM == 2 ? pi * R * R : 4.0 / 3.0 * pi * R * R * R);
+    const std::string value = std::to_string(1.0 + R * R);
+    std::vector<double> area_errors, flux_errors;
+    for (const uint32_t n : N_DIM == 2 ? std::vector<uint32_t>{12, 24, 48} : std::vector<uint32_t>{12, 24}) {
+        const std::string dir = fresh_dir("isosurface");
+        std::string probes;
+        for (const char * flip : {"false", "true"}) {
+            probes += std::string("[[probes]]\nname = \"") + (flip[0] == 't' ? "inward" : "outward") +
+                      "\"\nregion = {type = \"isosurface\", field = \"RHO\", value = " + value + ", flip = " + flip +
+                      "}\nfields = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
+                      "reductions_file = \"" + dir + "/" + (flip[0] == 't' ? "inward" : "outward") + ".csv\"\n";
+        }
+        std::string input = box_case(n, N_DIM == 2 ? "1 + (x - 0.5)^2 + (y - 0.5)^2" : "1 + (x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2",
+                                     "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probes);
+        const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
+        input.replace(input.find(u), u.size(), "u = " + vector3("0.1 * (x - 0.5)", "0.2 * (y - 0.5)", "-0.05 * (z - 0.5)"));
+        if (N_DIM == 3) input.replace(input.find("Nz = "), 5 + std::to_string(n / 2).size(), "Nz = " + std::to_string(n));
+        Solver solver;
+        solver.init(parse_toml(input));
+        run(solver);
+        const auto out = read_csv(dir + "/outward.csv").front(), in = read_csv(dir + "/inward.csv").front();
+        const std::string measure = N_DIM == 2 ? "length" : "area";
+        area_errors.push_back(std::fabs(out.at(measure) - area) / area);
+        flux_errors.push_back(std::fabs(out.at("integral_MASS_FLUX") - flux) / flux);
+        EXPECT_EQ(in.at("integral_MASS_FLUX"), -out.at("integral_MASS_FLUX")) << n;
+        EXPECT_EQ(in.at(measure), out.at(measure)) << n;
+    }
+    for (size_t i = 1; i < area_errors.size(); i++) {
+        EXPECT_GT(std::log2(area_errors[i - 1] / area_errors[i]), 1.7) << area_errors[i - 1] << " " << area_errors[i];
+        // 3D: the flux error is near 1e-3 already on the coarsest mesh, where other errors than the surface's compete
+        if (N_DIM == 2) {
+            EXPECT_GT(std::log2(flux_errors[i - 1] / flux_errors[i]), 1.7) << flux_errors[i - 1] << " " << flux_errors[i];
+        }
+    }
+    EXPECT_LT(area_errors.back(), 0.01);
+    EXPECT_LT(flux_errors.back(), 2e-3);
+}
+
+TEST(ProbesTest, RegionsOfTheSolutionAreTheSameOnAnyNumberOfRanks) {
+    // Each cell's level and its gradient are its own and its vertex neighbors', across
+    // periodic boundaries too; the sums run in global cell order
+    const std::string dir = fresh_dir("solution_ranks");
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        const std::vector<std::pair<std::string, std::string>> regions = {
+            {"dense", "{type = \"where\", condition = \"RHO > 1.1 and not (x < 0.3)\"}"},
+            {"level", "{type = \"isosurface\", field = \"RHO\", value = 1.1}"}};
+        for (const auto & [name, region] : regions) {
+            probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"" +
+                      (name == "level" ? ", \"MASS_FLUX\"" : "") + "]\nregion = " +
+                      region + "\nreductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"" + dir +
+                      "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return box_case(12, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 4\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"dense", "level"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        EXPECT_EQ(read_csv(file + "_serial.csv").size(), 5u) << name;
+    }
+}
+
+TEST(ProbesTest, RegionsOfVelocityGradientFieldsAreTheSameOnAnyNumberOfRanks) {
+    // First order and inviscid: the halo is one layer deep unless a condition reads the velocity gradient,
+    // which the levels' fit reads in every vertex neighbor
+    const std::string dir = fresh_dir("gradient_ranks");
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        const std::vector<std::pair<std::string, std::string>> regions = {
+            {"vortical", "{type = \"where\", condition = \"Q_CRITERION > 5 and MACH < 2\"}"},
+            {"level", "{type = \"isosurface\", field = \"Q_CRITERION\", value = 5}"}};
+        for (const auto & [name, region] : regions) {
+            probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"]\nregion = " + region +
+                      "\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + name + "_" +
+                      suffix + ".csv\"\n";
+        }
+        std::string text = box_case(12, SINE_RHO, "type = \"FO\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+        const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
+        text.replace(text.find(u), u.size(),
+                     "u = " + vector3("sin(2 * pi * x) * cos(2 * pi * y)", "-cos(2 * pi * x) * sin(2 * pi * y)", "0.2"));
+        return text;
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"vortical", "level"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        const auto rows = read_csv(file + "_serial.csv");
+        ASSERT_EQ(rows.size(), 3u) << name;
+        EXPECT_GT(rows.front().at(name == std::string("level") ? (N_DIM == 2 ? "length" : "area")
+                                                                : (N_DIM == 2 ? "area" : "volume")),
+                  0.0)
+            << name;
     }
 }
 
@@ -1698,4 +2055,552 @@ TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
               std::string::npos);
     EXPECT_NE(message("time_interval = 0.1\nspectra = {fields = [\"P\"], length = 0.2}\n").find("at least 4"),
               std::string::npos);
+}
+
+TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
+    // [output] reference is the default of every probe's; a probe's own replaces it
+    const std::string reference = "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
+    const auto cf = [&](const std::string & output, const std::string & own) {
+        const std::string dir = fresh_dir("output_reference");
+        const std::string probe = output + "[[probes]]\nname = \"walls\"\nfile = \"" + dir +
+                                  "/walls.csv\"\nboundary_type = \"wall\"\nfields = [\"CF\", \"CP\"]\n" + own;
+        Solver solver;
+        solver.init(parse_toml(couette_case(8, probe)));
+        run(solver);
+        std::vector<double> out;
+        for (const auto & row : read_csv(dir + "/walls.csv")) {
+            if (row.at("step") == 0.0) out.push_back(row.at("CF"));
+        }
+        return out;
+    };
+    const std::vector<double> own = cf("", reference), shared = cf(reference, "");
+    ASSERT_FALSE(own.empty());
+    EXPECT_EQ(shared, own);
+    const std::vector<double> denser =
+        cf(reference, "reference = {rho = 2.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n");
+    ASSERT_EQ(denser.size(), own.size());
+    for (size_t i = 0; i < own.size(); i++) EXPECT_EQ(rtype(denser[i]), rtype(0.5) * rtype(own[i]));
+}
+
+TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMeasures) {
+    // A disk (sphere) sweeping x at 1e5 over four steps of 1e-6, where the
+    // flow barely changes: rho = 1 + 0.5 x averages to its value at the mean
+    // center, x = 0.55, a constant to itself, and the extremes are those of
+    // the cells it covered. The restart file keeps the means of those cells
+    // only, and a run continued from it writes the same averages
+    const std::string dir = fresh_dir("region_moving_average");
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             (N_DIM == 2 ? "[\"0.3 + 1e5 * t\", 0.5]" : "[\"0.3 + 1e5 * t\", 0.5, 0.5]") +
+                             ", radius = 0.15}";
+    auto probe = [&](const std::string & name) {
+        return "[[probes]]\nname = \"" + name + "\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\n"
+               "average = true\ninterval = 4\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+               "reductions_file = \"" + dir + "/" + name + ".csv\"\n";
+    };
+    const std::string stats = "[statistics]\ninterval = 1\n" + probe("disk");
+    const std::string steps = "n_steps = 4\ndt = 1.0e-6\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n",
+                                    stats + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
+                                    "interval = 2\n", steps)));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/disk.csv");
+        ASSERT_EQ(rows.size(), 1u);
+        const auto & row = rows.at(0);
+        const char * volume = N_DIM == 2 ? "area" : "volume";
+        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, rounding_or(1e-9));
+        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), rounding_or(1e-9) * row.at(volume));
+        EXPECT_NEAR(row.at("integral_MEAN_RHO"), row.at("mean_MEAN_RHO") * row.at(volume), 1e-12);
+        EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
+        EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
+        EXPECT_GT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
+    }
+    // The restart at step 2 holds the cells the disk covered at t = 1e-6 and 2e-6, with their means
+    const Mesh & mesh = *solver.get_mesh();
+    const region::MeshRegions automatic(mesh);
+    const region::Region moving = region::read(parse_toml("r = " + disk).at("r"), "r", nullptr, &automatic);
+    std::vector<uint64_t> covered;
+    for (const double t : {1e-6, 2e-6}) {
+        const std::vector<double> f = region::cell_fractions(mesh, moving.at(t));
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            if (f[c] > 0.0) covered.push_back(mesh.n_global_cells > 0 ? mesh.h_global_cell(c) : c);
+        }
+    }
+    if (mesh.n_global_cells > 0) covered = comm::allgatherv(covered);
+    std::sort(covered.begin(), covered.end());
+    covered.erase(std::unique(covered.begin(), covered.end()), covered.end());
+    const RestartData restart = read_restart(dir + "/r_000002.restart");
+    const std::vector<double> * cells = restart.array("PROBE_AVERAGE_disk_CELLS");
+    ASSERT_NE(cells, nullptr);
+    EXPECT_EQ(std::vector<uint64_t>(cells->begin(), cells->end()), covered);
+    EXPECT_LT(covered.size(), mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_owned());
+    EXPECT_EQ(restart.array("PROBE_AVERAGE_disk_WEIGHTS")->size(), covered.size());
+    EXPECT_EQ(restart.array("PROBE_AVERAGE_disk_QUADRATURE")->size(), 2 * covered.size());
+    comm::barrier();
+    std::string input = box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n", stats, steps);
+    input.replace(input.find("[initialize]\n"), input.find("[numerics]") - input.find("[initialize]\n"),
+                  "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000002.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        const auto both = rows_at(dir + "/disk.csv", 4);
+        ASSERT_EQ(both.size(), 2u);
+        EXPECT_EQ(both[0], both[1]);
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, TimeAveragesOfIsosurfacesAreTheirMeanIntegralsOverTheirMeanMeasures) {
+    // A density front carried across the box: the isosurface rho = 1.1, extracted anew at each sample, moves
+    // by more than a cell. The averaging probe's integrals are the time-weighted means of those of the probe
+    // written at every sample, its measure their mean measure, its means the ratio, and its extremes within the
+    // samples'; a restarted run continues the averages bit for bit
+    const std::string dir = fresh_dir("isosurface_average");
+    auto probe = [&](const std::string & name, const std::string & keys) {
+        return "[[probes]]\nname = \"" + name + "\"\nregion = {type = \"isosurface\", field = \"RHO\", value = 1.1}\n"
+               "fields = [\"RHO\", \"P\", \"MASS_FLUX\"]\nsampling = \"point\"\n"
+               "reductions = [\"integral\", \"mean\", \"min\", \"max\"]\nreductions_file = \"" + dir + "/" + name +
+               ".csv\"\n" + keys;
+    };
+    const std::string stats = "[statistics]\ninterval = 1\nt_start = 0.02\n";
+    const std::string probes = stats + probe("every", "") + probe("averaged", "average = true\ninterval = 4\n");
+    const std::string steps = "n_steps = 12\ndt = 0.02\n";
+    const std::string teno = "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n";
+    Solver straight;
+    straight.init(parse_toml(box_case(16, SINE_RHO, teno, probes + "[[write_data]]\nprefix = \"" + dir +
+                                                               "/r\"\nformat = \"restart\"\ninterval = 6\n", steps)));
+    run(straight);
+    const std::string measure = N_DIM == 2 ? "length" : "area";
+    std::vector<std::map<std::string, double>> averaged;
+    if (comm::is_root()) {
+        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"integral_RHO", "integral_P", "integral_MASS_FLUX"},
+                             "", 1, 0.02);
+        const auto every = read_csv(dir + "/every.csv");
+        averaged = read_csv(dir + "/averaged.csv");
+        ASSERT_EQ(averaged.size(), 3u);
+        for (const auto & mean : averaged) {
+            double weight = 0.0, sum = 0.0, t_prev = 0.02, lo = std::numeric_limits<double>::infinity(), hi = -lo;
+            for (const auto & row : every) {
+                if (row.at("step") > mean.at("step") || !(row.at("t") > 0.02)) continue;
+                weight += row.at("t") - t_prev;
+                sum += (row.at("t") - t_prev) * row.at(measure);
+                t_prev = row.at("t");
+                lo = std::min(lo, row.at("min_MASS_FLUX"));
+                hi = std::max(hi, row.at("max_MASS_FLUX"));
+            }
+            const double tol = precision_tol<double>(1e-12, 1e-6);
+            EXPECT_NEAR(mean.at(measure), sum / weight, tol * mean.at(measure)) << "step " << mean.at("step");
+            EXPECT_NEAR(mean.at("mean_MEAN_RHO") * mean.at(measure), mean.at("integral_MEAN_RHO"),
+                        tol * mean.at("integral_MEAN_RHO"));
+            EXPECT_GE(mean.at("min_MEAN_MASS_FLUX"), lo - tol);
+            EXPECT_LE(mean.at("max_MEAN_MASS_FLUX"), hi + tol);
+        }
+        // The front moved: the measures of the samples differ
+        EXPECT_NE(every.at(1).at(measure), every.at(12).at(measure));
+    }
+    comm::barrier();
+    std::string input = box_case(16, SINE_RHO, teno, probes, steps);
+    input.replace(input.find("[initialize]\n"), input.find("[numerics]") - input.find("[initialize]\n"),
+                  "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000006.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        const auto both = rows_at(dir + "/averaged.csv", 12);
+        ASSERT_EQ(both.size(), 2u);
+        EXPECT_EQ(both[0], both[1]);
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach) {
+    // Two disks (spheres) moving across the periodic boundary at x = 1: each
+    // copy's probe measures its part in the domain where it is at each write
+    const std::string dir = fresh_dir("region_moving");
+    const std::string disks = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                              (N_DIM == 2 ? "[\"0.7 + 2 * t\", 0.3]" : "[\"0.7 + 2 * t\", 0.3, 0.5]") +
+                              ", radius = 0.15, repeat = {count = 2, translate = " +
+                              (N_DIM == 2 ? "[0, 0.4]" : "[0, 0.4, 0]") + "}}";
+    const std::string probes = "[[probes]]\nname = \"disks\"\nregion = " + disks + "\nfields = [\"RHO\"]\n"
+                               "copies = \"each\"\nreductions_file = \"" + dir + "/disks.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(16, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 4\ndt = 0.05\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    const region::MeshRegions automatic(mesh);
+    const region::Region array = region::read(parse_toml("r = " + disks).at("r"), "r", nullptr, &automatic);
+    run(solver);
+    const char * volume = N_DIM == 2 ? "area" : "volume";
+    for (uint32_t k = 0; k < 2; k++) {
+        const std::string file = dir + "/disks_copy" + std::to_string(k) + ".csv";
+        const auto rows = read_csv(file);
+        ASSERT_EQ(rows.size(), 5u) << file;
+        const region::Region copy = array.copy(k);
+        for (const auto & row : rows) {
+            const std::vector<double> f = region::cell_fractions(mesh, copy.at(row.at("t")));
+            double expected = 0.0;
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) expected += f[c] * double(mesh.h_cell_measure(c));
+            if (mesh.n_global_cells > 0) expected = comm::allreduce(expected, comm::Op::SUM);
+            EXPECT_NEAR(row.at(volume), expected, 1e-13 * expected) << file << " t " << row.at("t");
+            EXPECT_NEAR(row.at("mean_RHO"), 1.0, 1e-12) << file;
+        }
+        // It keeps its shape, so its own measures are those of where it starts
+        const json::Value b = json::parse(output::open(file).sampling);
+        EXPECT_EQ(b["measures"]["region"][volume].number, region::measures(copy.at(0.0), false).volume);
+    }
+}
+
+TEST(ProbesTest, RegionsOfTheSolutionCoveringNoCellMeasureZero) {
+    // rho > 2 holds in no cell of a uniform flow: at each write the measure and integral are zero,
+    // and the extremes those of no cell
+    const std::string dir = fresh_dir("region_solution_empty");
+    const std::string probes = "[[probes]]\nname = \"dense\"\nregion = {type = \"where\", condition = \"RHO > 2\"}\n"
+                               "fields = [\"RHO\"]\nreductions = [\"integral\", \"max\"]\n"
+                               "reductions_file = \"" + dir + "/dense.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 2\ndt = 1.0e-5\n")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/dense.csv");
+        ASSERT_EQ(rows.size(), 3u);
+        for (const auto & row : rows) {
+            EXPECT_EQ(row.at(N_DIM == 2 ? "area" : "volume"), 0.0);
+            EXPECT_EQ(row.at("integral_RHO"), 0.0);
+            EXPECT_EQ(row.at("max_RHO"), -std::numeric_limits<double>::infinity());
+        }
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, CutQuadratureIntegratesPolynomialsOverABallToRoundOff) {
+    // A ball cutting the simplices of a grid over [-1, 1]^N: its volume and second moments, and those of the
+    // few points fitted to each simplex's full quadrature
+    const double r = 0.63, center[3] = {0.07, -0.11, 0.05};
+    const int n = N_DIM == 2 ? 9 : 5;
+    const double h = 2.0 / n;
+    auto level = [&](const cut_quadrature::Vec & x) {
+        double s = 0.0;
+        for (size_t d = 0; d < N_DIM; d++) s += (x[d] - center[d]) * (x[d] - center[d]);
+        return std::sqrt(s) - r;
+    };
+    std::array<size_t, N_DIM> axes;
+    std::iota(axes.begin(), axes.end(), size_t(0));
+    std::vector<overlap::Simplex> simplices;
+    for (int i = 0; i < (N_DIM == 2 ? n * n : n * n * n); i++) {
+        overlap::Point lo;
+        for (size_t d = 0, rest = size_t(i); d < N_DIM; d++, rest /= size_t(n)) lo[d] = -1.0 + h * double(rest % size_t(n));
+        // Kuhn's simplices of the cube: one per order of the axes
+        std::array<size_t, N_DIM> order = axes;
+        do {
+            overlap::Simplex s;
+            s[0] = lo;
+            for (size_t k = 0; k < N_DIM; k++) {
+                s[k + 1] = s[k];
+                s[k + 1][order[k]] += h;
+            }
+            simplices.push_back(s);
+        } while (std::next_permutation(order.begin(), order.end()));
+    }
+    double volume = 0.0, second = 0.0, mixed = 0.0, fitted = 0.0, fitted_second = 0.0;
+    size_t n_full = 0, n_few = 0, n_fitted = 0;
+    for (const auto & s : simplices) {
+        std::vector<std::vector<cut_quadrature::Point>> out;
+        for (const auto & map : cut_quadrature::simplex_maps(s)) cut_quadrature::integrate(map, level, true, {3, 10}, out);
+        for (const auto & p : out[1]) {
+            const double dx = p.x[0] - center[0], dy = p.x[1] - center[1];
+            volume += p.w;
+            second += p.w * dx * dx;
+            mixed += p.w * dx * dy;
+        }
+        cut_quadrature::Vec c{0.0, 0.0, 0.0};
+        for (const auto & v : s) {
+            for (size_t d = 0; d < N_DIM; d++) c[d] += v[d] / (N_DIM + 1);
+        }
+        std::vector<cut_quadrature::Point> few = out[0];
+        if (!few.empty() && cut_quadrature::fit(few, out[1], 2, c, h)) n_fitted++;
+        else few = out[1];
+        n_full += out[1].size();
+        n_few += few.size();
+        for (const auto & p : few) {
+            const double dx = p.x[0] - center[0];
+            fitted += p.w;
+            fitted_second += p.w * dx * dx;
+        }
+    }
+    const double pi = std::numbers::pi;
+    const double exact = N_DIM == 2 ? pi * r * r : 4.0 / 3.0 * pi * r * r * r;
+    const double exact_second = N_DIM == 2 ? pi * std::pow(r, 4) / 4.0 : 4.0 * pi * std::pow(r, 5) / 15.0;
+    EXPECT_NEAR(volume, exact, 1e-12 * exact);
+    EXPECT_NEAR(second, exact_second, 1e-12 * exact_second);
+    EXPECT_NEAR(mixed, 0.0, 1e-12 * exact_second);
+    EXPECT_NEAR(fitted, exact, 1e-12 * exact);
+    EXPECT_NEAR(fitted_second, exact_second, 1e-12 * exact_second);
+    EXPECT_GT(n_fitted, simplices.size() / 4) << "the cut simplices are fitted, the outside ones have no points";
+    EXPECT_LT(n_few, n_full / 4);
+}
+
+namespace {
+
+const char * const QUADRATIC = "2.0 + 0.3 * x - 0.2 * y + 0.25 * x^2 + 0.15 * x * y - 0.1 * y^2";
+double quadratic(const double x, const double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; }
+const char * const TENO3 = "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n";
+
+/** @brief Runs the input distributed and on one rank with the file names' {} as "distributed" and "serial". */
+void run_both(const std::string & input) {
+    for (const std::string which : {"distributed", "serial"}) {
+        std::string text = input;
+        for (size_t at = text.find("{}"); at != std::string::npos; at = text.find("{}")) text.replace(at, 2, which);
+        Solver solver;
+        if (which == "serial") solver.set_distributed(false);
+        solver.init(parse_toml(text));
+        run(solver);
+    }
+}
+
+} // namespace
+
+TEST(ProbesTest, CurvesOnTheirCellsHaveOneSamplePerCellAndExactIntegrals) {
+    // A line through 11 cells of width 0.05, a line along the faces at y = 0.5 and a circle: one sample per
+    // cell crossed, each weighing its length in the cell, the same on any number of ranks
+    const std::string dir = fresh_dir("native");
+    auto probe = [&](const std::string & name, const std::string & where, const std::string & fields) {
+        return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + "_{}.csv\"\nfields = " + fields +
+               "\nsampling = \"point\"\n" + where + "n_points = \"cells\"\nreductions = [\"integral\"]\n"
+               "reductions_file = \"" + dir + "/" + name + "_{}_reductions.csv\"\n";
+    };
+    const std::string probes =
+        probe("line", "start = " + numbers3("0.31", "0.42", "0.45") + "\nend = " + numbers3("0.68", "0.57", "0.45") + "\n",
+              "[\"RHO\", \"P\"]") +
+        probe("face", "start = " + numbers3("0.2", "0.5", "0.45") + "\nend = " + numbers3("0.8", "0.5", "0.45") + "\n",
+              "[\"P\"]") +
+        probe("ring", std::string("type = \"circle\"\ncenter = ") + numbers3("0.5", "0.5", "0.45") +
+                          (N_DIM == 3 ? "\nnormal = [0, 0, 1]" : "") + "\nradius = 0.3\n",
+              "[\"P\"]");
+    run_both(box_case(20, QUADRATIC, TENO3, probes));
+    for (const std::string name : {"line", "face", "ring"}) {
+        EXPECT_EQ(without_run_metadata(read_all(dir + "/" + name + "_distributed.csv")),
+                  without_run_metadata(read_all(dir + "/" + name + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        EXPECT_EQ(without_run_metadata(read_all(dir + "/" + name + "_distributed_reductions.csv")),
+                  without_run_metadata(read_all(dir + "/" + name + "_serial_reductions.csv")))
+            << name << " on " << comm::size() << " ranks";
+    }
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    auto samples = [&](const std::string & name) {
+        std::vector<std::map<std::string, double>> rows;
+        for (const auto & row : read_csv(dir + "/" + name + "_serial.csv")) {
+            if (row.at("step") == 0.0) rows.push_back(row);
+        }
+        return rows;
+    };
+    auto cells_of = [](const std::vector<std::map<std::string, double>> & rows) {
+        std::set<std::array<int, 3>> cells;
+        for (const auto & row : rows) {
+            cells.insert({int(std::floor(row.at("x") / 0.05)), int(std::floor(row.at("y") / 0.05)),
+                          N_DIM == 3 ? int(std::floor(row.at("z") / 0.1)) : 0});
+        }
+        return cells.size();
+    };
+    const double L = std::hypot(0.37, 0.15);
+    const auto line = samples("line");
+    EXPECT_EQ(line.size(), 11u);
+    EXPECT_EQ(cells_of(line), line.size());
+    double length = 0.0;
+    for (const auto & row : line) length += row.at("area");
+    EXPECT_NEAR(length, L, tol * L);
+    const auto r = read_csv(dir + "/line_serial_reductions.csv").front();
+    const double integral = L * boole([](double s) { return quadratic(0.31 + 0.37 * s, 0.42 + 0.15 * s); }, 0.0, 1.0);
+    EXPECT_NEAR(r.at("length"), L, tol * L);
+    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
+    // On the faces between two rows of cells: once, in one of them
+    const auto face = samples("face");
+    EXPECT_EQ(face.size(), 12u);
+    EXPECT_NEAR(read_csv(dir + "/face_serial_reductions.csv").front().at("length"), 0.6, tol);
+    const auto ring = samples("ring");
+    EXPECT_EQ(cells_of(ring), ring.size());
+    EXPECT_NEAR(read_csv(dir + "/ring_serial_reductions.csv").front().at("integral_P"), 2.0 * std::numbers::pi * 0.3, tol);
+}
+
+TEST(ProbesTest, PointSampledRegionsIntegrateTheReconstructionOverTheCellsTheyCut) {
+    // A ball cutting the cells: the TENO (order 3) reconstruction of a quadratic integrated over its part in
+    // each cell is the quadratic's integral over the ball, the same on any number of ranks
+    const std::string dir = fresh_dir("region_point");
+    const double c[3] = {0.52, 0.47, 0.5}, radius = 0.27;
+    const std::string probes = "[[probes]]\nname = \"ball\"\nfields = [\"RHO\", \"P\"]\nsampling = \"point\"\n"
+                               "region = {type = \"sphere\", center = " + numbers3("0.52", "0.47", "0.5") +
+                               ", radius = 0.27}\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"" + dir +
+                               "/ball_{}.csv\"\n";
+    run_both(box_case(20, QUADRATIC, TENO3, probes));
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/ball_distributed.csv")),
+              without_run_metadata(read_all(dir + "/ball_serial.csv")))
+        << "on " << comm::size() << " ranks";
+    const double pi = std::numbers::pi;
+    const double volume = N_DIM == 2 ? pi * radius * radius : 4.0 / 3.0 * pi * std::pow(radius, 3);
+    const double second = N_DIM == 2 ? pi * std::pow(radius, 4) / 4.0 : 4.0 * pi * std::pow(radius, 5) / 15.0;
+    // About the center: the linear terms vanish, the squares' halves of the Hessian (0.5 and -0.2) remain
+    const double integral = quadratic(c[0], c[1]) * volume + 0.5 * (0.5 - 0.2) * second;
+    const auto r = read_csv(dir + "/ball_serial.csv").front();
+    const double tol = precision_tol<double>(1e-11, 1e-5);
+    const std::string measure = N_DIM == 3 ? "volume" : "area";
+    EXPECT_NEAR(r.at(measure), volume, tol * volume);
+    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("integral_P"), volume, tol * volume);
+}
+
+TEST(ProbesTest, PointSampledRegionsIntegrateToRoundOffInCurvedCellsTheyCutAtTheirCenters) {
+    // A ball about the center of an annulus (3D: a spherical shell) between curved walls, its surface through the
+    // vertex average of a cell at the inner wall and near those of its neighbors: its part in the domain, the
+    // shell between the inner wall and the ball, has a quadratic's integral to round-off, on quadrilaterals and
+    // triangles (3D: hexahedra and prisms)
+    const double r_in = 1.0;
+    for (const bool simplices : {false, true}) {
+        std::vector<std::array<rtype, N_DIM>> nodes;
+        std::vector<std::vector<uint32_t>> cells;
+        std::vector<Mesh::BoundaryFace> faces;
+#if N_DIM == 2
+        const uint32_t n_r = 3, n_t = 24;
+        auto id = [&](const uint32_t i, const uint32_t j) { return j * n_t + i % n_t; };
+        for (uint32_t j = 0; j <= n_r; j++) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                const double r = 1.0 + 0.384 * j / n_r, t = 2.0 * std::numbers::pi * i / n_t;
+                nodes.push_back({rtype(r * std::cos(t)), rtype(r * std::sin(t))});
+            }
+        }
+        for (uint32_t j = 0; j < n_r; j++) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                const uint32_t q[4] = {id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)};
+                if (!simplices) {
+                    cells.push_back({q[0], q[1], q[2], q[3]});
+                } else {
+                    cells.push_back({q[0], q[1], q[2]});
+                    cells.push_back({q[0], q[2], q[3]});
+                }
+            }
+        }
+        for (uint32_t i = 0; i < n_t; i++) {
+            faces.push_back({{id(i, 0), id(i + 1, 0)}, "inner"});
+            faces.push_back({{id(i, n_r), id(i + 1, n_r)}, "outer"});
+        }
+        const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                                   "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+#else
+        const Shell s = shell(4, 2, simplices);
+        nodes = s.nodes;
+        cells = s.cells;
+        faces = s.faces;
+        const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\n"
+                                   "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\ntype = \"sphere\"\nfilled = false\n"
+                                   "center = [0.0, 0.0, 0.0]\nradius = 1.5\n";
+#endif
+        Mesh mesh;
+        mesh.init_from_connectivity(nodes, cells, faces);
+        mesh.apply_curved(curved::surfaces_of_mesh(mesh, parse_toml("[mesh]\n" + shapes)));
+        double r = 0.0;
+        for (uint32_t c = 0; c < mesh.n_owned() && r == 0.0; c++) {
+            if (!mesh.curved_geometry->cell_is_curved(c)) continue;
+            double o[3] = {0.0, 0.0, 0.0}, lowest = std::numeric_limits<double>::infinity();
+            const uint32_t n = mesh.h_n_nodes_of_cell(c);
+            for (uint32_t k = 0; k < n; k++) {
+                double rk = 0.0;
+                for (size_t d = 0; d < N_DIM; d++) {
+                    const double x = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
+                    o[d] += x / n;
+                    rk += x * x;
+                }
+                lowest = std::min(lowest, std::sqrt(rk));
+            }
+            if (lowest < r_in + 1e-3) r = std::sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+        }
+        ASSERT_GT(r, r_in);
+        std::ostringstream ball;
+        ball.precision(17);
+        ball << "r = {type = \"sphere\", center = " << numbers3("0", "0", "0") << ", radius = " << r << "}";
+        const region::Region region = region::read(parse_toml(ball.str()).at("r"), "r");
+        const probe::VolumeQuadrature q = probe::volume_quadrature(mesh, region, 2, false);
+        double volume = 0.0, integral = 0.0;
+        for (size_t i = 0; i < q.weights.size(); i++) {
+            const auto & x = q.points.points[q.points.gathered_row[i]];
+            volume += q.weights[i];
+            integral += q.weights[i] * quadratic(x[0], x[1]);
+        }
+        const double pi = std::numbers::pi;
+        const double exact = N_DIM == 2 ? pi * (r * r - r_in * r_in) : 4.0 / 3.0 * pi * (std::pow(r, 3) - std::pow(r_in, 3));
+        const double second = N_DIM == 2 ? pi * (std::pow(r, 4) - std::pow(r_in, 4)) / 4.0
+                                         : 4.0 * pi * (std::pow(r, 5) - std::pow(r_in, 5)) / 15.0;
+        const double tol = rounding_or(1e-12);
+        const char * kind = simplices ? "simplices" : "quadrilaterals or hexahedra";
+        EXPECT_NEAR(volume, exact, tol * exact) << kind;
+        EXPECT_NEAR(integral, 2.0 * exact + (0.25 - 0.1) * second, tol * integral) << kind;
+    }
+}
+
+TEST(ProbesTest, GridsInRegionsSampleAsPointProbesAtTheirNodes) {
+    const std::string dir = fresh_dir("region_grid");
+    const double c[3] = {0.5, 0.45, 0.5}, radius = 0.3;
+    const uint32_t n[3] = {6, 5, 4};
+    std::ostringstream points, counts;
+    points.precision(17);
+    size_t n_points = 0;
+    counts << "[" << n[0] << ", " << n[1] << (N_DIM == 3 ? ", 4]" : "]");
+    for (uint32_t k = 0; k < (N_DIM == 3 ? n[2] : 1u); k++) {
+        for (uint32_t j = 0; j < n[1]; j++) {
+            for (uint32_t i = 0; i < n[0]; i++) {
+                const uint32_t ijk[3] = {i, j, k};
+                double x[3], r2 = 0.0;
+                for (size_t d = 0; d < N_DIM; d++) {
+                    x[d] = c[d] - radius + 2.0 * radius * double(ijk[d]) / double(n[d] - 1);
+                    r2 += (x[d] - c[d]) * (x[d] - c[d]);
+                }
+                if (r2 > radius * radius) continue;
+                points << (n_points++ ? ", [" : "[") << x[0] << ", " << x[1];
+                if (N_DIM == 3) points << ", " << x[2];
+                points << "]";
+            }
+        }
+    }
+    const std::string probes =
+        "[[probes]]\nname = \"grid\"\nfields = [\"RHO\", \"P\"]\nsampling = \"point\"\nregion = {type = \"sphere\", "
+        "center = " + numbers3("0.5", "0.45", "0.5") + ", radius = 0.3}\nn_points = " + counts.str() + "\nfile = \"" +
+        dir + "/grid_{}.csv\"\nreductions_file = \"" + dir + "/grid_reductions_{}.csv\"\n"
+        "[[probes]]\nname = \"points\"\nfields = [\"RHO\", \"P\"]\nsampling = \"point\"\ntype = \"points\"\npoints = [" +
+        points.str() + "]\nfile = \"" + dir + "/points_{}.csv\"\n";
+    run_both(box_case(12, SINE_RHO, TENO3, probes));
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/grid_distributed.csv")),
+              without_run_metadata(read_all(dir + "/grid_serial.csv")))
+        << "on " << comm::size() << " ranks";
+    const auto grid = read_csv(dir + "/grid_serial.csv"), point = read_csv(dir + "/points_serial.csv");
+    ASSERT_EQ(grid.size(), point.size());
+    ASSERT_EQ(grid.size(), 2 * n_points);
+    for (size_t i = 0; i < grid.size(); i++) {
+        for (const char * k : {"step", "x", "y", "RHO", "P"}) {
+            EXPECT_NEAR(grid[i].at(k), point[i].at(k), 1e-13 * std::max(1.0, std::fabs(point[i].at(k)))) << k << " row " << i;
+        }
+    }
+}
+
+TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingAndSolutionRegionsAndUnknownCurveCounts) {
+    auto error_of = [](const std::string & probe) {
+        try {
+            Solver solver;
+            solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", "[[probes]]\nname = \"r\"\nfields = [\"P\"]\n" + probe)));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string moving = "region = {type = \"sphere\", center = " + std::string(N_DIM == 2 ? "[\"0.5 + t\", 0.5]" : "[\"0.5 + t\", 0.5, 0.5]") +
+                               ", radius = 0.2}\n";
+    EXPECT_NE(error_of(moving + "sampling = \"point\"\n").find("moving region"), std::string::npos);
+    EXPECT_NE(error_of(moving + "n_points = " + numbers3("4", "4", "4") + "\n").find("moving region"), std::string::npos);
+    const std::string solution = "region = {type = \"where\", condition = \"P > 0.5\"}\n";
+    EXPECT_NE(error_of(solution + "sampling = \"point\"\n").find("defined by the solution"), std::string::npos);
+    EXPECT_NE(error_of(solution + "n_points = " + numbers3("4", "4", "4") + "\n").find("defined by the solution"),
+              std::string::npos);
+    const std::string iso = error_of("region = {type = \"isosurface\", field = \"P\", value = 0.5}\nn_points = [4, 4]\n");
+    EXPECT_NE(iso.find("no parameters"), std::string::npos) << iso;
+    EXPECT_NE(iso.find("[[write_data]]"), std::string::npos) << iso;
+    const std::string cells = error_of("start = " + numbers3("0.1", "0.1", "0.5") + "\nend = " + numbers3("0.9", "0.9", "0.5") +
+                                       "\nn_points = \"faces\"\n");
+    EXPECT_NE(cells.find("n_points = \"cells\""), std::string::npos) << cells;
 }

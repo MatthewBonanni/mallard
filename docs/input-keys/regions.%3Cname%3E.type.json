@@ -4,6 +4,8 @@
  ],
  "required": true,
  "set_in": [
+  "examples/hot_gas_regions/input.toml",
+  "examples/moving_heaters/input.toml",
   "examples/source_regions/input.toml"
  ],
  "type": "string",
@@ -22,10 +24,12 @@
   "implicit",
   "interior",
   "intersection",
+  "isosurface",
   "polygon",
   "rectangle",
   "sphere",
   "torus",
-  "union"
+  "union",
+  "where"
  ]
 }

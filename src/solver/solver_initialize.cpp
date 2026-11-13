@@ -44,6 +44,9 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 void Solver::init_solution() {
     if (state_reader) {
         apply_output_state(state_reader(*mesh));
+        update_primitives();
+        statistics.start(statistics.sampling_start());
+        probes.start_averages(statistics.sampling_start());
         initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
         return;
     }
@@ -137,14 +140,14 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
-    const std::vector<std::string> averages = statistics.variables();
+    const std::vector<std::string> averages = statistics.restart_variables();
     auto is_average = [&](const std::string & name) {
         return std::find(averages.begin(), averages.end(), name) != averages.end();
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
         if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
-            name.rfind("PHASE_", 0) == 0) continue;
+            name.rfind("PHASE_", 0) == 0 || name.rfind("BATCH_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -181,13 +184,21 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     step = restart.step;
     t = static_cast<rtype>(restart.t);
+    // Fused half steps: the state is that before the chemistry's pending half step
+    const double * pending = restart.attribute("CHEMISTRY_PENDING");
+    chemistry_pending = pending ? *pending : 0.0;
+    chemistry_flushed = false;
     if (resume_output) {
         triggers.restore(restart.attributes);
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
     }
-    statistics.restore(restart, file, t);
-    probes.restore_averages(restart, file, t, statistics.resets());
+    // States read for post-processing never continue the averages they hold
+    if (!state_reader) {
+        statistics.restore(restart, file, t);
+        probes.restore_averages(restart, file, t, statistics.resets());
+    }
     probes.restore_spectra(restart, file, statistics.resets());
+    if (resume_output && !statistics.resets()) convergence.restore(restart, file, averages_start());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;
@@ -202,7 +213,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
 void Solver::apply_output_state(RestartData state) {
     const std::vector<std::string> expected = restart_variables();
     const auto has = [&](const std::string & name) { return state.find(name) != nullptr; };
-    const auto optional = [](const std::string & name) { return name == "T_SEED" || name == "CHEM_H" || name == "P_MAX"; };
+    const auto optional = [](const std::string & name) {
+        return name == "T_SEED" || name == "CHEM_H" || name == "P_MAX" || name.starts_with("MEAN_") ||
+               name.starts_with("COV_") || name.starts_with("PHASE_");
+    };
     const bool conservative = std::all_of(expected.begin(), expected.end(),
                                           [&](const std::string & name) { return optional(name) || has(name); });
     RestartData out;
@@ -286,7 +300,6 @@ void Solver::apply_output_state(RestartData state) {
     apply_restart(out, "the output file", false);
     copy_host_to_device();
     if (is_mixture() && !seeded) init_temperature_seed();
-    update_primitives();
 }
 
 void Solver::init_solution_constant() {
@@ -302,7 +315,7 @@ void Solver::init_solution_constant() {
     if (u.size() != N_DIM) {
         throw InputError({.key = "initialize.u",
                           .line = line_of(init, "u"),
-                          .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                          .message = "has " + logging::count(u.size(), "component") + ", but this build is " +
                                      std::to_string(N_DIM) + "D",
                           .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
     }

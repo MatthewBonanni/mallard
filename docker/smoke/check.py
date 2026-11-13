@@ -3,10 +3,11 @@
 
     check.py TOOLS sod STEM [STEM...]           L1 density error against the exact Sod solution at t = 0.2
     check.py TOOLS reactor LOG                   `mallard reactor`'s ignition delay against Cantera's
+    check.py TOOLS python STEM [STEM...]        the Sod check, read with the installed Python package mallard
 
 TOOLS is the directory of Mallard's Python tools (share/mallard/tools). A STEM
-PREFIX_NNNNNN names a 2D or 3D snapshot: its .vtkhdf file, or without HDF5 its
-.vtu file (the .pvtu index of a distributed run).
+PREFIX names the series of a 2D or 3D run, whose last snapshot is checked: its
+.vtkhdf file, or without HDF5 its .pvd index (of .pvtu files on several ranks).
 """
 import os
 import re
@@ -20,7 +21,7 @@ IGNITION_DELAY_RTOL = 0.02
 
 
 def cells(stem):
-    """Snapshot file, cell-center x and density of a snapshot."""
+    """Snapshot file, cell-center x and density of the last snapshot of a series."""
     from mallard.vtu import read_vtu_cells, snapshot
     path = snapshot(stem)
     pts, conn, offs, _, arrays = read_vtu_cells(path)
@@ -40,6 +41,24 @@ def check_sod(paths):
     return ok
 
 
+def check_python(paths, tools):
+    import mallard
+    from plot_sod import exact_sod
+    where = os.path.dirname(os.path.realpath(mallard.__file__))
+    if where.startswith(os.path.realpath(tools) + os.sep):
+        print(f"mallard is imported from {where}, not from an installed package")
+        return False
+    ok = True
+    for stem in paths:
+        path = next(stem + ext for ext in (".vtkhdf", ".pvtu", ".vtu") if os.path.exists(stem + ext))
+        f = mallard.open(path)
+        x = f.geometry().vertex_averages()[:, 0]
+        err = np.mean(np.abs(f.read("RHO") - exact_sod(x, 0.2)))
+        ok &= bool(err < SOD_L1_MAX)
+        print(f"{path} (mallard {mallard.__version__} from {where}): L1 density error {err:.2e}")
+    return ok
+
+
 def check_reactor(path):
     m = re.search(r"Ignition delay\s+(\S+) s", open(path).read())
     delay = float(m.group(1))
@@ -50,9 +69,14 @@ def check_reactor(path):
 
 
 def main():
-    sys.path[:0] = [sys.argv[1], os.path.join(sys.argv[1], "..", "examples", "sod")]
-    kind, files = sys.argv[2], sys.argv[3:]
-    ok = check_sod(files) if kind == "sod" else check_reactor(files[0])
+    tools, kind, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+    sys.path[:0] = ([] if kind == "python" else [tools]) + [os.path.join(tools, "..", "examples", "sod")]
+    if kind == "sod":
+        ok = check_sod(files)
+    elif kind == "python":
+        ok = check_python(files, tools)
+    else:
+        ok = check_reactor(files[0])
     sys.exit(0 if ok else 1)
 
 

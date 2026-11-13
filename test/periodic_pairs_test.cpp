@@ -113,7 +113,9 @@ TEST(PeriodicPairsTest, OtherPairsNeedATranslationOrAnAngle) {
         const std::string error = error_of(text);
         EXPECT_NE(error.find("neither a translation nor an angle"), std::string::npos) << error;
     }
-    EXPECT_NE(error_of(BOX + "[[periodic]]\nzones = [\"left\"]\n").find("lists 1 zones"), std::string::npos);
+    const std::string one_zone = error_of(BOX + "[[periodic]]\nzones = [\"left\"]\n");
+    EXPECT_NE(one_zone.find("lists 1 zone"), std::string::npos) << one_zone;
+    EXPECT_EQ(one_zone.find("lists 1 zones"), std::string::npos) << one_zone;
     EXPECT_NE(error_of(BOX + "[[periodic]]\nzones = [\"left\", \"right\"]\nangle = 10.0\ntranslation = " +
                        components("2.0", "0.0", "0.0") + "\n")
                   .find("both a translation and an angle"),

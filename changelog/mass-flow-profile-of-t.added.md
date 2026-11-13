@@ -1,1 +1,0 @@
-- `inlet_mass_flow`: `mdot` and `profile` may depend on `t`. They are evaluated on the device at every stage and the faces carry exactly `mdot(t)`, identically on any rank count; an `mdot` of `x`, `y`, `z` is an error that points to `profile` and `mass_flux`, and an `mdot` or profile that turns negative stops the run with the time and value (#601).

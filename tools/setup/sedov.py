@@ -16,7 +16,6 @@ shock radius against R(t) for every snapshot and plots radial density
 scatter against the exact profile at the last one.
 """
 import argparse
-import glob
 import os
 import re
 import sys
@@ -57,14 +56,9 @@ def exact_density(r, t, energy, rho0, gamma):
 
 
 def snapshots(solut):
-    index = glob.glob(os.path.join(solut, "*.vtkhdf.series"))
-    if index:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-        from mallard.vtkhdf import read_series
-        return read_series(index[0])
-    pvd = glob.glob(os.path.join(solut, "*.pvd"))[0]
-    entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', open(pvd).read())
-    return [(float(t), os.path.join(solut, f)) for t, f in entries]
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from mallard.vtu import recorded_time, series
+    return [(recorded_time(f), f) for f in series(solut)]
 
 
 def read_cells(path):

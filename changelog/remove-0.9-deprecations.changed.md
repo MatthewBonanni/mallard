@@ -1,1 +1,0 @@
-- `[[write_data]] format = "xdmf"` writes XDMF indexes over HDF5 files (the mesh once, a file of fields per snapshot), for VisIt, meshio and ParaView of any version: the files `format = "hdf5"` wrote, now a supported format rather than a deprecated one. `docs/guide/output.md` has a table of which format to choose.

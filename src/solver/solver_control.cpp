@@ -172,10 +172,7 @@ void Solver::diverged() {
     MeshQuality quality;
     divergence::Evidence evidence = diagnose_divergence(has_valid, failed, quality);
     if (has_valid) {
-        if (chemistry_pending > 0.0) {
-            advance_chemistry(chemistry_pending);
-            chemistry_pending = 0.0;
-        }
+        flush_chemistry();
         write_data(true);
         evidence.restart_file = write_restarts();
         message += " The last valid state (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
@@ -225,12 +222,11 @@ void Solver::act_on_requests() {
 }
 
 void Solver::apply_commands() {
-    std::vector<run_control::Command> commands;
+    // Every rank empties its queue, so that no request stays pending; all follow rank 0's commands
+    std::vector<run_control::Command> commands = run_control::take_commands();
+    if (!comm::is_root()) commands.clear();
     std::string text;
-    if (comm::is_root()) {
-        commands = run_control::take_commands();
-        for (const auto & command : commands) text += command.text + "\n";
-    }
+    for (const auto & command : commands) text += command.text + "\n";
     text = comm::broadcast(text);
     const std::vector<std::string> lines = split(text, '\n');
     for (size_t i = 0; i < lines.size(); i++) {
@@ -348,6 +344,7 @@ std::string Solver::write_restarts() {
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = restart_arrays();
     std::string file;
+    swap_unflushed();
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;
         writer->write(step, t, true, attributes, faces, arrays);
@@ -359,6 +356,7 @@ std::string Solver::write_restarts() {
         checkpoint_writer->finish();
         file = checkpoint_writer->last_written();
     }
+    swap_unflushed();
     return file;
 }
 
@@ -374,7 +372,9 @@ void Solver::write_checkpoint() {
 }
 
 void Solver::poll_control_files() {
-    if (control_file_interval == 0 || step % control_file_interval != 0 || !comm::is_root()) return;
+    // Once per interval of the steps the host has taken, also while steps run ahead of it
+    if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
+    control_files_polled = step / control_file_interval;
     std::error_code error;
     if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
     if (std::filesystem::remove("STOP", error)) {

@@ -147,8 +147,11 @@ device (`step_scalars`). The right-hand side therefore gets the stage's
 fraction `c` of the step besides its host time (`RHSFunction(U, R, t, c)`):
 inside a capture a one-thread kernel sets the device stage time to
 `t_n + c dt` from the step's device scalars; otherwise it copies the host
-stage time. For FE, SSPRK3 and RK4 `c dt` is exact, so both give the same
-bits as the host's `t + c dt`. A step with time-dependent sources is a CUDA
+stage time. Both form `t + c dt` with one rounding (`time_of_stage`, an
+explicit FMA): with two, the device compiler would contract them into an FMA
+and the host would not, and for a `c` that is not a power of two (SSPRK54,
+RDPK3Sp35, CK45) the stage times, and so the solutions, would differ in the
+last bits. A step with time-dependent sources is a CUDA
 graph like any other, also with domain averages (`mean_*`): their global sum
 per stage is an `ExactSums` on the device, reduced over the ranks with NCCL on
 the step's stream.

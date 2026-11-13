@@ -1,1 +1,0 @@
-- The key catalog is `docs/input-keys/`, one file per key (its path, percent-encoded outside lowercase letters, digits, `_`, `.` and `-`, plus `.json`), so pull requests that add different keys change different files; `tools/dev/input_catalog.py build` writes it, and `mallard list keys` and the install read it (#845).

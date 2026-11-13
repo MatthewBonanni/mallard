@@ -13,9 +13,13 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <numbers>
 #include <set>
@@ -276,8 +280,8 @@ TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) 
     std::string writers = "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\n" + variables +
                           "[[write_data]]\nprefix = \"" + dir + "/near\"\nformat = \"vtu\"\nregion = " + ball + "\n" + variables;
 #ifdef Mallard_HAS_HDF5
-    writers += "[[write_data]]\nprefix = \"" + dir + "/kflow\"\nformat = \"vtkhdf\"\n" + variables +
-               "[[write_data]]\nprefix = \"" + dir + "/knear\"\nformat = \"vtkhdf\"\nregion = " + ball + "\n" + variables;
+    writers += "[[write_data]]\nprefix = \"" + dir + "/kflow\"\nformat = \"vtkhdf\"\nseries = false\n" + variables +
+               "[[write_data]]\nprefix = \"" + dir + "/knear\"\nformat = \"vtkhdf\"\nseries = false\nregion = " + ball + "\n" + variables;
 #endif
     const std::string input = box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", writers);
     Solver solver;
@@ -450,5 +454,226 @@ TEST(RegionSnapshotsTest, KeysThatDoNotFitTheRegionAreErrors) {
     EXPECT_NE(message("format = \"vtu\"\nregion = {type = \"sphere\", center = " + point(5, 5, 5) + ", radius = 0.1}\n")
                   .find("part of any cell"),
               std::string::npos);
+    const std::string moving_shell = std::string("{type = \"boundary\", of = {type = \"") + (N_DIM == 3 ? "box" : "rectangle") +
+                                     "\", center = [\"0.5 + t\", 0.5" + (N_DIM == 3 ? ", 0.5" : "") + "], size = [0.2, 0.2" +
+                                     (N_DIM == 3 ? ", 0.2" : "") + "]}}";
+    EXPECT_NE(message("format = \"vtu\"\nregion = " + moving_shell + "\n").find("moves"), std::string::npos);
     EXPECT_EQ(message("format = \"vtu\"\nregion = " + slice + "\n"), "");
+}
+
+namespace {
+
+/** @brief The raw appended array of a VTK XML file by name (Points, connectivity, offsets, the data). */
+std::string appended_array(const std::string & text, const std::string & name) {
+    const size_t base = text.find('_', text.find("<AppendedData encoding=\"raw\">")) + 1;
+    const size_t tag = name == "Points" ? text.find("<Points>") : text.find("Name=\"" + name + "\"");
+    EXPECT_NE(tag, std::string::npos) << name;
+    if (tag == std::string::npos) return "";
+    const size_t at = base + std::stoull(text.substr(text.find("offset=\"", tag) + 8));
+    uint64_t n = 0;
+    std::memcpy(&n, text.data() + at, sizeof(n));
+    return text.substr(at + sizeof(n), n);
+}
+
+/** @brief Rows [first, first + n) of a flat array of width values each. */
+template <typename T>
+std::vector<T> slice(const std::vector<T> & v, int64_t first, int64_t n, size_t width = 1) {
+    return std::vector<T>(v.begin() + first * int64_t(width), v.begin() + (first + n) * int64_t(width));
+}
+
+} // namespace
+
+TEST(RegionSnapshotsTest, RegionsThatMoveOrFollowTheSolutionWriteTheCellsTheyCoverAtEachWrite) {
+    // A condition linear in x, read through the solution (RHO > 0 holds everywhere), is cut exactly; a moving
+    // box covers at each write the cells of the fixed box where it is then
+    if (comm::size() > 1) GTEST_SKIP() << "serial";
+    const std::string dir = fresh_dir("changing");
+    const std::string where = "{type = \"where\", condition = \"x < 0.31 + 25 * t and RHO > 0\"}";
+    const std::string moving = std::string("{type = \"") + (N_DIM == 3 ? "box" : "rectangle") +
+                               "\", center = [\"0.2 + 25 * t\", 0.5" + (N_DIM == 3 ? ", 0.5" : "") +
+                               "], size = [0.25, 2.0" + (N_DIM == 3 ? ", 2.0" : "") + "]}";
+    const std::string variables = "fields = [\"RHO\", \"P\"]\ninterval = 2\n";
+    std::string writers = "[regions]\nwhere = " + where + "\nmoving = " + moving + "\n[[write_data]]\nprefix = \"" + dir +
+                          "/v\"\nformat = \"vtu\"\nregions = [\"where\", \"moving\"]\n" + variables;
+#ifdef Mallard_HAS_HDF5
+    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nseries = false\nregion = \"where\"\n" + variables +
+               "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"vtkhdf\"\nseries = true\nregion = \"where\"\n" +
+               variables;
+#endif
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(box_case("cartesian", "type = \"MUSCL\"\n", writers)));
+    solver.run();
+    const Mesh & mesh = *solver.get_mesh();
+    const double dt = 2.0e-3, dx = 1.0 / 8.0, tolerance = sizeof(rtype) == 8 ? 1e-12 : 1e-6;
+    const uint64_t layer = 6 * (N_DIM == 3 ? 4 : 1);
+    const region::Region box = region::read(parse_toml("r = " + moving + "\n").at("r"), "test");
+    for (const int step : {0, 2, 4}) {
+        const double t = step * dt, c = 0.31 + 25.0 * t;
+        std::ostringstream stem;
+        stem << "_" << std::setw(6) << std::setfill('0') << step;
+        const std::string text = read_all(dir + "/v_where" + stem.str() + ".vtu");
+        const std::vector<rtype> points = as<rtype>(appended_array(text, "Points"));
+        const auto cells = cell_points(std::vector<double>(points.begin(), points.end()),
+                                       as<int64_t>(appended_array(text, "connectivity")),
+                                       as<int64_t>(appended_array(text, "offsets")), false);
+        const std::vector<rtype> fraction = as<rtype>(appended_array(text, "REGION_FRACTION"));
+        ASSERT_EQ(cells.size(), layer * uint64_t(std::ceil(c / dx))) << "the columns of cells left of x = " << c;
+        ASSERT_EQ(fraction.size(), cells.size());
+        for (size_t k = 0; k < cells.size(); k++) {
+            double x0 = 1.0;
+            for (size_t i = 0; i < cells[k].size(); i += 3) x0 = std::min(x0, cells[k][i]);
+            EXPECT_NEAR(double(fraction[k]), std::clamp((c - x0) / dx, 0.0, 1.0), tolerance) << step << " " << k;
+        }
+
+        const std::vector<double> expected = region::cell_fractions(mesh, box.at(t));
+        std::vector<double> inside;
+        for (uint32_t cell : mesh.cells_by_global_id()) {
+            if (cell < mesh.n_owned() && expected[cell] > 0.0) inside.push_back(expected[cell]);
+        }
+        const std::vector<rtype> moved = as<rtype>(appended_array(read_all(dir + "/v_moving" + stem.str() + ".vtu"),
+                                                                  "REGION_FRACTION"));
+        ASSERT_EQ(moved.size(), inside.size()) << step;
+        for (size_t k = 0; k < inside.size(); k++) EXPECT_NEAR(double(moved[k]), inside[k], tolerance) << step << " " << k;
+
+#ifdef Mallard_HAS_HDF5
+        // Step k of the series is the snapshot of its own file, its mesh after the previous steps'
+        const std::string one = dir + "/k" + stem.str() + ".vtkhdf", series = dir + "/s.vtkhdf";
+        const int64_t k = step / 2;
+        const int64_t p0 = h5_values<int64_t>(series, "VTKHDF/Steps/PointOffsets")[size_t(k)];
+        const int64_t c0 = h5_values<int64_t>(series, "VTKHDF/Steps/CellOffsets")[size_t(k)];
+        const int64_t i0 = h5_values<int64_t>(series, "VTKHDF/Steps/ConnectivityIdOffsets")[size_t(k)];
+        EXPECT_EQ(h5_values<int64_t>(series, "VTKHDF/Steps/PartOffsets")[size_t(k)], k);
+        const int64_t n_points = h5_values<int64_t>(series, "VTKHDF/NumberOfPoints")[size_t(k)];
+        const int64_t n_cells = h5_values<int64_t>(series, "VTKHDF/NumberOfCells")[size_t(k)];
+        const int64_t n_ids = h5_values<int64_t>(series, "VTKHDF/NumberOfConnectivityIds")[size_t(k)];
+        EXPECT_EQ(n_cells, int64_t(cells.size()));
+        EXPECT_EQ(h5_values<int64_t>(series, "VTKHDF/Steps/CellDataOffsets/REGION_FRACTION")[size_t(k)], c0);
+        EXPECT_EQ(slice(h5_values<double>(series, "VTKHDF/Points"), p0, n_points, 3), h5_values<double>(one, "VTKHDF/Points"));
+        EXPECT_EQ(slice(h5_values<int64_t>(series, "VTKHDF/Offsets"), c0 + k, n_cells + 1),
+                  h5_values<int64_t>(one, "VTKHDF/Offsets"));
+        EXPECT_EQ(slice(h5_values<int64_t>(series, "VTKHDF/Connectivity"), i0, n_ids),
+                  h5_values<int64_t>(one, "VTKHDF/Connectivity"));
+        EXPECT_EQ(slice(h5_values<uint8_t>(series, "VTKHDF/Types"), c0, n_cells), h5_values<uint8_t>(one, "VTKHDF/Types"));
+        for (const char * v : {"RHO", "P", "REGION_FRACTION"}) {
+            const std::string path = std::string("VTKHDF/CellData/") + v;
+            EXPECT_EQ(slice(h5_values<rtype>(series, path), c0, n_cells), h5_values<rtype>(one, path)) << v;
+        }
+        EXPECT_EQ(h5_values<rtype>(one, "VTKHDF/CellData/REGION_FRACTION"), fraction);
+#endif
+    }
+}
+
+TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
+    // The elements of each snapshot are those the probe of the isosurface integrates over then; the VTKHDF
+    // file holds each step's elements after the previous steps'
+    const std::string dir = fresh_dir("isosurface");
+    const std::string front = "{type = \"isosurface\", field = \"RHO\", value = 1.05}";
+    const std::string variables = "fields = [\"RHO\", \"P\"]\ninterval = 2\n";
+    std::string writers = "[regions]\nflame = " + front + "\n[[write_data]]\nprefix = \"" + dir +
+                          "/v\"\nformat = \"vtu\"\nregion = \"flame\"\n" + variables + "[[probes]]\nname = \"f\"\n"
+                          "region = \"flame\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/f.csv\"\n" +
+                          variables;
+#ifdef Mallard_HAS_HDF5
+    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nregion = \"flame\"\n" + variables;
+#endif
+    run_case(box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", writers,
+                      "n_steps = 4\ndt = 2.0e-2\n"));
+    if (!comm::is_root()) return;
+    std::ifstream csv(dir + "/f.csv");
+    std::vector<double> probe_measure;
+    for (std::string line; std::getline(csv, line);) {
+        if (line.empty() || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+        std::stringstream row(line);
+        std::string cell;
+        for (int column = 0; column < 3; column++) std::getline(row, cell, ',');
+        probe_measure.push_back(std::stod(cell));
+    }
+    ASSERT_EQ(probe_measure.size(), 3u);
+    EXPECT_GT(std::abs(probe_measure[2] - probe_measure[0]), 1e-6 * probe_measure[0]) << "the front moves";
+    for (size_t k = 0; k < 3; k++) {
+        std::ostringstream name;
+        name << dir << "/v_" << std::setw(6) << std::setfill('0') << 2 * k << ".vtp";
+        const std::string text = read_all(name.str());
+        const std::vector<double> measure = as<double>(appended_array(text, "measure"));
+        ASSERT_GT(measure.size(), 4u) << k;
+        double total = 0.0;
+        for (double m : measure) total += m;
+        EXPECT_NEAR(total, probe_measure[k], 1e-12 * probe_measure[k]) << k;
+#ifdef Mallard_HAS_HDF5
+        const std::string file = dir + "/k.vtkhdf";
+        const char * kind = N_DIM == 3 ? "Polygons" : "Lines";
+        const std::string group = std::string("VTKHDF/") + kind + "/";
+        const auto counts = h5_values<int64_t>(file, group + "NumberOfCells");
+        const auto ids = h5_values<int64_t>(file, group + "NumberOfConnectivityIds");
+        const auto cell_offsets = h5_values<int64_t>(file, "VTKHDF/Steps/CellOffsets");
+        const auto id_offsets = h5_values<int64_t>(file, "VTKHDF/Steps/ConnectivityIdOffsets");
+        const int64_t which = N_DIM == 3 ? 2 : 1, c0 = cell_offsets[4 * k + size_t(which)];
+        const int64_t i0 = id_offsets[4 * k + size_t(which)];
+        const int64_t p0 = h5_values<int64_t>(file, "VTKHDF/Steps/PointOffsets")[k];
+        const int64_t n_points = h5_values<int64_t>(file, "VTKHDF/NumberOfPoints")[k];
+        ASSERT_EQ(counts[k], int64_t(measure.size())) << k;
+        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/measure"), c0, counts[k]), measure) << k;
+        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/P"), c0, counts[k]), as<double>(appended_array(text, "P")));
+        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/Points"), p0, n_points, 3), as<double>(appended_array(text, "Points")));
+        EXPECT_EQ(slice(h5_values<int64_t>(file, group + "Connectivity"), i0, ids[k]),
+                  as<int64_t>(appended_array(text, "connectivity")));
+        const std::vector<int64_t> offsets = slice(h5_values<int64_t>(file, group + "Offsets"), c0 + int64_t(k), counts[k] + 1);
+        EXPECT_EQ(std::vector<int64_t>(offsets.begin() + 1, offsets.end()), as<int64_t>(appended_array(text, "offsets")));
+#endif
+    }
+}
+
+TEST(RegionSnapshotsTest, RegionsOfTheSolutionDoNotDependOnTheRankCount) {
+    const std::string dir = fresh_dir("solution_ranks");
+    const std::string input = box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", "",
+                                       "n_steps = 4\ndt = 2.0e-2\n");
+    const std::string dense = "region = {type = \"where\", condition = \"RHO > 1.05\"}\n";
+    const std::string front = "region = {type = \"isosurface\", field = \"RHO\", value = 1.05}\n";
+    const std::string fields = "interval = 2\nfields = [\"RHO\", \"P\"]\n";
+    {
+        // The pieces of the ranks hold the serial snapshot's cells; the isosurface's file is the serial one
+        auto with = [&](const std::string & sub) {
+            return input + "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/w\"\nformat = \"vtu\"\n" + fields + dense +
+                   "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/f\"\nformat = \"vtu\"\n" + fields + front;
+        };
+        Solver distributed;
+        distributed.init(parse_toml(with("d")));
+        distributed.run();
+        const bool pieces = distributed.get_mesh()->n_global_cells > 0;
+        Solver serial;
+        serial.set_distributed(false);
+        serial.init(parse_toml(with("s")));
+        serial.run();
+        comm::barrier();
+        if (comm::is_root()) {
+            for (const char * step : {"_000000", "_000002", "_000004"}) {
+                const std::string f = read_all(dir + "/s/f" + std::string(step) + ".vtp");
+                EXPECT_GT(f.size(), 500u) << step;
+                EXPECT_EQ(without_run_metadata(read_all(dir + "/d/f" + std::string(step) + ".vtp")), without_run_metadata(f))
+                    << step;
+                std::multiset<rtype> serial_fractions, distributed_fractions;
+                for (rtype v : as<rtype>(appended_array(read_all(dir + "/s/w" + std::string(step) + ".vtu"), "REGION_FRACTION"))) {
+                    serial_fractions.insert(v);
+                }
+                for (int r = 0; r < (pieces ? comm::size() : 1); r++) {
+                    std::ostringstream piece;
+                    piece << dir << "/d/w" << step;
+                    if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << r;
+                    for (rtype v : as<rtype>(appended_array(read_all(piece.str() + ".vtu"), "REGION_FRACTION"))) {
+                        distributed_fractions.insert(v);
+                    }
+                }
+                EXPECT_GT(serial_fractions.size(), 4u) << step;
+                EXPECT_EQ(distributed_fractions, serial_fractions) << step << " on " << comm::size() << " ranks";
+            }
+        }
+        comm::barrier();
+    }
+#ifdef Mallard_HAS_HDF5
+    if (comm::size() > 1 && !have_parallel_hdf5()) return;
+    expect_vtkhdf_output_matches_serial(input, fields + "series = true\n" + dense, dir + "/series", {""});
+    expect_vtkhdf_output_matches_serial(input, fields + "series = false\n" + dense, dir + "/files", {"_000000", "_000002", "_000004"});
+    expect_vtkhdf_output_matches_serial(input, fields + front, dir + "/front", {""});
+#endif
 }
