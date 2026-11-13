@@ -17,6 +17,8 @@ When a job runs:
 
 A job *split across* N jobs runs as `<job>-1of<N>` to `<job>-<N>of<N>`, each building the
 same configuration and running every N-th test of each suite run (googletest's sharding).
+A suite without MPI runs as several processes at once, one per core (Serial) or per two
+cores (OpenMP, Threads), each running a share of the job's tests.
 
 ## Builds
 
@@ -32,7 +34,7 @@ same configuration and running every N-th test of each suite run (googletest's s
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
 | OpenMP, 2D, GCC 16 (Docker's `gcc:16.2.0`, Debian 13), CMake 4.2.3 | x86-64 CPU | Run | Full suite (2 threads) | every PR | `ci.yml/gcc-16` |
 | Serial, single precision, 2D, HDF5, Clang 22 (Ubuntu's) | x86-64 CPU | Run | Full suite | main | `ci.yml/clang-22` |
-| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite, split across 2 jobs | every PR | `ci.yml/clang-23` |
+| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite | every PR | `ci.yml/clang-23` |
 | OpenMP, 2D, HDF5, CGNS, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite (2 threads) | main | `ci.yml/gcc-15-arm64` |
 | Serial, MPI, 2D, dKaMinPar, HDF5, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks | main | `ci.yml/mpi-arm64` |
 | OpenMP, single precision, 3D, HDF5, CGNS, GCC 16 (Docker's `gcc:16.2.0`), CMake 4.2.3 | arm64 CPU | Run | Full suite (2 threads) | main | `ci.yml/gcc-16-arm64` |

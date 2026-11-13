@@ -230,7 +230,7 @@ jobs:
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true, "gate": true},
             {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3", "gate": true},
             {"name": "clang-22", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "hdf5": true},
-            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "shards": 2, "gate": true},
+            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23", "gate": true},
             {"name": "gcc-15-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "os": "ubuntu-26.04-arm"},
             {"name": "mpi-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "os": "ubuntu-26.04-arm"},
             {"name": "gcc-16-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "cgns": true, "container": "gcc:16.2.0", "cmake": "4.2.3", "os": "ubuntu-26.04-arm"},
@@ -373,12 +373,17 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
+      # As many processes at once as the runner's cores hold: one per core with Serial, one
+      # per two with OpenMP and Threads (tools/dev/parallel_test.sh)
       - name: Test
         if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
           OMP_NUM_THREADS: 2
           KOKKOS_NUM_THREADS: 2
-        run: ./build/src/mallard test
+          FLAGS: ${{ matrix.backend.flags }}
+        run: |
+          case "$FLAGS" in *OPENMP=ON*|*THREADS=ON*) threads=2 ;; *) threads=1 ;; esac
+          sh tools/dev/parallel_test.sh $(( $(getconf _NPROCESSORS_ONLN) / threads )) ./build/src/mallard test
       - name: Upgrade the inputs of every release
         if: matrix.backend.name == 'openmp'
         run: |
@@ -419,18 +424,19 @@ jobs:
             if [ -z "${GTEST_FILTER:-}" ]; then echo "$1"; return; fi
             comm -12 <(list "$1") <(list "$GTEST_FILTER") | paste -sd: -
           }
-          if [ "$FULL" = true ]; then
-            mpirun -n 1 ./build/src/mallard test
-          else
-            one=$(only "$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*")
-            if [ -n "$one" ]; then mpirun -n 1 ./build/src/mallard test --gtest_filter="$one"; fi
-          fi
+          if [ "$FULL" != true ]; then one=$(only "$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*"); fi
           mpi=$(only "$mpi_tests")
-          # Every test on 3 ranks, so none assumes a single rank; two rank
-          # counts at once, so tests that share a file path collide
-          if [ -n "$mpi" ]; then mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi" & two=$!; fi
+          # Every test on 3 ranks, so none assumes a single rank; meanwhile the MPI tests on
+          # 2 ranks, so tests that share a file path collide, then the 1-rank run
           mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_brief=1 & three=$!
-          ok=true; if [ -n "$mpi" ]; then wait "$two" || ok=false; fi; wait $three || ok=false; $ok
+          {
+            ok=true
+            if [ -n "$mpi" ]; then mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi" || ok=false; fi
+            if [ "$FULL" = true ]; then mpirun -n 1 ./build/src/mallard test || ok=false
+            elif [ -n "$one" ]; then mpirun -n 1 ./build/src/mallard test --gtest_filter="$one" || ok=false; fi
+            $ok
+          } & others=$!
+          ok=true; wait $others || ok=false; wait $three || ok=false; $ok
           if [ -n "$mpi" ]; then mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi"; fi
       # Every rank in the report, and no warning about a sensible placement
       - name: Rank report (MPI)
@@ -587,9 +593,12 @@ jobs:
     name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
     # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
-    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH)
+    # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH).
+    # Only main writes: no other branch could read what a branch writes, and it would push
+    # main's objects out of the repository's 10 GB of cache
     env:
       SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     steps:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
@@ -639,8 +648,11 @@ jobs:
   # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
   # dispatch asks for them (-f device=true): every source through the ROCm and oneAPI
   # compilers, for portability errors and warnings the GCC, Clang and nvcc builds miss.
-  # sccache caches the compiles that it can (hipcc and icpx calls it does not recognize
-  # run uncached).
+  # HIP compiles through sccache, written by main only, as in the CUDA builds. SYCL compiles
+  # through ccache in depend mode, saved by main as the backends' caches are: icpx gives
+  # each compile a random id and generated integration headers, and sccache hit only the
+  # sources without kernels; depend mode hashes the sources and the dependency file, which
+  # leaves the generated headers out.
   portability:
     needs: [changelog, device]
     if: >-
@@ -655,18 +667,25 @@ jobs:
         toolchain:
           - name: hip
             image: rocm/dev-ubuntu-26.04:10.1.0-full
+            launcher: sccache
             flags: >-
               -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DCMAKE_PREFIX_PATH=/opt/rocm -DKokkos_ENABLE_HIP=ON
               -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
           - name: sycl
             image: ubuntu:26.04
             oneapi: '2026.2'
+            launcher: ccache
             flags: >-
               -DCMAKE_CXX_COMPILER=icpx -DKokkos_ENABLE_SYCL=ON
               -DKokkos_ARCH_INTEL_GEN=ON -DKokkos_ENABLE_ONEDPL=OFF
     name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     env:
       SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_DEPEND: "true"
+      CCACHE_MAXSIZE: 2G
+      LAUNCHER: ${{ matrix.toolchain.launcher }}
     steps:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
@@ -678,7 +697,7 @@ jobs:
         timeout-minutes: 25
         run: >
           sh tools/dev/apt_install.sh --no-install-recommends
-          git cmake make curl g++ gfortran libopenmpi-dev openmpi-bin ca-certificates
+          git cmake make curl g++ gfortran libopenmpi-dev openmpi-bin ca-certificates ${{ matrix.toolchain.launcher == 'ccache' && 'ccache' || '' }}
       # The oneAPI image lags the releases: the compiler from Intel's apt repository
       - name: Install oneAPI ${{ matrix.toolchain.oneapi }}
         if: matrix.toolchain.oneapi
@@ -707,18 +726,39 @@ jobs:
           STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh running
       - uses: mozilla-actions/sccache-action@v0.0.9
+        if: matrix.toolchain.launcher == 'sccache'
+      - name: Restore compiler cache
+        if: matrix.toolchain.launcher == 'ccache'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/${{ github.sha }}
+          restore-keys: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
           -DKokkos_ENABLE_SERIAL=ON ${{ matrix.toolchain.flags }}
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER="$LAUNCHER"
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_DIM=${{ matrix.dim }}
+      # As in the backends' builds, the cache main saves keeps only what this build used
       - name: Build
-        run: cmake --build build -j $(nproc) -- -k
+        run: |
+          if [ "$LAUNCHER" = ccache ]; then ccache -z > /dev/null; fi
+          start=$(date +%s)
+          cmake --build build -j "$(nproc)" -- -k
+          if [ "$LAUNCHER" = ccache ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            ccache --evict-older-than $(( $(date +%s) - start + 60 ))s
+          fi
       - name: Cache statistics
         if: always()
-        run: sccache --show-stats
+        run: $LAUNCHER --show-stats
+      - name: Save compiler cache
+        if: matrix.toolchain.launcher == 'ccache' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache/${{ matrix.toolchain.name }}-${{ matrix.dim }}d/${{ github.sha }}
       - name: Report the job's result
         if: always()
         env:
@@ -850,6 +890,13 @@ jobs:
     if: always()
     needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, spack, fuzz]
     runs-on: ubuntu-26.04
+    # The workflow's permissions, and deleting caches
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      statuses: write
+      pull-requests: read
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -889,3 +936,18 @@ jobs:
             fi
           fi
           [ "$state" = success ]
+      # Each build's newest compiler cache on main is the one branches restore; the older ones
+      # would only push other caches out of the repository's 10 GB
+      - name: Delete main's superseded compiler caches
+        if: always() && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?ref=refs/heads/main&key=ccache/&per_page=100" \
+            --jq '.actions_caches[] | [.created_at, .id, .key] | @tsv' |
+          sort -r | awk -F'\t' '{ split($3, k, "/"); if (seen[k[2]]++) print $2, $3 }' |
+          while read -r id key; do
+            echo "Deleting $key"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" > /dev/null
+          done
