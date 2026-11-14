@@ -22,6 +22,7 @@
 #include "curved.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -42,6 +43,12 @@ using HostMem = Kokkos::HostSpace;
 // GPUs interleave each cell's scratch and outputs across the cells of a batch
 constexpr bool DEVICE_IS_HOST =
     Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+
+/** @brief n cells rounded up to whole slices of the packed stencils. */
+uint32_t whole_slices(const uint32_t n) {
+    constexpr uint32_t slice = 1u << teno::SLICE_SHIFT;
+    return (n + slice - 1) / slice * slice;
+}
 
 // The largest stencil degree's moment tables
 constexpr int MAX_NM = 2 * teno::MAX_DEGREE - 1;
@@ -3448,7 +3455,9 @@ class Setup3D {
         size_t c_nss_max() const { return nss_max; }
         uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
 
-        uint32_t batch_cells() const {
+        uint32_t batch_cells() const { return std::min(device_batch(), whole_slices(n_target)); }
+
+        uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
             // Batch outputs within about a quarter of the free device memory and
@@ -3788,11 +3797,11 @@ struct LatticeMap2D {
 
 /** @brief Sizes of each cell's scratch arrays in 2D. */
 struct Caps2D {
-    uint32_t visits = 512;
-    uint32_t hash = 1024;  // power of two, at least twice visits + 2
-    uint32_t entries = 1024;
+    uint32_t visits = 0;
+    uint32_t hash = 0;  // power of two, at least twice visits
+    uint32_t entries = 0;
     uint32_t lines = 16;
-    uint32_t line_faces = 128;
+    uint32_t line_faces = 64;
     uint32_t rows = 0;  // least-squares rows
     uint32_t sector = 0;
 
@@ -4709,16 +4718,28 @@ class Setup2D {
             d.face_gauss = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.face_gauss);
             caps.rows = std::max<uint32_t>(ns_max, nss_max);
             caps.sector = nss_max + 1;
+            // Twice the visits the searches stop after (the sector stencils' gathers 8 nss cells), and as
+            // many entries again for mirror images; cells that need more are redone on the host
+            caps.visits = std::bit_ceil(2u * (std::max<uint32_t>(ns_max, 8u * nss) + 1));
+            caps.hash = 2 * caps.visits;
+            caps.entries = 2 * caps.visits;
             timing.geometry = timer.seconds();
         }
 
         uint16_t max_large() const { return ns_max; }
         uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
 
+        // Meshes of at least MAX_BATCH cells share one workspace, the one check --memory measures on them
         uint32_t batch_cells() const {
+            const uint32_t n = device_batch();
+            return n_target < MAX_BATCH ? std::min(n, whole_slices(n_target)) : n;
+        }
+
+        uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Scratch and outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
+            // Scratch and outputs within about a quarter of the free device memory and what MAX_BATCH
+            // cells take with twice the scratch: a thread per cell, so smaller scratch fills more of the device
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -4726,14 +4747,20 @@ class Setup2D {
 #endif
             const size_t out_bytes = size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32;
-            size_t n = free_bytes / 4 / (out_bytes + caps.bytes(nk));
-            n = std::min<size_t>(n, MAX_BATCH);
+            const size_t workspace = std::min(free_bytes / 4, MAX_BATCH * (out_bytes + caps.scaled(2).bytes(nk)));
+            size_t n = workspace / (out_bytes + caps.bytes(nk));
+#if defined(KOKKOS_ENABLE_CUDA)
+            // At most one wave of threads: a multiprocessor holds at least a thread per 256 of its registers
+            const Kokkos::DefaultExecutionSpace space;
+            const cudaDeviceProp & prop = space.cuda_device_prop();
+            n = std::min(n, size_t(prop.multiProcessorCount) * size_t(prop.regsPerMultiprocessor) / 256);
+#endif
             n = std::max<size_t>(n / 1024 * 1024, 1024);
             return static_cast<uint32_t>(n);
         }
 
-        // The initial solution's chunk of cells: meshes larger than it share the setup's workspace, sized by the device
-        static constexpr size_t MAX_BATCH = 16384;
+        // The initial solution's chunk of cells
+        static constexpr uint32_t MAX_BATCH = 16384;
 
         void compute(const Kokkos::View<uint32_t *> & cells, const uint32_t n, TableBatch & out) {
             Kokkos::Timer timer;
@@ -4762,7 +4789,7 @@ class Setup2D {
             if (!redo.empty()) {
                 Kokkos::Timer host_timer;
                 auto h_cells = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(cells, std::make_pair(0u, n)));
-                on_host(h_cells, redo, out);
+                on_host(h_cells, redo, out, 4);
                 timing.host_cells += host_timer.seconds();
                 timing.n_host_cells += redo.size();
             }
@@ -4788,11 +4815,15 @@ class Setup2D {
             return logging::format("cell %u at (%.6g, %.6g)", c, double(host.cell_coords(c, 0)), double(host.cell_coords(c, 1)));
         }
 
-        /** @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch until they fit. */
-        void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out) {
+        /**
+         * @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch from first_scale
+         *        times caps until they fit.
+         */
+        void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out,
+                     const uint32_t first_scale = 1) {
             const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultHostExecutionSpace().concurrency());
-            constexpr uint32_t MAX_SCALE = 1024;
-            for (uint32_t scale = 1; !which.empty(); scale *= 4) {
+            constexpr uint32_t MAX_SCALE = 4096;
+            for (uint32_t scale = first_scale; !which.empty(); scale *= 4) {
                 if (scale > MAX_SCALE) {
                     const Caps2D most = caps.scaled(MAX_SCALE);
                     throw std::runtime_error(logging::format(
