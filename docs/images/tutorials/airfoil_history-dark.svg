@@ -369,8 +369,10 @@ L 136.080472 150.639295
 L 142.578206 151.044842 
 L 151.421086 151.358051 
 L 165.321331 151.602957 
-L 171.101885 151.664412 
-L 171.101885 151.664412 
+L 189.828255 151.788113 
+L 241.731524 151.916437 
+L 367.251166 151.996645 
+L 367.251166 151.996645 
 " clip-path="url(#p18e409b055)" style="fill: none; stroke: #f2a04d; stroke-width: 1.4; stroke-linecap: square"/>
    </g>
    <g id="line2d_33">
@@ -390,31 +392,31 @@ L 381.731133 214.401953
    </g>
    <g id="legend_1">
     <g id="line2d_34">
-     <path d="M 200.663945 20.38 
-L 210.663945 20.38 
-L 220.663945 20.38 
+     <path d="M 256.915508 20.38 
+L 266.915508 20.38 
+L 276.915508 20.38 
 " style="fill: none; stroke: #7fb0ea; stroke-width: 1.4; stroke-linecap: square"/>
     </g>
     <g id="text_18">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="228.663945" y="23.88" transform="rotate(-0 228.663945 23.88)">28,672 cells</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="284.915508" y="23.88" transform="rotate(-0 284.915508 23.88)">28,672 cells</text>
     </g>
     <g id="line2d_35">
-     <path d="M 200.663945 34.579219 
-L 210.663945 34.579219 
-L 220.663945 34.579219 
+     <path d="M 256.915508 34.579219 
+L 266.915508 34.579219 
+L 276.915508 34.579219 
 " style="fill: none; stroke: #f2a04d; stroke-width: 1.4; stroke-linecap: square"/>
     </g>
     <g id="text_19">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="228.663945" y="38.079219" transform="rotate(-0 228.663945 38.079219)">114,688 cells (t = 19, unfinished)</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="284.915508" y="38.079219" transform="rotate(-0 284.915508 38.079219)">114,688 cells</text>
     </g>
     <g id="line2d_36">
-     <path d="M 200.663945 49.119844 
-L 210.663945 49.119844 
-L 220.663945 49.119844 
+     <path d="M 256.915508 48.778437 
+L 266.915508 48.778437 
+L 276.915508 48.778437 
 " style="fill: none; stroke-dasharray: 4.44,1.92; stroke-dashoffset: 0; stroke: #ece4e7; stroke-width: 1.2"/>
     </g>
     <g id="text_20">
-     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="228.663945" y="52.619844" transform="rotate(-0 228.663945 52.619844)">workshop reference</text>
+     <text style="font-size: 10px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="284.915508" y="52.278437" transform="rotate(-0 284.915508 52.278437)">workshop reference</text>
     </g>
    </g>
   </g>
@@ -742,8 +744,10 @@ L 534.699384 116.898785
 L 540.383741 116.41957 
 L 546.712302 116.127952 
 L 554.493122 115.99654 
-L 556.866378 115.984609 
-L 556.866378 115.984609 
+L 570.088907 116.000589 
+L 610.300241 116.017483 
+L 753.015658 115.986085 
+L 753.015658 115.986085 
 " clip-path="url(#p894d4a26d4)" style="fill: none; stroke: #f2a04d; stroke-width: 1.4; stroke-linecap: square"/>
    </g>
    <g id="line2d_71">

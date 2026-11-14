@@ -74,7 +74,7 @@ U = 0.5 at 1° (`u = [0.49992, 0.00873]`), p = T = 1/γ with a gas constant of
 | `[numerics]` | HLLC, SSPRK3, MUSCL with the Venkatakrishnan limiter |
 | `[physics]` | `navier_stokes`, γ = 1.4, constant μ, Pr = 0.72 |
 | `[[forces]]` | The pressure and viscous forces on the airfoil every 50 steps, `forces_airfoil.csv` |
-| `[[write_data]]` | Density, velocity, pressure, temperature and vorticity every 20 time units |
+| `[[write_data]]` | Density, velocity, pressure, temperature and vorticity every 20 time units, every snapshot in `solut/flow.vtkhdf` |
 
 ## 4. Run
 
@@ -88,15 +88,15 @@ $MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=8    # CPU threads
 mpirun -n 4 $MALLARD/build/src/mallard -i input.toml               # MPI ranks
 ```
 
-This is a case for a GPU: on one A100 the first mesh takes about 25 minutes
-and the second 1.5 hours (estimated), with the CUDA build of the
-[first simulation](../guide/first_simulation.md) and the same input.
+This is a case for a GPU: on one A100 the first mesh takes about 15 minutes
+and the second an hour, with the CUDA build of the
+[first simulation](first_simulation.md) and the same input.
 
 ## 5. Monitor
 
 The progress rows show the minimum density and pressure and the maximum
 Mach number: after the start-up waves have left, the minimum pressure
-settles near 0.65 and the maximum Mach number near 0.61, at the suction peak
+settles near 0.66 and the maximum Mach number near 0.60, at the suction peak
 of the leading edge. The forces file grows as the run goes; `plot_results.py`
 (below) plots the drag and lift coefficients over time, or a quick look from
 the shell:
@@ -108,12 +108,12 @@ tail -n 3 forces_airfoil.csv     # step, t, Fx and Fy of pressure, then of visco
 ![Drag and lift coefficients over time on both meshes, against the workshop reference](../images/tutorials/airfoil_history-light.svg#gh-light-mode-only)
 ![Drag and lift coefficients over time on both meshes, against the workshop reference](../images/tutorials/airfoil_history-dark.svg#gh-dark-mode-only)
 
-After the start-up transient the coefficients settle to steady values; on the first mesh drag and lift change by less than 1e-6 over the last 10% of the run.
+After the start-up transient the coefficients settle to steady values; on both meshes drag and lift change by about 1e-6 over the last 10% of the run.
 
 ## 6. Post-process and compare
 
 ```bash
-python3 $MALLARD/tutorials/airfoil/plot_results.py coarse fine --labels coarse fine --out .
+python3 $MALLARD/tutorials/airfoil/plot_results.py coarse fine --labels "28,672 cells" "114,688 cells" --out .
 ```
 
 takes one directory per mesh, coarse first. It averages drag and lift over
@@ -135,9 +135,15 @@ distance d of their centroid from the wall.
 
 | Mesh | c_d | c_l |
 |---|---|---|
-| 28,672 cells (t = 60 c/U) | 0.05612 (+1.5%) | 0.01717 (−6.1%) |
-| 114,688 cells (t = 19 c/U, unfinished) | 0.05566 (+0.6%) | 0.01802 (−1.4%) |
+| 28,672 cells | 0.05612 (+1.5%) | 0.01717 (−6.1%) |
+| 114,688 cells | 0.05562 (+0.6%) | 0.01803 (−1.3%) |
 | Workshop reference | 0.05532 | 0.01827 |
+
+Halving the cell size moves both coefficients toward the reference: drag
+converges from above, and lift, small at 1° and sensitive to the trailing
+edge, closes most of its gap. The boundary layer on the upper surface
+separates at x/c = 0.68 on both meshes, and on the lower surface at
+x/c = 0.94, just ahead of the trailing edge.
 
 ## 7. Things to try
 
