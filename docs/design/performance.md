@@ -665,8 +665,10 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
   | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
 
-  PERF_LINE Results change at round-off, once, against per-cell rows; unstructured meshes have a shape per cell
-  and keep a row per cell.
+  The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
+  8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
+  against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
+  most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
 
 ### 15. Working set beyond the TENO tables (#552)
 
