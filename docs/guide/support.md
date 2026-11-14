@@ -13,7 +13,7 @@ When a job runs:
 - **every PR**: the gate, the CI run a pull request needs before it merges (`ci.yml`), and every push to `main`;
 - **main**: on `main` every 3 hours when it has changed since its last full run, and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
-- **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
+- **nightly**, **release** (each release, before its tag, and by hand on a branch) and **by hand** (before a release).
 
 A job *split across* N jobs builds once, in `build-<job>`, and runs as `<job>-1of<N>` to
 `<job>-<N>of<N>`, each running a share of the job's tests of about equal duration on that build.

@@ -256,5 +256,20 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   the CI jobs, the minimums in `CMakeLists.txt` and the Spack package's `conflicts`, and
   the docs, together. CUDA, ROCm and oneAPI releases move the device jobs the same way.
 
+## Releasing
+
+A maintainer releases version X.Y.Z in three steps:
+
+1. A release PR folds the changelog fragments into `CHANGELOG.md`
+   (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
+   `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
+2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
+   container images and the Spack package from `main`, pushes the images, and only then
+   creates the tag `vX.Y.Z`. A failed build leaves no tag: fix it on `main` and dispatch
+   again.
+3. `gh release create vX.Y.Z --verify-tag --title "Mallard X.Y.Z"` publishes the release
+   notes (starting from `python3 tools/dev/changelog.py notes X.Y.Z`), which also
+   publishes the website.
+
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).

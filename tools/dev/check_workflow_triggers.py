@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails if a GitHub workflow runs on pull requests or on pushes to branches other
 than main: CI on branches runs only by hand (gh workflow run --ref <branch>), and
-release workflows run on tags. Used by the first job of ci.yml.
+release workflows run by dispatch on main. Used by the first job of ci.yml.
 
     python3 tools/dev/check_workflow_triggers.py [WORKFLOW_DIR]
 """
@@ -41,7 +41,7 @@ def main():
     for problem in found:
         print(problem)
     if found:
-        print("CI runs on branches only by hand (gh workflow run --ref <branch>); releases run on tags.")
+        print("CI runs on branches only by hand (gh workflow run --ref <branch>); releases run by dispatch on main.")
     return 1 if found else 0
 
 
