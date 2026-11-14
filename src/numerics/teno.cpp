@@ -1026,9 +1026,9 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
 }
 
 #if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
-constexpr bool HOST_FMA = true;
+[[maybe_unused]] constexpr bool HOST_FMA = true;
 #else
-constexpr bool HOST_FMA = false;
+[[maybe_unused]] constexpr bool HOST_FMA = false;
 #endif
 
 /**
