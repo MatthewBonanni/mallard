@@ -572,6 +572,10 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
 
 Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
 
+With that rounding explicit, the smooth pass stages its entries with the conversion in the loading thread, bitwise
+equal to the unstaged loop: TENO5 in rounds of 10 entries, TENO6 in rounds of 5, which keep two teams per SM
+(#1004: 4.61M cells/s against 3.60M unstaged for the order-6 Taylor-Green vortex on $96^3$ hexahedra).
+
 ### 13. TENO setup on CPUs (#916)
 
 A start without a TENO cache, and `mallard post derive` or `post extract` of a run without one, spend nearly
