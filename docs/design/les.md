@@ -1,9 +1,8 @@
-# Design: large-eddy simulation
+# Large-eddy simulation
 
-Status: proposed. Recommendations are marked **Decision**; the alternatives
-considered are listed with each. Implementation follows the
-[stages](#9-stages), one pull request each; done: 1, 2, 3, 4, 5 (6 and 7 open:
-#197, #198).
+Status: implemented, [stages](#9-stages) 1 to 5 and 7; stage 6 (reacting
+validation, #197) is open. Recommendations are marked **Decision**; the
+alternatives considered are listed with each.
 
 Mallard resolves every scale it computes today (DNS of flames, detonations,
 Taylor-Green and isotropic turbulence). This document adds large-eddy
@@ -603,7 +602,7 @@ at every face quadrature point, with the same reconstructed states.
 - **`phi_f = max(phi_c0, phi_c1)`** from a cell sensor: the Ducros et al.
   (1999) sensor restricted to compressions (Bhagatwala & Lele 2009),
   `theta = H(-div u) (div u)^2 / ((div u)^2 + |omega|^2 + eps)`, and
-  `phi_c = 1` where `theta > theta_*` (default 0.65), else `phi_min` (default
+  `phi_c = 1` where `theta > theta_*` (default 0.65), else `upwind_floor` (default
   0). Shocks therefore keep the full Riemann solver and TENO's
   shock-capturing; vortical and expansion regions, and flames (expansions),
   get the central flux.
@@ -631,7 +630,7 @@ molecular viscosity are the only sinks at the cutoff, which is the intended
 LES. KEEP-type fluxes are stable for turbulence on smooth meshes (Kuya et al.
 2018; the same form underlies the second-order central schemes of
 production LES codes on unstructured meshes). The residual risk is
-aliasing on very irregular meshes or with nonlinear TENO stencils; `phi_min
+aliasing on very irregular meshes or with nonlinear TENO stencils; `upwind_floor
 > 0` (e.g. 0.05) is the documented remedy, and the budget reports the
 dissipation it adds.
 
@@ -1558,7 +1557,7 @@ One pull request each, stacked; the umbrella issue links them.
 ## 10. Risks
 
 - **Hybrid flux stability** on irregular tetrahedral meshes. Mitigation:
-  `phi_min`, tests on tetrahedra, budget.
+  `upwind_floor`, tests on tetrahedra, budget.
 - **Sigma's closed-form singular values** lose relative accuracy for
   nearly degenerate `G` in single precision. Mitigation: evaluated in double
   in every build, clipped to non-negative eigenvalues.

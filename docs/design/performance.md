@@ -1,4 +1,4 @@
-# Design: single-GPU performance and parallel scaling
+# Single-GPU performance and parallel scaling
 
 Status: in progress. Baseline measured on `main` at v0.5.0-92 (before any change here); each change below
 lists its measured effect. Results stay bitwise identical to `main` (checked on the cases under

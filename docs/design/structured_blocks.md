@@ -1,4 +1,4 @@
-# Design: structured blocks of hexahedra
+# Structured blocks of hexahedra
 
 Status: accepted (#440, Stage 1; decisions below, recorded on #440), in implementation. Stages 2
 and 3 (octree and Voronoi bulk; a dimension-by-dimension scheme in blocks) are
