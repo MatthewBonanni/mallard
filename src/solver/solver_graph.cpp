@@ -876,7 +876,8 @@ void Solver::capture_step_graph() {
         end_capture(graph);
         capture_graph = nullptr;
         cudaGraphExec_t exec = nullptr;
-        cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
+        // Without the flag, every node runs at the launch stream's priority, also those captured from comm_space
+        cuda_check(cudaGraphInstantiate(&exec, graph, cudaGraphInstantiateFlagUseNodePriority), "cudaGraphInstantiate");
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
