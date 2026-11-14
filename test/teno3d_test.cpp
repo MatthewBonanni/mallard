@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -25,6 +26,7 @@
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "solver.h"
+#include "teno_sharing.h"
 
 namespace {
 
@@ -605,3 +607,71 @@ TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy)
     }
 }
 
+
+TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRoundOff) {
+    // A blast on hexahedra with walls (mirror images, smooth and troubled cells):
+    // interior cells share their tables, cells along the walls keep their own
+    auto mesh = make_mesh_3d("cartesian", 8, 8, 8);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.4, 2);
+        const bool inside = r2 < 0.09;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 5}) {
+        auto face_values = [&](const bool share, const uint8_t shift) {
+            auto teno = std::make_unique<TENO>();
+            teno->set_mesh(mesh);
+            teno->set_boundaries(bd);
+            teno->slice_shift = shift;
+            teno->share_tables = share;
+            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::make_pair(std::vector<rtype>(h.data(), h.data() + h.span()),
+                                  teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span());
+        };
+        const auto [own, own_entries] = face_values(false, teno::SLICE_SHIFT);
+        const auto [shared, shared_entries] = face_values(true, teno::SLICE_SHIFT);
+        EXPECT_LT(4 * shared_entries, own_entries) << "order " << order;
+        double largest = 0.0, difference = 0.0;
+        for (size_t k = 0; k < own.size(); k++) {
+            largest = std::max(largest, std::abs(double(own[k])));
+            difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
+        }
+        EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+        // A shape's table is its cell's with the lowest global id, however many cells a slice packs
+        for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
+            EXPECT_TRUE(face_values(true, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
+        }
+    }
+}
+
+TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
+    // Two slots of width 2: two tables, bitwise different, under one key
+    const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
+    const std::vector<rtype> b = {1.0_r + 4 * std::numeric_limits<rtype>::epsilon(), 0.5_r, 0.25_r, 0.125_r};
+    const teno::CanonicalTable ta(a.data(), 2, {2}), tb(b.data(), 2, {2});
+    teno::TableStore store(2);
+    const uint32_t k = store.add_keyed(7, ta, a.data(), 9);
+    EXPECT_EQ(store.find_keyed(7), k);
+    EXPECT_EQ(store.find_keyed(8), teno::TableStore::NONE);
+    EXPECT_EQ(store.add_keyed(7, tb, b.data(), 3), k);
+    EXPECT_TRUE(store.values(k) == b);
+    EXPECT_EQ(store.owner(k), 3u);
+    EXPECT_EQ(store.add_keyed(7, ta, a.data(), 5), k);
+    EXPECT_TRUE(store.values(k) == b);
+    EXPECT_NE(store.add_keyed(8, ta, a.data(), 1), k);
+    const uint64_t gid = 2;
+    const rtype * values = a.data();
+    const auto shape = store.add(1, &ta, [&](uint32_t) { return values; }, &gid);
+    EXPECT_EQ(store.size(), 3u);
+    EXPECT_NE(shape[0], k);
+}

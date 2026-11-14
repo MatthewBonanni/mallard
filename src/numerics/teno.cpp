@@ -38,6 +38,7 @@
 #include "launch_bounds.h"
 #include "log.h"
 #include "periodic.h"
+#include "teno_sharing.h"
 #include "teno.h"
 #include "teno_setup.h"
 
@@ -201,6 +202,41 @@ class PageArray {
 };
 
 /**
+ * @brief Host copy of the slice starts, images and pseudo-inverse indices of
+ *        packed stencils, and, if cells share their pseudo-inverses, of those.
+ */
+struct HostIndex {
+    std::vector<uint64_t> slice_start;
+    std::vector<uint64_t> pinv_index;
+    std::vector<int32_t> images;
+    std::vector<char> pinv;  // shared: packed.pinv
+};
+
+HostIndex host_index(const teno::PackedStencils & packed) {
+    HostIndex h{std::vector<uint64_t>(packed.slice_start.extent(0)), std::vector<uint64_t>(packed.pinv_index.extent(0)),
+                std::vector<int32_t>(packed.images.extent(0)), {}};
+    Kokkos::deep_copy(HostUnmanaged<uint64_t>(h.slice_start.data(), h.slice_start.size()), packed.slice_start);
+    Kokkos::deep_copy(HostUnmanaged<uint64_t>(h.pinv_index.data(), h.pinv_index.size()), packed.pinv_index);
+    Kokkos::deep_copy(HostUnmanaged<int32_t>(h.images.data(), h.images.size()), packed.images);
+    if (packed.shared) {
+        h.pinv.resize(packed.pinv.extent(0) * sizeof(rtype));
+        Kokkos::deep_copy(HostUnmanaged<char>(h.pinv.data(), h.pinv.size()),
+                          DeviceUnmanaged<char>(reinterpret_cast<char *>(packed.pinv.data()), h.pinv.size()));
+    }
+    return h;
+}
+
+/** @brief Index of each cell's pseudo-inverses in packed stencils that share none (slice starts given). */
+Kokkos::View<uint64_t *> own_pinv_index(const std::vector<uint64_t> & slice_start, const uint8_t shift,
+                                        const uint32_t n_cells, const std::string & label) {
+    std::vector<uint64_t> index(n_cells);
+    for (uint32_t c = 0; c < n_cells; c++) index[c] = (slice_start[c >> shift] << shift) | (c & ((1u << shift) - 1));
+    Kokkos::View<uint64_t *> out(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), n_cells);
+    Kokkos::deep_copy(out, HostUnmanaged<const uint64_t>(index.data(), index.size()));
+    return out;
+}
+
+/**
  * @brief Moves one stencil family (large or sector) of CellTables into a
  *        teno::PackedStencils and back. The device arrays can only be sized
  *        once every stencil is known: on CUDA, each packed chunk goes straight
@@ -209,10 +245,17 @@ class PageArray {
  */
 class PackedRows {
     public:
+        /**
+         * @brief With share_values, the cells of a stencil shape share one
+         *        table (teno::TableStore), that of the cell with the lowest
+         *        global id (global_ids, by local cell; null: the local index);
+         *        sectors: the stencils are each face's sector stencil, one
+         *        after another.
+         */
         PackedRows(uint8_t slice_shift, uint8_t values_per_slot, IndexRow cell_row, IndexRow face_row, ValueRow pinv_row,
-                   bool single_values)
-            : shift(slice_shift), width(values_per_slot), single(single_values), cells(cell_row), faces(face_row),
-              pinv(pinv_row) {}
+                   bool single_values, bool share_values, const uint64_t * global_ids, bool sectors)
+            : shift(slice_shift), width(values_per_slot), single(single_values), share(share_values), gid(global_ids),
+              by_face(sectors), cells(cell_row), faces(face_row), pinv(pinv_row), store(values_per_slot) {}
 
         /**
          * @brief Upload each chunk as it is added, for n_cells cells of at
@@ -229,6 +272,11 @@ class PackedRows {
 
         /** @brief Pack the stencils of cells [c0, c0 + tables.size()), which follow the previous chunk. */
         void add(const uint32_t c0, const std::vector<CellTables> & tables) {
+            n_added += static_cast<uint32_t>(tables.size());
+            if (share) {
+                add_shared(c0, tables);
+                return;
+            }
             const uint32_t slice = 1u << shift;
             if (c0 % slice != 0 || c0 >> shift != slice_start.size() - 1) {
                 throw std::logic_error("TENO: stencil chunks must be packed in order.");
@@ -298,6 +346,7 @@ class PackedRows {
             if (c0 % slice != 0 || c0 >> shift != slice_start.size() - 1) {
                 throw std::logic_error("TENO: stencil chunks must be packed in order.");
             }
+            n_added += n;
             auto h_sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),
                                                                Kokkos::subview(sizes, std::make_pair(0u, n)));
             Chunk chunk;
@@ -431,6 +480,19 @@ class PackedRows {
                                                  images.size());
             Kokkos::deep_copy(out.images, HostUnmanaged<const int32_t>(images.data(), images.size()));
             images = std::vector<int32_t>();
+            if (share) {
+                finish_shared(out, label);
+                out.cells = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), n_slots);
+                for (Chunk & chunk : chunks) {
+                    const size_t b = chunk.slot0 << shift;
+                    Kokkos::deep_copy(Kokkos::subview(out.cells, std::make_pair(b, b + chunk.cells.size())),
+                                      HostUnmanaged<int32_t>(chunk.cells.data(), chunk.cells.size()));
+                    chunk = Chunk();
+                }
+                chunks.clear();
+                return out;
+            }
+            out.pinv_index = own_pinv_index(slice_start, shift, n_added, label + "_pinv_index");
             if (!memory.empty()) {
                 memory[0]->ensure(n_slots * sizeof(int32_t));
                 memory[1]->ensure(n_pinv * sizeof(rtype));
@@ -460,9 +522,10 @@ class PackedRows {
          *        (h_slice_start: host copy of packed.slice_start; h_images: of
          *        packed.images; sizes: slots of each cell).
          */
-        void download(const teno::PackedStencils & packed, const std::vector<uint64_t> & h_slice_start,
-                      const std::vector<int32_t> & h_images, const uint32_t c0, const std::vector<uint16_t> & sizes,
-                      std::vector<CellTables> & tables) const {
+        void download(const teno::PackedStencils & packed, const HostIndex & index, const uint32_t c0,
+                      const std::vector<uint16_t> & sizes, std::vector<CellTables> & tables) const {
+            const std::vector<uint64_t> & h_slice_start = index.slice_start;
+            const std::vector<int32_t> & h_images = index.images;
             const uint8_t sh = packed.shift;
             const uint32_t slice = 1u << sh;
             const uint32_t c1 = c0 + static_cast<uint32_t>(tables.size());
@@ -472,22 +535,27 @@ class PackedRows {
             const size_t vb = packed.single ? sizeof(float) : sizeof(rtype);
             const size_t n_values = (slots.second - slots.first) * packed.width;
             std::vector<int32_t> h_cells(slots.second - slots.first);
-            std::vector<char> h_pinv_bytes(n_values * vb);
+            const bool shared_values = packed.shared;
+            std::vector<char> h_pinv_bytes(shared_values ? 0 : n_values * vb);
             Kokkos::deep_copy(HostUnmanaged<int32_t>(h_cells.data(), h_cells.size()), Kokkos::subview(packed.cells, slots));
-            if (n_values > 0) {
+            if (!shared_values && n_values > 0) {
                 Kokkos::deep_copy(HostUnmanaged<char>(h_pinv_bytes.data(), h_pinv_bytes.size()),
                                   DeviceUnmanaged<char>(reinterpret_cast<char *>(packed.pinv.data()) +
                                                             slots.first * packed.width * vb,
                                                         h_pinv_bytes.size()));
             }
+            const char * pinv_bytes = shared_values ? index.pinv.data() : h_pinv_bytes.data();
             auto h_pinv = [&](const size_t k) {
-                return packed.single ? rtype(reinterpret_cast<const float *>(h_pinv_bytes.data())[k])
-                                     : reinterpret_cast<const rtype *>(h_pinv_bytes.data())[k];
+                return packed.single ? rtype(reinterpret_cast<const float *>(pinv_bytes)[k])
+                                     : reinterpret_cast<const rtype *>(pinv_bytes)[k];
             };
             for (uint32_t c = 0; c < tables.size(); c++) {
                 CellTables & t = tables[c];
                 const uint64_t start = h_slice_start[(c0 + c) >> sh] - slot0;
+                const uint64_t own = index.pinv_index[c0 + c];
+                const uint64_t start_pinv = shared_values ? own >> sh : start;
                 const uint32_t lane = (c0 + c) & (slice - 1);
+                const uint64_t lane_pinv = shared_values ? own & (slice - 1) : lane;
                 (t.*cells).resize(sizes[c]);
                 (t.*faces).resize(sizes[c]);
                 (t.*pinv).resize(sizes[c] * packed.width);
@@ -497,7 +565,7 @@ class PackedRows {
                     (t.*cells)[s] = e >= 0 ? e : h_images[2 * image];
                     (t.*faces)[s] = e >= 0 ? -1 : h_images[2 * image + 1];
                     for (uint32_t l = 0; l < packed.width; l++) {
-                        (t.*pinv)[s * packed.width + l] = h_pinv((((start + s) * packed.width + l) << sh) + lane);
+                        (t.*pinv)[s * packed.width + l] = h_pinv((((start_pinv + s) * packed.width + l) << sh) + lane_pinv);
                     }
                 }
             }
@@ -520,12 +588,131 @@ class PackedRows {
             }
         }
 
+        /** @brief Slots of each segment of t's stencil (one segment, or each face's sector stencil). */
+        std::vector<uint16_t> segments(const CellTables & t) const {
+            if (by_face) return std::vector<uint16_t>(t.small_size.begin(), t.small_size.end());
+            return {static_cast<uint16_t>((t.*cells).size())};
+        }
+
+        /** @brief add() with the cells of a stencil shape sharing its table, their slots in canonical order. */
+        void add_shared(const uint32_t c0, const std::vector<CellTables> & tables) {
+            const uint32_t slice = 1u << shift;
+            if (c0 % slice != 0 || c0 >> shift != slice_start.size() - 1) {
+                throw std::logic_error("TENO: stencil chunks must be packed in order.");
+            }
+            const uint32_t n = static_cast<uint32_t>(tables.size());
+            const size_t first_slice = slice_start.size() - 1;
+            for (uint32_t a = 0; a < n; a += slice) {
+                size_t largest = 0;
+                for (uint32_t c = a; c < std::min(n, a + slice); c++) largest = std::max(largest, (tables[c].*cells).size());
+                slice_start.push_back(slice_start.back() + largest);
+            }
+            std::vector<teno::CanonicalTable> canonical(n);
+            std::vector<uint64_t> first_value(n + 1, 0);
+            for (uint32_t c = 0; c < n; c++) first_value[c + 1] = first_value[c] + (tables[c].*pinv).size();
+            std::vector<rtype> ordered(first_value[n]);
+            Kokkos::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                                 [&](const uint32_t c) {
+                const CellTables & t = tables[c];
+                canonical[c] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
+                for (size_t s = 0; s < canonical[c].order.size(); s++) {
+                    const size_t from = canonical[c].order[s];
+                    for (uint32_t l = 0; l < width; l++) ordered[first_value[c] + s * width + l] = (t.*pinv)[from * width + l];
+                }
+            });
+            std::vector<uint64_t> ids(n);
+            for (uint32_t c = 0; c < n; c++) ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
+            const std::vector<uint32_t> shapes =
+                store.add(n, canonical.data(), [&](uint32_t c) { return ordered.data() + first_value[c]; }, ids.data());
+            ordered = std::vector<rtype>();
+            cell_shape.insert(cell_shape.end(), shapes.begin(), shapes.end());
+            std::vector<uint64_t> first_image(n + 1, images.size() / 2);
+            for (uint32_t c = 0; c < n; c++) {
+                const auto & f = tables[c].*faces;
+                first_image[c + 1] = first_image[c] + static_cast<uint64_t>(std::count_if(f.begin(), f.end(),
+                                                                                     [](int32_t x) { return x != -1; }));
+            }
+            images.resize(2 * first_image[n]);
+            Chunk chunk;
+            chunk.slot0 = slice_start[first_slice];
+            chunk.cells = PageArray<int32_t>((slice_start.back() - chunk.slot0) << shift, 0);
+            // Slots in canonical order; images are numbered in cell order, then in that order
+            Kokkos::parallel_for("teno_pack", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                                 [&](const uint32_t c) {
+                const CellTables & t = tables[c];
+                const uint64_t start = slice_start[(c0 + c) >> shift] - chunk.slot0;
+                const uint32_t lane = (c0 + c) & (slice - 1);
+                uint64_t image = first_image[c];
+                for (size_t s = 0; s < (t.*cells).size(); s++) {
+                    const uint16_t from = canonical[c].order[s];
+                    const int32_t cell = (t.*cells)[from], face = (t.*faces)[from];
+                    int32_t entry = cell;
+                    if (face != -1) {
+                        images[2 * image] = cell;
+                        images[2 * image + 1] = face;
+                        entry = teno::PackedStencils::image_entry(image++);
+                    }
+                    chunk.cells[((start + s) << shift) + lane] = entry;
+                }
+            });
+            chunks.push_back(std::move(chunk));
+        }
+
+        /**
+         * @brief The shapes' tables, agreed over the ranks, packed like the
+         *        stencils of cells: shape k is lane k mod 2^shift of block
+         *        k >> shift, which a mesh of distinct tables packs exactly as
+         *        its cells.
+         */
+        void finish_shared(teno::PackedStencils & out, const std::string & label) {
+            store.agree();
+            const uint32_t lanes = 1u << shift;
+            const size_t n_shapes = store.size();
+            const size_t n_blocks = (n_shapes + lanes - 1) >> shift;
+            std::vector<uint64_t> block_start(n_blocks + 1, 0);
+            for (size_t b = 0; b < n_blocks; b++) {
+                uint64_t largest = 0;
+                for (size_t k = b << shift; k < std::min(n_shapes, (b + 1) << shift); k++) {
+                    largest = std::max<uint64_t>(largest, store.slots(k));
+                }
+                block_start[b + 1] = block_start[b] + largest;
+            }
+            std::vector<rtype> values(teno::PackedStencils::pinv_elements((block_start[n_blocks] * width) << shift, single), 0.0);
+            Kokkos::parallel_for("teno_pack_shapes", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_shapes),
+                                 [&](const size_t k) {
+                const std::vector<rtype> & v = store.values(k);
+                const uint64_t start = block_start[k >> shift];
+                const size_t lane = k & (lanes - 1);
+                for (size_t i = 0; i < v.size(); i++) put_value(values.data(), (((start * width) + i) << shift) + lane, v[i]);
+            });
+            out.shared = true;
+            out.pinv = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_pinv"), values.size());
+            Kokkos::deep_copy(out.pinv, HostUnmanaged<const rtype>(values.data(), values.size()));
+            auto shape_index = [&](const size_t k) { return (block_start[k >> shift] << shift) | (k & (lanes - 1)); };
+            out.shape_owner = Kokkos::View<uint64_t *, Kokkos::HostSpace>(label + "_shape_owner", 2 * n_shapes);
+            for (size_t k = 0; k < n_shapes; k++) {
+                out.shape_owner(2 * k) = shape_index(k);
+                out.shape_owner(2 * k + 1) = store.owner(k);
+            }
+            std::vector<uint64_t> index(cell_shape.size());
+            for (size_t c = 0; c < index.size(); c++) index[c] = shape_index(cell_shape[c]);
+            out.pinv_index = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_pinv_index"),
+                                                      index.size());
+            Kokkos::deep_copy(out.pinv_index, HostUnmanaged<const uint64_t>(index.data(), index.size()));
+        }
+
         uint8_t shift;
         uint8_t width;
         bool single;  // pseudo-inverses stored in single precision
+        bool share;
+        const uint64_t * gid;  // shared: (local cell), or null
+        bool by_face;
         IndexRow cells, faces;
         ValueRow pinv;
         std::vector<uint64_t> slice_start = {0};  // (slice + 1)
+        uint32_t n_added = 0;
+        teno::TableStore store;                   // shared: a table per stencil shape
+        std::vector<uint32_t> cell_shape;         // shared: (cell)
         std::vector<int32_t> images;              // (2 image + {cell, face field})
         std::vector<Chunk> chunks;
         std::vector<std::shared_ptr<GrowingBuffer>> memory;  // streamed: cells, pinv
@@ -556,6 +743,65 @@ void store_cell_rows(TENO & scheme, const Kokkos::View<uint32_t *> & cells, cons
                                                        Kokkos::subview(batch.gather_depth, std::make_pair(0u, n)));
     auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(cells, std::make_pair(0u, n)));
     for (uint32_t j = 0; j < n; j++) scheme.gather_depth[h_cells(j)] = h_depth(j);
+}
+
+/** @brief Host copy of the stencils of slots 0..n of a batch. */
+std::vector<CellTables> host_tables(const teno_setup::TableBatch & batch, const uint32_t n) {
+    auto host = [](const auto & a) { return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), a.data); };
+    auto lane = [](const auto & h, const auto & a, const size_t slot, const size_t k) {
+        return a.interleaved ? h(slot + k * a.slots) : h(slot * a.cap + k);
+    };
+    auto large_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.large_size);
+    auto small_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.small_size);
+    auto large_cells = host(batch.large_cells), large_faces = host(batch.large_faces);
+    auto small_cells = host(batch.small_cells), small_faces = host(batch.small_faces);
+    auto large_pinv = host(batch.large_pinv), small_pinv = host(batch.small_pinv);
+    const size_t nk = batch.nk;
+    std::vector<CellTables> tables(n);
+    for (uint32_t j = 0; j < n; j++) {
+        CellTables & t = tables[j];
+        const size_t n_large = large_size(j);
+        size_t n_small = 0;
+        for (int k = 0; k < teno::MAX_FACES; k++) {
+            t.small_size[size_t(k)] = small_size(j, k);
+            n_small += small_size(j, k);
+        }
+        for (size_t s = 0; s < n_large; s++) {
+            t.large_cells.push_back(lane(large_cells, batch.large_cells, j, s));
+            t.large_faces.push_back(lane(large_faces, batch.large_faces, j, s));
+        }
+        for (size_t k = 0; k < n_large * nk; k++) t.large_pinv.push_back(lane(large_pinv, batch.large_pinv, j, k));
+        for (size_t s = 0; s < n_small; s++) {
+            t.small_cells.push_back(lane(small_cells, batch.small_cells, j, s));
+            t.small_faces.push_back(lane(small_faces, batch.small_faces, j, s));
+        }
+        for (size_t k = 0; k < n_small * teno::NK_SMALL; k++) {
+            t.small_pinv.push_back(lane(small_pinv, batch.small_pinv, j, k));
+        }
+    }
+    return tables;
+}
+
+PackedRows large_rows(const TENO & scheme);
+PackedRows small_rows(const TENO & scheme);
+void download_tables(const TENO & scheme, const HostIndex & large_index, const HostIndex & small_index, uint32_t c0,
+                     std::vector<CellTables> & tables);
+
+/** @brief Pack every cell's stencils again, sharing the pseudo-inverses that are equal. */
+void share_again(TENO & scheme) {
+    const uint32_t n_cells = static_cast<uint32_t>(scheme.scale.extent(0));
+    const HostIndex large_index = host_index(scheme.stencil_large);
+    const HostIndex small_index = host_index(scheme.stencil_small);
+    PackedRows large = large_rows(scheme), small = small_rows(scheme);
+    std::vector<CellTables> chunk;
+    for (uint32_t c0 = 0; c0 < n_cells; c0 += CHUNK_CELLS) {
+        chunk.assign(std::min(CHUNK_CELLS, n_cells - c0), CellTables());
+        download_tables(scheme, large_index, small_index, c0, chunk);
+        large.add(c0, chunk);
+        small.add(c0, chunk);
+    }
+    scheme.stencil_large = large.finish("teno_stencil_large");
+    scheme.stencil_small = small.finish("teno_stencil_small");
 }
 
 /**
@@ -591,6 +837,7 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
     });
     // Images are renumbered in cell order, then slot order, as a packing from scratch numbers them
     auto old_start = old.slice_start;
+    auto old_pinv_index = old.pinv_index;
     auto old_cells = old.cells;
     auto old_images = old.images;
     auto old_pinv = old.pinv;
@@ -617,6 +864,8 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
     out.width = w;
     out.single = old.single;
     out.slice_start = start;
+    out.pinv_index = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_pinv_index"), n_cells);
+    auto new_index = out.pinv_index;
     out.cells = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), total << sh);
     out.images = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_images"), 2 * n_images);
     out.pinv = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_pinv"),
@@ -633,6 +882,10 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
         const int32_t j = c < n_cells ? slot_of(c) : -1;
         const uint64_t size = c >= n_cells ? 0 : (j >= 0 ? sizes(j) : old_size(c));
         const uint64_t o0 = old_start(sl);
+        const uint64_t t_old = c < n_cells ? old_pinv_index(c) : 0;
+        const uint64_t o0_pinv = t_old >> sh;
+        const uint64_t lane_pinv = t_old & ((1u << sh) - 1);
+        if (c < n_cells) new_index(c) = (s0 << sh) | lane;
         const auto lc = batch_cells.lane(j >= 0 ? static_cast<size_t>(j) : 0);
         const auto lf = batch_faces.lane(j >= 0 ? static_cast<size_t>(j) : 0);
         const auto lp = batch_pinv.lane(j >= 0 ? static_cast<size_t>(j) : 0);
@@ -661,7 +914,7 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
             new_cells(k) = entry;
             for (uint32_t l = 0; l < w; l++) {
                 const uint64_t kp = (((s0 + s) * w + l) << sh) + lane;
-                const uint64_t ko_p = (((o0 + s) * w + l) << sh) + lane;
+                const uint64_t ko_p = (((o0_pinv + s) * w + l) << sh) + lane_pinv;
                 if (sg) {
                     const float old_v = reinterpret_cast<const float *>(old_pinv.data())[ko_p];
                     reinterpret_cast<float *>(new_pinv.data())[kp] =
@@ -711,12 +964,14 @@ void merge_tables(TENO & scheme, const Kokkos::View<uint32_t *> & cells, const t
 
 PackedRows large_rows(const TENO & scheme) {
     return PackedRows(scheme.slice_shift, scheme.n_dof_large, &CellTables::large_cells, &CellTables::large_faces,
-                      &CellTables::large_pinv, scheme.single_tables);
+                      &CellTables::large_pinv, scheme.single_tables, scheme.share_tables,
+                      scheme.global_cell_ids(), false);
 }
 
 PackedRows small_rows(const TENO & scheme) {
     return PackedRows(scheme.slice_shift, teno::NK_SMALL, &CellTables::small_cells, &CellTables::small_faces,
-                      &CellTables::small_pinv, scheme.single_tables);
+                      &CellTables::small_pinv, scheme.single_tables, scheme.share_tables,
+                      scheme.global_cell_ids(), true);
 }
 
 /** @brief Moves per-cell tables, chunk by chunk, into TENO's device arrays. */
@@ -733,7 +988,7 @@ class TableBuilder {
             scheme.stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
             scheme.stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
             scheme.gather_depth.assign(n_cells, 0);
-            if (GrowingBuffer::supported()) {
+            if (GrowingBuffer::supported() && !scheme.share_tables) {
                 // The searches cap central stencils at 3.5 nk + 64 entries and sectors
                 // at twice small_stencil_size; the reservation is address space only
                 large.stream(n_cells, 4 * size_t(nk) + 64, "teno_stencil_large");
@@ -783,6 +1038,12 @@ class TableBuilder {
         void add_batch(const uint32_t c0, const Kokkos::View<uint32_t *> & cells, const teno_setup::TableBatch & batch,
                        const uint32_t n) {
             store_cell_rows(scheme, cells, batch, n);
+            if (scheme.share_tables) {
+                const std::vector<CellTables> tables = host_tables(batch, n);
+                large.add(c0, tables);
+                small.add(c0, tables);
+                return;
+            }
             large.add_batch(c0, n, batch.large_size, batch.large_cells, batch.large_faces, batch.large_pinv);
             small.add_batch(c0, n, batch.small_total, batch.small_cells, batch.small_faces, batch.small_pinv);
         }
@@ -799,19 +1060,6 @@ class TableBuilder {
         TENO & scheme;
         PackedRows large, small;
 };
-
-/** @brief Host copy of the slice starts and images of packed stencils. */
-struct HostIndex {
-    std::vector<uint64_t> slice_start;
-    std::vector<int32_t> images;
-};
-
-HostIndex host_index(const teno::PackedStencils & packed) {
-    HostIndex h{std::vector<uint64_t>(packed.slice_start.extent(0)), std::vector<int32_t>(packed.images.extent(0))};
-    Kokkos::deep_copy(HostUnmanaged<uint64_t>(h.slice_start.data(), h.slice_start.size()), packed.slice_start);
-    Kokkos::deep_copy(HostUnmanaged<int32_t>(h.images.data(), h.images.size()), packed.images);
-    return h;
-}
 
 /** @brief Tables of the chunk of reconstructed cells starting at c0 from TENO's device arrays. */
 void download_tables(const TENO & scheme, const HostIndex & large_index, const HostIndex & small_index, const uint32_t c0,
@@ -845,8 +1093,8 @@ void download_tables(const TENO & scheme, const HostIndex & large_index, const H
             n_small[c] += t.small_size[k];
         }
     }
-    large_rows(scheme).download(scheme.stencil_large, large_index.slice_start, large_index.images, c0, n_large, tables);
-    small_rows(scheme).download(scheme.stencil_small, small_index.slice_start, small_index.images, c0, n_small, tables);
+    large_rows(scheme).download(scheme.stencil_large, large_index, c0, n_large, tables);
+    small_rows(scheme).download(scheme.stencil_small, small_index, c0, n_small, tables);
 }
 
 } // namespace
@@ -973,6 +1221,16 @@ report::Summary TENO::summary() const {
                                  (bound_preserving ? "yes" : "no") + (C_T > 0.0_r ? "" : ", C_T adaptive"));
     if (!setup_status.empty()) s.setting("TENO setup", setup_status);
     if (!cache_status.empty()) s.setting("TENO cache", cache_status);
+    if (share_tables) {
+        const auto slots = [](const teno::PackedStencils & p) { 
+            return std::make_pair(p.pinv.extent(0), teno::PackedStencils::pinv_elements(p.cells.extent(0) * p.width, p.single));
+        };
+        const auto [large_kept, large_all] = slots(stencil_large);
+        const auto [small_kept, small_all] = slots(stencil_small);
+        s.quantity("TENO shared tables", logging::format("%.1f", 100.0 * double(large_kept + small_kept) /
+                                                                     double(std::max<size_t>(1, large_all + small_all))),
+                   "%", "pseudo-inverse entries stored, of one per cell");
+    }
     s.quantity("TENO face quadrature points", count(n_face_quadrature_points()), "points", "per face");
     s.quantity("TENO large stencil", count(n_stencil_large + 1u), "cells", "the cell and its neighbors");
     s.quantity("TENO largest stencil", count(largest_stencil), "cells", "");
@@ -1034,7 +1292,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
     options.stencil_factor = double(stencil_factor);
     for (size_t q = 0; q < quadrature_face.h_points.extent(0); q++) options.face_points.push_back(double(quadrature_face.h_points(q, 0)));
-    teno_setup::SetupHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
+    auto handle = std::make_unique<teno_setup::SetupHandle>(*mesh, boundaries, face_quad_points, face_quad_weights, options);
+    teno_setup::SetupHandle & setup = *handle;
 
     // Cells per batch: whole slices of the packed stencils
     const uint32_t slice = 1u << slice_shift;
@@ -1071,14 +1330,20 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
         t_pack += pack_timer.seconds();
     }
-    if (subset == nullptr) {
-        if (n_failed_large == 0) builder->finish();
-        largest_stencil = largest;
-    }
     // Every cell's moments are a function of its geometry alone
     if (N_DIM == 3 && n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
     Kokkos::fence();
-    const teno_setup::Timings & t = setup.timings();
+    const teno_setup::Timings t = setup.timings();
+    // The packed tables are allocated after the setup's workspace is freed, so that they do not add to its peak
+    out = teno_setup::TableBatch();
+    cells = Kokkos::View<uint32_t *>();
+    handle.reset();
+    if (subset == nullptr) {
+        if (n_failed_large == 0) builder->finish();
+        largest_stencil = largest;
+    } else if (share_tables) {
+        share_again(*this);
+    }
     setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
                                    t.tables, t_pack);
@@ -2904,12 +3169,69 @@ std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {
     return teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i);
 }
 
+namespace {
+
+/**
+ * @brief Cells, not among the sorted rebuilt ones, to rebuild with them: a
+ *        shared table is that of its shape's cell with the lowest global id,
+ *        and the other cells of the shape hold it, not their own. When that
+ *        cell is rebuilt, a full setup gives the shape the table of the
+ *        lowest of the rest, so each rank rebuilds its lowest (collective).
+ */
+std::vector<uint32_t> owners_of_rebuilt_tables(const teno::PackedStencils & p, const std::vector<uint32_t> & rebuilt,
+                                               const uint64_t * gid, const uint32_t n_cells) {
+    auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c] : uint64_t(c); };
+    auto index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), p.pinv_index);
+    const size_t n_shapes = p.shape_owner.extent(0) / 2;
+    auto shape_of = [&](const uint32_t c) {
+        size_t lo = 0, hi = n_shapes;
+        while (hi - lo > 1) {
+            const size_t mid = (lo + hi) / 2;
+            (p.shape_owner(2 * mid) <= index(c) ? lo : hi) = mid;
+        }
+        return lo;
+    };
+    std::vector<uint64_t> lost;
+    for (const uint32_t c : n_shapes > 0 ? rebuilt : std::vector<uint32_t>()) {
+        if (p.shape_owner(2 * shape_of(c) + 1) == id(c)) lost.push_back(id(c));
+    }
+    lost = comm::allgatherv(lost);
+    std::sort(lost.begin(), lost.end());
+    std::unordered_map<size_t, uint32_t> lowest;  // shape: cell
+    for (uint32_t c = 0; c < (lost.empty() ? 0 : n_cells); c++) {
+        const size_t k = shape_of(c);
+        if (std::binary_search(rebuilt.begin(), rebuilt.end(), c) ||
+            !std::binary_search(lost.begin(), lost.end(), p.shape_owner(2 * k + 1))) {
+            continue;
+        }
+        auto [it, added] = lowest.try_emplace(k, c);
+        if (!added && id(c) < id(it->second)) it->second = c;
+    }
+    std::vector<uint32_t> out;
+    for (const auto & kc : lowest) out.push_back(kc.second);
+    return out;
+}
+
+} // namespace
+
 void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
     std::vector<uint32_t> sorted(cells);
     std::sort(sorted.begin(), sorted.end());
     sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
-    if (sorted.empty()) return;
-    if (sorted.back() >= scale.extent(0)) throw std::logic_error("TENO: only reconstructed cells have tables.");
+    if (!sorted.empty() && sorted.back() >= scale.extent(0)) {
+        throw std::logic_error("TENO: only reconstructed cells have tables.");
+    }
+    if (share_tables) {
+        const uint32_t n_rec = static_cast<uint32_t>(scale.extent(0));
+        std::vector<uint32_t> more = owners_of_rebuilt_tables(stencil_large, sorted, global_cell_ids(), n_rec);
+        const auto small = owners_of_rebuilt_tables(stencil_small, sorted, global_cell_ids(), n_rec);
+        more.insert(more.end(), small.begin(), small.end());
+        sorted.insert(sorted.end(), more.begin(), more.end());
+        std::sort(sorted.begin(), sorted.end());
+        sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+    } else if (sorted.empty()) {
+        return;
+    }
     // The face quadrature follows the mesh's geometry
     if constexpr (N_DIM == 3) init_face_quadrature_3d(degree + 1);
     compute_stencils_and_matrices(&sorted);
@@ -3008,6 +3330,9 @@ uint64_t TENO::options_key() const {
     hash.add(stencil_factor);
     hash.add(max_condition);
     hash.add(cache_single);
+    // A cache of shared tables holds each shape's table in canonical order; one of per-cell tables, which
+    // sharing turns into the same, loads either way
+    if (!share_tables) hash.add(uint8_t(1));
     hash.add(comm::size());
     hash.add(comm::rank());
     return hash.h;

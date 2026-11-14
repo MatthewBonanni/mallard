@@ -535,6 +535,25 @@ whose entries are interleaved, so that a warp reads consecutive words.
 `single_precision_tables` (3D, single gas) keeps $\mathbf{P}$, and the moments' values, in single
 precision on the device.
 
+**Shared tables.** The cells of one stencil shape share one table of
+pseudo-inverses (`teno_sharing.h`). The slots of a
+stencil are ranked by their columns of $\mathbf{P}$ on a grid of $2^{-30}$ of
+its largest entry, within the central stencil and within each sector, so that
+equal stencils of a lattice, whose equidistant entries the search ranks
+differently from cell to cell, list their entries in the same order. Two cells
+have the same shape if their tables are equal on that grid in that order (on a
+lattice they differ by about $5\times 10^{-14}$); the shape's table is that of
+its cell with the lowest global id, agreed over the ranks at setup, so a cell's
+table does not depend on the partition, the batches, the thread count or the
+slice width. A shape whose entries straddle a grid line becomes two shapes,
+which costs memory only. The tables of the shapes are packed like the cells'
+stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
+own through `pinv_index` (block and lane); on a mesh with a shape per cell this
+is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+A caller that knows its stencil shapes, such as a structured block's offset
+pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
+tables; such shapes are agreed over the ranks by their key in the same way.
+
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
