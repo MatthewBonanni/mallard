@@ -555,7 +555,7 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
 
 | | ms/step | cells/s | bitwise |
 |---|---|---|---|
-| main | 146-147 | 6.05M | |
+| main | 8,773 / 8,961,187 | 8,585 / 9,157,200 | 8,813 / 8,920,514 | 8,625 / 9,114,733 | 11,072 / 7,005,283 | 10,065 / 7,706,501 | 17,935 / 4,324,752 |
 | loader converts to conservative variables, STAGE = 10 | 136 | 6.50M | no |
 | the same, STAGE = 15 | 137 | 6.46M | not checked |
 | the same, STAGE = 25 | 146 | 6.08M | not checked |
@@ -654,16 +654,16 @@ vortex of the performance set on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra
 the Sigma model), and the propane flame of `flame_3d` with TENO5 on $48 \times 24^2$ hexahedra and
 $24 \times 12^2 \times 6$ tetrahedra (two-step mechanism, 6 species), and with GRI-Mech 3.0 (53 species) on
 $32 \times 16^2$ hexahedra. Bytes per cell at the steady state, and the cells that fit on an A100-80GB. The
-reconstruction tables are 32.0 KB per hexahedron and 43.4 KB per tetrahedron (#431); next come the face states
+reconstruction tables are 1.97 KB per hexahedron and 2.47 KB per tetrahedron (#431); next to them are the face states
 (2.2 KB per hexahedron, 1.2 KB per tetrahedron), the troubled passes' scratch (1.8 KB) and the vertex
 gradient's weights (0.6 / 1.5 KB). Results are bitwise unchanged (restart files after 4 steps of each case,
 and of MUSCL, double-flux and `outlet_extrapolation` variants).
 
 | bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
 |---|---|---|---|---|---|---|---|
-| main | 38,791 / 2,026,731 | 49,475 / 1,589,048 | 38,831 / 2,024,643 | 49,515 / 1,587,764 | 41,211 / 1,881,073 | 51,515 / 1,504,820 | 47,998 / 1,615,983 |
-| ghost weights of boundary faces | 38,656 / 2,033,796 | 49,387 / 1,591,896 | 38,696 / 2,031,706 | 49,427 / 1,590,590 | 41,073 / 1,887,378 | 51,425 / 1,507,453 | 47,862 / 1,620,574 |
-| species slots in the face states | 38,656 / 2,033,796 | 49,387 / 1,591,896 | 38,696 / 2,031,706 | 49,427 / 1,590,590 | 40,779 / 1,900,986 | 51,229 / 1,513,221 | 45,634 / 1,699,696 |
+| main | 8,773 / 8,961,187 | 8,585 / 9,157,200 | 8,813 / 8,920,514 | 8,625 / 9,114,733 | 11,072 / 7,005,283 | 10,065 / 7,706,501 | 17,935 / 4,324,752 |
+| ghost weights of boundary faces | 8,638 / 9,100,971 | 8,497 / 9,252,578 | 8,678 / 9,059,023 | 8,537 / 9,209,223 | 10,935 / 7,093,479 | 9,974 / 7,776,381 | 17,799 / 4,357,919 |
+| species slots in the face states | 8,638 / 9,100,971 | 8,497 / 9,252,578 | 8,678 / 9,059,023 | 8,537 / 9,209,223 | 10,641 / 7,289,471 | 9,778 / 7,932,252 | 15,571 / 4,981,336 |
 
 - **Ghost weights of boundary faces.** The vertex gradient (viscous fluxes, the hybrid flux's sensor, MUSCL)
   kept a weight for every face of every cell, though only boundary faces have ghosts; it keeps them for those
@@ -674,7 +674,7 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
   before the next stage's reconstruction writes them again: they share the face states' memory, which is the
   larger of the two below about 45 species at TENO5 on hexahedra (35 on tetrahedra, 5 with MUSCL). The
   saving is the smaller of the two: 48 bytes per species per hexahedron (294 for 6 species) and 32 per
-  tetrahedron, at most the face states' 2.2 / 1.2 KB (2,228 bytes with GRI-Mech, 5% more cells).
+  tetrahedron, at most the face states' 2.2 / 1.2 KB (2,228 bytes with GRI-Mech, 15% more cells).
 
 ## Scaling (one node)
 
