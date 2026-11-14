@@ -40,6 +40,7 @@
 #include "periodic.h"
 #include "teno_sharing.h"
 #include "teno.h"
+#include "structured_blocks.h"
 #include "teno_setup.h"
 
 namespace {
@@ -1211,6 +1212,7 @@ void TENO::init(const Input & input) {
     }
     allocate_scratch();
     largest_stencil = comm::allreduce(largest_stencil, comm::Op::MAX);
+    find_block_stencils();
 }
 
 report::Summary TENO::summary() const {
@@ -1731,9 +1733,23 @@ struct TENOFunctor {
         }
     }
 
+    // Block shapes of the cells of structured blocks: their central stencils by offsets
+    teno::BlockStencils block{};
+
     KOKKOS_INLINE_FUNCTION
     void operator()(SmoothPass, const uint32_t idx) const {
         const uint32_t i_cell = cells.extent(0) ? cells(idx) : idx;
+        const uint32_t k = block.shape_of(i_cell);
+        if (k == teno::BlockStencils::NONE) {
+            smooth(i_cell, stencil_large.template row<TABLE>(i_cell));
+        } else {
+            smooth(i_cell, stencil_large.template block_row<TABLE>(i_cell, block.offsets_of(k)));
+        }
+    }
+
+    template <typename Row>
+    KOKKOS_INLINE_FUNCTION
+    void smooth(const uint32_t i_cell, const Row & stencil) const {
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
@@ -1747,7 +1763,6 @@ struct TENOFunctor {
         // Mixtures: also the relative jumps of the molar mass, which show
         // species interfaces at constant density
         rtype m_mean = 0.0, m_m2 = 0.0;
-        const auto stencil = stencil_large.template row<TABLE>(i_cell);
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
@@ -1835,7 +1850,7 @@ struct TENOFunctor {
     // order 6 the staged entries leave room for one team per SM only: none
     static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
     static constexpr size_t SMOOTH_SCRATCH =
-        TEAM_SCRATCH + (STAGE ? sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
+        TEAM_SCRATCH + 8 + (STAGE ?sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -1856,17 +1871,16 @@ struct TENOFunctor {
      *        troubled and leaves in smooth_team[lane] -1 if smooth, else its
      *        place in the queue.
      */
-    template <uint8_t C, bool QUEUE = true>
+    template <uint8_t C, bool QUEUE = true, typename Row>
     KOKKOS_INLINE_FUNCTION
-    void smooth_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_team, int * smooth_team,
-                             const uint32_t lane) const {
+    void smooth_coefficients(const uint32_t i_cell, const Row & stencil, const rtype * U0, rtype * aK_team,
+                             int * smooth_team, const uint32_t lane) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
         const uint16_t ns = stencil_large_size(i_cell);
         rtype aK[CHUNK][N_CONSERVATIVE] = {};
         rtype g_mean = 0.0, g_m2 = 0.0;
         rtype m_mean = 0.0, m_m2 = 0.0;
-        const auto stencil = stencil_large.template row<TABLE>(i_cell);
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
@@ -1909,11 +1923,11 @@ struct TENOFunctor {
      *        then every thread accumulates its chunk over the round's entries
      *        in order. Every thread of the team calls it.
      */
-    template <uint8_t C, typename Member>
+    template <uint8_t C, typename Member, typename Row>
     KOKKOS_INLINE_FUNCTION
-    void staged_coefficients(const Member & team, const bool active, const uint32_t i_cell, const uint8_t part,
-                             const rtype * U0, rtype * aK_team, rtype * U_team, int * ns_team, int * smooth_team,
-                             const uint32_t lane) const {
+    void staged_coefficients(const Member & team, const bool active, const uint32_t i_cell, const Row & stencil,
+                             const uint8_t part, const rtype * U0, rtype * aK_team, rtype * U_team, int * ns_team,
+                             int * smooth_team, const uint32_t lane) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
         constexpr uint32_t PER = STAGE / PARTS;
@@ -1925,7 +1939,6 @@ struct TENOFunctor {
         rtype aK[CHUNK][N_CONSERVATIVE] = {};
         rtype g_mean = 0.0, g_m2 = 0.0;
         rtype m_mean = 0.0, m_m2 = 0.0;
-        const auto stencil = stencil_large.template row<TABLE>(active ? i_cell : 0);
         for (uint16_t s0 = 0; s0 < ns_max; s0 = static_cast<uint16_t>(s0 + STAGE)) {
             // Every load of the thread's entries first, so that they are in flight together
             int32_t c[PER], f[PER];
@@ -2007,27 +2020,42 @@ struct TENOFunctor {
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+        int * block_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int)));
 
         const bool active = idx < n;
         const uint32_t i_cell = active ? (cells.extent(0) ? cells(idx) : idx) : 0;
+        const uint32_t k = active ? block.shape_of(i_cell) : teno::BlockStencils::NONE;
         rtype U0[N_CONSERVATIVE];
         if (part == 0) {
             smooth_team[lane] = 0;
             admissible_team[lane] = 1;
+            if (lane == 0) block_team[0] = 1;
         }
         team.team_barrier();
-        if constexpr (STAGE > 0) {
-            rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
-            int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-            if (active) conservatives(i_cell, U0);
-            with_chunk(part, [&](auto C) {
-                staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, U_team, ns_team, smooth_team, lane);
-            });
-        } else if (active) {
-            conservatives(i_cell, U0);
-            with_chunk(part, [&](auto C) {
-                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
-            });
+        // The team takes the block rows if all its cells have them, so that its barriers stay uniform
+        if (active && k == teno::BlockStencils::NONE) block_team[0] = 0;
+        team.team_barrier();
+        auto coefficients = [&](const auto & stencil) {
+            if constexpr (STAGE > 0) {
+                rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+                int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+                if (active) conservatives(i_cell, U0);
+                with_chunk(part, [&](auto C) {
+                    staged_coefficients<decltype(C)::value>(team, active, i_cell, stencil, part, U0, aK, U_team, ns_team,
+                                                            smooth_team, lane);
+                });
+            } else if (active) {
+                conservatives(i_cell, U0);
+                with_chunk(part, [&](auto C) {
+                    smooth_coefficients<decltype(C)::value>(i_cell, stencil, U0, aK, smooth_team, lane);
+                });
+            }
+        };
+        if (block_team[0]) {
+            coefficients(stencil_large.template block_row<TABLE>(
+                i_cell, block.offsets_of(k == teno::BlockStencils::NONE ? 0 : k)));
+        } else {
+            coefficients(stencil_large.template row<TABLE>(i_cell));
         }
         team.team_barrier();
         const int slot = smooth_team[lane];
@@ -2404,7 +2432,8 @@ struct TENOFunctor {
                 rtype U0[N_CONSERVATIVE];
                 conservatives(i_cell, U0);
                 with_chunk(part, [&](auto C) {
-                    smooth_coefficients<decltype(C)::value, false>(i_cell, U0, aK, nullptr, lane);
+                    smooth_coefficients<decltype(C)::value, false>(i_cell, stencil_large.template row<TABLE>(i_cell), U0,
+                                                                   aK, nullptr, lane);
                 });
                 store_coefficients(part, idx, aK, lane);
             }
@@ -2717,6 +2746,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     const uint32_t capacity = static_cast<uint32_t>(troubled_coeffs.extent(0));
     const bool rounds = capacity < mesh->n_reconstructed();
     if (!troubled_pass) {
+        functor.block = block_stencils;
         if (rounds) functor.coeffs = {};
         const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_reconstructed();
         if constexpr (!Functor::USE_TEAM || Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible) {
@@ -3243,6 +3273,70 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
                             Kokkos::Max<uint16_t>(largest));
     largest_stencil = largest;
     cache_loaded = false;
+    find_block_stencils();
+}
+
+namespace {
+
+struct OffsetsHash {
+    size_t operator()(const std::vector<int32_t> & v) const {
+        uint64_t h = 1469598103934665603ULL;
+        for (const int32_t x : v) h = (h ^ uint32_t(x)) * 1099511628211ULL;
+        return size_t(h);
+    }
+};
+
+} // namespace
+
+void TENO::find_block_stencils() {
+    block_stencils = teno::BlockStencils();
+    n_block_cells = 0;
+    n_block_shapes = 0;
+    const uint32_t n_rec = static_cast<uint32_t>(scale.extent(0));
+    const uint32_t n = std::min(n_rec, structured_block_cells(mesh->structured_blocks));
+    if (!block_path || n == 0) return;
+    const teno::PackedStencils & p = stencil_large;
+    const uint8_t sh = p.shift;
+    const uint32_t n_slices = (n + (1u << sh) - 1) >> sh;
+    std::vector<uint64_t> start(n_slices + 1);
+    Kokkos::deep_copy(HostUnmanaged<uint64_t>(start.data(), start.size()),
+                      Kokkos::subview(p.slice_start, std::make_pair(0u, n_slices + 1)));
+    std::vector<int32_t> slots(start[n_slices] << sh);
+    Kokkos::deep_copy(HostUnmanaged<int32_t>(slots.data(), slots.size()),
+                      Kokkos::subview(p.cells, std::make_pair(size_t(0), slots.size())));
+    std::vector<uint16_t> sizes(n);
+    Kokkos::deep_copy(HostUnmanaged<uint16_t>(sizes.data(), n), Kokkos::subview(stencil_large_size, std::make_pair(0u, n)));
+    std::vector<uint32_t> shape(n_rec, teno::BlockStencils::NONE);
+    std::vector<std::vector<int32_t>> shapes;
+    std::unordered_map<std::vector<int32_t>, uint32_t, OffsetsHash> index;
+    std::vector<int32_t> offsets;
+    for (uint32_t c = 0; c < n; c++) {
+        const uint64_t first = (start[c >> sh] << sh) + (c & ((1u << sh) - 1));
+        offsets.resize(sizes[c]);
+        bool image = false;
+        for (uint32_t s = 0; s < sizes[c] && !image; s++) {
+            const int32_t e = slots[first + (uint64_t(s) << sh)];
+            image = e < 0;
+            offsets[s] = e - static_cast<int32_t>(c);
+        }
+        if (image) continue;
+        const auto [it, fresh] = index.try_emplace(offsets, uint32_t(shapes.size()));
+        if (fresh) shapes.push_back(offsets);
+        shape[c] = it->second;
+        n_block_cells++;
+    }
+    if (shapes.empty()) return;
+    size_t stride = 0;
+    for (const auto & o : shapes) stride = std::max(stride, o.size());
+    std::vector<int32_t> table(shapes.size() * stride, 0);
+    for (size_t k = 0; k < shapes.size(); k++) std::copy(shapes[k].begin(), shapes[k].end(), table.begin() + std::ptrdiff_t(k * stride));
+    block_stencils.stride = static_cast<uint32_t>(stride);
+    block_stencils.shape = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_block_shape"), n_rec);
+    Kokkos::deep_copy(block_stencils.shape, HostUnmanaged<const uint32_t>(shape.data(), shape.size()));
+    block_stencils.offsets = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_block_offsets"),
+                                                     table.size());
+    Kokkos::deep_copy(block_stencils.offsets, HostUnmanaged<const int32_t>(table.data(), table.size()));
+    n_block_shapes = static_cast<uint32_t>(shapes.size());
 }
 
 std::vector<uint32_t> TENO::cells_within_reach(const std::vector<uint32_t> & changed) const {

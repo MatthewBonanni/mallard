@@ -177,6 +177,29 @@ struct PackedStencils {
     };
     using Row = RowT<rtype>;
 
+    /**
+     * @brief RowT of a cell whose slot s holds the cell plus offsets[s], none
+     *        an image: the same entries and pseudo-inverse entries, without
+     *        reading the cell's slots.
+     */
+    template <typename T>
+    struct BlockRowT {
+        const T * pinv_;
+        const int32_t * offsets_;
+        int32_t cell_;
+        uint8_t shift;
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t cell(const uint32_t s) const { return cell_ + offsets_[s]; }
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t face(const uint32_t) const { return -1; }
+
+        template <uint8_t WIDTH>
+        KOKKOS_INLINE_FUNCTION
+        rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(pinv_[(s * WIDTH + l) << shift]); }
+    };
+
     // The arrays are single allocations whose base pointers reach the kernels
     // as parameters: pointers loaded from device memory (e.g. a table of
     // separately allocated chunks) compile to generic loads, which made the
@@ -184,14 +207,45 @@ struct PackedStencils {
     // T: float if single, else rtype
     template <typename T = rtype>
     KOKKOS_INLINE_FUNCTION
-    RowT<T> row(const uint32_t c) const {
-        const uint64_t start = slice_start(c >> shift);
+    const T * pinv_of(const uint32_t c) const {
         const uint64_t own = pinv_index(c);
         const uint32_t mask = (1u << shift) - 1;
-        const uint32_t lane = c & mask;
-        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + (((own >> shift) * width) << shift) + (own & mask),
-                       cells.data() + (start << shift) + lane, images.data(), shift};
+        return reinterpret_cast<const T *>(pinv.data()) + (((own >> shift) * width) << shift) + (own & mask);
     }
+
+    template <typename T = rtype>
+    KOKKOS_INLINE_FUNCTION
+    RowT<T> row(const uint32_t c) const {
+        const uint64_t start = slice_start(c >> shift);
+        const uint32_t lane = c & ((1u << shift) - 1);
+        return RowT<T>{pinv_of<T>(c), cells.data() + (start << shift) + lane, images.data(), shift};
+    }
+
+    /** @brief The row of cell c, whose slot s holds cell c + offsets[s]. */
+    template <typename T = rtype>
+    KOKKOS_INLINE_FUNCTION
+    BlockRowT<T> block_row(const uint32_t c, const int32_t * offsets) const {
+        return BlockRowT<T>{pinv_of<T>(c), offsets, static_cast<int32_t>(c), shift};
+    }
+};
+
+/**
+ * @brief Central stencils of the cells of structured blocks by index
+ *        arithmetic (see docs/design/structured_blocks.md): a cell of a
+ *        block shape has no image in its central stencil, and its slot s
+ *        holds the cell plus the shape's offset s.
+ */
+struct BlockStencils {
+    static constexpr uint32_t NONE = ~0u;
+    Kokkos::View<uint32_t *> shape;   // (reconstructed cell): its block shape, or NONE; empty if no cell has one
+    Kokkos::View<int32_t *> offsets;  // (shape stride + s)
+    uint32_t stride = 0;
+
+    KOKKOS_INLINE_FUNCTION
+    uint32_t shape_of(const uint32_t c) const { return shape.extent(0) ? shape(c) : NONE; }
+
+    KOKKOS_INLINE_FUNCTION
+    const int32_t * offsets_of(const uint32_t k) const { return offsets.data() + size_t(k) * stride; }
 };
 
 /** @brief (cell, k): central moments of each cell, mean of ((x - x_c) / h_c)^a ... (3D). */
