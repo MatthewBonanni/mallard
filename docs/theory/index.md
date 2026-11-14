@@ -12,7 +12,7 @@ accuracy of every method, from the convergence tests; the sources are in
 
 ## Chapters
 
-Part I, the continuous model:
+### Part I: the continuous model
 
 1. [Governing equations](governing_equations.md): the compressible
     Navier-Stokes equations, the single-gas constitutive laws and the
@@ -30,16 +30,16 @@ Part I, the continuous model:
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.
 
-Part II, the discretization, in the order a step assembles it:
+### Part II: the discretization, in the order a step assembles it
 
-6. [Finite-volume discretization and reconstruction](finite_volume.md):
+1. [Finite-volume discretization and reconstruction](finite_volume.md):
     face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
     the viscous terms.
-7. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
+2. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
     central-upwind flux, species fluxes and viscous fluxes.
-8. [Boundary conditions and sources](boundaries_sources.md): exterior
+3. [Boundary conditions and sources](boundaries_sources.md): exterior
     states, characteristic boundaries, body forces and sponges.
-9. [Time integration](time_integration.md): Runge-Kutta methods, the time
+4. [Time integration](time_integration.md): Runge-Kutta methods, the time
     step and the order of operations within a step.
 
 ## Notation
