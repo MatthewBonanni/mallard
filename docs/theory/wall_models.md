@@ -330,7 +330,7 @@ gradients of the viscous terms and the eddy viscosity, by one kernel over
 the modeled wall faces of the owned cells. Their inputs are instantaneous,
 not time-filtered. `[[forces]]` monitors of modeled zones report the
 modeled traction and add the integrated heat flux into the fluid
-([Output](../guide/output.md#wall-forces-forces)).
+([Probes and monitors](../guide/probes.md#wall-forces-forces)).
 
 ## Parallel runs and restarts
 

@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<!-- provenance {"schema":"mallard-provenance","version":1,"mallard":{"version":"v0.9.1","git_sha":null,"git_dirty":null},"build":{"dim":2,"precision":"double","build_type":"Release","compiler":"AppleClang 21.0.0.21000334","cxx_flags":"-O3 -DNDEBUG","kokkos":"5.2.2","backend":"Threads","host_backend":"Threads","mpi":false,"gpu_aware_mpi":false,"nccl":false,"hdf5":true,"kaminpar":false,"species_layout":"right"},"dependencies":{"compiler":"AppleClang 21.0.0.21000334","kokkos":"5.2.2","mpi":null,"hdf5":"2.2.0","cgns":null,"zlib":null,"nccl":null,"gpu_runtime":null,"gpu_driver":null},"run":{"start_time":"2026-11-05T18:20:41Z","ranks":1,"host":"fixture-host","device":"Apple M4 Pro","directory":"/fixtures/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","hosts":1},"input":{"file":"snapshots.toml","sha256":"e4b2faf710090dca8538c65887b16b33dd1932585c8d7e831abf4f2643caa910","text":"# Format fixture: snapshots in every format, probes, forces and integrals of\n# the perfect gas of gas.toml, two steps. See README.md.\n[run]\nn_steps = 1\ncfl = 0.2\n\n[mesh]\ntype = \"cartesian\"\nNx = 6\nNy = 5\nLx = 1.0\nLy = 1.0\n\n[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x + 0.2 * y * y\"\nu = [\"0.1 + 0.2 * y\", \"-0.1 * x\"]\np = \"1.0 + 0.1 * x * y\"\n\n[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n\n[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n\n[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n\n[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n\n[output]\ncheck_interval = 1000\nrun_log = \"snapshots.jsonl\"\n\n[[write_data]]\nprefix = \"snapshots_vtkhdf\"\nformat = \"vtkhdf\"\nvariables = [\"RHO\", \"U\", \"P\"]\ninterval = 1\n\n[[write_data]]\nprefix = \"snapshots_series\"\nformat = \"vtkhdf\"\nseries = true\nvariables = [\"RHO\", \"U\", \"P\"]\ninterval = 1\n\n[[write_data]]\nprefix = \"snapshots_vtu\"\nformat = \"vtu\"\nvariables = [\"RHO\", \"U\", \"P\"]\ninterval = 1\n\n[[write_data]]\nprefix = \"snapshots_xdmf\"\nformat = \"hdf5\"\nvariables = [\"RHO\", \"U\", \"P\"]\ninterval = 1\n\n[[write_data]]\nprefix = \"snapshots\"\nformat = \"restart\"\ninterval = 1\n\n[[probes]]\nname = \"line\"\ntype = \"line\"\nstart = [0.1, 0.5]\nend = [0.9, 0.5]\nn_points = 3\nvariables = [\"RHO\", \"P\"]\nfile = \"snapshots_probe.csv\"\n\n[[probes]]\nname = \"line_h5\"\ntype = \"line\"\nstart = [0.1, 0.5]\nend = [0.9, 0.5]\nn_points = 3\nvariables = [\"RHO\", \"P\"]\nformat = \"hdf5\"\nfile = \"snapshots_probe.h5\"\n\n[[forces]]\nzone = \"bottom\"\nfile = \"snapshots_forces.csv\"\n\n[integrals]\nfile = \"snapshots_integrals.csv\"\n"},"mesh":{"type":"cartesian"},"preset":null,"setup":{"Mesh":[["Type","cartesian"],["Cells","30 quad"],["Faces","71 (22 boundary)"],["Extent","[0, 1] x [0, 1]"],["Cell area","3.333e-02 to 3.333e-02 (ratio 1)"]],"Physics":[["Model","Euler"],["Gas","gamma 1.4, R 1, cp 3.5, cv 2.5"],["Initial state","analytical"]],"Numerics":[["Reconstruction","MUSCL, limiter venkatakrishnan (K 5)"],["Riemann solver","HLLC"],["Time integrator","SSPRK3"],["Time step","CFL 0.2"],["Stop at","n_steps = 1"],["Divergence","stop at the first non-finite value, writing the last valid state"]],"Boundaries":[["left","outlet_extrapolation, 5 faces"],["right","outlet_extrapolation, 5 faces"],["top","symmetry, 6 faces"],["bottom","wall_adiabatic, 6 faces"]],"Output":[["Progress","every 1,000 steps"],["vtkhdf","snapshots_vtkhdf_*.vtkhdf every 1 steps: RHO, U, P"],["vtkhdf","snapshots_series.vtkhdf every 1 steps: RHO, U, P"],["vtu","snapshots_vtu_*.vtu every 1 steps: RHO, U, P"],["hdf5","snapshots_xdmf_*.h5 every 1 steps: RHO, U, P"],["restart","snapshots_*.restart every 1 steps"],["forces","snapshots_forces.csv (bottom) every 1 steps"],["integrals","snapshots_integrals.csv every 1 steps"],["probe line","snapshots_probe.csv, line of 3 points every 1 steps: RHO, P"],["probe line_h5","snapshots_probe.h5, line of 3 points every 1 steps: RHO, P"]]}} -->
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="3.0">
+  <Domain>
+    <Grid Name="snapshots_xdmf" GridType="Collection" CollectionType="Temporal">
+      <Grid Name="snapshots_xdmf_000000" GridType="Uniform">
+        <Time Value="0"/>
+        <Topology TopologyType="Mixed" NumberOfElements="30">
+          <DataItem Dimensions="150" NumberType="Int" Precision="8" Format="HDF">snapshots_xdmf_mesh.h5:/cells/topology</DataItem>
+        </Topology>
+        <Geometry GeometryType="XY">
+          <DataItem Dimensions="42 2" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_mesh.h5:/nodes/coordinates</DataItem>
+        </Geometry>
+        <Attribute Name="RHO" AttributeType="Scalar" Center="Cell">
+          <Information Name="units" Value="kg m-3"/>
+          <Information Name="long_name" Value="density"/>
+          <DataItem Dimensions="30" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000000.h5:/fields/RHO</DataItem>
+        </Attribute>
+        <Attribute Name="U" AttributeType="Vector" Center="Cell">
+          <Information Name="units" Value="m s-1"/>
+          <Information Name="long_name" Value="velocity"/>
+          <DataItem Dimensions="30 3" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000000.h5:/fields/U</DataItem>
+        </Attribute>
+        <Attribute Name="P" AttributeType="Scalar" Center="Cell">
+          <Information Name="units" Value="kg m-1 s-2"/>
+          <Information Name="long_name" Value="pressure"/>
+          <DataItem Dimensions="30" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000000.h5:/fields/P</DataItem>
+        </Attribute>
+      </Grid>
+      <Grid Name="snapshots_xdmf_000001" GridType="Uniform">
+        <Time Value="0.014430646149284233"/>
+        <Topology TopologyType="Mixed" NumberOfElements="30">
+          <DataItem Dimensions="150" NumberType="Int" Precision="8" Format="HDF">snapshots_xdmf_mesh.h5:/cells/topology</DataItem>
+        </Topology>
+        <Geometry GeometryType="XY">
+          <DataItem Dimensions="42 2" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_mesh.h5:/nodes/coordinates</DataItem>
+        </Geometry>
+        <Attribute Name="RHO" AttributeType="Scalar" Center="Cell">
+          <Information Name="units" Value="kg m-3"/>
+          <Information Name="long_name" Value="density"/>
+          <DataItem Dimensions="30" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000001.h5:/fields/RHO</DataItem>
+        </Attribute>
+        <Attribute Name="U" AttributeType="Vector" Center="Cell">
+          <Information Name="units" Value="m s-1"/>
+          <Information Name="long_name" Value="velocity"/>
+          <DataItem Dimensions="30 3" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000001.h5:/fields/U</DataItem>
+        </Attribute>
+        <Attribute Name="P" AttributeType="Scalar" Center="Cell">
+          <Information Name="units" Value="kg m-1 s-2"/>
+          <Information Name="long_name" Value="pressure"/>
+          <DataItem Dimensions="30" NumberType="Float" Precision="8" Format="HDF">snapshots_xdmf_000001.h5:/fields/P</DataItem>
+        </Attribute>
+      </Grid>
+    </Grid>
+  </Domain>
+</Xdmf>

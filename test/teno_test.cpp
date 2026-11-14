@@ -52,14 +52,18 @@ std::unique_ptr<TENO> make_teno(std::shared_ptr<Mesh> mesh, const BoundaryData &
     return teno;
 }
 
+// The field along y = 0, on a strip one cell thick
+void strip_conservatives(double x, double, double * U) { smooth_conservatives(x, 0.0, U); }
+
+using Field = void (*)(double, double, double *);
+
 /**
  * @brief Max error of reconstructed face-point conservatives against the exact field.
  */
-double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, const std::string & extra = "",
-                            double margin = 0.0) {
-    auto mesh = make_mesh(mesh_type, n, n);
+double reconstruction_error(std::shared_ptr<Mesh> mesh, int order, const std::string & extra = "", double margin = 0.0,
+                            Field field = smooth_conservatives) {
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    auto avg = cell_averages(*mesh, smooth_conservatives);
+    auto avg = cell_averages(*mesh, field);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
     auto h_W = Kokkos::create_mirror_view(W);
@@ -87,7 +91,7 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
             const double y = double(mesh->h_face_coords(f, 1)) + s * (double(mesh->h_node_coords(b, 1)) - double(mesh->h_node_coords(a, 1)));
             if (x < margin || x > 1.0 - margin || y < margin || y > 1.0 - margin) continue;
             double U[N_CONSERVATIVE];
-            smooth_conservatives(x, y, U);
+            field(x, y, U);
             for (uint8_t side = 0; side < 2; side++) {
                 if (mesh->h_cells_of_face(f, side) < 0) continue;
                 err = std::max(err, std::abs(double(h_face_W(f, q, side, 0)) - U[0]));
@@ -95,6 +99,17 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
         }
     }
     return err;
+}
+
+double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, const std::string & extra = "",
+                            double margin = 0.0) {
+    return reconstruction_error(make_mesh(mesh_type, n, n), order, extra, margin);
+}
+
+/** @brief Max face-value error on a strip of n square cells, one cell thick, with symmetry walls all around. */
+double strip_error(uint32_t n, int order) {
+    return reconstruction_error(make_mesh("cartesian", n, 1, 1.0_r, 1.0_r / rtype(n)), order, "", 0.0,
+                                strip_conservatives);
 }
 
 using OrderParam = std::tuple<std::string, int>;
@@ -128,6 +143,16 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENOOrder,
 // The rest of the verification manual's matrix: run by tools/docs/verification.py
 INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENOOrder,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"), ::testing::Values(6)));
+
+TEST(TENOTest, StripsOneCellThickConvergeAtDesignOrder) {
+    // No neighbors across the strip: the fits take the monomials of x alone (#706)
+    SKIP_IN_SINGLE_PRECISION("the errors on the 64-cell strip are at round-off");
+    for (int order : {5, 6}) {
+        verification::expect_order({"boundaries", "TENO" + std::to_string(order), verification::cells_of("cartesian"),
+                                    "max face-value error, one cell thick", {32, 64},
+                                    {strip_error(32, order), strip_error(64, order)}, double(order), order - 0.4});
+    }
+}
 
 TEST(TENOTest, EigenvectorsAreInverse) {
     const rtype W[N_CONSERVATIVE] = {1.3_r, 0.4_r, -0.7_r, 2.1_r};
@@ -503,6 +528,11 @@ std::string temp_cache(const std::string & name) {
     return path;
 }
 
+/** @brief The file of cache_file on this rank: each rank of several has its own. */
+std::string file_of(const std::string & cache) {
+    return comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
+}
+
 TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     // Stencils of different sizes, and a cell count that is not a multiple of
     // the GPU slice width, so slices are both ragged and partly empty
@@ -522,16 +552,16 @@ TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     const std::string cache = temp_cache("mallard_teno_cache_slices.bin");
     const auto host = teno_outputs(mesh, bd, 4, "", 0);
     const auto gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
-    ASSERT_TRUE(std::filesystem::exists(cache));
-    const auto written = std::filesystem::last_write_time(cache);
+    ASSERT_TRUE(std::filesystem::exists(file_of(cache)));
+    const auto written = std::filesystem::last_write_time(file_of(cache));
     // A cache written with GPU slices loads into host rows, and back
     const auto loaded_host = teno_outputs(mesh, bd, 4, cache, 0, true);
     const auto loaded_gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
-    EXPECT_EQ(std::filesystem::last_write_time(cache), written);  // Loaded, never rewritten
+    EXPECT_EQ(std::filesystem::last_write_time(file_of(cache)), written);  // Loaded, never rewritten
     expect_bitwise_equal(host, gpu, "32-cell slices");
     expect_bitwise_equal(host, loaded_host, "loaded into host rows");
     expect_bitwise_equal(host, loaded_gpu, "loaded into 32-cell slices");
-    std::filesystem::remove(cache);
+    std::filesystem::remove(file_of(cache));
 }
 
 TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) {
@@ -552,12 +582,12 @@ TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) 
     }
     EXPECT_GT(max_diff, 0.0);
     EXPECT_LT(max_diff, 1e-5 * max_value);
-    EXPECT_LT(static_cast<double>(std::filesystem::file_size(single)), 0.6 * static_cast<double>(std::filesystem::file_size(full)));
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.6 * static_cast<double>(std::filesystem::file_size(file_of(full))));
     // A cache in the other precision is recomputed, never reinterpreted
     const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
     expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");
-    std::filesystem::remove(single);
-    std::filesystem::remove(full);
+    std::filesystem::remove(file_of(single));
+    std::filesystem::remove(file_of(full));
 }
 
 TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) {
@@ -570,9 +600,9 @@ TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) 
         return teno_outputs(m, b, order, "");
     };
     auto write_cache = [&]() {
-        std::filesystem::remove(cache);
+        std::filesystem::remove(file_of(cache));
         teno_outputs(mesh, bd, 4, cache, teno::SLICE_SHIFT, true);
-        ASSERT_TRUE(std::filesystem::exists(cache));
+        ASSERT_TRUE(std::filesystem::exists(file_of(cache)));
     };
 
     write_cache();
@@ -580,9 +610,9 @@ TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) 
     write_cache();
     expect_bitwise_equal(teno_outputs(mesh, bd, 3, cache), fresh(mesh, bd, 3), "other order");
     write_cache();
-    std::filesystem::resize_file(cache, std::filesystem::file_size(cache) / 2);
+    std::filesystem::resize_file(file_of(cache), std::filesystem::file_size(file_of(cache)) / 2);
     expect_bitwise_equal(teno_outputs(mesh, bd, 4, cache), fresh(mesh, bd, 4), "truncated cache");
-    std::filesystem::remove(cache);
+    std::filesystem::remove(file_of(cache));
 }
 
 namespace {
@@ -603,14 +633,53 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
     for (const teno::PackedStencils * s : {&teno.stencil_large, &teno.stencil_small}) {
         add(s->slice_start);
         add(s->cells);
-        add(s->faces);
+        add(s->images);
         add(s->pinv);
     }
     out.emplace_back(teno.gather_depth.begin(), teno.gather_depth.end());
     return out;
 }
 
+/** @brief The tables of a TENO whose setup options are set before init(). */
+template <typename F>
+std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order, F && options) {
+    TENO teno;
+    teno.set_mesh(mesh);
+    teno.set_boundaries(bd);
+    options(teno);
+    teno.init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    return teno_tables(teno);
+}
+
 } // namespace
+
+TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
+    // Triangles with mirror images at the walls: small batches split the cells
+    // differently, and the host setup is the fallback for cells whose search
+    // outgrows the device's scratch
+    auto mesh = make_mesh("cartesian_tri", 12, 10);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
+    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
+    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+}
+
+TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
+    // A thin annulus with symmetry walls: each search reaches more straight wall faces than the scratch
+    // holds mirror lines, so every cell is redone on the host with a larger scratch
+    Input input = parse_toml("[mesh]\ntype = \"annulus\"\nNtheta = 64\nNr = 4\nr_outer = 1.1\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto teno = make_teno(mesh, bd, 3);
+    std::string status;
+    for (const auto & [name, value] : teno->summary().settings) {
+        if (name == "TENO setup") status = value;
+    }
+    EXPECT_NE(status.find("256 cells redone on the host"), std::string::npos) << status;
+    EXPECT_TRUE(teno_tables(*teno) == tables_with(mesh, bd, 3, [](TENO & t) { t.setup_on_host = true; }));
+}
 
 TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
     // An interior node, and a node of the bottom symmetry wall moved along it

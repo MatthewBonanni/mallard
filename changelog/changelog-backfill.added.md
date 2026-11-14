@@ -1,3 +1,0 @@
-- Low-storage SSPRK(5,4) and 2N RK4(5) time integrators, and RDPK3Sp35 with error-controlled time steps (`[numerics.error_control]`); about 0.8x the cost of SSPRK3 per unit simulated time (#289, #314).
-- Wall-modeled LES: equilibrium ODE and Griffin-Fu-Moin wall models on wall boundaries (`wall_model = {...}`), single gases (#256, #307).
-- CUDA compile-only CI jobs (2D and 3D), so host-only changes that break the CUDA build are caught without a GPU (#401).

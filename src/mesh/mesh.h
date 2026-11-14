@@ -22,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 #include "input.h"
 
+#include "cell_order.h"
 #include "curved.h"
 #include "periodic_maps.h"
 #include "zone.h"
@@ -139,6 +140,32 @@ const std::vector<std::vector<uint8_t>> & cell_local_faces(uint32_t n_nodes);
 void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
                      std::vector<std::array<std::array<double, 3>, 4>> & tets);
 
+struct CellGeometry {
+    rtype volume;
+    rtype measure;  // the volume, or per radian int y dA of an axisymmetric cell
+    std::array<rtype, N_DIM> centroid;  // of the measure
+};
+
+/**
+ * @brief Volume (area in 2D), measure and centroid of a straight-sided cell
+ *        of these node coordinates (Gmsh/VTK order, either orientation), bit
+ *        for bit as the mesh computes them (after make_axisymmetric when
+ *        axisymmetric).
+ */
+CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes, bool axisymmetric = false);
+
+struct AxisymmetricCell {
+    double measure;
+    std::array<double, 2> centroid;
+};
+
+/**
+ * @brief Per radian volume int y dA of a 2D cell about the x axis (y the
+ *        radius) and the centroid of that volume, from its nodes as the mesh
+ *        stores them.
+ */
+AxisymmetricCell axisymmetric_cell(const std::vector<std::array<rtype, N_DIM>> & nodes);
+
 
 struct MeshBlock;
 struct PeriodicNodes;
@@ -176,9 +203,10 @@ class Mesh {
         void init(const Input & input);
 
         /**
-         * @brief Periodic pairs from [[periodic]] entries, and for generated
-         *        meshes from [mesh] periodic: left/right for x, bottom/top for
-         *        y, back/front for z.
+         * @brief Periodic pairs from the [[periodic]] entries. On a generated
+         *        mesh, opposite sides (left/right, bottom/top, back/front, the
+         *        annulus' start/end) need no translation or angle: the mesh
+         *        gives it, and checks one that is set.
          */
         static std::vector<PeriodicPair> periodic_pairs(const Input & input);
 
@@ -271,15 +299,8 @@ class Mesh {
                                  uint8_t n_order,
                                  std::vector<uint32_t> & neighbors) const;
 
-        /**
-         * @brief Compute cell centroids.
-         */
-        void compute_cell_centroids();
-
-        /**
-         * @brief Compute cell volumes.
-         */
-        void compute_cell_volumes();
+        /** @brief Cell volumes and centroids (cell_geometry). */
+        void compute_cell_volumes_and_centroids();
 
         /**
          * @brief Compute face areas.
@@ -335,6 +356,15 @@ class Mesh {
         void copy_device_to_host();
 
         /**
+         * @brief Drop what only the setup reads: the node coordinates and the
+         *        cells' and faces' node lists on the device, the zones' device
+         *        lists, and the host vertex-neighbor lists. Kernels that read
+         *        the nodes later keep their own views (2D TENO); output keeps
+         *        the host nodes and connectivity.
+         */
+        void release_setup_data();
+
+        /**
          * @brief Initialize the mesh as a cartesian grid.
          * 
          * @param nx Number of cells in the x-direction.
@@ -382,7 +412,10 @@ class Mesh {
          *        zone unlisted_zone. Cells are triangles and quadrilaterals in 2D;
          *        tetrahedra, pyramids, prisms and hexahedra (Gmsh/VTK node
          *        order) in 3D. The zones of each periodic pair are joined into
-         *        interior faces (see docs/design/periodic.md).
+         *        interior faces (see docs/design/periodic.md). Without global
+         *        ids, the cells are numbered by cell_order (their given order
+         *        becoming their global ids); faces are numbered in the order the
+         *        cells reach them and oriented by global ids.
          */
         void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
                                     const std::vector<std::vector<uint32_t>> & cells,
@@ -393,17 +426,18 @@ class Mesh {
         /**
          * @brief Build the mesh with periodic node classes found beforehand
          *        (e.g. across ranks); boundary faces of classes.zones, if given,
-         *        are dropped.
+         *        are dropped. Takes the nodes and cells, and frees them as soon
+         *        as the mesh holds them.
          */
-        void init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                    const std::vector<std::vector<uint32_t>> & cells,
+        void init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, CellNodes cells,
                                     const std::vector<BoundaryFace> & boundary_faces,
                                     const std::string & unlisted_zone, const PeriodicNodes & classes);
 
         /**
-         * @brief Build the mesh from a block holding the whole mesh.
+         * @brief Build the mesh from a block holding the whole mesh, freeing the
+         *        block's cells and nodes as soon as the mesh holds them.
          */
-        void init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic = {});
+        void init_from_block(MeshBlock block, const std::vector<PeriodicPair> & periodic = {});
 
         /**
          * @brief Curve the faces on the given surfaces (see curved::Geometry):
@@ -424,7 +458,7 @@ class Mesh {
         bool is_rotational() const { return periodic_rotation.direction >= 0; }
 
         /** @brief Whether shift row s turns vectors. */
-        bool h_rotated_row(uint8_t s) const {
+        bool h_rotated_row(uint32_t s) const {
             return is_rotational() && shift_lattice[s][static_cast<size_t>(periodic_rotation.direction)] != 0;
         }
 
@@ -432,10 +466,10 @@ class Mesh {
         PeriodicMaps periodic_maps() const { return PeriodicMaps{shifts, shift_rotations}; }
 
         /** @brief Host point x of the frame of cell 1 of face f seen from cell 0 (Q x + t). */
-        void h_forward(uint8_t s, const rtype * x, rtype * y) const;
+        void h_forward(uint32_t s, const rtype * x, rtype * y) const;
 
         /** @brief Host inverse of h_forward: Q^T (y - t). */
-        void h_backward(uint8_t s, const rtype * x, rtype * y) const;
+        void h_backward(uint32_t s, const rtype * x, rtype * y) const;
 
         /**
          * @brief Face f's centroid in the frame of cell c, one of its cells
@@ -464,13 +498,17 @@ class Mesh {
         void init_wedge(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly);
 
         /**
-         * @brief Global id of local cell i_cell (i_cell itself unless distributed).
-         *        Connectivity is ordered by global ids, so that every rank count
-         *        builds bitwise identical faces and stencils.
+         * @brief Global id of local cell i_cell (i_cell itself if the cells are
+         *        not renumbered). Connectivity is ordered by global ids, so that
+         *        every rank count and cell order builds bitwise identical faces
+         *        and stencils.
          */
         uint64_t h_global_cell(uint32_t i_cell) const {
             return h_global_cell_id.empty() ? i_cell : h_global_cell_id[i_cell];
         }
+
+        /** @brief Local cells in increasing global id (the first cell to visit a face becomes its cell 0). */
+        std::vector<uint32_t> cells_by_global_id() const;
 
         uint32_t n_cells, n_nodes, n_faces;
         // High-order boundary elements of the mesh file (global node ids), for curved::surfaces_of_mesh
@@ -486,11 +524,24 @@ class Mesh {
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
-        // Distributed runs: global id of every local cell and node, and the global counts (0 otherwise)
+        // Numbering of the cells of a whole mesh (init_from_connectivity); distributed meshes are numbered by
+        // DistributedMesh
+        CellNumbering cell_order;
+        // The order the cells were numbered in
+        CellOrderChoice cell_order_choice;
+        // Structured blocks of owned cells (cell_order auto), each a contiguous range of cells
+        std::vector<StructuredBlock> structured_blocks;
+        // Global id of every local cell (empty if the local order is the global one). Distributed runs: also of
+        // every local node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;
         uint64_t n_global_cells = 0;
         std::vector<uint64_t> h_global_node_id;
         uint64_t n_global_nodes = 0;
+        // Cell zones of the mesh file (Gmsh physical groups of cells, Fluent cell zones, CGNS families,
+        // OpenFOAM cellZones), and the zone of every local cell (empty without zones; NO_CELL_ZONE: none)
+        std::vector<std::string> cell_zone_names;
+        std::vector<uint32_t> h_cell_zone;
+        static constexpr uint32_t NO_CELL_ZONE = ~uint32_t(0);
         // Volume of each cell and area of each face in the flow's geometry: the
         // revolved ones per radian in axisymmetric runs, else the same views as
         // cell_volume and face_area
@@ -566,27 +617,19 @@ class Mesh {
     protected:
     private:
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
-        // Local cells in increasing global id: the first cell to visit a face becomes its cell 0
-        std::vector<uint32_t> cells_by_global_id() const;
-        /**
-         * @brief Positively oriented copy of 3D cells (Gmsh/VTK convention), as
-         *        CSR offsets and node lists.
-         */
-        static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                    const std::vector<std::vector<uint32_t>> & cells,
-                                    std::vector<uint32_t> & offsets, std::vector<uint32_t> & cell_nodes);
+        /** @brief Orient 3D cells positively (Gmsh/VTK convention), in place. */
+        static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells);
 
-        void allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                               const std::vector<uint32_t> & cell_node_offsets,
-                               const std::vector<uint32_t> & cell_nodes,
-                               const std::vector<uint32_t> & cell_face_offsets,
-                               const std::vector<uint32_t> & cell_faces,
-                               const std::vector<uint32_t> & face_node_offsets,
-                               const std::vector<uint32_t> & face_nodes,
-                               const std::vector<std::array<int32_t, 2>> & face_cells,
-                               const std::vector<uint8_t> & face_shifts,
-                               const std::vector<uint32_t> & interior,
-                               const std::map<std::string, std::vector<uint32_t>> & zone_faces);
+        /** @brief Copy the connectivity into the mesh's views, freeing each vector once copied. */
+        void allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, CellNodes && cells,
+                               std::vector<uint32_t> && cell_face_offsets,
+                               std::vector<uint32_t> && cell_faces,
+                               std::vector<uint32_t> && face_node_offsets,
+                               std::vector<uint32_t> && face_nodes,
+                               std::vector<std::array<int32_t, 2>> && face_cells,
+                               std::vector<uint8_t> && face_shifts,
+                               std::vector<uint32_t> && interior,
+                               std::map<std::string, std::vector<uint32_t>> && zone_faces);
 
         void h_neighbors_of_cell_helper(uint32_t i_cell,
                                         uint8_t n_order,

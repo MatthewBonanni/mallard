@@ -13,7 +13,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -49,16 +51,30 @@ struct Fixture {
     {"v0.6.0", "gas", 2},   {"v0.6.0", "statistics", 3}, {"v0.6.0", "mixture", 2},
     {"v0.7.0", "gas", 2},   {"v0.7.0", "statistics", 3}, {"v0.7.0", "mixture", 2}, {"v0.7.0", "nscbc", 4},
     {"v0.8.0", "gas", 2},   {"v0.8.0", "statistics", 3}, {"v0.8.0", "mixture", 2}, {"v0.8.0", "nscbc", 4},
+    {"v0.10.0", "gas", 7},  {"v0.10.0", "statistics", 7}, {"v0.10.0", "mixture", 7}, {"v0.10.0", "nscbc", 7},
 };
 
-/** @brief The fixture's input, without output; from a restart file if one is given. */
-[[maybe_unused]] Input fixture_input(const std::string & name, const fs::path & restart = {}) {
+/** @brief Whether a release (vX.Y.Z) is older than another. */
+[[maybe_unused]] bool older(const std::string & release, const std::string & than) {
+    const auto parts = [](const std::string & r) {
+        std::array<int, 3> v{};
+        std::sscanf(r.c_str(), "v%d.%d.%d", &v[0], &v[1], &v[2]);
+        return v;
+    };
+    return parts(release) < parts(than);
+}
+
+/** @brief The fixture's input, without output; from a restart file if one is given, as that release ran it. */
+[[maybe_unused]] Input fixture_input(const std::string & name, const fs::path & restart = {},
+                                     const std::string & release = "") {
     Input input = parse_input((FORMATS / (name + ".toml")).string());
     input.as_table().erase("write_data");
     auto & physics = input.at("physics");
     if (physics.contains("mechanism")) {
         physics["mechanism"] = (FORMATS / physics.at("mechanism").as_string()).lexically_normal().string();
     }
+    // Releases before 0.10.0 took the chemistry's half steps separately
+    if (input.contains("chemistry") && older(release, "v0.10.0")) input["chemistry"]["fuse_half_steps"] = false;
     if (!restart.empty()) {
         Input init(Input::table_type{});
         init["type"] = "restart";
@@ -71,6 +87,7 @@ struct Fixture {
 /** @brief Each conserved variable and species density of every cell, after init (and the run's steps if run). */
 [[maybe_unused]] std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(input);
     if (run) {
         solver.run();
@@ -117,12 +134,14 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
             const fs::path last = FORMATS / f.release / (f.name + "_000002.restart");
             ASSERT_EQ(restart_version(last), f.version);
 
-            // Step 0 holds the analytical initial state, which 2D builds compute the same since 0.5;
-            // step 2 the two steps this build takes from it, up to the round-off of scheme changes
+            // Step 0 holds the analytical initial state, which 2D builds compute the same since 0.5 up
+            // to the quadrature error of quadrilaterals (averaged from their vertex average since 0.9,
+            // #436); step 2 the two steps this build takes from it, up to the round-off of scheme changes.
+            // Running to step 2 from step 2 applies a pending chemistry half step (fused since 0.10.0).
             const auto analytical = solver_state(fixture_input(f.name), false);
             const auto from_first = solver_state(fixture_input(f.name, first), false);
-            const auto from_last = solver_state(fixture_input(f.name, last), false);
-            const auto rerun = solver_state(fixture_input(f.name, first), true);
+            const auto from_last = solver_state(fixture_input(f.name, last, f.release), true);
+            const auto rerun = solver_state(fixture_input(f.name, first, f.release), true);
             ASSERT_EQ(from_first.size(), analytical.size());
             auto size_of = [](const std::vector<double> & x) {
                 double m = 0;
@@ -134,7 +153,7 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
                 // Species densities, some zero everywhere, compare with the density
                 const double size = std::max(size_of(analytical[v]), v < N_CONSERVATIVE ? 0.0 : size_of(analytical[0]));
                 for (size_t i = 0; i < analytical[v].size(); i++) {
-                    ASSERT_NEAR(from_first[v][i], analytical[v][i], 1e-12 * size) << "variable " << v << ", cell " << i;
+                    ASSERT_NEAR(from_first[v][i], analytical[v][i], 1e-7 * size) << "variable " << v << ", cell " << i;
                     ASSERT_NEAR(from_last[v][i], rerun[v][i], 1e-10 * size) << "variable " << v << ", cell " << i;
                     moved = moved || from_last[v][i] != from_first[v][i];
                 }
@@ -164,7 +183,7 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
     if constexpr (N_DIM != 2) {
         GTEST_SKIP() << "2D fixtures";
     } else {
-        const fs::path file = scratch_dir() / "mallard_newer.restart";
+        const fs::path file = rank_scratch_dir() / "mallard_newer.restart";
         fs::copy_file(FORMATS / "v0.8.0" / "gas_000000.restart", file, fs::copy_options::overwrite_existing);
         {
             std::fstream out(file, std::ios::in | std::ios::out | std::ios::binary);
@@ -174,7 +193,7 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
         }
         const std::string error = error_of([&] { read_restart(file.string()); });
         EXPECT_NE(error.find("format version 99 is from a newer Mallard"), std::string::npos) << error;
-        EXPECT_NE(error.find("reads restart files of versions 1 to 6"), std::string::npos) << error;
+        EXPECT_NE(error.find("reads restart files of versions 1 to 7"), std::string::npos) << error;
         fs::remove(file);
     }
 }
@@ -210,18 +229,23 @@ namespace {
 } // namespace
 
 TEST(FormatCompatTest, MeshFilesOfPastReleasesAreRead) {
+    if (comm::size() > 1) GTEST_SKIP() << "compares whole meshes with a generated one, which ranks split";
     if constexpr (N_DIM != 2 || !std::is_same_v<rtype, double>) {
         GTEST_SKIP() << "2D fixtures, compared with double-precision meshes";
     } else {
         const MeshBlock generated = read_mesh_block(fixture_input("gas"));
-        for (const std::string release : {"v0.6.0", "v0.7.0", "v0.8.0"}) {
+        for (const std::string release : {"v0.6.0", "v0.7.0", "v0.8.0", "v0.10.0"}) {
             SCOPED_TRACE(release);
             expect_same_mesh(read_mesh_h5((FORMATS / release / "mesh.h5").string(), true), generated);
         }
         // Curved boundaries: the second-order nodes of the walls
-        const MeshBlock curved = read_mesh_h5((FORMATS / "v0.8.0" / "curved_mesh.h5").string(), true);
-        ASSERT_FALSE(curved.face_high_order_nodes.empty());
-        expect_same_mesh(curved, read_file_block((FORMATS / "annulus.msh").string()));
+        const MeshBlock annulus = read_file_block((FORMATS / "annulus.msh").string());
+        for (const std::string release : {"v0.8.0", "v0.10.0"}) {
+            SCOPED_TRACE(release);
+            const MeshBlock curved = read_mesh_h5((FORMATS / release / "curved_mesh.h5").string(), true);
+            ASSERT_FALSE(curved.face_high_order_nodes.empty());
+            expect_same_mesh(curved, annulus);
+        }
     }
 }
 
@@ -229,7 +253,7 @@ TEST(FormatCompatTest, MeshFilesOfANewerFormatAreRejectedClearly) {
     if constexpr (N_DIM != 2) {
         GTEST_SKIP() << "2D fixtures";
     } else {
-        const fs::path file = scratch_dir() / "mallard_newer_mesh.h5";
+        const fs::path file = rank_scratch_dir() / "mallard_newer_mesh.h5";
         fs::copy_file(FORMATS / "v0.8.0" / "mesh.h5", file, fs::copy_options::overwrite_existing);
         {
             h5::Handle h(H5Fopen(file.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "H5Fopen");

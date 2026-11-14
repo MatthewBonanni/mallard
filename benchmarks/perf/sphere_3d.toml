@@ -1,0 +1,65 @@
+# Performance set: examples/sphere_re300 on a mesh file as Gmsh numbers it,
+# prisms around the sphere and tetrahedra (180,243 cells); MUSCL, Navier-Stokes.
+# The mesh is examples/sphere_re300/make_sphere_re300_mesh.py sphere.msh
+# --scale 0.5 --threads 1 (Gmsh 4.13.1), its node coordinates rounded to nine
+# digits, compressed with xz; perf_suite.py decompresses it. See benchmarks/README.md.
+
+[run]
+n_steps = 100
+cfl = 0.4
+
+[mesh]
+type = "file"
+filename = "sphere_3d.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.2 * (1 + 0.0625 / (x^2 + y^2 + z^2)^1.5 - 0.1875 * x^2 / (x^2 + y^2 + z^2)^2.5)",
+     "-0.0375 * x * y / (x^2 + y^2 + z^2)^2.5 + 0.04 * exp(-((x - 1.5)^2 + y^2 + z^2))",
+     "-0.0375 * x * z / (x^2 + y^2 + z^2)^2.5"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "sphere"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "lateral"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outflow"
+type = "farfield"
+u = [0.2, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 6.666666666666667e-4
+Pr = 0.72
+
+[output]
+check_interval = 50

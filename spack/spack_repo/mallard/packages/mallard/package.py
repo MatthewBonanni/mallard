@@ -35,6 +35,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     license("Apache-2.0", checked_by="MatthewBonanni")
 
     version("main", branch="main", submodules=_submodules)
+    version("0.9.1", tag="v0.9.1", commit="254f9792e79530cb4391a701265aacf8356518ab", submodules=_submodules)
+    version("0.9.0", tag="v0.9.0", commit="4bdd93261bc4f6de6885b83c120856c7dc4be9dc", submodules=_submodules)
 
     variant(
         "dims",
@@ -42,7 +44,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         values=("2", "3"),
         multi=True,
         description="Spatial dimensions to build: one solver per dimension "
-        "(the 3D one is named mallard3d)",
+        "(mallard2d, mallard3d), both run as mallard",
     )
     variant(
         "precision",
@@ -67,10 +69,12 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
+    variant("python", default=True, description="The Python package mallard and the reader library it loads")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
-    depends_on("cmake@3.22:", type="build")
+    depends_on("cmake@4.2:", type="build")
+    depends_on("cuda@13.4:", when="+cuda")
 
     depends_on("kokkos@5: cxxstd=20")
     depends_on("kokkos+openmp", when="+openmp")
@@ -94,6 +98,9 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("cgns+hdf5", when="+cgns")
     depends_on("cgns~mpi", when="+cgns~mpi")
     depends_on("zlib-api", when="+zlib")
+    extends("python", when="+python")
+    depends_on("python@3.10:", when="+python", type=("build", "run"))
+    depends_on("py-numpy", when="+python", type="run")
 
     conflicts("+openmp", when="+threads", msg="Kokkos builds one parallel host backend")
     conflicts("+cuda", when="+rocm", msg="Kokkos builds one device backend")
@@ -102,22 +109,29 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     conflicts("+cuda", when="cuda_arch=none", msg="Set cuda_arch, e.g. cuda_arch=80 for A100")
     conflicts("+rocm", when="amdgpu_target=none", msg="Set amdgpu_target, e.g. gfx90a")
     conflicts("+cgns", when="~hdf5", msg="CGNS meshes need +hdf5")
+    _too_old = "Mallard supports GCC 15, Clang 22 and Apple Clang 21 or newer"
+    conflicts("%gcc@:14", msg=_too_old)
+    conflicts("%llvm@:21", msg=_too_old)
+    conflicts("%apple-clang@:20", msg=_too_old)
 
     def setup_run_environment(self, env):
         env.set("MALLARD_SHARE", join_path(self.prefix.share, "mallard"))
 
     @run_after("install")
     def check_install(self):
-        """The solvers start and report their version."""
-        for name in self._executables():
+        """mallard and the solvers start and report their version; shell completion is installed."""
+        for name in ["mallard"] + [f"mallard{dim}d" for dim in self.spec.variants["dims"].value]:
             Executable(join_path(self.prefix.bin, name))("--version", output=str, error=str)
+        for script in ["bash-completion/completions/mallard", "zsh/site-functions/_mallard",
+                       "fish/vendor_completions.d/mallard.fish"]:
+            if not os.path.exists(join_path(self.prefix.share, script)):
+                raise InstallError(f"no shell completion {script}: see the warning of cmake --install")
+        if self.spec.satisfies("+python"):
+            for dim in self.spec.variants["dims"].value:
+                if not find_libraries(f"libmallard{dim}d", self.prefix, shared=True, recursive=True):
+                    raise InstallError(f"no libmallard{dim}d")
 
-    def _executables(self):
-        return [
-            "mallard" + ("3d" if dim == "3" else "") for dim in self.spec.variants["dims"].value
-        ]
-
-    def _run_example(self, exe, example, *command):
+    def _run_example(self, example, *command):
         share = join_path(self.prefix.share, "mallard")
         work = join_path(self.test_suite.stage, example)
         if os.path.exists(work):
@@ -126,17 +140,31 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         case = join_path(work, "examples", example)
         shutil.copytree(join_path(share, "examples", example), case)
         with working_dir(case):
-            Executable(join_path(self.prefix.bin, exe))(*command, "-i", "input.toml")
+            Executable(join_path(self.prefix.bin, "mallard"))(*command, "-i", "input.toml")
 
     def test_sod(self):
         """Run the Sod shock tube example in 2D"""
         if not self.spec.satisfies("dims=2"):
             raise SkipTest("Mallard was built without dims=2")
-        self._run_example("mallard", "sod")
+        self._run_example("sod")
+
+    def test_python(self):
+        """Read the Sod example's output with the Python package"""
+        if not self.spec.satisfies("+python dims=2"):
+            raise SkipTest("Mallard was built without +python or dims=2")
+        self._run_example("sod")
+        case = join_path(self.test_suite.stage, "sod", "examples", "sod")
+        script = ("import mallard; f = mallard.open(mallard.run_files('.')[0]); rho = f.read('RHO'); "
+                  "assert f.kind == 'snapshot' and rho.size == f.geometry().n_cells and rho.min() > 0")
+        venv = self.spec["python-venv"].package
+        site = os.pathsep.join([join_path(self.prefix, venv.purelib), os.environ.get("PYTHONPATH", "")])
+        path = os.pathsep.join([self.prefix.bin, os.environ.get("PATH", "")])
+        with working_dir(case):
+            venv.command("-c", script, extra_env={"PYTHONPATH": site, "PATH": path})
 
     def test_reactor(self):
         """Run the hydrogen ignition example with mallard reactor"""
-        self._run_example(self._executables()[0], "h2_ignition", "reactor")
+        self._run_example("h2_ignition", "reactor")
 
 
 class CMakeBuilder(cmake.CMakeBuilder):
@@ -162,7 +190,11 @@ class CMakeBuilder(cmake.CMakeBuilder):
             self.define("USE_SYSTEM_CGNS", True),
             self.define_from_variant("Mallard_ENABLE_ZLIB", "zlib"),
             self.define("Mallard_ENABLE_TESTS", self.pkg.run_tests),
+            self.define_from_variant("Mallard_ENABLE_PYTHON", "python"),
         ]
+        if spec.satisfies("+python"):
+            site = join_path(self.pkg.prefix, spec["python-venv"].package.purelib)
+            args.append(self.define("Mallard_PYTHON_INSTALL_DIR", site))
         if spec.satisfies("+mpi"):
             args.append(self.define_from_variant("Mallard_GPU_AWARE_MPI", "gpu_aware_mpi"))
             if spec.satisfies("+cuda"):
@@ -180,7 +212,6 @@ class CMakeBuilder(cmake.CMakeBuilder):
             args = self.std_cmake_args + self.cmake_args()
             args += [
                 self.define("Mallard_DIM", dim),
-                self.define("Mallard_EXECUTABLE_SUFFIX", "3d" if dim == "3" else ""),
                 os.path.abspath(self.root_cmakelists_dir),
             ]
             with working_dir(self._build_dir(dim), create=True):
@@ -197,5 +228,4 @@ class CMakeBuilder(cmake.CMakeBuilder):
     def check(self):
         for dim in self._dims():
             with working_dir(self._build_dir(dim)):
-                suffix = "3d" if dim == "3" else ""
-                Executable(join_path(self._build_dir(dim), "test", "mallard-test" + suffix))()
+                Executable(join_path(self._build_dir(dim), "test", "mallard-test" + dim + "d"))()

@@ -55,6 +55,14 @@ the fit is rank deficient (Householder QR with a relative pivot tolerance of
 one-sided stencils. Across periodic seams the neighbors are translated as in
 the TENO stencils (docs/design/periodic.md).
 
+A cell is fitted only when a target cell cuts it, once however many targets
+use it: a source cell wholly inside one target cell (its intersection's volume
+its own to `1e-12`) contributes its measure and average alone, which its
+polynomial integrates to by construction. Coarsening a nested refinement, as
+`mallard post convergence` does against the finest run, then fits and
+integrates no polynomial at all. The report's counts of cells at a lower
+degree or limited are over the fitted cells.
+
 The fit is unlimited: it is TENO's central polynomial, without the weighting
 of the candidate stencils, which buys nothing for a one-time projection.
 Instead, `limiter = "bounds"` (the default) scales each polynomial's
@@ -113,7 +121,7 @@ Where the meshes cover different domains (a curved wall discretized
 differently, a shorter source box), a target cell's average is over the part
 the source covers; cells the source misses entirely take the average of the
 source cell with the nearest centroid (found through the same trees, ties to
-the lower id). The run log reports how many cells were partly or wholly
+the lower id). The terminal output reports how many cells were partly or wholly
 uncovered. Conservation then holds only over the common part. Curved
 boundary geometry (`apply_curved`) is not used: cells are their straight
 sided polytopes.

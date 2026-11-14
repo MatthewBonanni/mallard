@@ -1,0 +1,31 @@
+{
+ "default": "5",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/double_mach/input.toml",
+  "examples/explosion_3d/input.toml",
+  "examples/isotropic_turbulence/input.toml",
+  "examples/noh_axisymmetric/input.toml",
+  "examples/pulsed_jet/input.toml",
+  "examples/riemann_2d/input.toml",
+  "examples/riemann_2d_quads/coarse.toml",
+  "examples/riemann_2d_quads/input.toml",
+  "examples/riemann_2d_quads/remap.toml",
+  "examples/rotational_sector/annulus.toml",
+  "examples/rotational_sector/sector.toml",
+  "examples/sedov_3d/input.toml",
+  "examples/sedov_axisymmetric/input.toml",
+  "examples/shu_osher/input.toml",
+  "examples/sod/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/taylor_green_3d/remap.toml",
+  "examples/turbulent_hot_spot_2d/input.toml",
+  "examples/viscous_shock_tube/input.toml",
+  "tutorials/cluster/input.toml"
+ ],
+ "type": "integer"
+}

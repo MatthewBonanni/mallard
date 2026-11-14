@@ -83,6 +83,9 @@ struct Rule {
 };
 const Rule & simplex_rule(uint32_t degree);
 
+/** @brief Gauss-Legendre nodes and weights on [0, 1], exact for polynomials of degree 2 n - 1. */
+void gauss_legendre(uint32_t n, std::vector<double> & x, std::vector<double> & w);
+
 /** @brief Physical point of reference coordinates xi in simplex s. */
 Point map(const Simplex & s, const std::array<double, N_DIM> & xi);
 

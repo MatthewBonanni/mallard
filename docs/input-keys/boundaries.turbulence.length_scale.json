@@ -1,0 +1,9 @@
+{
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/turbulent_inflow_duct/input.toml"
+ ]
+}

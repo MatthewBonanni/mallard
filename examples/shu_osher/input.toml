@@ -29,7 +29,7 @@ p = "10.33333"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
@@ -49,6 +49,7 @@ order = 5
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -59,6 +60,5 @@ check_interval = 1000
 
 [[write_data]]
 prefix = "./solut/shu_osher"
-format = "vtu"
 time_interval = 1.8
-variables = ["RHO", "U_X", "P"]
+fields = ["RHO", "U_X", "P"]

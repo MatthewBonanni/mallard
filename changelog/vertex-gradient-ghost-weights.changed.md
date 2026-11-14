@@ -1,0 +1,1 @@
+- Viscous, hybrid-flux and MUSCL runs keep the vertex gradient's boundary-ghost weights for boundary faces only, about 140 bytes less device memory per hexahedron and 90 per tetrahedron; results are bitwise unchanged (#552).

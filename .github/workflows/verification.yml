@@ -9,7 +9,7 @@ on:
 
 jobs:
   verification:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,7 +44,7 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-verification-${{ github.sha }}
       - name: Run the convergence studies
-        run: python tools/docs/verification.py --jobs $(nproc) --test build-2/test/mallard-test build-3/test/mallard-test
+        run: python tools/docs/verification.py --jobs $(nproc) --test build-2/test/mallard-test2d build-3/test/mallard-test3d
       - name: Upload the manual
         if: always()
         uses: actions/upload-artifact@v4

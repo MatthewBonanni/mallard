@@ -64,10 +64,36 @@ step, at its first stage.
     $$
 
 - **FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
+- **SSPRK54**, the five-stage, fourth-order SSP method of
+    [Kraaijevanger 1991](../references.md#kraaijevanger-1991) and
+    [Spiteri & Ruuth 2002](../references.md#spiteri-ruuth-2002) (SSP
+    coefficient 1.508), and **RDPK3Sp35**, a five-stage, third-order method
+    with an embedded second-order error estimate for error-controlled steps
+    ([Ranocha et al. 2022](../references.md#ranocha-2022)), both in the
+    low-storage 3S\* form of [Ketcheson 2010](../references.md#ketcheson-2010).
+- **CK45**, the five-stage, fourth-order 2N-storage method of
+    [Carpenter & Kennedy 1994](../references.md#carpenter-kennedy-1994).
 
-Positivity is not enforced between stages: the face reconstructions fall
-back to first order where a face state would have a non-positive density
-or pressure ([chapter 6](finite_volume.md#reconstruction)).
+Applied to $\mathrm{d}u/\mathrm{d}t = \lambda u$, each method advances
+$u^{n+1} = R(\lambda\Delta t)\,u^n$ with a polynomial $R$; the step is
+stable where $\lvert R\rvert \le 1$. The five-stage methods reach about
+twice as far along the negative real axis as SSPRK3 and RK4, at five
+right-hand-side evaluations per step instead of three or four:
+
+![Stability regions of the six integrators in the complex plane of lambda dt, and the time error of the isentropic vortex against cfl for five of them](../images/theory/time_integrators-light.svg#gh-light-mode-only)
+![Stability regions of the six integrators in the complex plane of lambda dt, and the time error of the isentropic vortex against cfl for five of them](../images/theory/time_integrators-dark.svg#gh-dark-mode-only)
+
+*Left: regions computed from the coefficients in `src/numerics/time_integrator.cpp`
+(`tools/docs/time_integrators.py`). Right: density error of the isentropic
+vortex (40 × 40 quads, TENO5, t = 2) against RK4 at `cfl` 0.02, from
+[time integrators](../numerics/overview.md#time-integrators).*
+
+The face reconstructions fall back to first order where a face state would
+have a non-positive density or pressure
+([chapter 6](finite_volume.md#reconstruction)). Positivity of the cell
+averages is enforced only by bound-preserving TENO's flux limiter (planar
+single-gas runs, $\mathrm{CFL} \le 0.5$, SSP integrators), which bounds each
+forward-Euler stage.
 
 ## Time step
 
@@ -117,7 +143,7 @@ in 3D. Mixtures use the frozen sound speed $a = \sqrt{\gamma p/\rho}$.
 A time step of a reacting run is (`Solver::take_step`):
 
 1. Strang splitting: chemistry over $\Delta t/2$ (fused with the previous
-    step's second half with `fuse_half_steps`); SIMPLER: the transport
+    step's second half by default, `fuse_half_steps`); SIMPLER: the transport
     tendency, then chemistry over $\Delta t$ ([chapter 3](chemistry_radiation.md#coupling-with-the-flow));
 2. with double flux, freezing each cell's $(\gamma, e_0)$
     ([chapter 2](thermodynamics_transport.md#double-flux));

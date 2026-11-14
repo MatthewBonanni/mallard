@@ -46,7 +46,17 @@ class FoamFile {
             const std::string key = token();
             if (key == "}") break;
             std::string value;
-            for (std::string t = token(); t != ";"; t = token()) value += (value.empty() ? "" : " ") + t;
+            for (std::string t = token(); t != ";"; t = token()) {
+                if (t == "{") {
+                    // A sub-dictionary (meta): skipped
+                    for (int depth = 1; depth > 0;) {
+                        const std::string u = token();
+                        depth += u == "{" ? 1 : u == "}" ? -1 : 0;
+                    }
+                    break;
+                }
+                value += (value.empty() ? "" : " ") + t;
+            }
             header[key] = value;
         }
         binary = header["format"] == "binary";
@@ -348,6 +358,29 @@ MeshFileData read_openfoam(const std::string & path) {
                 if (edge.size() != 2) throw std::runtime_error(where + ": a face of patch " + p.name + " does not span the mesh's thickness.");
                 data.boundary_faces.push_back({edge, p.name});
                 data.boundary_high_order.emplace_back();
+            }
+        }
+    }
+    if (fs::exists(dir / "cellZones")) {
+        FoamFile f(dir / "cellZones");
+        const size_t n = f.list_start();
+        for (size_t i = 0; i < n; i++) {
+            const std::string name = f.token();
+            f.expect("{");
+            for (int depth = 1; depth > 0;) {
+                const std::string t = f.token();
+                if (t == "{") {
+                    depth++;
+                } else if (t == "}") {
+                    depth--;
+                } else if (t == "cellLabels" && depth == 1) {
+                    const size_t mark = f.pos;
+                    if (f.token().rfind("List", 0) != 0) f.pos = mark;
+                    for (const int64_t c : f.labels()) {
+                        if (c < 0 || c >= n_cells) f.fail("refers to a missing cell in zone " + name + ".");
+                        data.set_cell_zone(size_t(c), name);
+                    }
+                }
             }
         }
     }

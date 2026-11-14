@@ -1,0 +1,2 @@
+- On GPU builds (CUDA, HIP, SYCL), mixture inlets whose temperature is an expression evaluated it at the wrong y (and z) coordinates of each face on meshes of 256 faces or more; they now use the face centers. CPU builds were not affected (#968).
+- The build rejects Kokkos View accesses whose indices are all narrower than `int`, which Kokkos 5 computes in a wrapping 8- or 16-bit offset (#968).

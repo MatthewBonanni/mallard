@@ -308,7 +308,7 @@ Results: section 10.
 
 ## 10. Results
 
-`examples/channel_wmles` (`tools/wmles_channel.py`): the setup of section 9
+`examples/channel_wmles` (`examples/channel_wmles/wmles_channel.py`): the setup of section 9
 on 72 x 24 x 36 uniform hexahedra ($h / 12$), statistics over t = 200 to the
 end (1200 $h/U_b$: 42-46 $h/u_\tau$ for Lee & Moser's cases; 800 $h/U_b$: 19-26
 $h/u_\tau$ for Trettel & Larsson's), both walls, `exchange_distance = 0.3 h`.

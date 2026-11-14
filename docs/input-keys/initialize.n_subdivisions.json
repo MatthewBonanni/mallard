@@ -1,0 +1,16 @@
+{
+ "default": "4",
+ "defaults_by_dim": {
+  "3": "1"
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/sedov_3d/input.toml",
+  "examples/sedov_axisymmetric/input.toml",
+  "examples/turbulent_hot_spot_2d/input.toml"
+ ],
+ "type": "integer"
+}

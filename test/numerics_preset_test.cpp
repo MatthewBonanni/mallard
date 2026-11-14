@@ -16,11 +16,15 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "example_inputs.h"
 #include "input.h"
+#include "json.h"
+#include "memory_tracker.h"
 #include "numerics_preset.h"
+#include "provenance.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -28,10 +32,19 @@ namespace {
 
 using Keys = std::map<std::string, std::string>;
 
-Keys resolved(const numerics_preset::Resolution & r, bool from_preset) {
+/** @brief The keys the preset (or the input) set, with their values in the input. */
+Keys resolved(const numerics_preset::Resolution & r, const Input & input, bool from_preset) {
     Keys keys;
     for (const auto & s : r.settings) {
-        if (s.from_preset == from_preset) keys[s.key] = s.value;
+        if (s.from_preset != from_preset) continue;
+        const Input * v = &input;
+        for (size_t begin = 0, end = 0; end != std::string::npos; begin = end + 1) {
+            end = s.key.find('.', begin);
+            v = &v->as_table().entries().at(s.key.substr(begin, end - begin));
+        }
+        keys[s.key] = v->is_string()   ? v->as_string()
+                      : v->is_integer() ? std::to_string(v->as_integer())
+                                        : input_detail::float_text(v->as_floating());
     }
     return keys;
 }
@@ -48,24 +61,29 @@ numerics_preset::Resolution resolve(const std::string & text, Input * out = null
 // The table of docs/guide/numerics.md#presets
 TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
     const std::map<std::string, Keys> documented = {
-        {"robust", {{"numerics.face_reconstruction.type", "MUSCL"},
-                    {"numerics.face_reconstruction.limiter", "venkatakrishnan"},
-                    {"numerics.riemann_solver", "RHLL"},
-                    {"numerics.convective_flux", "riemann"},
-                    {"numerics.time_integrator", "SSPRK3"},
-                    {"run.cfl", "0.5"}}},
-        {"accurate", {{"numerics.face_reconstruction.type", "TENO"},
-                      {"numerics.face_reconstruction.order", "5"},
-                      {"numerics.riemann_solver", "HLLC"},
-                      {"numerics.convective_flux", "riemann"},
-                      {"numerics.time_integrator", "SSPRK3"},
-                      {"run.cfl", "1"}}},
+        {"high_order", {{"numerics.face_reconstruction.type", "TENO"},
+                        {"numerics.face_reconstruction.order", "5"},
+                        {"numerics.riemann_solver", "HLLC"},
+                        {"numerics.convective_flux", "riemann"},
+                        {"numerics.time_integrator", "SSPRK3"},
+                        {"run.cfl", "1.0"}}},
+        {"second_order", {{"numerics.face_reconstruction.type", "MUSCL"},
+                          {"numerics.face_reconstruction.limiter", "venkatakrishnan"},
+                          {"numerics.riemann_solver", "RHLL"},
+                          {"numerics.convective_flux", "riemann"},
+                          {"numerics.time_integrator", "SSPRK3"},
+                          {"run.cfl", "0.5"}}},
+        {"first_order", {{"numerics.face_reconstruction.type", "FO"},
+                         {"numerics.riemann_solver", "HLL"},
+                         {"numerics.convective_flux", "riemann"},
+                         {"numerics.time_integrator", "SSPRK3"},
+                         {"run.cfl", "0.5"}}},
         {"les", {{"numerics.face_reconstruction.type", "MUSCL"},
                  {"numerics.face_reconstruction.limiter", "none"},
                  {"numerics.riemann_solver", "HLLC"},
                  {"numerics.convective_flux", "hybrid"},
-                 {"numerics.time_integrator", "SSPRK3"},
-                 {"run.cfl", "0.8"}}},
+                 {"numerics.time_integrator", "SSPRK54"},
+                 {"run.cfl", "2.0"}}},
         {"reacting", {{"numerics.face_reconstruction.type", "MUSCL"},
                       {"numerics.face_reconstruction.limiter", "venkatakrishnan"},
                       {"numerics.riemann_solver", "HLLC"},
@@ -73,15 +91,15 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
                       {"numerics.time_integrator", "SSPRK3"},
                       {"run.cfl", "0.35"}}},
     };
-    EXPECT_EQ(numerics_preset::names(), (std::vector<std::string>{"robust", "accurate", "les", "reacting"}));
+    EXPECT_EQ(numerics_preset::names(), (std::vector<std::string>{"high_order", "second_order", "first_order", "les", "reacting"}));
     for (const auto & name : numerics_preset::names()) {
         SCOPED_TRACE(name);
         Input input;
         const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"" + name + "\"\n", &input);
         EXPECT_EQ(r.name, name);
-        EXPECT_EQ(resolved(r, true), documented.at(name));
-        EXPECT_TRUE(resolved(r, false).empty());
-        EXPECT_EQ(r.summary(), name);
+        EXPECT_EQ(resolved(r, input, true), documented.at(name));
+        EXPECT_TRUE(resolved(r, input, false).empty());
+        EXPECT_EQ(r.summary(resolve_input(input)), name);
         // The keys land in the input the rest of the setup reads
         const Input & recon = input.at("numerics").at("face_reconstruction");
         EXPECT_EQ(recon.at("type").as_string(), documented.at(name).at("numerics.face_reconstruction.type"));
@@ -94,37 +112,55 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
 TEST(NumericsPreset, ExplicitKeysOverrideThePreset) {
     Input input;
     const auto r = resolve("[run]\nt_stop = 1.0\ndt = 1e-3\n"
-                         "[numerics]\npreset = \"accurate\"\nriemann_solver = \"RHLL\"\n"
+                         "[numerics]\npreset = \"high_order\"\nriemann_solver = \"RHLL\"\n"
                          "[numerics.face_reconstruction]\norder = 3\n", &input);
-    EXPECT_EQ(resolved(r, false), (Keys{{"numerics.riemann_solver", "RHLL"},
-                                        {"numerics.face_reconstruction.order", "3"},
-                                        {"run.dt", "0.001"}}));
-    EXPECT_EQ(resolved(r, true), (Keys{{"numerics.face_reconstruction.type", "TENO"},
-                                       {"numerics.convective_flux", "riemann"},
-                                       {"numerics.time_integrator", "SSPRK3"}}));
+    EXPECT_EQ(resolved(r, input, false), (Keys{{"numerics.riemann_solver", "RHLL"},
+                                               {"numerics.face_reconstruction.order", "3"},
+                                               {"run.dt", "0.001"}}));
+    EXPECT_EQ(resolved(r, input, true), (Keys{{"numerics.face_reconstruction.type", "TENO"},
+                                              {"numerics.convective_flux", "riemann"},
+                                              {"numerics.time_integrator", "SSPRK3"}}));
     EXPECT_EQ(input.at("numerics").at("riemann_solver").as_string(), "RHLL");
     EXPECT_EQ(input.at("numerics").at("face_reconstruction").at("order").as_integer(), 3);
     EXPECT_FALSE(input.at("run").contains("cfl"));
-    EXPECT_EQ(r.summary(), "accurate (the input sets numerics.face_reconstruction.order = 3, "
-                           "numerics.riemann_solver = RHLL, run.dt = 0.001)");
+    EXPECT_EQ(r.summary(resolve_input(input)), "high_order (the input sets numerics.face_reconstruction.order = 3, "
+                                                 "numerics.riemann_solver = \"RHLL\", run.dt = 0.001)");
 }
 
 TEST(NumericsPreset, AnotherReconstructionTypeGetsNoneOfThePresetsReconstructionOptions) {
     Input input;
-    const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"accurate\"\n"
+    const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"high_order\"\n"
                          "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n", &input);
     EXPECT_FALSE(input.at("numerics").at("face_reconstruction").contains("order"));
-    EXPECT_EQ(resolved(r, false), (Keys{{"numerics.face_reconstruction.type", "MUSCL"}}));
-    EXPECT_EQ(resolved(r, true).count("numerics.face_reconstruction.order"), 0u);
+    EXPECT_EQ(resolved(r, input, false), (Keys{{"numerics.face_reconstruction.type", "MUSCL"}}));
+    EXPECT_EQ(resolved(r, input, true).count("numerics.face_reconstruction.order"), 0u);
 }
 
-TEST(NumericsPreset, WithoutAPresetTheInputIsUnchanged) {
-    const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.7\n[numerics]\nriemann_solver = \"Roe\"\n";
+TEST(NumericsPreset, WithoutAPresetOrAReconstructionTheDefaultIsHighOrderUnderTheInputsKeys) {
     Input input;
-    const auto r = resolve(text, &input);
-    EXPECT_TRUE(r.name.empty());
-    EXPECT_TRUE(r.settings.empty());
-    EXPECT_EQ(input, parse_toml(text));
+    const auto r = resolve("[run]\nt_stop = 1.0\ncfl = 0.7\n[numerics]\nriemann_solver = \"Roe\"\n", &input);
+    EXPECT_EQ(r.name, "high_order");
+    EXPECT_TRUE(r.is_default);
+    EXPECT_EQ(input.at("numerics").at("face_reconstruction").at("type").as_string(), "TENO");
+    EXPECT_EQ(input.at("numerics").at("riemann_solver").as_string(), "Roe");
+    EXPECT_EQ(r.summary(resolve_input(input)), "high_order (the default since 0.10.0, first order before: the input "
+                                               "sets no preset and no [numerics.face_reconstruction]; the input sets "
+                                               "numerics.riemann_solver = \"Roe\", run.cfl = 0.7)");
+    Input bare;
+    EXPECT_TRUE(resolve("[run]\nt_stop = 1.0\n", &bare).is_default);
+    EXPECT_EQ(bare.at("run").at("cfl").as_floating(), 1.0);
+}
+
+TEST(NumericsPreset, AReconstructionTableWithoutAPresetLeavesTheInputUnchanged) {
+    for (const std::string recon : {"type = \"FO\"\n", "bound_preserving = true\n"}) {
+        const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.7\n[numerics.face_reconstruction]\n" + recon;
+        Input input;
+        const auto r = resolve(text, &input);
+        EXPECT_TRUE(r.name.empty());
+        EXPECT_FALSE(r.is_default);
+        EXPECT_TRUE(r.settings.empty());
+        EXPECT_EQ(input, parse_toml(text));
+    }
 }
 
 TEST(NumericsPreset, InvalidPresetsAreInputErrors) {
@@ -133,7 +169,9 @@ TEST(NumericsPreset, InvalidPresetsAreInputErrors) {
         FAIL() << "no error for an unknown preset";
     } catch (const InputError & e) {
         EXPECT_EQ(std::string(e.what()),
-                  "numerics.preset = \"fast\" is not one of: accurate, les, reacting, robust.");
+                  "line 2: numerics.preset: \"fast\" is not accepted. Accepted values: first_order, high_order, les, reacting, "
+                  "second_order. "
+                  "See docs/input.md#numerics.");
     }
     EXPECT_THROW(resolve("[numerics]\npreset = 1\n"), InputError);
 }
@@ -147,44 +185,59 @@ const std::string H2_AIR_INIT = "type = \"constant\"\np = 101325.0\nT = 300.0\nu
 
 /** @brief Every solver example, with the preset closest to its numerics and purpose. */
 const std::vector<ExampleCase> EXAMPLES = {
+    {"average_outlet/input.toml", "second_order", 2, "", {}, ""},
+    {"average_outlet/local.toml", "second_order", 2, "", {}, ""},
     {"autoignition_2d/input.toml", "reacting", 2,
      "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}, ""},
-    {"cylinder/input.toml", "accurate", 2, "",
+    {"cylinder/input.toml", "high_order", 2, "",
      {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}}, ""},
     {"detonation_1d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
     {"detonation_2d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
     {"detonation_3d/input_2d.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
-    {"double_mach/input.toml", "robust", 2, "", {}, ""},
+    {"double_mach/input.toml", "second_order", 2, "", {}, ""},
     {"flame_2d/input.toml", "reacting", 2, "", {}, ""},
     {"flame_2d/unity/input.toml", "reacting", 2, "", {}, ""},
     {"flame_outflow/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}, ""},
-    {"mallard/input.toml", "robust", 2, "",
+    {"forced_inlet/input.toml", "second_order", 2, "", {}, ""},
+    {"heated_duct/closed.toml", "second_order", 2, "", {}, ""},
+    {"heated_duct/closed_upt.toml", "second_order", 2, "", {}, ""},
+    {"heated_duct/input.toml", "second_order", 2, "", {}, ""},
+    {"heated_wall/input.toml", "second_order", 2, "", {}, ""},
+    {"mallard/input.toml", "second_order", 2, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
-    {"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""},
-    {"nozzle/input.toml", "robust", 2, "",
+    {"mallard_logo/input.toml", "second_order", 2,
+     "type = \"constant\"\np = 0.7142857142857143\nT = 0.7142857142857143\nu = [0.0, 0.0]\n",
+     {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
+    {"moving_heaters/input.toml", "second_order", 2, "", {}, ""},
+    {"noh_axisymmetric/input.toml", "second_order", 2, "", {}, ""},
+    {"nozzle/input.toml", "second_order", 2, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "wall"}, {"cylinder", "axis"}}, ""},
-    {"poiseuille_pipe/input.toml", "accurate", 2, "", {}, ""},
+    {"poiseuille_pipe/input.toml", "high_order", 2, "", {}, ""},
+    {"pulsed_jet/input.toml", "high_order", 2, "", {}, ""},
     {"premixed_flame/input.toml", "reacting", 2, "", {}, ""},
     {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}, ""},
     {"reactive_shock_tube/input.toml", "reacting", 2, "", {}, ""},
-    {"riemann_2d/input.toml", "accurate", 2, "", {}, ""},
-    {"riemann_2d_quads/coarse.toml", "accurate", 2, "", {}, ""},
-    {"riemann_2d_quads/input.toml", "accurate", 2, "", {}, ""},
-    {"riemann_2d_quads/remap.toml", "accurate", 2, "", {}, ""},
-    {"rotational_sector/annulus.toml", "accurate", 2, "", {}, ""},
-    {"rotational_sector/sector.toml", "accurate", 2, "", {}, ""},
-    {"sedov_axisymmetric/input.toml", "robust", 2, "", {}, ""},
-    {"shu_osher/input.toml", "accurate", 2, "", {}, ""},
-    {"sod/input.toml", "accurate", 2, "", {}, ""},
-    {"source_regions/input.toml", "robust", 2, "", {}, ""},
-    {"sphere_axisymmetric/input.toml", "accurate", 2, "",
+    {"riemann_2d/input.toml", "high_order", 2, "", {}, ""},
+    {"riemann_2d_quads/coarse.toml", "high_order", 2, "", {}, ""},
+    {"riemann_2d_quads/input.toml", "high_order", 2, "", {}, ""},
+    {"riemann_2d_quads/remap.toml", "high_order", 2, "", {}, ""},
+    {"rotational_sector/annulus.toml", "high_order", 2, "", {}, ""},
+    {"rotational_sector/sector.toml", "high_order", 2, "", {}, ""},
+    {"sedov_axisymmetric/input.toml", "second_order", 2, "", {}, ""},
+    {"shock_bubble_2d/input.toml", "second_order", 2, "", {}, ""},
+    {"shu_osher/input.toml", "high_order", 2, "", {}, ""},
+    {"sod/input.toml", "high_order", 2, "", {}, ""},
+    {"source_regions/input.toml", "second_order", 2, "", {}, ""},
+    {"hot_gas_regions/input.toml", "second_order", 2, "", {}, ""},
+    {"sphere_axisymmetric/input.toml", "high_order", 2, "",
      {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "axis"}, {"cylinder", "cylinder"}}, ""},
     {"triple_flame/input.toml", "reacting", 2, "", {}, ""},
+    {"turbulent_hot_spot_2d/input.toml", "high_order", 2, "", {}, ""},
     {"triple_flame/thick/input.toml", "reacting", 2, "", {}, ""},
-    {"viscous_shock_tube/input.toml", "robust", 2, "", {}, ""},
-    {"wedge/input.toml", "robust", 2, "", {}, ""},
+    {"viscous_shock_tube/input.toml", "second_order", 2, "", {}, ""},
+    {"wedge/input.toml", "second_order", 2, "", {}, ""},
     {"cbc_les/input.toml", "les", 3, "", {}, ""},
     {"channel_inflow_retau180/input.toml", "les", 3, "", {}, ""},
     {"channel_les/input.toml", "les", 3, "", {}, ""},
@@ -198,26 +251,30 @@ const std::vector<ExampleCase> EXAMPLES = {
      {{"inlet", "fuel"}, {"outlet", "oxidizer"}, {"walls", "side_y"}, {"cylinder", "sym_y"}, {"back", "sym_z"},
       {"front", "side_z"}}, ""},
     {"detonation_3d/input.toml", "reacting", 3, DETONATION_INIT + "u = [0.0, 0.0, 0.0]\n", {}, ""},
-    {"explosion_3d/input.toml", "accurate", 3, "", {}, ""},
+    {"ellipsoid/input.toml", "high_order", 3, "",
+     {{"left", "inflow"}, {"right", "outflow"}, {"bottom", "symmetry_y"}, {"back", "symmetry_z"}, {"top", "lateral"},
+      {"front", "lateral"}},
+     "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
+    {"explosion_3d/input.toml", "high_order", 3, "", {}, ""},
     {"flame_turbulence/hit.toml", "les", 3, "", {}, ""},
     {"flame_turbulence/input.toml", "les", 3, H2_AIR_INIT, {}, ""},
     {"flame_turbulence/les.toml", "les", 3, H2_AIR_INIT, {}, ""},
-    {"forced_isotropic_turbulence/input.toml", "accurate", 3, "", {}, ""},
-    {"isotropic_turbulence/input.toml", "accurate", 3, "", {}, ""},
-    {"rotational_sector/annulus_3d.toml", "accurate", 3, "", {}, ""},
-    {"rotational_sector/sector_3d.toml", "accurate", 3, "", {}, ""},
-    {"sedov_3d/input.toml", "robust", 3, "", {}, ""},
-    {"shock_bubble_3d/input.toml", "robust", 3, "", {}, ""},
-    {"sphere_mach3/input.toml", "robust", 3, "",
+    {"forced_isotropic_turbulence/input.toml", "high_order", 3, "", {}, ""},
+    {"isotropic_turbulence/input.toml", "high_order", 3, "", {}, ""},
+    {"rotational_sector/annulus_3d.toml", "high_order", 3, "", {}, ""},
+    {"rotational_sector/sector_3d.toml", "high_order", 3, "", {}, ""},
+    {"sedov_3d/input.toml", "second_order", 3, "", {}, ""},
+    {"shock_bubble_3d/input.toml", "second_order", 3, "", {}, ""},
+    {"sphere_mach3/input.toml", "second_order", 3, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "lateral"}, {"cylinder", "sphere"},
       {"back", "symmetry_z"}, {"front", "symmetry_y"}}, ""},
-    {"sphere_re300/input.toml", "accurate", 3, "",
+    {"sphere_re300/input.toml", "high_order", 3, "",
      {{"left", "inflow"}, {"right", "outflow"}, {"bottom", "lateral"}, {"top", "lateral"}, {"back", "lateral"},
       {"front", "lateral"}},
      "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
-    {"taylor_green_3d/coarse.toml", "accurate", 3, "", {}, ""},
-    {"taylor_green_3d/input.toml", "accurate", 3, "", {}, ""},
-    {"taylor_green_3d/remap.toml", "accurate", 3, "", {}, ""},
+    {"taylor_green_3d/coarse.toml", "high_order", 3, "", {}, ""},
+    {"taylor_green_3d/input.toml", "high_order", 3, "", {}, ""},
+    {"taylor_green_3d/remap.toml", "high_order", 3, "", {}, ""},
     {"turbulent_inflow_duct/input.toml", "les", 3, "", {}, ""},
     {"volvo_bluff_body/cold.toml", "les", 3, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "top"}, {"cylinder", "bluffbody"}, {"back", "bottom"},
@@ -227,6 +284,8 @@ const std::vector<ExampleCase> EXAMPLES = {
       {"front", "bottom"}}, ""},
 };
 
+} // namespace
+
 std::vector<ExampleCase> examples_of_this_build() {
     std::vector<ExampleCase> list;
     for (const auto & c : EXAMPLES) {
@@ -234,6 +293,8 @@ std::vector<ExampleCase> examples_of_this_build() {
     }
     return list;
 }
+
+namespace {
 
 class ExampleUnderPreset : public ::testing::TestWithParam<ExampleCase> {};
 
@@ -266,11 +327,43 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
 TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     const ExampleCase & c = GetParam();
     const Input input = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
+    memory::Tracker tracker;
     Solver solver;
     solver.init(input);
     EXPECT_EQ(solver.get_numerics_preset().name, c.preset);
     solver.run();
     EXPECT_EQ(solver.get_step(), 3u);
+    // mallard check's memory breakdown names every allocation: give new labels a rule in memory_tracker.cpp
+    EXPECT_EQ(tracker.unclassified(), std::vector<std::string>{});
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);
+
+namespace {
+
+/** @brief The resolved input a run records in its provenance, and the state (and species) after the run. */
+std::pair<std::string, std::vector<double>> resolved_run(const Input & input) {
+    Solver solver;
+    solver.init(input);
+    const std::string resolved = json::parse(provenance::json())["input"]["resolved"].string;
+    solver.run();
+    solver.copy_device_to_host();
+    std::vector<double> state;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        for (size_t i = 0; i < solver.h_conservatives.extent(1); i++) state.push_back(double(solver.h_conservatives(c, i)));
+        for (size_t k = 0; k < solver.h_species.extent(1); k++) state.push_back(double(solver.h_species(c, k)));
+    }
+    return {resolved, state};
+}
+
+} // namespace
+
+// The resolved input of every example runs bitwise as the example and resolves to
+// itself. Fails if writing out a default changes what setup does (a key whose
+// presence matters), a value is written out inexactly, or a key read is not recorded.
+TEST_P(ExampleUnderPreset, ResolvedInputRunsBitwiseTheSameAndResolvesToItself) {
+    const auto [resolved, state] = resolved_run(example_under_preset(GetParam(), 2, N_DIM == 3 ? 8 : 16));
+    const auto [again, state_again] = resolved_run(parse_toml(resolved));
+    EXPECT_EQ(again, resolved);
+    EXPECT_EQ(state_again, state);
+}

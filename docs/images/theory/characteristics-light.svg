@@ -223,7 +223,7 @@ L 181.069195 39.683475
     <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="181.069195" y="34.08211" transform="rotate(-0 181.069195 34.08211)">boundary</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 12px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: middle; fill: #1f1a1d" x="147.007042" y="12.061875" transform="rotate(-0 147.007042 12.061875)">nscbc_outlet</text>
+    <text style="font-size: 12px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: middle; fill: #1f1a1d" x="147.007042" y="12.061875" transform="rotate(-0 147.007042 12.061875)">outlet_pressure + nscbc</text>
    </g>
   </g>
   <g id="axes_2">
@@ -441,7 +441,7 @@ L 372.362248 39.683475
     <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="372.362248" y="34.08211" transform="rotate(-0 372.362248 34.08211)">boundary</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 12px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: middle; fill: #1f1a1d" x="406.424401" y="12.061875" transform="rotate(-0 406.424401 12.061875)">nscbc_inlet</text>
+    <text style="font-size: 12px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: middle; fill: #1f1a1d" x="406.424401" y="12.061875" transform="rotate(-0 406.424401 12.061875)">inlet_state + nscbc</text>
    </g>
   </g>
  </g>

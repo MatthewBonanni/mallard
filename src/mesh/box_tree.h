@@ -145,12 +145,17 @@ class BoxTree {
 
         size_t size() const { return order.size(); }
 
-    private:
         struct Node {
             Box box;
             uint32_t first = 0;  // leaf: first slot of order; inner: first of its two children
             uint32_t count = 0;  // leaf: items; inner: 0
         };
+
+        /** @brief The nodes (the root first) and item order, for traversals elsewhere (e.g. on the device). */
+        const std::vector<Node> & tree() const { return nodes; }
+        const std::vector<uint32_t> & item_order() const { return order; }
+
+    private:
         static constexpr uint32_t LEAF = 8;
         std::vector<Node> nodes;
         std::vector<uint32_t> order;

@@ -58,20 +58,20 @@ bin weights are restart attributes, the bins restart fields.
 
 - Isotropic turbulence, 64^3, per-sample spectra every 20 steps to t / tau =
   4: shell spectra of velocity, density and pressure equal
-  `tools/isotropic_turbulence_stats.py --no-deconvolve` on restart files of
+  `examples/isotropic_turbulence/isotropic_turbulence_stats.py --no-deconvolve` on restart files of
   the same steps within 1e-14 (relative, every shell, 16 snapshots). Against
   the tool's default (deconvolved point values) they are lower by the cell
   average factor: 0.95 at k = 16, 0.41 at k = 32.
 - Channel at Re_tau 180 (`examples/channel_retau180`, from a developed state,
   t = 320): averaged spectra and correlations of 5 samples equal
-  `tools/insitu_statistics.py spectra` on restart files of the same steps
+  `tools/post/insitu_statistics.py spectra` on restart files of the same steps
   within 3e-13 (relative to each quantity's largest value). Over 12,000 steps
   (Re_tau 182), the near-wall (y+ = 4.5) streamwise correlation in z has its
   minimum, -0.19, at dz+ = 54, the streak half-spacing of Kim, Moin & Moser
   (1987).
 - Cylinder at Re 100, t = 100-400, 12 bins triggered by U_Y on the wake axis
   at x = 3: crossings give St = 0.1651; the bins at the probe cell equal the
-  probe series binned by `tools/insitu_statistics.py phase` bitwise, and the
+  probe series binned by `tools/post/insitu_statistics.py phase` bitwise, and the
   phase-averaged U_Y keeps 0.991 of the signal's amplitude (a sinusoid binned
   in 12 keeps 0.989), i.e. no phase jitter.
 - Unit tests: correlations against direct shifted products, shell spectra

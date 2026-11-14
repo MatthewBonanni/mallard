@@ -33,6 +33,12 @@ struct MeshFileData {
     std::vector<std::vector<uint32_t>> cells;
     std::vector<Mesh::BoundaryFace> boundary_faces;
     std::vector<std::vector<curved::Vec3>> boundary_high_order;
+    // Cell zones: the zone of each cell (Mesh::NO_CELL_ZONE: none), empty if the file has none
+    std::vector<uint32_t> cell_zone;
+    std::vector<std::string> cell_zone_names;
+
+    /** @brief Put cell c (cells numbered in order) in the zone of that name, created if new. */
+    void set_cell_zone(size_t c, const std::string & name);
 };
 
 /**
@@ -73,6 +79,9 @@ MeshFileData read_openfoam(const std::string & path);
 std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std::vector<std::vector<uint32_t>> & faces,
                                                     const std::vector<std::array<int64_t, 2>> & face_cells,
                                                     const std::string & source);
+
+/** @brief The cell dimension of a CGNS file's base. */
+int cgns_dimension(const std::string & filename);
 
 /** @brief Whether this build reads CGNS files. */
 bool have_cgns();

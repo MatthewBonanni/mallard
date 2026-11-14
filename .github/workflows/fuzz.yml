@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: fuzz-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - name: Skip if main is unchanged
         id: changed
         if: github.event_name == 'schedule'
@@ -55,10 +55,11 @@ jobs:
           last=$(gh run list --workflow fuzz.yml --branch main --event schedule --status success -L 1 --json headSha -q '.[0].headSha')
           if [ "$last" = "$GITHUB_SHA" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
       - name: Install libFuzzer, HDF5, CGNS and ccache
+        timeout-minutes: 25
         if: steps.changed.outputs.skip != 'true'
         run: >
-          sudo apt-get update -qq && sudo apt-get install -y -qq
-          libclang-rt-18-dev libhdf5-dev libcgns-dev ccache
+          sh tools/dev/apt_install.sh
+          libclang-rt-22-dev libhdf5-dev libcgns-dev ccache
       - name: Restore compiler cache
         if: steps.changed.outputs.skip != 'true'
         uses: actions/cache/restore@v4
@@ -77,7 +78,7 @@ jobs:
         if: steps.changed.outputs.skip != 'true'
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_SERIAL=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_ENABLE_FUZZING=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON
@@ -115,4 +116,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: fuzz-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}

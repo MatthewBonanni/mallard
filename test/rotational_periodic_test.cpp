@@ -64,10 +64,8 @@ std::string annulus_input(const Annulus & a) {
     s << "[run]\nn_steps = " << a.n_steps << "\ndt = 0.004\n"
       << "[mesh]\ntype = \"annulus\"\nNtheta = " << n_theta << "\nNr = " << a.n_r << "\nNz = " << a.n_z
       << "\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\nangle = " << (a.full ? 360.0 : 360.0 / a.sectors) << "\n";
-    std::string periodic;
-    if (!a.full) periodic = "\"theta\"";
-    if (N_DIM == 3) periodic += std::string(periodic.empty() ? "" : ", ") + "\"z\"";
-    if (!periodic.empty()) s << "periodic = [" << periodic << "]\n";
+    if (!a.full) s << "[[periodic]]\nzones = [\"start\", \"end\"]\n";
+    if (N_DIM == 3) s << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[initialize]\ntype = \"constant\"\nu = [" << (N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") << "]\np = 1.0\nT = 1.0\n"
       << "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"outer\"\ntype = \"" << (a.physics.find("navier") != std::string::npos ? "wall_adiabatic" : "symmetry")
@@ -120,6 +118,7 @@ void conservatives(const double * W, double * U) {
 
 std::unique_ptr<Solver> start(const Annulus & a) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(annulus_input(a)));
     set_cell_averages(*solver, [&](double x, double y, double z, double * U) {
         double W[N_CONSERVATIVE];
@@ -307,7 +306,7 @@ TEST(RotationalPeriodicSetup, InvalidPairsAreRejected) {
                  std::exception);
     // Fewer than 3 cells around
     EXPECT_THROW(Mesh().init(parse_toml("[mesh]\ntype = \"annulus\"\nNtheta = 2\nNr = 3\nNz = 3\nangle = 60.0\n"
-                                        "periodic = [\"theta\"]\n")),
+                                        "[[periodic]]\nzones = [\"start\", \"end\"]\n")),
                  std::runtime_error);
 }
 
@@ -387,6 +386,25 @@ INSTANTIATE_TEST_SUITE_P(Rotational, RotationalSector,
     ::testing::Values(SchemeParam{"MUSCL", "Euler"}, SchemeParam{"MUSCL", "NS"}, SchemeParam{"TENO3", "Euler"},
                       SchemeParam{"TENO5", "Euler"}, SchemeParam{"TENO5", "NS"}));
 
+TEST(RotationalPeriodicSetup, TENOStateDoesNotDependOnTheTroubledCellsOfARound) {
+    // Most cells of the swirl are troubled, so the two capacities put different
+    // cells in the first round. Fails where the smooth pass and the troubled
+    // central pass contract the turned entries' arithmetic into different FMAs
+    // (GPUs, -ffp-contract=fast) if a cell's coefficients depend on its round (#612)
+    auto state = [](const std::string & capacity) {
+        Annulus a;
+        a.n_theta = 8;
+        a.n_steps = 2;
+        a.recon = "type = \"TENO\"\norder = 5\ntroubled_capacity = " + capacity + "\n";
+        auto solver = start(a);
+        solver->run();
+        solver->copy_device_to_host();
+        const auto & U = solver->h_conservatives;
+        return std::vector<rtype>(U.data(), U.data() + U.span());
+    };
+    EXPECT_TRUE(state("0.5") == state("0.02"));
+}
+
 TEST(RotationalPeriodicSetup, SectorConservesMassAndEnergy) {
     // Slip walls and the seam: no mass or energy leaves the sector
     for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 5\n"}) {
@@ -405,21 +423,43 @@ TEST(RotationalPeriodicSetup, SectorConservesMassAndEnergy) {
 }
 
 TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
-    // Halos and stencils across the turned seam, cut by each partitioner
+    // Halos and stencils across the turned seam, cut by each partitioner. TENO's
+    // owners send the turned sides of seam faces cut by the partition
     for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
         if (partitioner == "graph" && !have_graph_partitioner()) continue;
         for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 5\n"}) {
             Annulus a;
-            a.n_theta = 8;
+            a.n_theta = 16;
+            a.n_r = 3;
             a.n_steps = 5;
             a.recon = recon;
             a.physics = "type = \"navier_stokes\"\nmu = 0.01\n";
             a.extra = "[parallel]\npartitioner = \"" + partitioner + "\"\n";
             std::string input = annulus_input(a);
+            // A thin ring: multijagged's equal slabs along x or y put the sector's two
+            // ends, at x = 0 and y = 0, on different ranks on any rank count
+            const std::string radii = "r_inner = 1.0\n";
+            input.replace(input.find(radii), radii.size(), "r_inner = 1.8\n");
             const std::string init = "[initialize]\ntype = \"constant\"\nu = [" +
                                      std::string(N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") + "]\np = 1.0\nT = 1.0\n";
             input.replace(input.find(init), init.size(), swirl_initializer(a.sectors));
-            expect_matches_serial(input);
+            if (recon == "type = \"MUSCL\"\n") {
+                expect_matches_serial(input);
+                continue;
+            }
+            expect_matches_serial_with_and_without_step_graphs(input, [&](const Solver & s) {
+                const Mesh & mesh = *s.get_mesh();
+                uint64_t cut = 0;
+                for (uint32_t f = 0; f < mesh.n_faces; f++) {
+                    const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+                    if (c1 < 0 || !mesh.h_rotated_row(mesh.h_face_shift(f))) continue;
+                    cut += (uint32_t(c0) < mesh.n_owned()) != (uint32_t(c1) < mesh.n_owned());
+                }
+                cut = comm::allreduce(cut, comm::Op::SUM);
+                if (comm::size() > 1 && partitioner == "multijagged") {
+                    EXPECT_GT(cut, 0u);
+                }
+            });
         }
     }
 }

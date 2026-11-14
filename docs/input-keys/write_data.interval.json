@@ -1,0 +1,23 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_wmles/lm2000.toml",
+  "examples/channel_wmles/lm5200.toml",
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/riemann_2d_quads/coarse.toml",
+  "examples/sedov_3d/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/taylor_green_3d/remap.toml",
+  "examples/turbulent_inflow_duct/input.toml"
+ ],
+ "type": "integer"
+}

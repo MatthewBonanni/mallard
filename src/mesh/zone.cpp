@@ -36,7 +36,7 @@ FaceZone::~FaceZone() {
 }
 
 uint32_t FaceZone::n_faces() const {
-    return static_cast<uint32_t>(faces.extent(0));
+    return static_cast<uint32_t>(h_faces.extent(0));
 }
 
 FaceZoneType FaceZone::get_type() const {

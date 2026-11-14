@@ -1,1 +1,0 @@
-- libFuzzer harnesses for the input file, expressions and every mesh reader (`-DMallard_ENABLE_FUZZING=ON`, Clang; run them with `test/fuzz/run.sh`), fuzzed for a minute each in CI and ten minutes nightly (#412).

@@ -1,0 +1,9 @@
+{
+ "default": "0.0",
+ "dimension": "time (s)",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "number"
+}

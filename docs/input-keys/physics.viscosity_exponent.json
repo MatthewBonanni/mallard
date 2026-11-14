@@ -1,0 +1,12 @@
+{
+ "dims": [
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/isotropic_turbulence/input.toml"
+ ],
+ "type": "number"
+}

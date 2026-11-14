@@ -11,7 +11,8 @@
 
 #include "step_control.h"
 
-#include <sstream>
+#include "log.h"
+#include "units.h"
 
 namespace {
 
@@ -99,9 +100,13 @@ rtype StepController::read(const Slot slot) const {
 
 std::vector<std::pair<std::string, double>> StepController::attributes() const {
     auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), state);
-    return {{ATTRIBUTE_NAMES[0], static_cast<double>(h(DT_NEXT))},
-            {ATTRIBUTE_NAMES[1], static_cast<double>(h(EPS_1))},
-            {ATTRIBUTE_NAMES[2], static_cast<double>(h(EPS_2))}};
+    return attributes(h.data());
+}
+
+std::vector<std::pair<std::string, double>> StepController::attributes(const rtype * slots) {
+    return {{ATTRIBUTE_NAMES[0], static_cast<double>(slots[DT_NEXT])},
+            {ATTRIBUTE_NAMES[1], static_cast<double>(slots[EPS_1])},
+            {ATTRIBUTE_NAMES[2], static_cast<double>(slots[EPS_2])}};
 }
 
 void StepController::restore(const std::vector<std::pair<std::string, double>> & attributes) {
@@ -115,9 +120,15 @@ void StepController::restore(const std::vector<std::pair<std::string, double>> &
     Kokkos::deep_copy(state, h);
 }
 
-std::string StepController::summary() const {
-    std::ostringstream out;
-    out << "embedded error, abs_tol " << abs_tol << ", rel_tol " << rel_tol << ", PID beta (" << beta[0] << ", "
-        << beta[1] << ", " << beta[2] << ")";
-    return out.str();
+report::Summary StepController::summary() const {
+    using logging::real;
+    report::Summary s;
+    s.setting("Step controller", "embedded error estimate, PID control");
+    s.quantity("step controller abs_tolerance", real(double(abs_tol)), units::column("U's"),
+               "absolute, in each conservative variable's units");
+    s.quantity("step controller rel_tolerance", real(double(rel_tol)), "-", "relative");
+    for (size_t i = 0; i < beta.size(); i++) {
+        s.quantity("step controller b" + std::to_string(i + 1), real(double(beta[i])), "-", "PID coefficient");
+    }
+    return s;
 }

@@ -2,3 +2,4 @@
 # time come from examples/README.md, its settings from the input file.
 build = "3d"
 demonstrates = ["unstructured tetrahedra from Gmsh", "bow-shock standoff", "HLL flux"]
+validation = [{anchor = "mach-3-sphere", regime = "Mach 3 bow shock on a sphere, against Billig's standoff correlation"}]

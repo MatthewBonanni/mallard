@@ -2,7 +2,7 @@
  * @file input_upgrade.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Renamed, moved and removed input keys and options: warnings while
- *        they are deprecated, errors once removed, and `mallard upgrade-input`,
+ *        they are deprecated, errors once removed, and `mallard input upgrade`,
  *        which rewrites an input file keeping its comments and layout.
  * @version 0.9
  * @date 2026-10-16
@@ -23,8 +23,8 @@ namespace input_upgrade {
 
 /**
  * @brief A key renamed, moved to another table, or removed. Paths are dotted;
- *        `name[]` stands for every table of the array of tables `name`, and
- *        `to` has the same `[]` steps as `from` (the same element).
+ *        `name[]` stands for every table of the array of tables `name`,
+ *        and `to` has the same `[]` steps as `from` (the same element).
  */
 struct KeyRule {
     std::string from;
@@ -36,17 +36,45 @@ struct KeyRule {
     std::string (*convert)(const std::string & toml_text) = nullptr;
 };
 
-/** @brief A string option renamed: `key = "from"` becomes `key = "to"`. */
+/**
+ * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
+ *        `add` (`name = value`), if given, is set beside it unless its table
+ *        has it (with `from` equal to `to`, the rule only adds it). A kept
+ *        option still does what it did while deprecated (the setup reads it
+ *        unchanged); only the rewritten file switches to `to`. Option rules
+ *        apply before key rules, so `key` may be a key's old name.
+ */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
+    bool kept = false;
+    int dim = 0;           ///< The only dimension of runs it applies to; 0: every run
+    std::string add = {};  ///< E.g. "axis = [0, 0, 1]"
+};
+
+/**
+ * @brief A key holding an array of strings replaced by elements of an array of
+ *        tables, one per string: `from = ["a", "b"]` becomes `[[to]] key =
+ *        convert("a")`, `[[to]] key = convert("b")`, after the elements
+ *        already there. `to` is dotted, without `[]` steps.
+ */
+struct ArrayRule {
+    std::string from;
+    std::string to;
+    std::string key;      ///< The key each new element sets
+    std::string context;  ///< A string key of from's table the conversion depends on, or empty
+    std::string since, removed, note;
+    /// The value of `key` for one string, given the context's value (empty if
+    /// absent); throws std::invalid_argument, saying why, for strings it does not take
+    std::vector<std::string> (*convert)(const std::string & item, const std::string & context) = nullptr;
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
 struct Rules {
     std::vector<KeyRule> keys;
     std::vector<OptionRule> options;
+    std::vector<ArrayRule> arrays;
 };
 const Rules & rules();
 
@@ -67,9 +95,10 @@ std::string advice(const Finding & finding);
 
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
- *        setup reads them, and returns them. Throws an InputError listing the
- *        removed ones, with what to do (`mallard upgrade-input`). `version`
- *        is this release's (MALLARD_VERSION when empty).
+ *        setup reads them (kept options stay), and returns them. Throws an InputError listing the
+ *        removed ones, with what to do (`mallard input upgrade`). `version`
+ *        is this release's (when empty, MALLARD_VERSION, or the release whose
+ *        removals this source has made if that is later).
  */
 std::vector<Finding> apply(Input & input, const std::string & version = "", const Rules & table = rules());
 
@@ -78,14 +107,32 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
  *        ones), changing only the lines of those keys: a renamed key keeps its
  *        line, value and comment; a moved key goes to the end of its new table;
  *        a removed key is commented out with a note. Where that is not
- *        possible (dotted keys, inline tables), the whole file is reformatted,
- *        and `reformatted` is set. `findings` gets every change.
+ *        possible (renamed or moved dotted keys, or keys of inline tables),
+ *        the whole file is reformatted, and `reformatted` is set. `findings`
+ *        gets every change. `dim` is the case's dimension (0: unknown, an
+ *        error if a rule of one dimension matches, which gives
+ *        `unknown_dimension` as the reason).
  */
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table = rules());
+                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM,
+                         const std::string & unknown_dimension = "");
 
-/** @brief `mallard upgrade-input [--check] old.toml > new.toml`; arguments after the command name. */
-int main(int argc, char ** argv);
+/**
+ * @brief Changes of behavior that need no rewrite but are worth knowing,
+ *        e.g. a changed default the input relies on: one line each, for
+ *        `mallard input upgrade` to print. They change neither the file nor
+ *        the exit status of `--check`.
+ */
+std::vector<std::string> notices(const std::string & text);
+
+/**
+ * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
+ *        upgraded file to stdout and the changes to stderr; with `check`, only
+ *        the changes, and exit status 1 if there are any. `dim` is the case's
+ *        dimension (0: unknown, for the reason `unknown_dimension`). Returns
+ *        the exit status.
+ */
+int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension = "");
 
 } // namespace input_upgrade
 

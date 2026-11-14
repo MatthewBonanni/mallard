@@ -1,0 +1,15 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/flame_2d/input.toml",
+  "examples/flame_2d/unity/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/flame_vortex/input.toml",
+  "examples/premixed_flame/input.toml",
+  "examples/reactive_shock_tube/input.toml"
+ ],
+ "type": "number"
+}

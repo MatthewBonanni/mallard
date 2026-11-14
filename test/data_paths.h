@@ -27,10 +27,10 @@ inline std::string source_dir() {
 
 #ifdef MALLARD_EXECUTABLE
 /**
- * @brief The mallard next to this mallard-test (install tree), else the one of its build.
+ * @brief The solver next to this test suite (install tree), else the one of its build.
  */
 inline std::string mallard_executable() {
-    const std::filesystem::path sibling = executable_path().parent_path() / ("mallard" MALLARD_EXECUTABLE_SUFFIX);
+    const std::filesystem::path sibling = executable_path().parent_path() / ("mallard" + std::to_string(Mallard_DIM) + "d");
     return std::filesystem::exists(sibling) ? sibling.string() : MALLARD_EXECUTABLE;
 }
 #endif

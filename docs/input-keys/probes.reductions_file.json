@@ -1,0 +1,13 @@
+{
+ "default": "\"probe_inlet_p_reductions.csv\"",
+ "defaults_by_dim": {
+  "2": "\"probe_line_reductions.csv\"",
+  "3": "\"probe_x5_reductions.csv\""
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [],
+ "type": "string"
+}

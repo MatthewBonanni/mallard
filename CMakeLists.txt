@@ -1,6 +1,19 @@
-cmake_minimum_required(VERSION 3.16)
-project(Mallard VERSION 0.8.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 4.2)
+project(Mallard VERSION 0.10.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
+
+set(mallard_compiler_minimums GNU 15 Clang 22 AppleClang 21)
+list(FIND mallard_compiler_minimums "${CMAKE_CXX_COMPILER_ID}" index)
+if(index GREATER_EQUAL 0)
+    math(EXPR index "${index} + 1")
+    list(GET mallard_compiler_minimums ${index} minimum)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS minimum)
+        message(FATAL_ERROR
+            "Mallard needs ${CMAKE_CXX_COMPILER_ID} ${minimum} or newer; this is "
+            "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER}). See "
+            "https://github.com/MatthewBonanni/mallard/blob/main/docs/installation.md#if-your-compiler-is-too-old")
+    endif()
+endif()
 
 find_package(Git QUIET)
 
@@ -29,7 +42,7 @@ function(mallard_target_warnings target)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND warnings -Wduplicated-cond -Wlogical-op)
     else()
-        # GCC's -Wnull-dereference flags code inlined from toml11 and exprtk, which SYSTEM cannot silence
+        # GCC's -Wnull-dereference flags code inlined from toml11, which SYSTEM cannot silence
         list(APPEND warnings -Wnull-dereference)
     endif()
     if(${PROJECT_NAME}_WARNINGS_AS_ERRORS)
@@ -46,10 +59,13 @@ endfunction()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-fp-model=precise)
 endif()
-
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
-    set(MALLARD_THIRD_PARTY SYSTEM)
+# GCC fuses multiplies and adds across statements where the CPU has FMA (arm64, or x86-64
+# with -march), so equal expressions round differently by where they are inlined, and
+# results differ from other CPUs'; Clang fuses only within an expression
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT Kokkos_ENABLE_CUDA)
+    add_compile_options(-ffp-contract=off)
 endif()
+
 
 # libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
 # target built with the sanitizers of Mallard_FUZZ_SANITIZERS
@@ -83,6 +99,20 @@ endif()
 message(STATUS "Mallard: Dimension: ${${PROJECT_NAME}_DIM}")
 add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
 
+# libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
+# every library it links is compiled position independent
+option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" ON)
+set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
+    "A site-packages directory to install the Python package into, besides share/mallard/tools")
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
+    if(NOT python_version STREQUAL "__version__ = \"${PROJECT_VERSION}\"")
+        message(FATAL_ERROR "tools/mallard/_version.py has ${python_version}, not Mallard's version "
+                            "${PROJECT_VERSION}: set it to \"${PROJECT_VERSION}\"")
+    endif()
+endif()
+
 option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
 if(${PROJECT_NAME}_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
@@ -104,7 +134,7 @@ if(${PROJECT_NAME}_ENABLE_MPI)
             GIT_REPOSITORY https://github.com/KaHIP/KaMinPar.git
             GIT_TAG v3.7.3
             EXCLUDE_FROM_ALL
-            ${MALLARD_THIRD_PARTY})
+            SYSTEM)
         set(KAMINPAR_BUILD_DISTRIBUTED ON CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_APPS OFF CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_IO OFF CACHE BOOL "" FORCE)
@@ -130,7 +160,7 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
     else()
         message(STATUS "Using external HDF5 from submodule")
         set(HDF5_ENABLE_PARALLEL ${${PROJECT_NAME}_ENABLE_MPI} CACHE BOOL "" FORCE)
-        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 ${MALLARD_THIRD_PARTY})
+        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 SYSTEM)
         set(HDF5_C_LIBRARIES hdf5-static)
     endif()
 endif()
@@ -162,6 +192,16 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
             target_link_libraries(mallard_cgns INTERFACE ${CGNS_LIBRARY})
             set(MALLARD_CGNS_LIBRARY mallard_cgns)
         endif()
+        # Ubuntu's CGNS package links HDF5's CMake target hdf5-shared, but its HDF5
+        # package installs no CMake package that would define it
+        if(MALLARD_CGNS_LIBRARY MATCHES "^CGNS::" AND NOT TARGET hdf5-shared)
+            get_target_property(_cgns_links ${MALLARD_CGNS_LIBRARY} INTERFACE_LINK_LIBRARIES)
+            if(_cgns_links MATCHES "hdf5-shared")
+                find_package(HDF5 REQUIRED COMPONENTS C)
+                add_library(hdf5-shared INTERFACE IMPORTED)
+                target_link_libraries(hdf5-shared INTERFACE ${HDF5_C_LIBRARIES})
+            endif()
+        endif()
         message(STATUS "Mallard: CGNS ${MALLARD_CGNS_LIBRARY} ${CGNS_VERSION}${CGNS_LIBRARY}")
     else()
         include(FetchContent)
@@ -169,7 +209,7 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
             GIT_REPOSITORY https://github.com/CGNS/CGNS.git
             GIT_TAG v4.5.0
             EXCLUDE_FROM_ALL
-            ${MALLARD_THIRD_PARTY})
+            SYSTEM)
         set(CGNS_ENABLE_HDF5 ON CACHE BOOL "" FORCE)
         set(CGNS_ENABLE_FORTRAN OFF CACHE BOOL "" FORCE)
         set(CGNS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
@@ -191,7 +231,7 @@ option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
     find_package(Kokkos 5 REQUIRED)
 else()
-    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos ${MALLARD_THIRD_PARTY})
+    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos SYSTEM)
 endif()
 
 # Cantera YAML mechanism files
@@ -204,7 +244,7 @@ else()
         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
         GIT_TAG yaml-cpp-0.9.0
         EXCLUDE_FROM_ALL
-        ${MALLARD_THIRD_PARTY})
+        SYSTEM)
     set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
@@ -219,12 +259,14 @@ endif()
 
 # Include other external libraries
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
-set(${PROJECT_NAME}_EXECUTABLE_SUFFIX "" CACHE STRING
-    "Appended to the names of mallard and mallard-test (e.g. 3d, to install both dimensions side by side)")
+if(DEFINED ${PROJECT_NAME}_EXECUTABLE_SUFFIX)
+    message(WARNING "Mallard_EXECUTABLE_SUFFIX is gone: the executables are mallard${Mallard_DIM}d and "
+                    "mallard-test${Mallard_DIM}d, and mallard runs the one of a case's dimension.")
+    unset(${PROJECT_NAME}_EXECUTABLE_SUFFIX CACHE)
+endif()
 option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" ON)
-option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test and its data, for mallard test on an installed build" ON)
+option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test2d/3d and its data, for mallard test on an installed build" ON)
 
 add_subdirectory(src)
 if(${PROJECT_NAME}_ENABLE_TESTS)
@@ -254,6 +296,46 @@ endif()
 include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+    if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
+        install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
+    endif()
+endif()
+# mallard links to either solver; installs of both dimensions share it
+install(CODE "
+    set(bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+    if(EXISTS \"\${bin}/mallard${Mallard_DIM}d\" AND NOT (IS_SYMLINK \"\${bin}/mallard\" AND EXISTS \"\${bin}/mallard\"))
+        message(STATUS \"Installing: \${bin}/mallard -> mallard${Mallard_DIM}d\")
+        file(REMOVE \"\${bin}/mallard\")
+        execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink mallard${Mallard_DIM}d \"\${bin}/mallard\")
+    endif()")
+option(${PROJECT_NAME}_INSTALL_COMPLETION "Install bash, zsh and fish completion, from mallard completion" ON)
+if(${PROJECT_NAME}_INSTALL_COMPLETION AND NOT CMAKE_CROSSCOMPILING)
+    # From the built executable, so completion knows exactly its commands; skipped, with a warning, where it cannot run
+    install(CODE "
+        get_filename_component(share \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}\" ABSOLUTE)
+        foreach(script bash:bash-completion/completions/mallard zsh:zsh/site-functions/_mallard
+                       fish:fish/vendor_completions.d/mallard.fish)
+            string(REGEX MATCH \"^[a-z]+\" shell \"\${script}\")
+            string(REGEX REPLACE \"^[a-z]+:\" \"\" path \"\${script}\")
+            if(NOT EXISTS \"$<TARGET_FILE:mallard>\")
+                break()
+            endif()
+            get_filename_component(dir \"\${share}/\${path}\" DIRECTORY)
+            file(MAKE_DIRECTORY \"\${dir}\")
+            message(STATUS \"Installing: \${share}/\${path}\")
+            execute_process(COMMAND \"$<TARGET_FILE:mallard>\" completion \${shell}
+                OUTPUT_FILE \"\${share}/\${path}\" RESULT_VARIABLE status ERROR_VARIABLE error)
+            if(NOT status EQUAL 0)
+                file(REMOVE \"\${share}/\${path}\")
+                message(WARNING \"No \${shell} completion: $<TARGET_FILE_NAME:mallard> completion \${shell} failed \"
+                                \"(\${status}): \${error}\")
+            else()
+                list(APPEND CMAKE_INSTALL_MANIFEST_FILES \"\${share}/\${path}\")
+            endif()
+        endforeach()")
+endif()
 if(${PROJECT_NAME}_ENABLE_TESTS AND ${PROJECT_NAME}_INSTALL_TESTS)
     install(TARGETS mallard-test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     install(DIRECTORY test/data DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/test)
@@ -265,6 +347,8 @@ install(DIRECTORY templates examples mechanisms tools tutorials
     USE_SOURCE_PERMISSIONS
     PATTERN __pycache__ EXCLUDE
     PATTERN solut EXCLUDE)
+# The key catalog of mallard list keys
+install(DIRECTORY docs/input-keys DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/docs)
 install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 

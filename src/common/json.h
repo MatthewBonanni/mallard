@@ -1,7 +1,8 @@
 /**
  * @file json.h
  * @brief JSON text for the run log and provenance: string quoting, numbers
- *        that read back exactly, and objects built key by key.
+ *        that read back exactly, objects built key by key, and a strict parser
+ *        for reading them back (mallard info, tests).
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -10,6 +11,7 @@
 #define JSON_H
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -57,6 +59,35 @@ class Object {
     private:
         std::string text = "{";
 };
+
+/**
+ * @brief A parsed JSON value. Objects keep their members in order.
+ */
+struct Value {
+    enum class Type { NUL, BOOL, NUMBER, STRING, ARRAY, OBJECT };
+    Type type = Type::NUL;
+    bool boolean = false;
+    double number = 0.0;
+    std::string string;
+    std::vector<Value> array;
+    std::vector<std::string> names;  ///< of the object's members, in order
+    std::vector<Value> members;      ///< (a vector of an incomplete type is allowed, a pair is not)
+
+    /** @brief Whether the object has this member. */
+    bool has(const std::string & key) const;
+    /** @brief The member of this name. @throws std::out_of_range if there is none */
+    const Value & operator[](const std::string & key) const;
+    /** @brief The member of this name, or nullptr (also for a value that is not an object). */
+    const Value * find(const std::string & key) const;
+    std::vector<std::string> keys() const { return names; }
+    bool is_null() const { return type == Type::NUL; }
+};
+
+/**
+ * @brief Parses JSON text (RFC 8259; \u escapes become UTF-8).
+ * @throws std::runtime_error saying what is wrong and where
+ */
+Value parse(std::string_view text);
 
 } // namespace json
 

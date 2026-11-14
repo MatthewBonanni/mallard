@@ -229,7 +229,7 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
                                               Kokkos::View<rtype **, Kokkos::LayoutRight> scalars,
                                               Kokkos::View<rtype *> theta, uint32_t n_species) {
     return TENOScalarValues<DEG>{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face,
-                                 mesh.offsets_nodes_of_face, mesh.nodes_of_face, mesh.node_coords,
+                                 teno.offsets_nodes_of_face, teno.nodes_of_face, teno.node_coords,
                                  mesh.cell_coords, mesh.face_coords, mesh.periodic_maps(), mesh.face_shift,
                                  teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
                                  teno.scale, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,

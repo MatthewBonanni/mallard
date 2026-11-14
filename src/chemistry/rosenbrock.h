@@ -116,6 +116,7 @@ struct RosenbrockResult {
     RosenbrockStatus status = RosenbrockStatus::SUCCESS;
     uint32_t steps = 0;
     uint32_t rejected = 0;
+    uint32_t clipped = 0;  // advance_reactor: 1 if it clipped negative mass fractions (before or after integrating)
 };
 
 /** @brief An observer that ignores the trajectory. */

@@ -2,7 +2,7 @@
  * @file inflow.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Boundary states of subsonic inlets given stagnation conditions or
- *        for calorically and thermally perfect gases.
+ *        or a mass flux, for calorically and thermally perfect gases.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -157,6 +157,35 @@ KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma
     FOR_I_DIM W_g[1 + i] = static_cast<rtype>(V * dir[i]);
     W_g[E] = static_cast<rtype>(p);
     T_b = T;
+}
+
+/**
+ * @brief Subsonic inflow state of mass flux G (rho u . -n, per unit area)
+ *        at temperature T and gas constant R, flowing along the unit vector d
+ *        (zero: along -n): the pressure follows from the outgoing acoustic
+ *        wave p + rho_i c_i u_n of the interior state, with c_i^2 = gamma_c
+ *        p_i / rho_i, so p - Z G R T / p = p_i + Z u_n,i.
+ */
+KOKKOS_INLINE_FUNCTION void mass_flow_state(const double gamma_c, const double R, const double T, const double G,
+                                            const rtype * d, const rtype * W_i, const rtype * n, rtype * W_g) {
+    constexpr uint8_t E = N_DIM + 1;
+    double dir[N_DIM], d2 = 0.0;
+    FOR_I_DIM d2 += double(d[i]) * double(d[i]);
+    FOR_I_DIM dir[i] = (d2 > 0.0) ? double(d[i]) : -double(n[i]);
+    double c_dn = 0.0, u_n = 0.0;
+    FOR_I_DIM {
+        c_dn += dir[i] * double(n[i]);
+        u_n += double(W_i[1 + i]) * double(n[i]);
+    }
+    const double rho_i = double(W_i[0]), p_i = double(W_i[E]);
+    const double Z = Kokkos::sqrt(gamma_c * p_i * rho_i);
+    const double w_out = p_i + Z * u_n;
+    const double p = 0.5 * (w_out + Kokkos::sqrt(w_out * w_out + 4.0 * Z * G * R * T));
+    const double rho = p / (R * T);
+    const double V = G / (rho * -c_dn);
+    W_g[0] = static_cast<rtype>(rho);
+    FOR_I_DIM W_g[1 + i] = static_cast<rtype>(V * dir[i]);
+    W_g[E] = static_cast<rtype>(p);
 }
 
 } // namespace inflow

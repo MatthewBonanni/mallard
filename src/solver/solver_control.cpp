@@ -22,8 +22,10 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "run_control.h"
+#include "snapshot_block.h"
 #include "units.h"
 
 namespace {
@@ -152,6 +154,8 @@ std::string Solver::describe_invalid_cells() {
 }
 
 void Solver::diverged() {
+    const snapshot_block::Reason reason(snapshot_block::reason::DIVERGENCE);
+    if (source_terms) source_terms->check_loops();
     if (stepped_past_divergence && last_good_set) {
         // A step graph went on from the invalid state: recompute it kernel by kernel
         stepped_past_divergence = false;
@@ -163,22 +167,33 @@ void Solver::diverged() {
     logging::event(step, double(t), "diverged", invalid);
     std::string message = "Solution diverged at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                           ": " + invalid + ".";
-    if (last_good_set && last_good_step < step) {
-        restore_last_good();
-        if (chemistry_pending > 0.0) {
-            advance_chemistry(chemistry_pending);
-            chemistry_pending = 0.0;
-        }
+    const bool has_valid = last_good_set && last_good_step < step;
+    std::vector<int> failed;
+    MeshQuality quality;
+    divergence::Evidence evidence = diagnose_divergence(has_valid, failed, quality);
+    if (has_valid) {
+        flush_chemistry();
         write_data(true);
-        const std::string file = write_restarts();
+        evidence.restart_file = write_restarts();
         message += " The last valid state (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
-                   ") is in " + file + ".";
+                   ") is in " + evidence.restart_file + ".";
     }
+    const std::vector<divergence::Cause> causes = write_divergence_report(evidence, failed, quality);
+    const divergence::Cause & top = causes.front();
+    message += " Most likely cause: " + top.title + (top.evidence.empty() ? "" : " (" + top.evidence.front() + ")") +
+               (top.fix.empty() ? "" : "; try: " + top.fix) + ".";
+    message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
+                                            : " " + evidence.report_file + " has the evidence and other causes.";
+    message += " See docs/guide/running.md#divergence.";
     for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
     for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
     checkpoint_replies.clear();
     stop_replies.clear();
-    throw std::runtime_error(message);
+    // Collective, as is the divergence: every rank's part of the last files is written and recorded first
+    for (auto & writer : data_writers) writer->finish();
+    if (checkpoint_writer) checkpoint_writer->finish();
+    write_end_record({"diverged", "", message});
+    throw diagnostic_code::Error(diagnostic_code::DIVERGED, message);
 }
 
 void Solver::act_on_requests() {
@@ -192,20 +207,26 @@ void Solver::act_on_requests() {
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
-        const int signo = run_control::stop_signal();
-        control_stop = signo ? run_control::signal_name(signo) + " received"
-                       : stop_file_note.empty() ? std::string("stop requested") : stop_file_note;
-        logging::event(step, double(t), "stop", control_stop);
+        // The signal that reached any rank, so that rank 0 records it
+        const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        if (signo) {
+            const std::string name = run_control::signal_name(signo);
+            control_stop = {"signal", name, name + " received"};
+        } else {
+            const bool file = !stop_file_note.empty();
+            control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        logging::event(step, double(t), "stop", control_stop.reason);
     }
+    if (acted & run_control::WALL_TIME) wall_time_reached = true;
 }
 
 void Solver::apply_commands() {
-    std::vector<run_control::Command> commands;
+    // Every rank empties its queue, so that no request stays pending; all follow rank 0's commands
+    std::vector<run_control::Command> commands = run_control::take_commands();
+    if (!comm::is_root()) commands.clear();
     std::string text;
-    if (comm::is_root()) {
-        commands = run_control::take_commands();
-        for (const auto & command : commands) text += command.text + "\n";
-    }
+    for (const auto & command : commands) text += command.text + "\n";
     text = comm::broadcast(text);
     const std::vector<std::string> lines = split(text, '\n');
     for (size_t i = 0; i < lines.size(); i++) {
@@ -217,9 +238,9 @@ void Solver::apply_commands() {
             checkpoint_replies.push_back(command);
             logging::event(step, double(t), "checkpoint", "requested by mallard ctl");
         } else if (line == "stop") {
-            control_stop = "stop requested by mallard ctl";
+            control_stop = {"stopped", "mallard_ctl", "stop requested by mallard ctl"};
             stop_replies.push_back(command);
-            logging::event(step, double(t), "stop", control_stop);
+            logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
             std::string reply;
             bool ok = true;
@@ -238,6 +259,7 @@ void Solver::apply_commands() {
 }
 
 std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value) {
+    const comm::SelfScope scope = communication_scope();
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
     double x = 0.0;
@@ -281,11 +303,13 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         for (const auto & w : data_writers) {
             if (!writer && w->get_prefix() == name) writer = w.get();
         }
-        if (!writer) return rejected("no [[write_data]] with prefix or index " + name);
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
-        const std::string error = field == "interval" ? writer->set_interval(n)
-                                                      : writer->set_time_interval(static_cast<rtype>(x), t);
+        // Surfaces, curves and points of a [[write_data]] are written as probes, by their prefix
+        const std::string error = writer ? (field == "interval" ? writer->set_interval(n)
+                                                                : writer->set_time_interval(static_cast<rtype>(x), t))
+                                         : field == "interval" ? probes.set_interval(name, n, true)
+                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
@@ -319,8 +343,9 @@ std::string Solver::write_restarts() {
     copy_device_to_host();
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
-    const RestartArrays arrays = statistics.arrays();
+    const RestartArrays arrays = restart_arrays();
     std::string file;
+    swap_unflushed();
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;
         writer->write(step, t, true, attributes, faces, arrays);
@@ -332,10 +357,12 @@ std::string Solver::write_restarts() {
         checkpoint_writer->finish();
         file = checkpoint_writer->last_written();
     }
+    swap_unflushed();
     return file;
 }
 
 void Solver::write_checkpoint() {
+    const snapshot_block::Reason reason(snapshot_block::reason::CHECKPOINT);
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {
@@ -346,7 +373,9 @@ void Solver::write_checkpoint() {
 }
 
 void Solver::poll_control_files() {
-    if (control_file_interval == 0 || step % control_file_interval != 0 || !comm::is_root()) return;
+    // Once per interval of the steps the host has taken, also while steps run ahead of it
+    if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
+    control_files_polled = step / control_file_interval;
     std::error_code error;
     if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
     if (std::filesystem::remove("STOP", error)) {
@@ -361,6 +390,12 @@ std::string Solver::stop_conditions() const {
     if (t_stop > 0) text += (text.empty() ? "" : ", ") + std::string("t_stop = ") + logging::real(double(t_stop));
     if (t_wall_stop > 0) {
         text += (text.empty() ? "" : ", ") + std::string("t_wall_stop = ") + logging::real(double(t_wall_stop)) + " s";
+    }
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const bool stops = std::any_of(trigger.actions.begin(), trigger.actions.end(),
+                                       [](const Triggers::Act & a) { return a.action == Triggers::Action::STOP; });
+        if (stops) text += (text.empty() ? "" : ", ") + std::string("trigger ") + trigger.name + " (" + trigger.when + ")";
     }
     return text;
 }

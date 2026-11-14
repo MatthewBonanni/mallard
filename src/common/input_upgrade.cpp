@@ -1,7 +1,7 @@
 /**
  * @file input_upgrade.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Renamed, moved and removed input keys and options, and `mallard upgrade-input`.
+ * @brief Renamed, moved and removed input keys and options, and `mallard input upgrade`.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -12,7 +12,6 @@
 #include "input_upgrade.h"
 
 #include <array>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -23,6 +22,8 @@
 
 #include "input.h"
 #include "version.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace input_upgrade {
 
@@ -30,9 +31,34 @@ namespace {
 
 std::string plus_one(const std::string & text) { return std::to_string(std::stoll(text) + 1); }
 
+// geometry = "all" wrote the whole mesh, which region calls "domain"
+std::string all_to_domain(const std::string & text) { return text == "\"all\"" || text == "'all'" ? "\"domain\"" : text; }
+
+/** @brief The zones of a generated mesh that a direction of `[mesh] periodic` joined. */
+std::vector<std::string> periodic_zones(const std::string & direction, const std::string & mesh_type) {
+    if (mesh_type.empty() || mesh_type == "file") {
+        throw std::invalid_argument("applies to generated meshes; pair the zones of a mesh file with [[periodic]] "
+                                    "zones and a translation or an angle");
+    }
+    if (mesh_type == "annulus") {
+        if (direction == "theta") return {"start", "end"};
+        if (direction == "z") return {"back", "front"};
+        throw std::invalid_argument("\"" + direction + "\" is not accepted: the annulus is periodic in \"theta\" "
+                                    "(and \"z\" in 3D)");
+    }
+    if (direction == "x") return {"left", "right"};
+    if (direction == "y") return {"bottom", "top"};
+    if (direction == "z") return {"back", "front"};
+    throw std::invalid_argument("\"" + direction + "\" is not accepted: a " + mesh_type +
+                                " mesh is periodic in \"x\", \"y\" (and \"z\" in 3D)");
+}
+
 } // namespace
 
 const Rules & rules() {
+    static const std::string TYPES = "boundary types name their kind first, and options are keys";
+    static const std::string NSCBC = "the characteristic parameters are the nscbc table";
+    static const std::string FIELDS = "[[write_data]], [[probes]] and [statistics] all name their output fields";
     // Deprecate before removing: `removed` is at least one minor release after `since`.
     // Keys removed before this policy (0.9.0) have since == removed.
     static const Rules table = {
@@ -50,15 +76,61 @@ const Rules & rules() {
             {"numerics.face_reconstruction.quadrature_order", "", "0.2.0", "0.2.0", "never read"},
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
+            {"boundaries[].L", "boundaries[].nscbc.L", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma", "boundaries[].nscbc.sigma", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].beta", "boundaries[].nscbc.beta", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma_T", "boundaries[].nscbc.sigma_T", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma_t", "boundaries[].nscbc.sigma_t", "0.9.0", "0.10.0", NSCBC},
+            {"write_data[].geometry", "write_data[].region", "0.9.0", "0.10.0",
+             "region takes any region: a boundary zone by name, a named or inline region, or \"domain\"",
+             all_to_domain},
+            {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
+             "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
+            {"write_data[].variables", "write_data[].fields", "0.10.0", "0.11.0", FIELDS},
+            {"probes[].variables", "probes[].fields", "0.10.0", "0.11.0", FIELDS},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
+            {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
+             "the default, for ParaView 5.12 and later; or \"xdmf\", the XDMF indexes over HDF5 files, for VisIt, "
+             "meshio and older ParaView", true},
+            {"boundaries[].type", "upt", "inlet_state", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "p_out", "outlet_pressure", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "p_out_average", "outlet_pressure", "0.9.0", "0.10.0", TYPES, false, 0,
+             "average = true"},
+            {"boundaries[].type", "extrapolation", "outlet_extrapolation", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "nscbc_inlet", "inlet_state", "0.9.0", "0.10.0", TYPES + "; " + NSCBC, false, 0,
+             "nscbc = {}"},
+            {"boundaries[].type", "nscbc_outlet", "outlet_pressure", "0.9.0", "0.10.0", TYPES + "; " + NSCBC, false, 0,
+             "nscbc = {}"},
+            {"mesh.curved[].shape", "sphere", "sphere", "0.9.0", "0.10.0",
+             "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
+             "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"numerics.preset", "robust", "second_order", "0.10.0", "0.11.0", "presets are named by their order"},
+            {"numerics.preset", "accurate", "high_order", "0.10.0", "0.11.0", "presets are named by their order"},
+        },
+        {
+            {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
+             "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
+            {"initialize.mesh.periodic", "initialize.periodic", "zones", "type", "0.9.0", "0.10.0",
+             "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
         },
     };
     return table;
 }
 
 namespace {
+
+/**
+ * @brief Parses TOML text. Not toml::parse_str: its default std::source_location
+ *        argument points at another object when GCC builds for macOS (#692).
+ */
+template <typename TC>
+toml::basic_value<TC> parse_toml(const std::string & text) {
+    std::istringstream stream(text);
+    return toml::parse<TC>(stream, "input");
+}
 
 // ---------------------------------------------------------------- paths
 
@@ -198,6 +270,11 @@ bool is_removed(const std::string & removed, const std::string & version) {
     return parse_version(version) >= parse_version(removed);
 }
 
+// The release whose removals this source has made, which rejects them before its version bump
+constexpr const char * REMOVALS = "0.10.0";
+
+std::string this_release() { return is_removed(REMOVALS, MALLARD_VERSION) ? MALLARD_VERSION : REMOVALS; }
+
 Finding key_finding(const KeyRule & rule, const Concrete & key, std::size_t line, const std::string & version) {
     Finding f;
     f.key = to_string(key);
@@ -215,11 +292,30 @@ Finding option_finding(const OptionRule & rule, const Concrete & key, std::size_
     f.key = to_string(key);
     f.line = line;
     f.removed = is_removed(rule.removed, version);
-    f.suggestion = f.key + " = \"" + rule.to + "\"";
+    const bool kept = rule.from == rule.to;
+    f.suggestion = kept ? rule.add : f.key + " = \"" + rule.to + "\"";
     f.message = f.key + " = \"" + rule.from + "\"" +
                 (f.removed ? " was removed in " + rule.removed
                            : " is deprecated since " + rule.since + " and will be removed in " + rule.removed) +
-                ": use \"" + rule.to + "\" (" + rule.note + ")";
+                (kept ? ": add " + rule.add
+                      : ": use \"" + rule.to + "\"" + (rule.add.empty() ? "" : " with " + rule.add)) +
+                " (" + rule.note + ")";
+    return f;
+}
+
+Finding array_finding(const ArrayRule & rule, const Concrete & key, std::size_t line, const std::string & version,
+                      const std::vector<std::vector<std::string>> & elements) {
+    Finding f;
+    f.key = to_string(key);
+    f.line = line;
+    f.removed = is_removed(rule.removed, version);
+    for (const auto & values : elements) {
+        f.suggestion += (f.suggestion.empty() ? "" : ", ") + ("[[" + rule.to + "]] " + rule.key + " = ") +
+                        input_detail::toml_text(values);
+    }
+    f.message = f.key + (f.removed ? " was removed in " + rule.removed
+                                   : " is deprecated since " + rule.since + " and will be removed in " + rule.removed);
+    f.message += ": use " + (f.suggestion.empty() ? "[[" + rule.to + "]]" : f.suggestion) + " (" + rule.note + ")";
     return f;
 }
 
@@ -237,13 +333,94 @@ std::size_t line_of(const V & value) {
 
 // ---------------------------------------------------------------- the rewrite of a parsed input
 
+/** @brief The new elements' values for the `from` key matched at `key`, or an InputError for one it does not take. */
+template <typename V>
+std::vector<std::vector<std::string>> array_elements(V & root, const ArrayRule & rule, const Concrete & key) {
+    const auto & table = entries_of(*at(root, parent(key)));
+    const V & value = table.at(key.back().first);
+    std::string context;
+    if (!rule.context.empty() && table.contains(rule.context) && table.at(rule.context).is_string()) {
+        context = table.at(rule.context).as_string();
+    }
+    auto error = [&](const std::string & message) {
+        Diagnostic d;
+        d.key = to_string(key);
+        d.line = line_of(value);
+        d.message = message;
+        return InputError(d);
+    };
+    if (!value.is_array()) throw error("takes an array of strings");
+    std::vector<std::vector<std::string>> elements;
+    for (size_t i = 0; i < value.size(); i++) {
+        if (!value.at(i).is_string()) throw error("takes an array of strings");
+        try {
+            elements.push_back(rule.convert(value.at(i).as_string(), context));
+        } catch (const std::invalid_argument & e) {
+            throw error(e.what());
+        }
+    }
+    return elements;
+}
+
+Concrete plain_path(const std::string & dotted_path) {
+    Concrete key;
+    for (const Step & step : parse_path(dotted_path)) key.emplace_back(step.key, -1);
+    return key;
+}
+
 /**
- * @brief Applies every rule to the parsed input; returns what changed. Throws
- *        if a key is set under both its old and its new name.
+ * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
+ *        if it depends on the dimension, which is unknown, and the input has its option.
  */
 template <typename V>
-std::vector<Finding> transform(V & root, const Rules & table, const std::string & version) {
-    std::vector<Finding> findings;
+bool applies(V & root, const OptionRule & rule, const int dim, const std::string & unknown_dimension) {
+    if (rule.dim == 0 || rule.dim == dim) return true;
+    if (dim != 0) return false;
+    for (const Concrete & key : matches(root, rule.key)) {
+        const V & value = *at(root, key);
+        if (value.is_string() && value.as_string() == rule.from) {
+            throw InputError(to_string(key) + " = \"" + rule.from + "\" is renamed differently in 2D and 3D runs, and "
+                             "Mallard can't tell 2D or 3D" +
+                             (unknown_dimension.empty() ? std::string() : ": " + unknown_dimension) +
+                             "; run from the directory you run the case in, or pass --dim 2|3.");
+        }
+    }
+    return false;
+}
+
+/** @brief Whether a rule that keeps its option and only adds a key finds that key set already. */
+template <typename V>
+bool added_already(V & root, const OptionRule & rule, const Concrete & key) {
+    return rule.from == rule.to && entries_of(*at(root, parent(key))).contains(rule.add.substr(0, rule.add.find(' ')));
+}
+
+/**
+ * @brief Applies every rule to the parsed input; returns what changed. Throws
+ *        if a key is set under both its old and its new name. Option rules
+ *        come first, so that they can match a key by the old name that a key
+ *        rule then renames.
+ *        `setup`: as the run reads it (kept options keep their value).
+ */
+template <typename V>
+std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim,
+                               bool setup = false, const std::string & unknown_dimension = "") {
+    std::vector<Finding> findings, option_findings;
+    for (const OptionRule & rule : table.options) {
+        if (!applies(root, rule, dim, unknown_dimension)) continue;
+        for (const Concrete & key : matches(root, rule.key)) {
+            V & value = *at(root, key);
+            if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
+            option_findings.push_back(option_finding(rule, key, line_of(value), version));
+            if (rule.from != rule.to && !(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
+            if (!rule.add.empty()) {
+                const auto added = parse_toml<typename V::config_type>(rule.add);
+                auto & beside = entries_of(*at(root, parent(key)));
+                for (const auto & [name, v] : entries_of(added)) {
+                    if (!beside.contains(name)) beside[name] = v;
+                }
+            }
+        }
+    }
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
             V value = *at(root, key);
@@ -256,7 +433,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 }
                 if (rule.convert) {
                     const std::string text = rule.convert(bare_text(value));
-                    value = toml::parse_str<typename V::config_type>("x = " + text).at("x");
+                    value = parse_toml<typename V::config_type>("x = " + text).at("x");
                 }
                 V * new_parent = at(root, parent(to), true);
                 if (new_parent == nullptr || !new_parent->is_table()) {
@@ -267,12 +444,28 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             entries_of(*at(root, parent(key))).erase(key.back().first);
         }
     }
-    for (const OptionRule & rule : table.options) {
-        for (const Concrete & key : matches(root, rule.key)) {
-            V & value = *at(root, key);
-            if (!value.is_string() || value.as_string() != rule.from) continue;
-            findings.push_back(option_finding(rule, key, line_of(value), version));
-            value = rule.to;
+    findings.insert(findings.end(), option_findings.begin(), option_findings.end());
+    for (const ArrayRule & rule : table.arrays) {
+        for (const Concrete & key : matches(root, rule.from)) {
+            const auto elements = array_elements(root, rule, key);
+            findings.push_back(array_finding(rule, key, line_of(*at(root, key)), version, elements));
+            const Concrete to = plain_path(rule.to);
+            V * holder = at(root, parent(to), true);
+            if (holder == nullptr || !holder->is_table()) {
+                throw InputError("cannot move " + to_string(key) + " to [[" + rule.to + "]].");
+            }
+            auto & entries = entries_of(*holder);
+            if (!entries.contains(to.back().first)) entries[to.back().first] = V(typename V::array_type{});
+            V & array = entries.at(to.back().first);
+            if (!array.is_array()) throw InputError(rule.to + " must be an array of tables.");
+            for (const auto & values : elements) {
+                typename V::array_type names;
+                for (const auto & v : values) names.push_back(V(v));
+                typename V::table_type element;
+                element[rule.key] = V(names);
+                array.as_array().push_back(V(element));
+            }
+            entries_of(*at(root, parent(key))).erase(key.back().first);
         }
     }
     return findings;
@@ -389,7 +582,7 @@ using OrderedValue = toml::ordered_value;
 
 /** @brief One textual change for the first match of a rule, or false if the rule has none left. */
 bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     const std::vector<Concrete> found = matches(root, rule.from);
     if (found.empty()) return false;
     const Concrete & key = found.front();
@@ -425,7 +618,20 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
         lines[first] = indent + to.back().first + " " + rest;
         return true;
     }
-    if (at(root, parent(to)) == nullptr) {
+    // A new table in an element of an array of tables: a header of it after the element's own keys
+    const Concrete table = parent(to);
+    // An empty inline table there (an option rule's `add`, e.g. nscbc = {}) gives way to the header
+    if (const OrderedValue * existing = at(root, table);
+        existing && existing->is_table() && existing->size() == 0 && existing->location().is_ok()) {
+        const size_t line = existing->location().first_line_number() - 1;
+        if (line == existing->location().last_line_number() - 1 && key_column(lines[line], table.back().first)) {
+            lines.erase(lines.begin() + static_cast<long>(line));
+            return true;
+        }
+    }
+    const bool in_element = !table.empty() && table.back().second < 0 && table.size() >= 2 &&
+                            table[table.size() - 2].second >= 0 && at(root, parent(table)) != nullptr;
+    if (at(root, table) == nullptr && !in_element) {
         for (const auto & step : to) {
             if (step.second >= 0) {
                 impossible = true;
@@ -435,9 +641,17 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
     }
     moved[0] = to.back().first + " " + rest;
     lines.erase(lines.begin() + static_cast<long>(first), lines.begin() + static_cast<long>(last) + 1);
-    const auto end = end_of_table(lines, parent(to));
+    const auto end = end_of_table(lines, table);
     if (end) {
         lines.insert(lines.begin() + static_cast<long>(*end), moved.begin(), moved.end());
+    } else if (in_element) {
+        const auto element_end = end_of_table(lines, parent(table));
+        if (!element_end) {
+            impossible = true;
+            return false;
+        }
+        moved.insert(moved.begin(), {"", "[" + dotted(table) + "]"});
+        lines.insert(lines.begin() + static_cast<long>(*element_end), moved.begin(), moved.end());
     } else {
         lines.push_back("");
         lines.push_back("[" + dotted(parent(to)) + "]");
@@ -447,28 +661,128 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
 }
 
 bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     for (const Concrete & key : matches(root, rule.key)) {
         const OrderedValue & value = *at(root, key);
-        if (!value.is_string() || value.as_string() != rule.from) continue;
+        if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
         const size_t line = value.location().first_line_number() - 1;
-        const auto column = key_column(lines[line], key.back().first);
+        const size_t v = value.location().first_column_number() - 1;
         const std::string old_text = bare_text(value);
-        const size_t v = column ? lines[line].find(old_text, *column) : std::string::npos;
-        if (v == std::string::npos) {
+        if (lines[line].compare(v, old_text.size(), old_text) != 0) {
             impossible = true;
             return false;
         }
-        lines[line].replace(v, old_text.size(), toml::format(OrderedValue(rule.to)));
+        const std::string new_text = toml::format(OrderedValue(rule.to));
+        lines[line].replace(v, old_text.size(), new_text);
+        if (!rule.add.empty() && !entries_of(*at(root, parent(key))).contains(rule.add.substr(0, rule.add.find(' ')))) {
+            const auto column = key_column(lines[line], key.back().first);
+            const size_t after = v + new_text.size(), rest = lines[line].find_first_not_of(" \t", after);
+            if (column && (rest == std::string::npos || lines[line][rest] == '#')) {
+                lines.insert(lines.begin() + static_cast<long>(line) + 1, lines[line].substr(0, *column) + rule.add);
+            } else {
+                lines[line].insert(after, ", " + rule.add);
+            }
+        }
         return true;
     }
     return false;
 }
 
+/** @brief The line of the first match of an array rule removed and its elements inserted, or false if none is left. */
+bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule, bool & impossible) {
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
+    const std::vector<Concrete> found = matches(root, rule.from);
+    if (found.empty()) return false;
+    const Concrete & key = found.front();
+    const OrderedValue & value = *at(root, key);
+    const size_t first = value.location().first_line_number() - 1, last = value.location().last_line_number() - 1;
+    const Concrete to = plain_path(rule.to);
+    const OrderedValue * existing = at(root, to);
+    if (!key_column(lines[first], key.back().first) || (existing != nullptr && !existing->is_array())) {
+        impossible = true;
+        return false;
+    }
+    std::string comment;
+    if (const size_t hash = lines[last].find('#', last == first ? lines[first].find('=') : 0); hash != std::string::npos) {
+        comment = "  " + lines[last].substr(hash);
+    }
+    std::vector<std::string> block;
+    for (const auto & values : array_elements(root, rule, key)) {
+        block.push_back("");
+        block.push_back("[[" + rule.to + "]]");
+        block.push_back(rule.key + " = " + input_detail::toml_text(values) + comment);
+        comment.clear();
+    }
+    lines.erase(lines.begin() + static_cast<long>(first), lines.begin() + static_cast<long>(last) + 1);
+    Concrete after = parent(key);
+    if (existing != nullptr && existing->size() > 0) {
+        after = to;
+        after.back().second = static_cast<long>(existing->size()) - 1;
+    }
+    const auto end = end_of_table(lines, after);
+    if (!end || (existing != nullptr && existing->size() == 0)) {
+        impossible = true;
+        return false;
+    }
+    lines.insert(lines.begin() + static_cast<long>(*end), block.begin(), block.end());
+    return true;
+}
+
 } // namespace
 
+std::vector<std::string> notices(const std::string & text) {
+    const Input input = parse_input_string(text);
+    const auto has = [&](const char * table, const char * key) {
+        return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
+    };
+    std::vector<std::string> out;
+    if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
+        out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
+                      "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
+                      "older first-order results");
+    }
+    if (input.contains("chemistry") && input.at("chemistry").is_table() && !has("chemistry", "fuse_half_steps")) {
+        const Input & chemistry = input.at("chemistry");
+        const bool off = chemistry.contains("enabled") && chemistry.at("enabled").is_boolean() &&
+                         !chemistry.at("enabled").as_boolean();
+        const bool simpler = chemistry.contains("coupling") && chemistry.at("coupling").is_string() &&
+                             chemistry.at("coupling").as_string() == "simpler";
+        if (!off && !simpler) {
+            out.push_back("no chemistry.fuse_half_steps: since 0.10.0 Strang splitting fuses each step's closing "
+                          "chemistry half step with the next step's opening one (results change within the "
+                          "chemistry's tolerances); add fuse_half_steps = false to [chemistry] to reproduce older "
+                          "results");
+        }
+    }
+    if (input.contains("write_data") && input.at("write_data").is_array()) {
+        for (const auto & entry : input.at("write_data").as_array()) {
+            if (!entry.is_table() || entry.contains("series") || entry.contains("region") || entry.contains("regions")) {
+                continue;
+            }
+            if (entry.contains("format") && !(entry.at("format").is_string() && entry.at("format").as_string() == "vtkhdf")) {
+                continue;
+            }
+            const std::string prefix =
+                entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
+                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+                          prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
+        }
+    }
+    if (has("numerics", "preset") && input.at("numerics").at("preset").is_string() &&
+        input.at("numerics").at("preset").as_string() == "les" && !has("numerics", "time_integrator")) {
+        const bool sets_step = has("run", "cfl") || has("run", "dt");
+        std::string note = "preset = \"les\": since 0.10.0 it runs SSPRK54 at cfl 2.0, not SSPRK3 at 0.8; add "
+                           "[numerics] time_integrator = \"SSPRK3\"" +
+                           std::string(sets_step ? "" : " and [run] cfl = 0.8") + " to reproduce older results";
+        if (has("run", "cfl")) note += "; the cfl this input sets now applies to SSPRK54, which is cheapest near 2.0";
+        out.push_back(note);
+    }
+    return out;
+}
+
 std::string advice(const Finding & finding) {
-    return describe(finding) + "; `mallard upgrade-input FILE > NEW_FILE` rewrites the file";
+    return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
 }
 
 std::string describe(const Finding & finding) {
@@ -476,32 +790,37 @@ std::string describe(const Finding & finding) {
 }
 
 std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
-    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version);
+    std::vector<Finding> findings = transform(input, table, version.empty() ? this_release() : version, N_DIM, true);
     std::string removed;
     for (const Finding & f : findings) {
         if (f.removed) removed += "\n  " + describe(f);
     }
     if (!removed.empty()) {
         throw InputError("the input uses keys or options that this release no longer reads:" + removed +
-                         "\n`mallard upgrade-input FILE > NEW_FILE` rewrites them.");
+                         "\n`mallard input upgrade old.toml > new.toml` rewrites them.");
     }
     return findings;
 }
 
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table) {
+                         bool & reformatted, const Rules & table, const int dim,
+                         const std::string & unknown_dimension) {
     reformatted = false;
     Input expected = parse_input_string(text);
-    findings = transform(expected, table, MALLARD_VERSION);
+    findings = transform(expected, table, this_release(), dim, false, unknown_dimension);
     if (findings.empty()) return text;
 
     std::vector<std::string> lines = split_lines(text);
     bool impossible = false;
+    for (const OptionRule & rule : table.options) {
+        if (rule.dim != 0 && rule.dim != dim) continue;
+        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_option(lines, rule, impossible); guard++) {}
+    }
     for (const KeyRule & rule : table.keys) {
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_key(lines, rule, impossible); guard++) {}
     }
-    for (const OptionRule & rule : table.options) {
-        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_option(lines, rule, impossible); guard++) {}
+    for (const ArrayRule & rule : table.arrays) {
+        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_array(lines, rule, impossible); guard++) {}
     }
     if (!impossible) {
         try {
@@ -510,34 +829,15 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
         }
     }
     reformatted = true;
-    OrderedValue ordered = toml::parse_str<toml::ordered_type_config>(text);
-    transform(ordered, table, MALLARD_VERSION);
+    OrderedValue ordered = parse_toml<toml::ordered_type_config>(text);
+    transform(ordered, table, this_release(), dim);
     return toml::format(ordered);
 }
 
-int main(int argc, char ** argv) {
-    bool check = false;
-    std::string file;
-    for (int i = 0; i < argc; i++) {
-        if (std::strcmp(argv[i], "--check") == 0) {
-            check = true;
-        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0 || !file.empty()) {
-            file.clear();
-            break;
-        } else {
-            file = argv[i];
-        }
-    }
-    if (file.empty()) {
-        std::cerr << "Usage: mallard upgrade-input old.toml > new.toml\n"
-                  << "       mallard upgrade-input --check old.toml   (exit status 1 if anything is out of date)\n"
-                  << "Rewrites renamed, moved and removed input keys and options for Mallard " MALLARD_VERSION
-                     ", keeping comments and layout.\n";
-        return 1;
-    }
+int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "mallard upgrade-input: cannot open " << file << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: cannot open " + file);
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -545,8 +845,9 @@ int main(int argc, char ** argv) {
         parse_input(file);  // syntax errors with the file's name
         std::vector<Finding> findings;
         bool reformatted = false;
-        const std::string upgraded = upgrade_text(text, findings, reformatted);
+        const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
+        for (const std::string & note : notices(text)) std::cerr << file << ": note: " << note << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
                       << "reformatted (comments are kept, layout is not)\n";
@@ -554,7 +855,7 @@ int main(int argc, char ** argv) {
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "mallard upgrade-input: " << file << ": " << e.what() << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: " + file + ": " + e.what());
         return 1;
     }
     return 0;

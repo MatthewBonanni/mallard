@@ -131,16 +131,15 @@ to output
 ([Ketcheson 2008](../references.md#ketcheson-2008), [2010](../references.md#ketcheson-2010)),
 written for the deviations from U<sup>n</sup>:
 `S += delta_i (Y_{i-1} - U^n)`, `Y_i = U^n + gamma1_i (Y_{i-1} - U^n) + gamma2_i S + beta_i dt L(Y_{i-1})`.
-A steady state then stays bitwise steady (rounded weights summing to $1 - 2^{-54}$
-are what changed SSPRK3's carbuncle behavior in 0.7, [below](#stationary-shocks-on-cell-faces)),
+A steady state then stays bitwise steady (weights that round to a sum of
+$1 - 2^{-54}$ change the carbuncle behavior, [below](#stationary-shocks-on-cell-faces)),
 and one fused kernel per stage updates every register. For SSPRK54 the
 coefficients come from Spiteri and Ruuth's Shu–Osher form re-solved to 50
 digits (the fourth-order conditions hold to 1e-50, and their 15-digit values
 agree to 1e-15); its equal ratios $\alpha/\beta = 1.508$ make $\delta_4$ and $\gamma_3$
 vanish, so U<sup>n</sup>, the solution and `S = alpha_52 (Y_2 - U^n)` suffice.
 `CK45` is the 2N form `D = A_i D + dt L(U)`, `U += B_i D`, with the RHS kept
-apart from D. None changes the existing integrators: restart files of FE,
-SSPRK3 and RK4 runs are byte-identical to those of the previous main. All run inside the step's
+apart from D. All run inside the step's
 CUDA graph (dt read on the device), with SIMPLER and Strang splitting, and
 take bitwise the same steps on any number of ranks.
 
@@ -166,6 +165,9 @@ of its small-`cfl` value up to at least the pulse limit, except TENO6 with
 RDPK3Sp35 (2.40 quads, 2.27 triangles) and TENO4 on triangles with RDPK3Sp35
 (2.34), and TENO6 on triangles with SSPRK54 (2.96). The safe value on these cells is 2.2 for all three,
 against 1.2 (SSPRK3) and 1.35 (RK4).
+
+The [theory manual](../theory/time_integration.md#runge-kutta-methods) plots
+the stability regions of all six methods and the convergence below.
 
 **Temporal convergence** (vortex, 40 x 40 quads, TENO5, to t = 2; maximum
 density difference from RK4 at `cfl` 0.02 on the same mesh):
@@ -290,9 +292,10 @@ depends only on how the time integrator rounds:
   40 x 40 grid (the setup of `carbuncle_growth` in `test/solver_test.cpp`
   with no drift), both grow an O(0.1-1) carbuncle with FE, RK4 and SSPRK3.
   This holds with or without FMA contraction and at CFL 0.18-0.3.
-- Until 0.7.0 the SSPRK3 last stage was `2/3 U2 + 1/3 U`. Its rounded weights
-  sum to 1 - 2^-54, which nudged the state down by an ulp in a fraction of
-  the cells every step and happened to keep that wave speed positive.
+- Written as `2/3 U2 + 1/3 U`, the SSPRK3 last stage has rounded weights
+  that sum to 1 - 2^-54. They nudge the state down by an ulp in a fraction
+  of the cells every step, which happens to keep that wave speed positive.
+  Mallard writes the stage as an interpolation, whose weights sum to one.
 
 A shock that moves, or that sits inside a cell, never puts the sonic speed on
 a face. For example, the same shock drifting at 0.03, as in
@@ -375,14 +378,16 @@ the Riemann solver.
 - **No-slip walls** (viscous): reflect the full velocity relative to the wall velocity, and use one-sided wall gradients for the viscous flux.
 - **Periodic boundaries**: no ghost states; the paired zones are joined into interior faces whose second cell is translated next to the first (see `docs/design/periodic.md`), so every scheme treats the seam as interior.
 - **Characteristic far field**: the outgoing Riemann invariant comes from the interior and the incoming one from the free stream ([Blazek 2015](../references.md#blazek-2015)).
-- **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell. This is exactly what an interior face sees for a solution that does not vary normal to the boundary.
+- **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell (by one cell where that lands mid-cell, as at a pyramid's apex), or where no face lies there (unstructured triangles and tetrahedra) the image cell's reconstruction polynomial at the translated quadrature points. This is exactly what an interior face sees for a solution that does not vary normal to the boundary. Gradient stencils continue across `extrapolation` boundaries the same way, through the image cells.
   - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
   - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
-- **Characteristic boundaries** (`nscbc_outlet`, `nscbc_inlet`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. An inlet's target velocity is per face and may carry synthetic turbulence: the digital filter of [Klein et al. (2003)](../references.md#klein-2003) with the Reynolds stress of [Lund et al. (1998)](../references.md#lund-1998), entering through the incoming wave as [Guézennec & Poinsot (2009)](../references.md#guezennec-poinsot-2009) propose; see `docs/design/synthetic_inflow.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
+  - The image cell's average instead of its polynomial is first order against TENO-E's interior state; on unstructured triangles it amplified round-off at a subsonic inflow to vacuum states.
+- **Characteristic boundaries** (`outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. An inlet's target velocity is per face and may carry synthetic turbulence: the digital filter of [Klein et al. (2003)](../references.md#klein-2003) with the Reynolds stress of [Lund et al. (1998)](../references.md#lund-1998), entering through the incoming wave as [Guézennec & Poinsot (2009)](../references.md#guezennec-poinsot-2009) propose; see `docs/design/synthetic_inflow.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes
 
 - Cell gradients come from a weighted least-squares quadratic fit ([Barth & Frederickson 1990](../references.md#barth-frederickson-1990)) over the vertex neighbors and the cell's boundary ghosts. A linear fit is only first-order accurate on one-sided boundary stencils and on triangles, where its errors cancel only in the interior of regular meshes.
+- Across `outlet_extrapolation` boundaries the vertex neighbors continue beyond the boundary through the image cells, as across a periodic seam, instead of a ghost: one-sided stencils on tetrahedra made a channel with extrapolation sides first order and drove a cross flow.
 - Face gradients of velocity and temperature average the two cell gradients. They are then corrected along the face normal so that their component along the line between the cell centroids matches the direct difference ([Diskin et al. 2010](../references.md#diskin-2010)).
 - Transmissive faces take the face values and gradients of their image face, as the convective flux does.
 - Stress follows the Stokes hypothesis; heat flux uses a constant Prandtl number. Viscosity is constant, follows Sutherland's law ([Sutherland 1893](../references.md#sutherland-1893)) or a power law.

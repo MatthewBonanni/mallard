@@ -19,6 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cell_order.h"
 #include "distribution.h"
 #include "mesh_block.h"
 #include "periodic.h"
@@ -42,8 +43,9 @@ class Mesh;
  *           cell to its owner.
  *        3. build_local_mesh() adds halo layers by a distributed breadth-first
  *           search over vertex neighbors and builds the rank's Mesh and
- *           Distribution. Asking for more layers later grows the existing
- *           ones.
+ *           Distribution. It frees the cells and the node directory before
+ *           building the Mesh, so that the peak holds only the block besides
+ *           it; a later call sends the cells to their owners again.
  *
  *        All memory is O(cells / ranks) per rank, plus the halo.
  */
@@ -82,19 +84,21 @@ class DistributedMesh {
         void distribute(const std::vector<int> & owner);
 
         /**
-         * @brief This rank's mesh: its owned cells in global order, then
-         *        halo_layers layers of vertex neighbors, each in global order.
-         *        Faces on the global boundary keep their zones; faces towards
-         *        cells not on this rank go to PARTITION_ZONE. Fills dist,
-         *        including the exchange plan (collective; after distribute()).
+         * @brief This rank's mesh: its owned cells, then halo_layers layers
+         *        of vertex neighbors, each numbered by cell_order. Faces on the
+         *        global boundary keep their zones; faces towards cells not on
+         *        this rank go to PARTITION_ZONE. Fills dist, including the
+         *        exchange plan (collective; after distribute()).
          */
-        std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist);
+        std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist,
+                                               const CellNumbering & cell_order = {});
 
     private:
         /** @brief The cells this rank holds: owned cells, then halo layers. */
         struct Cells {
             std::vector<uint64_t> gid;
             std::vector<int> owner;
+            std::vector<uint32_t> zone;  // with cell zones
             std::vector<uint8_t> layer;
             std::vector<uint64_t> node_offsets{0}, nodes;            // global node ids
             std::vector<uint32_t> boundary_offsets{0};
@@ -119,6 +123,9 @@ class DistributedMesh {
 
         size_t rank_of_cell(uint64_t g) const;
         size_t rank_of_node(uint64_t g) const;
+        /** @brief Send every block cell to its owner, build the node directory and find halo layer 1 (collective). */
+        void send_to_owners();
+        void release_cells();
         void append_record(std::vector<uint64_t> & out, uint32_t i) const;
         void read_records(const std::vector<uint64_t> & in, uint8_t layer);
         std::vector<std::array<double, N_DIM>> fetch_nodes(const std::vector<uint64_t> & sorted_ids) const;
@@ -136,13 +143,15 @@ class DistributedMesh {
         // After distribute()
         std::vector<int> owner;                         // per block cell
         std::vector<uint64_t> directory_offsets{0};     // per block node: cells using it (by node key)
-        std::vector<std::pair<uint64_t, int>> directory;  // (cell, owner)
+        std::vector<uint64_t> directory_cells;
+        std::vector<int> directory_owners;
         Cells cells;
         std::unordered_map<uint64_t, uint32_t> halo_index;  // halo cell -> index in cells
         std::vector<uint64_t> owned_nodes;                   // keys of the owned cells' nodes, sorted
         std::unordered_set<uint64_t> searched_nodes;         // halo nodes whose cells are all here
-        std::vector<std::pair<uint64_t, int>> next_layer;    // layer 1, found by distribute()
+        std::vector<std::pair<uint64_t, int>> next_layer;    // layer 1, found by send_to_owners()
         int layers = 0;
+        bool sent = false;                                   // cells, directory and layers are built
 };
 
 #endif // DISTRIBUTED_MESH_H

@@ -1,0 +1,1 @@
+- The 3D TENO smooth pass on GPUs at order 5 stages its stencil entries in team scratch (#931). TENO reconstruction now fuses multiplies and adds only where written explicitly, so its results are bitwise the same however a kernel is staged; they differ from earlier versions' in the last bits.
