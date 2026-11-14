@@ -11,6 +11,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -732,13 +733,13 @@ void Solver::update_thickened_flame() {
     if (thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC) {
         update_dynamic_efficiency();
     } else {
-        Kokkos::parallel_for("tfles_vorticity", mesh->n_cells, VorticityFunctor{transport_gradients, tfles_vorticity});
+        gated::parallel_for("tfles_vorticity", mesh->n_cells, VorticityFunctor{transport_gradients, tfles_vorticity});
         // The vorticity of outer halo cells misses neighbors: take the owners' before differentiating it again
         exchange_cell_vectors(tfles_vorticity);
-        Kokkos::parallel_for("tfles_vorticity_gradient", mesh->n_cells,
+        gated::parallel_for("tfles_vorticity_gradient", mesh->n_cells,
                              VorticityGradientFunctor{viscous_gradient, tfles_vorticity, tfles_gradients});
     }
-    Kokkos::parallel_for("tfles_fields", mesh->n_owned(),
+    gated::parallel_for("tfles_fields", mesh->n_owned(),
                          ThickenedFlameFunctor{thickened_flame, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
                                                mesh->cell_volume, mesh->cell_coords, mesh->periodic_maps(),
@@ -756,25 +757,25 @@ void Solver::update_dynamic_efficiency() {
     const ThickenedFlame tf = thickened_flame;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values;
     Kokkos::View<rtype *[3]> progress = tfles_test[0], filtered = tfles_test[1];
-    Kokkos::parallel_for("tfles_progress", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("tfles_progress", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double T = static_cast<double>(values(c, N_DIM));
         progress(c, 0) = static_cast<rtype>(Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - tf.T_u) / (tf.T_b - tf.T_u))));
     });
-    Kokkos::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 1});
+    gated::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 1});
     exchange_cell_vectors(progress);
     for (uint32_t pass = 0; pass < tfles_test_passes; pass++) {
-        Kokkos::parallel_for("tfles_test_filter", n_owned,
+        gated::parallel_for("tfles_test_filter", n_owned,
                              TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, progress, filtered});
         exchange_cell_vectors(filtered);
         std::swap(progress, filtered);
     }
-    Kokkos::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 2});
-    Kokkos::parallel_for("tfles_dynamic_terms", n_owned,
+    gated::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 2});
+    gated::parallel_for("tfles_dynamic_terms", n_owned,
                          DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, progress,
                                                   tfles_test_passes, tfles_dynamic_terms});
     tfles_dynamic_sums.sum(tfles_dynamic_terms);
     const Kokkos::View<double *> sums = tfles_dynamic_sums.sums(), state = les_state;
-    Kokkos::parallel_for("tfles_dynamic_beta", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("tfles_dynamic_beta", 1, KOKKOS_LAMBDA(const int) {
         const double resolved = sums(0), test = sums(1), log_gamma = sums(2), scale = sums(3);
         // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts
         // reproduce). A resolved surface below 1e-6 of the thickened volume over Delta_e is round-off in a
@@ -788,7 +789,7 @@ void Solver::update_dynamic_efficiency() {
 void Solver::init_dynamic_efficiency() {
     const uint32_t n_owned = mesh->n_owned();
     tfles_test_width2 = Kokkos::View<rtype *>("tfles_test_width2", n_owned);
-    Kokkos::parallel_for("tfles_test_width", n_owned,
+    gated::parallel_for("tfles_test_width", n_owned,
                          TestFilterWidthFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell,
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
@@ -799,7 +800,7 @@ void Solver::init_dynamic_efficiency() {
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
     const ThickenedFlame tf = thickened_flame;
     Kokkos::View<rtype *> delta = les_delta, volume = mesh->cell_volume, width2 = tfles_test_width2;
-    Kokkos::parallel_for("tfles_test_ratio", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("tfles_test_ratio", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const double F_max = tf.thickening(static_cast<double>(delta(c)), 1.0);
         const double delta_e = F_max * tf.delta_L, V = static_cast<double>(volume(c));
         const bool thick = F_max > 1.0;
@@ -822,7 +823,7 @@ void Solver::update_partially_stirred_reactor() {
     Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values;
     Kokkos::View<rtype *[3]> transport = cell_transport, sgs = les_coefficients;
     Kokkos::View<rtype *> q = hrr, delta = les_delta, kappa = chem_time_scale;
-    Kokkos::parallel_for("pasr_fraction", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("pasr_fraction", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const double rho = static_cast<double>(W(c, 0));
         const double T = static_cast<double>(values(c, N_DIM));
         const ScalarMassFractions y{&scalars(c, 0)};
@@ -840,7 +841,7 @@ void Solver::update_dynamic_constant() {
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
     if (is_mixture()) {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> tg = transport_gradients;
-        Kokkos::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
             for (uint8_t i = 0; i < N_DIM; i++) {
                 for (uint8_t j = 0; j < N_DIM; j++) g(c, 3 * i + j) = tg(c, i, j);
@@ -848,7 +849,7 @@ void Solver::update_dynamic_constant() {
         });
     } else {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> vg = viscous_gradients;
-        Kokkos::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
             for (uint8_t i = 0; i < N_DIM; i++) {
                 for (uint8_t j = 0; j < N_DIM; j++) g(c, 3 * i + j) = vg(c, 1 + i, j);
@@ -856,9 +857,9 @@ void Solver::update_dynamic_constant() {
         });
     }
     if (halo.active()) halo.exchange(dynamic_halo);
-    Kokkos::parallel_for("dynamic_stresses", mesh->n_cells,
+    gated::parallel_for("dynamic_stresses", mesh->n_cells,
                          DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
-    Kokkos::parallel_for("dynamic_terms", n_owned,
+    gated::parallel_for("dynamic_terms", n_owned,
                          DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
                                                  mesh->cells_of_cell_shift, mesh->periodic_maps(), mesh->cell_coords,
                                                  mesh->cell_volume, les_width, flow, g, dynamic_stresses,
@@ -866,7 +867,7 @@ void Solver::update_dynamic_constant() {
     dynamic_sums.sum(dynamic_terms);
     const Kokkos::View<double *> sums = dynamic_sums.sums(), state = les_state;
     const bool vreman = les.model == SGSModel::VREMAN;
-    Kokkos::parallel_for("dynamic_constant", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("dynamic_constant", 1, KOKKOS_LAMBDA(const int) {
         // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
         if (!(sums(1) > 0.0)) return;
         const double ratio = sums(0) / sums(1);
@@ -886,17 +887,17 @@ double Solver::les_value(const int k) const {
 void Solver::exchange_cell_vectors(const Kokkos::View<rtype *[3]> & v) {
     if (!halo.active()) return;
     SpeciesView packed = tfles_halo.species;
-    Kokkos::parallel_for("halo_pack", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("halo_pack", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         for (int k = 0; k < 3; k++) packed(c, k) = v(c, k);
     });
     halo.exchange(tfles_halo);
-    Kokkos::parallel_for("halo_unpack", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("halo_unpack", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         for (int k = 0; k < 3; k++) v(c, k) = packed(c, k);
     });
 }
 
 void Solver::thicken_transport() {
-    Kokkos::parallel_for("tfles_thicken", mesh->n_cells,
+    gated::parallel_for("tfles_thicken", mesh->n_cells,
                          ThickenFunctor{tfles_fields, cell_transport, cell_diffusion, les_coefficients,
                                         mixture.n_species});
 }
@@ -990,12 +991,12 @@ void Solver::init_les() {
 void Solver::update_eddy_viscosity(const uint32_t n, const bool of_state) {
     if (les.reconstruction_gradients) update_reconstruction_gradients(n, of_state);
     if (is_mixture()) {
-        Kokkos::parallel_for("eddy_viscosity", n,
+        gated::parallel_for("eddy_viscosity", n,
                              MixtureEddyViscosityFunctor{les, mixture, W_cells, cell_scalars, transport_values,
                                                          transport_gradients, les_velocity_gradients, les_width,
                                                          cell_transport, les_coefficients, les_state});
     } else {
-        Kokkos::parallel_for("eddy_viscosity", n,
+        gated::parallel_for("eddy_viscosity", n,
                              EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients,
                                                   les_velocity_gradients, les_width, les_coefficients, les_state});
     }
@@ -1011,7 +1012,7 @@ void Solver::update_reconstruction_gradients(const uint32_t n, const bool of_sta
     Kokkos::View<rtype ***, Kokkos::LayoutRight> T = transport_gradients;
     Kokkos::View<rtype *[N_DIM][N_DIM]> g = les_velocity_gradients;
     const bool mixture_gradients = is_mixture();
-    Kokkos::parallel_for("les_reconstruction_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("les_reconstruction_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const bool smooth = sigma(c) < threshold;
         FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
             g(c, i, j) = smooth ? P(c, 1 + i, j) : mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
@@ -1019,17 +1020,17 @@ void Solver::update_reconstruction_gradients(const uint32_t n, const bool of_sta
     });
     if (n <= n_owned) return;
     if (!halo.active()) {
-        Kokkos::parallel_for("les_gradients_rest", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("les_gradients_rest", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
         });
         return;
     }
     SpeciesView packed = r.halo.species;
-    Kokkos::parallel_for("les_gradients_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("les_gradients_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) packed(c, i * N_DIM + j) = g(c, i, j);
     });
     halo.exchange(r.halo);
-    Kokkos::parallel_for("les_gradients_unpack", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("les_gradients_unpack", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
         FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = packed(c, i * N_DIM + j);
     });
 }
@@ -1038,11 +1039,11 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
     update_boundary_states(t);
     if (is_mixture()) {
         update_cell_states(state(), false);
-        Kokkos::parallel_for("mixture_transport", mesh->n_cells,
+        gated::parallel_for("mixture_transport", mesh->n_cells,
                              MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                      transport_values});
         with_rotations(mesh->periodic_maps(), [&](auto rotations) {
-            Kokkos::parallel_for("mixture_gradients", n,
+            gated::parallel_for("mixture_gradients", n,
                                  MixtureGradientFunctor<decltype(rotations)::value>{
                                      viscous_gradient, transport_values, transport_gradients, bc_transport_values,
                                      mixture.n_species, cell_transport});
@@ -1051,13 +1052,13 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         const Euler phys = physics;
         StateView U = conservatives;
         Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-        Kokkos::parallel_for("les_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("les_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
             rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE cons[i] = U(c, i);
             phys.compute_W_from_conservatives(W_c, cons);
             FOR_I_CONSERVATIVE W(c, i) = W_c[i];
         });
-        Kokkos::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
+        gated::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
     }
     // The right-hand side's reconstruction writes the polynomials' gradients of its stage, and may be running;
     // here, those of this state
@@ -1070,7 +1071,7 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
 
 rtype Solver::kinetic_energy_rate() const {
     rtype sum = 0.0_r;
-    Kokkos::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
+    gated::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
                             KineticEnergyRateFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                      mesh->cells_of_face, face_flux, W_cells, mesh->periodic_maps(),
                                                      mesh->face_shift},
@@ -1080,7 +1081,7 @@ rtype Solver::kinetic_energy_rate() const {
 
 rtype Solver::pressure_work_rate() const {
     rtype sum = 0.0_r;
-    Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
+    gated::parallel_reduce("pressure_work_rate", mesh->n_owned(),
                             PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                                 mesh->face_normals, face_flux, W_cells, mesh->periodic_maps(),
                                                 mesh->face_shift},
@@ -1089,7 +1090,7 @@ rtype Solver::pressure_work_rate() const {
 }
 
 void Solver::kinetic_energy_rate(rtype * const out) const {
-    Kokkos::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
+    gated::parallel_reduce("kinetic_energy_rate", mesh->n_owned(),
                             KineticEnergyRateFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                      mesh->cells_of_face, face_flux, W_cells, mesh->periodic_maps(),
                                                      mesh->face_shift},
@@ -1102,9 +1103,9 @@ void Solver::budget_rates_of_fluxes(const int stage) {
     switch (stage) {
         case 0:
             // Before the viscous fluxes: the convective rate and the pressure work
-            Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), budget_rates, 0.0_r);
+            gated::fill(budget_rates, 0.0_r);
             kinetic_energy_rate(rates);
-            Kokkos::parallel_reduce("pressure_work_rate", mesh->n_owned(),
+            gated::parallel_reduce("pressure_work_rate", mesh->n_owned(),
                                     PressureWorkFunctor{mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                         mesh->cells_of_face, mesh->face_normals, face_flux, W_cells,
                                                         mesh->periodic_maps(), mesh->face_shift},
@@ -1113,12 +1114,12 @@ void Solver::budget_rates_of_fluxes(const int stage) {
         case 1:
             // After them: the viscous rate is what they added
             kinetic_energy_rate(rates + 1);
-            Kokkos::parallel_for("budget_viscous", 1, KOKKOS_LAMBDA(const int) { b(1) = b(1) - b(0); });
+            gated::parallel_for("budget_viscous", 1, KOKKOS_LAMBDA(const int) { b(1) = b(1) - b(0); });
             break;
         default:
             // The SGS fluxes alone: their rate, out of the viscous one
             kinetic_energy_rate(rates + 2);
-            Kokkos::parallel_for("budget_sgs", 1, KOKKOS_LAMBDA(const int) { b(1) -= b(2); });
+            gated::parallel_for("budget_sgs", 1, KOKKOS_LAMBDA(const int) { b(1) -= b(2); });
             break;
     }
 }
@@ -1135,7 +1136,7 @@ void Solver::enqueue_kinetic_energy_budget() {
     allocate_budget();
     // Freezing moves the temperature seeds: restored, so that output does not change the solution
     if (double_flux) {
-        Kokkos::deep_copy(exec, budget_T_seed, T_seed);
+        gated::copy(exec, budget_T_seed, T_seed);
         freeze_thermodynamics();
         cells_frozen = true;
     }
@@ -1144,7 +1145,7 @@ void Solver::enqueue_kinetic_energy_budget() {
     budget_pass = false;
     if (double_flux) {
         cells_frozen = false;
-        Kokkos::deep_copy(exec, T_seed, budget_T_seed);
+        gated::copy(exec, T_seed, budget_T_seed);
     }
     if (is_distributed()) comm::allreduce_device(budget_rates, comm::Op::SUM, halo.uses_nccl());
 }

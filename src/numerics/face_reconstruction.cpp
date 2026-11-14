@@ -10,6 +10,7 @@
  */
 
 #include "face_reconstruction.h"
+#include "gated.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -80,7 +81,7 @@ void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSER
     const auto face_shift = mesh->face_shift;
     const PeriodicMaps periodic = mesh->periodic_maps();
     const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
-    Kokkos::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t f = faces(k);
         for (uint32_t q = 0; q < n_quad; q++) {
             rtype u[N_DIM];
@@ -139,11 +140,11 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
     const auto faces = image_point_faces;
     const auto cells = image_point_cells;
     const auto W = image_point_W;
-    Kokkos::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+    gated::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE W(p, i) = solution(cells(p / n_quad), i);
     });
     point_values(solution, cells, image_point_offsets, W);
-    Kokkos::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+    gated::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE face_solution(faces(p / n_quad), p % n_quad, 1, i) = W(p, i);
     });
 }
@@ -416,7 +417,7 @@ struct FirstOrderFunctor {
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     FirstOrderFunctor recon_functor(mesh->cells_of_face, face_solution, solution);
-    Kokkos::parallel_for(mesh->n_faces, recon_functor);
+    gated::parallel_for(mesh->n_faces, recon_functor);
 }
 
 MUSCL::MUSCL() {
@@ -673,7 +674,7 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                               face_solution},
                              cells};
     const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
-    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
+    gated::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
                          functor);
 }
 
@@ -686,10 +687,10 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
         return;
     }
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
-    Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
+    gated::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
 
     LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K};
-    Kokkos::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
+    gated::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
 
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
@@ -700,5 +701,5 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   gradients,
                                   limiters,
                                   face_solution};
-    Kokkos::parallel_for("muscl_faces", mesh->n_faces, face_functor);
+    gated::parallel_for("muscl_faces", mesh->n_faces, face_functor);
 }

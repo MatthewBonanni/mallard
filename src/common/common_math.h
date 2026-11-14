@@ -19,6 +19,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
+#include "gated.h"
 
 /** @brief SplitMix64 finalizer: a well-mixed 64-bit hash of z, the same on every device and rank. */
 KOKKOS_INLINE_FUNCTION
@@ -616,7 +617,7 @@ std::array<rtype, N> max_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> max;
     for (uint32_t i = 0; i < N; ++i) {
         rtype max_i = std::numeric_limits<rtype>::lowest();
-        Kokkos::parallel_reduce(a.extent(0),
+        gated::parallel_reduce(a.extent(0),
                                 KOKKOS_LAMBDA(const uint32_t j, rtype & max_j) {
             if (a(j, i) > max_j) {
                 max_j = a(j, i);
@@ -639,7 +640,7 @@ std::array<rtype, N> min_array(Kokkos::View<rtype **> a) {
     std::array<rtype, N> min;
     for (uint32_t i = 0; i < N; ++i) {
         rtype min_i = std::numeric_limits<rtype>::max();
-        Kokkos::parallel_reduce(a.extent(0),
+        gated::parallel_reduce(a.extent(0),
                                 KOKKOS_LAMBDA(const uint32_t j, rtype & min_j) {
             if (a(j, i) < min_j) {
                 min_j = a(j, i);

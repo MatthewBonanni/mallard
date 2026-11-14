@@ -446,12 +446,20 @@ host decides as before.
 The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
 Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
 time-step reduction reads, as before, with minus rank 0's wall time (the other ranks post the largest value),
-which the reduction's minimum gives every rank for the triggers that read `wall`. The step body sits under a conditional IF node on a device flag: after
-a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
-the launches already enqueued do nothing; the host then acts on that step's state with the code of the
-one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
-launch one step at a time with the IF bodies always run.
+which the reduction's minimum gives every rank for the triggers that read `wall`. After a step the host must
+act on (or a divergence, or the last allowed rejection), the device clears a flag, and the launches already
+enqueued do nothing; the host then acts on that step's state with the code of the one-step path. The graph has
+no conditional nodes: every launch runs every node, and each kernel exits at once unless its gate is set.
+`Solver::device_if` opens a gate: a kernel copies its flag, and the gate of the code around it, into a gate of
+its own, which every kernel of its body tests, so a body's kernels follow the flag as it was when the body began
+even where the body clears it. Every top-level kernel launches through `src/common/gated.h` (a CMake check
+rejects Kokkos's own launches), which tests the innermost gate; a reduction that does nothing leaves its
+destination as it was, by copying it into the result in the reduction's final step. The step body holds no
+memory copy or fill, which would still run (the tests' `StepGraphGuard` reports them). The NCCL operations
+always run, on the same buffers on every rank, since the flags come from values reduced over the ranks; host
+nodes, which NCCL adds to the operations it captures when it communicates over a network, are then allowed,
+which a conditional node's body forbids. A launch after a stop costs its kernels' launches and the NCCL
+latency instead of nothing, `step_queue` - 1 times per stop.
 
 Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
 the host).
@@ -459,7 +467,7 @@ the host).
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
 step the device goes on from and advances their clocks, and the step's target time (the next output time, as
-`next_target_time` has it) follows them. Under an IF node on that decision the graph does `write_data`'s
+`next_target_time` has it) follows them. Gated by that decision the graph does `write_data`'s
 device work at the device's `t` (the primitives, the transport, the heat release, the eddy viscosity, the
 gradients and derived fields) and copies every array the files read, with the statistics' clocks, the step
 controller's slots, the characteristic faces' state and the triggers' states, into the host's mirrors. The
@@ -470,7 +478,7 @@ it has written in the step's time-step reduction, whose minimum the device compa
 staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
 `[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
 spectra, phase averages (whose files and restart arrays read the device) stop the
-device at their steps, as do all outputs of builds without conditional nodes.
+device at their steps, as do all outputs of runs without step graphs.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -480,7 +488,7 @@ reduces them over the ranks as it takes the record.
 
 Force and integral monitors are evaluated in the graph. After a step's end, a kernel sets one flag per
 monitor (the step is accepted, the device goes on, and the step is a multiple of the monitor's interval);
-each monitor's reduction sits under an IF node on its flag and is reduced over the ranks on the device
+each monitor's reduction is gated by its flag and is reduced over the ranks on the device
 (NCCL in NCCL builds), then copied into a pinned array per record slot with a bit in the record. The host
 writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
 monitors itself, with the same device reduction, so rows match at any depth.
@@ -509,9 +517,9 @@ them take effect at the host's next step.
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
 of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
-flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
+flushed yet; gated by it, the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
 last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
-audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code
+audit, as on the host). After the progress row a last gate copies them back. The flush runs the host's code
 on the same inputs, so the samples are the host-flushed ones bit for bit, and since the kept buffers include
 the integrator's counts and costs, a flush leaves no trace in the steps after it: a step the device flushed
 for and the host then takes (a trigger fires) is flushed again by the host from the same state. A failed

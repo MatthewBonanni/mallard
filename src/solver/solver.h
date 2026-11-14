@@ -461,15 +461,17 @@ class Solver {
         void captured_launch();
         void device_step_body();
         /**
-         * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
+         * @brief Fused chemistry: applies the pending half step (device_if) if any of the n device
          *        flags is set and the launch has not yet flushed, for the parts of the step's end that read the state.
          */
         void flush_chemistry_if(const uint32_t * flags, uint32_t n);
         /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
         void unflush_chemistry_on_device();
         void capture_step_graph();
-        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
-        bool conditional_nodes_work();
+        /**
+         * @brief Runs body if the device flag is set: in a step graph's launch, gated (gated.h) by the flag and
+         *        every enclosing one as they were when it began; else as the host reads the flag.
+         */
         template <typename F>
         void device_if(const uint32_t * flag, F && body);
         /** @brief The record of the oldest launch not yet taken, once it ran; passes on requests while waiting. */
@@ -701,7 +703,7 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
-        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
+        /** @brief What breaks a step graph's capture inside the step's body (tests). */
         enum class CaptureFault {
             NONE,
             FENCE,         // fails while the stream captures
@@ -941,11 +943,12 @@ class Solver {
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
-        void * capture_graph = nullptr;        // cudaGraph_t being captured
         uint64_t graph_steps = 0;
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
-        bool conditional_steps = false;        // launches after a stop do nothing
+        bool gating = false;                   // in a step graph's launch: device_if gates its body
+        uint32_t gate_depth = 0;               // device_if's nesting
+        Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction

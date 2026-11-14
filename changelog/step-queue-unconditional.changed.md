@@ -1,0 +1,1 @@
+- Multi-node NCCL runs now enqueue steps ahead of the GPU (`[run] step_queue`) instead of launching one step at a time, as do CUDA builds older than 12.4: the step graph no longer uses conditional nodes, and in the launches after a stop every kernel of the step exits at once. Results and files are the same bit for bit (#787).

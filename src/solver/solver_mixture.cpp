@@ -11,6 +11,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <limits>
@@ -415,7 +416,7 @@ struct MixtureGeometricSourceFunctor {
 
 void Solver::mixture_reductions(step_queue::MixtureDiagnostics * out) {
     using Memory = Kokkos::DefaultExecutionSpace::memory_space;
-    Kokkos::parallel_reduce("mixture_diagnostics", mesh->n_owned(),
+    gated::parallel_reduce("mixture_diagnostics", mesh->n_owned(),
                             MixtureDiagnosticsFunctor{mixture, conservatives, species, T_seed},
                             Kokkos::View<step_queue::MixtureDiagnostics, Memory>(out));
 }
@@ -424,7 +425,7 @@ void Solver::update_cell_states(const State & solution, const bool update_seed) 
     MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars,
                                cell_molar_mass, cells_frozen ? frozen_thermo : Kokkos::View<rtype *[2]>(),
                                update_seed, {}};
-    Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
+    gated::parallel_for("mixture_cells", mesh->n_cells, functor);
 }
 
 void Solver::update_cell_states_and_primitives() {
@@ -435,15 +436,15 @@ void Solver::update_cell_states_and_primitives() {
     }
     MixtureCellFunctor functor{mixture, conservatives, species, T_seed, W_cells, cell_scalars, cell_molar_mass,
                                Kokkos::View<rtype *[2]>(), false, primitives};
-    Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
+    gated::parallel_for("mixture_cells", mesh->n_cells, functor);
 }
 
 void Solver::update_transport() {
-    Kokkos::parallel_for("mixture_transport", mesh->n_cells,
+    gated::parallel_for("mixture_transport", mesh->n_cells,
                          MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                  transport_values});
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
-        Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+        gated::parallel_for("mixture_gradients", mesh->n_cells,
                              MixtureGradientFunctor<decltype(rotations)::value>{
                                  viscous_gradient, transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport});
@@ -451,29 +452,29 @@ void Solver::update_transport() {
 }
 
 void Solver::freeze_thermodynamics() {
-    Kokkos::parallel_for("freeze_thermodynamics", mesh->n_cells,
+    gated::parallel_for("freeze_thermodynamics", mesh->n_cells,
                          FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
 }
 
 void Solver::reset_energy() {
     ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}};
     if (run_health.reset_site == HealthState::NONE) {
-        Kokkos::parallel_for("reset_energy", mesh->n_owned(), functor);
+        gated::parallel_for("reset_energy", mesh->n_owned(), functor);
         return;
     }
     const RepairRecorder recorder = run_health.repairs.recorder(run_health.reset_site);
     functor.volume = mesh->cell_measure;
     functor.touched = recorder.touched;
     const Kokkos::View<double *> sums = run_health.reset_sums;
-    Kokkos::parallel_reduce("reset_energy", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor, sums);
-    Kokkos::parallel_for("reset_energy_record", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_reduce("reset_energy", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor, sums);
+    gated::parallel_for("reset_energy_record", 1, KOKKOS_LAMBDA(const int) {
         recorder.change(0) += sums(0);
         recorder.activations(0) += static_cast<uint64_t>(sums(1));
     });
 }
 
 void Solver::init_temperature_seed() {
-    Kokkos::parallel_for("temperature_seed", mesh->n_cells, TemperatureFunctor{mixture, conservatives, species, T_seed});
+    gated::parallel_for("temperature_seed", mesh->n_cells, TemperatureFunctor{mixture, conservatives, species, T_seed});
 }
 
 void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype c) {
@@ -527,10 +528,10 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
                 mesh->cell_covariance, les_coefficients, sgs_only,
                 double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
             if (rhs_faces.extent(0) == 0) {
-                Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, functor);
+                gated::parallel_for("mixture_viscous_flux", mesh->n_faces, functor);
             } else {
                 Kokkos::View<uint32_t *> list = rhs_faces;
-                Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
+                gated::parallel_for("mixture_viscous_flux", list.extent(0),
                                      OverFaces<decltype(functor)>{functor, list});
             }
         });
@@ -548,19 +549,19 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (double_flux) {
         DoubleFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                          face_flux, face_energy_1, rhs, mesh->periodic_maps(), mesh->face_shift};
-        Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
+        gated::parallel_for("face_flux_sum", n_owned, sum_functor);
     } else {
         FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                        face_flux, rhs, mesh->periodic_maps(), mesh->face_shift};
-        Kokkos::parallel_for("face_flux_sum", n_owned, sum_functor);
+        gated::parallel_for("face_flux_sum", n_owned, sum_functor);
     }
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                   mesh->cell_measure, species_slots, rhs_state.species, n_species};
-    Kokkos::parallel_for("species_sum", n_owned, species_sum);
+    gated::parallel_for("species_sum", n_owned, species_sum);
 
     if (axisymmetric) {
         const bool viscous = is_viscous();
-        Kokkos::parallel_for("geometric_source", n_owned,
+        gated::parallel_for("geometric_source", n_owned,
                              MixtureGeometricSourceFunctor{W_cells, viscous ? cell_transport : Kokkos::View<rtype *[3]>(),
                                                            transport_gradients, mesh->cell_volume, mesh->cell_coords,
                                                            geometric_source});
@@ -575,7 +576,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (hold_mass_flow) add_mass_flow_force(solution, rhs);
     if (radiating) add_radiation(rhs, state.species);
 
-    Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state, t_stage, c);
@@ -584,7 +585,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
-        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), face_flux, 0.0_r);
+        gated::fill(face_flux, 0.0_r);
         sgs_only = true;
         viscous_flux();
         budget_rates_of_fluxes(2);
@@ -612,10 +613,10 @@ void Solver::launch_mixture_flux_functor() {
         central_states()};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
+        gated::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
+        gated::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
 
@@ -641,10 +642,10 @@ void Solver::launch_double_flux_functor() {
         face_reconstruction->face_quad_normals,
         central_states()};
     if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
+        gated::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {
         Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
+        gated::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
                              OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
     }
 }
@@ -665,7 +666,7 @@ rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
     } else {
         update_cell_states(state(), false);
         if (is_viscous()) {
-            Kokkos::parallel_for("mixture_transport", mesh->n_owned(),
+            gated::parallel_for("mixture_transport", mesh->n_owned(),
                                  MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                          transport_values});
         }
@@ -675,14 +676,14 @@ rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
                                    mesh->periodic_maps(), mesh->face_shift};
-    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+    gated::parallel_reduce("time_step", mesh->n_owned(), functor,
                             Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(
                                 on_device.data() ? on_device : dt_reduce_slot()));
     return on_device.data() ? 0.0_r : reduce_dt();
 }
 
 void Solver::update_primitives_mixture() {
-    Kokkos::parallel_for("update_primitives", mesh->n_cells,
+    gated::parallel_for("update_primitives", mesh->n_cells,
                          MixturePrimitivesFunctor{mixture, conservatives, species, T_seed, primitives});
 }
 
@@ -691,7 +692,7 @@ std::vector<rtype> Solver::integrate_species() {
     std::vector<rtype> total(species_names.size());
     for (uint32_t k = 0; k < total.size(); k++) {
         rtype sum = 0.0_r;
-        Kokkos::parallel_reduce("integrate_species", mesh->n_owned(),
+        gated::parallel_reduce("integrate_species", mesh->n_owned(),
                                 SpeciesIntegralFunctor{species, mesh->cell_measure, k}, sum);
         total[k] = sum;
     }

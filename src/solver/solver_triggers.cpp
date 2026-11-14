@@ -10,6 +10,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <limits>
@@ -164,7 +165,7 @@ void Solver::evaluate_triggers() {
     const rtype * const wall = step_wall_device();
     const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
     const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
-    Kokkos::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
         step_queue::Record & record = records((L.seq - 1) % n_records);

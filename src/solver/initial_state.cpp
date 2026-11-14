@@ -10,6 +10,7 @@
  */
 
 #include "initial_state.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -1746,7 +1747,7 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
             }
             Kokkos::deep_copy(e.base_cells, h_base_cells);
         }
-        Kokkos::parallel_for("initial_state", Kokkos::RangePolicy<>(0, n), e);
+        gated::parallel_for("initial_state", Kokkos::RangePolicy<>(0, n), e);
         Kokkos::deep_copy(h_result, e.result);
         Kokkos::deep_copy(h_kept, e.kept);
         for (uint32_t r = 0; r < n; r++) {

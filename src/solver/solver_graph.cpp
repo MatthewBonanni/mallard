@@ -13,12 +13,13 @@
  * would (step_queue.h) and writes what the host needs into a pinned record.
  * The host keeps step_queue launches ahead and reads the records after the
  * steps ran. At a step the host must act on, the device stops: the launches
- * after it are no-ops (a conditional node around the step), and the host acts
- * on the device's state of that step, then resumes.
+ * after it do nothing (every kernel of the step exits at once, gated.h), and
+ * the host acts on the device's state of that step, then resumes.
  *
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <limits>
 #include <stdexcept>
@@ -34,10 +35,6 @@
 #include "log.h"
 #include "probe_fluxes.h"
 #include "run_control.h"
-
-#if defined(KOKKOS_ENABLE_CUDA) && CUDART_VERSION >= 12040
-#define MALLARD_CONDITIONAL_NODES 1
-#endif
 
 namespace {
 
@@ -55,80 +52,15 @@ void cuda_check(const cudaError_t err, const char * what) {
 
 cudaStream_t step_stream() { return Kokkos::DefaultExecutionSpace().cuda_stream(); }
 
-void begin_capture(cudaGraph_t graph, const cudaGraphNode_t * after, const size_t n_after) {
-    cuda_check(cudaStreamBeginCaptureToGraph(step_stream(), graph, after, nullptr, n_after, cudaStreamCaptureModeRelaxed),
-               "cudaStreamBeginCaptureToGraph");
-}
-
-/** @brief A capture that cudaStreamEndCapture reports invalidated: it has ended, and the driver destroyed its graph. */
-struct CaptureInvalidated : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
-void end_capture(cudaGraph_t graph) {
-    const cudaError_t err = cudaStreamEndCapture(step_stream(), &graph);
-    if (err == cudaErrorStreamCaptureInvalidated) {
-        throw CaptureInvalidated(std::string("cudaStreamEndCapture: ") + cudaGetErrorString(err));
-    }
-    cuda_check(err, "cudaStreamEndCapture");
-}
-
-/**
- * @brief Ends a capture that failed with error, if the stream still captures.
- * @return Whether the capture was invalidated, while the stream still captured or as cudaStreamEndCapture reported
- *         it. The driver then destroys the graph it captured into: the step graph, or a conditional node's body,
- *         which leaves the step graph holding a destroyed body. Destroying the step graph or that node then crashes
- *         in the driver, so the step graph is left to the process (once per run).
- */
-bool abandon_capture(const std::exception & error) {
+/** @brief Ends a capture that failed, if the stream still captures, and destroys what it captured. */
+void abandon_capture() {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaStreamIsCapturing(step_stream(), &status);
     if (status != cudaStreamCaptureStatusNone) {
         cudaGraph_t graph = nullptr;
-        cudaStreamEndCapture(step_stream(), &graph);
+        if (cudaStreamEndCapture(step_stream(), &graph) == cudaSuccess && graph) cudaGraphDestroy(graph);
     }
     cudaGetLastError();
-    return status == cudaStreamCaptureStatusInvalidated || dynamic_cast<const CaptureInvalidated *>(&error);
-}
-#endif
-
-#ifdef MALLARD_CONDITIONAL_NODES
-/** @brief The nodes the stream's next captured work would depend on. */
-std::vector<cudaGraphNode_t> capture_frontier() {
-    cudaStreamCaptureStatus status;
-    const cudaGraphNode_t * nodes = nullptr;
-    size_t n = 0;
-#if CUDART_VERSION >= 13000
-    cuda_check(cudaStreamGetCaptureInfo(step_stream(), &status, nullptr, nullptr, &nodes, nullptr, &n),
-               "cudaStreamGetCaptureInfo");
-#else
-    cuda_check(cudaStreamGetCaptureInfo(step_stream(), &status, nullptr, nullptr, &nodes, &n), "cudaStreamGetCaptureInfo");
-#endif
-    return std::vector<cudaGraphNode_t>(nodes, nodes + n);
-}
-
-/** @brief Adds an IF node after the given nodes; returns it and its body. */
-std::pair<cudaGraphNode_t, cudaGraph_t> add_if_node(cudaGraph_t graph, const std::vector<cudaGraphNode_t> & after,
-                                                    const cudaGraphConditionalHandle handle) {
-    cudaGraphNodeParams params = {};
-    params.type = cudaGraphNodeTypeConditional;
-    params.conditional.handle = handle;
-    params.conditional.type = cudaGraphCondTypeIf;
-    params.conditional.size = 1;
-    cudaGraphNode_t node = nullptr;
-#if CUDART_VERSION >= 13000
-    cuda_check(cudaGraphAddNode(&node, graph, after.data(), nullptr, after.size(), &params), "cudaGraphAddNode");
-#else
-    cuda_check(cudaGraphAddNode(&node, graph, after.data(), after.size(), &params), "cudaGraphAddNode");
-#endif
-    return {node, params.conditional.phGraph_out[0]};
-}
-
-void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * flag) {
-    Kokkos::parallel_for("step_condition", 1, KOKKOS_LAMBDA(const int) {
-        KOKKOS_IF_ON_DEVICE((cudaGraphSetConditional(handle, *flag ? 1u : 0u);))
-        KOKKOS_IF_ON_HOST(((void)handle; (void)flag;))
-    });
 }
 #endif
 
@@ -152,7 +84,8 @@ std::string Solver::step_graph_unsupported() const {
 }
 
 void Solver::flag_timed_boundaries() {
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), boundary_failed, 0.0);
+    const Kokkos::View<double *> any_failed = boundary_failed;
+    gated::parallel_for("step_boundary_reset", 1, KOKKOS_LAMBDA(const int) { any_failed(0) = 0.0; });
     timed_fields.flag_error(boundary_failed);
     dirichlet_states.flag_error(boundary_failed);
     timed_inlets.flag_error(boundary_failed);
@@ -161,7 +94,7 @@ void Solver::flag_timed_boundaries() {
     const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
     const uint64_t n_records = step_records.extent(0);
     const Kokkos::View<double *> failed = boundary_failed;
-    Kokkos::parallel_for("step_boundary_check", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_boundary_check", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         if (!L.progress || failed(0) == 0.0) return;
         // The host's check at this row throws
@@ -172,14 +105,19 @@ void Solver::flag_timed_boundaries() {
 }
 
 void Solver::record_step() {
-    const Kokkos::DefaultExecutionSpace exec;
     // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES), and no target
     // or wave the host advanced before stands for one of the graph's
     recording_step = true;
     t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
     // The run-control requests ride along the time-step reduction
-    Kokkos::deep_copy(exec, step_requests, requests_posted);
-    Kokkos::deep_copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)), step_requests);
+    {
+        const Kokkos::View<rtype *> requests = step_requests, reduce = step_reduce;
+        const Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> posted = requests_posted;
+        gated::parallel_for("step_requests", N_POSTED, KOKKOS_LAMBDA(const int i) {
+            requests(i) = posted(i);
+            reduce(1 + i) = posted(i);
+        });
+    }
     // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     exchange_for_first_stage();
     update_boundary_states(t);
@@ -191,7 +129,7 @@ void Solver::record_step() {
     const rtype cfl_ = cfl, dt_fixed_ = dt_fixed, sponge_dt_max_ = sponge_dt_max;
     const bool controlled = step_controller.enabled();
     const Kokkos::View<rtype *> control = step_controller.slots();
-    Kokkos::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_dt", 1, KOKKOS_LAMBDA(const int) {
         // calc_dt's arithmetic; volatile keeps the compiler from fusing the
         // product into the comparison's sum (one rounding instead of two)
         volatile rtype dt_v = use_cfl_ ? cfl_ * r(0) : dt_fixed_;
@@ -206,24 +144,25 @@ void Solver::record_step() {
     });
     if (last_good.flow.is_allocated()) save_last_good_if_valid(r);
     const Kokkos::View<rtype *> c = cfl_local;
-    Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = s(STEP_DT) / c(i);
     });
     // take_step
     if (reacting) {
         cell_chemistry.begin_step();
-        Kokkos::deep_copy(exec, chem_cost, 0.0_r);
+        const Kokkos::View<rtype *> cost = chem_cost;
+        gated::parallel_for("chemistry_cost_reset", cost.extent(0), KOKKOS_LAMBDA(const size_t i) { cost(i) = 0.0_r; });
     }
     const Kokkos::View<double> chem = chem_dt;
     const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
     if (simpler) {
         // take_simpler_step, at the device's t and dt
         calc_rhs(state(), transport_rate, t);
-        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = static_cast<double>(s(STEP_DT)); });
+        gated::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = static_cast<double>(s(STEP_DT)); });
         const ChemistryForcing forcing{transport_rate, rhs_vec[0]};
         run_chemistry(&forcing);
         halo_current = false;
-        Kokkos::parallel_for("simpler_half_step", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("simpler_half_step", 1, KOKKOS_LAMBDA(const int) {
             const rtype step_half = 0.5_r * s(STEP_DT);
             s(T_HALF) = s(T) + step_half;
             dt_scales(step_half, &s(HALF_SCALES));
@@ -235,7 +174,7 @@ void Solver::record_step() {
         simpler_half_step = false;
     } else {
         if (reacting) {
-            Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) {
+            gated::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) {
                 chem() = io(0) + 0.5 * static_cast<double>(s(STEP_DT));
             });
             run_chemistry(nullptr);
@@ -269,7 +208,7 @@ void Solver::record_step() {
         reset_energy();
     }
     if (reacting && !simpler && !defer_chemistry) {
-        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = 0.5 * static_cast<double>(s(STEP_DT)); });
+        gated::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = 0.5 * static_cast<double>(s(STEP_DT)); });
         run_chemistry(nullptr);
     }
     if (reacting) reduce_chemistry_failures();
@@ -281,7 +220,7 @@ void Solver::set_stage_time(const rtype t_stage, const rtype c) {
     if (recording_step) {
         record_stage_time(c);
     } else {
-        Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
+        gated::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
     }
 }
 
@@ -289,7 +228,7 @@ void Solver::record_stage_time(const rtype c) {
     const Kokkos::View<rtype> st = stage_time;
     const Kokkos::View<rtype *> s = step_scalars;
     const int origin = simpler_half_step ? T_HALF : T, h = simpler_half_step ? HALF_DT : STEP_DT;
-    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = time_of_stage(s(origin), c, s(h)); });
+    gated::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = time_of_stage(s(origin), c, s(h)); });
 }
 
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
@@ -300,33 +239,24 @@ const rtype * Solver::step_wall_device() const { return step_reduce.data() + WAL
 
 template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
-#ifdef MALLARD_CONDITIONAL_NODES
-    if (capture_graph) {
-        if (!conditional_steps) {
-            // One step per launch: the body (of pure reductions, or a step that is due) runs every time
-            body();
-            return;
+    if (gating) {
+        // The body's kernels exit at once unless the flag and every enclosing one were set when it began
+        if (gate_depth >= step_gates.extent(0)) throw std::logic_error("Solver::device_if: nested too deeply");
+        const uint32_t * const parent = gated::flag();
+        uint32_t * const gate = step_gates.data() + gate_depth;
+        {
+            const gated::Scope always(nullptr);
+            gated::parallel_for("step_gate", 1, KOKKOS_LAMBDA(const int) { *gate = (!parent || *parent) && *flag; });
         }
-        cudaGraph_t graph = static_cast<cudaGraph_t>(capture_graph);
-        cudaGraphConditionalHandle handle;
-        cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
-                   "cudaGraphConditionalHandleCreate");
-        set_condition(handle, flag);
-        const std::vector<cudaGraphNode_t> after = capture_frontier();
-        end_capture(graph);
-        const auto [node, branch] = add_if_node(graph, after, handle);
-        capture_graph = branch;
-        begin_capture(branch, nullptr, 0);
+        const gated::Scope scope(gate);
+        gate_depth++;
         body();
-        end_capture(branch);
-        capture_graph = graph;
-        begin_capture(graph, &node, 1);
+        gate_depth--;
         return;
     }
-#endif
     uint32_t on = 0;
     {
-        // A conditional node's decision, read by the host
+        // The gate's decision, read by the host
         const comm::HostStaged staged;
         Kokkos::deep_copy(on, Kokkos::View<const uint32_t, DeviceMemory>(flag));
     }
@@ -338,7 +268,7 @@ void Solver::count_nonfinite() {
     const StateView U = conservatives;
     const SpeciesView Y = species;
     const uint32_t n_species = species.span() > 0 ? static_cast<uint32_t>(Y.extent(1)) : 0;
-    Kokkos::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, int64_t & bad) {
+    gated::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, int64_t & bad) {
         FOR_I_CONSERVATIVE {
             if (!Kokkos::isfinite(U(i_cell, i))) bad++;
         }
@@ -357,7 +287,7 @@ void Solver::device_step_body() {
     const Kokkos::View<rtype *> r = step_reduce, s = step_scalars, local = step_requests;
     const bool controlled = step_controller.enabled();
     const Kokkos::View<rtype *> control = step_controller.slots();
-    Kokkos::parallel_for("step_end", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_end", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         step_queue::Record & record = records((L.seq - 1) % n_records);
         int32_t contributed = 0, reduced = 0;
@@ -383,7 +313,7 @@ void Solver::device_step_body() {
         const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
         const bool deferred = defer_chemistry && !simpler;
         const uint32_t * const grows = cell_chemistry.balance_grows();
-        Kokkos::parallel_for("step_chemistry", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("step_chemistry", 1, KOKKOS_LAMBDA(const int) {
             step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
             record.chemistry_ns = L.chemistry_ns;
@@ -401,7 +331,7 @@ void Solver::device_step_body() {
         // check_fields after the step
         count_nonfinite();
         const Kokkos::View<int64_t *> n = n_nonfinite;
-        Kokkos::parallel_for("step_nonfinite", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("step_nonfinite", 1, KOKKOS_LAMBDA(const int) {
             step_queue::Loop & L = loop();
             if (!L.advanced || n(0) == 0) return;
             records((L.seq - 1) % n_records).reasons |= step_queue::NONFINITE;
@@ -419,7 +349,7 @@ void Solver::device_step_body() {
         const Kokkos::View<uint32_t *> due = monitor_due;
         const Kokkos::View<uint64_t *> intervals = monitor_intervals;
         const uint32_t n_monitors = static_cast<uint32_t>(monitor_due.extent(0));
-        Kokkos::parallel_for("monitors_due", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("monitors_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
             record.monitors = 0;
@@ -435,7 +365,7 @@ void Solver::device_step_body() {
                 const Kokkos::View<double *> values = monitor_results;
                 const Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged = monitor_staging;
                 const size_t first = monitor_offsets[k], last = monitor_offsets[k + 1];
-                Kokkos::parallel_for("monitor_staged", 1, KOKKOS_LAMBDA(const int) {
+                gated::parallel_for("monitor_staged", 1, KOKKOS_LAMBDA(const int) {
                     const uint64_t slot = (loop().seq - 1) % n_records;
                     for (size_t i = first; i < last; i++) staged(slot, i) = values(i);
                 });
@@ -459,7 +389,7 @@ void Solver::device_step_body() {
         const bool staged_spectra = spectra && !statistics.get_spectra().averaged();
         const uint64_t every = statistics.sampling_interval(), spectra_every = statistics.get_spectra().sampling_interval(),
                        phase_every = statistics.get_phase().sampling_interval();
-        Kokkos::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             const bool on = L.active && L.advanced;
             due(0) = means && on && L.step % every == 0 && s(T) > clock().t_start;
@@ -474,12 +404,12 @@ void Solver::device_step_body() {
             const ConditionalStatistics & entry = statistics.get_conditional()[i];
             const Kokkos::View<const ConditionalStatistics::Clock> entry_clock = entry.device_clock();
             const uint64_t entry_every = entry.sampling_interval();
-            Kokkos::parallel_for("conditional_due", 1, KOKKOS_LAMBDA(const int) {
+            gated::parallel_for("conditional_due", 1, KOKKOS_LAMBDA(const int) {
                 const step_queue::Loop & L = loop();
                 due(3 + i) = L.active && L.advanced && L.step % entry_every == 0 && double(s(T)) > entry_clock().t_start;
             });
         }
-        Kokkos::parallel_for("statistics_any_due", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("statistics_any_due", 1, KOKKOS_LAMBDA(const int) {
             uint32_t any = 0;
             for (size_t i = 0; i < 3 + n_conditional; i++) any |= due(i);
             due(3 + n_conditional) = any;
@@ -521,7 +451,7 @@ void Solver::device_step_body() {
         const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
         const uint64_t average_interval = probes.get_average_interval();
         const rtype average_start = probes.get_average_start();
-        Kokkos::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
             record.probes = record.probe_samples = 0;
@@ -584,7 +514,7 @@ void Solver::device_step_body() {
         const Kokkos::View<const rtype> target = step_target;
         const uint32_t n_probes = static_cast<uint32_t>(probe_clocks.extent(0));
         const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
-        Kokkos::parallel_for("step_target", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("step_target", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             if (!L.active || !L.advanced) return;
             rtype t_target = target();
@@ -610,7 +540,7 @@ void Solver::device_step_body() {
         const Kokkos::View<double *> values = progress_values;
         const Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged = progress_staging;
         const size_t n_values = staged.extent(1);
-        Kokkos::parallel_for("step_progress", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("step_progress", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             if (!L.progress) return;
             const uint64_t slot = (L.seq - 1) % n_records;
@@ -626,7 +556,7 @@ void Solver::device_step_body() {
 void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
     if (!defer_chemistry) return;
     const Kokkos::View<uint32_t *> f = chemistry_flush;
-    Kokkos::parallel_for("chemistry_flush_due", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_flush_due", 1, KOKKOS_LAMBDA(const int) {
         uint32_t any = 0;
         for (uint32_t i = 0; i < n; i++) any |= flags[i];
         f(0) = any && !f(1);
@@ -637,7 +567,7 @@ void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
         keep_unflushed();
         const Kokkos::View<double> chem = chem_dt;
         const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
-        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = io(0); });
+        gated::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = io(0); });
         const bool recording = recording_step;
         recording_step = true;
         run_chemistry(nullptr, false);
@@ -647,7 +577,7 @@ void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
         const Kokkos::View<step_queue::Loop> loop = step_loop;
         const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
         const uint64_t n_records = step_records.extent(0);
-        Kokkos::parallel_for("chemistry_flush_check", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("chemistry_flush_check", 1, KOKKOS_LAMBDA(const int) {
             step_queue::Loop & L = loop();
             if (!(io(1) > L.chemistry_failures)) return;
             io(1) = L.chemistry_failures;
@@ -664,7 +594,7 @@ void Solver::unflush_chemistry_on_device() {
     device_if(&chemistry_flush.data()[1], [&] {
         restore_unflushed();
         const Kokkos::View<uint32_t *> f = chemistry_flush;
-        Kokkos::parallel_for("chemistry_unflushed", 1, KOKKOS_LAMBDA(const int) { f(1) = 0; });
+        gated::parallel_for("chemistry_unflushed", 1, KOKKOS_LAMBDA(const int) { f(1) = 0; });
     });
     halo_current = false;
 }
@@ -673,6 +603,8 @@ void Solver::captured_launch() {
     // Kokkos Tools see what a capture records: fences, host copies and allocations there break it
     Kokkos::Profiling::ProfilingSection section("step_graph_capture");
     section.start();
+    gating = true;
+    gate_depth = 0;
     try {
         step_prologue();
         device_if(&step_loop.data()->active, [&] {
@@ -688,9 +620,11 @@ void Solver::captured_launch() {
 #endif
         });
     } catch (...) {
+        gating = false;
         section.stop();
         throw;
     }
+    gating = false;
     section.stop();
 }
 
@@ -711,7 +645,7 @@ void Solver::decide_outputs() {
     const Kokkos::View<OutputClock *> clocks = output_clocks;
     const Kokkos::View<uint32_t> due = output_due;
     const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
-    Kokkos::parallel_for("outputs_due", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("outputs_due", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         step_queue::Record & record = records((L.seq - 1) % n_records);
         record.outputs = 0;
@@ -797,14 +731,14 @@ void Solver::monitor_reductions(const size_t k) {
     const Kokkos::View<double *> state = les_state;
     const bool has_state = les_state.is_allocated();
     const double C = static_cast<double>(les.C);
-    Kokkos::parallel_for("integrals_les", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("integrals_les", 1, KOKKOS_LAMBDA(const int) {
         out[N_FLOW_STATISTICS] = has_state ? state(0) : C;
         out[N_FLOW_STATISTICS + 1] = has_state ? state(2) : 0.0;
     });
     if (!integral_monitor.budget) return;
     enqueue_kinetic_energy_budget();
     const Kokkos::View<rtype *> b = budget_rates;
-    Kokkos::parallel_for("integrals_budget", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("integrals_budget", 1, KOKKOS_LAMBDA(const int) {
         // The exact convective rate is the pressure work; the rest is numerical
         double * const budget = out + N_FLOW_STATISTICS + 2;
         budget[0] = double(b(0));
@@ -829,7 +763,7 @@ void Solver::step_prologue() {
     const Kokkos::View<step_queue::Loop> loop = step_loop;
     const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
     const uint64_t n_records = step_records.extent(0);
-    Kokkos::parallel_for("step_begin", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_begin", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         L.seq++;
         step_queue::Record & record = records((L.seq - 1) % n_records);
@@ -848,20 +782,16 @@ void Solver::capture_step_graph() {
     lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
     try {
-        cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
-        capture_graph = graph;
-        begin_capture(graph, nullptr, 0);
+        cuda_check(cudaStreamBeginCapture(step_stream(), cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture");
         captured_launch();
-        graph = static_cast<cudaGraph_t>(capture_graph);
-        end_capture(graph);
-        capture_graph = nullptr;
+        graph = end_capture();
         cudaGraphExec_t exec = nullptr;
         cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
-        if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
-        capture_graph = nullptr;
+        abandon_capture();
+        if (graph) cudaGraphDestroy(graph);
         halo_current = false;
         recording_step = false;
         use_step_graph = false;
@@ -871,53 +801,13 @@ void Solver::capture_step_graph() {
 #endif
 }
 
-bool Solver::conditional_nodes_work() {
-#ifdef MALLARD_CONDITIONAL_NODES
-    // A step under a conditional node captures its NCCL operations there, which fails where NCCL communicates
-    // over a network (it then adds host nodes): try one first, on every rank
-    bool works = true;
-    if (is_distributed() && halo.uses_nccl()) {
-        Kokkos::fence("conditional_nodes");
-        lock_arrays::copy_all();
-        const Kokkos::View<uint32_t> on("conditional_probe_flag");
-        Kokkos::deep_copy(on, 1u);
-        const Kokkos::View<double *> x("conditional_probe", 1);
-        cudaGraph_t graph = nullptr;
-        cudaGraphExec_t exec = nullptr;
-        try {
-            cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
-            capture_graph = graph;
-            begin_capture(graph, nullptr, 0);
-            device_if(on.data(), [&] { comm::allreduce_device(x, comm::Op::SUM, true); });
-            end_capture(graph);
-            cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
-        } catch (const std::exception & e) {
-            if (abandon_capture(e)) graph = nullptr;
-            works = false;
-            logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
-                             "); one step per launch");
-        }
-        capture_graph = nullptr;
-        works = comm::allreduce(static_cast<int>(works), comm::Op::MIN) > 0;
-        if (works) {
-            cuda_check(cudaGraphLaunch(exec, step_stream()), "cudaGraphLaunch");
-            Kokkos::fence("conditional_nodes");
-        }
-        if (exec) cudaGraphExecDestroy(exec);
-        if (graph) cudaGraphDestroy(graph);
-    }
-    return works;
-#else
-    return false;
-#endif
-}
-
 void Solver::begin_device_steps() {
     dt_reduce_slot();
     step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
     step_requests = Kokkos::View<rtype *>("step_requests", N_POSTED);
     requests_posted = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_requests_posted", N_POSTED);
     step_loop = Kokkos::View<step_queue::Loop>("step_loop");
+    step_gates = Kokkos::View<uint32_t *>("step_gates", 8);
     const uint32_t n_records = static_cast<uint32_t>(std::max<uint64_t>(step_queue_depth, 1));
     step_records = Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace>("step_records", n_records);
     if (!progress_device.is_allocated()) progress_device = Kokkos::View<step_queue::ProgressLocals>("step_progress");
@@ -991,15 +881,12 @@ void Solver::begin_device_steps() {
         step_events.push_back(event);
     }
     // Launches that are not graphs read the device's decision on the host: one at a time
-    conditional_steps = use_step_graph;
-    if (conditional_steps) conditional_steps = conditional_nodes_work();
-    queue_depth = conditional_steps ? n_records : 1;
+    const bool queued = use_step_graph;
 #else
-    conditional_steps = true;
-    queue_depth = n_records;
+    const bool queued = true;
 #endif
-    // Graphs without conditional nodes run every IF body: outputs are then the host's
-    staged_outputs = conditional_steps && outputs_stageable();
+    queue_depth = queued ? n_records : 1;
+    staged_outputs = queued && outputs_stageable();
     staged_time_outputs = false;
     requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);
     if (staged_outputs) {
@@ -1217,9 +1104,9 @@ void Solver::destroy_step_graph() {
 void Solver::mark_chemistry_time(const bool start) {
     if (!recording_step) return;
 #ifdef KOKKOS_ENABLE_CUDA
-    // A kernel reading the device's clock: event nodes cannot sit under the step's conditional node
+    // A kernel reading the device's clock, which a launch after a stop skips as it does the step's other kernels
     const Kokkos::View<step_queue::Loop> loop = step_loop;
-    Kokkos::parallel_for("chemistry_clock", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_clock", 1, KOKKOS_LAMBDA(const int) {
         // Captures used in the same order by nvcc's host and device passes, or the kernel's names differ between them
         step_queue::Loop * const L = loop.data();
         const bool starts = start;

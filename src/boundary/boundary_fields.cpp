@@ -10,6 +10,7 @@
  */
 
 #include "boundary_fields.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -802,15 +803,15 @@ void TimedBoundaryFields::apply_profiles(const Kokkos::View<rtype> & time,
                                          const Kokkos::View<BoundaryCondition *> & bcs) const {
     if (profiles.empty()) return;
     const FirstError first_error{profile_error, profile_error_value};
-    Kokkos::parallel_reduce("mass_flow_profile_chunks", static_cast<uint32_t>(chunk_range.extent(0)),
+    gated::parallel_reduce("mass_flow_profile_chunks", static_cast<uint32_t>(chunk_range.extent(0)),
                             ProfileChunkFunctor{first_error, chunk_range, profile_program, inlet_x, inlet_measure,
                                                 programs, time, chunk_sum},
                             launch_error);
-    Kokkos::parallel_reduce("mass_flow_profile_scale", static_cast<uint32_t>(profiles.size()),
+    gated::parallel_reduce("mass_flow_profile_scale", static_cast<uint32_t>(profiles.size()),
                             ProfileScaleFunctor{first_error, profile_chunks, chunk_sum, profile_mdot, programs, time,
                                                 profile_scale},
                             launch_error);
-    Kokkos::parallel_for("mass_flow_profile_flux", static_cast<uint32_t>(profile_bc.extent(0)),
+    gated::parallel_for("mass_flow_profile_flux", static_cast<uint32_t>(profile_bc.extent(0)),
                          ProfileFluxFunctor{profile_bc, profile_of, profile_x, profile_program, programs, time,
                                             profile_scale, bcs});
 }
@@ -822,7 +823,7 @@ void flag_nonzero(const Kokkos::View<double *> & failed, const Kokkos::View<uint
                   const Kokkos::View<int32_t> & a, const Kokkos::View<int32_t> & b) {
     const bool has_runaway = runaway.is_allocated(), has_a = a.is_allocated(), has_b = b.is_allocated();
     if (!has_runaway && !has_a && !has_b) return;
-    Kokkos::parallel_for("boundary_error_flag", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("boundary_error_flag", 1, KOKKOS_LAMBDA(const int) {
         if ((has_runaway && runaway() != 0) || (has_a && a() != 0) || (has_b && b() != 0)) failed(0) = 1.0;
     });
 }
@@ -860,7 +861,7 @@ void TimedBoundaryFields::apply(const Kokkos::View<rtype> & time, const Kokkos::
                                      set_slot, set_composition, set_direction, composition_species,
                                      composition_program, programs, time, bcs, gas};
     if (!faces_host.empty()) {
-        Kokkos::parallel_reduce("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor,
+        gated::parallel_reduce("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor,
                                 launch_error);
     }
     apply_profiles(time, bcs);
@@ -961,14 +962,14 @@ void DirichletStates::finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state
     for (const auto & p : host_programs) all.push_back(p.get());
     programs = kexpr::ProgramTable<>(all);
     if (n == n_timed) return;
-    Kokkos::parallel_for("dirichlet_states", Kokkos::RangePolicy<>(n_timed, n),
+    gated::parallel_for("dirichlet_states", Kokkos::RangePolicy<>(n_timed, n),
                          DirichletStatesFunctor{face_state_index, face_set, face_x, programs,
                                                 Kokkos::View<rtype>("dirichlet_time"), face_state});
 }
 
 void DirichletStates::apply(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM + 2]> & face_state) const {
     if (n_timed == 0) return;
-    Kokkos::parallel_for("dirichlet_states", n_timed,
+    gated::parallel_for("dirichlet_states", n_timed,
                          DirichletStatesFunctor{face_state_index, face_set, face_x, programs, time, face_state});
 }
 
@@ -1083,7 +1084,7 @@ void TimedInletTargets::check() const {
 
 void TimedInletTargets::fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target) const {
     if (host_chars.empty()) return;
-    Kokkos::parallel_reduce("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
+    gated::parallel_reduce("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
                             InletTargetsFunctor{{error_face, error}, chars, x, slots, direction, scale, programs,
                                                 target, time},
                             launch_error);

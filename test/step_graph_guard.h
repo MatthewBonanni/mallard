@@ -2,7 +2,7 @@
  * @file step_graph_guard.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Records, with Kokkos Tools callbacks, what would break the capture of
- *        a step's CUDA graph on any backend.
+ *        a step's CUDA graph on any backend, or run in its launches after a stop.
  * @version 0.1
  * @date 2026-11-10
  *
@@ -24,8 +24,8 @@
 #include <Kokkos_Profiling_ProfileSection.hpp>
 
 /**
- * @brief While alive, records the fences, allocations and copies between host
- *        and device memory issued inside the profiling section
+ * @brief While alive, records the fences, allocations, copies and fills issued
+ *        inside the profiling section
  *        "step_graph_capture" (what a capture records, Solver::graph_step) but
  *        outside "host_staged" (comm::HostStaged: round trips the graph makes
  *        with NCCL or CUDA events instead). One guard at a time.
@@ -118,16 +118,10 @@ class StepGraphGuard {
         static void begin_deep_copy(const Kokkos::Profiling::SpaceHandle dst_space, const char * dst_label, const void *,
                                     const Kokkos::Profiling::SpaceHandle src_space, const char * src_label, const void *,
                                     uint64_t) {
-            // Device builds only: pageable host memory cannot take part in a capture
-            const bool dst_host = std::strcmp(dst_space.name, "Host") == 0;
-            const bool src_host = std::strcmp(src_space.name, "Host") == 0;
-            // deep_copy(exec, view, value) fills on the execution space (a memset or a kernel on its stream), and
-            // Kokkos reports the value as a host source "(none)"; fills that must fence are reported as fences
-            const bool fill = src_host && std::strcmp(src_label, "(none)") == 0;
-            if (dst_host != src_host && !fill) {
-                record(std::string("copy \"") + src_label + "\" (" + src_space.name + ") to \"" + dst_label + "\" (" +
-                       dst_space.name + ")");
-            }
+            // Every copy and fill, with the host or not: a launch after a stop would still run it, where every
+            // kernel of the step does nothing (gated.h)
+            record(std::string("copy \"") + src_label + "\" (" + src_space.name + ") to \"" + dst_label + "\" (" +
+                   dst_space.name + ")");
         }
 
         Kokkos::Tools::Experimental::EventSet saved;

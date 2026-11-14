@@ -10,6 +10,7 @@
  */
 
 #include "remap.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -209,7 +210,7 @@ void Source::fit(const std::vector<uint8_t> & need) const {
     for (uint32_t c = 0; c < n_owned; c++) {
         if (need[c] && !fitted[c]) cells.push_back(c);
     }
-    Kokkos::parallel_for("remap_fit", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, cells.size()),
+    gated::parallel_for("remap_fit", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, cells.size()),
                          [&](const size_t i) {
                              fit(cells[i]);
                              if (options.limit) limit(cells[i]);
@@ -509,7 +510,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     // Source cells wholly inside a target cell give their own measure and averages, which their polynomials
     // integrate to by construction; only the cells a target cuts need theirs
     std::vector<std::vector<uint32_t>> cut(requests.size());
-    Kokkos::parallel_for("remap_intersect",
+    gated::parallel_for("remap_intersect",
                          Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, requests.size()),
                          [&](const size_t q) {
                              Box box;
@@ -540,7 +541,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
         for (uint32_t c : cells) need[c] = 1;
     }
     fit(need);
-    Kokkos::parallel_for("remap_integrate",
+    gated::parallel_for("remap_integrate",
                          Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, requests.size()),
                          [&](const size_t q) {
                              if (cut[q].empty()) return;

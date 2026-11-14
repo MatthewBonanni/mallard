@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "common.h"
+#include "gated.h"
 
 namespace teno {
 
@@ -121,7 +122,7 @@ class TableStore {
                 shape[c] = create(canonical[c], ordered(c), gid[c]);
                 found[c] = 1;
             }
-            Kokkos::parallel_for("teno_share", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+            gated::parallel_for("teno_share", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
                                  [&](const uint32_t c) {
                 if (!found[c] && same_shape(size_t(tried[c]), canonical[c], ordered(c))) {
                     shape[c] = uint32_t(tried[c]);

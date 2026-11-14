@@ -536,7 +536,7 @@ std::string reacting_body(const std::string & chemistry, const std::string & T =
 } // namespace
 
 TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
-    // Means and conditional statistics of derived fields, computed under the sampling's conditional node
+    // Means and conditional statistics of derived fields, computed under the sampling's gate
     const std::string restarts = "check_interval = 1000\n"
                                  "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
     Case c;

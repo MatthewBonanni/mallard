@@ -10,6 +10,7 @@
  */
 
 #include "probes.h"
+#include "gated.h"
 #include "probe_cells.h"
 #include "probe_fluxes.h"
 
@@ -1128,7 +1129,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const bool on_faces = faces.extent(0) > 0;
     const bool has_normals = normals.extent(0) > 0;
     if (sampling == Sampling::CELL && !has_normals) {
-        Kokkos::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
+        gated::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
             for (uint32_t v = 0; v < n_vars; v++) out(i, v) = sampler(cell(i), code(v));
         });
         return;
@@ -1138,11 +1139,11 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     if (sampling == Sampling::POINT || need_gradients) {
         const auto gradient = fields.gradient;
         const auto unique = unique_cells;
-        Kokkos::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) { gradient(unique(i)); });
+        gated::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) { gradient(unique(i)); });
     }
     // The trace: the cell average (from the current conservatives), or the reconstruction at the sample
     const auto Ws = W;
-    Kokkos::parallel_for("probe_cell_W", n, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("probe_cell_W", n, KOKKOS_LAMBDA(const uint32_t s) {
         const uint32_t c = cell(s);
         Ws(s, 0) = sampler.U(c, 0);
         for (uint8_t i = 0; i <= N_DIM; i++) Ws(s, 1 + i) = sampler.P(c, i);
@@ -1153,7 +1154,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         const auto in_offsets = inside_offsets;
         const auto in_W = inside_W;
         // Linear least squares, kept where the reconstruction has no admissible polynomial value
-        Kokkos::parallel_for("probe_linear_values", in_cells.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+        gated::parallel_for("probe_linear_values", in_cells.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             const uint32_t c = in_cells(j);
             rtype Wq[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE {
@@ -1165,7 +1166,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         });
         if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
         const auto in = inside;
-        Kokkos::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+        gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             FOR_I_CONSERVATIVE Ws(in(j), i) = in_W(j, i);
         });
     }
@@ -1180,7 +1181,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const bool viscous = fields.viscous;
     if (on_faces) {
         // The state the boundary condition sets on the face
-        Kokkos::parallel_for("probe_face_state", n, KOKKOS_LAMBDA(const uint32_t s) {
+        gated::parallel_for("probe_face_state", n, KOKKOS_LAMBDA(const uint32_t s) {
             const uint32_t c = cell(s), f = face(s);
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
             rtype Wf[N_CONSERVATIVE], nv[N_DIM];
@@ -1212,14 +1213,14 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         // The scheme's diffusive fluxes of each face, out of the domain
         if (mixture) {
             const MixtureViscousFluxFunctor<true> mixture_flux = fields.fluxes->mixture;
-            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+            gated::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
                 const DiffusiveColumns columns{out, code, s, n_vars};
                 columns.clear();
                 mixture_flux.flux(face(s), columns);
             });
         } else {
             const ViscousFluxFunctor viscous_flux = fields.fluxes->viscous;
-            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+            gated::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
                 const DiffusiveColumns columns{out, code, s, n_vars};
                 const uint32_t f = face(s);
                 rtype F[N_CONSERVATIVE] = {};
@@ -1235,7 +1236,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const ProbeReference ref = reference;
     const WallModelFunctor wall_model = fields.wall_model;
     const bool modeled = wall_model.wm.active();
-    Kokkos::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
         const uint32_t c = cell(s);
         const rtype g = mixture ? cell_gamma(c) : physics.gamma;
         const rtype rho_c = sampler.U(c, 0), p_c = sampler.P(c, N_DIM), T_c = sampler.P(c, N_DIM + 1);
@@ -1416,7 +1417,7 @@ void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
     const auto st = staging;
     const uint64_t n_records = staging.extent(0);
     const uint32_t n_vars = static_cast<uint32_t>(values.extent(1));
-    Kokkos::parallel_for("probe_staged", values.extent(0), KOKKOS_LAMBDA(const size_t i) {
+    gated::parallel_for("probe_staged", values.extent(0), KOKKOS_LAMBDA(const size_t i) {
         const uint64_t slot = (*seq - 1) % n_records;
         for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
     });
@@ -3218,7 +3219,7 @@ namespace {
 uint32_t covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<const double *> & volumes,
                        const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights) {
     uint32_t n = 0;
-    Kokkos::parallel_scan("probe_covered_cells", static_cast<uint32_t>(volumes.extent(0)),
+    gated::parallel_scan("probe_covered_cells", static_cast<uint32_t>(volumes.extent(0)),
                           KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
         const double w = f(c) * volumes(c);
         if (!(w > 0.0)) return;

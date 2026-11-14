@@ -10,6 +10,7 @@
  */
 
 #include "region_motion.h"
+#include "gated.h"
 
 #include <array>
 #include <cmath>
@@ -245,7 +246,7 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
     const bool gradients = a.is_allocated(), axi = axisymmetric;
     const uint32_t owned = n_owned, n_k = n_conditions, n_sp = n_species;
     if (gradients) {
-        Kokkos::parallel_for("region_velocity_gradients", n_complete, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("region_velocity_gradients", n_complete, KOKKOS_LAMBDA(const uint32_t c) {
             double M[3][3] = {}, b[N_DIM][3] = {};
             for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
                 const uint32_t j = neighbors(q);
@@ -272,7 +273,7 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
             }
         });
     }
-    Kokkos::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double t = static_cast<double>(time());
         double x[3] = {0.0, 0.0, 0.0}, W[N_CONSERVATIVE];
         rtype a_c[N_DIM][N_DIM] = {};
@@ -352,7 +353,7 @@ Levels CrossedLevels::update(const double t) const {
     const uint32_t n_pieces = static_cast<uint32_t>(offsets.extent(0)) - 1;
     uint32_t n = 0;
     // A cell the host keeps (|g| <= 1.01 |grad g| r for every condition of a piece) with a margin for round-off
-    Kokkos::parallel_scan("region_crossed_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
+    gated::parallel_scan("region_crossed_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
         bool keep = all;
         for (uint32_t p = 0; p < n_pieces && !keep; p++) {
             keep = true;
@@ -370,7 +371,7 @@ Levels CrossedLevels::update(const double t) const {
     const auto rows = Kokkos::make_pair(uint32_t(0), n);
     const auto values_ = values;
     const uint32_t n_k = m_levels->size();
-    Kokkos::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
         for (uint32_t k = 0; k < n_k; k++) {
             for (int d = 0; d <= N_DIM; d++) values_(i, k, d) = L(cells_(i), k, d);
         }
@@ -566,7 +567,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const Kokkos::View<const Step *> s = steps;
     const kexpr::ProgramTable<> of_t = times;
     if (m.extent(0) > 0) {
-        Kokkos::parallel_for("region_motion", m.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        gated::parallel_for("region_motion", m.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const double t = static_cast<double>(time());
             auto value = [&](const uint32_t p) { return of_t(p, kexpr::ArrayVariables{&t}); };
             move(m(k), s.data(), value, n(m(k).node));
@@ -587,7 +588,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const auto cell_offsets = offsets_nodes_of_cell;
     const bool sharp_bounds = bounded, axi = axisymmetric;
     const Kokkos::View<double *> out = m_fractions;
-    Kokkos::parallel_for("region_moving_fractions", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("region_moving_fractions", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double t = static_cast<double>(time());
         double stack[MAX_STACK];
         int top = -1;
