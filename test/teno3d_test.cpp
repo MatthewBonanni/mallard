@@ -550,7 +550,9 @@ TEST(TENO3DSetup, FacetedSpheresOfTetrahedraMirrorAcrossEachFacet) {
 TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
     // A blast (density and pressure jumps on a sphere) on mixed cells with walls:
     // rounds after the first recompute the central coefficients that the smooth
-    // pass could not keep, with its arithmetic (its team kernel on GPUs from order 5)
+    // pass could not keep, with its arithmetic. On GPUs from order 5 both are
+    // team kernels, and at order 5 only the smooth pass stages its stencil
+    // entries in team scratch
     auto mesh = make_mesh_3d("cartesian_mixed", 6, 6, 6);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);

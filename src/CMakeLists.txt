@@ -218,15 +218,18 @@ foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
     endforeach()
 endforeach()
 # The TENO setup computes every table with the same operations on the host
-# and on the device, and contracting multiplies and adds into FMAs would
-# change them differently on each: no contraction in that file
+# and on the device, and the reconstruction stages its stencil loads on GPUs
+# only: contracting multiplies and adds into FMAs would round each differently
+# by where the compiler fuses, so neither file contracts and the hot loops
+# write their FMAs explicitly
+set(teno_sources numerics/teno_setup.cpp numerics/teno.cpp)
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
