@@ -664,6 +664,18 @@ TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemU
     EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
 }
 
+TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
+    // Output of states read from files sets up only what cell_gradients and point_values read: scale,
+    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses
+    auto mesh = make_mesh("cartesian_tri", 12, 10);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const auto full = teno_tables(*make_teno(mesh, bd, 5));
+    const auto central = tables_with(mesh, bd, 5, [](TENO & t) { t.sector_stencils = false; });
+    for (const size_t k : {0, 1, 3, 5, 6, 7, 8}) EXPECT_TRUE(central[k] == full[k]) << "table " << k;
+    EXPECT_TRUE(central[2].empty()) << "smoothness matrices";
+    EXPECT_TRUE(central[12].empty()) << "sector pseudo-inverses";
+}
+
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
     // A thin annulus with symmetry walls: each search reaches more straight wall faces than the scratch
     // holds mirror lines, so every cell is redone on the host with a larger scratch

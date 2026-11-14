@@ -508,6 +508,28 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     expect_same_tables(*reference, *host, "host setup");
 }
 
+TEST(TENO3DSetup, CentralStencilsAloneAreTheFullSetupsBitForBit) {
+    // Output of states read from files sets up only what cell_gradients and point_values read
+    auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const auto full = teno_tables(*make_teno(mesh, bd, 5));
+    for (const bool on_host : {false, true}) {
+        auto central = make_teno_with(mesh, bd, 5, [&](TENO & t) {
+            t.sector_stencils = false;
+            t.setup_on_host = on_host;
+        });
+        const auto tables = teno_tables(*central);
+        for (size_t k = 0; k < full.size(); k++) {
+            if (full[k].first == "scale" || full[k].first == "basis_mean" || full[k].first.starts_with("large")) {
+                EXPECT_TRUE(tables[k].second == full[k].second) << full[k].first << (on_host ? " (host setup)" : "");
+            }
+        }
+        EXPECT_EQ(central->stencil_small.pinv.extent(0), 0u);
+        EXPECT_FALSE(central->moments.is_allocated());
+        EXPECT_EQ(central->troubled_coeffs.extent(0), 0u);
+    }
+}
+
 namespace {
 
 // The field along y = z = 0, on slabs and pencils one cell thick

@@ -900,6 +900,7 @@ struct CellSetup {
     uint16_t wall_ns = 0;
     // Central stencil size per fitted monomial, for fits that drop the monomials of flat axes
     double stencil_factor = 2.0;
+    bool sector_stencils = true;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1554,6 +1555,11 @@ struct CellSetup {
                 o.large_faces[s] = code(w, s, v, n_plane_faces);
                 for (uint32_t l = 0; l < nk; l++) o.large_pinv[s * nk + l] = rtype(w.X[s * nk + l]);
             }
+        }
+
+        if (!sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return OK;
         }
 
         // Small sector stencils, one per face: entries whose direction from the
@@ -2729,6 +2735,10 @@ struct CellTeam {
                                  [&](const uint32_t e) { o.large_pinv[e] = rtype(X_used[e]); });
         }
         tm.team_barrier();
+        if (!c.sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return Status::OK;
+        }
 
         // Sector stencils
         if (reach_grows(ctl, end, 8 * uint32_t(c.nss), 6)) fill_hash(tm, ws, hash_pos, ctl, end[ctl[N_END] - 1]);
@@ -3453,13 +3463,13 @@ class Setup3D {
 
         uint16_t max_large() const { return ns_max; }
         size_t c_nss_max() const { return nss_max; }
-        uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
+        uint16_t max_small() const { return options.sector_stencils ? uint16_t(teno::MAX_FACES * nss_max) : uint16_t(0); }
 
         uint32_t batch_cells() const { return std::min(device_batch(), whole_slices(n_target)); }
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 8192;
+            if constexpr (DEVICE_IS_HOST) return 2048;
             // Batch outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -3570,7 +3580,7 @@ class Setup3D {
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                              double(options.stencil_factor)};
+                                                              double(options.stencil_factor), options.sector_stencils};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3583,7 +3593,7 @@ class Setup3D {
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                    double(options.stencil_factor)},
+                                                    double(options.stencil_factor), options.sector_stencils},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3654,7 +3664,7 @@ class Setup3D {
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                                  double(options.stencil_factor)};
+                                                                  double(options.stencil_factor), options.sector_stencils};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -3906,6 +3916,7 @@ struct CellSetup2D {
     uint8_t wall_r = 0;
     uint16_t wall_ns = 0;
     rtype stencil_factor = 2.0;
+    bool sector_stencils = true;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
@@ -4436,6 +4447,11 @@ struct CellSetup2D {
             }
         }
 
+        if (!sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return OK;
+        }
+
         // The visits of the rows of w.means that are no mirror images: the
         // sectors' means are the first of theirs, which the gather below keeps
         for (uint32_t s = 0; s < n_means; s++) {
@@ -4726,7 +4742,7 @@ class Setup2D {
         }
 
         uint16_t max_large() const { return ns_max; }
-        uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
+        uint16_t max_small() const { return options.sector_stencils ? uint16_t(teno::MAX_FACES * nss_max) : uint16_t(0); }
 
         // Meshes of at least MAX_BATCH cells share one workspace, the one check --memory measures on them
         uint32_t batch_cells() const {
@@ -4736,7 +4752,7 @@ class Setup2D {
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 8192;
+            if constexpr (DEVICE_IS_HOST) return 2048;
             // Scratch and outputs within about a quarter of the free device memory and what MAX_BATCH
             // cells take with twice the scratch: a thread per cell, so smaller scratch fills more of the device
             size_t free_bytes = size_t(8) << 30;
@@ -4806,7 +4822,8 @@ class Setup2D {
                                const TableBatchT<typename Exec::memory_space> & batch,
                                const Kokkos::View<uint32_t *, typename Exec::memory_space> & batch_cells) const {
             return CellSetup2D<Exec>{geometry, s, batch, batch_cells, {}, r, nk, ns, nss, ns_max, nss_max,
-                                     double(options.max_condition), wall_r, wall_ns, rtype(options.stencil_factor)};
+                                     double(options.max_condition), wall_r, wall_ns, rtype(options.stencil_factor),
+                                     options.sector_stencils};
         }
 
         /** @brief Where cell c is, for errors. */

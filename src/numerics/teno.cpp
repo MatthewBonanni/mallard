@@ -983,7 +983,10 @@ class TableBuilder {
             scheme.scale = Kokkos::View<rtype *>("teno_scale", n_cells);
             scheme.basis_mean = Kokkos::View<rtype **>("teno_basis_mean", n_cells, nk);
             // 3D: the setup hands over its moments; tables from the host (cache) bring theirs
-            if constexpr (N_DIM == 2) scheme.si_matrix = Kokkos::View<rtype **>("teno_si_matrix", n_cells, nk * (nk + 1) / 2);
+            if constexpr (N_DIM == 2) {
+                scheme.si_matrix = Kokkos::View<rtype **>("teno_si_matrix", n_cells,
+                                                          scheme.sector_stencils ? nk * (nk + 1) / 2 : 0);
+            }
             if constexpr (N_DIM == 3) scheme.moments = teno::Moments();
             scheme.stencil_large_size = Kokkos::View<uint16_t *>("teno_stencil_large_size", n_cells);
             scheme.stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
@@ -1003,7 +1006,7 @@ class TableBuilder {
             Kokkos::View<rtype **>::host_mirror_type h_mean("teno_basis_mean_rows", n, scheme.basis_mean.extent(1));
             Kokkos::View<rtype **>::host_mirror_type h_si("teno_si_rows", n, scheme.si_matrix.extent(1));
             if constexpr (N_DIM == 3) {
-                if (!scheme.moments.is_allocated()) {
+                if (scheme.sector_stencils && !scheme.moments.is_allocated()) {
                     scheme.moments = teno::Moments("teno_moments", scheme.scale.extent(0), teno_setup::n_moments(scheme.degree));
                 }
             }
@@ -1016,8 +1019,8 @@ class TableBuilder {
                 scheme.gather_depth[c0 + c] = t.gather_depth;
                 h_scale(c) = t.scale;
                 for (size_t l = 0; l < t.basis_mean.size(); l++) h_mean(c, l) = t.basis_mean[l];
-                for (size_t k = 0; k < t.si.size(); k++) h_si(c, k) = t.si[k];
-                for (size_t k = 0; k < t.moments.size(); k++) h_moments(c, k) = t.moments[k];
+                for (size_t k = 0; k < h_si.extent(1); k++) h_si(c, k) = t.si[k];
+                for (size_t k = 0; k < h_moments.extent(1); k++) h_moments(c, k) = t.moments[k];
                 h_large_size(c) = static_cast<uint16_t>(t.large_cells.size());
                 for (uint8_t k = 0; k < teno::MAX_FACES; k++) h_small_size(c, k) = t.small_size[k];
             });
@@ -1155,7 +1158,7 @@ void TENO::init(const Input & input) {
     quadrature_face = GaussLegendre(static_cast<uint8_t>(n_gp));
     if constexpr (N_DIM == 3) {
         init_face_quadrature_3d(static_cast<uint8_t>(order));
-        si_terms = teno_setup::smoothness_terms(degree);
+        if (sector_stencils) si_terms = teno_setup::smoothness_terms(degree);
     }
     init_face_quadrature_2d_curved();
     if constexpr (N_DIM == 2) {
@@ -1291,6 +1294,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     options.curved_wall_degree = curved_wall_degree;
     options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
     options.stencil_factor = double(stencil_factor);
+    options.sector_stencils = sector_stencils;
     for (size_t q = 0; q < quadrature_face.h_points.extent(0); q++) options.face_points.push_back(double(quadrature_face.h_points(q, 0)));
     auto handle = std::make_unique<teno_setup::SetupHandle>(*mesh, boundaries, face_quad_points, face_quad_weights, options);
     teno_setup::SetupHandle & setup = *handle;
@@ -1331,7 +1335,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         t_pack += pack_timer.seconds();
     }
     // Every cell's moments are a function of its geometry alone
-    if (N_DIM == 3 && n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
+    if (N_DIM == 3 && n_failed_large == 0 && sector_stencils) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
     Kokkos::fence();
     const teno_setup::Timings t = setup.timings();
     // The packed tables are allocated after the setup's workspace is freed, so that they do not add to its peak
@@ -3154,7 +3158,7 @@ void TENO::round_to_single() {
 void TENO::allocate_scratch() {
     const uint32_t n_reconstructed = mesh->n_reconstructed();
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
-    const uint32_t capacity = std::min<uint32_t>(
+    const uint32_t capacity = !sector_stencils ? 0u : std::min<uint32_t>(
         n_reconstructed, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_reconstructed))));
     troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);
     troubled_small_coeffs = Kokkos::View<rtype ****>("teno_troubled_small_coeffs", capacity, teno::MAX_FACES,
@@ -3389,7 +3393,7 @@ uint8_t TENO::cached_halo_layers(const Input & input) {
 }
 
 void TENO::save_cache(const uint8_t halo_layers) {
-    if (cache_file.empty() || cache_loaded) return;
+    if (cache_file.empty() || cache_loaded || !sector_stencils) return;
     // Written aside and renamed, so an interrupted run never leaves a truncated cache
     const std::string partial = cache_file + ".partial";
     std::ofstream out(partial, std::ios::binary);
@@ -3454,6 +3458,12 @@ bool TENO::load_cache() {
         chunk.assign(std::min(CHUNK_CELLS, n_reconstructed - c0), CellTables());
         for (CellTables & t : chunk) {
             ok = ok && deserialize(in, n_dof_large, n_moments, cache_single, t);
+            if (!sector_stencils) {
+                t.small_cells.clear();
+                t.small_faces.clear();
+                t.small_pinv.clear();
+                t.small_size = {};
+            }
             largest_stencil = std::max(largest_stencil, static_cast<uint32_t>(t.large_cells.size()));
         }
         if (ok) builder.add(c0, chunk);

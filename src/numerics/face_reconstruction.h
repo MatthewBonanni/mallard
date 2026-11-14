@@ -392,6 +392,9 @@ class TENO : public FaceReconstruction {
         // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore);
         // false (tests only) keeps a table per cell
         bool share_tables = true;
+        // false: the central stencils alone, which cell_gradients and point_values read, and no
+        // face values (output of states read from files); such tables are never written to the cache
+        bool sector_stencils = true;
         /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
         const uint64_t * global_cell_ids() const {
             return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();

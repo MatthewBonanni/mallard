@@ -229,6 +229,7 @@ struct Options {
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
     double stencil_factor = 2.0;     // central stencil size per fitted monomial
     std::vector<double> face_points;  // 2D: the face quadrature's points on [-1, 1]
+    bool sector_stencils = true;      // false: the central stencils alone, without sectors or smoothness matrices
 };
 
 /** @brief Timings of the last setup, in seconds. */

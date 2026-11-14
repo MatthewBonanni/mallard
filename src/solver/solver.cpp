@@ -1476,13 +1476,15 @@ void Solver::init_numerics() {
 
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
+    // Output of states read from files reconstructs no faces
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get()); teno && state_reader) teno->sector_stencils = false;
     face_reconstruction->init(face_reconstruction_input);
     describe_stencil_shapes();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
-    if (is_mixture()) {
+    if (is_mixture() && !state_reader) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
