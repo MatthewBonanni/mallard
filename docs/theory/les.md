@@ -7,7 +7,7 @@ SGS models, the filter width, the global dynamic procedure, the two
 turbulent combustion models (thickened flame and partially stirred
 reactor) and the synthetic turbulence of characteristic inlets. The
 low-dissipation convective flux used with LES is in
-[chapter 7](fluxes.md#hybrid-central-upwind-flux). Usage:
+[Numerical fluxes](fluxes.md#hybrid-central-upwind-flux). Usage:
 [Large-eddy simulation](../guide/les.md); design and validation:
 [LES design notes](../design/les.md).
 
@@ -15,7 +15,7 @@ low-dissipation convective flux used with LES is in
 
 With a spatial filter $\overline{\phi}$ of width $\Delta$ and the Favre
 filter $\widetilde{\phi} = \overline{\rho\phi}/\overline{\rho}$, Mallard
-solves eq. (2) of [chapter 1](governing_equations.md#conservation-laws) for $\overline{\rho}$, $\overline{\rho}\widetilde{\mathbf{u}}$,
+solves eq. (2) of [Governing equations](governing_equations.md#conservation-laws) for $\overline{\rho}$, $\overline{\rho}\widetilde{\mathbf{u}}$,
 $\overline{\rho}\widetilde{E}$ and $\overline{\rho}\widetilde{Y}_k$, with the
 molecular fluxes evaluated at the filtered state and the unclosed SGS fluxes
 modeled by gradient-diffusion closures:
@@ -31,18 +31,18 @@ $$
 
 with $\widetilde{\mathbf{S}}^d = \tfrac12(\nabla\widetilde{\mathbf{u}} + \nabla\widetilde{\mathbf{u}}^T) - \tfrac13(\nabla\cdot\widetilde{\mathbf{u}})\mathbf{I}$
 and $\mu_t = \overline{\rho}\,\nu_t$ (`src/solver/solver_les.cpp`). That is,
-$\mu_t$ is added to $\mu$ in eq. (5) of [chapter 1](governing_equations.md#viscous-stress-and-heat-flux), $\lambda_t$ to $\lambda$, and for
-mixtures $\overline{\rho}\,\nu_t/Sc_t$ to every $\rho D_k$ of eq. (10) of [chapter 2](thermodynamics_transport.md#diffusive-fluxes), so
+$\mu_t$ is added to $\mu$ in eq. (5) of [Governing equations](governing_equations.md#viscous-stress-and-heat-flux), $\lambda_t$ to $\lambda$, and for
+mixtures $\overline{\rho}\,\nu_t/Sc_t$ to every $\rho D_k$ of eq. (10) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#diffusive-fluxes), so
 the SGS species fluxes keep the correction velocity and sum to zero.
 $Pr_t$ = `Pr_t` and $Sc_t$ = `Sc_t` (both default 0.9). The isotropic part
 of the SGS stress, the SGS diffusion of kinetic energy and the
 subgrid parts of the molecular fluxes are neglected, and without a
 combustion model the filtered reaction rates are those of the filtered
 state. Wall faces keep the molecular fluxes only
-([chapter 9](boundaries_sources.md#walls)), or take a wall model's
-([chapter 5](wall_models.md)). The eddy viscosity is
+([Boundary conditions and sources](boundaries_sources.md#walls)), or take a wall model's
+([Wall models](wall_models.md)). The eddy viscosity is
 recomputed at every stage from the cell velocity gradients of the viscous
-terms ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms));
+terms ([Finite-volume discretization and reconstruction](finite_volume.md#gradients-for-the-viscous-terms));
 filter symbols are dropped in the other chapters.
 
 ## Subgrid-scale models
@@ -333,7 +333,7 @@ by $\mathcal{E}/F$, so that the flame is $F$ times thicker and propagates at
 $\mathcal{E}s_L$; the SGS heat and species fluxes are multiplied by
 $1 - \Omega$, since the thickened flame is resolved. The rate multiplier is
 applied by integrating each cell's chemistry over $(\mathcal{E}/F)\,\tau$
-([chapter 3](chemistry_radiation.md#strang-splitting)).
+([Chemistry and radiation](chemistry_radiation.md#strang-splitting)).
 
 The efficiency $\mathcal{E}$ restores the flame surface that thickening
 removes from the subgrid wrinkling. With `efficiency = "dynamic"` (the
@@ -408,7 +408,7 @@ $$
 with $C_u$ = `C_u` (default 28). The Laplacian of the vorticity is the
 divergence of its face gradients, cell gradients averaged to interior faces
 and corrected along the line of centroids as the viscous fluxes are
-([chapter 7](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
+([Numerical fluxes](fluxes.md#viscous-fluxes)); boundary faces carry none. Without
 the efficiency (`efficiency = "none"`) or where $F = 1$ or $u'_\Delta = 0$,
 $\mathcal{E} = 1$. The fields $\Omega$, $F$ and $\mathcal{E}$ are evaluated
 once per time step and held over its stages.
@@ -432,7 +432,7 @@ $$
 \end{equation}
 $$
 
-with $\dot\omega_T$ the heat release rate of eq. (2) of [chapter 3](chemistry_radiation.md#finite-rate-kinetics) at the filtered
+with $\dot\omega_T$ the heat release rate of eq. (2) of [Chemistry and radiation](chemistry_radiation.md#finite-rate-kinetics) at the filtered
 state, $C_\mathrm{mix}$ = `C_mix` (default 1) and the cell size $\Delta_V$.
 As the mesh resolves the mixing ($\Delta_V \to 0$), $\kappa \to 1$; where the
 chemistry is fast, the rate tends to the mixing-limited
@@ -450,7 +450,7 @@ fluctuation comes from the digital filter of
 Reynolds stress imposed as
 [Lund, Wu & Squires 1998](../references.md#lund-1998) propose
 (`src/boundary/synthetic_inflow.cpp`). How the target enters the flow is in
-[chapter 9](boundaries_sources.md#characteristic-boundaries).
+[Boundary conditions and sources](boundaries_sources.md#characteristic-boundaries).
 
 1. **Random field.** Independent unit-variance random numbers
     $r_j(\mathbf{k}, m)$ for each velocity component $j$ live on an auxiliary
