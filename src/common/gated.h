@@ -81,6 +81,11 @@ struct Space<P> {
     using type = Kokkos::DefaultExecutionSpace;
 };
 
+/** @brief Whether P runs on the default execution space; kernels elsewhere (host setup beside a GPU) never run in a
+ *         step and launch as they are. */
+template <class P>
+constexpr bool gated_space = std::is_same_v<typename Space<P>::type, Kokkos::DefaultExecutionSpace>;
+
 template <class P, class M>
 constexpr bool accessible = Kokkos::SpaceAccessibility<typename Space<P>::type, M>::accessible;
 
@@ -208,18 +213,40 @@ struct Results<R> {
     static constexpr bool reducer = Kokkos::is_reducer_v<T>, view = Kokkos::is_view_v<T>;
 };
 
+/** @brief Kokkos's parallel_for, parallel_reduce or parallel_scan (pattern), with or without the label. */
+template <class Pattern, class P, class Functor, class... R>
+void launch(Pattern pattern, const std::string * label, const P & policy, const Functor & functor, R &&... r) {
+    if (label) {
+        pattern(*label, work(policy), functor, static_cast<R &&>(r)...);
+    } else {
+        pattern(work(policy), functor, static_cast<R &&>(r)...);
+    }
+}
+
+#define GATED_PATTERN(name) [](auto &&... a) { Kokkos::name(static_cast<decltype(a) &&>(a)...); }
+
+template <class P, class F>
+void for_(const std::string * label, const P & policy, const F & f) {
+    check_policy<P>();
+    if constexpr (gated_space<P>) {
+        launch(GATED_PATTERN(parallel_for), label, policy, For<F>{f, flag()});
+    } else {
+        unsupported("a kernel on another execution space");
+        launch(GATED_PATTERN(parallel_for), label, policy, f);
+    }
+}
+
 template <class P, class F, class... R>
 void reduce(const std::string * label, const P & policy, const F & f, R &&... results) {
     check_policy<P>();
     const auto run = [&](const auto & functor, auto &&... r) {
-        if (label) {
-            Kokkos::parallel_reduce(*label, work(policy), functor, static_cast<decltype(r) &&>(r)...);
-        } else {
-            Kokkos::parallel_reduce(work(policy), functor, static_cast<decltype(r) &&>(r)...);
-        }
+        launch(GATED_PATTERN(parallel_reduce), label, policy, functor, static_cast<decltype(r) &&>(r)...);
     };
     const uint32_t * const on = flag();
-    if constexpr (Results<R...>::reducer) {
+    if constexpr (!gated_space<P>) {
+        unsupported("a kernel on another execution space");
+        run(f, static_cast<R &&>(results)...);
+    } else if constexpr (Results<R...>::reducer) {
         using Result = typename Results<R...>::T;
         if constexpr (!accessible<P, typename Result::result_view_type::memory_space>) {
             unsupported("a reduction into host memory");
@@ -249,19 +276,31 @@ void reduce(const std::string * label, const P & policy, const F & f, R &&... re
     }
 }
 
+template <class P, class F, class... T>
+void scan(const std::string * label, const P & policy, const F & f, T &&... total) {
+    check_policy<P>();
+    if constexpr (!gated_space<P>) {
+        unsupported("a kernel on another execution space");
+        launch(GATED_PATTERN(parallel_scan), label, policy, f, static_cast<T &&>(total)...);
+    } else {
+        if constexpr (sizeof...(T) > 0) unsupported("a scan's total");
+        launch(GATED_PATTERN(parallel_scan), label, policy, Scan<F, P>{f, flag()}, static_cast<T &&>(total)...);
+    }
+}
+
+#undef GATED_PATTERN
+
 } // namespace detail
 
 template <class P, class F>
     requires(!std::is_convertible_v<const P &, std::string>)
 void parallel_for(const P & policy, const F & f) {
-    detail::check_policy<P>();
-    Kokkos::parallel_for(detail::work(policy), detail::For<F>{f, flag()});
+    detail::for_(nullptr, policy, f);
 }
 
 template <class P, class F>
 void parallel_for(const std::string & label, const P & policy, const F & f) {
-    detail::check_policy<P>();
-    Kokkos::parallel_for(label, detail::work(policy), detail::For<F>{f, flag()});
+    detail::for_(&label, policy, f);
 }
 
 template <class P, class F, class... R>
@@ -278,16 +317,12 @@ void parallel_reduce(const std::string & label, const P & policy, const F & f, R
 template <class P, class F, class... T>
     requires(!std::is_convertible_v<const P &, std::string>)
 void parallel_scan(const P & policy, const F & f, T &&... total) {
-    detail::check_policy<P>();
-    if constexpr (sizeof...(T) > 0) detail::unsupported("a scan's total");
-    Kokkos::parallel_scan(detail::work(policy), detail::Scan<F, P>{f, flag()}, static_cast<T &&>(total)...);
+    detail::scan(nullptr, policy, f, static_cast<T &&>(total)...);
 }
 
 template <class P, class F, class... T>
 void parallel_scan(const std::string & label, const P & policy, const F & f, T &&... total) {
-    detail::check_policy<P>();
-    if constexpr (sizeof...(T) > 0) detail::unsupported("a scan's total");
-    Kokkos::parallel_scan(label, detail::work(policy), detail::Scan<F, P>{f, flag()}, static_cast<T &&>(total)...);
+    detail::scan(&label, policy, f, static_cast<T &&>(total)...);
 }
 
 /** @brief Kokkos::deep_copy(exec, dst, src) of contiguous Views of one layout and span, as a kernel on exec. */
@@ -301,7 +336,8 @@ void copy(const E & exec, const D & dst, const S & src) {
     }
     const auto d = dst.data();
     const auto s = src.data();
-    gated::parallel_for("gated_copy", Kokkos::RangePolicy<E>(exec, 0, dst.span()), KOKKOS_LAMBDA(const size_t i) { d[i] = s[i]; });
+    gated::parallel_for("gated_copy", Kokkos::RangePolicy<E>(exec, 0, dst.span()),
+                        KOKKOS_LAMBDA(const size_t i) { d[i] = s[i]; });
 }
 
 template <class D, class S>
@@ -314,7 +350,8 @@ template <class E, class D>
 void fill(const E & exec, const D & dst, const typename D::non_const_value_type value) {
     if (!dst.span_is_contiguous()) throw std::logic_error("gated::fill: \"" + dst.label() + "\" is not contiguous");
     const auto d = dst.data();
-    gated::parallel_for("gated_fill", Kokkos::RangePolicy<E>(exec, 0, dst.span()), KOKKOS_LAMBDA(const size_t i) { d[i] = value; });
+    gated::parallel_for("gated_fill", Kokkos::RangePolicy<E>(exec, 0, dst.span()),
+                        KOKKOS_LAMBDA(const size_t i) { d[i] = value; });
 }
 
 template <class D>
