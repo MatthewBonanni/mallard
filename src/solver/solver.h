@@ -1053,7 +1053,7 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<uint32_t *> faces);
+        void launch_flux_functor(const IndexSet & faces);
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
         bool exchanges_partition_faces() const;
         /**
@@ -1072,16 +1072,16 @@ class Solver {
         /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
         void copy_boundary_gas();
 
-        Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
-        uint32_t n_early_cells = 0;
+        // Reconstructed cells independent of the halo (empty unless split), and the others
+        IndexSet early_cells, late_cells;
         // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
         std::string stencil_shapes_setting;
         void describe_stencil_shapes();
-        Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        IndexSet rhs_faces;  // faces of owned cells, whose fluxes are used
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
         FaceExchange face_exchange;
-        Kokkos::View<uint32_t *> local_faces, partition_faces;
+        IndexSet local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
         bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
