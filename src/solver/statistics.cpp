@@ -441,6 +441,16 @@ void Statistics::register_data(std::vector<Data> & data) const {
     phase.register_data(data);
 }
 
+Kokkos::View<const rtype *, Kokkos::LayoutStride> Statistics::device_average(const std::string & name) const {
+    const std::vector<std::string> names = average_names(fields, products);
+    for (size_t i = 0; i < names.size(); i++) {
+        if (names[i] != name) continue;
+        return i < fields.size() ? Kokkos::subview(mean, Kokkos::ALL(), i)
+                                 : Kokkos::subview(cov, Kokkos::ALL(), i - fields.size());
+    }
+    return phase.device_average(name);
+}
+
 void Statistics::copy_device_to_host() {
     stage_output();
     Kokkos::fence("statistics_copy");
@@ -833,6 +843,14 @@ std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field
 void PhaseAverage::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
     for (size_t i = 0; i < names.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
+}
+
+Kokkos::View<const rtype *, Kokkos::LayoutStride> PhaseAverage::device_average(const std::string & name) const {
+    const std::vector<std::string> names = variables();
+    for (size_t i = 0; i < names.size(); i++) {
+        if (names[i] == name) return Kokkos::subview(mean, Kokkos::ALL(), i);
+    }
+    return {};
 }
 
 void PhaseAverage::copy_device_to_host() {

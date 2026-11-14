@@ -156,6 +156,8 @@ class PhaseAverage {
         Kokkos::View<const Clock> device_clock() const { return clock; }
         /** @brief Host copy (see copy_device_to_host): (cell, bin * n_fields + field). */
         const auto & host_means() const { return h_mean; }
+        /** @brief The device column of the output of that name (see variables()); empty if none. */
+        Kokkos::View<const rtype *, Kokkos::LayoutStride> device_average(const std::string & name) const;
 
     private:
         static constexpr int32_t NO_TRIGGER = -2;
@@ -347,6 +349,9 @@ class Statistics {
         const auto & host_covariances() const { return h_cov; }
         /** @brief Host copy of the half widths: (cell, average), the means' then the covariances'. */
         const auto & host_intervals() const { return h_ci; }
+        /** @brief The device column of the output of that name, as register_data's host column; empty for the
+         *         intervals, which the host computes. */
+        Kokkos::View<const rtype *, Kokkos::LayoutStride> device_average(const std::string & name) const;
 
     private:
         std::vector<std::string> fields;

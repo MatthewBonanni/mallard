@@ -1411,7 +1411,9 @@ void Probes::Samples::allocate_staging(const uint64_t n_records) {
         "probe_staging", n_records, values.extent(0) * values.extent(1));
 }
 
-void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
+void Probes::Samples::copy_to_staging(
+    const uint64_t * seq, const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns)
+    const {
     const auto v = values;
     const auto st = staging;
     const uint64_t n_records = staging.extent(0);
@@ -1420,6 +1422,15 @@ void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
         const uint64_t slot = (*seq - 1) % n_records;
         for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
     });
+    // gather's cell columns: each sample's cell's value
+    const auto c = cells;
+    for (const auto & entry : columns) {
+        const uint32_t column = entry.first;
+        const auto field = entry.second;
+        Kokkos::parallel_for("probe_staged_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            st((*seq - 1) % n_records, i * n_vars + column) = field(c(i));
+        });
+    }
 }
 
 namespace probe {
@@ -2434,15 +2445,21 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
     }
 }
 
-bool Probes::can_stage(const size_t k) const {
+bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const Probe & p = *probes[k];
-    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && p.cell_columns.empty() &&
+    const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
+        return statistics.device_average(c.second->name()).data() != nullptr;
+    });
+    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
-void Probes::stage(const size_t k, const uint64_t n_records) {
+void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics) {
     Probe & p = *probes[k];
     p.staged = true;
+    for (const auto & [column, data] : p.cell_columns) {
+        p.device_columns.emplace_back(column, statistics.device_average(data->name()));
+    }
     if (p.samples_nodes()) p.nodes.allocate_staging(n_records);
     if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
 }
@@ -2472,11 +2489,11 @@ void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const u
     Probe & p = *probes[k];
     if (p.samples_nodes()) {
         p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
-        p.nodes.copy_to_staging(seq);
+        p.nodes.copy_to_staging(seq, p.device_columns);
     }
     if (p.samples_quadrature()) {
         p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-        p.quadrature.copy_to_staging(seq);
+        p.quadrature.copy_to_staging(seq, p.device_columns);
     }
 }
 
