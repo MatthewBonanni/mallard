@@ -400,11 +400,11 @@ std::vector<std::pair<std::string, std::vector<char>>> teno_tables(const TENO & 
     add("small sizes", teno.stencil_small_size);
     add("large slices", teno.stencil_large.slice_start);
     add("large cells", teno.stencil_large.cells);
-    add("large faces", teno.stencil_large.faces);
+    add("large images", teno.stencil_large.images);
     add("large pinv", teno.stencil_large.pinv);
     add("small slices", teno.stencil_small.slice_start);
     add("small cells", teno.stencil_small.cells);
-    add("small faces", teno.stencil_small.faces);
+    add("small images", teno.stencil_small.images);
     add("small pinv", teno.stencil_small.pinv);
     out.emplace_back("gather depth", std::vector<char>(teno.gather_depth.begin(), teno.gather_depth.end()));
     return out;

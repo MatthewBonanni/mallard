@@ -528,8 +528,9 @@ time of each phase.
 
 The tables are packed without padding to the largest stencil: per cell, the
 scale $h_i$, the means $\overline{\phi}_{l,i}$, the 2D matrix $\mathbf{S}$ or
-the 3D moments, and per stencil entry its cell, its mirror face (or none)
-and its column of $\mathbf{P}$. On GPUs, 32 consecutive cells form a slice
+the 3D moments, and per stencil entry its cell and its column of
+$\mathbf{P}$. A mirror image's entry instead points into a list of the
+rank's images, which holds the cell and the mirror face. On GPUs, 32 consecutive cells form a slice
 whose entries are interleaved, so that a warp reads consecutive words.
 `single_precision_tables` (3D, single gas) keeps $\mathbf{P}$, and the moments' values, in single
 precision on the device.

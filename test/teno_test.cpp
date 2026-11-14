@@ -633,7 +633,7 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
     for (const teno::PackedStencils * s : {&teno.stencil_large, &teno.stencil_small}) {
         add(s->slice_start);
         add(s->cells);
-        add(s->faces);
+        add(s->images);
         add(s->pinv);
     }
     out.emplace_back(teno.gather_depth.begin(), teno.gather_depth.end());
