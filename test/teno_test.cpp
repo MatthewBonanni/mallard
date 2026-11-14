@@ -671,7 +671,7 @@ TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     const auto full = teno_tables(*make_teno(mesh, bd, 5));
     const auto central = tables_with(mesh, bd, 5, [](TENO & t) { t.sector_stencils = false; });
-    for (const size_t k : {0, 1, 3, 5, 6, 7, 8}) EXPECT_TRUE(central[k] == full[k]) << "table " << k;
+    for (const size_t k : {0u, 1u, 3u, 5u, 6u, 7u, 8u}) EXPECT_TRUE(central[k] == full[k]) << "table " << k;
     EXPECT_TRUE(central[2].empty()) << "smoothness matrices";
     EXPECT_TRUE(central[12].empty()) << "sector pseudo-inverses";
 }
