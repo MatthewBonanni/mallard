@@ -14,6 +14,7 @@ add_library(MallardCore STATIC
     common/input.cpp
     common/units.cpp
     common/memory_tracker.cpp
+    common/view_entries.cpp
     common/build_info.cpp
     common/case_template.cpp
     common/growing_buffer.cpp
@@ -40,6 +41,7 @@ add_library(MallardCore STATIC
     mesh/read_openfoam.cpp
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
+    mesh/structured_blocks.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp
@@ -216,15 +218,18 @@ foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
     endforeach()
 endforeach()
 # The TENO setup computes every table with the same operations on the host
-# and on the device, and contracting multiplies and adds into FMAs would
-# change them differently on each: no contraction in that file
+# and on the device, and the reconstruction stages its stencil loads on GPUs
+# only: contracting multiplies and adds into FMAs would round each differently
+# by where the compiler fuses, so neither file contracts and the hot loops
+# write their FMAs explicitly
+set(teno_sources numerics/teno_setup.cpp numerics/teno.cpp)
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
@@ -255,6 +260,48 @@ add_custom_target(mallard_git_version COMMAND ${git_version_command}
     BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h)
 add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+
+# Kokkos computes the offset of a multi-dimensional View in the common type of its
+# indices, at most 32 bits (signed or not) in Mallard, so a View with more entries
+# would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp that
+# checks every allocation against common/view_entries.h.
+if(USE_SYSTEM_KOKKOS)
+    get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
+    find_file(Mallard_KOKKOS_BASIC_VIEW_HEADER View/Kokkos_BasicView.hpp PATHS ${kokkos_includes}
+              NO_DEFAULT_PATH NO_CACHE)
+else()
+    set(Mallard_KOKKOS_BASIC_VIEW_HEADER ${PROJECT_SOURCE_DIR}/src/external/kokkos/core/src/View/Kokkos_BasicView.hpp)
+endif()
+set(basic_view_patched FALSE)
+if(Mallard_KOKKOS_BASIC_VIEW_HEADER)
+    file(READ ${Mallard_KOKKOS_BASIC_VIEW_HEADER} basic_view)
+    set(include_anchor "#include <optional>\n#include <type_traits>\n")
+    set(alloc_anchor "        allocation_size_from_mapping_and_accessor(arg_mapping, arg_accessor);\n")
+    string(CONCAT alloc_check
+        "    if constexpr (extents_type::rank() > 1 || std::is_same_v<layout_type, Kokkos::layout_stride>)\n"
+        "      ::view_entries::check(Impl::get_property<Impl::LabelTag>(prop_copy), arg_mapping.required_span_size());\n")
+    string(FIND "${basic_view}" "${include_anchor}" include_found)
+    string(FIND "${basic_view}" "${alloc_anchor}" alloc_found)
+    if(include_found GREATER_EQUAL 0 AND alloc_found GREATER_EQUAL 0)
+        string(REPLACE "${include_anchor}" "${include_anchor}#include \"view_entries.h\"\n" basic_view "${basic_view}")
+        string(REPLACE "${alloc_anchor}" "${alloc_anchor}${alloc_check}" basic_view "${basic_view}")
+        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Kokkos_BasicView.hpp.guarded "${basic_view}")
+        configure_file(${CMAKE_CURRENT_BINARY_DIR}/Kokkos_BasicView.hpp.guarded
+                       ${CMAKE_CURRENT_BINARY_DIR}/kokkos_entries_guard/View/Kokkos_BasicView.hpp COPYONLY)
+        target_include_directories(MallardCore SYSTEM BEFORE PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/kokkos_entries_guard)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${Mallard_KOKKOS_BASIC_VIEW_HEADER})
+        set(basic_view_patched TRUE)
+    endif()
+endif()
+if(NOT basic_view_patched)
+    if(USE_SYSTEM_KOKKOS)
+        message(WARNING "Mallard: this Kokkos's View/Kokkos_BasicView.hpp does not allocate as the View size check "
+                        "in src/CMakeLists.txt expects, so Views past 2^31 entries are not rejected.")
+    else()
+        message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_BasicView.hpp no longer allocates as the View "
+                            "size check expects; update the check for this Kokkos version.")
+    endif()
+endif()
 if(Mallard_ENABLE_MPI)
     target_link_libraries(MallardCore PUBLIC MPI::MPI_CXX)
     target_compile_definitions(MallardCore PUBLIC Mallard_HAS_MPI)

@@ -513,7 +513,7 @@ def cfl_limits(P):
 
 
 def step_queue(P):
-    """Host and GPU timelines of the steps with an output at step 5 (docs/guide/parallel.md); not to scale."""
+    """Host and GPU timelines of the steps with a checkpoint at step 5 (docs/guide/parallel.md); not to scale."""
     step, record, output, gap, noop, end = 1.0, 0.12, 1.4, 0.35, 0.14, 12.6
     fig, axes = plt.subplots(2, 1, figsize=(10.4, 3.8), sharex=True, gridspec_kw=dict(hspace=0.6))
 
@@ -535,7 +535,7 @@ def step_queue(P):
     box(ax, t, noop, 0, P["muted"], hatch="////")
     box(ax, t + noop, noop, 0, P["muted"], hatch="////")
     label(ax, t + noop, -0.4, "6, 7: nothing", P, color=P["muted"], size=9.5, va="top")
-    box(ax, t + record, output, 1, P["flame"], "output")
+    box(ax, t + record, output, 1, P["flame"], "checkpoint")
     t += record + output
     k = 6
     while t < end:
@@ -552,7 +552,7 @@ def step_queue(P):
         t += step
         box(ax, t, record, 1, P["muted"], alpha=0.7)
         if k == 5:
-            box(ax, t + record, output, 1, P["flame"], "output")
+            box(ax, t + record, output, 1, P["flame"], "checkpoint")
             t += output
         t += gap
         k += 1

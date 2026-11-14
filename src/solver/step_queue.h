@@ -52,6 +52,7 @@ enum Reason : uint32_t {
     CHEMISTRY = 128,   // the chemistry failed in some cell, or its balancing across ranks must grow
     BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
     TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
+    OUTPUT = 1024,     // an output is due while the one staged before is still being written on some rank
 };
 
 /**
@@ -143,6 +144,7 @@ struct Record {
     uint64_t probes;         // bit k: staged probe k is written
     uint64_t probe_samples;  // bit k: staged averaging probe k staged a sample for its averages
     uint32_t spectra;        // the unaveraged spectra staged their sample
+    uint64_t outputs;        // bit k: [[write_data]] writer k is due, its arrays staged in the host's mirrors
     ProgressLocals progress_locals;
 };
 
@@ -157,6 +159,7 @@ struct Loop {
     uint64_t check_interval;  // progress rows on the device every this many steps, 0: by the host
     Horizon horizon;
     double chemistry_failures;  // failed cells the host has seen, over the ranks
+    uint64_t outputs_staged;    // launches that staged outputs, since the run started
     uint64_t chemistry_start, chemistry_ns;  // of the current launch's chemistry calls
 };
 

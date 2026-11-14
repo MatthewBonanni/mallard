@@ -353,7 +353,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
                 if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
             }
         } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos) {
-            o.files[file] = without_records(read_file(entry.path()));
+            // Restart attributes name the writers by their prefixes
+            o.files[file] = strip(without_records(read_file(entry.path())));
         } else {
             o.files[file] = "";
         }
@@ -736,6 +737,47 @@ TEST(StepQueueTest, OutputsByTimeAndTStop) {
               "point = " + point_of("0.5", "0.5", "0.2") + "\n";
     const Outcome o = expect_queue_invariant("by_time", c);
     EXPECT_EQ(o.t, 0.1_r);
+}
+
+TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
+    // Restarts by step and snapshots by time (the device shortens the steps to their times), with the means and
+    // their batches and the step controller's history in the restarts
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.integrator = "RDPK3Sp35";
+    c.numerics = "[numerics.error_control]\ntolerance = 1e-3\n";
+    const std::string outputs = "check_interval = 4\n"
+                                "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n"
+                                "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ntime_interval = 0.15\n"
+                                "variables = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
+    c.extra = outputs + "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("staged_outputs", c);
+    if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000012.restart"));
+        EXPECT_GT(std::count_if(o.files.begin(), o.files.end(), [](const auto & f) {
+                      return f.first.find("flow_") == 0 && f.first.find(".vtu") != std::string::npos;
+                  }), 2);
+    }
+    // Restarts further apart than the queue is deep: as many steps run ahead as without them
+    const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
+    Case spaced = c;
+    spaced.extra = "check_interval = 4\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 7\n" +
+                   statistics;
+    Case bare = c;
+    bare.extra = "check_interval = 4\n" + statistics;
+    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, OutputsDueBeforeTheLastOneIsWrittenStopTheDevice) {
+    // A restart every 2 steps with 3 enqueued: the next is due while the host still writes the last one; the
+    // restarts carry a characteristic outlet's faces
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.right = "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n";
+    c.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    c.distributed = comm::size() > 1;
+    expect_queue_invariant("busy_outputs", c);
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {

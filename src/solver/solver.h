@@ -58,6 +58,7 @@
 #include "distribution.h"
 #include "face_exchange.h"
 #include "partition.h"
+#include "pinned_mirrors.h"
 #include "halo_exchange.h"
 #include "log.h"
 #include "check.h"
@@ -140,7 +141,7 @@ bool writes_variable(const Input & input, const std::string & name);
 class Solver {
     public:
         /** @brief Values of the step's time-step reduction: dt_cfl1, the run-control requests and minus the wall time. */
-        static constexpr int N_STEP_REDUCE = 2 + run_control::N_REQUESTS;
+        static constexpr int N_STEP_REDUCE = 3 + run_control::N_REQUESTS;
 
         Solver();
         ~Solver();
@@ -248,7 +249,7 @@ class Solver {
         void update_p_max();
 
         /**
-         * @brief Copy the device solution to the host mirrors.
+         * @brief Copy the device solution to the host mirrors: output_arrays_to_host, then finish_output_arrays.
          */
         void copy_device_to_host();
 
@@ -379,8 +380,8 @@ class Solver {
         void init_error_control();
         /** @brief Throws once the same step has been rejected too many times. */
         void check_rejections(int tries) const;
-        /** @brief The time the next step must not pass: t_stop or the next time-based output. */
-        rtype next_target_time(bool unstaged_probes = false) const;
+        /** @brief The time the next step must not pass: t_stop or the next time-based output (unstaged: of the host's). */
+        rtype next_target_time(bool unstaged = false) const;
         void check_fields();
 
         // Run control and divergence (see run_control.h)
@@ -488,6 +489,23 @@ class Solver {
         void chemistry_reductions(step_queue::Chemistry * out);
         /** @brief The means sampled in the step graph. */
         bool statistics_on_device() const;
+        /** @brief Whether the step graph stages snapshots and restarts in the host's mirrors (set by begin_device_steps). */
+        bool outputs_stageable() const;
+        /**
+         * @brief What copy_device_to_host enqueues on the device: the output fields, then their copies into the
+         *        pinned mirrors with the clocks and states restart files carry (capturable).
+         */
+        void output_arrays_to_host();
+        /** @brief The mirrors of the step controller and the characteristic faces, outside step graphs. */
+        void allocate_restart_mirrors();
+        /** @brief What copy_device_to_host computes on the host from the mirrors once output_arrays_to_host ran. */
+        void finish_output_arrays();
+        /** @brief write_data's files from the mirrors: snapshots, restarts and the statistics' files. */
+        void write_outputs(bool force);
+        /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
+        void decide_outputs();
+        /** @brief Writes the outputs the record staged (collective), then frees the mirrors for the next. */
+        void write_staged_outputs(const step_queue::Record & record);
         /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
         bool monitors_on_device() const;
         void allocate_monitors();
@@ -539,13 +557,15 @@ class Solver {
          *        (viscous_gradients, or transport_gradients for mixtures, whose
          *        time-step diffusivity NU_EFF also grows).
          */
-        void update_eddy_viscosity(uint32_t n);
+        void update_eddy_viscosity(uint32_t n, bool of_state = false);
         /**
          * @brief [les] gradients = "reconstruction": les_velocity_gradients of the owned cells from TENO's
          *        central polynomials where its last reconstruction found the cell smooth, else the
-         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo.
+         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo. With
+         *        of_state, eddy_viscosity_of_state's polynomials, and the flags of the reconstruction before
+         *        the one exchange_for_first_stage() started.
          */
-        void update_reconstruction_gradients(uint32_t n);
+        void update_reconstruction_gradients(uint32_t n, bool of_state);
         void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
@@ -923,7 +943,7 @@ class Solver {
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
-        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, -wall], local, then reduced
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> requests_posted;  // pinned: written by the host any time
@@ -942,8 +962,18 @@ class Solver {
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
-        Kokkos::View<rtype> probe_target;  // next_target_time of all but the staged probes
+        Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
+        bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs
+        bool staged_time_outputs = false;        // some of them by time
+        Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
+        Kokkos::View<uint32_t> output_due;       // the current launch stages its outputs
+        uint64_t n_staged_outputs = 0;           // records whose outputs the host wrote
+        PinnedMirrors pinned_mirrors;            // the host mirrors output_arrays_to_host fills
+        Kokkos::View<rtype *>::host_mirror_type h_step_control;  // the step controller's slots
+        Kokkos::View<rtype *[2]>::host_mirror_type h_char_state;  // the characteristic faces' [p, u_n]
+        Kokkos::View<uint32_t *>::host_mirror_type h_char_faces;
+        Kokkos::View<Triggers::DeviceState *>::host_mirror_type h_trigger_states;
         Kokkos::View<uint64_t *> monitor_intervals;
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)
 
@@ -1164,7 +1194,9 @@ class Solver {
         // [les] gradients = "reconstruction": the models' velocity gradients (cell, i, j) = d u_i / d x_j
         Kokkos::View<rtype *[N_DIM][N_DIM]> les_velocity_gradients;
         struct ReconstructionGradients {
-            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W, by the reconstruction
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> of_state;    // (owned cell): eddy_viscosity_of_state's
+            Kokkos::View<rtype *> troubled;  // (owned cell): TENO's flags, kept from the first stage's early start
             State halo;
         } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
@@ -1218,6 +1250,7 @@ class Solver {
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
+        Kokkos::View<double **, Kokkos::LayoutRight>::host_mirror_type h_cell_diffusion;
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
