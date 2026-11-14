@@ -529,6 +529,8 @@ class Mesh {
         CellNumbering cell_order;
         // The order the cells were numbered in
         CellOrderChoice cell_order_choice;
+        // Structured blocks of owned cells (cell_order auto), each a contiguous range of cells
+        std::vector<StructuredBlock> structured_blocks;
         // Global id of every local cell (empty if the local order is the global one). Distributed runs: also of
         // every local node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;

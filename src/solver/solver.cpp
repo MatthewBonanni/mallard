@@ -510,6 +510,18 @@ void Solver::init_mesh() {
                                     hilbert ? choice.input_lines : choice.hilbert_lines,
                                     hilbert ? "in the input order" : "along the Hilbert curve");
         }
+        std::array<uint64_t, 2> blocks = {mesh->structured_blocks.size(), 0};
+        for (const StructuredBlock & block : mesh->structured_blocks) {
+            uint64_t cells = 1;
+            for (uint32_t e : block.n) cells *= e;
+            blocks[1] += cells;
+        }
+        blocks = comm::allreduce(blocks, comm::Op::SUM);
+        if (blocks[0] > 0) {
+            text += logging::format(", structured blocks first (%llu %s, %.1f%% of the cells)",
+                                    static_cast<unsigned long long>(blocks[0]), blocks[0] == 1 ? "block" : "blocks",
+                                    100.0 * double(blocks[1]) / double(n_cells_global));
+        }
         mesh_settings.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
