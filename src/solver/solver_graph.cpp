@@ -52,6 +52,12 @@ void cuda_check(const cudaError_t err, const char * what) {
 
 cudaStream_t step_stream() { return Kokkos::DefaultExecutionSpace().cuda_stream(); }
 
+cudaGraph_t end_capture() {
+    cudaGraph_t graph = nullptr;
+    cuda_check(cudaStreamEndCapture(step_stream(), &graph), "cudaStreamEndCapture");
+    return graph;
+}
+
 /** @brief Ends a capture that failed, if the stream still captures, and destroys what it captured. */
 void abandon_capture() {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
