@@ -686,6 +686,28 @@ TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("time_probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
+    // A line of a mean, a covariance and a phase average, read from the device's averages at each write
+    const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n"
+                                   "products = [\"RHO*P\"]\n"
+                                   "[statistics.phase]\nfields = [\"P\"]\nbins = 2\nperiod = 0.02\n";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + statistics +
+              "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 5\n"
+              "fields = [\"P\", \"MEAN_P\", \"COV_RHO_P\", \"PHASE_1_P\"]\n"
+              "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") +
+              "\nn_points = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("statistics_probes", c);
+    if (comm::is_root()) {
+        EXPECT_GT(std::count(o.files.at("line.csv").begin(), o.files.at("line.csv").end(), '\n'), 20);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + statistics;
+    EXPECT_EQ(run_case("statistics_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     // An integral, a force and a probe's value, each sampled at its own monitor's steps while steps run ahead
     Case c;
