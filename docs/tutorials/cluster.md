@@ -67,13 +67,13 @@ mpirun -n 2 mallard check input.toml --steps 20 --kokkos-num-threads=2
 ...
 == Time step ============================================================================ ok
   At the initial state, t = 0 s.
-  status  quantity                      value      units          target  basis
-          time step dt                  0.0002196  s                      run.cfl times the time step at CFL 1
-  ok      CFL number                    1          dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
-          time step at CFL 1            0.0002196  s                      the smallest over the cells
-          CFL-limiting cell             16,247     global id              at (0.5611, 0.6972) m
-          cells within 10% of its step  13,136     cells                  in (0.002778, 0.002778) m to (0.7389, 0.9972)
-                                                                          m
+  status  quantity                      value           units          target  basis
+          time step dt                       0.0002196  s                      run.cfl times the time step at CFL 1
+  ok      CFL number                         1          dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
+          time step at CFL 1                 0.0002196  s                      the smallest over the cells
+          CFL-limiting cell             16,247          global id              at (0.5611, 0.6972) m
+          cells within 10% of its step  13,136          cells                  in (0.002778, 0.002778) m to (0.7389,
+                                                                               0.9972) m
 ...
 == Memory =============================================================================== ok
   Kokkos allocations in host memory per rank, of the rank with the largest peak (with
@@ -85,10 +85,10 @@ mpirun -n 2 mallard check input.toml --steps 20 --kokkos-num-threads=2
 == Cost ===================================================================================
   On 2 ranks at 568k cells/s per rank (measured over 20 steps), at the initial time step;
   rank-hours: ranks times wall hours.
-  period                   simulated time [s]  steps  wall time  rank-hours
-  per unit simulated time  1                   4,555  7m 42s     0.257
-  per flow-through time    1.06                4,828  8m 10s     0.272
-  to run.t_stop            0.2                 910.9  1m 32s     0.0514
+  period                   simulated time [s]  steps    wall time  rank-hours
+  per unit simulated time  1                   4,555    7m 42s     0.257
+  per flow-through time    1.06                4,828    8m 10s     0.272
+  to run.t_stop            0.2                   910.9  1m 32s     0.0514
 ...
   Result: ok, 0 errors and 0 warnings (exit status 0)
 ```
@@ -116,33 +116,33 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
   --ranks from a serial check, scaled to the largest part the partitioner makes); peak:
   during the setup.
   status  run         ranks  owned cells  halo cells  after setup  peak     peak of the device
-          this check  1      460,800      0           3.96 GB      3.96 GB  -
+          this check  1      460,800          0       3.96 GB      3.96 GB  -
           --ranks 4   4      115,200      7,680       1.06 GB      1.06 GB  -
 ...
 == GPU sizing =========================================================================== ok
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
-  status  quantity                            value      units                 basis
-          memory per GPU                      85.1       GB                    A100-80GB
-          kept free                           5          % of the memory       fragmentation and allocations during the
-                                                                               run
-          outside Kokkos per GPU              1.60       GB                    typical: CUDA's context and kernels'
-                                                                               local memory on an A100
-  ok      most cells per GPU                  9,226,381  owned and halo cells  8.59 kB per cell + 3.43 MB, at the
-                                                                               setup's peak
-  ok      fewest GPUs                         1          GPUs                  largest part 460,800 owned + 0 halo
-                                                                               cells, predicted peak 5.56 GB (from the
-                                                                               partitioner)
-          most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
-          wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
+  status  quantity                            value         units                 basis
+          memory per GPU                             85.1   GB                    A100-80GB
+          kept free                                   5     % of the memory       fragmentation and allocations during
+                                                                                  the run
+          outside Kokkos per GPU                      1.60  GB                    typical: CUDA's context and kernels'
+                                                                                  local memory on an A100
+  ok      most cells per GPU                  9,226,381     owned and halo cells  8.59 kB per cell + 3.43 MB, at the
+                                                                                  setup's peak
+  ok      fewest GPUs                                 1     GPUs                  largest part 460,800 owned + 0 halo
+                                                                                  cells, predicted peak 5.56 GB (from
+                                                                                  the partitioner)
+          most GPUs with halo < 10% of owned          4     GPUs                  doubling from the fewest
+          wall time per unit simulated time          21.0   s                     on 4 GPUs at 50.0M cells/s each
 
 == Cost ===================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps   wall time  rank-hours
-  per unit simulated time  1                   9,109   21.0 s     0.0233
+  per unit simulated time  1                    9,109  21.0 s     0.0233
   per flow-through time    1.135               10,340  23.8 s     0.0265
-  to run.t_stop            0.2                 1,822   4.20 s     0.00466
+  to run.t_stop            0.2                  1,822   4.20 s    0.00466
 ```
 
 (From a CPU build; a GPU build counts GPU-hours and device memory.) Seconds
@@ -229,11 +229,11 @@ acted on prints a remark between the rows:
   over the cells; troubled: cells where TENO selects stencils (shocks); written: files since
   the previous row, named in mallard.jsonl and the summary (--verbose: a line each).
   Nondimensional case (physics.units): no units.
-         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
-            -           -         -      %         ms     cells/s    h:mm:ss           -           -        -         %  files
-            0  0.0000e+00  2.20e-04    0.0          -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
-           50  1.0258e-02  1.91e-04    5.1        107    1.08e+06    0:01:39   1.399e+00   9.987e-01    2.148      1.44  -
-          100  1.9370e-02  1.81e-04    9.7        109    1.06e+06    0:01:41   1.399e+00   9.929e-01    2.463      1.57  -
+         step           t        dt   done    wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+            -           -         -      %           ms     cells/s    h:mm:ss           -           -        -         %  files
+            0  0.0000e+00  2.20e-04    0.0            -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
+           50  1.0258e-02  1.91e-04    5.1       107.00    1.08e+06    0:01:39   1.399e+00   9.987e-01    2.148      1.44  -
+          100  1.9370e-02  1.81e-04    9.7       109.00    1.06e+06    0:01:41   1.399e+00   9.929e-01    2.463      1.57  -
 ```
 
 What to look for in a long job:
@@ -323,8 +323,8 @@ with a summary of it, here at the end of the third job of section 5:
 == Health =================================================================================
   Lowest values at the progress rows, over the cells:
   quantity  value  units  step   at
-  rho       1.39   -      850    (2.081, 0.2444)
-  p         0.982  -      800    (1.981, 0.1361)
+  rho       1.39   -        850  (2.081, 0.2444)
+  p         0.982  -        800  (1.981, 0.1361)
   T         0.703  -      1,000  (2.414, 0.1528)
 
   Shares of the cells at the last progress row:
@@ -335,9 +335,9 @@ with a summary of it, here at the end of the third job of section 5:
   explain, relative to the total's scale:
   total       unexplained change [-]
   mass        -1.6e-13
-  momentum_x  9.6e-15
-  momentum_y  1.8e-15
-  energy      2.2e-13
+  momentum_x   9.6e-15
+  momentum_y   1.8e-15
+  energy       2.2e-13
 
   output        per step, slowest rank [ms]
   output_sync   0.738
@@ -405,16 +405,16 @@ Stopping after the current step (Ctrl-C again to stop now)
 == Summary ================================================================================
   Ended (stopped): stop requested by mallard ctl, at step 364, t = 0.0652797
   phase          wall time [s]  of the total [%]
-  setup          10.63          19.8
-  time stepping  42.92          80.0
-  diagnostics    0.003741       0.0
-  output         0.0213         0.0
+  setup          10.63           19.8
+  time stepping  42.92           80.0
+  diagnostics     0.003741        0.0
+  output          0.0213          0.0
   total          53.65          100.0
 
-  quantity            value     units    basis
-  throughput          9.77e+05  cells/s  over 364 steps
-  wall time per step  118       ms       time stepping
-  written             43.5      MB       in 0.0228 s of writing, in the background
+  quantity            value       units    basis
+  throughput            9.77e+05  cells/s  over 364 steps
+  wall time per step  118         ms       time stepping
+  written              43.5       MB       in 0.0228 s of writing, in the background
 
   Files (-: one file, appended to as the run goes):
   kind     files  index, or file
@@ -441,10 +441,10 @@ NRANKS=2 THREADS=2 ./mpirun.sh > run.log 2>&1 &
 ```text
   Initial state      restart from restart_000364.restart (step 364, t = 0.0652797)
   ...
-         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
-            -           -         -      %         ms     cells/s    h:mm:ss           -           -        -         %  files
-          364  6.5280e-02  1.70e-04   32.6          -           -          -   1.397e+00   9.904e-01    3.331      0.00  -
-          400  7.1405e-02  1.70e-04   35.7        127    9.05e+05    0:01:37   1.393e+00   9.906e-01    3.355      2.58  -
+         step           t        dt   done    wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+            -           -         -      %           ms     cells/s    h:mm:ss           -           -        -         %  files
+          364  6.5280e-02  1.70e-04   32.6            -           -          -   1.397e+00   9.904e-01    3.331      0.00  -
+          400  7.1405e-02  1.70e-04   35.7       127.00    9.05e+05    0:01:37   1.393e+00   9.906e-01    3.355      2.58  -
 ```
 
 This time stop it with `mallard ctl`, which replies once the run has ended:
@@ -470,15 +470,15 @@ exit 0
 ```text
   Ended (finished): t_stop = 0.2 reached, at step 1,167, t = 0.2
   phase          wall time [s]  of the total [%]
-  setup          12.23          10.9
-  time stepping  99.69          88.9
-  diagnostics    0.03069        0.0
-  output         0.03783        0.0
+  setup           12.23          10.9
+  time stepping   99.69          88.9
+  diagnostics      0.03069        0.0
+  output           0.03783        0.0
   total          112.1          100.0
 
-  quantity            value     units    basis
-  throughput          8.25e+05  cells/s  over 714 steps
-  wall time per step  140       ms       time stepping
+  quantity            value       units    basis
+  throughput            8.25e+05  cells/s  over 714 steps
+  wall time per step  140         ms       time stepping
 ```
 
 The exit status tells a job chain what to do next: 0, finished; 1, an error

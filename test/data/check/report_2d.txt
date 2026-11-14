@@ -13,8 +13,8 @@
 == Boundaries ========================================================================== ok
   Every boundary face has a condition: 4 zones (periodic zones are paired, not listed).
   status  zone    condition  faces  details
-  ok      left    symmetry   8      -
-  ok      right   symmetry   8      -
+  ok      left    symmetry    8     -
+  ok      right   symmetry    8     -
   ok      bottom  symmetry   16     -
   ok      top     symmetry   16     -
 
@@ -23,12 +23,12 @@
   cells: the cells each touches. A region of the case that touches no cell is an error.
   status  region                        kind    measure  units  cells  made from
   ok      domain                        filled  2        m^2    128    the mesh's
-  ok      bottom                        curve   2        m      16     the mesh's
-  ok      left                          curve   1        m      8      the mesh's
-  ok      right                         curve   1        m      8      the mesh's
-  ok      top                           curve   2        m      16     the mesh's
-  ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
-  ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+  ok      bottom                        curve   2        m       16    the mesh's
+  ok      left                          curve   1        m        8    the mesh's
+  ok      right                         curve   1        m        8    the mesh's
+  ok      top                           curve   2        m       16    the mesh's
+  ERROR   sponges[0].region             filled  0        m^2      0    cell fractions
+  ok      probes[name = "ring"].region  curve   1.5708   m       13    exact
   Filled regions: their part in the domain (its surface: theirs inside the domain and the
   domain's boundary inside them) and their own measures, independent of the mesh ("-" for
   regions of the mesh or unbounded ones), exact or within a relative tolerance; outside: the
@@ -39,20 +39,20 @@
 
 == Mesh quality ======================================================================== ok
   Over every cell; a cell above the limit is questionable.
-  status  metric             units          max  mean  limit  cells over limit
-  ok      non-orthogonality  deg            0    0     70     0
-  ok      skewness           dimensionless  0    0     0.5    0
-  ok      aspect ratio       dimensionless  1    1     1000   0
-  ok      volume ratio       dimensionless  1    1     10     0
+  status  metric             units          max  mean  limit   cells over limit
+  ok      non-orthogonality  deg            0    0       70    0
+  ok      skewness           dimensionless  0    0        0.5  0
+  ok      aspect ratio       dimensionless  1    1     1000    0
+  ok      volume ratio       dimensionless  1    1       10    0
 
 == Time step ========================================================================= WARN
   At the initial state, t = 0 s.
-  status  quantity                      value    units          target  basis
-          time step dt                  0.0557   s                      run.cfl times the time step at CFL 1
-  WARN    CFL number                    1.5      dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
-          time step at CFL 1            0.03713  s                      the smallest over the cells
-          CFL-limiting cell             0        global id              at (0.0625, 0.0625) m
-          cells within 10% of its step  128      cells                  in (0.0625, 0.0625) m to (1.938, 0.9375) m
+  status  quantity                      value      units          target  basis
+          time step dt                    0.0557   s                      run.cfl times the time step at CFL 1
+  WARN    CFL number                      1.5      dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
+          time step at CFL 1              0.03713  s                      the smallest over the cells
+          CFL-limiting cell               0        global id              at (0.0625, 0.0625) m
+          cells within 10% of its step  128        cells                  in (0.0625, 0.0625) m to (1.938, 0.9375) m
 
 == Resolution ========================================================================== ok
   Estimates from the initial state, against the targets of the case's regime (DNS, or LES
@@ -74,34 +74,34 @@
   By category, of the same rank; per cell: per owned and halo cell of the rank (128);
   categories below 0.05% of the peak are left out.
   category             at the setup's peak  per cell  after setup  per cell  proportional to the cells
-  solution and stages  27.1 kB              212 B     27.1 kB      212 B     yes
-  mesh and geometry    42.9 kB              335 B     42.9 kB      335 B     yes
-  setup                58.1 kB              -         0 B          -         no
-  total                128 kB               -         70.0 kB      -
+  solution and stages   27.1 kB             212 B     27.1 kB      212 B     yes
+  mesh and geometry     42.9 kB             335 B     42.9 kB      335 B     yes
+  setup                 58.1 kB               -        0   B         -       no
+  total                128   kB               -       70.0 kB        -
 
 == GPU sizing ========================================================================== ok
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
-  status  quantity                           value        units                 basis
-          memory per GPU                     80.0         GB                    A100-80GB
-          kept free                          5            % of the memory       fragmentation and allocations during the
-                                                                                run
-          outside Kokkos per GPU             1.60         GB                    typical: CUDA's context and kernels'
-                                                                                local memory on an A100
-  ok      most cells per GPU                 128,683,729  owned and halo cells  547 B per cell + 58.1 kB, at the setup's
-                                                                                peak
-  ok      fewest GPUs                        1            GPUs                  largest part 128 owned + 0 halo cells,
-                                                                                predicted peak 1.60 GB (from the
-                                                                                partitioner)
-          wall time per unit simulated time  2.30         ms                    on 1 GPU at 1.00M cells/s each
+  status  quantity                           value           units                 basis
+          memory per GPU                              80.0   GB                    A100-80GB
+          kept free                                    5     % of the memory       fragmentation and allocations during
+                                                                                   the run
+          outside Kokkos per GPU                       1.60  GB                    typical: CUDA's context and kernels'
+                                                                                   local memory on an A100
+  ok      most cells per GPU                 128,683,729     owned and halo cells  547 B per cell + 58.1 kB, at the
+                                                                                   setup's peak
+  ok      fewest GPUs                                  1     GPUs                  largest part 128 owned + 0 halo
+                                                                                   cells, predicted peak 1.60 GB (from
+                                                                                   the partitioner)
+          wall time per unit simulated time            2.30  ms                    on 1 GPU at 1.00M cells/s each
 
 == Cost ===================================================================================
   On 1 rank at 1.00M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
-  period                   simulated time [s]  steps  wall time  rank-hours
-  per unit simulated time  1                   17.95  2.30 ms    6.38e-07
-  per flow-through time    2                   35.91  4.60 ms    1.28e-06
-  to run.t_stop            0.5                 8.977  1.15 ms    3.19e-07
+  period                   simulated time [s]  steps   wall time  rank-hours
+  per unit simulated time  1                   17.95   2.30 ms    6.38e-07
+  per flow-through time    2                   35.91   4.60 ms    1.28e-06
+  to run.t_stop            0.5                  8.977  1.15 ms    3.19e-07
 
 == Diagnostics ====================================================================== ERROR
   status  code              message, then the docs that explain it

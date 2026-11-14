@@ -100,9 +100,13 @@ rtype StepController::read(const Slot slot) const {
 
 std::vector<std::pair<std::string, double>> StepController::attributes() const {
     auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), state);
-    return {{ATTRIBUTE_NAMES[0], static_cast<double>(h(DT_NEXT))},
-            {ATTRIBUTE_NAMES[1], static_cast<double>(h(EPS_1))},
-            {ATTRIBUTE_NAMES[2], static_cast<double>(h(EPS_2))}};
+    return attributes(h.data());
+}
+
+std::vector<std::pair<std::string, double>> StepController::attributes(const rtype * slots) {
+    return {{ATTRIBUTE_NAMES[0], static_cast<double>(slots[DT_NEXT])},
+            {ATTRIBUTE_NAMES[1], static_cast<double>(slots[EPS_1])},
+            {ATTRIBUTE_NAMES[2], static_cast<double>(slots[EPS_2])}};
 }
 
 void StepController::restore(const std::vector<std::pair<std::string, double>> & attributes) {

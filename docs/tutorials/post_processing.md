@@ -115,21 +115,21 @@ mallard info medium
   Conservation: the change of each total that the boundaries, sources and repairs do not
   explain, relative to the total's scale:
   total       unexplained change  units  note
-  mass        4.2e-15             -
-  momentum_x  3.5e-18             -
+  mass         4.2e-15            -
+  momentum_x   3.5e-18            -
   momentum_y  -5.7e-18            -
-  energy      1.3e-15             -
+  energy       1.3e-15            -
 
 == Cost ===================================================================================
-  quantity           value     units    basis
-  wall time          227.2     s        the whole run
-  setup              0.3477    s        0.2% of the wall time
-  time stepping      226.2     s        99.6% of the wall time
-  diagnostics        0.008499  s        0.0% of the wall time
-  output             0.4687    s        0.2% of the wall time
-  steps              20609     steps    this run's
-  throughput         6.62e+05  cells/s  time stepping
-  host memory, peak  77.5      MB       the largest rank
+  quantity           value         units    basis
+  wall time            227.2       s        the whole run
+  setup                  0.3477    s        0.2% of the wall time
+  time stepping        226.2       s        99.6% of the wall time
+  diagnostics            0.008499  s        0.0% of the wall time
+  output                 0.4687    s        0.2% of the wall time
+  steps              20609         steps    this run's
+  throughput             6.62e+05  cells/s  time stepping
+  host memory, peak     77.5       MB       the largest rank
 
 == Warnings ============================================================================ ok
   none
@@ -137,7 +137,7 @@ mallard info medium
 == Output files =================================================================== 2 files
   file                 kind      times  first t [s]  last t [s]  last step  fields  format
   forces_cylinder.csv  table     1,030  0.190063414  199.92089   20600      6       CSV
-  solut/wake.vtkhdf    snapshot  5      0            200         20609      3       VTKHDF
+  solut/wake.vtkhdf    snapshot      5  0            200         20609      3       VTKHDF
 
 == Files against the run record ======================= 1 recorded as written, size checked
   Recorded files     all present, as written
@@ -215,20 +215,20 @@ reductions of the last snapshot, in the fine run:
 ```text
 == probe_wall_reductions.csv ========================================== t = 200 s, the last
   column                        value            units
-  length                        3.14098214       m
+  length                         3.14098214      m
   integral_CP                   -1.02092069      m
-  integral_CF                   0.530380813      m
-  integral_TRACTION_PRESSURE_X  0.0207651252     kg s-2
+  integral_CF                    0.530380813     m
+  integral_TRACTION_PRESSURE_X   0.0207651252    kg s-2
   integral_TRACTION_PRESSURE_Y  -4.20926906e-07  kg s-2
-  integral_TRACTION_VISCOUS_X   0.011134492      kg s-2
+  integral_TRACTION_VISCOUS_X    0.011134492     kg s-2
   integral_TRACTION_VISCOUS_Y   -1.00614686e-07  kg s-2
 
 == probe_contour_reductions.csv ======================================= t = 200 s, the last
-  column                    value           units
-  length                    31.4159265      m
-  integral_MASS_FLUX        5.34867893e-05  kg m-1 s-1
-  integral_MOMENTUM_FLUX_X  -0.0311596759   kg s-2
-  integral_MOMENTUM_FLUX_Y  1.9290865e-06   kg s-2
+  column                    value            units
+  length                    31.4159265       m
+  integral_MASS_FLUX         5.34867893e-05  kg m-1 s-1
+  integral_MOMENTUM_FLUX_X  -0.0311596759    kg s-2
+  integral_MOMENTUM_FLUX_Y   1.9290865e-06   kg s-2
 ```
 
 `integral_TRACTION_PRESSURE_X` plus `integral_TRACTION_VISCOUS_X` is the drag of `[[forces]]`. The circle's
@@ -329,15 +329,15 @@ mallard post convergence coarse medium fine --quantity Fx_pressure,Fx_viscous
 ```text
 == Runs ===================================================================================
   run     cells   h / h_fine  run id
-  coarse  3,656   1.988       9a366ea3-d93e-421f-addc-53cb8d9cc11c
-  medium  7,266   1.41        7a965c86-59db-453a-814c-364545cdce27
+  coarse   3,656  1.988       9a366ea3-d93e-421f-addc-53cb8d9cc11c
+  medium   7,266  1.41        7a965c86-59db-453a-814c-364545cdce27
   fine    14,444  1           7a460e95-c708-4f1a-a5c7-e72dd99cbbd3
   design order 3: the runs' [numerics.face_reconstruction]
 
 == Grid convergence ================================================================== WARN
-  status  quantity                     fine         extrapolated  units   order  GCI    behavior
-  WARN    forces_cylinder:Fx_pressure  0.020765125  0.020581499   kg s-2  1.72   1.11%  monotonic
-  WARN    forces_cylinder:Fx_viscous   0.011134492  0.0099813681  kg s-2  0.38   12.9%  monotonic
+  status  quantity                     fine         extrapolated  units   order  GCI     behavior
+  WARN    forces_cylinder:Fx_pressure  0.020765125  0.020581499   kg s-2  1.72    1.11%  monotonic
+  WARN    forces_cylinder:Fx_viscous   0.011134492  0.0099813681  kg s-2  0.38   12.9%   monotonic
 
   forces_cylinder:Fx_pressure: converging monotonically, order 1.72 (design 3), extrapolated
   0.020581499; fine-grid value 0.020765125 +/- 1.11% (GCI, Fs = 1.25); order 1.72 is more

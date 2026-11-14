@@ -1,0 +1,1 @@
+- **Distributed TENO runs with ranks whose owned cells all read the halo keep their CUDA step graph**: the step capture no longer joins an overlap stream that it never forked, which used to drop such runs to kernel-by-kernel steps (W-CUDA-GRAPH).

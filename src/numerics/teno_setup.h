@@ -262,7 +262,7 @@ class SetupHandle {
          */
         void compute(const Kokkos::View<uint32_t *> & cells, uint32_t n, TableBatch & out);
 
-        /** @brief Cells per batch that fit the device. */
+        /** @brief Cells per batch: what fits the device, for the cells to set up. */
         uint32_t batch_cells() const;
 
         uint16_t max_large() const;

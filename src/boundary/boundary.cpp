@@ -701,10 +701,10 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         // Neighbors across periodic translations, at the image point moved into
         // their frame (images do not cross rotations: the exterior state would
         // need turning)
-        uint8_t image_shift = 0;
+        uint32_t image_shift = 0;
         for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
              image == c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            const uint8_t s = mesh.h_cells_of_cell_shift(k);
+            const uint32_t s = mesh.h_cells_of_cell_shift(k);
             if (s == 0 || mesh.h_rotated_row(s)) continue;
             rtype q[N_DIM];
             FOR_I_DIM q[i] = p[i] - mesh.h_shifts(s, i);
@@ -914,7 +914,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             std::array<rtype, N_DIM> best{};
             rtype best2 = std::numeric_limits<rtype>::infinity();
             for (uint32_t s = 0; s < mesh.h_shifts.extent(0); s++) {
-                if (mesh.h_rotated_row(static_cast<uint8_t>(s))) continue;
+                if (mesh.h_rotated_row(s)) continue;
                 for (const rtype sign : {1.0_r, -1.0_r}) {
                     std::array<rtype, N_DIM> d;
                     rtype d2 = 0.0_r;

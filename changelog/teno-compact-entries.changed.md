@@ -1,0 +1,1 @@
+- TENO stores each stencil entry in one word instead of two (the mirror face only for mirror images): 2-5% less memory for the tables in 3D, results unchanged (#431).

@@ -212,6 +212,8 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
     sums = Kokkos::View<int64_t *>("conditional_sums", size_t(B) * Q * 2);
     acc = Kokkos::View<double *>("conditional_acc", size_t(B) * Q);
     clock = Kokkos::View<Clock>("conditional_clock");
+    h_acc = pinned_mirrors(acc);
+    h_clock = pinned_mirrors(clock);
     t_sample = Kokkos::View<rtype>("conditional_t_sample");
     start(t_start);
 }
@@ -354,19 +356,28 @@ void ConditionalStatistics::restore(const RestartData & restart, const std::stri
     set_clock({*w, tl ? *tl : double(t), 0.0, n ? static_cast<uint64_t>(*n) : 0, double(t_start)});
 }
 
+void ConditionalStatistics::stage_output() {
+    copy_to_pinned(pinned_mirrors, h_clock, clock);
+    copy_to_pinned(pinned_mirrors, h_acc, acc);
+}
+
 RestartAttributes ConditionalStatistics::attributes() const {
-    const Clock k = host_clock();
+    const Clock k = h_clock();
     return {{restart_prefix + "WEIGHT", k.weight},
             {restart_prefix + "T_LAST", k.t_last},
             {restart_prefix + "SAMPLES", static_cast<double>(k.n)}};
 }
 
 RestartArrays ConditionalStatistics::arrays() const {
-    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), acc);
-    return {{restart_prefix + "ACC", std::vector<double>(h.data(), h.data() + h.size())}};
+    return {{restart_prefix + "ACC", std::vector<double>(h_acc.data(), h_acc.data() + h_acc.size())}};
 }
 
 ConditionalStatistics::Result ConditionalStatistics::result() const {
+    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), acc);
+    return result_of(host_clock(), h.data());
+}
+
+ConditionalStatistics::Result ConditionalStatistics::result_of(const Clock & k, const double * h) const {
     Result r;
     r.on = on;
     r.fields = fields;
@@ -374,26 +385,24 @@ ConditionalStatistics::Result ConditionalStatistics::result() const {
         r.bins.push_back(n_bins[v]);
         r.range.push_back({lo[v], hi[v]});
     }
-    const Clock k = host_clock();
     r.samples = k.n;
     if (k.n > 0) {
         r.t_first = k.t_last - k.weight;
         r.t_last = k.t_last;
     }
-    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), acc);
     const uint32_t Q = quantities(), n_grid = n_grid_bins(), F = static_cast<uint32_t>(fields.size());
-    for (uint32_t b = 0; b <= n_grid; b++) r.total += h(size_t(b) * Q);
-    r.outside = h(size_t(n_grid) * Q);
+    for (uint32_t b = 0; b <= n_grid; b++) r.total += h[size_t(b) * Q];
+    r.outside = h[size_t(n_grid) * Q];
     double width = 1.0;
     for (uint32_t v = 0; v < n_on; v++) width *= (hi[v] - lo[v]) / n_bins[v];
     const double nan = std::numeric_limits<double>::quiet_NaN();
     for (uint32_t b = 0; b < n_grid; b++) {
-        const double W = h(size_t(b) * Q);
+        const double W = h[size_t(b) * Q];
         r.weight.push_back(W);
         r.pdf.push_back(r.total > 0.0 ? W / (r.total * width) : 0.0);
         for (uint32_t f = 0; f < F; f++) {
-            r.mean.push_back(W > 0.0 ? h(size_t(b) * Q + 1 + 2 * f) : nan);
-            r.variance.push_back(W > 0.0 ? h(size_t(b) * Q + 2 + 2 * f) / W : nan);
+            r.mean.push_back(W > 0.0 ? h[size_t(b) * Q + 1 + 2 * f] : nan);
+            r.variance.push_back(W > 0.0 ? h[size_t(b) * Q + 2 + 2 * f] / W : nan);
         }
     }
     return r;
@@ -401,7 +410,7 @@ ConditionalStatistics::Result ConditionalStatistics::result() const {
 
 void ConditionalStatistics::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!comm::is_root()) return;
-    const Result r = result();
+    const Result r = result_of(h_clock(), h_acc.data());
     create_parent_directories("the conditional statistics file", file_name);
     std::ofstream out(partial_name(file_name));
     if (!out.good()) throw cannot_write("the conditional statistics file", file_name);

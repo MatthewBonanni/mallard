@@ -23,6 +23,7 @@
 #include "derived_fields.h"
 #include "input.h"
 #include "mesh.h"
+#include "pinned_mirrors.h"
 
 struct CellSampler;
 
@@ -84,6 +85,8 @@ class ConditionalStatistics {
         void start(rtype t);
         void set_start(rtype t);
         void restore(const RestartData & restart, const std::string & file_name, rtype t, bool reset);
+        /** @brief Enqueues the copies of the clock and accumulators that attributes, arrays and write read (capturable). */
+        void stage_output();
         RestartAttributes attributes() const;
         RestartArrays arrays() const;
         /** @brief Rank 0 writes the PDF and conditional statistics to the entry's file. */
@@ -125,6 +128,7 @@ class ConditionalStatistics {
     private:
         Clock host_clock() const;
         void set_clock(const Clock & k);
+        Result result_of(const Clock & k, const double * h_acc) const;
 
         std::vector<std::string> on, fields;
         std::vector<int32_t> h_codes;  // on, then fields
@@ -148,6 +152,9 @@ class ConditionalStatistics {
         Kokkos::View<double *> acc;       // [bin * (1 + 2 fields)]: W, then mean and M2 of each field
         Kokkos::View<Clock> clock;
         Kokkos::View<rtype> t_sample;
+        PinnedMirrors pinned_mirrors;
+        Kokkos::View<double *>::host_mirror_type h_acc;  // copied by stage_output
+        Kokkos::View<Clock>::host_mirror_type h_clock;
 
         uint32_t quantities() const { return 1 + 2 * static_cast<uint32_t>(fields.size()); }
         /** @brief Bins of the ranges (one more holds the samples outside them). */
