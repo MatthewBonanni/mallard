@@ -195,6 +195,30 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+**2D** (#889, #999). The 2D setup runs one thread per cell (`CellSetup2D`), each with its own scratch in
+global memory, so the threads in flight are the batch's cells. The kernel takes 134 registers per thread,
+and Kokkos launches it in blocks of 128, three per SM: 41,472 resident threads on an A100. On CUDA a
+batch is that one wave (`resident_threads()` repeats Kokkos's block-size choice from the kernel's
+attributes), within a quarter of the free memory. Batches of 13,824 to 55,296 cells at orders 5 and 6
+took 6.25 / 5.04 / 5.17 / **4.17** / 4.69 / 4.48 s and 19.7 / 19.3 / 15.6 / **12.2** / 14.5 / 14.7 s
+(13,824 cells, the earlier byte budget's batch, then 27,648, 41,472, 51,840 and 55,296 cells): past one wave, a partial
+second wave lengthens every batch.
+
+"TENO setup" tables phase, one A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`); the host setup is
+the same code on the 16 host threads; restart files are bitwise identical:
+
+| tables (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 6.48 | 12.8 | 23.5 | 57.8 |
+| double Mach, device, batches from a byte budget (at most 27,648 cells) | 1.03 | 1.66 | 5.12 | 19.3 |
+| double Mach, device, batches of one wave (41,472) | **0.89** | **1.47** | **4.18** | **12.2** |
+| box, 1024 x 1024 quadrilaterals, device, byte budget | 0.86 | 1.35 | 3.38 | 17.4 |
+| box, device, one wave | **0.69** | **1.11** | **3.25** | **10.7** |
+
+The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
+wave takes 1.5 GB at order 3 and 3.6 GB at order 6. The packing of the shared tables, on the host,
+takes 7-37 s on these meshes, more than the tables (#1031).
+
 ### 5. Reacting mixtures (#257)
 
 The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`

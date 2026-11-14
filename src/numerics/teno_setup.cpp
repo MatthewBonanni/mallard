@@ -4737,8 +4737,6 @@ class Setup2D {
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Scratch and outputs within about a quarter of the free device memory and what MAX_BATCH
-            // cells take with twice the scratch: a thread per cell, so smaller scratch fills more of the device
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -4746,17 +4744,37 @@ class Setup2D {
 #endif
             const size_t out_bytes = size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                      8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32;
-            const size_t workspace = std::min(free_bytes / 4, MAX_BATCH * (out_bytes + caps.scaled(2).bytes(nk)));
-            size_t n = workspace / (out_bytes + caps.bytes(nk));
+            const size_t cell_bytes = out_bytes + caps.bytes(nk);
 #if defined(KOKKOS_ENABLE_CUDA)
-            // At most one wave of threads: a multiprocessor holds at least a thread per 256 of its registers
-            const Kokkos::DefaultExecutionSpace space;
-            const cudaDeviceProp & prop = space.cuda_device_prop();
-            n = std::min(n, size_t(prop.multiProcessorCount) * size_t(prop.regsPerMultiprocessor) / 256);
+            // One wave of the kernel's resident threads, a thread per cell, within about a quarter of the free memory
+            const size_t n = std::min(free_bytes / 4 / cell_bytes, resident_threads());
+            return static_cast<uint32_t>(std::max<size_t>(n, 1024));
+#else
+            // Within about a quarter of the free device memory and what MAX_BATCH cells take with twice the scratch
+            const size_t workspace = std::min(free_bytes / 4, MAX_BATCH * (out_bytes + caps.scaled(2).bytes(nk)));
+            return static_cast<uint32_t>(std::max<size_t>(workspace / cell_bytes / 1024 * 1024, 1024));
 #endif
-            n = std::max<size_t>(n / 1024 * 1024, 1024);
-            return static_cast<uint32_t>(n);
         }
+
+        using CellRange = HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>;
+
+#if defined(KOKKOS_ENABLE_CUDA)
+        /** @brief Threads of the cell kernel resident on the device at once, with the blocks Kokkos launches it in. */
+        static size_t resident_threads() {
+            using Task = CellSetup2D<Kokkos::Cuda>;
+            using Bounds = CellRange::launch_bounds;
+            const Kokkos::Cuda space;
+            const auto * instance = space.impl_internal_space_instance();
+            const cudaFuncAttributes attr =
+                Kokkos::Impl::CudaParallelLaunch<Kokkos::Impl::ParallelFor<Task, CellRange>, Bounds>::get_cuda_func_attributes(
+                    instance);
+            const int block = Kokkos::Impl::cuda_get_opt_block_size<Task, Bounds>(instance, attr, Task{}, 1, 0, 0);
+            const cudaDeviceProp & prop = space.cuda_device_prop();
+            const int blocks = std::min(Kokkos::Impl::cuda_max_active_blocks_per_sm(prop, attr, block, 0),
+                                        prop.maxThreadsPerMultiProcessor / block);
+            return size_t(prop.multiProcessorCount) * size_t(blocks) * size_t(block);
+        }
+#endif
 
         // The initial solution's chunk of cells
         static constexpr uint32_t MAX_BATCH = 16384;
@@ -4777,7 +4795,7 @@ class Setup2D {
                 scratch = Scratch2D<DefaultMem>();
                 scratch = Scratch2D<DefaultMem>(caps, slots, nk, !DEVICE_IS_HOST);
             }
-            Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task<Kokkos::DefaultExecutionSpace>(device, scratch, out, cells));
+            Kokkos::parallel_for("teno_setup_cells", CellRange(0, n), task<Kokkos::DefaultExecutionSpace>(device, scratch, out, cells));
             Kokkos::fence();
             // Cells whose search outgrew the scratch: again on the host, with more room
             auto status = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(out.status, std::make_pair(0u, n)));
