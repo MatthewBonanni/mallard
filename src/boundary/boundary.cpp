@@ -593,6 +593,26 @@ ImageNeighbors image_neighbors(const Mesh & mesh, const std::vector<int32_t> & h
 
 } // namespace
 
+BoundaryData::HostImages BoundaryData::host_images() const {
+    const auto rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), image_rows);
+    const auto cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), image_cells);
+    const auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), image_faces);
+    const auto sides = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), image_sides);
+    const auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), image_offsets);
+    const size_t n_faces = rows.extent(0);
+    HostImages h{std::vector<int32_t>(n_faces, -1), std::vector<int32_t>(n_faces, -1), std::vector<uint8_t>(n_faces, 0),
+                 std::vector<std::array<rtype, N_DIM>>(n_faces, std::array<rtype, N_DIM>{})};
+    for (size_t f = 0; f < n_faces; f++) {
+        const int32_t k = rows(f);
+        if (k < 0) continue;
+        h.cell[f] = cells(k);
+        h.face[f] = faces(k);
+        h.side[f] = sides(k);
+        FOR_I_DIM h.offset[f][i] = offsets(k, i);
+    }
+    return h;
+}
+
 BoundaryData make_boundary_data(const Mesh & mesh,
                                 const std::vector<int32_t> & h_face_bc_vec,
                                 const std::vector<BoundaryCondition> & h_bcs_vec,
@@ -604,24 +624,15 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     data.R = R;
     data.viscous = viscous;
     data.face_bc = Kokkos::View<int32_t *>("face_bc", mesh.n_faces);
-    data.face_image = Kokkos::View<int32_t *>("face_image", mesh.n_faces);
-    data.face_image_face = Kokkos::View<int32_t *>("face_image_face", mesh.n_faces);
-    data.face_image_side = Kokkos::View<uint8_t *>("face_image_side", mesh.n_faces);
-    data.face_image_flip = Kokkos::View<uint8_t *>("face_image_flip", mesh.n_faces);
     data.face_state_index = Kokkos::View<int32_t *>("face_state_index", mesh.n_faces);
-    data.face_image_offset = Kokkos::View<rtype *[N_DIM]>("face_image_offset", mesh.n_faces);
-    if constexpr (N_DIM == 3) {
-        // Filled with the per-face quadrature by the face reconstruction
-        data.face_image_quad = Kokkos::View<uint8_t **>("face_image_quad", mesh.n_faces, 9);
-    }
     data.bcs = Kokkos::View<BoundaryCondition *>("bcs", h_bcs_vec.size());
     auto h_face_bc = Kokkos::create_mirror_view(data.face_bc);
-    auto h_face_image = Kokkos::create_mirror_view(data.face_image);
-    auto h_face_image_face = Kokkos::create_mirror_view(data.face_image_face);
-    auto h_face_image_side = Kokkos::create_mirror_view(data.face_image_side);
-    auto h_face_image_flip = Kokkos::create_mirror_view(data.face_image_flip);
+    // Every face's image on the host; the device keeps the transmissive faces' rows only
+    Kokkos::View<int32_t *>::host_mirror_type h_face_image("face_image", mesh.n_faces);
+    Kokkos::View<int32_t *>::host_mirror_type h_face_image_face("face_image_face", mesh.n_faces);
+    std::vector<uint8_t> h_face_image_side(mesh.n_faces), h_face_image_flip(mesh.n_faces);
+    Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_face_image_offset("face_image_offset", mesh.n_faces);
     auto h_face_state_index = Kokkos::create_mirror_view(data.face_state_index);
-    auto h_face_image_offset = Kokkos::create_mirror_view(data.face_image_offset);
     int32_t n_dirichlet = 0;
     data.face_char = Kokkos::View<int32_t *>("face_char", mesh.n_faces);
     auto h_face_char = Kokkos::create_mirror_view(data.face_char);
@@ -648,8 +659,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         h_face_bc(f) = h_face_bc_vec[f];
         h_face_image(f) = -1;
         h_face_image_face(f) = -1;
-        h_face_image_side(f) = 0;
-        h_face_image_flip(f) = 0;
+        h_face_image_side[f] = 0;
+        h_face_image_flip[f] = 0;
         h_face_state_index(f) = -1;
         h_face_char(f) = -1;
         FOR_I_DIM h_face_image_offset(f, i) = 0.0_r;
@@ -718,7 +729,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 }
             }
             if (h_face_image_face(f) >= 0) {
-                h_face_image_side(f) = (mesh.h_cells_of_face(h_face_image_face(f), 0) == static_cast<int32_t>(image)) ? 0 : 1;
+                h_face_image_side[f] = (mesh.h_cells_of_face(h_face_image_face(f), 0) == static_cast<int32_t>(image)) ? 0 : 1;
             }
         } else {
             const rtype t_f[N_DIM] = {mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0) - mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0),
@@ -739,8 +750,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
                 if (dist < precision_tol(1e-12, 1e-8) * len2 && std::abs(cross) < precision_tol(1e-10, 1e-5) * len2 &&
                     std::abs(mesh.h_face_area(g) - mesh.h_face_area(f)) < precision_tol(1e-10, 1e-5) * mesh.h_face_area(f)) {
                     h_face_image_face(f) = static_cast<int32_t>(g);
-                    h_face_image_side(f) = (mesh.h_cells_of_face(g, 0) == static_cast<int32_t>(image)) ? 0 : 1;
-                    h_face_image_flip(f) = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0_r) ? 1 : 0;
+                    h_face_image_side[f] = (mesh.h_cells_of_face(g, 0) == static_cast<int32_t>(image)) ? 0 : 1;
+                    h_face_image_flip[f] = (t_f[0] * t_g[0] + t_f[1] * t_g[1] < 0.0_r) ? 1 : 0;
                     break;
                 }
             }
@@ -753,12 +764,44 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         }
     }
     Kokkos::deep_copy(data.face_bc, h_face_bc);
-    Kokkos::deep_copy(data.face_image, h_face_image);
-    Kokkos::deep_copy(data.face_image_face, h_face_image_face);
-    Kokkos::deep_copy(data.face_image_side, h_face_image_side);
-    Kokkos::deep_copy(data.face_image_flip, h_face_image_flip);
     Kokkos::deep_copy(data.face_state_index, h_face_state_index);
-    Kokkos::deep_copy(data.face_image_offset, h_face_image_offset);
+    {
+        std::vector<uint32_t> image_faces;
+        for (uint32_t f = 0; f < mesh.n_faces; f++) {
+            if (h_face_image(f) >= 0) image_faces.push_back(f);
+        }
+        const size_t n = image_faces.size();
+        data.image_rows = Kokkos::View<int32_t *>("face_image_rows", mesh.n_faces);
+        data.image_cells = Kokkos::View<int32_t *>("face_image_cells", n);
+        data.image_faces = Kokkos::View<int32_t *>("face_image_faces", n);
+        data.image_sides = Kokkos::View<uint8_t *>("face_image_sides", n);
+        data.image_flips = Kokkos::View<uint8_t *>("face_image_flips", n);
+        data.image_offsets = Kokkos::View<rtype *[N_DIM]>("face_image_offsets", n);
+        // Filled with the per-face quadrature by the face reconstruction
+        if constexpr (N_DIM == 3) data.image_quads = Kokkos::View<uint8_t **>("face_image_quads", n, 9);
+        auto h_rows = Kokkos::create_mirror_view(data.image_rows);
+        auto h_cells = Kokkos::create_mirror_view(data.image_cells);
+        auto h_faces = Kokkos::create_mirror_view(data.image_faces);
+        auto h_sides = Kokkos::create_mirror_view(data.image_sides);
+        auto h_flips = Kokkos::create_mirror_view(data.image_flips);
+        auto h_offsets = Kokkos::create_mirror_view(data.image_offsets);
+        Kokkos::deep_copy(h_rows, -1);
+        for (size_t k = 0; k < n; k++) {
+            const uint32_t f = image_faces[k];
+            h_rows(f) = static_cast<int32_t>(k);
+            h_cells(k) = h_face_image(f);
+            h_faces(k) = h_face_image_face(f);
+            h_sides(k) = h_face_image_side[f];
+            h_flips(k) = h_face_image_flip[f];
+            FOR_I_DIM h_offsets(k, i) = h_face_image_offset(f, i);
+        }
+        Kokkos::deep_copy(data.image_rows, h_rows);
+        Kokkos::deep_copy(data.image_cells, h_cells);
+        Kokkos::deep_copy(data.image_faces, h_faces);
+        Kokkos::deep_copy(data.image_sides, h_sides);
+        Kokkos::deep_copy(data.image_flips, h_flips);
+        Kokkos::deep_copy(data.image_offsets, h_offsets);
+    }
     const ImageNeighbors images =
         image_neighbors(mesh, h_face_bc_vec, h_bcs_vec, h_face_image_face, h_face_image, h_face_image_offset, cells_of_node);
     if (image_reach) *image_reach = images.reach;

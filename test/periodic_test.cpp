@@ -325,12 +325,12 @@ TEST(PeriodicSetup2D, TransmissiveImagesAreFoundAcrossTheSeam) {
     mesh.init_from_connectivity(nodes, cells, faces, "unassigned",
                                 std::vector<Mesh::PeriodicPair>{{"left", "right", {1.0, 0.0}}});
     const BoundaryData bd = make_uniform_boundaries(mesh, BoundaryType::OUTLET_EXTRAPOLATION);
-    auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
+    const auto h_image_face = bd.host_images().face;
     uint32_t n_boundary = 0;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
         if (mesh.h_cells_of_face(f, 1) >= 0) continue;
         n_boundary++;
-        EXPECT_GE(h_image_face(f), 0) << "face " << f;
+        EXPECT_GE(h_image_face[f], 0) << "face " << f;
     }
     EXPECT_EQ(n_boundary, 2 * n);
 }

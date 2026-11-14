@@ -12,6 +12,7 @@
 #ifndef BOUNDARY_H
 #define BOUNDARY_H
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -302,14 +303,15 @@ struct BoundaryComposition {
  */
 struct BoundaryData {
     Kokkos::View<int32_t *> face_bc;          // Index into bcs, -1 for interior faces
-    Kokkos::View<int32_t *> face_image;       // Transmissive faces: interior image cell, else -1
-    Kokkos::View<int32_t *> face_image_face;  // Face of the image cell matching the translated face, else -1
-    Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
-    Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
-    Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
-    // Transmissive faces: offset moving the image face (or the translated face,
-    // in the image cell's frame) onto the boundary face
-    Kokkos::View<rtype *[N_DIM]> face_image_offset;
+    // Transmissive faces: their row in the image_* tables, else -1 (read through face_image* below)
+    Kokkos::View<int32_t *> image_rows;
+    Kokkos::View<int32_t *> image_cells;   // Interior image cell
+    Kokkos::View<int32_t *> image_faces;   // Face of the image cell matching the translated face, else -1
+    Kokkos::View<uint8_t *> image_sides;   // Side of image_faces belonging to the image cell
+    Kokkos::View<uint8_t *> image_flips;   // 2D: whether the image face runs opposite to the boundary face
+    Kokkos::View<uint8_t **> image_quads;  // 3D: quadrature point of the image face matching each point
+    // Offset moving the image face (or the translated face, in the image cell's frame) onto the boundary face
+    Kokkos::View<rtype *[N_DIM]> image_offsets;
     // Vertex neighbors of each cell beyond extrapolation boundaries with image
     // faces: cells translated outward by their image offsets, as the cell would
     // see them in a flow continued unchanged across the boundary (empty without)
@@ -344,6 +346,43 @@ struct BoundaryData {
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
     Kokkos::View<rtype *[2]> bc_thermo;
     chemistry::ThermoTable<> thermo;  // Gas mixtures: species thermodynamics
+
+    /** @brief Transmissive face i_face's interior image cell, else -1. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t face_image(const uint32_t i_face) const {
+        const int32_t k = image_rows(i_face);
+        return k < 0 ? -1 : image_cells(k);
+    }
+    /** @brief The face of the image cell matching the translated face i_face, else -1. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t face_image_face(const uint32_t i_face) const {
+        const int32_t k = image_rows(i_face);
+        return k < 0 ? -1 : image_faces(k);
+    }
+    // The image face's side, orientation and points, of a face with an image face (face_image_face(i_face) >= 0)
+    /** @brief The side of face_image_face(i_face) belonging to the image cell. */
+    KOKKOS_INLINE_FUNCTION
+    uint8_t face_image_side(const uint32_t i_face) const { return image_sides(image_rows(i_face)); }
+    /** @brief 2D: whether the image face of i_face runs opposite to it. */
+    KOKKOS_INLINE_FUNCTION
+    uint8_t face_image_flip(const uint32_t i_face) const { return image_flips(image_rows(i_face)); }
+    /** @brief 3D: the quadrature point of the image face of i_face matching its point q. */
+    KOKKOS_INLINE_FUNCTION
+    uint8_t face_image_quad(const uint32_t i_face, const uint8_t q) const { return image_quads(image_rows(i_face), q); }
+    /** @brief Component i of the offset moving the image face of i_face onto it (zero without one). */
+    KOKKOS_INLINE_FUNCTION
+    rtype face_image_offset(const uint32_t i_face, const uint8_t i) const {
+        const int32_t k = image_rows(i_face);
+        return k < 0 ? 0.0_r : image_offsets(k, i);
+    }
+
+    /** @brief The image of each face, on the host: face_image, face_image_face, face_image_side, face_image_offset. */
+    struct HostImages {
+        std::vector<int32_t> cell, face;
+        std::vector<uint8_t> side;
+        std::vector<std::array<rtype, N_DIM>> offset;
+    };
+    HostImages host_images() const;
 
     /**
      * @brief Whether scalar j (the mass fractions, then [gamma, e0]) beyond

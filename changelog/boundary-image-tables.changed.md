@@ -1,0 +1,1 @@
+- The image cells and faces of transmissive boundary faces are kept for those faces only, not for every face: about 120 bytes less device memory per hexahedron and 80 per tetrahedron in every run; results are bitwise unchanged (#552).

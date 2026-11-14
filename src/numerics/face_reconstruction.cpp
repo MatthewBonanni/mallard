@@ -95,9 +95,7 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
                                             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
     if (!image_points_found) {
-        auto h_face_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image);
-        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
-        auto h_offset = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_offset);
+        const BoundaryData::HostImages h_images = boundaries.host_images();
         Kokkos::View<rtype ***>::host_mirror_type h_quad_points;
         if (face_quad_points.is_allocated()) {
             h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
@@ -106,11 +104,11 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
         std::vector<std::array<rtype, N_DIM>> offsets;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             const int32_t c = mesh->h_cells_of_face(f, 0);
-            if (mesh->h_cells_of_face(f, 1) >= 0 || c >= static_cast<int32_t>(mesh->n_owned()) || h_face_image(f) < 0 ||
-                h_image_face(f) >= 0) {
+            if (mesh->h_cells_of_face(f, 1) >= 0 || c >= static_cast<int32_t>(mesh->n_owned()) || h_images.cell[f] < 0 ||
+                h_images.face[f] >= 0) {
                 continue;
             }
-            const uint32_t image = static_cast<uint32_t>(h_face_image(f));
+            const uint32_t image = static_cast<uint32_t>(h_images.cell[f]);
             faces.push_back(f);
             cells.push_back(image);
             for (uint32_t q = 0; q < n_quad; q++) {
@@ -122,7 +120,7 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
                     const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
                     FOR_I_DIM x[i] = mesh->h_face_coords(f, i) + s_q * (mesh->h_node_coords(b, i) - mesh->h_node_coords(a, i));
                 }
-                FOR_I_DIM x[i] -= h_offset(f, i) + mesh->h_cell_coords(image, i);
+                FOR_I_DIM x[i] -= h_images.offset[f][i] + mesh->h_cell_coords(image, i);
                 offsets.push_back(x);
             }
         }
@@ -284,12 +282,15 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         Kokkos::deep_copy(face_quad_normals, h_normals);
     }
 
-    if (boundaries.face_image_quad.extent(0) != n_faces) return;
-    auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
-    auto h_image_quad = Kokkos::create_mirror_view(boundaries.face_image_quad);
+    if (!boundaries.image_quads.is_allocated()) return;
+    const auto h_rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_rows);
+    const auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_faces);
+    auto h_image_quad = Kokkos::create_mirror_view(boundaries.image_quads);
     for (uint32_t f = 0; f < n_faces; f++) {
-        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = static_cast<uint8_t>(q);
-        const int32_t g_index = h_image_face(f);
+        const int32_t k = h_rows(f);
+        if (k < 0) continue;
+        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(k, q) = static_cast<uint8_t>(q);
+        const int32_t g_index = h_image_face(k);
         if (g_index < 0) continue;
         const uint32_t g = static_cast<uint32_t>(g_index);
         for (size_t q = 0; q < n_points(f) && q < h_image_quad.extent(1); q++) {
@@ -302,12 +303,12 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                 }
                 if (d2 < best) {
                     best = d2;
-                    h_image_quad(f, q) = static_cast<uint8_t>(r);
+                    h_image_quad(k, q) = static_cast<uint8_t>(r);
                 }
             }
         }
     }
-    Kokkos::deep_copy(boundaries.face_image_quad, h_image_quad);
+    Kokkos::deep_copy(boundaries.image_quads, h_image_quad);
 }
 
 void FaceReconstruction::init_face_quadrature_2d_curved() {
