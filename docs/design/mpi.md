@@ -6,7 +6,7 @@ Status: implemented (milestones 1 to 6, reviewed in #32, issue #2); milestone 7,
 
 - Run on one GPU per MPI rank, from one node (8 GPUs) to thousands of GPUs.
 - **No rank ever holds the global mesh.** Reading, partitioning, setup and output are all distributed, so the mesh size is limited only by aggregate memory.
-- Results independent of the rank count up to round-off (bitwise identical stencils and reconstructions; only the summation order of fluxes into a cell may differ).
+- Results bitwise identical on any rank count: stencils, reconstructions, the order in which each cell sums its face fluxes, and the global sums that feed the solution.
 - A single-rank build without MPI keeps working and stays the default for development and CI.
 - Everything here is dimension-agnostic: it works on cells, faces as node lists and the cell graph, so 3D inherits it.
 
