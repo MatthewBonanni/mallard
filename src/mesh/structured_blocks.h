@@ -48,4 +48,7 @@ struct StructuredBlock {
 std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, uint32_t n_cells,
                                                uint32_t min_extent, std::vector<uint32_t> & block_cells);
 
+/** @brief Cells in the blocks, which come first: the end of the last block. */
+uint32_t structured_block_cells(const std::vector<StructuredBlock> & blocks);
+
 #endif // STRUCTURED_BLOCKS_H

@@ -450,7 +450,7 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
     run(distributed);
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input("serial.csv")));
+    serial.init(parse_toml(input(serial_name("serial") + ".csv")));
     run(serial);
     const std::string a = without_run_metadata(read_all(dir + "/distributed.csv"));
     EXPECT_EQ(a, without_run_metadata(read_all(dir + "/serial.csv"))) << "on " << comm::size() << " ranks";
@@ -486,7 +486,7 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
     run(distributed);
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input("serial")));
+    serial.init(parse_toml(input(serial_name("serial"))));
     run(serial);
     for (const char * name : {"half", "inside", "cut"}) {
         const std::string file = dir + "/" + name;
@@ -521,7 +521,7 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
     run(distributed);
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input("serial")));
+    serial.init(parse_toml(input(serial_name("serial"))));
     run(serial);
     for (const std::string name : {"shell", "ring"}) {
         if (name == "ring" && N_DIM == 2) continue;
@@ -1276,7 +1276,7 @@ TEST(ProbesTest, RegionsOfTheSolutionAreTheSameOnAnyNumberOfRanks) {
     run(distributed);
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input("serial")));
+    serial.init(parse_toml(input(serial_name("serial"))));
     run(serial);
     for (const char * name : {"dense", "level"}) {
         const std::string file = dir + "/" + name;
@@ -1311,7 +1311,7 @@ TEST(ProbesTest, RegionsOfVelocityGradientFieldsAreTheSameOnAnyNumberOfRanks) {
     run(distributed);
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input("serial")));
+    serial.init(parse_toml(input(serial_name("serial"))));
     run(serial);
     for (const char * name : {"vortical", "level"}) {
         const std::string file = dir + "/" + name;
@@ -1671,7 +1671,7 @@ TEST(ProbesTest, MomentsOfTractionsHaveTheirClosedForm) {
 
 TEST(ProbesTest, StatisticsAveragesAreProbeVariablesAtTheirSamplesCells) {
     // Each sample of MEAN_ and COV_ variables is its cell's [statistics] average
-    const std::string dir = fresh_dir("statistics_variables");
+    const std::string dir = (rank_scratch_dir() / "probes_statistics_variables").string();
     const std::string ends = N_DIM == 2 ? "start = [0.05, 0.31]\nend = [0.93, 0.77]\n"
                                         : "start = [0.05, 0.31, 0.2]\nend = [0.93, 0.77, 0.6]\n";
     const std::string extra =

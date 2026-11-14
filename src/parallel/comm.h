@@ -48,10 +48,27 @@ class Session {
 #endif
 };
 
-/** @brief Rank of this process in the world communicator; 0 before MPI starts and after it ends. */
+/**
+ * @brief While one exists, this rank communicates with itself alone: rank() is
+ *        0, size() is 1 and every collective involves only this rank. Scopes
+ *        the calls of a solver that runs whole on every rank, so that a request
+ *        that reaches one rank only never leaves the others in a collective.
+ */
+class SelfScope {
+    public:
+        explicit SelfScope(bool on = true);
+        ~SelfScope();
+        SelfScope(const SelfScope &) = delete;
+        SelfScope & operator=(const SelfScope &) = delete;
+
+    private:
+        bool on;
+};
+
+/** @brief Rank of this process in communicator(); 0 before MPI starts and after it ends. */
 int rank();
 
-/** @brief Number of processes in the world communicator; 1 before MPI starts and after it ends. */
+/** @brief Number of processes in communicator(); 1 before MPI starts and after it ends. */
 int size();
 
 /** @brief Whether this is rank 0, which does all logging. */
@@ -158,8 +175,8 @@ void alltoallv(const T * send, std::span<const uint64_t> send_counts, std::span<
 } // namespace detail
 
 #ifdef Mallard_HAS_MPI
-/** @brief The world communicator. */
-MPI_Comm world();
+/** @brief The communicator of every call: the world, or this rank alone within a SelfScope. */
+MPI_Comm communicator();
 
 /**
  * @brief Posts a nonblocking send of n values to rank `to`, in messages of at

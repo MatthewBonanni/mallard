@@ -115,7 +115,7 @@ double direct_correlation(const std::vector<double> & a, const std::vector<doubl
 std::string one_sample(const std::string & fields, uint32_t n_steps) {
     // A single sample, at the last step, weighs 1: the averages are that sample
     return "[statistics]\ninterval = " + std::to_string(n_steps) + "\n[statistics.spectra]\n" + fields +
-           "file = \"spectra_unused.csv\"\n";
+           "file = \"" + (rank_scratch_dir() / "spectra_unused.csv").string() + "\"\n";
 }
 
 } // namespace
@@ -258,7 +258,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // averages are bitwise those of the period
     const double u0 = 0.1, t_ref = 1.0 / 12.0;
     const uint32_t n_steps = 416, bins = 4;
-    const std::string dir = (scratch_dir() / "mallard_phase_restart").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_phase_restart").string();
     auto run = [&](uint32_t steps, const std::string & phase, const std::string & from = "") {
         std::string input = oscillating(steps, "[statistics]\nt_start = 1.25\ninterval = 2\n"
                                                "[statistics.phase]\nfields = [\"U_X\", \"RHO\"]\nbins = 4\n" + phase);
@@ -486,7 +486,7 @@ TEST(InsituStatisticsTest, UnaveragedSpectraAreStagedWithoutStoppingTheDevice) {
     for (const bool spectra : {true, false}) {
         for (const int depth : {0, 1, 3}) {
             if (!spectra && depth != 3) continue;
-            const std::filesystem::path dir = scratch_dir() / ("unaveraged_spectra_" + std::to_string(depth));
+            const std::filesystem::path dir = (distributed ? scratch_dir() : rank_scratch_dir()) / ("unaveraged_spectra_" + std::to_string(depth));
             if (comm::is_root()) std::filesystem::remove_all(dir);
             comm::barrier();
             const std::string extra =
@@ -549,7 +549,8 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     for (const std::string & periodic : {box_dirs, channel_dirs}) {
         auto extra = [&](const std::string & name, bool restart) {
             return "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*U_Y\"]\n"
-                   "file = \"" + dir + "/" + name + ".csv\"\n"
+                   "file = \"" + (name == "serial" || name == "continued" ? rank_scratch_dir().string() : dir) + "/" + name +
+                   ".csv\"\n"
                    "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.013\n" +
                    (restart ? "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 4\n" : "");
         };

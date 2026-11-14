@@ -757,7 +757,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
             distributed.run();
             Solver serial;
             serial.set_distributed(false);
-            serial.init(writing("s"));
+            serial.init(writing(serial_name("s")));
             serial.run();
         }
         comm::barrier();
@@ -888,7 +888,7 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     };
     Solver reference;
     reference.set_distributed(false);
-    reference.init(parse_toml(restart_case(20, stats + probe("reference.csv"))));
+    reference.init(parse_toml(restart_case(20, stats + probe(serial_name("reference") + ".csv"))));
     reference.run();
     const auto ref = gather_statistics(reference);
 
@@ -899,7 +899,7 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     EXPECT_EQ(max_rel_diff(gather_statistics(distributed), ref), 0.0);
     comm::barrier();
 
-    std::string input = restart_case(20, stats + probe("continued.csv"));
+    std::string input = restart_case(20, stats + probe(serial_name("continued") + ".csv"));
     const std::string init = BLAST;
     input.replace(input.find("[initialize]\n") + 13, init.size(),
                   "type = \"restart\"\nfile = \"" + dir + "/r_000010.restart\"\n");
@@ -981,7 +981,7 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     };
     Solver reference;
     reference.set_distributed(false);
-    reference.init(parse_toml(input("serial")));
+    reference.init(parse_toml(input(serial_name("serial"))));
     reference.run();
     Solver distributed;
     distributed.init(parse_toml(input("ranks")));
@@ -1029,7 +1029,7 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
     };
     Solver reference;
     reference.set_distributed(false);
-    reference.init(parse_toml(input("serial")));
+    reference.init(parse_toml(input(serial_name("serial"))));
     reference.run();
     Solver distributed;
     distributed.init(parse_toml(input("ranks")));
