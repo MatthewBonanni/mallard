@@ -555,7 +555,7 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
 
 | | ms/step | cells/s | bitwise |
 |---|---|---|---|
-| main | 146-147 | 6.05M | |
+| main | 8,773 / 8,961,187 | 8,585 / 9,157,200 | 8,813 / 8,920,514 | 8,625 / 9,114,733 | 11,072 / 7,005,283 | 10,065 / 7,706,501 | 17,935 / 4,324,752 |
 | loader converts to conservative variables, STAGE = 10 | 136 | 6.50M | no |
 | the same, STAGE = 15 | 137 | 6.46M | not checked |
 | the same, STAGE = 25 | 146 | 6.08M | not checked |
@@ -654,17 +654,17 @@ vortex of the performance set on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra
 the Sigma model), and the propane flame of `flame_3d` with TENO5 on $48 \times 24^2$ hexahedra and
 $24 \times 12^2 \times 6$ tetrahedra (two-step mechanism, 6 species), and with GRI-Mech 3.0 (53 species) on
 $32 \times 16^2$ hexahedra. Bytes per cell at the steady state, and the cells that fit on an A100-80GB. The
-reconstruction tables are 32.0 KB per hexahedron and 43.4 KB per tetrahedron (#431); next come the face states
+reconstruction tables are 1.97 KB per hexahedron and 2.47 KB per tetrahedron (#431); next to them are the face states
 (2.2 KB per hexahedron, 1.2 KB per tetrahedron), the troubled passes' scratch (1.8 KB) and the vertex
 gradient's weights (0.6 / 1.5 KB). Results are bitwise unchanged (restart files after 4 steps of each case,
 and of MUSCL, double-flux and `outlet_extrapolation` variants).
 
 | bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
 |---|---|---|---|---|---|---|---|
-| main | 38,791 / 2,026,731 | 49,475 / 1,589,048 | 38,831 / 2,024,643 | 49,515 / 1,587,764 | 41,211 / 1,881,073 | 51,515 / 1,504,820 | 47,998 / 1,615,983 |
-| ghost weights of boundary faces | 38,656 / 2,033,796 | 49,387 / 1,591,896 | 38,696 / 2,031,706 | 49,427 / 1,590,590 | 41,073 / 1,887,378 | 51,425 / 1,507,453 | 47,862 / 1,620,574 |
-| species slots in the face states | 38,656 / 2,033,796 | 49,387 / 1,591,896 | 38,696 / 2,031,706 | 49,427 / 1,590,590 | 40,779 / 1,900,986 | 51,229 / 1,513,221 | 45,634 / 1,699,696 |
-| image tables of transmissive faces | 38,535 / 2,040,163 | 49,306 / 1,594,492 | 38,575 / 2,038,047 | 49,346 / 1,593,199 | 40,661 / 1,906,486 | 51,150 / 1,515,555 | 45,517 / 1,704,101 |
+| main | 8,773 / 8,961,187 | 8,585 / 9,157,200 | 8,813 / 8,920,514 | 8,625 / 9,114,733 | 11,072 / 7,005,283 | 10,065 / 7,706,501 | 17,935 / 4,324,752 |
+| ghost weights of boundary faces | 8,638 / 9,100,971 | 8,497 / 9,252,578 | 8,678 / 9,059,023 | 8,537 / 9,209,223 | 10,935 / 7,093,479 | 9,974 / 7,776,381 | 17,799 / 4,357,919 |
+| species slots in the face states | 8,638 / 9,100,971 | 8,497 / 9,252,578 | 8,678 / 9,059,023 | 8,537 / 9,209,223 | 10,641 / 7,289,471 | 9,778 / 7,932,252 | 15,571 / 4,981,336 |
+| image tables of transmissive faces | 8,518 / 9,229,863 | 8,416 / 9,340,971 | 8,558 / 9,186,721 | 8,456 / 9,296,787 | 10,523 / 7,370,967 | 9,700 / 7,996,390 | 15,453 / 5,019,363 |
 
 - **Ghost weights of boundary faces.** The vertex gradient (viscous fluxes, the hybrid flux's sensor, MUSCL)
   kept a weight for every face of every cell, though only boundary faces have ghosts; it keeps them for those
@@ -675,14 +675,14 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
   before the next stage's reconstruction writes them again: they share the face states' memory, which is the
   larger of the two below about 45 species at TENO5 on hexahedra (35 on tetrahedra, 5 with MUSCL). The
   saving is the smaller of the two: 48 bytes per species per hexahedron (294 for 6 species) and 32 per
-  tetrahedron, at most the face states' 2.2 / 1.2 KB (2,228 bytes with GRI-Mech, 5% more cells).
+  tetrahedron, at most the face states' 2.2 / 1.2 KB (2,228 bytes with GRI-Mech, 15% more cells).
 - **Image tables of transmissive faces.** The image cell, image face, its side, orientation, matching
   quadrature points and offset of transmissive boundary faces were stored for every face (43 bytes in 3D);
   every face now has the row of its transmissive face in tables of those faces alone, -1 for the others (4
   bytes): 121 bytes less per hexahedron and 80 per tetrahedron, in every run.
 
-Together: 0.7% more cells on hexahedra and 0.3% on tetrahedra for a perfect gas, 1.4% and 0.7% for the
-6-species flame, 5.5% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
+Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
+6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
 ## Scaling (one node)
 
