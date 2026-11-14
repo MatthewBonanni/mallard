@@ -15,6 +15,7 @@ input file and the Python scripts that set it up and draw its figures, and
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 | `post_processing/` | [From run to figure](../docs/tutorials/post_processing.md) (2D, the cylinder's Gmsh script): `mallard info`, `mallard post extract` and `mallard post convergence` on a steady wake at Re = 40 on three meshes, figures with the Python package |
 | `cluster/` | [Running on a cluster](../docs/tutorials/cluster.md): a coarse double Mach reflection through the job scripts, stopped and resumed |
+| `airfoil/` | [Laminar airfoil](../docs/tutorials/airfoil.md) (2D, Gmsh): NACA 0012 drag and lift against the High-Order CFD Workshop |
 
 `ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does, with the steps in each
 tutorial's own `ci.sh`, through the `mallard` of an install with both dimensions:
