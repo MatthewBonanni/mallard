@@ -711,7 +711,7 @@ class PackedRows {
         ValueRow pinv;
         std::vector<uint64_t> slice_start = {0};  // (slice + 1)
         uint32_t n_added = 0;
-        teno::TableStore store;                   // shared: a table per stencil shape
+        teno::TableStore<> store;                 // shared: a table per stencil shape
         std::vector<uint32_t> cell_shape;         // shared: (cell)
         std::vector<int32_t> images;              // (2 image + {cell, face field})
         std::vector<Chunk> chunks;
@@ -974,6 +974,125 @@ PackedRows small_rows(const TENO & scheme) {
                       scheme.global_cell_ids(), true);
 }
 
+/** @brief Host copy of the rows of cells [c0, c1) of an array with a row per cell shape. */
+template <typename View>
+typename View::host_mirror_type download_shape_rows(const View & dev, const Kokkos::View<uint32_t *> & shape,
+                                                    const uint32_t c0, const uint32_t c1) {
+    View rows(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_rows"), c1 - c0, dev.extent(1));
+    Kokkos::parallel_for("teno_shape_rows", Kokkos::RangePolicy<>(0, c1 - c0), KOKKOS_LAMBDA(const uint32_t j) {
+        for (size_t k = 0; k < rows.extent(1); k++) rows(j, k) = dev(shape(c0 + j), k);
+    });
+    return download_rows(rows, 0, c1 - c0);
+}
+
+/** @brief An array with a row per cell shape as one with a row per cell. */
+template <typename View>
+void expand_shape_rows(View & dev, const Kokkos::View<uint32_t *> & shape, const std::string & label) {
+    View rows(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), shape.extent(0), dev.extent(1));
+    const View from = dev;
+    Kokkos::parallel_for("teno_expand_rows", Kokkos::RangePolicy<>(0, shape.extent(0)), KOKKOS_LAMBDA(const uint32_t c) {
+        for (size_t k = 0; k < rows.extent(1); k++) rows(c, k) = from(shape(c), k);
+    });
+    dev = rows;
+}
+
+/** @brief Every cell its own cell shape. */
+void own_cell_shapes(TENO & scheme) {
+    scheme.cell_shape = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_shape"),
+                                                 scheme.scale.extent(0));
+    auto shape = scheme.cell_shape;
+    Kokkos::parallel_for("teno_own_cell_shapes", Kokkos::RangePolicy<>(0, shape.extent(0)),
+                         KOKKOS_LAMBDA(const uint32_t c) { shape(c) = c; });
+    scheme.cell_shape_owner.clear();
+}
+
+/** @brief Rows of basis_mean and si_matrix or moments per cell, from rows per cell shape. */
+void expand_cell_rows(TENO & scheme) {
+    expand_shape_rows(scheme.basis_mean, scheme.cell_shape, "teno_basis_mean");
+    if constexpr (N_DIM == 2) {
+        expand_shape_rows(scheme.si_matrix, scheme.cell_shape, "teno_si_matrix");
+    } else {
+        expand_shape_rows(scheme.moments, scheme.cell_shape, "teno_moments");
+    }
+    own_cell_shapes(scheme);
+}
+
+/**
+ * @brief From rows of basis_mean and si_matrix or moments per cell, with
+ *        share_tables, one row per cell shape: the cells whose rows are equal
+ *        on the grid of teno::CanonicalTable share that of the one with the
+ *        lowest global id, agreed over the ranks (teno::TableStore, in
+ *        double); without, every cell keeps its own.
+ */
+void share_cell_rows(TENO & scheme) {
+    const uint32_t n_cells = static_cast<uint32_t>(scheme.scale.extent(0));
+    if (!scheme.share_tables) {
+        own_cell_shapes(scheme);
+        return;
+    }
+    const size_t nb = scheme.basis_mean.extent(1);
+    const size_t ns = N_DIM == 2 ? scheme.si_matrix.extent(1) : scheme.moments.extent(1);
+    const uint32_t width = static_cast<uint32_t>(nb + ns);
+    const uint64_t * gid = scheme.global_cell_ids();
+    teno::TableStore<double> store(width);
+    std::vector<uint32_t> shape_of;
+    shape_of.reserve(n_cells);
+    for (uint32_t c0 = 0; c0 < n_cells; c0 += CHUNK_CELLS) {
+        const uint32_t c1 = std::min(n_cells, c0 + CHUNK_CELLS), n = c1 - c0;
+        auto h_mean = download_rows(scheme.basis_mean, c0, c1);
+        Kokkos::View<rtype **>::host_mirror_type h_si;
+        teno::Moments::host_mirror_type h_moments;
+        if constexpr (N_DIM == 2) {
+            h_si = download_rows(scheme.si_matrix, c0, c1);
+        } else {
+            h_moments = download_rows(scheme.moments, c0, c1);
+        }
+        std::vector<double> rows(size_t(n) * width);
+        std::vector<teno::CanonicalTable> canonical(n);
+        std::vector<uint64_t> ids(n);
+        Kokkos::parallel_for("teno_cell_rows", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                             [&](const uint32_t c) {
+            double * row = rows.data() + size_t(c) * width;
+            for (size_t l = 0; l < nb; l++) row[l] = double(h_mean(c, l));
+            for (size_t k = 0; k < ns; k++) row[nb + k] = N_DIM == 2 ? double(h_si(c, k)) : h_moments(c, k);
+            canonical[c] = teno::CanonicalTable(row, width, {1});
+            ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
+        });
+        const std::vector<uint32_t> shapes =
+            store.add(n, canonical.data(), [&](uint32_t c) { return rows.data() + size_t(c) * width; }, ids.data());
+        shape_of.insert(shape_of.end(), shapes.begin(), shapes.end());
+    }
+    store.agree();
+    const size_t n_shapes = store.size();
+    Kokkos::View<rtype **>::host_mirror_type h_mean("teno_basis_mean_rows", n_shapes, nb);
+    Kokkos::View<rtype **>::host_mirror_type h_si("teno_si_rows", N_DIM == 2 ? n_shapes : 0, ns);
+    teno::Moments::host_mirror_type h_moments("teno_moments_rows", N_DIM == 3 ? n_shapes : 0, ns);
+    scheme.cell_shape_owner.resize(n_shapes);
+    for (size_t k = 0; k < n_shapes; k++) {
+        const std::vector<double> & v = store.values(k);
+        for (size_t l = 0; l < nb; l++) h_mean(k, l) = rtype(v[l]);
+        for (size_t j = 0; j < ns; j++) {
+            if constexpr (N_DIM == 2) {
+                h_si(k, j) = rtype(v[nb + j]);
+            } else {
+                h_moments(k, j) = v[nb + j];
+            }
+        }
+        scheme.cell_shape_owner[k] = store.owner(k);
+    }
+    scheme.basis_mean = Kokkos::View<rtype **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_basis_mean"), n_shapes, nb);
+    Kokkos::deep_copy(scheme.basis_mean, h_mean);
+    if constexpr (N_DIM == 2) {
+        scheme.si_matrix = Kokkos::View<rtype **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_si_matrix"), n_shapes, ns);
+        Kokkos::deep_copy(scheme.si_matrix, h_si);
+    } else {
+        scheme.moments = teno::Moments(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_shapes, ns);
+        Kokkos::deep_copy(scheme.moments, h_moments);
+    }
+    scheme.cell_shape = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_shape"), n_cells);
+    Kokkos::deep_copy(scheme.cell_shape, HostUnmanaged<const uint32_t>(shape_of.data(), shape_of.size()));
+}
+
 /** @brief Moves per-cell tables, chunk by chunk, into TENO's device arrays. */
 class TableBuilder {
     public:
@@ -1051,6 +1170,7 @@ class TableBuilder {
         void finish() {
             scheme.stencil_large = large.finish("teno_stencil_large");
             scheme.stencil_small = small.finish("teno_stencil_small");
+            share_cell_rows(scheme);
             scheme.table_memory = large.device_memory();
             scheme.table_memory.insert(scheme.table_memory.end(), small.device_memory().begin(),
                                        small.device_memory().end());
@@ -1066,13 +1186,13 @@ void download_tables(const TENO & scheme, const HostIndex & large_index, const H
                      std::vector<CellTables> & tables) {
     const uint32_t c1 = c0 + static_cast<uint32_t>(tables.size());
     auto h_scale = download_rows(scheme.scale, c0, c1);
-    auto h_mean = download_rows(scheme.basis_mean, c0, c1);
+    auto h_mean = download_shape_rows(scheme.basis_mean, scheme.cell_shape, c0, c1);
     Kokkos::View<rtype **>::host_mirror_type h_si;
     teno::Moments::host_mirror_type h_moments;
     if constexpr (N_DIM == 2) {
-        h_si = download_rows(scheme.si_matrix, c0, c1);
+        h_si = download_shape_rows(scheme.si_matrix, scheme.cell_shape, c0, c1);
     } else {
-        h_moments = download_rows(scheme.moments, c0, c1);
+        h_moments = download_shape_rows(scheme.moments, scheme.cell_shape, c0, c1);
     }
     auto h_large_size = download_rows(scheme.stencil_large_size, c0, c1);
     auto h_small_size = download_rows(scheme.stencil_small_size, c0, c1);
@@ -1341,8 +1461,9 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     if (subset == nullptr) {
         if (n_failed_large == 0) builder->finish();
         largest_stencil = largest;
-    } else if (share_tables) {
-        share_again(*this);
+    } else {
+        if (share_tables) share_again(*this);
+        share_cell_rows(*this);
     }
     setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
@@ -1439,6 +1560,7 @@ struct TENOFunctor {
     BoundaryData boundaries;
 
     Kokkos::View<rtype *> scale;
+    Kokkos::View<uint32_t *> cell_shape;      // (cell): its row of basis_mean and si_matrix or moments
     Kokkos::View<rtype **> basis_mean;
     Kokkos::View<uint16_t *> stencil_large_size;
     teno::PackedStencils stencil_large;
@@ -1595,6 +1717,7 @@ struct TENOFunctor {
     KOKKOS_INLINE_FUNCTION
     bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t i_cell, rtype * psi) const {
         const rtype h = scale(i_cell);
+        const uint32_t row = cell_shape(i_cell);
         // The face's points are in its cell 0's frame
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(i_cell)) ? face_shift(f) : 0;
         rtype x[N_DIM], p[N_DIM];
@@ -1604,7 +1727,7 @@ struct TENOFunctor {
                 FOR_I_DIM x[i] = face_quad_points(f, q, i);
                 periodic.backward(s, x, p);
                 teno::monomials(DEG, (p[0] - cell_coords(i_cell, 0)) / h, (p[1] - cell_coords(i_cell, 1)) / h, psi);
-                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(i_cell, l);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
                 return true;
             }
             const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
@@ -1623,7 +1746,7 @@ struct TENOFunctor {
             FOR_I_DIM xi[i] = (p[i] - cell_coords(i_cell, i)) / h;
             teno::monomials(DEG, xi, psi);
         }
-        for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(i_cell, l);
+        for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
         return true;
     }
 
@@ -1713,6 +1836,7 @@ struct TENOFunctor {
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         if (sigma >= sigma_threshold) return;
         const rtype h = scale(i_cell);
+        const uint32_t row = cell_shape(i_cell);
         const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
         for (uint32_t p = k * m; p < (k + 1) * m; p++) {
             rtype xi[N_DIM];
@@ -1722,7 +1846,7 @@ struct TENOFunctor {
             rtype U[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U[i] = U0[i];
             for (uint8_t l = 0; l < NK; l++) {
-                FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(i_cell, l), U[i]);
+                FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(row, l), U[i]);
             }
             rtype Wq[N_CONSERVATIVE];
             to_primitives(U, Wq);
@@ -2444,6 +2568,7 @@ struct TENOFunctor {
                 }
             }
             const rtype h = scale(i_cell);
+            const uint32_t row = cell_shape(i_cell);
             const rtype xc = cell_coords(i_cell, 0), yc = cell_coords(i_cell, 1);
             const bool viscous = mu.extent(0) > 0;
             const uint32_t begin = offsets_nodes_of_cell(i_cell);
@@ -2465,7 +2590,7 @@ struct TENOFunctor {
                     rtype U[N_CONSERVATIVE];
                     FOR_I_CONSERVATIVE U[i] = U0[i];
                     for (uint8_t l = 0; l < NK; l++) {
-                        FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(i_cell, l), U[i]);
+                        FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(row, l), U[i]);
                     }
                     rtype Wq[N_CONSERVATIVE];
                     to_primitives(U, Wq);
@@ -2512,9 +2637,9 @@ struct TENOFunctor {
         for (uint32_t idx = t; idx < n; idx += stride) {
             const uint32_t r = idx % per_cell;
             const uint32_t j = round_begin + idx / per_cell;
-            const uint32_t i_cell = troubled_cells(j);
+            const uint32_t row = cell_shape(troubled_cells(j));
             troubled_select(j, static_cast<uint8_t>(r / N_CONSERVATIVE), static_cast<uint8_t>(r % N_CONSERVATIVE),
-                            [&](const uint32_t e) { return si_matrix(i_cell, e); });
+                            [&](const uint32_t e) { return si_matrix(row, e); });
         }
     }
 
@@ -2537,8 +2662,8 @@ struct TENOFunctor {
         const uint32_t league_rank = static_cast<uint32_t>(team.league_rank());
         const uint32_t league_size = static_cast<uint32_t>(team.league_size());
         for (uint32_t j = round_begin + league_rank; j < end; j += league_size) {
-            const uint32_t i_cell = troubled_cells(j);
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_MOMENTS), [&](const uint32_t k) { mom[k] = moments(i_cell, k); });
+            const uint32_t row = cell_shape(troubled_cells(j));
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, N_MOMENTS), [&](const uint32_t k) { mom[k] = moments(row, k); });
             team.team_barrier();
             Kokkos::parallel_for(Kokkos::TeamThreadRange(team, (N_SI + SI_GROUP - 1) / SI_GROUP), [&](const uint32_t g) {
                 si_terms.entries<SI_GROUP>(g * SI_GROUP, N_SI, mom, S);
@@ -2703,7 +2828,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
-                    scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
+                    scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
                     solution, face_solution, cells, smooth_gradients, cell_gamma, cell_molar_mass, selection,
@@ -2789,7 +2914,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
-                    scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
+                    scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
                     solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
@@ -2805,7 +2930,7 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
-                    scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
+                    scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
                     solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
@@ -2825,7 +2950,7 @@ void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
-                    scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
+                    scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
                     solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
@@ -3173,14 +3298,39 @@ namespace {
 
 /**
  * @brief Cells, not among the sorted rebuilt ones, to rebuild with them: a
- *        shared table is that of its shape's cell with the lowest global id,
- *        and the other cells of the shape hold it, not their own. When that
- *        cell is rebuilt, a full setup gives the shape the table of the
- *        lowest of the rest, so each rank rebuilds its lowest (collective).
+ *        shared table or row is that of its shape's cell with the lowest
+ *        global id (owner(k) of shape k), and the other cells of the shape
+ *        hold it, not their own. When that cell is rebuilt, a full setup gives
+ *        the shape the table of the lowest of the rest, so each rank rebuilds
+ *        its lowest (collective).
  */
+template <typename ShapeOf, typename Owner>
+std::vector<uint32_t> owners_of_rebuilt(const size_t n_shapes, ShapeOf shape_of, Owner owner,
+                                        const std::vector<uint32_t> & rebuilt, const uint64_t * gid, const uint32_t n_cells) {
+    auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c] : uint64_t(c); };
+    std::vector<uint64_t> lost;
+    for (const uint32_t c : n_shapes > 0 ? rebuilt : std::vector<uint32_t>()) {
+        if (owner(shape_of(c)) == id(c)) lost.push_back(id(c));
+    }
+    lost = comm::allgatherv(lost);
+    std::sort(lost.begin(), lost.end());
+    std::unordered_map<size_t, uint32_t> lowest;  // shape: cell
+    for (uint32_t c = 0; c < (lost.empty() ? 0 : n_cells); c++) {
+        const size_t k = shape_of(c);
+        if (std::binary_search(rebuilt.begin(), rebuilt.end(), c) || !std::binary_search(lost.begin(), lost.end(), owner(k))) {
+            continue;
+        }
+        auto [it, added] = lowest.try_emplace(k, c);
+        if (!added && id(c) < id(it->second)) it->second = c;
+    }
+    std::vector<uint32_t> out;
+    for (const auto & kc : lowest) out.push_back(kc.second);
+    return out;
+}
+
+/** @brief owners_of_rebuilt for the shared pseudo-inverses of p. */
 std::vector<uint32_t> owners_of_rebuilt_tables(const teno::PackedStencils & p, const std::vector<uint32_t> & rebuilt,
                                                const uint64_t * gid, const uint32_t n_cells) {
-    auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c] : uint64_t(c); };
     auto index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), p.pinv_index);
     const size_t n_shapes = p.shape_owner.extent(0) / 2;
     auto shape_of = [&](const uint32_t c) {
@@ -3191,25 +3341,8 @@ std::vector<uint32_t> owners_of_rebuilt_tables(const teno::PackedStencils & p, c
         }
         return lo;
     };
-    std::vector<uint64_t> lost;
-    for (const uint32_t c : n_shapes > 0 ? rebuilt : std::vector<uint32_t>()) {
-        if (p.shape_owner(2 * shape_of(c) + 1) == id(c)) lost.push_back(id(c));
-    }
-    lost = comm::allgatherv(lost);
-    std::sort(lost.begin(), lost.end());
-    std::unordered_map<size_t, uint32_t> lowest;  // shape: cell
-    for (uint32_t c = 0; c < (lost.empty() ? 0 : n_cells); c++) {
-        const size_t k = shape_of(c);
-        if (std::binary_search(rebuilt.begin(), rebuilt.end(), c) ||
-            !std::binary_search(lost.begin(), lost.end(), p.shape_owner(2 * k + 1))) {
-            continue;
-        }
-        auto [it, added] = lowest.try_emplace(k, c);
-        if (!added && id(c) < id(it->second)) it->second = c;
-    }
-    std::vector<uint32_t> out;
-    for (const auto & kc : lowest) out.push_back(kc.second);
-    return out;
+    return owners_of_rebuilt(n_shapes, shape_of, [&](const size_t k) { return p.shape_owner(2 * k + 1); }, rebuilt, gid,
+                             n_cells);
 }
 
 } // namespace
@@ -3226,6 +3359,11 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
         std::vector<uint32_t> more = owners_of_rebuilt_tables(stencil_large, sorted, global_cell_ids(), n_rec);
         const auto small = owners_of_rebuilt_tables(stencil_small, sorted, global_cell_ids(), n_rec);
         more.insert(more.end(), small.begin(), small.end());
+        auto shape = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cell_shape);
+        const auto rows = owners_of_rebuilt(
+            cell_shape_owner.size(), [&](const uint32_t c) { return size_t(shape(c)); },
+            [&](const size_t k) { return cell_shape_owner[k]; }, sorted, global_cell_ids(), n_rec);
+        more.insert(more.end(), rows.begin(), rows.end());
         sorted.insert(sorted.end(), more.begin(), more.end());
         std::sort(sorted.begin(), sorted.end());
         sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
@@ -3234,6 +3372,7 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
     }
     // The face quadrature follows the mesh's geometry
     if constexpr (N_DIM == 3) init_face_quadrature_3d(degree + 1);
+    expand_cell_rows(*this);
     compute_stencils_and_matrices(&sorted);
     if (single_tables || (cache_single && !cache_file.empty())) round_to_single();
     uint16_t largest = 0;
