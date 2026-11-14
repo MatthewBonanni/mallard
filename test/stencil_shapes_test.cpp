@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -70,7 +71,7 @@ TEST(StencilShapes, AStretchedBoxHasAShapePerPlane) {
     EXPECT_EQ(shapes.first.size(), M * power(2 * reach + 3) / (2 * reach + 3));
     std::map<double, std::set<uint32_t>> by_plane;
     for (uint32_t c = 0; c < shapes.shape.size(); c++) {
-        by_plane[std::round(1e9 * double(mesh->h_cell_coords(c, 1)))].insert(shapes.shape[c]);
+        by_plane[std::round(1e4 * double(mesh->h_cell_coords(c, 1)))].insert(shapes.shape[c]);
     }
     EXPECT_EQ(by_plane.size(), M);
     for (const auto & [y, set] : by_plane) EXPECT_EQ(set.size(), power(2 * reach + 3) / (2 * reach + 3)) << "plane " << y;
@@ -78,7 +79,7 @@ TEST(StencilShapes, AStretchedBoxHasAShapePerPlane) {
 
 /**
  * @brief A periodic box has two shapes, one per way of keying, across its
- *        periodic faces. A node moved 1e-6 of a cell changes the shapes of the
+ *        periodic faces. A node moved 1e-3 of a cell changes the shapes of the
  *        cells whose reach includes a cell around it, and only those.
  */
 TEST(StencilShapes, APeriodicBoxHasTwoShapesAndANodeMovedChangesTheShapesWithinReach) {
@@ -97,7 +98,7 @@ TEST(StencilShapes, APeriodicBoxHasTwoShapesAndANodeMovedChangesTheShapesWithinR
         FOR_I_DIM at = at && std::abs(mesh->h_node_coords(v, i) - 0.5_r) < 1e-6_r;
         if (at) middle = v;
     }
-    mesh->h_node_coords(middle, 0) += 1e-6_r / rtype(m);
+    mesh->h_node_coords(middle, 0) += 1e-3_r / rtype(m);
     const StructuredBlock & block = mesh->structured_blocks.at(0);
     auto cell_at = [&](uint32_t i, uint32_t j) {
         uint32_t l = i + block.n[0] * j;
@@ -184,6 +185,6 @@ TEST(StencilShapes, CellsOfOneShapeHaveOneTENOTable) {
     }, true);
     EXPECT_GT(compared, 0u);
     EXPECT_EQ(reach_seen, 3);
-    EXPECT_LT(worst, 1e-12 * largest);
+    EXPECT_LT(worst, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest);
 }
 #endif

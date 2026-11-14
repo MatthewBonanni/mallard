@@ -33,7 +33,8 @@ struct StencilShapes {
  * @brief Stencil shapes of the blocks' cells: two cells have one shape if
  *        everything within `reach` vertex layers around them has the same
  *        geometry relative to the cell, to rounding (1e-9 of the cell's
- *        h = V^(1/N_DIM), and h to 1e-9 relative): the cells, by their nodes,
+ *        h = V^(1/N_DIM) in double precision, 8192 epsilon (1e-3) in single, and h
+ *        likewise relative): the cells, by their nodes,
  *        and the boundary faces of those cells, by their nodes and zone. A cell
  *        whose reach lies in its block is keyed through the block's indices;
  *        the others through their vertex neighbors, across periodic

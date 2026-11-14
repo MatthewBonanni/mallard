@@ -26,7 +26,8 @@
 
 namespace {
 
-constexpr double QUANTUM = 1.0e-9;
+// Far above the round-off of the coordinates, far below the differences of stretched or graded cells
+constexpr double QUANTUM = std::max(1.0e-9, 8192.0 * double(std::numeric_limits<rtype>::epsilon()));
 
 int64_t quantize(double x) { return static_cast<int64_t>(std::llround(x / QUANTUM)); }
 
@@ -180,7 +181,7 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
                     const uint8_t row = shifted ? mesh.h_cells_of_cell_shift(k) : 0;
                     if (mesh.h_rotated_row(row)) return;
                     std::array<double, N_DIM> t = t_d;
-                    if (row != 0) FOR_I_DIM t[i] += double(mesh.h_shifts(row, i));
+                    if (row != 0) FOR_I_DIM t[i] += double(mesh.h_shifts(uint32_t(row), i));
                     const size_t found = at.insert(mesh.h_cells_of_cell(k), t);
                     // A cell reached across two different periodic shifts: no frame
                     FOR_I_DIM if (std::abs(at.shift[found][i] - t[i]) > QUANTUM * h[c]) return;
