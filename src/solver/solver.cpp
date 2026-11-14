@@ -3368,7 +3368,7 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
             update_dynamic_constant();
-            update_eddy_viscosity(mesh->n_owned());
+            update_eddy_viscosity(mesh->n_owned(), true);
         }
     }
     // On comm_space, so that the reduction ahead of the allreduce does not wait

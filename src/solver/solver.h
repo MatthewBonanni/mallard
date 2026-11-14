@@ -557,13 +557,15 @@ class Solver {
          *        (viscous_gradients, or transport_gradients for mixtures, whose
          *        time-step diffusivity NU_EFF also grows).
          */
-        void update_eddy_viscosity(uint32_t n);
+        void update_eddy_viscosity(uint32_t n, bool of_state = false);
         /**
          * @brief [les] gradients = "reconstruction": les_velocity_gradients of the owned cells from TENO's
          *        central polynomials where its last reconstruction found the cell smooth, else the
-         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo.
+         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo. With
+         *        of_state, eddy_viscosity_of_state's polynomials, and the flags of the reconstruction before
+         *        the one exchange_for_first_stage() started.
          */
-        void update_reconstruction_gradients(uint32_t n);
+        void update_reconstruction_gradients(uint32_t n, bool of_state);
         void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
@@ -1192,7 +1194,9 @@ class Solver {
         // [les] gradients = "reconstruction": the models' velocity gradients (cell, i, j) = d u_i / d x_j
         Kokkos::View<rtype *[N_DIM][N_DIM]> les_velocity_gradients;
         struct ReconstructionGradients {
-            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W, by the reconstruction
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> of_state;    // (owned cell): eddy_viscosity_of_state's
+            Kokkos::View<rtype *> troubled;  // (owned cell): TENO's flags, kept from the first stage's early start
             State halo;
         } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
