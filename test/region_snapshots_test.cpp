@@ -246,7 +246,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsDoNotDependOnTheR
         distributed.run();
         Solver serial;
         serial.set_distributed(false);
-        serial.init(parse_toml(input("s")));
+        serial.init(parse_toml(input(serial_name("s"))));
         serial.run();
     }
     comm::barrier();
@@ -273,7 +273,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsDoNotDependOnTheR
 TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) {
     // Serial, where the files hold every cell at its global id (MPITest compares ranks)
     if (comm::size() > 1) GTEST_SKIP() << "serial";
-    const std::string dir = fresh_dir("volume");
+    const std::string dir = (rank_scratch_dir() / "region_snapshots_volume").string();
     const std::string ball = std::string("{type = \"sphere\", center = ") + point(0.45, 0.5, 0.5) +
                              ", radius = 0.3, edge = 0.1}";
     const std::string variables = "fields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
@@ -487,7 +487,7 @@ TEST(RegionSnapshotsTest, RegionsThatMoveOrFollowTheSolutionWriteTheCellsTheyCov
     // A condition linear in x, read through the solution (RHO > 0 holds everywhere), is cut exactly; a moving
     // box covers at each write the cells of the fixed box where it is then
     if (comm::size() > 1) GTEST_SKIP() << "serial";
-    const std::string dir = fresh_dir("changing");
+    const std::string dir = (rank_scratch_dir() / "region_snapshots_changing").string();
     const std::string where = "{type = \"where\", condition = \"x < 0.31 + 25 * t and RHO > 0\"}";
     const std::string moving = std::string("{type = \"") + (N_DIM == 3 ? "box" : "rectangle") +
                                "\", center = [\"0.2 + 25 * t\", 0.5" + (N_DIM == 3 ? ", 0.5" : "") +
@@ -643,7 +643,7 @@ TEST(RegionSnapshotsTest, RegionsOfTheSolutionDoNotDependOnTheRankCount) {
         const bool pieces = distributed.get_mesh()->n_global_cells > 0;
         Solver serial;
         serial.set_distributed(false);
-        serial.init(parse_toml(with("s")));
+        serial.init(parse_toml(with(serial_name("s"))));
         serial.run();
         comm::barrier();
         if (comm::is_root()) {

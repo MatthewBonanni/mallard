@@ -404,7 +404,7 @@ TEST(InitialStateTest, ProfilesAndPointsFeedExpressions) {
 }
 
 TEST(InitialStateTest, RegionsOverARestartKeepTheCellsTheyMiss) {
-    const std::string dir = (scratch_dir() / "restart").string();
+    const std::string dir = (rank_scratch_dir() / "restart").string();
     const std::string write = "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 1\n";
     const std::string blob = std::string("type = \"analytical\"\nrho = \"1 + 0.5 * sin(3 * x) * cos(2 * y)\"\np = \"1\"\nu = ") +
                              (N_DIM == 2 ? "[\"0.1\", \"0\"]\n" : "[\"0.1\", \"0\", \"0\"]\n");

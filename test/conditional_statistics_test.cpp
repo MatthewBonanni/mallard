@@ -191,7 +191,7 @@ TEST(ConditionalStatisticsTest, PdfsAndConditionalMomentsAreThoseOfTheSampledCel
     // One sample, at the last step: the PDFs, means and variances are those of the final state's cells, in
     // bins of 8 (each team bins in scratch memory) and 64 x 48 (too many for it: global sums), by volume and
     // by mass, the cells outside the ranges in the total only
-    const std::string dir = fresh_dir("one_sample");
+    const std::string dir = (rank_scratch_dir() / "conditional_one_sample").string();
     const uint32_t P = 1 + N_DIM, T = 2 + N_DIM, U_X = 1, U_Y = 2;
     for (const std::string weight : {"volume", "mass"}) {
         Solver solver;
@@ -273,7 +273,8 @@ TEST(ConditionalStatisticsTest, TheSameBitForBitOnAnyNumberOfRanks) {
     if (comm::nccl_available()) inputs.push_back(with_halo_exchange(input, "nccl"));
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input));
+    serial.init(parse_toml(flow_case(6, "[statistics]\nt_start = 0.005\n" +
+                                            two_entries((rank_scratch_dir() / "conditional_serial").string(), "mass"))));
     serial.run();
     for (const std::string & text : inputs) {
         Solver distributed;

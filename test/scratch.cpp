@@ -92,6 +92,10 @@ std::filesystem::path rank_scratch_dir() {
     return dir;
 }
 
+std::string serial_name(const std::string & name) {
+    return comm::is_root() ? name : name + std::to_string(comm::rank());
+}
+
 void install_scratch_directories() {
     testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
 }
