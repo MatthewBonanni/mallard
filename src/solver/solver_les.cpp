@@ -939,7 +939,7 @@ void Solver::init_les() {
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
     les_state = Kokkos::View<double *>("les_state", 3);
     Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
-    h_les_coefficients = Kokkos::create_mirror_view(les_coefficients);
+    h_les_coefficients = pinned_mirrors(les_coefficients);
     if (les.reconstruction_gradients) {
         if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
             throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
@@ -963,7 +963,7 @@ void Solver::init_les() {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
-        h_chem_time_scale = Kokkos::create_mirror_view(chem_time_scale);
+        h_chem_time_scale = pinned_mirrors(chem_time_scale);
         Kokkos::deep_copy(chem_time_scale, 1.0_r);
         return;
     }
@@ -971,7 +971,7 @@ void Solver::init_les() {
     tfles_on = true;
     Kokkos::deep_copy(Kokkos::subview(les_state, 2), thickened_flame.beta);
     tfles_fields = Kokkos::View<rtype *[3]>("tfles_fields", mesh->n_cells);
-    h_tfles_fields = Kokkos::create_mirror_view(tfles_fields);
+    h_tfles_fields = pinned_mirrors(tfles_fields);
     chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
     tfles_halo = State("tfles_halo", mesh->n_cells, 3);
     if (thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC) {

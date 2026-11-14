@@ -253,12 +253,11 @@ uint64_t Solver::restart_face_key(const uint32_t i_face) const {
 RestartFaces Solver::characteristic_restart_faces() const {
     RestartFaces faces;
     if (!characteristic_state_set) return faces;
-    const auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_faces);
-    const auto h_state = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_state);
-    for (uint32_t k = 0; k < h_faces.extent(0); k++) {
-        if (static_cast<uint32_t>(mesh->h_cells_of_face(h_faces(k), 0)) >= mesh->n_owned()) continue;
-        faces.keys.push_back(restart_face_key(h_faces(k)));
-        for (uint32_t w = 0; w < RestartFaces::WIDTH; w++) faces.values.push_back(h_state(k, w));
+    // The mirrors output_arrays_to_host filled
+    for (uint32_t k = 0; k < h_char_faces.extent(0); k++) {
+        if (static_cast<uint32_t>(mesh->h_cells_of_face(h_char_faces(k), 0)) >= mesh->n_owned()) continue;
+        faces.keys.push_back(restart_face_key(h_char_faces(k)));
+        for (uint32_t w = 0; w < RestartFaces::WIDTH; w++) faces.values.push_back(h_char_state(k, w));
     }
     return faces;
 }
