@@ -23,6 +23,8 @@
 
 namespace comm {
 
+#ifdef Mallard_HAS_MPI
+
 namespace {
 
 int self_scopes = 0;
@@ -36,8 +38,6 @@ SelfScope::SelfScope(const bool on_) : on(on_) {
 SelfScope::~SelfScope() {
     if (on) self_scopes--;
 }
-
-#ifdef Mallard_HAS_MPI
 
 namespace {
 
@@ -283,6 +283,9 @@ std::vector<T> gatherv(const std::vector<T> & local) {
 }
 
 #else
+
+SelfScope::SelfScope(const bool on_) : on(on_) {}
+SelfScope::~SelfScope() { static_cast<void>(on); }
 
 Session::Session(int &, char **&) {}
 Session::~Session() {}

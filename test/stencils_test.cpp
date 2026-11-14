@@ -78,12 +78,8 @@ std::vector<std::array<double, 3>> centroids(const std::string & file) {
     return out;
 }
 
-std::string scratch(const std::string & name) {
-    const std::filesystem::path dir = scratch_dir() / name;
-    if (comm::is_root()) std::filesystem::remove_all(dir);
-    comm::barrier();
-    return (dir / "mesh").string();
-}
+/** @brief The mesh fields prefix of a check, whose undistributed solver writes on every rank. */
+std::string scratch(const std::string & name) { return (rank_scratch_dir() / name / "mesh").string(); }
 
 }  // namespace
 
@@ -338,7 +334,7 @@ TEST(Stencils, WriteDataWritesTheMeshAndStencilFieldsOfTheCheck) {
     const std::string prefix = scratch("mallard_stencils_write_data");
     const std::string dir = std::filesystem::path(prefix).parent_path().string();
     const std::string input = box("type = \"TENO\"\norder = 3\n",
-                                  "[[write_data]]\nprefix = \"" + dir + "/" + serial_name("run") + "\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\n"
+                                  "[[write_data]]\nprefix = \"" + dir + "/run + "\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\n"
                                   "fields = [\"NON_ORTHOGONALITY\", \"STENCIL_SIZE\", \"STENCIL_WALL\"]\n");
     const CheckReport r = check_fields(input, {}, prefix);
     ASSERT_TRUE(r.ok()) << r.errors().front();
@@ -357,7 +353,7 @@ TEST(Stencils, WriteDataWritesTheMeshAndStencilFieldsOfTheCheck) {
 }
 
 TEST(Stencils, FileOfADistributedRunMatchesTheSerialOne) {
-    const std::string dir = std::filesystem::path(scratch("mallard_stencils_ranks")).parent_path().string();
+    const std::string dir = (scratch_dir() / "mallard_stencils_ranks").string();
     auto input = [&](const std::string & name) {
         return box("type = \"TENO\"\norder = 3\n", "[output]\nwrite_stencils = \"" + dir + "/" + name + ".h5\"\n");
     };
