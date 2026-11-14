@@ -467,10 +467,15 @@ mirrors are pinned (never the device's own arrays, also off GPUs), so the copies
 writes the files from them as it takes the record, after the step's probes and before its progress row, as
 `after_step` orders them. One set of mirrors serves every output: each rank posts the number of staged outputs
 it has written in the step's time-step reduction, whose minimum the device compares with the number it
-staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
-`[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
-spectra, phase averages (whose files and restart arrays read the device) stop the
-device at their steps, as do all outputs of builds without conditional nodes.
+staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. The staging also evaluates
+the `[sources]` at the device's `t` into a device array, and copies the averaged spectra, the phase averages and
+their clocks and bin weights, from which the host writes the spectra file and the restart attributes and
+arrays. A region that moves or follows the solution takes its cells from its fractions, computed under an IF
+node on its writer's own flag at the device's `t` (after the cell states, for a region of the solution) and
+copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
+With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
+copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
+of builds without conditional nodes stop the device at their steps.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -508,7 +513,7 @@ them take effect at the host's next step.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
-of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
+of the monitors, statistics, probes, outputs and progress row due at a step, a kernel sets a flag if the launch has not
 flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
 last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
 audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code

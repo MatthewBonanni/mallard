@@ -352,7 +352,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
                 if (v["type"].string == "progress" || v["type"].string == "event") o.log.push_back(strip(without_timing(v)));
                 if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
             }
-        } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos) {
+        } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos ||
+                   file.find(".vtu") != std::string::npos) {
             // Restart attributes name the writers by their prefixes
             o.files[file] = strip(without_records(read_file(entry.path())));
         } else {
@@ -778,6 +779,103 @@ TEST(StepQueueTest, OutputsDueBeforeTheLastOneIsWrittenStopTheDevice) {
     c.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 2\n";
     c.distributed = comm::size() > 1;
     expect_queue_invariant("busy_outputs", c);
+}
+
+TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheDevice) {
+    // Sources of t, in a moving region too, evaluated at the device's t; a region that moves and one that follows
+    // the solution, their cells taken at the device's t and state. The writers coincide every 6 steps, further
+    // apart than the queue is deep
+    const std::string moving = std::string("{type = \"") + (N_DIM == 3 ? "box" : "rectangle") +
+                               "\", center = [\"0.3 + 0.8 * t\", 0.5" + (N_DIM == 3 ? ", 0.2" : "") +
+                               "], size = [0.3, 2.0" + (N_DIM == 3 ? ", 2.0" : "") + "]}";
+    const std::string base = "check_interval = 1000\n"
+                             "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n"
+                             "[regions]\nmoving = " + moving + "\n"
+                             "[[sources]]\nrhoE = \"0.2 * sin(30 * t) * x\"\n"
+                             "[[sources]]\ntotal = true\nrhoE = \"0.5 + t\"\nregion = \"moving\"\n";
+    Case c;
+    c.run = "n_steps = 26\ncfl = 0.5\n";
+    c.extra = base +
+              "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ninterval = 6\n"
+              "fields = [\"RHO\", \"SOURCE_RHOE\"]\n"
+              "[[write_data]]\nprefix = \"{dir}/region\"\nformat = \"vtu\"\ninterval = 6\nregions = [\"moving\", "
+              "{type = \"where\", condition = \"x < 0.4 + t and RHO > 0\"}]\n"
+              "fields = [\"RHO\", \"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("sources_regions", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"flow_000024.vtu", "region_moving_000024.vtu", "region_1_000024.vtu"}) {
+            EXPECT_TRUE(o.files.count(file) || o.files.count(file.substr(0, file.size() - 3) + "pvtu")) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = base;
+    const Outcome queued = run_case("sources_regions", c, 3);
+    expect_graphed(queued, "sources_regions");
+    EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
+    // Snapshots of the state with the pending half step applied on the device, restarts of the state without it,
+    // with the pending time
+    Case c;
+    c.run = "n_steps = 14\ncfl = 0.5\n";
+    c.body = reacting_body("", "1800.0");
+    const std::string outputs = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 6\n"
+                                "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ninterval = 6\n"
+                                "fields = [\"T\", \"HRR\", \"Y_H2O\"]\n";
+    c.extra = "check_interval = 1000\n" + outputs;
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("fused_outputs", c);
+    if (comm::is_root()) {
+        ASSERT_TRUE(o.files.count("restart_000012.restart"));
+        EXPECT_NE(o.files.at("restart_000012.restart").find("CHEMISTRY_PENDING"), std::string::npos);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    const Outcome queued = run_case("fused_outputs", c, 3), quiet = run_case("fused_outputs_bare", bare, 3);
+    expect_graphed(queued, "fused_outputs");
+    EXPECT_EQ(queued.queued, quiet.queued);
+    ASSERT_EQ(queued.U.size(), quiet.U.size());
+    size_t differ = 0;
+    for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
+    EXPECT_EQ(differ, 0u);
+}
+
+TEST(StepQueueTest, OutputsOfAveragedSpectraAndPhasesAreStagedWithoutStoppingTheDevice) {
+    // Restarts carry the averaged spectra, their clock and the phase averages, snapshots the phase averages, and
+    // the spectra file is written with them, all from the device's copies at the staged step
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 10\nLx = 6.283185307179586\nLy = 3.0\n";
+    if (N_DIM == 3) body << "Nz = 6\nLz = 5.0\n";
+    body << periodic_sides(N_DIM == 3 ? "xyz" : "xy")
+         << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(x + 2.1 * y)\"\n"
+         << "u = " << vector_of("0.3 * sin(2 * x + 0.5) * cos(1.3 * y)", "0.2 * cos(3 * x - y)", "0.1 * sin(y)")
+         << "\np = \"1.0 + 0.05 * cos(x - y)\"\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+         << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.01\n"
+            "Pr = 0.72\n";
+    const std::string restarts = "check_interval = 1000\n"
+                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 6\n";
+    const std::string statistics = "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\n"
+                                   "products = [\"U_X*U_Y\"]\ninterval = 3\nt_start = 0.004\nfile = \"{dir}/spectra.csv\"\n"
+                                   "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\ninterval = 2\nperiod = 0.05\n";
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.4\n";
+    c.body = body.str();
+    c.extra = restarts + "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ninterval = 6\n"
+                         "fields = [\"RHO\", \"PHASE_0_U_Y\"]\n" + statistics;
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("spectra_phases", c);
+    if (comm::is_root()) {
+        ASSERT_TRUE(o.files.count("restart_000018.restart"));
+        EXPECT_FALSE(o.files.at("spectra.csv").empty());
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + statistics;
+    const Outcome queued = run_case("spectra_phases", c, 3);
+    expect_graphed(queued, "spectra_phases");
+    EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {

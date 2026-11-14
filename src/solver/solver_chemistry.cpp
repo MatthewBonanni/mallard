@@ -34,30 +34,6 @@ struct MaxCostFunctor {
     void operator()(const uint32_t c, rtype & max) const { max = Kokkos::fmax(max, cost(c)); }
 };
 
-template <typename T>
-struct SwapFunctor {
-    T * a;
-    T * b;
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const size_t i) const {
-        const T v = a[i];
-        a[i] = b[i];
-        b[i] = v;
-    }
-};
-
-/** @brief Exchanges the values of two views of one shape. */
-template <typename V>
-void swap_values(const V & a, const V & b) {
-    if (a.span() != b.span() || !a.span_is_contiguous() || !b.span_is_contiguous()) {
-        throw std::logic_error("swap_values: views of different spans");
-    }
-    using T = typename V::value_type;
-    Kokkos::parallel_for("swap_values", Kokkos::RangePolicy<Kokkos::IndexType<size_t>>(0, a.span()),
-                         SwapFunctor<T>{a.data(), b.data()});
-}
-
 } // namespace
 
 void Solver::init_chemistry() {
@@ -159,6 +135,10 @@ void Solver::allocate_unflushed() {
     unflushed_T_seed = Kokkos::View<rtype *>("unflushed_T_seed", T_seed.extent(0));
     unflushed_chem_h = Kokkos::View<rtype *>("unflushed_chem_h", chem_h.extent(0));
     unflushed_chem_cost = Kokkos::View<rtype *>("unflushed_chem_cost", chem_cost.extent(0));
+    h_unflushed = pinned_mirrors(unflushed.flow);
+    h_unflushed_species = pinned_mirrors(unflushed.species);
+    h_unflushed_T_seed = pinned_mirrors(unflushed_T_seed);
+    h_unflushed_chem_h = pinned_mirrors(unflushed_chem_h);
     cell_chemistry.allocate_kept();
 }
 
@@ -198,16 +178,15 @@ void Solver::unflush_chemistry() {
 }
 
 void Solver::swap_unflushed() {
-    if (!chemistry_flushed) return;
-    swap_values(conservatives, unflushed.flow);
-    swap_values(species, unflushed.species);
-    swap_values(T_seed, unflushed_T_seed);
-    swap_values(chem_h, unflushed_chem_h);
-    // The mirrors the restart writers read
-    Kokkos::deep_copy(h_conservatives, conservatives);
-    Kokkos::deep_copy(h_species, species);
-    Kokkos::deep_copy(h_T_seed, T_seed);
-    Kokkos::deep_copy(h_chem_h, chem_h);
+    if (!mirrors_unflushed) return;
+    const auto swap = [](const auto & a, const auto & b) {
+        if (a.span() != b.span()) throw std::logic_error("swap_unflushed: mirrors of different sizes");
+        std::swap_ranges(a.data(), a.data() + a.span(), b.data());
+    };
+    swap(h_conservatives, h_unflushed);
+    swap(h_species, h_unflushed_species);
+    swap(h_T_seed, h_unflushed_T_seed);
+    swap(h_chem_h, h_unflushed_chem_h);
 }
 
 void Solver::reduce_chemistry_failures() {

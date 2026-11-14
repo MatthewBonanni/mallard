@@ -31,6 +31,7 @@
 #include "global_order.h"
 #include "mesh.h"
 #include "output_clock.h"
+#include "pinned_mirrors.h"
 #include "snapshot_block.h"
 
 enum class DataFormat {
@@ -188,12 +189,14 @@ struct CellSubset {
     std::vector<uint32_t> cells;  // owned, increasing
     std::vector<double> fractions;
     /**
-     * @brief For a region that moves or follows the solution: the fractions
-     *        of every cell at time t (collective), from which each snapshot
-     *        takes its cells; cells and fractions are then unused.
+     * @brief For a region that moves or follows the solution: enqueues the
+     *        fractions of every cell at the device's time time() into
+     *        moving_fractions, without host work (capturable); each snapshot
+     *        takes its cells from them, and cells and fractions are unused.
      */
-    std::function<std::vector<double>(double t)> at;
-    bool solution = false;  // at reads the solution's cell values, which must be current
+    std::function<void(const Kokkos::View<const rtype> & time)> update;
+    Kokkos::View<const double *> moving_fractions;
+    bool solution = false;  // update reads the solution's cell values, which must be current
 };
 
 /**
@@ -281,7 +284,14 @@ class DataWriter {
         /** @brief When outputs are due, as the step graph decides it too. */
         OutputClock output_clock() const { return {interval, time_interval, n_written}; }
         /** @brief Whether its cells change between snapshots (a region that moves or follows the solution). */
-        bool moving_subset() const { return static_cast<bool>(subset_at); }
+        bool moving_subset() const { return static_cast<bool>(subset_update); }
+        /**
+         * @brief A moving region's fractions at the device's time time(), enqueued into pinned memory
+         *        (capturable); the next write takes its cells from them instead of computing them at its t.
+         */
+        void stage_subset(const Kokkos::View<const rtype> & time);
+        /** @brief The next write takes its cells from the fractions stage_subset enqueued, which have arrived. */
+        void use_staged_subset() { subset_staged = true; }
 
         /**
          * @brief Continue numbering and the .pvd (.xmf) series of a previous
@@ -450,7 +460,12 @@ class DataWriter {
         uint64_t n_subset = 0;
         std::unique_ptr<Data> fraction;
         Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type fraction_values;
-        std::function<std::vector<double>(double)> subset_at;  // the region changes between snapshots
+        std::function<void(const Kokkos::View<const rtype> &)> subset_update;  // the region changes between snapshots
+        Kokkos::View<const double *> subset_fractions;                     // device: what subset_update fills
+        PinnedMirrors subset_mirrors;
+        Kokkos::View<double *>::host_mirror_type h_subset_fractions;
+        Kokkos::View<rtype> subset_time;
+        bool subset_staged = false;
         bool subset_solution = false;
         // Compression
         Compression compression = Compression::NONE;
