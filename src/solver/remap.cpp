@@ -18,6 +18,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
@@ -124,7 +125,7 @@ std::shared_ptr<Mesh> source_mesh(const Input & input, uint8_t degree) {
     DistributedMesh setup(read_mesh_block(input), Mesh::periodic_pairs(input));
     setup.distribute(partition_multijagged(setup, comm::size()));
     Distribution dist;
-    return setup.build_local_mesh(halo_layers(degree), dist);
+    return std::move(setup).build_local_mesh(halo_layers(degree), dist);
 }
 
 Source::Source(std::shared_ptr<const Mesh> mesh_in, const std::vector<std::vector<double>> & values_in,
