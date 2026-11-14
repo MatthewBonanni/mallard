@@ -494,7 +494,9 @@ TEST(DistributedMeshTest, OwnedCellsAndFacesNearThePartitionComeLast) {
                                           CellNumbering{CellOrder::AUTO, layers, true}}) {
         Distribution dist;
         const auto mesh = distributed.build_local_mesh(4, dist, numbering);
-        if (comm::size() > 1) EXPECT_LT(mesh->n_interior(), mesh->n_owned());
+        if (comm::size() > 1) {
+            EXPECT_LT(mesh->n_interior(), mesh->n_owned());
+        }
         for (uint32_t c = 0; c < mesh->n_owned(); c++) {
             EXPECT_EQ(distance[mesh->h_global_cell(c)] > layers, c < mesh->n_interior()) << "cell " << c;
         }
