@@ -1,0 +1,1 @@
+- Probes reading `[statistics]` means, covariances or phase averages no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at their writes: the step graph copies those averages at each sample's cell into the probe's staged values. Files are the same bit for bit. Probes reading confidence intervals (`CI_`) still stop the queue (#906).
