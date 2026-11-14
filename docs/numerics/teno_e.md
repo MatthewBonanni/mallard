@@ -516,10 +516,12 @@ and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
 free device memory: a thread per cell in 2D, a team of threads per cell on
 GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
-the cells the searches gather), and a batch takes as many cells as fit what
-16,384 cells take with twice that scratch, up to one wave of threads on the
-GPU; meshes of at least 16,384 cells share one batch size, so that the
-setup's workspace does not grow with the mesh. Cells whose search
+the cells the searches gather). On CUDA a batch is one wave of the kernel's
+threads (as many as the GPU holds at once with the kernel's registers: 41,472
+on an A100), within a quarter of the free memory; on other GPUs it takes as
+many cells as fit what 16,384 cells take with twice that scratch. Meshes of
+at least 16,384 cells share one batch size, so that the setup's workspace
+does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
