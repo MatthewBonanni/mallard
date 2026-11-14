@@ -89,7 +89,8 @@ class Text {
 
         /**
          * @brief A table: a header row (dimmed), then a row per entry, each column as wide as its widest
-         *        cell; the last column wraps at the width, and a cell's "\n" starts a continuation line.
+         *        cell, its numbers aligned at the decimal point (logging::align_decimals); the last column wraps
+         *        at the width, and a cell's "\n" starts a continuation line.
          * @param status_column A "status" column first, holding each row's status.
          */
         void table(const std::vector<Column> & header, const std::vector<Row> & rows, bool status_column = true);

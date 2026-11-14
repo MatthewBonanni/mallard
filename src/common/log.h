@@ -71,8 +71,16 @@ void item(std::string_view key, std::string_view value);
 void items(const Items & list);
 
 /**
+ * @brief The cells of a column with its numbers padded so that their decimal points share a column: the point,
+ *        or where it would be (after an integer's last digit, before an exponent), at the same offset in every
+ *        number, with a slot for a minus sign, and every number as wide. A number may be followed by "%" or by
+ *        a space and one word ("27.1 kB"); "-" (no value) aligns as an integer. Other cells are unchanged.
+ */
+std::vector<std::string> align_decimals(std::vector<std::string> column);
+
+/**
  * @brief Columns under a section: a header row, then one row per entry, each column as wide
- *        as its widest cell.
+ *        as its widest cell, its numbers aligned at the decimal point (align_decimals).
  */
 void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows);
 

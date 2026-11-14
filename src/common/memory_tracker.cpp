@@ -51,8 +51,11 @@ constexpr Rule RULES[] = {
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
     {"transport_gradients", false, C::FACES},
     // TENO setup's workspace
-    {"teno_batch_", true, C::SETUP}, {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
-    {"teno_rows", false, C::SETUP}, {"teno_boxes", false, C::SETUP}, {"teno_cell_rule", false, C::SETUP},
+    {"teno_batch_", true, C::SETUP},
+    // The setup's geometry of every cell (freed with it)
+    {"teno_setup_h", false, C::MESH}, {"teno_setup_metric", false, C::MESH}, {"teno_boxes", false, C::MESH},
+    {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
+    {"teno_rows", false, C::SETUP}, {"teno_cell_rule", false, C::SETUP},
     {"teno_pack_", true, C::SETUP}, {"teno_large_size_rows", false, C::SETUP},
     {"teno_small_size_rows", false, C::SETUP}, {"teno_scale_rows", false, C::SETUP},
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
@@ -175,8 +178,8 @@ const char * category_name(const Category c) { return NAMES[static_cast<size_t>(
 bool scales_with_cells(const Category c) { return c != Category::SETUP && c != Category::WORK && c != Category::RUNTIME; }
 
 Category category(const std::string_view label) {
-    // Host copies of device views (create_mirror, create_mirror_view in device builds)
-    if (ends_with(label, "_mirror")) return Category::OUTPUT;
+    // Host copies of device views (create_mirror, create_mirror_view in device builds; pinned staging)
+    if (ends_with(label, "_mirror") || ends_with(label, "_pinned")) return Category::OUTPUT;
     // GrowingBuffer: the rest of its last page
     if (ends_with(label, "_pages")) return Category::RUNTIME;
     for (const Rule & rule : RULES) {

@@ -221,7 +221,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             for (double v : x) send[q].push_back(std::bit_cast<uint64_t>(v));
         }
     }
-    zone_nodes = {};
+    release(zone_nodes);
     comm::Received<uint64_t> received = comm::exchange(std::move(send));
     const uint64_t n_records = received.data.size() / WIDTH;
     const uint64_t * rec = received.data.data();
@@ -293,9 +293,9 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         send[rank_of_node(a)].insert(send[rank_of_node(a)].end(), {a, b, k, MINUS});
     }
     received = {};
-    order = {};
-    grids = {};
-    b_nodes = {};
+    release(order);
+    release(grids);
+    release(b_nodes);
     check_all(error);
     std::vector<std::array<uint64_t, 4>> links;
     {
@@ -358,7 +358,7 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         }
     }
     check_all(error);
-    links = {};
+    release(links);
 
     // Each rank learns the classes of its block's nodes from the ranks whose
     // node blocks hold them
@@ -496,7 +496,7 @@ DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPa
         i = j;
     }
     received = {};
-    order = {};
+    release(order);
     check_all(error);
     received = comm::exchange(std::move(send));
 
@@ -620,12 +620,27 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     check_all(error);
     owner = cell_owner;
     // The dual graph only serves the partitioner
-    graph_offsets_ = {};
-    graph_neighbors_ = {};
+    release(graph_offsets_);
+    release(graph_neighbors_);
+    send_to_owners();
+}
+
+void DistributedMesh::release_cells() {
     cells = Cells();
-    halo_index.clear();
-    searched_nodes.clear();
+    release(halo_index);
+    release(owned_nodes);
+    release(searched_nodes);
+    release(next_layer);
+    release(directory_offsets);
+    release(directory_cells);
+    release(directory_owners);
     layers = 0;
+    sent = false;
+}
+
+void DistributedMesh::send_to_owners() {
+    const size_t p = static_cast<size_t>(comm::size());
+    release_cells();
 
     // Every block cell to its owner. Ranks hold increasing ranges of global
     // ids, so the owned cells arrive sorted.
@@ -636,27 +651,37 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     for (uint64_t & node : owned_nodes) node = node_key(node);
     std::sort(owned_nodes.begin(), owned_nodes.end());
     owned_nodes.erase(std::unique(owned_nodes.begin(), owned_nodes.end()), owned_nodes.end());
+    owned_nodes.shrink_to_fit();
 
     // Node directory: the cells using each block node (all nodes of a
     // periodic class count as its key), and their owners
     send.assign(p, {});
+    {
+        std::vector<uint64_t> count(p, 0);
+        for (uint64_t node : block.cell_nodes) count[rank_of_node(node_key(node))] += 3;
+        for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
+    }
     for (uint32_t c = 0; c < block.n_cells(); c++) {
         for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
             const uint64_t key = node_key(block.cell_nodes[k]);
             send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, block.first_cell + c, uint64_t(owner[c])});
         }
     }
-    const std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
+    std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
     directory_offsets.assign(block.n_nodes() + 1, 0);
     for (size_t i = 0; i < uses.size(); i += 3) directory_offsets[uses[i] - block.first_node + 1]++;
     std::partial_sum(directory_offsets.begin(), directory_offsets.end(), directory_offsets.begin());
-    directory.assign(directory_offsets.back(), {});
+    directory_cells.assign(directory_offsets.back(), 0);
+    directory_owners.assign(directory_offsets.back(), 0);
     {
         std::vector<uint64_t> fill(directory_offsets.begin(), directory_offsets.end() - 1);
         for (size_t i = 0; i < uses.size(); i += 3) {
-            directory[fill[uses[i] - block.first_node]++] = {uses[i + 1], int(uses[i + 2])};
+            const uint64_t j = fill[uses[i] - block.first_node]++;
+            directory_cells[j] = uses[i + 1];
+            directory_owners[j] = int(uses[i + 2]);
         }
     }
+    release(uses);
 
     // Halo layer 1: at every node shared by several owners, each owner gets
     // the cells there that it does not own
@@ -664,13 +689,13 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     std::vector<int> owners;
     for (uint64_t n = 0; n < block.n_nodes(); n++) {
         owners.clear();
-        for (uint64_t i = directory_offsets[n]; i < directory_offsets[n + 1]; i++) owners.push_back(directory[i].second);
+        for (uint64_t i = directory_offsets[n]; i < directory_offsets[n + 1]; i++) owners.push_back(directory_owners[i]);
         std::sort(owners.begin(), owners.end());
         owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
         if (owners.size() < 2) continue;
         for (int o : owners) {
             for (uint64_t i = directory_offsets[n]; i < directory_offsets[n + 1]; i++) {
-                if (directory[i].second != o) send[static_cast<size_t>(o)].insert(send[static_cast<size_t>(o)].end(), {directory[i].first, uint64_t(directory[i].second)});
+                if (directory_owners[i] != o) send[static_cast<size_t>(o)].insert(send[static_cast<size_t>(o)].end(), {directory_cells[i], uint64_t(directory_owners[i])});
             }
         }
     }
@@ -679,6 +704,7 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
     for (size_t i = 0; i < pushed.size(); i += 2) next_layer.push_back({pushed[i], int(pushed[i + 1])});
     std::sort(next_layer.begin(), next_layer.end());
     next_layer.erase(std::unique(next_layer.begin(), next_layer.end()), next_layer.end());
+    sent = true;
 }
 
 void DistributedMesh::grow_layer() {
@@ -705,7 +731,7 @@ void DistributedMesh::grow_layer() {
             for (uint64_t node : asked.from(r)) {
                 const uint64_t n = node - block.first_node;
                 for (uint64_t i = directory_offsets[n]; i < directory_offsets[n + 1]; i++) {
-                    answer[r].insert(answer[r].end(), {directory[i].first, uint64_t(directory[i].second)});
+                    answer[r].insert(answer[r].end(), {directory_cells[i], uint64_t(directory_owners[i])});
                 }
             }
         }
@@ -733,6 +759,7 @@ void DistributedMesh::grow_layer() {
 }
 
 std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order) {
+    if (!sent) send_to_owners();
     while (layers < halo_layers) grow_layer();
     const uint32_t n_local = static_cast<uint32_t>(std::count_if(cells.layer.begin(), cells.layer.end(),
                                            [&](uint8_t l) { return l <= halo_layers; }));
@@ -740,21 +767,26 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     // Nodes, numbered in order of first use
     std::unordered_map<uint64_t, uint32_t> local_node;
     std::vector<uint64_t> node_ids;
-    std::vector<std::vector<uint32_t>> local_cells(n_local);
+    CellNodes local_cells;
+    local_cells.offsets.reserve(n_local + 1);
+    local_cells.nodes.reserve(cells.node_offsets[n_local]);
     for (uint32_t i = 0; i < n_local; i++) {
         for (uint64_t k = cells.node_offsets[i]; k < cells.node_offsets[i + 1]; k++) {
             const auto [it, inserted] = local_node.emplace(cells.nodes[k], node_ids.size());
             if (inserted) node_ids.push_back(cells.nodes[k]);
-            local_cells[i].push_back(it->second);
+            local_cells.nodes.push_back(it->second);
         }
+        local_cells.offsets.push_back(static_cast<uint32_t>(local_cells.nodes.size()));
     }
-    std::vector<uint64_t> sorted_ids(node_ids);
-    std::sort(sorted_ids.begin(), sorted_ids.end());
-    const auto coords = fetch_nodes(sorted_ids);
     std::vector<std::array<rtype, N_DIM>> nodes(node_ids.size());
-    for (size_t j = 0; j < node_ids.size(); j++) {
-        const auto & x = coords[static_cast<size_t>(std::lower_bound(sorted_ids.begin(), sorted_ids.end(), node_ids[j]) - sorted_ids.begin())];
-        FOR_I_DIM nodes[j][i] = static_cast<rtype>(x[i]);
+    {
+        std::vector<uint64_t> sorted_ids(node_ids);
+        std::sort(sorted_ids.begin(), sorted_ids.end());
+        const auto coords = fetch_nodes(sorted_ids);
+        for (size_t j = 0; j < node_ids.size(); j++) {
+            const auto & x = coords[static_cast<size_t>(std::lower_bound(sorted_ids.begin(), sorted_ids.end(), node_ids[j]) - sorted_ids.begin())];
+            FOR_I_DIM nodes[j][i] = static_cast<rtype>(x[i]);
+        }
     }
 
     // Faces on the global boundary; the remaining one-sided faces border other ranks
@@ -769,6 +801,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
             boundary_faces.push_back({std::move(local), zones[cells.boundary[b][1]]});
         }
     }
+    release(local_node);
     // Periodic classes of the local nodes, keyed by their first local node
     PeriodicNodes classes = periodic_classes;
     if (!classes.zones.empty()) {
@@ -789,33 +822,44 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     }
     const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends);
     const std::vector<uint32_t> & order = numbered.order;
-    std::vector<std::vector<uint32_t>> ordered_cells(n_local);
+    CellNodes ordered_cells;
+    ordered_cells.offsets.reserve(n_local + 1);
+    ordered_cells.nodes.reserve(local_cells.nodes.size());
     std::vector<int> owners(n_local);
     dist = Distribution();
     dist.halo_layers = static_cast<uint8_t>(halo_layers);
     dist.global_cell.resize(n_local);
     dist.layer.resize(n_local);
     for (uint32_t i = 0; i < n_local; i++) {
-        ordered_cells[i] = std::move(local_cells[order[i]]);
+        ordered_cells.add(local_cells[order[i]]);
         owners[i] = cells.owner[order[i]];
         dist.global_cell[i] = cells.gid[order[i]];
         dist.layer[i] = cells.layer[order[i]];
     }
+    local_cells = {};
     dist.n_owned = static_cast<uint32_t>(std::count(dist.layer.begin(), dist.layer.end(), 0));
     plan_halo_exchange(dist, std::vector<int>(owners.begin() + dist.n_owned, owners.end()));
+
+    std::vector<uint32_t> cell_zone;
+    if (!block.cell_zone_names.empty()) {
+        cell_zone.resize(n_local);
+        for (uint32_t i = 0; i < n_local; i++) cell_zone[i] = cells.zone[order[i]];
+    }
+    // Deeper halos later start again from the block and the owners
+    release_cells();
 
     auto mesh = std::make_shared<Mesh>();
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
     mesh->cell_order_choice = numbered.choice;
+    mesh->structured_blocks = numbered.blocks;
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
     mesh->h_global_node_id = std::move(node_ids);
     mesh->n_global_nodes = node_dist.back();
-    mesh->init_from_connectivity(nodes, ordered_cells, boundary_faces, PARTITION_ZONE, classes);
+    mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, classes);
     if (!block.cell_zone_names.empty()) {
         mesh->cell_zone_names = block.cell_zone_names;
-        mesh->h_cell_zone.resize(n_local);
-        for (uint32_t i = 0; i < n_local; i++) mesh->h_cell_zone[i] = cells.zone[order[i]];
+        mesh->h_cell_zone = std::move(cell_zone);
     }
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells =

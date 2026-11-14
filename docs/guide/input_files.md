@@ -355,7 +355,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
   status  zone    condition             faces  details
   ok      left    dirichlet             240    -
   ok      right   outlet_extrapolation  240    -
-  ok      bottom  dirichlet             40     where x < 1/6
+  ok      bottom  dirichlet              40    where x < 1/6
   ok      bottom  symmetry              920    where x >= 1/6
   ok      top     dirichlet             960    -
 
@@ -364,20 +364,20 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
   cells: the cells each touches. A region of the case that touches no cell is an error.
   status  region  kind    measure  units  cells    made from
   ok      domain  filled  4        m^2    460,800  the mesh's
-  ok      bottom  curve   4        m      960      the mesh's
-  ok      left    curve   1        m      240      the mesh's
-  ok      right   curve   1        m      240      the mesh's
-  ok      top     curve   4        m      960      the mesh's
+  ok      bottom  curve   4        m          960  the mesh's
+  ok      left    curve   1        m          240  the mesh's
+  ok      right   curve   1        m          240  the mesh's
+  ok      top     curve   4        m          960  the mesh's
   Case view (every region and zone, for ParaView): view/case.vtm
   Case view images: view/case-light.svg, view/case-dark.svg
 
 == Mesh quality ========================================================================= ok
   Over every cell; a cell above the limit is questionable.
-  status  metric             units          max       mean      limit  cells over limit
-  ok      non-orthogonality  deg            26.6      26.6      70     0
-  ok      skewness           dimensionless  1.43e-13  2.85e-14  0.5    0
-  ok      aspect ratio       dimensionless  1.58      1.58      1000   0
-  ok      volume ratio       dimensionless  1         1         10     0
+  status  metric             units          max        mean       limit   cells over limit
+  ok      non-orthogonality  deg            26.6       26.6         70    0
+  ok      skewness           dimensionless   1.43e-13   2.85e-14     0.5  0
+  ok      aspect ratio       dimensionless   1.58       1.58      1000    0
+  ok      volume ratio       dimensionless   1          1           10    0
 
   Worst cells of the metrics at or above their notable value (non-orthogonality 10 deg,
   skewness 0.05, aspect ratio 10, volume ratio 2), worst first:
@@ -391,13 +391,13 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
 
 == Time step ============================================================================ ok
   At the initial state, t = 0 s.
-  status  quantity                      value      units          target  basis
-          time step dt                  0.0001098  s                      run.cfl times the time step at CFL 1
-  ok      CFL number                    1          dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
-          time step at CFL 1            0.0001098  s                      the smallest over the cells
-          CFL-limiting cell             57,397     global id              at (0.4972, 0.5778) m
-          cells within 10% of its step  52,499     cells                  in (0.001389, 0.001389) m to (0.7431, 0.9986)
-                                                                          m
+  status  quantity                      value           units          target  basis
+          time step dt                       0.0001098  s                      run.cfl times the time step at CFL 1
+  ok      CFL number                         1          dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
+          time step at CFL 1                 0.0001098  s                      the smallest over the cells
+          CFL-limiting cell             57,397          global id              at (0.4972, 0.5778) m
+          cells within 10% of its step  52,499          cells                  in (0.001389, 0.001389) m to (0.7431,
+                                                                               0.9986) m
 
 == Resolution =========================================================================== ok
   Estimates from the initial state, against the targets of the case's regime (DNS, or LES
@@ -414,44 +414,44 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
   --ranks from a serial check, scaled to the largest part the partitioner makes); peak:
   during the setup.
   status  run         ranks  owned cells  halo cells  after setup  peak     peak of the device
-          this check  1      460,800      0           3.96 GB      3.96 GB  -
+          this check  1      460,800          0       3.96 GB      3.96 GB  -
           --ranks 4   4      115,200      7,680       1.06 GB      1.06 GB  -
 
   By category, of the same rank; per cell: per owned and halo cell of the rank (460,800);
   categories below 0.05% of the peak are left out.
-  category               at the setup's peak  per cell  after setup  per cell  proportional to the cells
-  solution and stages    95.8 MB              208 B     95.8 MB      208 B     yes
-  faces and gradients    658 MB               1.43 kB   658 MB       1.43 kB   yes
-  reconstruction tables  3.07 GB              6.66 kB   3.07 GB      6.66 kB   yes
-  mesh and geometry      127 MB               275 B     127 MB       275 B     yes
-  boundaries and models  5.62 MB              12 B      5.62 MB      12 B      yes
-  setup                  3.43 MB              -         0 B          -         no
-  total                  3.96 GB              -         3.96 GB      -
+  category               at the setup's peak  per cell   after setup  per cell   proportional to the cells
+  solution and stages     95.8  MB            208    B    95.8  MB    208    B   yes
+  faces and gradients    658    MB              1.43 kB  658    MB      1.43 kB  yes
+  reconstruction tables    3.07 GB              6.66 kB    3.07 GB      6.66 kB  yes
+  mesh and geometry      127    MB            275    B   127    MB    275    B   yes
+  boundaries and models    5.62 MB             12    B     5.62 MB     12    B   yes
+  setup                    3.43 MB              -          0    B       -        no
+  total                    3.96 GB              -          3.96 GB      -
 
 == GPU sizing =========================================================================== ok
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
-  status  quantity                            value      units                 basis
-          memory per GPU                      85.1       GB                    A100-80GB
-          kept free                           5          % of the memory       fragmentation and allocations during the
-                                                                               run
-          outside Kokkos per GPU              1.60       GB                    typical: CUDA's context and kernels'
-                                                                               local memory on an A100
-  ok      most cells per GPU                  9,226,381  owned and halo cells  8.59 kB per cell + 3.43 MB, at the
-                                                                               setup's peak
-  ok      fewest GPUs                         1          GPUs                  largest part 460,800 owned + 0 halo
-                                                                               cells, predicted peak 5.56 GB (from the
-                                                                               partitioner)
-          most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
-          wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
+  status  quantity                            value         units                 basis
+          memory per GPU                             85.1   GB                    A100-80GB
+          kept free                                   5     % of the memory       fragmentation and allocations during
+                                                                                  the run
+          outside Kokkos per GPU                      1.60  GB                    typical: CUDA's context and kernels'
+                                                                                  local memory on an A100
+  ok      most cells per GPU                  9,226,381     owned and halo cells  8.59 kB per cell + 3.43 MB, at the
+                                                                                  setup's peak
+  ok      fewest GPUs                                 1     GPUs                  largest part 460,800 owned + 0 halo
+                                                                                  cells, predicted peak 5.56 GB (from
+                                                                                  the partitioner)
+          most GPUs with halo < 10% of owned          4     GPUs                  doubling from the fewest
+          wall time per unit simulated time          21.0   s                     on 4 GPUs at 50.0M cells/s each
 
 == Cost ===================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps   wall time  rank-hours
-  per unit simulated time  1                   9,109   21.0 s     0.0233
+  per unit simulated time  1                    9,109  21.0 s     0.0233
   per flow-through time    1.135               10,340  23.8 s     0.0265
-  to run.t_stop            0.2                 1,822   4.20 s     0.00466
+  to run.t_stop            0.2                  1,822   4.20 s    0.00466
 
 == Diagnostics ========================================================================== ok
   None.
@@ -546,26 +546,27 @@ laminar profile:
   Estimates from the initial state, against the targets of the case's regime (DNS, or LES
   with [les]); value -: not estimated, for the reason its basis gives. See
   docs/guide/input_files.md#resolution.
-  status  quantity                      value     units          target       basis
-          cell size V^(1/3), smallest   0.129     m                           over every cell
-          cell size V^(1/3), mean       0.218     m                           volume-weighted
-          cell size V^(1/3), largest    0.249     m                           over every cell, at (8.639, 1.057, 1.44) m
-          friction velocity u_tau       0.065     m/s                         root mean square over the walls' area,
-                                                                              from Dean's channel correlation at the
-                                                                              forcing's Re_b = U_b 2h / nu = 5.6e+03 (h
-                                                                              = volume / wall area = 1)
-  WARN    first-cell y+, largest        1.43      wall units     <= 1 (DNS)   first cell centers of the walls without a
-                                                                              wall model, at (0.2618, 1.992, 0.1309) m
-          first-cell y+, mean           1.43      wall units                  area-weighted over every wall
-  WARN    wall-cell x+, largest         95.2      wall units     <= 15 (DNS)  wall faces' extent along the flow
-  WARN    wall-cell z+, largest         47.6      wall units     <= 8 (DNS)   wall faces' extent across the flow
-          dissipation epsilon, mean     0.00422   m^2/s^3                     the forcing's power, u_tau^2 U_b / h
-          kinematic viscosity nu, mean  0.000357  m^2/s                       the mean mu over the mean rho
-          Kolmogorov length eta         0.0102    m                           (nu^3 / epsilon)^(1/4)
-  WARN    cell size / eta, mean         21.4      dimensionless  <= 2 (DNS)   the volume-weighted mean cell size over
-                                                                              eta
-          cell size / eta, largest      24.5      dimensionless               the largest cell size over eta, at (8.639,
-                                                                              1.057, 1.44) m
+  status  quantity                      value      units          target       basis
+          cell size V^(1/3), smallest    0.129     m                           over every cell
+          cell size V^(1/3), mean        0.218     m                           volume-weighted
+          cell size V^(1/3), largest     0.249     m                           over every cell, at (8.639, 1.057, 1.44)
+                                                                               m
+          friction velocity u_tau        0.065     m/s                         root mean square over the walls' area,
+                                                                               from Dean's channel correlation at the
+                                                                               forcing's Re_b = U_b 2h / nu = 5.6e+03 (h
+                                                                               = volume / wall area = 1)
+  WARN    first-cell y+, largest         1.43      wall units     <= 1 (DNS)   first cell centers of the walls without a
+                                                                               wall model, at (0.2618, 1.992, 0.1309) m
+          first-cell y+, mean            1.43      wall units                  area-weighted over every wall
+  WARN    wall-cell x+, largest         95.2       wall units     <= 15 (DNS)  wall faces' extent along the flow
+  WARN    wall-cell z+, largest         47.6       wall units     <= 8 (DNS)   wall faces' extent across the flow
+          dissipation epsilon, mean      0.00422   m^2/s^3                     the forcing's power, u_tau^2 U_b / h
+          kinematic viscosity nu, mean   0.000357  m^2/s                       the mean mu over the mean rho
+          Kolmogorov length eta          0.0102    m                           (nu^3 / epsilon)^(1/4)
+  WARN    cell size / eta, mean         21.4       dimensionless  <= 2 (DNS)   the volume-weighted mean cell size over
+                                                                               eta
+          cell size / eta, largest      24.5       dimensionless               the largest cell size over eta, at
+                                                                               (8.639, 1.057, 1.44) m
 ...
 == Diagnostics ======================================================================== WARN
   status  code            message, then the docs that explain it

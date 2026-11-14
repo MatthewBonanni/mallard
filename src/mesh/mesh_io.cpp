@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -26,6 +27,7 @@
 #include "common_io.h"
 #include "log.h"
 #include "periodic.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -61,31 +63,35 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                                   const std::vector<BoundaryFace> & boundary_faces,
                                   const std::string & unlisted_zone,
                                   const std::vector<PeriodicPair> & periodic) {
-    init_from_connectivity(nodes, cells, boundary_faces, unlisted_zone,
+    CellNodes csr;
+    for (const auto & c : cells) csr.add(c);
+    init_from_connectivity(nodes, std::move(csr), boundary_faces, unlisted_zone,
                            periodic.empty() ? PeriodicNodes() : match_periodic_nodes(nodes, boundary_faces, periodic));
 }
 
-void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                                  const std::vector<std::vector<uint32_t>> & input_cells,
+void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, CellNodes cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
                                   const std::string & unlisted_zone, const PeriodicNodes & classes) {
     n_nodes = static_cast<uint32_t>(nodes.size());
-    n_cells = static_cast<uint32_t>(input_cells.size());
+    n_cells = cells.size();
+    view_entries::set_cells(n_cells);
     // A mesh without global ids is whole: its input order becomes the global order
-    std::vector<std::vector<uint32_t>> ordered_cells;
     if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
-        const LocalityOrder numbered = locality_order(cell_order, nodes, input_cells, {n_cells});
+        const LocalityOrder numbered = locality_order(cell_order, nodes, cells, {n_cells});
         cell_order_choice = numbered.choice;
-        if (numbered.choice.order == CellOrder::HILBERT) {
-            ordered_cells.resize(n_cells);
+        structured_blocks = numbered.blocks;
+        if (numbered.choice.order == CellOrder::HILBERT || !numbered.blocks.empty()) {
+            CellNodes ordered;
+            ordered.offsets.reserve(cells.offsets.size());
+            ordered.nodes.reserve(cells.nodes.size());
             h_global_cell_id.resize(n_cells);
             for (uint32_t c = 0; c < n_cells; c++) {
-                ordered_cells[c] = input_cells[numbered.order[c]];
+                ordered.add(cells[numbered.order[c]]);
                 h_global_cell_id[c] = numbered.order[c];
             }
+            cells = std::move(ordered);
         }
     }
-    const std::vector<std::vector<uint32_t>> & cells = ordered_cells.empty() ? input_cells : ordered_cells;
 
     // Periodic classes of the nodes; faces are keyed by the classes' keys so a
     // face of zone_a and its image in zone_b become one face
@@ -100,13 +106,12 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         for (uint32_t & n : face) n = node_key(n);
     };
 
-    // Cells oriented counterclockwise (2D) or positively (3D), as CSR
-    std::vector<uint32_t> cell_node_offsets, cell_nodes;
+    // Cells oriented counterclockwise (2D) or positively (3D)
     if constexpr (N_DIM == 3) {
-        orient_cells_3d(nodes, cells, cell_node_offsets, cell_nodes);
+        orient_cells_3d(nodes, cells);
     } else {
-        cell_node_offsets.assign(1, 0);
-        for (const auto & c : cells) {
+        for (uint32_t i = 0; i < n_cells; i++) {
+            const auto c = std::span<uint32_t>(cells.nodes).subspan(cells.offsets[i], cells.offsets[i + 1] - cells.offsets[i]);
             if (c.size() != 3 && c.size() != 4) {
                 throw std::runtime_error("Mesh: only triangles and quadrilaterals are supported.");
             }
@@ -116,14 +121,11 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
                 const auto & b = nodes[c[(k + 1) % c.size()]];
                 area2 += a[0] * b[1] - b[0] * a[1];
             }
-            if (area2 < 0.0_r) {
-                cell_nodes.insert(cell_nodes.end(), c.rbegin(), c.rend());
-            } else {
-                cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
-            }
-            cell_node_offsets.push_back(static_cast<uint32_t>(cell_nodes.size()));
+            if (area2 < 0.0_r) std::reverse(c.begin(), c.end());
         }
     }
+    const std::vector<uint32_t> & cell_node_offsets = cells.offsets;
+    const std::vector<uint32_t> & cell_nodes = cells.nodes;
 
     // Local face k of every cell (a "half face"), its nodes ordered outward
     std::vector<uint32_t> cell_face_offsets(n_cells + 1, 0);
@@ -157,6 +159,8 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     }
     std::sort(halves.begin(), halves.end());
     std::vector<uint32_t> partner(n_half, NO_NODE);
+    uint32_t n_pairs = 0;
+    size_t n_face_nodes = 0;
     for (uint32_t i = 0; i < n_half;) {
         uint32_t j = i + 1;
         while (j < n_half && halves[j].first == halves[i].first) j++;
@@ -168,12 +172,32 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         if (j - i == 2) {
             partner[halves[i].second] = halves[i + 1].second;
             partner[halves[i + 1].second] = halves[i].second;
+            n_pairs++;
         }
+        n_face_nodes += static_cast<size_t>(std::count_if(halves[i].first.begin(), halves[i].first.end(),
+                                                          [](uint32_t n) { return n != NO_NODE; }));
         i = j;
     }
+    // The half face of every boundary face (NO_NODE if none), so the halves can go now
+    std::vector<uint32_t> boundary_half(boundary_faces.size(), NO_NODE);
+    for (size_t b = 0; b < boundary_faces.size(); b++) {
+        const auto & bf = boundary_faces[b];
+        if (bf.nodes.size() > KEY) continue;
+        half_nodes.assign(bf.nodes.begin(), bf.nodes.end());
+        keyed(half_nodes);
+        const FaceKey key = face_key(half_nodes, half_nodes.size());
+        const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
+        if (it != halves.end() && it->first == key) boundary_half[b] = it->second;
+    }
+    release(halves);
+    n_faces = n_half - n_pairs;
     std::vector<uint32_t> cell_faces(n_half, NO_NODE), face_node_offsets{0}, face_nodes;
     std::vector<std::array<int32_t, 2>> face_cells;
     std::vector<uint8_t> face_shifts;
+    face_node_offsets.reserve(n_faces + 1);
+    face_nodes.reserve(n_face_nodes);
+    face_cells.reserve(n_faces);
+    face_shifts.reserve(n_faces);
     std::vector<uint32_t> other_nodes;
     for (uint32_t c : cells_by_global_id()) {
         for (uint32_t h = cell_face_offsets[c]; h < cell_face_offsets[c + 1]; h++) {
@@ -215,8 +239,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
             face_node_offsets.push_back(static_cast<uint32_t>(face_nodes.size()));
         }
     }
-    partner = {};
-    n_faces = static_cast<uint32_t>(face_cells.size());
+    release(partner);
 
     // Faces renumbered in the order of the local cells, keeping their orientation
     {
@@ -232,6 +255,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         std::vector<std::array<int32_t, 2>> cells_new(n_faces);
         std::vector<uint8_t> shifts_new(n_faces);
         std::vector<uint32_t> offsets_new{0}, nodes_new;
+        offsets_new.reserve(n_faces + 1);
         nodes_new.reserve(face_nodes.size());
         for (uint32_t f = 0; f < n_faces; f++) {
             const uint32_t g = old_face[f];
@@ -250,18 +274,16 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     // Zones: interior plus one per boundary name
     std::map<std::string, std::vector<uint32_t>> zone_faces;
     std::vector<uint32_t> interior;
+    interior.reserve(n_pairs);
     std::vector<bool> zoned(n_faces, false);
-    for (const auto & bf : boundary_faces) {
-        half_nodes.assign(bf.nodes.begin(), bf.nodes.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(bf.nodes.size(), KEY)));
-        keyed(half_nodes);
-        const FaceKey key = face_key(half_nodes, half_nodes.size());
-        const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
-        if (bf.nodes.size() > KEY || it == halves.end() || it->first != key) {
+    for (size_t b = 0; b < boundary_faces.size(); b++) {
+        const auto & bf = boundary_faces[b];
+        if (boundary_half[b] == NO_NODE) {
             throw std::runtime_error("Mesh: a face of zone " + bf.zone + " at " + centroid_text(nodes, bf.nodes) +
                                      " is not a face of any cell. Mesh the boundary together with the domain, so "
                                      "they share nodes, and check that the zone holds only boundary elements.");
         }
-        const uint32_t f = cell_faces[it->second];
+        const uint32_t f = cell_faces[boundary_half[b]];
         if (std::find(periodic_zones.begin(), periodic_zones.end(), bf.zone) != periodic_zones.end()) {
             if (face_cells[f][1] == -1) {
                 throw std::runtime_error("Mesh: the face of periodic zone " + bf.zone + " at " +
@@ -283,7 +305,6 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
             zoned[f] = true;
         }
     }
-    halves = {};
     for (uint32_t f = 0; f < n_faces; f++) {
         if (face_cells[f][1] >= 0) {
             interior.push_back(f);
@@ -292,37 +313,84 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         }
     }
 
-    allocate_and_fill(nodes, cell_node_offsets, cell_nodes, cell_face_offsets, cell_faces, face_node_offsets,
-                      face_nodes, face_cells, face_shifts, interior, zone_faces);
+    allocate_and_fill(std::move(nodes), std::move(cells), std::move(cell_face_offsets), std::move(cell_faces),
+                      std::move(face_node_offsets), std::move(face_nodes), std::move(face_cells),
+                      std::move(face_shifts), std::move(interior), std::move(zone_faces));
     compute_geometry();
 }
 
-void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const std::vector<uint32_t> & cell_node_offsets,
-                             const std::vector<uint32_t> & cell_nodes,
-                             const std::vector<uint32_t> & cell_face_offsets,
-                             const std::vector<uint32_t> & cell_faces,
-                             const std::vector<uint32_t> & face_node_offsets,
-                             const std::vector<uint32_t> & face_nodes,
-                             const std::vector<std::array<int32_t, 2>> & face_cells,
-                             const std::vector<uint8_t> & face_shifts,
-                             const std::vector<uint32_t> & interior,
-                             const std::map<std::string, std::vector<uint32_t>> & zone_faces) {
-    // Allocate views and fill host mirrors
+void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, CellNodes && cells,
+                             std::vector<uint32_t> && cell_face_offsets,
+                             std::vector<uint32_t> && cell_faces,
+                             std::vector<uint32_t> && face_node_offsets,
+                             std::vector<uint32_t> && face_nodes,
+                             std::vector<std::array<int32_t, 2>> && face_cells,
+                             std::vector<uint8_t> && face_shifts,
+                             std::vector<uint32_t> && interior,
+                             std::map<std::string, std::vector<uint32_t>> && zone_faces) {
+    // Each input is freed once copied, before the geometry is allocated
     node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
+    h_node_coords = Kokkos::create_mirror_view(node_coords);
+    for (uint32_t i_node = 0; i_node < n_nodes; i_node++) {
+        FOR_I_DIM h_node_coords(i_node, i) = nodes[i_node][i];
+    }
+    release(nodes);
+    cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
+    h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
+    for (uint32_t f = 0; f < n_faces; f++) {
+        h_cells_of_face(f, 0) = face_cells[f][0];
+        h_cells_of_face(f, 1) = face_cells[f][1];
+    }
+    release(face_cells);
+    face_shift = Kokkos::View<uint8_t *>("face_shift", n_faces);
+    h_face_shift = Kokkos::create_mirror_view(face_shift);
+    std::copy(face_shifts.begin(), face_shifts.end(), h_face_shift.data());
+    release(face_shifts);
+
+    auto copy_csr = [&](std::vector<uint32_t> & offsets_in, std::vector<uint32_t> & values_in,
+                        Kokkos::View<uint32_t *> & values, Kokkos::View<uint32_t *> & offsets,
+                        Kokkos::View<uint32_t *>::host_mirror_type & h_values,
+                        Kokkos::View<uint32_t *>::host_mirror_type & h_offsets, const std::string & name) {
+        values = Kokkos::View<uint32_t *>(name, values_in.size());
+        h_values = Kokkos::create_mirror_view(values);
+        std::copy(values_in.begin(), values_in.end(), h_values.data());
+        release(values_in);
+        offsets = Kokkos::View<uint32_t *>("offsets_" + name, offsets_in.size());
+        h_offsets = Kokkos::create_mirror_view(offsets);
+        std::copy(offsets_in.begin(), offsets_in.end(), h_offsets.data());
+        release(offsets_in);
+    };
+    copy_csr(cells.offsets, cells.nodes, nodes_of_cell, offsets_nodes_of_cell, h_nodes_of_cell,
+             h_offsets_nodes_of_cell, "nodes_of_cell");
+    copy_csr(cell_face_offsets, cell_faces, faces_of_cell, offsets_faces_of_cell, h_faces_of_cell,
+             h_offsets_faces_of_cell, "faces_of_cell");
+    copy_csr(face_node_offsets, face_nodes, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face,
+             h_offsets_nodes_of_face, "nodes_of_face");
+
+    auto add_zone = [&](const std::string & name, FaceZoneType zone_type, std::vector<uint32_t> & faces) {
+        FaceZone zone;
+        zone.set_name(name);
+        zone.set_type(zone_type);
+        zone.faces = Kokkos::View<uint32_t *>("zone_" + name, faces.size());
+        zone.h_faces = Kokkos::create_mirror_view(zone.faces);
+        for (size_t i = 0; i < faces.size(); i++) zone.h_faces(i) = faces[i];
+        release(faces);
+        m_face_zones.push_back(zone);
+    };
+    m_face_zones.clear();
+    add_zone("interior", FaceZoneType::INTERIOR, interior);
+    for (auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
+
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
     face_area = Kokkos::View<rtype *>("face_area", n_faces);
     face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
     face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
-    cells_of_face = Kokkos::View<int32_t *[2]>("cells_of_face", n_faces);
-    h_node_coords = Kokkos::create_mirror_view(node_coords);
     h_cell_coords = Kokkos::create_mirror_view(cell_coords);
     h_cell_volume = Kokkos::create_mirror_view(cell_volume);
     h_face_area = Kokkos::create_mirror_view(face_area);
     h_face_normals = Kokkos::create_mirror_view(face_normals);
     h_face_coords = Kokkos::create_mirror_view(face_coords);
-    h_cells_of_face = Kokkos::create_mirror_view(cells_of_face);
     axisymmetric = false;
     cell_measure = cell_volume;
     face_measure = face_area;
@@ -330,47 +398,6 @@ void Mesh::allocate_and_fill(const std::vector<std::array<rtype, N_DIM>> & nodes
     h_face_measure = h_face_area;
     cell_covariance = {};
     h_cell_covariance = {};
-    for (uint32_t i_node = 0; i_node < n_nodes; i_node++) {
-        FOR_I_DIM h_node_coords(i_node, i) = nodes[i_node][i];
-    }
-    for (uint32_t f = 0; f < n_faces; f++) {
-        h_cells_of_face(f, 0) = face_cells[f][0];
-        h_cells_of_face(f, 1) = face_cells[f][1];
-    }
-    face_shift = Kokkos::View<uint8_t *>("face_shift", n_faces);
-    h_face_shift = Kokkos::create_mirror_view(face_shift);
-    std::copy(face_shifts.begin(), face_shifts.end(), h_face_shift.data());
-
-    auto copy_csr = [](const std::vector<uint32_t> & offsets_in, const std::vector<uint32_t> & values_in,
-                       Kokkos::View<uint32_t *> & values, Kokkos::View<uint32_t *> & offsets,
-                       Kokkos::View<uint32_t *>::host_mirror_type & h_values,
-                       Kokkos::View<uint32_t *>::host_mirror_type & h_offsets, const std::string & name) {
-        values = Kokkos::View<uint32_t *>(name, values_in.size());
-        offsets = Kokkos::View<uint32_t *>("offsets_" + name, offsets_in.size());
-        h_values = Kokkos::create_mirror_view(values);
-        h_offsets = Kokkos::create_mirror_view(offsets);
-        std::copy(offsets_in.begin(), offsets_in.end(), h_offsets.data());
-        std::copy(values_in.begin(), values_in.end(), h_values.data());
-    };
-    copy_csr(cell_node_offsets, cell_nodes, nodes_of_cell, offsets_nodes_of_cell, h_nodes_of_cell,
-             h_offsets_nodes_of_cell, "nodes_of_cell");
-    copy_csr(cell_face_offsets, cell_faces, faces_of_cell, offsets_faces_of_cell, h_faces_of_cell,
-             h_offsets_faces_of_cell, "faces_of_cell");
-    copy_csr(face_node_offsets, face_nodes, nodes_of_face, offsets_nodes_of_face, h_nodes_of_face,
-             h_offsets_nodes_of_face, "nodes_of_face");
-
-    auto add_zone = [&](const std::string & name, FaceZoneType zone_type, const std::vector<uint32_t> & faces) {
-        FaceZone zone;
-        zone.set_name(name);
-        zone.set_type(zone_type);
-        zone.faces = Kokkos::View<uint32_t *>("zone_" + name, faces.size());
-        zone.h_faces = Kokkos::create_mirror_view(zone.faces);
-        for (size_t i = 0; i < faces.size(); i++) zone.h_faces(i) = faces[i];
-        m_face_zones.push_back(zone);
-    };
-    m_face_zones.clear();
-    add_zone("interior", FaceZoneType::INTERIOR, interior);
-    for (const auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
 }
 
 namespace {
@@ -727,10 +754,10 @@ void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPai
                      const MeshTransform & transform) {
     MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename, true) : file_block(read_mesh_file(filename), 0, 1);
     transform_block(block, transform);
-    init_from_block(block, periodic);
+    init_from_block(std::move(block), periodic);
 }
 
-void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic) {
+void Mesh::init_from_block(MeshBlock block, const std::vector<PeriodicPair> & periodic) {
     if (block.first_cell != 0 || block.first_node != 0) {
         throw std::logic_error("Mesh::init_from_block: the block must hold the whole mesh.");
     }
@@ -738,18 +765,20 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
     for (uint64_t i = 0; i < block.n_nodes(); i++) {
         for (size_t d = 0; d < N_DIM; d++) nodes[i][d] = static_cast<rtype>(block.node_coords[i][d]);
     }
-    std::vector<std::vector<uint32_t>> cells(block.n_cells());
-    for (uint64_t c = 0; c < block.n_cells(); c++) {
-        cells[c].assign(block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
-                        block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
-    }
+    release(block.node_coords);
+    CellNodes cells;
+    cells.offsets.assign(block.cell_offsets.begin(), block.cell_offsets.end());
+    release(block.cell_offsets);
+    cells.nodes.assign(block.cell_nodes.begin(), block.cell_nodes.end());
+    release(block.cell_nodes);
     std::vector<BoundaryFace> boundary_faces(block.n_faces());
     for (uint64_t f = 0; f < block.n_faces(); f++) {
         boundary_faces[f].nodes.assign(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
                                        block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
-    init_from_connectivity(nodes, cells, boundary_faces, "unassigned", periodic);
+    PeriodicNodes classes = periodic.empty() ? PeriodicNodes() : match_periodic_nodes(nodes, boundary_faces, periodic);
+    init_from_connectivity(std::move(nodes), std::move(cells), boundary_faces, "unassigned", classes);
     cell_zone_names = block.cell_zone_names;
     h_cell_zone.resize(block.cell_zone.size());
     for (uint32_t c = 0; c < h_cell_zone.size(); c++) h_cell_zone[c] = block.cell_zone[h_global_cell(c)];
