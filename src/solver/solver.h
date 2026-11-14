@@ -692,6 +692,8 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+        /** @brief Scope of a call that communicates: this rank alone unless distributed. */
+        comm::SelfScope communication_scope() const { return comm::SelfScope(!distribute); }
         /**
          * @brief Off CUDA, takes the steps a CUDA build would graph through the
          *        graph's step path without capture, so tests check that path's
@@ -709,6 +711,7 @@ class Solver {
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
+            const comm::SelfScope scope = communication_scope();
             return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
         }
         const Distribution & get_distribution() const { return distribution; }

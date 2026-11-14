@@ -13,6 +13,7 @@
 #define SCRATCH_H
 
 #include <filesystem>
+#include <string>
 
 /**
  * @brief The running test's own directory, shared by all ranks and unique to
@@ -26,6 +27,13 @@ const std::filesystem::path & scratch_dir();
  *        test that every rank writes on its own (not those of a distributed run).
  */
 std::filesystem::path rank_scratch_dir();
+
+/**
+ * @brief name on rank 0, and name followed by the rank on the others: the
+ *        files of an undistributed solver, which every rank writes on its own,
+ *        under names that only rank 0's copy keeps.
+ */
+std::string serial_name(const std::string & name);
 
 /** @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS(). */
 void install_scratch_directories();

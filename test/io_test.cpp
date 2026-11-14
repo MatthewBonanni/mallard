@@ -94,7 +94,7 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
 TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
     // dt = 0.01 with outputs every 0.015: every other step is clipped to land
     // on an output time, the others take the full dt
-    const std::string dir = (scratch_dir() / "mallard_fixed_dt").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_fixed_dt").string();
     const std::string input =
         "[run]\nn_steps = 10\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
@@ -294,7 +294,7 @@ TEST(IOTest, FinalSnapshotAtTStopOnTheSnapshotGridIsWrittenOnce) {
     // snapshot at that time is the one at t_stop, with no second one a
     // round-off later
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
-    const std::string dir = (scratch_dir() / "mallard_final_snapshot").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_final_snapshot").string();
     std::filesystem::remove_all(dir);
     Solver solver;
     solver.set_distributed(false);
@@ -323,7 +323,7 @@ TEST(IOTest, FinalSnapshotAtTStopOnTheSnapshotGridIsWrittenOnce) {
 TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
     // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
-    const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_cfl_output").string();
     const std::string input =
         "[run]\nn_steps = 1\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
@@ -377,7 +377,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     }
     int variant = 0;
     for (const auto & [snapshot_keys, restart_keys] : variants) {
-        const std::string dir = (scratch_dir() / ("mallard_async_output_" + std::to_string(variant++))).string();
+        const std::string dir = (rank_scratch_dir() / ("mallard_async_output_" + std::to_string(variant++))).string();
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
@@ -460,7 +460,7 @@ TEST(IOTest, ARestartFileCutShortIsNeverFoundUnderItsName) {
 
 TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     if (!compression::have_zlib()) GTEST_SKIP() << "built without zlib";
-    const std::string dir = (scratch_dir() / "mallard_compressed_output").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_compressed_output").string();
     run_case(output_case(dir + "/raw", "", "", ""));
     run_case(output_case(dir + "/zlib", "", "compression = \"zlib\"\n", "compression = \"zlib\"\nchunk_cells = 100\n"));
     run_case(output_case(dir + "/lossy", "", "compression = \"zlib\"\nrelative_error = 1e-3\n", ""));
@@ -777,7 +777,7 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
     // and at the end; resuming at t = 1.25 continues at 6, and with the index
     // lost still never overwrites a snapshot; resuming at t = 1 rewrites 5
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
-    const std::string dir = (scratch_dir() / "mallard_resume_numbering").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_resume_numbering").string();
     struct Output {
         std::string prefix, format, extension, index;
     };
@@ -874,7 +874,7 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     // Annulus cells at the walls (circles) are quadratic: their edge nodes on
     // the walls lie on the circles; the ring in between stays linear
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-    const std::string dir = (scratch_dir() / "mallard_vtkhdf_curved").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_vtkhdf_curved").string();
     constexpr uint32_t N_T = 24;
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool triangles : {false, true}) {

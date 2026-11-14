@@ -172,12 +172,12 @@ void FaceExchange::start(const Kokkos::DefaultExecutionSpace & exec,
     for (size_t n = 0; n < ranks.size(); n++) {
         MPI_Irecv(recv_ptr + size_t(recv_offsets[n]) * stride,
                   static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * stride), type, ranks[n], FACE_TAG,
-                  comm::world(), &requests[n]);
+                  comm::communicator(), &requests[n]);
     }
     for (size_t n = 0; n < ranks.size(); n++) {
         MPI_Isend(send_ptr + size_t(send_offsets[n]) * stride,
                   static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * stride), type, ranks[n], FACE_TAG,
-                  comm::world(), &requests[ranks.size() + n]);
+                  comm::communicator(), &requests[ranks.size() + n]);
     }
 #else
     (void)exec;

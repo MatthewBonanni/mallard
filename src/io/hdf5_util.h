@@ -92,7 +92,7 @@ inline hid_t file_access(bool collective = true) {
     const hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
 #if defined(Mallard_HAS_MPI) && defined(H5_HAVE_PARALLEL)
     if (collective) {
-        check(H5Pset_fapl_mpio(fapl, comm::world(), MPI_INFO_NULL), "H5Pset_fapl_mpio");
+        check(H5Pset_fapl_mpio(fapl, comm::communicator(), MPI_INFO_NULL), "H5Pset_fapl_mpio");
         check(H5Pset_all_coll_metadata_ops(fapl, true), "H5Pset_all_coll_metadata_ops");
         check(H5Pset_coll_metadata_write(fapl, true), "H5Pset_coll_metadata_write");
     }

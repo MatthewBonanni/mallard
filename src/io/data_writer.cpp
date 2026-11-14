@@ -1226,7 +1226,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
     // its owned cells at their global offsets, so any rank count can read it
     const auto start = std::chrono::steady_clock::now();
     MPI_File fh;
-    if (MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) !=
+    if (MPI_File_open(comm::communicator(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) !=
         MPI_SUCCESS) {
         throw cannot_write("the restart file", filename);
     }
