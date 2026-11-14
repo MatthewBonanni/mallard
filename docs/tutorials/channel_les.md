@@ -140,13 +140,11 @@ The cost of a wall-resolved LES grows steeply with the Reynolds number, since
 the near-wall cells must shrink with the viscous length $\nu/u_\tau$:
 `examples/channel_les` runs $Re_\tau = 395$ and 590 on $64^3$ and $96^3$ cells.
 Wall-modeled LES removes that constraint by modeling the inner layer and
-resolving only the outer flow; it is under development for Mallard (issue
-[#256](https://github.com/MatthewBonanni/mallard/issues/256)). This tutorial
-is set up for it: its mesh is the `channel.geo` of this page with a uniform
-or mildly stretched spacing in y (`-setnumber beta 0.5`), and its input this
-one at a higher bulk Reynolds number, with the wall model's table in place of
-the wall-resolution requirement. This section will walk through it once the
-wall model is merged.
+resolving only the outer flow: a `wall_model` table on the `wall` zones of
+`[[boundaries]]` ([Wall models](../guide/les.md#wall-models-wall_model)).
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles)
+runs this channel at $Re_\tau = 2000$ and 5200, and with supersonic
+isothermal walls, on meshes coarse at the wall.
 
 ## 8. Things to try
 

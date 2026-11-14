@@ -84,7 +84,7 @@ $MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=4
 ```
 
 This is about 70,000 steps: viscous flow on a fine wall mesh makes the time step small. The run takes
-about 5 minutes on 3 laptop CPU threads. The progress rows show the maximum Mach
+about 5 minutes on 4 laptop CPU threads. The progress rows show the maximum Mach
 number rising from 0.2 to about 0.3 as the flow accelerates around the cylinder.
 
 ## 5. Forces

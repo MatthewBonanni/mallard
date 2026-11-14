@@ -11,7 +11,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 |---|---|---|
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone); it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution), and expressions read the index of [copies](#arrays-of-copies) as `copy` | [Sources](sources.md#regions) |
 | `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh); filled regions may [move](#moving-regions); regions of any dimension may [follow the solution](#regions-defined-by-the-solution); `copies = "each"` reduces each [copy](#arrays-of-copies) | [Probes](probes.md#region-probes) |
-| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
+| `[[probes]]` `type` | [points or a curve](#points-and-curves), [boundary zones](#boundary-zones) or [surfaces](#surfaces) | [Probes](probes.md#probes-probes) |
 | `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions); filled regions may [move](#moving-regions), and regions of any dimension may [follow the solution](#regions-defined-by-the-solution) | [Output](output.md#snapshots-of-regions) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution) | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
@@ -774,8 +774,8 @@ Probes sample at points (`point`, `points`, `points_file`) or along a curve
 | `arc` | `n_points` evenly from the first angle to the second, both included |
 | `curve` | `n_points` evenly in the parameter `s` over `s_range`: denser where the curve moves slowly in `s` |
 
-Transforms of probes are `scale`, then `rotate`, then `translate`, all about
-the origin (probes have no `pivot`): the scaled and rotated circle above is
+Transforms of probes are `scale`, then `rotate`, both about `pivot` (default
+the origin), then `translate`: the scaled and rotated circle above is
 centered at the origin, then translated. A `point` or `points` probe with a
 point outside the domain is an error, and curves are clipped to the domain:
 [Samples outside the domain](probes.md#samples-outside-the-domain).
@@ -799,17 +799,14 @@ Use `point` to compare with references or to measure orders of accuracy, and
 
 ## Boundary zones
 
-> **Coming soon** ([#466](https://github.com/MatthewBonanni/mallard/pull/466)):
-> probes that sample the faces of a boundary zone.
-
-<!-- Boundary-zone probes: fill in when #466 merges (keys, sample placement, a figure). -->
+`boundary = "<zone>"` (a name or a list) or `boundary_type = "wall"` samples
+every face of the zones: [Boundary data](probes.md#boundary-data).
 
 ## Surfaces
 
-> **Coming soon** ([#395](https://github.com/MatthewBonanni/mallard/pull/395)):
-> cut planes and resampled surfaces.
-
-<!-- Cut planes and resampled surfaces: fill in when #395 merges (keys, a figure of a cut plane). -->
+`type = "cut_plane"` cuts the mesh exactly with a plane, one sample per cut
+cell; surface regions (`filled = false`) are resampled on a grid of
+`n_points`: [Cut planes and surfaces](probes.md#cut-planes-and-surfaces).
 
 ## Reading probe output
 

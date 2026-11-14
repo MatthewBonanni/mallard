@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes GCC 15, Clang 22 or Apple Clang 21 or newer ([supported platforms](../installation.md#supported-platforms)), CMake 4.2 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build-3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
@@ -135,12 +135,12 @@ PYTHON=../../.venv/bin/python ./post.sh
 The spatial dimension is fixed when Mallard is built. `-DMallard_DIM=3` gives a 3D solver for meshes of tetrahedra, hexahedra, prisms and pyramids, in any mix; build it in its own directory, next to the 2D one:
 
 ```bash
-cmake -S . -B build3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
+cmake -S . -B build-3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
       -DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3
-cmake --build build3d -j
+cmake --build build-3d -j
 ```
 
-This builds `build3d/src/mallard3d`, run as `build3d/src/mallard`. Installed to one prefix (`cmake --install build --prefix ~/mallard` and the same for `build3d`), the two solvers share one `mallard`, which runs the 2D or 3D solver by the case's mesh (a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`).
+This builds `build-3d/src/mallard3d`, run as `build-3d/src/mallard`. Installed to one prefix (`cmake --install build --prefix ~/mallard` and the same for `build-3d`), the two solvers share one `mallard`, which runs the 2D or 3D solver by the case's mesh (a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`).
 
 3D inputs use the same keys as 2D, with three differences: vectors have three components (`u = [u_x, u_y, u_z]`, `gravity`, `rhou`); expressions are in `x`, `y` and `z`; and generated meshes are `Nx × Ny × Nz` boxes with two more boundary zones, `back` (z = 0) and `front` (z = Lz). Each block of the box holds:
 
@@ -157,7 +157,7 @@ Gmsh meshes (format 2.2 or 4.1) work as in 2D, each physical surface becoming a 
 The `explosion_3d` template, a spherical explosion on 64³ hexahedra, takes about 11 minutes on 6 threads:
 
 ```bash
-build3d/src/mallard new explosion_3d runs/explosion_3d
+build-3d/src/mallard new explosion_3d runs/explosion_3d
 runs/explosion_3d/run.sh -t 6
 ```
 

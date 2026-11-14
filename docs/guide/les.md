@@ -258,7 +258,7 @@ Pitfalls:
   wall face or in its halo; the halo deepens until they are, which is costly
   when a partition boundary runs parallel to a wall within `h` (or
   `edge_distance`) of it.
-- Single gases only (mixtures after isothermal mixture walls), not
+- Single gases only, not
   `axisymmetric`. `[[forces]]` of modeled zones report the modeled stress
   and add a column `Q`, the heat flux into the fluid.
 
@@ -269,7 +269,7 @@ Pitfalls:
 | `cbc_les` | Decaying isotropic turbulence, Sigma + hybrid flux, 32³ to 128³ |
 | `channel_les` | Wall-resolved channel at Re<sub>τ</sub> = 395 and 590 |
 | `channel_wmles` | Wall-modeled channels: Re<sub>τ</sub> = 2000, 5200 and supersonic isothermal walls (M<sub>b</sub> = 1.7, 3.0) |
-| `volvo_bluff_body` | Bluff-body combustor with synthetic inflow and NSCBC outlet |
+| `volvo_bluff_body` | Bluff-body combustor with synthetic turbulence and NSCBC outlet |
 | `flame_turbulence` | Premixed flame in turbulence: DNS and TFLES |
 
 ## See also

@@ -22,7 +22,7 @@ $u_n = \mathbf{u}^L\cdot\mathbf{n}$, the exterior states $\mathbf{W}^b = [\rho, 
 
 - `symmetry`, inviscid walls: $[\rho^L,\ \mathbf{u}^L - 2u_n\mathbf{n},\ p^L]$;
 - `wall_adiabatic`, `wall_heat_flux` (viscous): $[\rho^L,\ 2\mathbf{u}_w - \mathbf{u}^L,\ p^L]$;
-- `wall_isothermal` (viscous, single gas): as above, with $\rho^b = p^L/(R\,T^b)$, $T^b = \max(2T_w - T^L,\ 0.1\,T_w)$;
+- `wall_isothermal` (viscous): as above, for single gases with $\rho^b = p^L/(R\,T^b)$, $T^b = \max(2T_w - T^L,\ 0.1\,T_w)$;
 - `inlet_state`, `dirichlet`: the prescribed state (`dirichlet`: per face, from expressions);
 - `farfield`: eq. $\eqref{eq:far-field}$;
 - `outlet_pressure`: subsonic ($u_n < a^L$): $[\rho^L p_b/p^L,\ \mathbf{u}^L,\ p_b]$, keeping $T$; supersonic: $\mathbf{W}^L$;
@@ -36,8 +36,9 @@ their ghosts: a ghost at distance $\delta$ beyond the face has
 $p^b = p^L + \rho^L(\mathbf{g}\cdot\mathbf{n})\,\delta$. For gas mixtures
 the exterior state also carries the mass fractions and $(\gamma, e_0)$: the
 prescribed ones at `inlet_state` faces, the image's at transmissive faces, the
-interior's elsewhere. Walls are adiabatic and non-catalytic for mixtures
-(`wall_isothermal` is not available).
+interior's elsewhere. Walls are non-catalytic for mixtures, and an isothermal
+wall keeps the interior density in its exterior state: its temperature enters
+through the viscous fluxes only.
 
 ### Far field
 

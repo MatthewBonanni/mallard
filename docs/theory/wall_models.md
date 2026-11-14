@@ -354,8 +354,7 @@ and a restarted run reproduces an uninterrupted one bitwise.
 
 ## Limitations
 
-- Single gases only; gas mixtures are rejected (they will follow isothermal
-  mixture walls). Axisymmetric runs are not supported. `[physics]` must be
+- Single gases only; gas mixtures are rejected. Axisymmetric runs are not supported. `[physics]` must be
   `navier_stokes`.
 - Equilibrium models only: no pressure-gradient or convective terms in the
   layer, so no model of non-equilibrium boundary layers (strong pressure
@@ -363,7 +362,7 @@ and a restarted run reproduces an uninterrupted one bitwise.
 - The Griffin-Fu-Moin model supports isothermal and adiabatic walls, and
   takes the edge state at a fixed distance rather than detecting the
   boundary-layer edge.
-- The modeled wall flux and the force monitors include no SGS contribution
+- The modeled wall flux and the wall forces include no SGS contribution
   at the wall.
 
 The validation against the channels of
