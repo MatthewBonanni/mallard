@@ -436,7 +436,7 @@ void Solver::init_mesh() {
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
             halo_layers = std::max(base_halo_layers(), cached);
         }
-        // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
+        // Partition once; deeper halos (see halo_too_shallow) keep the partition
         if (!setup) {
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
