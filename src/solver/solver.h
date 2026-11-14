@@ -1074,6 +1074,9 @@ class Solver {
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
+        // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
+        std::string stencil_shapes_setting;
+        void describe_stencil_shapes();
         Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
