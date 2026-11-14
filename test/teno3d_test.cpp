@@ -549,6 +549,143 @@ TEST(TENO3DSetup, FacetedSpheresOfTetrahedraMirrorAcrossEachFacet) {
     expect_same_tables(*device, *host, "host setup");
 }
 
+/**
+ * @brief Checks that every mirror image in the central stencils of a mesh with
+ *        symmetry walls is the image of a cell in front of its face, across
+ *        that face (the cell's foot on the face's plane lies on the face), for
+ *        a target cell in front of the face. Returns the number checked.
+ */
+uint32_t expect_images_across_their_faces(const std::shared_ptr<Mesh> & mesh, int order) {
+    const Mesh & m = *mesh;
+    BoundaryData bd = make_uniform_boundaries(m, BoundaryType::SYMMETRY, GAMMA);
+    const TENO::Stencils stencils = make_teno(mesh, bd, order)->large_stencils();
+    auto point = [](const auto & coords, uint32_t k) {
+        return std::array<double, 3>{double(coords(k, 0)), double(coords(k, 1)), double(coords(k, 2))};
+    };
+    auto dot = [](const std::array<double, 3> & a, const std::array<double, 3> & b) {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    };
+    auto sub = [](const std::array<double, 3> & a, const std::array<double, 3> & b) {
+        return std::array<double, 3>{a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+    };
+    uint32_t n_checked = 0;
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const int32_t f = stencils.faces[s];
+            if (f < 0) continue;
+            const uint32_t uf = static_cast<uint32_t>(f);
+            const std::array<double, 3> xf = point(m.h_face_coords, uf);
+            std::array<double, 3> n = point(m.h_face_normals, uf);
+            const double norm = std::sqrt(dot(n, n));
+            for (double & x : n) x /= norm;
+            if (dot(n, sub(xf, point(m.h_cell_coords, uint32_t(m.h_cells_of_face(uf, 0))))) < 0) {
+                for (double & x : n) x = -x;
+            }
+            auto in_front = [&](uint32_t cell) { return dot(n, sub(point(m.h_cell_coords, cell), xf)) < 0; };
+            const uint32_t image_of = static_cast<uint32_t>(stencils.cells[s]);
+            EXPECT_TRUE(in_front(c)) << "cell " << c << " takes an image across face " << f << " from behind it";
+            EXPECT_TRUE(in_front(image_of)) << "cell " << c << " takes the image of cell " << image_of << ", behind face " << f;
+            const std::array<double, 3> x = point(m.h_cell_coords, image_of);
+            const double depth = dot(n, sub(x, xf));
+            const std::array<double, 3> foot = {x[0] - depth * n[0], x[1] - depth * n[1], x[2] - depth * n[2]};
+            // The foot is on the same side of every edge of the face
+            const uint32_t a0 = m.h_offsets_nodes_of_face(uf), nv = m.h_offsets_nodes_of_face(uf + 1) - a0;
+            double lowest = std::numeric_limits<double>::max(), highest = std::numeric_limits<double>::lowest();
+            for (uint32_t a = 0; a < nv; a++) {
+                const auto pa = point(m.h_node_coords, m.h_nodes_of_face(a0 + a));
+                const auto pb = point(m.h_node_coords, m.h_nodes_of_face(a0 + (a + 1) % nv));
+                const auto e = sub(pb, pa), q = sub(foot, pa);
+                const std::array<double, 3> cross = {e[1] * q[2] - e[2] * q[1], e[2] * q[0] - e[0] * q[2],
+                                                     e[0] * q[1] - e[1] * q[0]};
+                const double side = dot(cross, n) / dot(e, e);
+                lowest = std::min(lowest, side);
+                highest = std::max(highest, side);
+            }
+            EXPECT_TRUE(lowest >= -1e-9 || highest <= 1e-9)
+                << "cell " << c << " takes the image of cell " << image_of << " across the extension of face " << f;
+            n_checked++;
+        }
+    }
+    return n_checked;
+}
+
+/** @brief Hexahedra of a quadrilateral mesh of the xy plane extruded over nz layers of height dz. */
+std::shared_ptr<Mesh> extruded(const std::vector<std::array<double, 2>> & nodes, const std::vector<std::array<uint32_t, 4>> & quads,
+                               uint32_t nz, double dz) {
+    std::vector<std::array<rtype, N_DIM>> nodes_3d;
+    for (uint32_t k = 0; k <= nz; k++) {
+        for (const auto & p : nodes) nodes_3d.push_back({rtype(p[0]), rtype(p[1]), rtype(k * dz)});
+    }
+    const uint32_t m = static_cast<uint32_t>(nodes.size());
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t k = 0; k < nz; k++) {
+        for (const auto & q : quads) {
+            cells.push_back({k * m + q[0], k * m + q[1], k * m + q[2], k * m + q[3],
+                             (k + 1) * m + q[0], (k + 1) * m + q[1], (k + 1) * m + q[2], (k + 1) * m + q[3]});
+        }
+    }
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init_from_connectivity(nodes_3d, cells, {});
+    mesh->copy_host_to_device();
+    return mesh;
+}
+
+TEST(TENO3DSetup, MirrorImagesOfFacetedCurvedWallsAreAcrossTheFacetUnderTheirCell) {
+    // A polygonal annulus of thin hexahedra (aspect ratio 10 at the inner
+    // wall), two layers deep: the plane of a facet, extended, passes a cell
+    // height inside the next column of cells, so reflections across it
+    // misplace the flow there (#382, #443)
+    const uint32_t n_theta = 32, n_r = 6;
+    const double r0 = 0.5, dr0 = 2.0 * M_PI * r0 / n_theta / 10.0, q = 1.5;
+    std::vector<std::array<double, 2>> nodes;
+    double r = r0, dr = dr0;
+    for (uint32_t j = 0; j <= n_r; j++, r += dr, dr *= q) {
+        for (uint32_t i = 0; i < n_theta; i++) {
+            const double t = 2.0 * M_PI * i / n_theta;
+            nodes.push_back({r * std::cos(t), r * std::sin(t)});
+        }
+    }
+    std::vector<std::array<uint32_t, 4>> quads;
+    for (uint32_t j = 0; j < n_r; j++) {
+        for (uint32_t i = 0; i < n_theta; i++) {
+            const uint32_t i1 = (i + 1) % n_theta;
+            quads.push_back({j * n_theta + i, j * n_theta + i1, (j + 1) * n_theta + i1, (j + 1) * n_theta + i});
+        }
+    }
+    const auto annulus = extruded(nodes, quads, 2, 2.0 * M_PI * r0 / n_theta);
+    for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(annulus, order), 0u) << "order " << order;
+    // Faceted spheres of tetrahedra
+    const Shell s = tetrahedral_shell(4, 2);
+    auto shell_mesh = std::make_shared<Mesh>();
+    shell_mesh->init_from_connectivity(s.nodes, s.cells, s.faces);
+    shell_mesh->copy_host_to_device();
+    EXPECT_GT(expect_images_across_their_faces(shell_mesh, 3), 0u) << "tetrahedral shell";
+}
+
+TEST(TENO3DSetup, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
+    // A box with a slot-shaped hole three quarters of a cell thick through it
+    // (as at a closed trailing edge): a cell below it mirrored across its lower
+    // side lands inside the hole, a quarter cell from its upper side, next to
+    // the cells above it (#382, #443)
+    const uint32_t n = 8;
+    const double h = 1.0 / n;
+    std::vector<std::array<double, 2>> nodes;
+    for (uint32_t j = 0; j <= n; j++) {
+        const double y = j <= 4 ? j * h : (j - 0.25) * h;
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({i * h, y});
+    }
+    std::vector<std::array<uint32_t, 4>> quads;
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (j == 4 && i >= 2 && i < 6) continue;
+            const uint32_t k = j * (n + 1) + i;
+            quads.push_back({k, k + 1, k + n + 2, k + n + 1});
+        }
+    }
+    const auto mesh = extruded(nodes, quads, 2, h);
+    for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
+}
+
 TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
     // A blast (density and pressure jumps on a sphere) on mixed cells with walls:
     // rounds after the first recompute the central coefficients that the smooth
