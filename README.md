@@ -73,7 +73,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
-- 40 [examples](https://matthewbonanni.github.io/mallard/docs/examples/), compared with exact solutions, other codes, DNS and experiments
+- 40 [examples](https://matthewbonanni.github.io/mallard/docs/examples/), compared with exact solutions, other codes, DNS and experiments: the [verification and validation cases](https://matthewbonanni.github.io/mallard/validation/)
 - Over 500 tests; a [verification manual](https://matthewbonanni.github.io/mallard/docs/verification/) of measured convergence orders
 - CPU and GPU CI before every merge; a [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
