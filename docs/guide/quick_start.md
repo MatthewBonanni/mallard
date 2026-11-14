@@ -16,17 +16,8 @@ one with its mesh, run and post-processing scripts). GPU builds (CUDA, HIP), MPI
 
 ## Where next
 
-The [tutorials](../tutorials/index.md) are an ordered path, each building on the last:
-
-1. [First simulation](../tutorials/first_simulation.md): the Sod shock tube against the exact solution, then changing the case
-2. [Oblique shock on a ramp](../tutorials/wedge.md): a 2D generated mesh, boundary conditions, probes, ParaView
-3. [Vortex shedding behind a cylinder](../tutorials/cylinder.md): a Gmsh mesh, viscous flow, wall forces
-4. [Supersonic flow over a cone](../tutorials/cone.md): 3D, tetrahedra, symmetry planes, MPI and GPUs
-5. Premixed flame against Cantera: mixtures and chemistry (in preparation)
-6. [Channel LES](../tutorials/channel_les.md): large-eddy simulation, statistics, multi-GPU runs
-7. [Running on a cluster](../tutorials/cluster.md): sizing a run, job scripts, `mallard ctl`, stopping and resuming
-8. [Measuring a flow](../tutorials/measuring.md): named regions, probes, fluxes, a control-volume balance, phase averages and spectra
-
-The [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are 40 ready-to-run cases to
+The [tutorials](../tutorials/index.md) are an ordered path from this first run to
+multi-GPU large-eddy simulation, each building on the last. The
+[examples](https://matthewbonanni.github.io/mallard/docs/examples/) are ready-to-run cases to
 browse, and the user guide covers each topic: [input files](input_files.md), [expressions](expressions.md), [meshes](meshes.md),
 [boundary conditions](boundary_conditions.md), [numerics](numerics.md), [output](output.md).
