@@ -1,4 +1,4 @@
-# What's new in Mallard's numerics
+# What's original in Mallard
 
 Most of Mallard's numerics are published methods, implemented as their
 papers describe them and cited on the page that describes each one
