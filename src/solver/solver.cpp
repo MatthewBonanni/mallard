@@ -2055,13 +2055,17 @@ void Solver::allocate_memory() {
 void Solver::allocate_time_stepping() {
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
-    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("face_solution", mesh->n_faces, n_quad);
+    // The species slots are filled after the fluxes, the last to read the face states of a stage
+    const size_t n_states = size_t(mesh->n_faces) * n_quad * 2 * N_CONSERVATIVE;
+    const size_t n_slots = is_mixture() ? size_t(mesh->n_faces) * 2 * n_species : 0;
+    face_storage = Kokkos::View<rtype *>("face_solution", std::max(n_states, n_slots));
+    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>(face_storage.data(), mesh->n_faces, n_quad);
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (is_mixture()) {
         face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
         face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
-        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
+        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), mesh->n_faces, 2, n_species);
         if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
     }
     solution_vec.clear();
