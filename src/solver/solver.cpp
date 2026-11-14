@@ -1556,7 +1556,8 @@ void Solver::init_numerics() {
 void Solver::describe_stencil_shapes() {
     // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
     const FaceReconstructionType type = face_reconstruction->get_type();
-    if (type == FaceReconstructionType::FIRST_ORDER) return;
+    // The setup report of states read from files is not shown
+    if (type == FaceReconstructionType::FIRST_ORDER || state_reader) return;
     uint32_t reach = 1;
     if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
         reach = 0;

@@ -2930,8 +2930,11 @@ struct CellTeam {
     }
 };
 
-/** @brief Central moments of every cell, mean of ((x - x_c) / h_c)^a ... (see teno.cpp). */
-template <int NM, class Space>
+/**
+ * @brief Central moments of every cell, mean of ((x - x_c) / h_c)^a ... (see
+ *        teno.cpp), up to degree D; the slots of higher degrees are left zero.
+ */
+template <int NM, int D, class Space>
 struct MomentsTask {
     Geometry<Space> g;
     int n_moments = 0;
@@ -2974,7 +2977,8 @@ struct MomentsTask {
         int k = 0;
         for (int a = 0; a < NM; a++) {
             for (int b = 0; a + b < NM; b++) {
-                for (int c = 0; a + b + c < NM; c++) m[k++] += w * px[a] * py[b] * pz[c];
+                for (int c = 0; a + b + c <= D; c++) m[k + c] += w * px[a] * py[b] * pz[c];
+                k += NM - a - b;
             }
         }
     }
@@ -3036,6 +3040,22 @@ struct MomentsTask {
         for (int k = 0; k < n_moments; k++) g.moments(c, k) = sums[k] / vol;
     }
 };
+
+/**
+ * @brief The moments of cells [0, n_cells) of degree 2 r - 2 (NM = 2 r - 1) for the smoothness
+ *        matrices, else of degree r, all that the central stencils read.
+ */
+template <int NM>
+void launch_moments(const Geometry<Kokkos::DefaultExecutionSpace::memory_space> & g, const uint32_t n_cells,
+                    const int n_moments, const bool smoothness) {
+    using Space = Kokkos::DefaultExecutionSpace::memory_space;
+    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, n_cells);
+    if (smoothness) {
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, Space>{g, n_moments});
+    } else {
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, Space>{g, n_moments});
+    }
+}
 
 /** @brief Box around every point inside all face planes of each cell (see plane_bounds in teno.cpp). */
 template <class Space>
@@ -3442,10 +3462,10 @@ class Setup3D {
                                                            n_cells);
             using Range = Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>;
             switch (tables.nm) {
-                case 3: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<3, DefaultMem>{d, tables.n_moments}); break;
-                case 5: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<5, DefaultMem>{d, tables.n_moments}); break;
-                case 7: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<7, DefaultMem>{d, tables.n_moments}); break;
-                case 9: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<9, DefaultMem>{d, tables.n_moments}); break;
+                case 3: launch_moments<3>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 5: launch_moments<5>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 7: launch_moments<7>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 9: launch_moments<9>(d, n_cells, tables.n_moments, options.sector_stencils); break;
                 default: throw std::logic_error("TENO setup: unsupported degree.");
             }
             Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
