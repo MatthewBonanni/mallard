@@ -7,6 +7,8 @@
 
 #include "log.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -16,16 +18,19 @@
 #include <unistd.h>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "json.h"
+#include "provenance.h"
 #include "run_log.h"
+#include "units.h"
 
 namespace logging {
 
 namespace {
 
 bool phase_open = false;
-bool recording = false;
-Record record;
+// Wide enough for the longest setup phase, "mesh quality and resolution"
+constexpr size_t PHASE_WIDTH = static_cast<size_t>(KEY_WIDTH) + 10;
 
 bool env_set(const char * name) {
     const char * value = std::getenv(name);
@@ -66,6 +71,70 @@ std::string paint(std::string_view text, Style s, bool on) {
     return ansi(s) + std::string(text) + "\033[0m";
 }
 
+/// Columns a UTF-8 string takes: its code points (status marks like ✓ are one column).
+size_t columns(std::string_view text) {
+    size_t n = 0;
+    for (const char c : text) n += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+    return n;
+}
+
+/// The micro prefix: the micro sign in a UTF-8 locale (the first of LC_ALL, LC_CTYPE, LANG set), else "u".
+const char * micro() {
+    static const char * prefix = [] {
+        for (const char * name : {"LC_ALL", "LC_CTYPE", "LANG"}) {
+            const char * value = std::getenv(name);
+            if (value == nullptr || value[0] == '\0') continue;
+            std::string v(value);
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            return v.find("utf-8") != std::string::npos || v.find("utf8") != std::string::npos ? "\u00b5" : "u";
+        }
+        return "u";
+    }();
+    return prefix;
+}
+
+bool digit(const char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
+
+/// Where a number cell's decimal point is (or would be) and where its number ends and its unit or "%" begins;
+/// point is npos if the cell is no number.
+struct NumberCell {
+    size_t point, end;
+};
+
+NumberCell number_cell(std::string_view s) {
+    constexpr size_t NONE = std::string_view::npos;
+    if (s == "-") return {1, 1};
+    size_t i = 0;
+    if (i < s.size() && (s[i] == '-' || s[i] == '+')) i++;
+    size_t point = NONE;
+    if (s.substr(i, 3) == "inf" || s.substr(i, 3) == "nan") {
+        i += 3;
+        point = i;
+    } else {
+        size_t digits = 0;
+        // A comma groups digits: "1,024"
+        auto grouping = [&](const size_t j) { return s[j] == ',' && digits > 0 && j + 1 < s.size() && digit(s[j + 1]); };
+        for (; i < s.size() && (digit(s[i]) || grouping(i)); i++) digits += digit(s[i]);
+        point = i;
+        if (i < s.size() && s[i] == '.') {
+            for (i++; i < s.size() && digit(s[i]); i++) digits++;
+        }
+        if (digits == 0) return {NONE, NONE};
+        if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+            i++;
+            if (i < s.size() && (s[i] == '+' || s[i] == '-')) i++;
+            const size_t exponent = i;
+            while (i < s.size() && digit(s[i])) i++;
+            if (i == exponent) return {NONE, NONE};
+        }
+    }
+    const std::string_view rest = s.substr(i);
+    const bool word = rest.size() > 1 && rest[0] == ' ' && rest.find_first_of(" \n", 1) == NONE;
+    return rest.empty() || rest == "%" || word ? NumberCell{point, i} : NumberCell{NONE, NONE};
+}
+
+size_t decimal_point(std::string_view s) { return number_cell(s).point; }
+
 void close_phase() {
     if (phase_open) {
         std::cout << "\n";
@@ -88,6 +157,27 @@ std::string format(const char * fmt, ...) {
     return out;
 }
 
+std::vector<std::string> align_decimals(std::vector<std::string> column) {
+    // The decimal points share a column, and so do the first letters of the units after the numbers
+    std::vector<NumberCell> cell(column.size());
+    size_t left = 0, right = 0, unit = 0;
+    for (size_t i = 0; i < column.size(); i++) {
+        cell[i] = number_cell(column[i]);
+        if (cell[i].point == std::string_view::npos) continue;
+        left = std::max(left, cell[i].point);
+        right = std::max(right, cell[i].end - cell[i].point);
+        unit = std::max(unit, columns(column[i]) - cell[i].end);
+    }
+    for (size_t i = 0; i < column.size(); i++) {
+        const auto [point, end] = cell[i];
+        if (point == std::string_view::npos) continue;
+        const size_t tail = columns(column[i]) - end;
+        column[i] = std::string(left - point, ' ') + column[i].substr(0, end) + std::string(right - (end - point), ' ') +
+                    column[i].substr(end) + std::string(unit - tail, ' ');
+    }
+    return column;
+}
+
 bool color_stdout() {
     static const bool on = want_color(STDOUT_FILENO);
     return on;
@@ -102,6 +192,8 @@ std::string style(std::string_view text, Style s) {
     return paint(text, s, color_stdout());
 }
 
+std::string style(std::string_view text, Style s, bool on) { return paint(text, s, on); }
+
 void line(std::string_view text) {
     if (!comm::is_root()) return;
     close_phase();
@@ -110,11 +202,10 @@ void line(std::string_view text) {
 
 void section(std::string_view title, std::string_view right) {
     if (!comm::is_root()) return;
-    const int used = 4 + static_cast<int>(title.size()) + (right.empty() ? 0 : 1 + static_cast<int>(right.size()));
+    const int used = 4 + static_cast<int>(columns(title)) + (right.empty() ? 0 : 1 + static_cast<int>(columns(right)));
     std::string text = style("== ", Style::DIM) + style(title, Style::BOLD) + " ";
     text += style(std::string(static_cast<size_t>(std::max(3, WIDTH - used - 1)), '='), Style::DIM);
     if (!right.empty()) text += " " + std::string(right);
-    if (recording) record.emplace_back(std::string(title), Items{});
     line();
     line(text);
 }
@@ -124,31 +215,49 @@ void item(std::string_view key, std::string_view value) {
     std::string padded(key);
     if (padded.size() < KEY_WIDTH) padded.resize(KEY_WIDTH, ' ');
     line("  " + padded + " " + std::string(value));
-    if (recording) {
-        if (record.empty()) record.emplace_back("", Items{});
-        record.back().second.emplace_back(std::string(key), std::string(value));
-    }
 }
 
 void items(const Items & list) {
     for (const auto & [key, value] : list) item(key, value);
 }
 
-void begin_record() {
-    record.clear();
-    recording = comm::is_root();
-}
-
-Record end_record() {
-    recording = false;
-    return std::move(record);
+void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & input) {
+    std::vector<std::vector<std::string>> rows = input;
+    for (size_t c = 0; c < header.size(); c++) {
+        std::vector<std::string> column;
+        for (const auto & row : rows) {
+            if (c < row.size()) column.push_back(row[c]);
+        }
+        column = align_decimals(std::move(column));
+        size_t k = 0;
+        for (auto & row : rows) {
+            if (c < row.size()) row[c] = column[k++];
+        }
+    }
+    std::vector<size_t> width(header.size());
+    for (size_t c = 0; c < header.size(); c++) width[c] = columns(header[c]);
+    for (const auto & row : rows) {
+        for (size_t c = 0; c < row.size() && c < width.size(); c++) width[c] = std::max(width[c], columns(row[c]));
+    }
+    const auto text = [&](const std::vector<std::string> & row) {
+        std::string out = " ";
+        for (size_t c = 0; c < row.size() && c < width.size(); c++) {
+            std::string cell = row[c];
+            if (c + 1 < row.size()) cell.append(width[c] - columns(cell), ' ');
+            out += " " + cell + (c + 1 < row.size() ? " " : "");
+        }
+        while (!out.empty() && out.back() == ' ') out.pop_back();
+        return out;
+    };
+    line(style(text(header), Style::DIM));
+    for (const auto & row : rows) line(text(row));
 }
 
 void begin_phase(std::string_view name) {
     if (!comm::is_root()) return;
     close_phase();
     std::string padded(name);
-    if (padded.size() < KEY_WIDTH + 8) padded.resize(KEY_WIDTH + 8, ' ');
+    if (padded.size() < PHASE_WIDTH) padded.resize(PHASE_WIDTH, ' ');
     std::cout << "  " << padded << std::flush;
     phase_open = true;
 }
@@ -156,34 +265,115 @@ void begin_phase(std::string_view name) {
 void end_phase(double seconds) {
     if (!comm::is_root()) return;
     // Something printed since begin_phase moved the time onto its own line
-    if (!phase_open) std::cout << "  " << std::string(KEY_WIDTH + 8, ' ');
-    std::cout << format("%10s", duration(seconds).c_str()) << std::endl;
+    if (!phase_open) std::cout << "  " << std::string(PHASE_WIDTH, ' ');
+    // The decimal points of the durations share a column; "2m 05s" ends where "1.23 ms" does
+    const std::string text = duration(seconds);
+    const size_t point = decimal_point(text), width = columns(text);
+    const size_t pad = point == std::string_view::npos ? (width < 10 ? 10 - width : 0) : (point < 4 ? 4 - point : 0);
+    std::cout << std::string(pad, ' ') << text << std::endl;
     phase_open = false;
 }
 
-void event(uint64_t step, double t, std::string_view kind, std::string_view text) {
-    if (!comm::is_root()) return;
-    std::string padded(kind);
-    if (padded.size() < 8) padded.resize(8, ' ');
-    line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
-         std::string(text));
-    run_log::write(json::Object().add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text));
+namespace {
+
+bool verbose = false;
+std::vector<std::pair<std::string, uint64_t>> written_since;
+
+void remark(const uint64_t step, const double t, std::string_view kind, std::string_view text) {
+    line("  " + style(">>", Style::CYAN) + " step " + count(step) + ", t = " + units::with(format("%.6g", t), "s") +
+         ": " + std::string(kind) + ": " + std::string(text));
 }
 
-void warning(std::string_view message) {
+void record(const uint64_t step, const double t, std::string_view kind, std::string_view text,
+            const std::vector<std::pair<std::string, std::string>> & fields = {}) {
+    json::Object event;
+    event.add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text);
+    for (const auto & [key, value] : fields) event.raw(key, value);
+    run_log::write(event);
+}
+
+} // namespace
+
+void event(uint64_t step, double t, std::string_view kind, std::string_view text,
+           const std::vector<std::pair<std::string, std::string>> & fields) {
+    if (!comm::is_root()) return;
+    remark(step, t, kind, text);
+    record(step, t, kind, text, fields);
+}
+
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer, const std::vector<WrittenFile> & files) {
+    if (!comm::is_root()) return;
+    if (verbose) remark(step, t, "wrote " + std::string(kind), path);
+    uint64_t bytes = 0;
+    std::string list = "[";
+    for (const WrittenFile & f : files) {
+        if (list.size() > 1) list += ",";
+        json::Object o;
+        o.add("path", f.path).add("bytes", f.bytes);
+        if (!f.sha256.empty()) o.add("sha256", f.sha256);
+        list += o.str();
+        bytes += f.bytes;
+    }
+    run_log::write(json::Object()
+                       .add("type", "output")
+                       .add("step", step)
+                       .add("t", t)
+                       .add("kind", kind)
+                       .add("path", path)
+                       .add("reason", reason)
+                       .add("writer", writer)
+                       .add("run_id", provenance::run_id())
+                       .add("complete", true)
+                       .add("bytes", bytes)
+                       .raw("files", list + "]"));
+    auto it = std::find_if(written_since.begin(), written_since.end(), [&](const auto & k) { return k.first == kind; });
+    if (it == written_since.end()) {
+        written_since.emplace_back(std::string(kind), 1);
+    } else {
+        it->second++;
+    }
+}
+
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer) {
+    if (comm::is_root()) written(step, t, kind, path, reason, writer, {written_file(std::string(path))});
+}
+
+std::string take_written() {
+    std::string out;
+    for (const auto & [kind, n] : written_since) out += (out.empty() ? "" : ", ") + count(n) + " " + kind;
+    written_since.clear();
+    return out;
+}
+
+bool written_pending() { return !written_since.empty(); }
+
+void set_verbose(const bool on) { verbose = on; }
+
+std::string diagnostic(const bool is_error, std::string_view code, std::string_view message, const bool color) {
+    return paint(std::string(is_error ? "error " : "warning ") + std::string(code) + ":", is_error ? Style::RED : Style::YELLOW,
+                 color) +
+           " " + std::string(message) + "\n  " + paint(diagnostic_code::docs(code), Style::DIM, color);
+}
+
+void warning(std::string_view code, std::string_view message) {
     if (!comm::is_root()) return;
     close_phase();
     std::cout << std::flush;
-    std::cerr << paint("warning:", Style::YELLOW, color_stderr()) << " " << message << std::endl;
-    run_log::write(json::Object().add("type", "warning").add("message", message));
+    std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
+    run_log::write(json::Object().add("type", "warning").add("code", std::string(code)).add("message", message).add(
+                       "docs", diagnostic_code::docs(code)),
+                   true);
 }
 
-void error(std::string_view message) {
+void error(std::string_view code, std::string_view message) {
     close_phase();
     std::cout << std::flush;
     std::string prefix = comm::size() > 1 ? format("[rank %d] ", comm::rank()) : "";
-    std::cerr << prefix << paint("error:", Style::RED, color_stderr()) << " " << message << std::endl;
-    run_log::write(json::Object().add("type", "error").add("message", message));
+    std::cerr << prefix << diagnostic(true, code, message, color_stderr()) << std::endl;
+    run_log::write(json::Object().add("type", "error").add("code", std::string(code)).add("message", message).add(
+        "docs", diagnostic_code::docs(code)));
 }
 
 std::string count(uint64_t n) {
@@ -197,9 +387,13 @@ std::string count(uint64_t n) {
     return out;
 }
 
+std::string count(uint64_t n, std::string_view noun) {
+    return count(n) + " " + std::string(noun) + (n == 1 ? "" : "s");
+}
+
 std::string duration(double s) {
     if (!std::isfinite(s) || s < 0.0) return "--";
-    if (s < 0.9995e-3) return sig3(s * 1.0e6) + " us";
+    if (s < 0.9995e-3) return sig3(s * 1.0e6) + " " + micro() + "s";
     if (s < 0.9995) return sig3(s * 1.0e3) + " ms";
     if (s < 59.95) return sig3(s) + " s";
     const uint64_t total = static_cast<uint64_t>(std::llround(s));

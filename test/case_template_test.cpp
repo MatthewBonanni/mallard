@@ -46,9 +46,11 @@ TEST(CaseTemplateTest, SetKeyNeedsTheTable) {
 
 TEST(CaseTemplateTest, RelocateRepositoryPaths) {
     EXPECT_EQ(relocate("mechanism = \"../../mechanisms/h2o2.yaml\"\n"
-                       "#   python ../../tools/make_cylinder_mesh.py c.msh\n"
-                       "#   mpirun -n 4 ../../build3d/src/mallard -i input.toml\n"),
+                       "#   python ../../tools/mesh/make_cylinder_mesh.py c.msh\n"
+                       "#   mpirun -n 4 ../../build3d/src/mallard -i input.toml\n"
+                       "sys.path.insert(0, os.path.join(os.path.dirname(__file__), \"../../tools\"))\n"),
               "mechanism = \"mechanisms/h2o2.yaml\"\n"
-              "#   python tools/make_cylinder_mesh.py c.msh\n"
-              "#   mpirun -n 4 mallard -i input.toml\n");
+              "#   python tools/mesh/make_cylinder_mesh.py c.msh\n"
+              "#   mpirun -n 4 mallard -i input.toml\n"
+              "sys.path.insert(0, os.path.join(os.path.dirname(__file__), \"tools\"))\n");
 }

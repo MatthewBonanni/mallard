@@ -12,7 +12,12 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:*
+[`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -28,7 +33,10 @@ gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 mass_flow = [1.0, 0.0, 0.0]
 ```
 
-*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:*
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 A periodic channel has no inlet to fix its flow rate. `mass_flow` adds the
 uniform body force that keeps the volume-averaged momentum at the given value,
@@ -42,7 +50,8 @@ rounding; the energy gains the force's work.
 gravity = [0.0, -9.81]
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe).
+*Used in:*
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe).
 
 Pitfall: the scheme is not exactly well balanced. A hydrostatic atmosphere
 carries spurious velocities of about 1e-4 of the sound speed on a 32 x 32
@@ -66,60 +75,64 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | `sources[i]` | Name in the run log |
-| `region` | everywhere | Where the source acts (below); values are multiplied by each cell's volume fraction |
-| `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
+| `name` | `sources[i]` | Name in the terminal output |
+| `region` | everywhere | Where the source acts (below), or the name of a region in `[regions]`; values are multiplied by each cell's volume fraction |
+| `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` and `copy` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
 | `rhoY` | none | Mixtures: species sources by name, `{H2 = "1e-3"}`; they also add to the mass |
 
 Expressions read `x`, `y`, `z`, `t`, the local state `rho`, `u_x`, `u_y`,
 `u_z`, `p`, `T` (and `Y_<species>`, `X_<species>` in mixtures), and domain
-averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`. Region
-lengths take units too (`radius = "5 mm"`). Write
+averages `mean_rho`, `mean_rhou_x` (`_y`, `_z`), `mean_rhoE`, `mean_ke`, and
+`copy`, the index of a copy of a region with
+[`repeat`](geometry.md#arrays-of-copies). Regions may
+[move](geometry.md#moving-regions), with centers, sizes and transforms of `t`,
+or follow the solution, such as `{type = "where", condition = "T > 1500"}`
+([Regions defined by the solution](geometry.md#regions-defined-by-the-solution)).
+Region lengths take units too (`radius = "5 mm"`). Write
 `SOURCE_RHOE` (and `SOURCE_RHO`, `SOURCE_RHOU_X`, ...) to see where sources
 act.
 
 ### Regions
 
-A region is a primitive shape — sphere, ellipsoid, cylinder (solid or
-annular), cone or frustum, box, torus, half-space, any implicit `f(x, y, z) <
-0`, and in 2D disk, annulus, ellipse, rectangle and polygon — or a union,
-intersection or difference of regions, nested freely, each scaled, rotated and
-translated. Shapes need not follow the mesh: each cell gets its volume
-fraction, computed by subdividing its simplices where the surface crosses
-them, so a coarse mesh sees the right amount of the shape instead of a
-staircase of whole cells.
-
-![Cell volume fractions of each primitive over a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-light.svg#gh-light-mode-only)
-![Cell volume fractions of each primitive over a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-dark.svg#gh-dark-mode-only)
+A region is a primitive — sphere, cylinder (solid or annular), cone, box (2D:
+rectangle), torus, half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
+or difference of regions, each scaled, rotated and translated. Regions need not
+follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
+right amount of the region instead of a staircase of whole cells. `edge` (on the
+outermost region) smooths the boundary over a band of that width, so that a
+source switches on gradually and excites fewer grid-scale waves.
 
 ```toml
 # A disk with a rotated slot cut out of it
-region = {type = "difference",
-          a = {type = "disk", center = [0.5, 0.5], radius = 0.38},
-          b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}}
+region.type = "difference"
+region.a = {type = "disk", center = [0.5, 0.5], radius = 0.38}
+region.b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}
 ```
 
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
 
-In 3D the same tables describe solids; transforms take an axis and an angle,
-or the region's own axes:
+Every primitive, boolean and transform, with figures: [Geometry](geometry.md#regions).
+
+A region used by several features (a source, the probe that measures it, a
+sponge) can be defined once in `[regions]` and given by its name:
 
 ```toml
-region = {type = "box", center = [0, 0, 0], size = [0.65, 0.35, 0.22],
-          rotate = {axis = [1, 2, 3], angle = 35}, translate = [0.5, 0.5, 0.5]}
+[regions]
+igniter = {type = "sphere", center = [0, 0, 0], radius = 2e-3, edge = 5e-4}
+
+[[sources]]
+total = true
+rhoE = "50 W"
+region = "igniter"
 ```
 
-![Volume fractions in a tetrahedral mesh of a tilted annular cylinder, a rotated box and a drilled sphere, cut open](../images/guide/regions-3d-light.svg#gh-light-mode-only)
-![Volume fractions in a tetrahedral mesh of a tilted annular cylinder, a rotated box and a drilled sphere, cut open](../images/guide/regions-3d-dark.svg#gh-dark-mode-only)
-
-`edge` (on the outermost region) smooths the boundary over a band of that
-width, so that a source switches on gradually, which avoids exciting
-grid-scale waves:
-
-![Volume fraction against radius for a sharp and a smooth-edged disk, with the smoothstep](../images/guide/region-smooth-edge-light.svg#gh-light-mode-only)
-![Volume fraction against radius for a sharp and a smooth-edged disk, with the smoothstep](../images/guide/region-smooth-edge-dark.svg#gh-dark-mode-only)
+See [named regions](geometry.md#named-regions). The mesh's own regions need
+no definition: `region = "domain"` is every cell, and a cell zone of the mesh
+file (a Gmsh physical group of cells, a Fluent cell zone, ...) is a region by
+its name, e.g. `region = "flame_holder"`
+([regions of the mesh](geometry.md#regions-of-the-mesh)).
 
 ### Exact totals
 
@@ -156,10 +169,12 @@ Pitfalls:
   if the energy should follow.
 - Mixtures take mass through `rhoY` only; give the enthalpy of injected mass in
   `rhoE` yourself.
-- Domain averages cost a global sum per stage and keep steps out of CUDA graphs.
+- Domain averages cost a global sum per stage (exact, so the same on any number
+  of ranks; on the GPU's stream with NCCL, inside the step's CUDA graph).
 
 Example: `examples/source_regions` heats a ring with an exact Gaussian pulse
-and pushes the gas with a tilted fan.
+and pushes the gas with a tilted fan; a probe of the same named region records
+the mass and temperature in the ring.
 
 ## Sponge layers
 
@@ -171,7 +186,9 @@ p = 1.0
 T = 1.0
 ```
 
-*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
+*Used in:*
+[`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
 
 `[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
 species), damping the solution toward a reference state where the strength is
@@ -184,16 +201,35 @@ conditions alone may reflect them or let reversed flow in.
 | Key | Default | Meaning |
 |---|---|---|
 | `strength` | required | Damping rate [1/s], a number or an expression of x, y, z; zero outside the layer |
+| `region` | none | A [region](geometry.md#regions) (or its name in `[regions]`): `strength` is multiplied by each cell's volume fraction of it |
 | `u`, `p`, `T` | required | Reference state, numbers or expressions of x, y, z |
 | `X` or `Y`, `balance` | — | Mixtures: reference composition |
 
-Several sponges add up. Strength and reference are evaluated once, at cell
+With `region`, the layer is where the region is, and the region's smooth
+`edge` ramps it up; `strength` gives the peak rate, or a profile inside the
+region:
+
+```toml
+# 50 1/s beyond x = 4.5, ramped up smoothly between x = 4 and 5
+[[sponges]]
+strength = 50.0
+region = {type = "half_space", point = [4.5, 0.0], normal = [-1.0, 0.0], edge = 1.0}
+u = [1.0, 0.0]
+p = 1.0
+T = 1.0
+```
+
+Both forms remain: an expression alone gives any profile, a region gives any
+[region](geometry.md#regions) its volume fractions (not a staircase of cell
+centroids) and shares a named region with sources and probes. Several sponges
+add up. Strength and reference are evaluated once, at cell
 centroids. The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
-fifth of the channel in front of its `nscbc_outlet`.
+fifth of the channel in front of its `outlet_pressure` with `nscbc`.
 
 ## See also
 
+- [Geometry](geometry.md): regions, their transforms and volume fractions
 - [Input reference: `[source]`](../input.md#source), [`[[sources]]`](../input.md#sources), [regions](../input.md#regions), [`[[sponges]]`](../input.md#sponges)
-- [Boundary conditions](boundary_conditions.md#characteristic-boundaries)
+- [Boundary conditions](boundary_conditions.md#nscbc-characteristic-boundaries)
 - Design notes: [characteristic boundaries and sponges](../design/nscbc.md)

@@ -39,7 +39,10 @@
 
 #include "comm.h"
 #include "data_paths.h"
+#include "device_comm.h"
+#include "json.h"
 #include "run_control.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -55,8 +58,8 @@ std::string case_input(const std::string & dir, const std::string & run, uint64_
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -75,6 +78,23 @@ std::string fresh_dir(const std::string & name) {
     if (comm::is_root()) fs::create_directories(name);
     comm::barrier();
     return name;
+}
+
+/** @brief The input with its run log in dir. */
+std::string logged(std::string input, const std::string & dir) {
+    const std::string section = "[output]\n";
+    return input.insert(input.find(section) + section.size(), "run_log = \"" + dir + "/mallard.jsonl\"\n");
+}
+
+/** @brief The end record of the run log in dir (null if there is none). */
+json::Value end_record(const std::string & dir) {
+    json::Value end;
+    std::ifstream in(dir + "/mallard.jsonl");
+    for (std::string line; std::getline(in, line);) {
+        json::Value v = json::parse(line);
+        if (v["type"].string == "end") end = v;
+    }
+    return end;
 }
 
 std::string restart_file(const std::string & dir, uint64_t step) {
@@ -153,13 +173,33 @@ TEST(RunControlTest, StopRequestEndsTheRunAfterTheNextStepWithARestart) {
     const std::string dir = fresh_dir("stop");
     clear_requests();
     Solver solver;
-    solver.init(parse_toml(case_input(dir, "n_steps = 50\ncfl = 0.25\n", 1000)));
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 50\ncfl = 0.25\n", 1000), dir)));
     run_control::request(run_control::STOP);
     EXPECT_EQ(solver.run(), EXIT_STOPPED);
     EXPECT_EQ(solver.get_step(), 1u);
     EXPECT_EQ(run_control::pending(), 0);
     ASSERT_TRUE(fs::exists(restart_file(dir, 1)));
+    if (comm::is_root()) {
+        const json::Value end = end_record(dir);
+        EXPECT_EQ(end["outcome"].string, "stopped");
+        EXPECT_EQ(end["last_restart"]["path"].string, restart_file(dir, 1));
+    }
     expect_restart_continues_exactly(dir, restart_file(dir, 1), 5);
+}
+
+TEST(RunControlTest, UndistributedSolverStopsAloneOnTheRankAsked) {
+    // Every rank runs the whole mesh on its own; only rank 0 is asked to stop
+    const std::string dir = (rank_scratch_dir() / "undistributed_stop").string();
+    fs::create_directories(dir);
+    clear_requests();
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 8\ncfl = 0.25\ncontrol_socket = false\n", 1000), dir)));
+    const bool asked = comm::is_root();
+    if (asked) run_control::request(run_control::STOP);
+    EXPECT_EQ(solver.run(), asked ? EXIT_STOPPED : 0);
+    EXPECT_EQ(solver.get_step(), asked ? 1u : 8u);
+    EXPECT_EQ(run_control::pending(), 0);
 }
 
 TEST(RunControlTest, CommandsChangeRuntimeSettingsAtTheNextStep) {
@@ -170,6 +210,8 @@ TEST(RunControlTest, CommandsChangeRuntimeSettingsAtTheNextStep) {
     run_control::submit("set n_steps=7 write_data.0.interval=3 cfl=0.5");
     EXPECT_EQ(solver.run(), 0);
     EXPECT_EQ(solver.get_step(), 7u);
+    // On every rank: a request left pending would reach the next run
+    EXPECT_EQ(run_control::pending(), 0);
     for (uint64_t step : {3u, 6u}) EXPECT_TRUE(fs::exists(restart_file(dir, step))) << step;
     EXPECT_FALSE(fs::exists(restart_file(dir, 4)));
 }
@@ -199,7 +241,7 @@ TEST(RunControlTest, ProbeIntervalsChangeOnlyInTheirOwnKind) {
     clear_requests();
     Solver solver;
     solver.init(parse_toml(case_input(dir, "n_steps = 5\ncfl = 0.25\n", 1000) +
-                           "[[probes]]\nname = \"mid\"\nvariables = [\"P\"]\npoint = [0.5, 0.5]\n"
+                           "[[probes]]\nname = \"mid\"\nfields = [\"P\"]\npoint = [0.5, 0.5]\n"
                            "time_interval = 0.1\nfile = \"" + dir + "/mid.csv\"\n"));
     EXPECT_FALSE(solver.apply_setting("probes.mid.interval", "3").first);
     EXPECT_FALSE(solver.apply_setting("probes.other.time_interval", "0.05").first);
@@ -209,7 +251,7 @@ TEST(RunControlTest, ProbeIntervalsChangeOnlyInTheirOwnKind) {
 TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
     const std::string dir = fresh_dir("diverge");
     Solver solver;
-    solver.init(parse_toml(case_input(dir, "n_steps = 500\ndt = 0.04\n", 1000)));
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 500\ndt = 0.04\n", 1000), dir)));
     std::string message;
     try {
         solver.run();
@@ -225,12 +267,39 @@ TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
         << message;
     const std::string last = restart_file(dir, bad - 1);
     EXPECT_NE(message.find("last valid state (step " + std::to_string(bad - 1)), std::string::npos) << message;
+    EXPECT_NE(message.find("Most likely cause: time step too large"), std::string::npos) << message;
+    EXPECT_NE(message.find("lower run.dt below"), std::string::npos) << message;
+    EXPECT_NE(message.find("docs/guide/running.md#divergence"), std::string::npos) << message;
     ASSERT_TRUE(fs::exists(last)) << message;
     const RestartData restart = read_restart(last);
     EXPECT_EQ(restart.step, bad - 1);
     for (const auto & field : restart.fields) {
         for (rtype v : field) ASSERT_TRUE(std::isfinite(double(v)));
     }
+    if (!comm::is_root()) return;
+    const json::Value end = end_record(dir);
+    ASSERT_TRUE(end.has("outcome")) << "no end record";
+    EXPECT_EQ(end["outcome"].string, "diverged");
+    EXPECT_EQ(end["reason"].string, message);
+    EXPECT_EQ(end["last_restart"]["step"].number, double(bad - 1));
+    EXPECT_EQ(end["last_restart"]["path"].string, last);
+}
+
+TEST(RunControlTest, WallTimeLimitStopsEveryRankAfterTheSameStep) {
+    const std::string dir = fresh_dir("wall_time");
+    clear_requests();
+    Solver solver;
+    // Reached before the first step on every rank, acted on after it
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 50\ncfl = 0.25\nt_wall_stop = 1e-9\n", 1000), dir)));
+    EXPECT_EQ(solver.run(), 0);
+    EXPECT_EQ(solver.get_step(), 1u);
+    EXPECT_EQ(run_control::pending(), 0);
+    if (!comm::is_root()) return;
+    const json::Value end = end_record(dir);
+    ASSERT_TRUE(end.has("outcome")) << "no end record";
+    EXPECT_EQ(end["outcome"].string, "wall_time_limit");
+    EXPECT_FALSE(end.has("cause"));
+    EXPECT_EQ(end["step"].number, 1);
 }
 
 TEST(RunControlTest, ControlSocketIsPrivateAnswersStatusAndQueuesCommands) {
@@ -468,9 +537,11 @@ std::vector<std::string> restart_files(const std::string & dir) {
 }
 
 /** @brief Starts a long run in a fresh directory and waits until it answers on its socket. */
-pid_t start_run(const std::string & dir, [[maybe_unused]] int ranks) {
-    std::ofstream(dir + "/input.toml") << case_input(".", "n_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n",
-                                                    100000000);
+pid_t start_run(const std::string & dir, int ranks) {
+    std::string input = case_input(".", "n_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n", 100000000);
+    // The ranks may share one GPU, which NCCL refuses
+    if (comm::nccl_available() && ranks > 1) input += "[parallel]\nhalo_exchange = \"mpi\"\n";
+    std::ofstream(dir + "/input.toml") << input;
     std::vector<std::string> args;
 #ifdef MALLARD_MPIEXEC
     // An MPI library need not start a process without its launcher (a singleton)
@@ -506,6 +577,11 @@ void signals_checkpoint_and_stop(const std::string & name, int ranks, int stop_s
     const std::string log = read_text(dir + "/run.log");
     EXPECT_NE(log.find(run_control::signal_name(stop_signal) + " received"), std::string::npos) << log;
     const std::string last = restart_files(dir).back();
+    const json::Value end = end_record(dir);
+    ASSERT_TRUE(end.has("outcome")) << "no end record\n" << log;
+    EXPECT_EQ(end["outcome"].string, "signal");
+    EXPECT_EQ(end["cause"].string, run_control::signal_name(stop_signal));
+    EXPECT_EQ((fs::path(dir) / end["last_restart"]["path"].string).lexically_normal(), fs::path(last).lexically_normal());
     const RestartData restart = read_restart(last);
     EXPECT_GT(restart.step, checkpoint_step);
     EXPECT_EQ(restart.n_cells, 240u);

@@ -7788,7 +7788,7 @@ z
 " clip-path="url(#p77b2d070b9)" style="fill: none; stroke: #1f1a1d; stroke-width: 1.4"/>
    </g>
    <g id="text_3">
-    <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="322.202842" y="11.88" transform="rotate(-0 322.202842 11.88)">ellipse, rotated</text>
+    <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="322.202842" y="11.88" transform="rotate(-0 322.202842 11.88)">ellipsoid (slice), rotated</text>
    </g>
   </g>
   <g id="axes_4">

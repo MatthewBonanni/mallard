@@ -1,7 +1,7 @@
 # Quick start
 
-Build Mallard on a CPU and run your first case in three commands (a C++20 compiler, CMake 3.16 or
-newer and git are all it needs):
+Build Mallard on a CPU and run your first case in three commands (GCC 15, Clang 22 or Apple Clang 21
+or newer, CMake 4.2 or newer and git are all it needs; see [supported platforms](../installation.md#supported-platforms)):
 
 ```bash
 git clone --recursive https://github.com/MatthewBonanni/mallard.git && cd mallard
@@ -9,8 +9,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cd examples/sod && ../../build/src/mallard -i input.toml
 ```
 
-The last line runs the Sod shock tube in about a second and writes `solut/sod.pvd`, which ParaView
-opens. `build/src/mallard new --list` lists ready-to-run cases to copy (`mallard new cylinder` creates
+The last line runs the Sod shock tube in about a second and writes `solut/sod.pvd` (VTU: this build has no
+HDF5; with `-DMallard_ENABLE_HDF5=ON` it writes VTKHDF, `solut/sod.vtkhdf`), which ParaView
+opens. `build/src/mallard list templates` lists ready-to-run cases to copy (`mallard new cylinder` creates
 one with its mesh, run and post-processing scripts). GPU builds (CUDA, HIP), MPI and the other options are in [Installation](https://matthewbonanni.github.io/mallard/docs/installation/).
 
 ## Where next
@@ -23,7 +24,9 @@ The [tutorials](../tutorials/index.md) are an ordered path, each building on the
 4. [Supersonic flow over a cone](../tutorials/cone.md): 3D, tetrahedra, symmetry planes, MPI and GPUs
 5. Premixed flame against Cantera: mixtures and chemistry (in preparation)
 6. [Channel LES](../tutorials/channel_les.md): large-eddy simulation, statistics, multi-GPU runs
+7. [Running on a cluster](../tutorials/cluster.md): sizing a run, job scripts, `mallard ctl`, stopping and resuming
+8. [Measuring a flow](../tutorials/measuring.md): named regions, probes, fluxes, a control-volume balance, phase averages and spectra
 
 The [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are 40 ready-to-run cases to
-browse, and the user guide covers each topic: [input files](input_files.md), [meshes](meshes.md),
+browse, and the user guide covers each topic: [input files](input_files.md), [expressions](expressions.md), [meshes](meshes.md),
 [boundary conditions](boundary_conditions.md), [numerics](numerics.md), [output](output.md).

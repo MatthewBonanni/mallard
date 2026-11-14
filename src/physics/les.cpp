@@ -47,7 +47,7 @@ LES LES::from_input(const Input & input) {
     }
     LES les;
     const std::string name = find_value_or<std::string>(table, "model", N_DIM == 3 ? "sigma" : "wale");
-    const auto it = find_option(SGS_MODELS, "les.model", name);
+    const auto it = find_option(SGS_MODELS, "les.model", name, line_of(table, "model"));
     les.model = it->second;
     if (N_DIM == 2 && les.model == SGSModel::SIGMA) {
         throw InputError("les.model = \"sigma\" vanishes for every two-dimensional flow; use \"wale\" or \"vreman\" in "
@@ -62,6 +62,11 @@ LES LES::from_input(const Input & input) {
     }
     les.scotti = width == "scotti";
     les.dynamic = find_value_or<bool>(table, "dynamic", false);
+    const std::string gradients = find_value_or<std::string>(table, "gradients", "least_squares");
+    if (gradients != "least_squares" && gradients != "reconstruction") {
+        throw InputError("les.gradients = \"" + gradients + "\" is not one of: least_squares, reconstruction.");
+    }
+    les.reconstruction_gradients = gradients == "reconstruction";
     if (N_DIM == 2 && les.scotti) throw InputError("les.filter_width = \"scotti\" is for 3D builds.");
     for (const auto & [key, value] : std::initializer_list<std::pair<const char *, rtype>>{
              {"C", les.C}, {"Pr_t", les.Pr_t}, {"Sc_t", les.Sc_t}}) {
@@ -75,11 +80,15 @@ double LES::scotti_factor(const double h1, const double h2, const double h3) {
     return std::cosh(std::sqrt(4.0 / 27.0 * (l1 * l1 - l1 * l2 + l2 * l2)));
 }
 
-logging::Items LES::summary() const {
+report::Summary LES::summary() const {
     using logging::real;
-    return {{"LES", SGS_MODEL_NAMES.at(model) + " (" + (model == SGSModel::VREMAN ? "c " : "C ") +
-                        real(double(C)) + "), Pr_t " + real(double(Pr_t)) + ", Sc_t " + real(double(Sc_t)) +
-                        ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
-                        (scotti ? " times Scotti's f(a_1, a_2)" : "") +
-                        (dynamic ? "; C from the global dynamic procedure" : "")}};
+    report::Summary s;
+    s.setting("LES", SGS_MODEL_NAMES.at(model) + ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
+                         (scotti ? " times Scotti's f(a_1, a_2)" : "") +
+                         (reconstruction_gradients ? ", gradients of the reconstruction polynomials" : "") +
+                         (dynamic ? "; C from the global dynamic procedure" : ""));
+    s.quantity("LES C", real(double(C)), "-", dynamic ? "model constant of the first step" : "model constant");
+    s.quantity("LES Pr_t", real(double(Pr_t)), "-", "turbulent Prandtl number");
+    s.quantity("LES Sc_t", real(double(Sc_t)), "-", "turbulent Schmidt number");
+    return s;
 }

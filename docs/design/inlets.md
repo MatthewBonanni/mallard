@@ -1,9 +1,9 @@
 # Design: inlets
 
-Status: implemented (`stagnation_inlet`).
+Status: implemented (`inlet_stagnation`, `inlet_mass_flow`, numbers as expressions of x, y, z, t).
 
-`upt` imposes velocity, pressure and temperature, which over-specifies a
-subsonic inflow: one characteristic, the acoustic wave travelling upstream,
+`inlet_state` imposes velocity, pressure and temperature, which over-specifies a
+subsonic inflow: one characteristic, the acoustic wave traveling upstream,
 leaves the domain through it. Nozzles, ducts and intakes need inlets that
 impose only what the flow upstream sets and take the rest from the interior.
 
@@ -18,7 +18,7 @@ An inlet imposes all but the last. Like every Mallard boundary, it does so
 weakly: it builds a ghost state from the interior face state, and the Riemann
 solver takes the flux between the two.
 
-## `stagnation_inlet`
+## `inlet_stagnation`
 
 ![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-light.svg#gh-light-mode-only)
 ![The stagnation inlet: what it imposes and what it takes from the interior](../images/guide/inlet_stagnation-dark.svg#gh-dark-mode-only)
@@ -87,7 +87,7 @@ The ghost depends on the interior state, as `farfield`'s does:
   fluxes and their reconstruction. The ghost's frozen `[γ, e0]` are those at
   the ghost temperature. The surrogates in the scalar reconstruction stay the
   cell's own, since they vary with the ghost.
-- **Viscous terms.** Viscous fluxes treat the inlet like `upt`: the cell's
+- **Viscous terms.** Viscous fluxes treat the inlet like `inlet_state`: the cell's
   values and gradients.
 
 ### Verification
@@ -111,7 +111,7 @@ The ghost depends on the interior state, as `farfield`'s does:
 
 The `nozzle` example is a planar converging-diverging nozzle with inlet and
 exit 1.6 throat heights, fed at `p0`, `T0`. The back pressure `0.75 p0` puts
-a normal shock in the diverging part. `tools/plot_nozzle.py` compares the
+a normal shock in the diverging part. `examples/nozzle/plot_nozzle.py` compares the
 section averages with the quasi-one-dimensional solution (`--figure` redraws
 this figure):
 
@@ -130,3 +130,149 @@ nozzle is curved; the quasi-1D theory has it straight. The shock is curved
 too (it stands further upstream at the wall), and its section average is
 weaker than the quasi-1D one: 1.4% less loss of stagnation pressure, which
 moves it two cells upstream.
+
+## `inlet_mass_flow`
+
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-light.svg#gh-light-mode-only)
+![The mass-flow inlet: what it imposes and what it takes from the interior](../images/guide/inlet_mass_flow-dark.svg#gh-dark-mode-only)
+
+The inlet imposes the mass flux `G = ρ u · n_in`, the temperature `T`, the
+flow direction `d` and the composition. The interior supplies the outgoing
+acoustic wave, linearized about the interior state:
+
+```
+p + Z u_n = p_i + Z u_n,i,    Z = sqrt(γ_c p_i ρ_i)       (u_n along the outward normal)
+u_n = −G / ρ = −G R T / p
+⇒ p² − (p_i + Z u_n,i) p − Z G R T = 0                     (the positive root)
+ρ = p / (R T),   u = G / (ρ |d · n|) d
+```
+
+`γ_c` is the condition's own frozen ratio of specific heats at `T` for
+mixtures (the gas's `γ` otherwise). The pressure is a closed form, with no
+iteration.
+
+**The flux is the boundary state's.** A ghost state alone does not hold the
+mass flow. The Riemann flux between the interior state and a ghost of mass
+flux `G` carries `G` only where the two states agree. Heat release or
+compression behind the inlet keeps them apart, and the mass flow drifts with
+them. The face flux is therefore the physical flux of the boundary state:
+the Riemann solver gets the boundary state on both sides, and every solver
+returns `F(W_b)` for equal states. Its mass flux is `ρ u · n = −G` to
+round-off, at every quadrature point. Species enter at `G Y_k`. With double
+flux, both sides use the cell's frozen thermodynamics, as at any face.
+
+The pressure still comes from the interior, so the face keeps the outgoing
+acoustic wave's characteristic relation. A boundary-state flux is stable
+where a single wave leaves, which is the subsonic inflow this condition is
+for.
+
+`mdot` is divided among the faces by `profile × face measure`, summed over
+the faces of owned cells on all ranks. The faces' total is then `mdot`
+exactly, with whatever measure the flux integral uses (per unit depth in
+2D, `r L` per radian in axisymmetric runs). A face with a mass flux of its
+own (an expression, or a profile) gets its own copy of the condition, as the
+faces of a composition that varies along `inlet_state` do.
+
+A `profile` or an `mdot` of `t` is renormalized at every stage, on the device,
+inside the step's CUDA graph (a constant `mdot` with a fixed profile keeps
+the setup-time division above). At setup every rank holding faces of the inlet gathers all
+its faces (centroid and measure) in the order of the area sum above. At each
+stage, such a rank evaluates the profile at all of them, sums `profile ×
+measure` in chunks of 256 faces, then the chunks in order, and gives its own
+faces `mdot(t) / sum × profile`. Every rank does the same arithmetic in the same
+order, so the fluxes and their total are identical on any rank count, with no
+communication. The cost is O(global inlet faces) on each of those ranks: 32
+bytes per face on the device (as much on the host) and one expression
+evaluation per face and stage. For an inlet of 10^6 faces that is 32 MB and
+one pass over 10^6 faces per stage, small next to the volume kernels of the
+mesh behind such an inlet; ranks away from the inlet skip it. A negative
+value or a zero integral at some stage is recorded on the device and stops
+the run at the next progress check.
+
+An NSCBC-relaxed variant, relaxing the mass flux like `inlet_state` with `nscbc` relaxes
+the velocity, would let acoustic waves leave; it is not implemented.
+`inlet_mass_flow` reflects them like `inlet_state`, at a fixed mass flux instead of a
+fixed velocity.
+
+### Verification
+
+`test/inlet_test.cpp`:
+
+- **Ghost.** The ghost carries `G`, `T` and `d`, and keeps the outgoing
+  acoustic wave, for interior densities from 0.5 to 3.
+- **Closed heated duct.** A duct closed at the far end and heated in its
+  middle gains exactly `mdot t` (to 1e-11 of it, in practice 1e-14). This
+  holds for a single gas with MUSCL/HLLC and TENO/Roe, for mixtures with and
+  without double flux, and for a uniform `mass_flux` as well as an `mdot`
+  with a profile, fixed or of `t`. `inlet_state` at the same initial mass flux misses by more than 1%.
+- **Profile of `t`.** The faces' fluxes integrate to `mdot(t)` at every time
+  and follow the profile's shape, bitwise the same whichever faces a rank
+  holds; a profile or an `mdot` that turns negative stops the run.
+- **`mdot` of `t`.** The closed duct fed by a cubic `mdot(t)`, with and
+  without a profile of `t`, gains its integral to 1e-11: SSPRK3's stages are
+  Simpson's rule, exact for a cubic.
+- **Rayleigh flow.** Steady flow through a heated duct to a pressure outlet
+  matches Rayleigh flow to 1e-4: the inlet pressure the flow needs, and the
+  exit velocity and temperature.
+- **MPI.** An `mdot` with a profile, fixed or of `t`, on two to four ranks
+  matches the serial run.
+
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-light.svg#gh-light-mode-only)
+![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-dark.svg#gh-dark-mode-only)
+
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while inlet_state's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)
+![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while inlet_state's drifts](../images/guide/mass_flow_held-dark.svg#gh-dark-mode-only)
+
+`examples/heated_duct` (`examples/heated_duct/plot_heated_duct.py`):
+
+- **Steady duct.** On 200 cells, the inlet pressure is within 1e-5 and the
+  exit temperature within 1e-6 of Rayleigh flow.
+- **Closed duct.** The mass added stays within 1.1e-14 of `mdot t` while the
+  inlet density rises from 1.16 to 1.69 kg/m³. With `inlet_state`, the duct first
+  gains less, then loses gas through the inlet once its pressure exceeds the
+  inlet's.
+
+## Numbers as expressions of x, y, z and t
+
+The inflow numbers (`u`, `p`, `T` of `inlet_state` (also with `nscbc`), `p0`, `T0`,
+`mass_flux`), the wall velocity and the mixture composition may be
+expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
+
+- **Per face.** A condition with an expression gets a copy for each of its
+  faces, as composition profiles already did, holding the values at the
+  face center.
+- **Per stage.** The expressions are compiled (`kexpr::Program`). Copies with
+  expressions of `t` are re-evaluated by one kernel at each stage time
+  (`TimedBoundaryFields`), which reads the time from the device scalar
+  `stage_time`, so the step's CUDA graph replays it. For mixtures the kernel
+  also sets the composition, gas constant, frozen `[gamma, e0]` and the
+  transport values. The velocity of `inlet_state` with `nscbc` goes into its faces' targets:
+  at the stage time, and at the end of the step for the target's own
+  incoming wave (`TimedInletTargets`).
+- **Cost.** Time-independent inputs are evaluated once, and nothing runs per
+  stage for them. Time-dependent ones cost one small kernel per stage and
+  keep the CUDA graph (mixtures and characteristic boundaries step without
+  one anyway).
+- **Range.** A device flag records the first number of `t` out of its range
+  (face, time, value); the host checks it at each progress check and before
+  reporting a divergence, and stops with an input error.
+
+`test/inlet_test.cpp` (`ForcedInletTest`) checks the stage times. With
+SSPRK3 on a fixed mesh, a temporal-refinement study (steps `dt` and `dt / 2`
+against `dt / 8`, forcing at 40 rad/s with `dt = 0.0075`, and at 20 rad/s with
+`dt = 0.004` for `inlet_state` with `nscbc`) converges at:
+
+| Forced input | Order |
+|---|---|
+| `inlet_state` `T(t)` | 2.75 |
+| `inlet_state` `u(t)` | 2.91 |
+| `inlet_stagnation` `p0(t)` | 3.00 |
+| `inlet_mass_flow` `mass_flux(t)` | 2.91 |
+| moving wall `u(t)` | 3.02 |
+| `inlet_state` with `nscbc` `u(t)` | 1.20 |
+
+The same study gives 1.21 to 1.28 if the inputs are taken at the start of
+each step instead of at the stage times. In single precision the moving
+wall's errors reach round-off; the test then checks that they fall to it.
+`inlet_state` with `nscbc` is first order either way: its boundary point advances by a
+forward-Euler step of the LODI relation once per step.

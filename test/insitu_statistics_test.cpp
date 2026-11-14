@@ -12,12 +12,14 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <span>
 #include <sstream>
 #include <string>
@@ -25,9 +27,13 @@
 
 #include "comm.h"
 #include "compression.h"
+#include "device_comm.h"
+#include "mpi_compare.h"
 #include "solver.h"
 #include "provenance.h"
 #include "scratch.h"
+#include "snapshot_block.h"
+#include "step_graph_guard.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -43,8 +49,8 @@ std::string box(const std::string & periodic, double beta_y, uint32_t n_steps, c
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\n";
     for (size_t d = 0; d < N_DIM; d++) s << "N" << "xyz"[d] << " = " << N[d] << "\nL" << "xyz"[d] << " = " << L[d] << "\n";
-    s << "periodic = " << periodic << "\n";
     if (beta_y > 0.0) s << "stretching = [0.0, " << beta_y << (N_DIM == 3 ? ", 0.0" : "") << "]\n";
+    s << periodic_sides(periodic);
     if (periodic.find("\"y\"") == std::string::npos) {
         s << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
@@ -64,10 +70,11 @@ std::string box(const std::string & periodic, double beta_y, uint32_t n_steps, c
 /** @brief Cell values of a variable (host copies; serial run, so local = global ids). */
 std::vector<double> values(const Solver & solver, const std::string & name) {
     const int32_t code = CellSampler::code(name, {}, "test");
-    std::vector<double> v(solver.get_mesh()->n_cells);
+    std::vector<double> v(solver.get_mesh()->n_cells);  // by global id
     for (uint32_t c = 0; c < v.size(); c++) {
-        v[c] = code == CellSampler::RHO ? double(solver.h_conservatives(c, 0))
-                                        : double(solver.h_primitives(c, size_t(code - CellSampler::FIRST_PRIMITIVE)));
+        v[solver.get_mesh()->h_global_cell(c)] =
+            code == CellSampler::RHO ? double(solver.h_conservatives(c, 0))
+                                     : double(solver.h_primitives(c, size_t(code - CellSampler::FIRST_PRIMITIVE)));
     }
     return v;
 }
@@ -108,7 +115,7 @@ double direct_correlation(const std::vector<double> & a, const std::vector<doubl
 std::string one_sample(const std::string & fields, uint32_t n_steps) {
     // A single sample, at the last step, weighs 1: the averages are that sample
     return "[statistics]\ninterval = " + std::to_string(n_steps) + "\n[statistics.spectra]\n" + fields +
-           "file = \"spectra_unused.csv\"\n";
+           "file = \"" + (rank_scratch_dir() / "spectra_unused.csv").string() + "\"\n";
 }
 
 } // namespace
@@ -120,6 +127,7 @@ TEST(SpectraTest, CorrelationsAndShellSpectraOfAPeriodicBoxMatchDirectSums) {
     // sums of a direct (non-FFT) DFT of the cells over the whole box
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 0.0, 4, one_sample("fields = [\"U_X\", \"RHO\"]\nproducts = [\"U_X*RHO\"]\n", 4))));
     solver.run();
     solver.copy_device_to_host();
@@ -186,6 +194,7 @@ TEST(SpectraTest, ChannelCorrelationsAtEachHeightMatchDirectSums) {
     // on their slab, and each height has its own spectra and plane means
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 1.5, 3, one_sample("fields = [\"U_Y\"]\nproducts = [\"U_X*U_Y\"]\n", 3))));
     solver.run();
     solver.copy_device_to_host();
@@ -229,8 +238,8 @@ std::string oscillating(uint32_t n_steps, const std::string & extra) {
     const double u0 = 0.1, w = 2.0 * M_PI;
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = 0.0078125\n[mesh]\ntype = \"cartesian\"\n"
-      << "Nx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n"
-                                                                : "periodic = [\"x\", \"y\"]\n")
+      << "Nx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                                                                : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"constant\"\nu = " << (N_DIM == 3 ? "[0, 0, 0]" : "[0, 0]") << "\np = 1.0\nT = 1.0\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[source]\nrhou = [\"" << u0 * w << " * cos(" << w << " * t)\", \"0\"" << (N_DIM == 3 ? ", \"0\"" : "")
@@ -249,8 +258,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // averages are bitwise those of the period
     const double u0 = 0.1, t_ref = 1.0 / 12.0;
     const uint32_t n_steps = 416, bins = 4;
-    const std::string dir = (scratch_dir() / "mallard_phase_restart").string();
-    std::filesystem::remove_all(dir);
+    const std::string dir = (rank_scratch_dir() / "mallard_phase_restart").string();
     auto run = [&](uint32_t steps, const std::string & phase, const std::string & from = "") {
         std::string input = oscillating(steps, "[statistics]\nt_start = 1.25\ninterval = 2\n"
                                                "[statistics.phase]\nfields = [\"U_X\", \"RHO\"]\nbins = 4\n" + phase);
@@ -259,6 +267,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
             input.replace(a, b - a, "[initialize]\ntype = \"restart\"\nfile = \"" + from + "\"\n");
         }
         auto solver = std::make_unique<Solver>();
+        solver->set_distributed(false);
         solver->init(parse_toml(input));
         solver->run();
         solver->copy_device_to_host();
@@ -274,7 +283,6 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // window, carries the bins and the trigger's last crossings and sample
     run(200, trigger + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 200\n");
     const auto continued = run(n_steps, trigger, dir + "/r_000200.restart");
-    std::filesystem::remove_all(dir);
 
     std::vector<double> sum(bins, 0.0), count(bins, 0.0);
     for (uint32_t k = 81; k <= n_steps / 2; k++) {
@@ -307,7 +315,6 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     // continues the averaged spectra (restart arrays) and the phase bins as if
     // uninterrupted, and leaves the solution unchanged
     const std::string dir = (scratch_dir() / "mallard_insitu_restart").string();
-    std::filesystem::remove_all(dir);
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     auto extra = [&](const std::string & sub, bool zlib = false) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\n"
@@ -360,19 +367,35 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
             }
         }
     }
-    // The values; the provenance line names each run's own input
-    auto read = [](const std::string & path, std::string & provenance_line) {
+    // The values and the averaging window; the run block names each run's own input
+    auto read = [](const std::string & path, std::string & run_json, snapshot_block::Block & block) {
         std::ifstream in(path);
-        std::getline(in, provenance_line);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        return ss.str();
+        std::string values;
+        for (std::string line; std::getline(in, line);) {
+            if (line.starts_with("# mallard-run ")) {
+                run_json = provenance::parse_comment(line);
+            } else if (line.starts_with("# mallard-snapshot ")) {
+                block = snapshot_block::parse(provenance::parse_comment(line, snapshot_block::NAME));
+            } else {
+                values += line + "\n";
+            }
+        }
+        return values;
     };
-    std::string provenance_a, provenance_b;
-    const std::string values_a = read(dir + "/a/spectra.csv", provenance_a);
+    std::string run_a, run_b;
+    snapshot_block::Block block_a, block_b;
+    const std::string values_a = read(dir + "/a/spectra.csv", run_a, block_a);
     EXPECT_FALSE(values_a.empty());
-    EXPECT_EQ(read(dir + "/b/spectra.csv", provenance_b), values_a);
-    EXPECT_FALSE(provenance::parse_comment(provenance_a).empty()) << provenance_a;
+    EXPECT_EQ(read(dir + "/b/spectra.csv", run_b, block_b), values_a);
+    EXPECT_FALSE(run_a.empty());
+    EXPECT_EQ(block_b.step, block_a.step);
+    EXPECT_EQ(block_b.time, block_a.time);
+    EXPECT_TRUE(block_a.averaged);
+    EXPECT_EQ(block_b.average_start, block_a.average_start);
+    EXPECT_EQ(block_b.average_end, block_a.average_end);
+    EXPECT_EQ(block_b.samples, block_a.samples);
+    EXPECT_GT(block_a.samples, 0);
+    EXPECT_TRUE(block_b.restarted);
     const PhaseAverage & pa = straight->get_statistics().get_phase();
     const PhaseAverage & pb = second->get_statistics().get_phase();
     EXPECT_GT(pa.samples(), 0u);
@@ -381,7 +404,117 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
         for (uint32_t bin = 0; bin < 3; bin++) EXPECT_EQ(pb.host_means()(c, bin), pa.host_means()(c, bin));
     }
-    std::filesystem::remove_all(dir);
+}
+
+// Averaged spectra and phase averages (by period and by a trigger signal), each at its own interval and t_start, are
+// sampled in the step graph: the
+// same spectra, bins and means bit for bit with the host's steps (step_queue = 0), one step per launch and steps
+// enqueued ahead, which run ahead of the host. Fails if a sample stops the queue, is taken at another step or time,
+// or the device's clock of the bins or the trigger's crossings differs from the host's.
+TEST(InsituStatisticsTest, SpectraAndPhasesAreSampledInTheStepGraph) {
+    const std::string box_dirs = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
+    for (const std::string & phase : {std::string("period = 0.013\n"),
+                                      "variable = \"U_X\"\nlevel = 0.05\nprobe = " + std::string(N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") + "\n"}) {
+        const std::string extra = "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\n"
+                                  "products = [\"U_X*U_Y\"]\ninterval = 3\nt_start = 0.004\n"
+                                  "file = \"" + (rank_scratch_dir() / "queued_spectra.csv").string() + "\"\n"
+                                  "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\ninterval = 4\n" + phase;
+        std::vector<std::unique_ptr<Solver>> runs;
+        for (const int depth : {0, 1, 3}) {
+            std::string input = box(box_dirs, 0.0, 24, extra);
+            input.insert(input.find("[mesh]"), "step_queue = " + std::to_string(depth) + "\n");
+            const StepGraphGuard guard;
+            auto solver = std::make_unique<Solver>();
+            solver->set_distributed(false);
+            solver->set_uncaptured_step_graphs(depth > 0);
+            solver->init(parse_toml(input));
+            solver->run();
+            solver->copy_device_to_host();
+            for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+            runs.push_back(std::move(solver));
+        }
+        EXPECT_GT(runs[2]->get_queued_steps(), 0u) << phase;
+        const Spectra & ref = runs[0]->get_statistics().get_spectra();
+        const PhaseAverage & ref_phase = runs[0]->get_statistics().get_phase();
+        EXPECT_GT(ref.samples(), 0u);
+        // A trigger signal crosses its level twice before its first sample: its state is compared below
+        if (phase.find("period") != std::string::npos) {
+            EXPECT_GT(ref_phase.samples(), 0u);
+        }
+        for (size_t r = 1; r < runs.size(); r++) {
+            const Spectra & s = runs[r]->get_statistics().get_spectra();
+            const PhaseAverage & ph = runs[r]->get_statistics().get_phase();
+            EXPECT_EQ(s.samples(), ref.samples());
+            for (uint32_t p = 0; p < 2; p++) {
+                for (uint32_t h = 0; h < N_DIM; h++) EXPECT_EQ(s.spectrum(0, p, h), ref.spectrum(0, p, h)) << phase;
+                EXPECT_EQ(s.shell(p), ref.shell(p)) << phase;
+            }
+            EXPECT_EQ(ph.samples(), ref_phase.samples()) << phase;
+            EXPECT_EQ(ph.bin_weights(), ref_phase.bin_weights()) << phase;
+            EXPECT_EQ(ph.attributes(), ref_phase.attributes()) << phase;
+            size_t differ = 0;
+            for (uint32_t c = 0; c < runs[r]->get_mesh()->n_owned(); c++) {
+                for (uint32_t bin = 0; bin < 3; bin++) differ += ph.host_means()(c, bin) != ref_phase.host_means()(c, bin);
+            }
+            EXPECT_EQ(differ, 0u) << phase;
+        }
+    }
+}
+
+// Spectra written at each sample (average = false) are staged in the step graph and written by the host from the
+// records: the same files bit for bit with the host's steps, one step per launch and steps enqueued ahead, which run
+// as far ahead as without them. Fails if a sample stops the queue or a file holds another step's sample.
+TEST(InsituStatisticsTest, UnaveragedSpectraAreStagedWithoutStoppingTheDevice) {
+    const std::string box_dirs = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
+    const auto files_of = [](const std::filesystem::path & dir) {
+        std::vector<std::string> files;
+        for (const auto & entry : std::filesystem::directory_iterator(dir)) {
+            std::ifstream in(entry.path());
+            std::string text = entry.path().filename().string() + "\n";
+            for (std::string line; std::getline(in, line);) {
+                if (line.empty() || line[0] != '#') text += line + "\n";
+            }
+            files.push_back(text);
+        }
+        std::sort(files.begin(), files.end());
+        return files;
+    };
+    // Over the ranks, rank 0 writes the files
+    const bool distributed = comm::size() > 1;
+    std::vector<std::vector<std::string>> files;
+    std::vector<uint64_t> queued;
+    for (const bool spectra : {true, false}) {
+        for (const int depth : {0, 1, 3}) {
+            if (!spectra && depth != 3) continue;
+            const std::filesystem::path dir = (distributed ? scratch_dir() : rank_scratch_dir()) / ("unaveraged_spectra_" + std::to_string(depth));
+            if (comm::is_root()) std::filesystem::remove_all(dir);
+            comm::barrier();
+            const std::string extra =
+                spectra ? "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\n"
+                          "products = [\"U_X*U_Y\"]\naverage = false\ninterval = 3\nt_start = 0.004\n"
+                          "file = \"" + (dir / "spectra.csv").string() + "\"\n"
+                        : "";
+            std::string input = box(box_dirs, 0.0, 24, extra);
+            input.insert(input.find("[mesh]"), "step_queue = " + std::to_string(depth) + "\n");
+            const StepGraphGuard guard;
+            Solver solver;
+            solver.set_distributed(distributed);
+            solver.set_uncaptured_step_graphs(depth > 0);
+            solver.init(parse_toml(input));
+            solver.run();
+            for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+            queued.push_back(solver.get_queued_steps());
+            comm::barrier();
+            if (spectra && comm::is_root()) files.push_back(files_of(dir));
+        }
+    }
+    EXPECT_GT(queued[2], 0u);
+    EXPECT_EQ(queued[2], queued[3]);
+    if (!comm::is_root()) return;
+    ASSERT_EQ(files.size(), 3u);
+    EXPECT_GT(files[0].size(), 3u);
+    EXPECT_EQ(files[1], files[0]);
+    EXPECT_EQ(files[2], files[0]);
 }
 
 namespace {
@@ -394,7 +527,7 @@ std::vector<double> gather_phase(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * width, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         for (size_t i = 0; i < width; i++) values[g * width + i] = double(mean(c, i));
     }
     if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(values), comm::Op::SUM);
@@ -406,8 +539,8 @@ std::vector<double> gather_phase(Solver & solver) {
 TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     // Both slab paths (a periodic box: x slabs transposed to y slabs; a
     // channel: y slabs) and a triggered phase average equal the serial run's
-    // bitwise on any number of ranks, also continued on one rank from a
-    // restart file written by all
+    // bitwise on any number of ranks, with NCCL's and MPI's transposes, also
+    // continued on one rank from a restart file written by all
     const std::string dir = (scratch_dir() / "mallard_mpi_insitu").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
@@ -416,7 +549,8 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     for (const std::string & periodic : {box_dirs, channel_dirs}) {
         auto extra = [&](const std::string & name, bool restart) {
             return "[statistics]\ninterval = 2\n[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*U_Y\"]\n"
-                   "file = \"" + dir + "/" + name + ".csv\"\n"
+                   "file = \"" + (name == "serial" || name == "continued" ? rank_scratch_dir().string() : dir) + "/" + name +
+                   ".csv\"\n"
                    "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.013\n" +
                    (restart ? "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 4\n" : "");
         };
@@ -430,6 +564,13 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         distributed.init(parse_toml(box(periodic, beta, 8, extra("distributed", true))));
         distributed.run();
         distributed.copy_device_to_host();
+        Solver over_mpi;
+        const bool both = comm::nccl_available() && comm::size() > 1;
+        if (both) {
+            over_mpi.init(parse_toml(with_halo_exchange(box(periodic, beta, 8, extra("over_mpi", false)), "mpi")));
+            over_mpi.run();
+            over_mpi.copy_device_to_host();
+        }
         comm::barrier();
         std::string input = box(periodic, beta, 8, extra("continued", false));
         const size_t a = input.find("[initialize]\n"), b = input.find("[numerics]\n");
@@ -441,7 +582,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         continued.copy_device_to_host();
 
         const Spectra & ref = serial.get_statistics().get_spectra();
-        for (const Solver * other : {&distributed, &continued}) {
+        std::vector<const Solver *> others = {&distributed, &continued};
+        if (both) others.push_back(&over_mpi);
+        for (const Solver * other : others) {
             const Spectra & s = other->get_statistics().get_spectra();
             ASSERT_EQ(s.samples(), ref.samples());
             for (uint32_t pos = 0; pos < ref.n_positions(); pos++) {
@@ -459,6 +602,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         const auto phase_ref = gather_phase(serial);
         EXPECT_EQ(gather_phase(distributed), phase_ref);
         EXPECT_EQ(gather_phase(continued), phase_ref);
+        if (both) {
+            EXPECT_EQ(gather_phase(over_mpi), phase_ref);
+        }
         comm::barrier();
     }
 
@@ -478,6 +624,13 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     EXPECT_GT(serial.get_statistics().get_phase().samples(), 0u);
     EXPECT_EQ(distributed.get_statistics().get_phase().samples(), serial.get_statistics().get_phase().samples());
     EXPECT_EQ(gather_phase(distributed), gather_phase(serial));
+    if (comm::nccl_available() && comm::size() > 1) {
+        Solver over_mpi;
+        over_mpi.init(parse_toml(with_halo_exchange(oscillating(240, trigger), "mpi")));
+        over_mpi.run();
+        over_mpi.copy_device_to_host();
+        EXPECT_EQ(gather_phase(over_mpi), gather_phase(serial));
+    }
     comm::barrier();
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }

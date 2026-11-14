@@ -42,7 +42,7 @@ body:
       label: Build
       description: Dimension (2D/3D), Kokkos backend (Threads, OpenMP, CUDA, HIP, ...), precision, MPI ranks, compiler and OS, GPU model if any, and the CMake options you used.
       placeholder: |
-        3D, OpenMP, double, 4 MPI ranks, GCC 13, Ubuntu 24.04
+        3D, OpenMP, double, 4 MPI ranks, GCC 15, Ubuntu 26.04
         cmake -S . -B build -DMallard_DIM=3 -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON
     validations:
       required: true

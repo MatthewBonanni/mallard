@@ -39,6 +39,7 @@ order = 5
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -49,6 +50,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/annulus"
-format = "vtu"
 time_interval = 0.5
-variables = ["RHO", "RHOU", "RHOE", "P"]
+fields = ["RHO", "RHOU", "RHOE", "P"]

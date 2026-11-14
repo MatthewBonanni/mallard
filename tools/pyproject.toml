@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mallard-python"
+description = "Mallard's output as numpy arrays and its commands as functions, through the solver's own reader"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/MatthewBonanni/mallard"
+Documentation = "https://github.com/MatthewBonanni/mallard/blob/main/docs/guide/python.md"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["mallard"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mallard._version.__version__" }

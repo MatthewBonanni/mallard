@@ -65,8 +65,9 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 ### 6. Halo
 
 - **Local numbering:**
-  - Cells: `[owned interior | owned near partition boundary | halo layer 1 | ... | halo layer k]`. Owned cells are in Hilbert order within each group. (Implemented so far: owned cells, then each halo layer, each in global id order.)
-  - Faces: faces between owned cells, then faces between an owned and a halo cell, then faces between halo cells that reconstruction needs.
+  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`) or in global order (`"input"`); the default `"auto"` takes whichever reads fewer cache lines over the reconstruction's stencil (`performance.md`, "Cell numbering"). Serial runs number their cells the same way, the mesh's order becoming the global ids.
+  - Faces: in the order the local cells reach them, so faces of owned cells come first; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id).
+  - Nothing that results depend on follows the local numbering: faces, neighbor lists and stencils are ordered by global ids, and so are the sums that mix cells (characteristic boundaries' transverse fits, the mass-flow force, by fixed-point sums), the image-cell search and the rows of periodic translations. Restart, HDF5 and VTU files are written in global order. Measurements: `performance.md`, "Cell numbering".
   - Every cell and node keeps its global id.
 - **Depth k:** the number of vertex-neighbor layers any reconstruction needs:
 
@@ -77,8 +78,15 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
   | TENO | stencil radius + 1 |
 
   TENO's central-stencil gather grows layer by layer until it has enough rows. So the halo is built with a default depth, stencils are computed, and if any stencil reaches the halo frontier the halo is deepened on every rank and the setup after the mesh repeats. This keeps stencils *identical* to the serial ones, which is what makes results rank-count independent.
-- **Construction:** a distributed breadth-first search over vertex neighbors. Layer 1 comes from the node directory (section 5); for each further layer, a rank asks the directory for the cells around the nodes of its previous layer that it has not asked about, then fetches the new cells from the ranks whose blocks hold them. Deepening the halo continues the search from the existing layers rather than starting over.
-- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, sorted by global id on both sides.
+- **Construction:** a distributed breadth-first search over vertex neighbors. Layer 1 comes from the node directory (section 5); for each further layer, a rank asks the directory for the cells around the nodes of its previous layer that it has not asked about, then fetches the new cells from the ranks whose blocks hold them. Once a rank has its local connectivity and coordinates it frees the cells it received and the node directory, before building its `Mesh`, so that the build's peak holds only the block besides the mesh; deepening the halo later sends the cells to their owners again and repeats the search from layer 1, which visits the same cells in the same order.
+- **Exchange plan:** for each neighbor rank, the list of local owned cells to send and of halo cells to receive, both in the receiver's local order.
+
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-light.svg#gh-light-mode-only)
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-dark.svg#gh-dark-mode-only)
+
+*Rank 1 of 3 with its halo layers, from Mallard runs: `tools/docs/runs.py` repeats the
+breadth-first search above on the owned cells of every rank and checks its counts against
+the run's report.*
 
 ### 7. Time stepping
 
@@ -90,7 +98,9 @@ Per right-hand-side evaluation:
 
 Implemented for TENO, the reconstruction that needs deep halos; FO and MUSCL exchange first and then reconstruct. The first stage of a step reuses the halo that the time-step computation has just filled, so an SSPRK3 step exchanges three times, not four.
 
-Halo layer 1 is reconstructed redundantly so that a single exchange per stage suffices. The alternative, exchanging reconstructed face states at partition faces, would save that layer's work (a surface-to-volume fraction of the TENO cost) but adds a second, dependent message round per stage; at thousands of ranks the extra latency costs more than the redundant work. The choice is contained in the exchange plan and can be revisited with measurements.
+**Owner-computes partition faces (TENO, #305).** Each rank reconstructs only its owned cells. The halo side of a partition face is reconstructed by the rank that owns that cell, which sends it (all quadrature points, 5 states) after its reconstruction: a second, dependent message round per stage (`FaceExchange`). Each rank asks the owners for the face sides its fluxes read but does not reconstruct (the halo side of partition faces, and the side of a transmissive face's image face that belongs to a halo cell), naming each by the cell's global id and the face's index among the cell's faces, which every rank count numbers alike. Across a rotational periodic seam the owner sends the side already turned into the face's frame, that of its cell 0, which is the same on every rank since faces take their orientation from the global ids of their cells. The face messages travel while the fluxes of the other faces and the viscous gradients are computed; the partition faces' fluxes follow. Measured (3D TENO5, 64³ per A100, 16 GPUs): the first halo layer was 6% of the cells and its redundant reconstruction 2.3–2.9 ms of a 51.7 ms step, while the face messages are hidden behind the other faces' fluxes. Results are unchanged bit for bit, since the owner computes the same stencil at the same points. The halo exchange then carries only the cells that owned cells' stencils read. FO and MUSCL keep the redundant layer-1 reconstruction, which is cheaper than a second message round for them.
+
+**Time step and priorities.** The first stage's interior reconstruction does not depend on dt, so it starts before the time-step exchange; the exchange, the reduction for dt and its allreduce then happen under it. Packing, unpacking, the dt reduction and the reconstruction of the cells that read the halo run on a high-priority stream (`comm::high_priority_space`): the device schedules them as soon as their inputs arrive, interleaved with the interior cells, instead of after them as a tail of a partially filled device (which had cost 0.3–0.75 ms per stage).
 
 Faces between an owned and a halo cell are computed by both ranks. Each keeps only its owned side's contribution, since residuals of halo cells are never used. This costs a few redundant face fluxes but needs no reverse exchange.
 
@@ -106,7 +116,7 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 
 ### 9. Output and restart
 
-- **Solution output:** per-rank VTU pieces plus a `.pvtu` index and the `.pvd` series to start. At scale, HDF5 with an XDMF index (one shared file per snapshot, collective writes).
+- **Solution output:** VTKHDF by default, one shared file of every snapshot written with collective I/O at global offsets (rank-count independent); VTU (per-rank pieces plus a `.pvtu` index and the `.pvd` series) without parallel HDF5.
 - **Restart:** HDF5, written by global cell id, so a run can restart on a **different rank count**. This is essential for hero runs, which rarely get the same allocation twice.
 
 ### 10. Dynamic load balancing
@@ -209,6 +219,6 @@ gathers the periodic zones.
 
 ## Decisions from review
 
-1. One halo exchange per stage with a redundant halo-layer-1 reconstruction (section 7).
+1. One halo exchange per stage with a redundant halo-layer-1 reconstruction (section 7); replaced for TENO by owner-computes partition faces with a second, overlapped exchange of face states (#305).
 2. Optional NCCL backend for the halo exchange and reductions (section 1).
 3. Dynamic load balancing deferred, with the setup structured to allow it (section 10); prototyped and measured in milestone 7, and not adopted.

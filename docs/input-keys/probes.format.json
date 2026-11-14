@@ -1,0 +1,15 @@
+{
+ "default": "\"csv\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [],
+ "type": "string",
+ "values": [
+  "csv",
+  "hdf5",
+  "vtkhdf",
+  "vtp"
+ ]
+}

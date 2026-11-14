@@ -1,0 +1,14 @@
+{
+ "default": "\"volume\"",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/flame_turbulence/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "mass",
+  "volume"
+ ]
+}

@@ -20,7 +20,7 @@ T = 300.0
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [600.0, 0.0]
 p = 101325.0
 T = 300.0
@@ -28,7 +28,7 @@ T = 300.0
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 # type = "symmetry"
 
@@ -62,6 +62,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/wedge"
-format = "vtu"
 time_interval = 0.0005
-variables = ["RHO", "U_X", "U_Y", "P", "T"]
+fields = ["RHO", "U_X", "U_Y", "P", "T"]

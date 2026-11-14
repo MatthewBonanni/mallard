@@ -1,0 +1,90 @@
+# Moving heaters: a column of three heaters sweeps through gas at rest in a
+# channel that is periodic in x.
+#
+# - The heaters are one region, a disk repeated three times across the
+#   channel (repeat), moving at speed 0.5: its center is an expression of t.
+#   At every stage Mallard places the disks where they are and recomputes
+#   their cell fractions on the device, so a captured step (CUDA graphs)
+#   follows them.
+# - Each heater releases its own exactly integrated power (total = true),
+#   which grows with its index copy: 0.05, 0.1 and 0.15 per unit depth.
+# - From t = 1 the disks cross the periodic boundary at x = 1 and wrap:
+#   their part beyond it heats the gas at x = 0, and their totals stay exact
+#   while they cross.
+# - A probe with copies = "each" writes one file per heater,
+#   probe_heaters_copy<k>_reductions.csv: the mass and mean temperature in
+#   it, and in the third column its area in the domain, which stays
+#   pi r^2 = 0.0314 through the crossing.
+#
+# Each heater leaves a warm trail behind it. The mean temperature in the
+# disks levels off near 1.1, 1.2 and 1.3 once the gas they reach is heated
+# for as long as they take to pass over it. SOURCE_RHOE in the snapshots
+# shows the disks, split in half across the boundary at the end (t = 1.2).
+
+[run]
+t_stop = 1.2
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 100
+Ny = 100
+Lx = 1.0
+Ly = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[regions]
+heaters = {type = "disk", center = ["0.4 + 0.5 * t", 0.2], radius = 0.1, repeat = {count = 3, translate = [0, 0.3]}}
+
+[[sources]]
+name = "heaters"
+total = true
+rhoE = "0.05 * (1 + copy)"
+region = "heaters"
+
+[output]
+check_interval = 100
+
+[[probes]]
+name = "heaters"
+fields = ["RHO", "T"]
+region = "heaters"
+copies = "each"
+reductions = ["integral", "mean"]
+interval = 20
+
+[[write_data]]
+prefix = "solut/heaters"
+time_interval = 0.25
+fields = ["RHO", "U", "P", "T", "SOURCE_RHOE"]

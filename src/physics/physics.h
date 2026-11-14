@@ -20,6 +20,7 @@
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 enum class PhysicsType {
     EULER,
@@ -74,7 +75,7 @@ struct Euler {
     static Euler from_input(const Input & input);
 
     /** @brief Display lines for the run log. */
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     KOKKOS_INLINE_FUNCTION
     PhysicsType get_type() const {

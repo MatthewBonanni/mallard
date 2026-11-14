@@ -10,7 +10,9 @@
  */
 
 #include "solver.h"
+#include "stencil_shapes.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -23,8 +25,14 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <optional>
+#include <span>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include <Kokkos_Core.hpp>
 
@@ -32,14 +40,20 @@
 #include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
+#include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "region_input.h"
+#include "region_motion.h"
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
+#include "snapshot_block.h"
+#include "run_report.h"
 #include "expression.h"
 #include "gradient.h"
 #include "viscous_flux.h"
+#include "probe_fluxes.h"
 
 Solver::Solver() {
     // Empty
@@ -64,14 +78,77 @@ Input unrecorded(Input value) {
     return value;
 }
 
+/**
+ * @brief The names of the mesh's boundary zones, sorted, on every rank (collective if
+ *        distributed): a rank's part of the mesh may not touch every zone.
+ */
+std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed) {
+    std::string local;
+    for (const FaceZone & z : *mesh.face_zones()) {
+        if (z.get_type() == FaceZoneType::BOUNDARY && z.get_name() != PARTITION_ZONE) local += z.get_name() + '\n';
+    }
+    std::vector<std::string> names;
+    for (const std::string & part : distributed ? comm::allgather(local) : std::vector<std::string>{local}) {
+        std::istringstream lines(part);
+        for (std::string name; std::getline(lines, name);) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
+}
+
 } // namespace
 
-int Solver::init(const std::string & input_file_name) {
+int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
     std::ifstream in(input_file_name, std::ios::binary);
     provenance::start_run();
     provenance::set_input(input_file_name, std::string(std::istreambuf_iterator<char>(in), {}));
     input_from_file = true;
-    return init(parse_input(input_file_name));
+    Input parsed = parse_input(input_file_name);
+    if (!restart_file.empty()) start_from_restart(parsed, restart_file);
+    return init(parsed);
+}
+
+void Solver::start_from_restart(Input & input, const std::string & restart_file) {
+    std::string file = restart_file;
+    if (restart_file == "latest") {
+        // The files the run's restart writers write: those of the whole mesh, or the on-request default
+        std::vector<std::string> prefixes;
+        if (input.contains("write_data")) {
+            for (const Input & output : find_value<std::vector<Input>>(input, "write_data")) {
+                if (find_value_or<std::string>(output, "format", "") == "restart" && output.contains("prefix") &&
+                    !output.contains("region") && !output.contains("regions")) {
+                    prefixes.push_back(find_value<std::string>(output, "prefix"));
+                }
+            }
+        }
+        if (prefixes.empty()) prefixes.emplace_back("restart");
+        std::string list;
+        for (const std::string & prefix : prefixes) list += (list.empty() ? "" : ", ") + prefix + "_<step>.restart";
+        std::string error;
+        if (comm::is_root()) {
+            std::vector<std::string> skipped;
+            const std::string run_log = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
+            const FoundRestart found = newest_restart(prefixes, skipped, run_log);
+            for (const std::string & reason : skipped) logging::warning(diagnostic_code::RESTART_SKIPPED, reason + " Skipped by --restart latest.");
+            file = found.file;
+            if (!file.empty()) {
+                logging::line("--restart latest: " + file + " (step " + std::to_string(found.step) + ", t = " +
+                              logging::real(found.t) + " s), from " + found.source);
+            }
+            if (file.empty() && !skipped.empty()) {
+                error = "--restart latest: no restart file " + list + " reads completely. Name one with --restart "
+                        "FILE, or delete them to start from [initialize].";
+            } else if (file.empty()) {
+                logging::line("--restart latest: no restart file " + list + "; starting from [initialize]");
+            }
+        }
+        error = comm::broadcast(error);
+        if (!error.empty()) throw std::runtime_error(error);
+        file = comm::broadcast(file);
+        if (file.empty()) return;
+    }
+    input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", file}});
 }
 
 template <typename F>
@@ -80,13 +157,17 @@ void Solver::timed_phase(const std::string & name, F && f) {
     Kokkos::Timer phase_timer;
     f();
     Kokkos::fence();
+    memory::end_phase();
     const double seconds = phase_timer.seconds();
+    run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
     logging::end_phase(seconds);
 }
 
 int Solver::init(const Input & input_in) {
+    const comm::SelfScope scope = communication_scope();
     this->input = input_in;
+    run_log::hold();
     if (!input_from_file) {
         provenance::start_run();
         provenance::set_input("", toml::format(unrecorded(input)));
@@ -94,12 +175,9 @@ int Solver::init(const Input & input_in) {
     input_from_file = false;
     deprecated_keys = input_upgrade::apply(input);
     if (!check_only) {
-        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+        for (const auto & finding : deprecated_keys) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
-    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
-    for (const auto & s : preset.settings) preset_settings.emplace_back(s.key, s.value, s.from_preset);
-    provenance::set_preset(preset.name, preset_settings);
     try {
         setup_from_input();
     } catch (const std::exception & e) {
@@ -110,18 +188,28 @@ int Solver::init(const Input & input_in) {
         if (misspelled.empty() || check_only) throw;
         throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
     }
-    if (!check_only) {
+    if (!check_only && !state_reader) {
         const std::vector<Diagnostic> unused = unused_keys(input);
         if (!unused.empty()) {
             std::string list;
             for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            throw InputError("keys that are unknown or unused with these settings (mallard check lists them all):" +
+            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
                              list);
+            error.code = diagnostic_code::KEY_UNUSED;
+            throw error;
         }
     }
-    logging::begin_record();
-    print_setup();
-    provenance::set_setup(logging::end_record());
+    const ResolvedInput resolved = resolve_input(input);
+    provenance::set_resolved(resolved.toml);
+    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
+    for (const auto & s : preset.settings) {
+        const KeyRecord * record = resolved.find(s.key);
+        preset_settings.emplace_back(s.key, record ? record->value : "", s.from_preset);
+    }
+    provenance::set_preset(preset.name, preset.is_default, preset_settings);
+    print_setup(resolved);
+    provenance::set_placement();
+    provenance::set_read_files();
     provenance::share();
     write_provenance();
     return 0;
@@ -131,6 +219,7 @@ void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
+    run_health.setup_phases.clear();
 
     logging::section("Setup");
     init_run_parameters();
@@ -144,7 +233,7 @@ void Solver::setup_from_input() {
     });
     timed_phase("numerics", [&] { init_numerics(); });
     while (halo_too_shallow()) {
-        timed_phase("halo rebuild (" + std::to_string(halo_layers) + " layers)", [&] {
+        timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
             init_numerics();
@@ -158,15 +247,32 @@ void Solver::setup_from_input() {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        // Output of states read from files takes no steps
+        if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        init_sources();
-        init_sponges();
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
+        statistics.init(input, species_names, *mesh, derived_selection,
+                        {.chemistry = reacting,
+                         .regions = used_regions.get(),
+                         .distributed = is_distributed(),
+                         .nccl = halo.uses_nccl()});
+        init_sources(*used_regions);
+        init_sponges(*used_regions);
+        init_mesh_fields();
         register_data();
-        init_output();
+        init_output(*used_regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
+    init_health();
+    setup_check_json.clear();
+    if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
+    mesh->release_setup_data();
+    if (!check_only) used_regions.reset();
+    // glibc keeps what the setup freed in its arenas; hand it back to the system
+#ifdef __GLIBC__
+    malloc_trim(0);
+#endif
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
 }
@@ -190,12 +296,37 @@ void Solver::write_provenance() {
         if (monitor.out) *monitor.out << line << std::flush;
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
-    probes.annotate(line);
-    run_log::write(json::Object()
-                       .add("type", "start")
-                       .add("schema", run_log::SCHEMA)
-                       .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json()));
+    probes.annotate(line, step);
+    std::vector<std::string> names;
+    std::vector<double> seconds, ones;
+    for (const auto & [name, s] : run_health.setup_phases) {
+        names.push_back(name);
+        seconds.push_back(s);
+        ones.push_back(1.0);
+    }
+    json::Object setup_phases;
+    for (const auto & phase : health::spread(names, seconds, ones)) {
+        setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
+    }
+    json::Object start;
+    start.add("type", "start")
+        .add("schema", run_log::SCHEMA)
+        .add("version", run_log::VERSION)
+        .add("run_id", provenance::run_id())
+        .raw("restart_of", provenance::restart_of())
+        .raw("provenance", provenance::json())
+        .raw("placement", provenance::placement())
+        .raw("setup_phases", setup_phases.str())
+        .raw("units", progress_units());
+    if (!setup_check_json.empty()) start.raw("check", setup_check_json);
+    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
+        json::Object restart;
+        restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
+        const std::optional<uint64_t> recorded = run_log::last_step();
+        if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
+        start.raw("restart", restart.str());
+    }
+    run_log::release(start);
 }
 
 namespace {
@@ -205,10 +336,8 @@ namespace {
  *        Each rank counts its owned cells; a face between two ranks is counted by
  *        the rank owning the side with the lower global cell id.
  */
-logging::Items describe_mesh(const Mesh & mesh) {
-    using logging::count;
-    using logging::format;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+MeshSetup describe_mesh(const Mesh & mesh) {
+    const bool distributed = mesh.n_global_cells > 0;
     const uint32_t n_owned = mesh.n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && static_cast<uint32_t>(c) < n_owned; };
 
@@ -251,56 +380,49 @@ logging::Items describe_mesh(const Mesh & mesh) {
     const std::map<uint32_t, const char *> names = N_DIM == 2
         ? std::map<uint32_t, const char *>{{3, "tri"}, {4, "quad"}}
         : std::map<uint32_t, const char *>{{4, "tet"}, {5, "pyramid"}, {6, "prism"}, {8, "hex"}};
-    std::string types;
-    uint64_t n_cells = 0;
-    int n_types = 0;
+    MeshSetup m;
     for (uint32_t k = 0; k < MAX_NODES; k++) {
         if (counts[k] == 0) continue;
         const auto it = names.find(k);
-        types += (types.empty() ? "" : ", ") + count(counts[k]) + " " +
-                 (it != names.end() ? std::string(it->second) : std::to_string(k) + "-node");
-        n_cells += counts[k];
-        n_types++;
+        m.cells.emplace_back(it != names.end() ? std::string(it->second) : std::to_string(k) + "-node", counts[k]);
     }
-    std::string extent;
+    m.faces = counts[MAX_NODES];
+    m.boundary_faces = counts[MAX_NODES + 1];
     for (size_t d = 0; d < N_DIM; d++) {
-        extent += (d ? " x " : "") +
-                  format("[%.4g, %.4g]", static_cast<double>(-lo_hi[d]), static_cast<double>(lo_hi[N_DIM + d]));
+        m.lo[d] = static_cast<double>(-lo_hi[d]);
+        m.hi[d] = static_cast<double>(lo_hi[N_DIM + d]);
     }
-    return {
-        {"Cells", n_types == 1 ? types : count(n_cells) + ": " + types},
-        {"Faces", count(counts[MAX_NODES]) + " (" + count(counts[MAX_NODES + 1]) + " boundary)"},
-        {"Extent", extent},
-        {N_DIM == 2 ? "Cell area" : "Cell volume",
-         format("%.3e to %.3e (ratio %.3g)", static_cast<double>(v_min), static_cast<double>(v_max),
-                static_cast<double>(v_max / v_min))},
-    };
+    m.size_min = static_cast<double>(v_min);
+    m.size_max = static_cast<double>(v_max);
+    return m;
 }
+
+} // namespace
 
 bool writes_variable(const Input & input, const std::string & name) {
     if (!input.contains("write_data")) return false;
     const auto outputs = find_value<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
-        if (!output.contains("variables")) continue;
-        const auto variables = find_value<std::vector<std::string>>(output, "variables");
+        if (!output.contains("fields")) continue;
+        const auto variables = find_value<std::vector<std::string>>(output, "fields");
         if (std::find(variables.begin(), variables.end(), name) != variables.end()) return true;
     }
     return false;
 }
 
-} // namespace
-
 void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     // Read in every run, so that an input runs unchanged on any number of ranks
     partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
     if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+        throw not_accepted(input.at("parallel"), "parallel.partitioner", partitioner, {"graph", "hilbert", "multijagged"});
     }
     const std::string exchange =
         find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    record_options("parallel.halo_exchange", {"nccl", "mpi"});
     if (exchange != "nccl" && exchange != "mpi") {
-        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+        throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
     }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
@@ -316,35 +438,45 @@ void Solver::init_mesh() {
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
             halo_layers = std::max(base_halo_layers(), cached);
         }
-        // Partition once; deeper halos (see halo_too_shallow) grow the existing layers
+        // Partition once; deeper halos (see halo_too_shallow) keep the partition
         if (!setup) {
             setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
             setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution);
+        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
-            throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
+            throw InputError({.key = "parallel.halo_exchange",
+                              .line = line_of(input.at("parallel"), "halo_exchange"),
+                              .message = "\"nccl\" needs a build with NCCL, and this one has none",
+                              .fix = "Set halo_exchange = \"mpi\", or rebuild with -DMallard_ENABLE_NCCL=ON",
+                              .docs = "docs/guide/parallel.md#mpi"});
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
     const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
                                                        : curved::surfaces_of_mesh(*mesh, input);
     mesh->apply_curved(surfaces);
-    mesh_summary = describe_mesh(*mesh);
-    mesh_summary.insert(mesh_summary.begin(),
-                        {"Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
-                                                                                         "mesh.msh")
-                                                : type});
+    mesh_setup = describe_mesh(*mesh);
+    Settings & mesh_settings = mesh_setup.settings;
+    mesh_settings.emplace_back("Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
+                                                                                               "mesh.msh")
+                                                      : type);
     const MeshTransform transform = mesh_transform(input);
-    if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
+    if (!transform.is_identity()) mesh_settings.emplace_back("Transform", transform.description);
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
-        if (type == "file") throw InputError("[mesh] stretching applies to generated meshes.");
+        if (type == "file") {
+            throw InputError({.key = "mesh.stretching",
+                              .line = line_of(input.at("mesh"), "stretching"),
+                              .message = "applies only to generated meshes, not to a mesh file",
+                              .fix = "Remove stretching and grade the mesh in the program that made the file",
+                              .docs = "docs/guide/meshes.md#stretching"});
+        }
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
-        mesh_summary.insert(mesh_summary.begin() + 1, {"Stretching", text + "] (tanh, toward both ends)"});
+        mesh_settings.emplace_back("Stretching", text + "] (tanh, toward both ends)");
     }
     n_cells_global = comm::allreduce(uint64_t(mesh->n_owned()), comm::Op::SUM);
     if (is_distributed()) {
@@ -353,18 +485,46 @@ void Solver::init_mesh() {
         const uint64_t min_owned = comm::allreduce(n_owned, comm::Op::MIN);
         const uint64_t max_owned = comm::allreduce(n_owned, comm::Op::MAX);
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
-        const double mean = static_cast<double>(n_cells_global) / comm::size();
-        mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
-                                                               partitioner == "graph"         ? "graph (KaMinPar)"
-                                                               : partitioner == "multijagged" ? "multi-jagged"
-                                                                                              : "Hilbert curve",
-                                                               comm::size(), halo_layers,
-                                                               halo.uses_nccl() ? "NCCL" : "MPI"));
-        mesh_summary.emplace_back("Cells per rank",
-                                  logging::format("%s to %s owned (imbalance %.3f), up to %s halo",
-                                                  logging::count(min_owned).c_str(),
-                                                  logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
-                                                  logging::count(max_halo).c_str()));
+        mesh_setup.partition = MeshSetup::Partition{.partitioner = partitioner == "graph"         ? "graph (KaMinPar)"
+                                                                   : partitioner == "multijagged" ? "multi-jagged"
+                                                                                                  : "Hilbert curve",
+                                                    .exchange = halo.uses_nccl() ? "NCCL" : "MPI",
+                                                    .ranks = comm::size(),
+                                                    .halo_layers = halo_layers,
+                                                    .owned_min = min_owned,
+                                                    .owned_max = max_owned,
+                                                    .halo_max = max_halo};
+    }
+    {
+        const CellOrderChoice & choice = mesh->cell_order_choice;
+        const bool hilbert = choice.order == CellOrder::HILBERT;
+        std::string text = hilbert ? "Hilbert curve" : "input order";
+        if (is_distributed()) {
+            const int n_hilbert = comm::allreduce(int(hilbert), comm::Op::SUM);
+            if (n_hilbert > 0 && n_hilbert < comm::size()) {
+                text = logging::format("Hilbert curve on %d of %d ranks, input order on the others", n_hilbert, comm::size());
+            } else {
+                text = n_hilbert > 0 ? "Hilbert curve" : "input order";
+            }
+        } else if (choice.input_lines > 0.0) {
+            text += logging::format(" (auto: %.3g cache lines per cell, %.3g %s)",
+                                    hilbert ? choice.hilbert_lines : choice.input_lines,
+                                    hilbert ? choice.input_lines : choice.hilbert_lines,
+                                    hilbert ? "in the input order" : "along the Hilbert curve");
+        }
+        std::array<uint64_t, 2> blocks = {mesh->structured_blocks.size(), 0};
+        for (const StructuredBlock & block : mesh->structured_blocks) {
+            uint64_t cells = 1;
+            for (uint32_t e : block.n) cells *= e;
+            blocks[1] += cells;
+        }
+        blocks = comm::allreduce(blocks, comm::Op::SUM);
+        if (blocks[0] > 0) {
+            text += logging::format(", structured blocks first (%llu %s, %.1f%% of the cells)",
+                                    static_cast<unsigned long long>(blocks[0]), blocks[0] == 1 ? "block" : "blocks",
+                                    100.0 * double(blocks[1]) / double(n_cells_global));
+        }
+        mesh_settings.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all
@@ -375,30 +535,41 @@ void Solver::init_mesh() {
             counts[1]++;
         }
         const auto total = comm::allreduce(std::array<uint64_t, 2>{counts[0], counts[1]}, comm::Op::SUM);
-        std::string text = logging::count(total[0]) + " boundary faces";
-        if (N_DIM == 3) text += " (" + logging::count(total[1]) + " curved faces)";
+        std::string text = logging::count(total[0], "boundary face");
+        if (N_DIM == 3) text += " (" + logging::count(total[1], "curved face") + ")";
         uint64_t n_high_order = 0;
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
         if (n_high_order > 0) text += ", high-order faces from the mesh file";
         for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
-        mesh_summary.emplace_back("Curved boundary", text);
+        mesh_settings.emplace_back("Curved boundary", text);
     }
     axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
         if (mesh->curved_geometry) {
-            throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
-                             "(set [mesh] curved_geometry = false).");
+            throw InputError({.key = "physics.axisymmetric",
+                              .line = line_of(input.at("physics"), "axisymmetric"),
+                              .message = "curved boundaries are not supported in axisymmetric runs yet",
+                              .fix = "Set curved_geometry = false in [mesh]",
+                              .docs = "docs/input.md#axisymmetric-flows"});
         }
         if (mesh->is_rotational()) {
-            throw InputError("physics.axisymmetric: rotational periodicity is not supported in axisymmetric runs.");
+            throw InputError({.key = "physics.axisymmetric",
+                              .line = line_of(input.at("physics"), "axisymmetric"),
+                              .message = "rotational periodicity is not supported in axisymmetric runs",
+                              .fix = "Remove the angle of the [[periodic]] pair, or run in 3D",
+                              .docs = "docs/input.md#axisymmetric-flows"});
         }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
-                throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");
+                throw InputError({.key = "physics.axisymmetric",
+                                  .line = line_of(input.at("physics"), "axisymmetric"),
+                                  .message = "the mesh is periodic in y, which is the radius of an axisymmetric run",
+                                  .fix = "Remove the periodicity in y",
+                                  .docs = "docs/input.md#axisymmetric-flows"});
             }
         }
         mesh->make_axisymmetric();
-        mesh_summary.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
+        mesh_setup.settings.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
     }
     mesh->copy_host_to_device();
 }
@@ -411,7 +582,8 @@ int Solver::base_halo_layers() const {
     const bool viscous = find_value_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
     // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
     const bool hybrid = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
-    return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
+    // Fields of the velocity gradient in conditions read it in the cells' vertex neighbors
+    return (type == "FO" && !viscous && !hybrid && !region::conditions_read_gradients(input)) ? 1 : 2;
 }
 
 void Solver::trim_halo() {
@@ -420,9 +592,33 @@ void Solver::trim_halo() {
     // stencils kept, and the layers the other kernels read
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     if (!is_distributed() || teno == nullptr) return;
-    std::vector<uint8_t> needed = teno->stencil_cells();
+    // Owned cells' stencils, or with exchanges_partition_faces() and halo layer 1 not reconstructed, owned cells'
+    // and those of the halo image cells of transmissive faces without an image face (image_point_values)
+    const bool own_faces = exchanges_partition_faces();
+    std::vector<uint8_t> reconstructed(mesh->n_cells, 0);
+    std::fill_n(reconstructed.begin(), own_faces ? mesh->n_owned() : mesh->n_reconstructed(), uint8_t(1));
+    if (own_faces) {
+        const BoundaryData::HostImages images = boundary_data.host_images();
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            const int32_t c0 = mesh->h_cells_of_face(f, 0);
+            if (mesh->h_cells_of_face(f, 1) < 0 && c0 >= 0 && c0 < static_cast<int32_t>(mesh->n_owned()) &&
+                images.cell[f] >= 0 && images.face[f] < 0) {
+                reconstructed[static_cast<size_t>(images.cell[f])] = 1;
+            }
+        }
+    }
+    std::vector<uint8_t> needed = teno->stencil_cells(reconstructed);
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    // Image neighbors of the cells whose gradients are read
+    if (boundary_data.image_neighbors.extent(0) > 0) {
+        auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbor_offsets);
+        auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbors);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            if (distribution.layer[c] > 1) continue;
+            for (uint32_t k = offsets(c); k < offsets(c + 1); k++) needed[neighbors(k)] = 1;
+        }
+    }
     // Wall-model points: their cells and the vertex neighbors their gradients read
     for (const uint32_t c : wall_model_points.cells) {
         needed[c] = 1;
@@ -449,24 +645,29 @@ void Solver::describe_partition_surface() {
     const std::array<uint64_t, 3> local{cut, layer1, received};
     const auto total = comm::allreduce(local, comm::Op::SUM);
     const auto most = comm::allreduce(local, comm::Op::MAX);
-    mesh_summary.emplace_back(
-        "Partition surface",
-        logging::format("%s faces between ranks; per rank up to %s halo layer-1 cells (%s in all), %s cells "
-                        "received per exchange (%s in all)",
-                        logging::count(total[0] / 2).c_str(), logging::count(most[1]).c_str(),
-                        logging::count(total[1]).c_str(), logging::count(most[2]).c_str(),
-                        logging::count(total[2]).c_str()));
+    MeshSetup::Partition & p = *mesh_setup.partition;
+    p.cut_faces = total[0] / 2;
+    p.layer1_max = most[1];
+    p.layer1_all = total[1];
+    p.received_max = most[2];
+    p.received_all = total[2];
 }
 
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    if (teno == nullptr && !wall_model_on) return false;
+    // Every rank takes part in the reduction below, also those without image neighbors
+    const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
+    if (teno == nullptr && !wall_model_on && !images) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
     int needed = 0;
     for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    }
+    // The same for the gradient stencils that continue across extrapolation boundaries
+    for (uint32_t c = 0; !image_reach.empty() && c < mesh->n_cells; c++) {
+        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + image_reach[c]);
     }
     // The wall model's exchange and edge points must lie in cells with complete gradient stencils
     needed = std::max(needed, wall_model_points.needed_layers);
@@ -476,6 +677,10 @@ bool Solver::halo_too_shallow() {
     return true;
 }
 
+bool Solver::exchanges_partition_faces() const {
+    return is_distributed() && !is_mixture() && face_reconstruction->exchanges_partition_faces();
+}
+
 void Solver::init_rhs_split() {
     auto to_device = [](const std::vector<uint32_t> & v, const char * label) {
         Kokkos::View<uint32_t *> d(label, v.size());
@@ -483,40 +688,104 @@ void Solver::init_rhs_split() {
         return d;
     };
     const uint32_t n_owned = mesh->n_owned();
+    auto owned = [&](int32_t c) { return c >= 0 && c < static_cast<int32_t>(n_owned); };
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
-        const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
-        if (c0 < static_cast<int32_t>(n_owned) || (c1 >= 0 && c1 < static_cast<int32_t>(n_owned))) faces.push_back(f);
+        if (owned(mesh->h_cells_of_face(f, 0)) || owned(mesh->h_cells_of_face(f, 1))) faces.push_back(f);
     }
     rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
+
+    const bool own_faces = exchanges_partition_faces();
+    if (own_faces) {
+        // Fluxes read the halo side of partition faces, and transmissive
+        // boundary faces read a side of their image face, which may be a halo cell's
+        const BoundaryData::HostImages images = boundary_data.host_images();
+        std::vector<uint32_t> local, remote;
+        std::vector<RemoteFaceSide> needed;
+        std::vector<bool> requested(2 * size_t(mesh->n_faces), false);
+        auto need = [&](uint32_t f, int32_t c) {
+            const size_t k = 2 * size_t(f) + (mesh->h_cells_of_face(f, 0) == c ? 0 : 1);
+            if (requested[k]) return;
+            requested[k] = true;
+            needed.push_back({f, static_cast<uint32_t>(c)});
+        };
+        for (const uint32_t f : faces) {
+            const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+            bool waits = c1 >= 0 && owned(c0) != owned(c1);
+            if (waits) need(f, owned(c0) ? c1 : c0);
+            if (c1 < 0 && images.face[f] >= 0) {
+                const uint32_t g = static_cast<uint32_t>(images.face[f]);
+                const int32_t c = mesh->h_cells_of_face(g, images.side[f]);
+                if (!owned(c)) {
+                    need(g, c);
+                    waits = true;
+                }
+            }
+            (waits ? remote : local).push_back(f);
+        }
+        local_faces = to_device(local, "local_faces");
+        partition_faces = to_device(remote, "partition_faces");
+        face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
+                                     static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+    }
 
     std::vector<uint32_t> cells;
     if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
     n_early_cells = static_cast<uint32_t>(cells.size());
-    if (n_early_cells == 0) return;
+    if (n_early_cells == 0 && !(own_faces && halo.active())) return;
     std::vector<bool> early(mesh->n_cells, false);
     for (uint32_t c : cells) early[c] = true;
-    for (uint32_t c = 0; c < mesh->n_reconstructed(); c++) {
+    for (uint32_t c = 0; c < (own_faces ? n_owned : mesh->n_reconstructed()); c++) {
         if (!early[c]) cells.push_back(c);
     }
     rhs_cells = to_device(cells, "rhs_cells");
     // Host backends run kernels to completion anyway; on devices the early cells get their own stream
     if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                               Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
-        overlap_space = Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0];
+        // Without early cells nothing forks overlap_space into a step graph's capture, and joining a stream
+        // outside the capture invalidates it
+        overlap_space = n_early_cells > 0
+                            ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
+                            : Kokkos::DefaultExecutionSpace();
+        if (own_faces) comm_space = comm::high_priority_space();
     }
 }
 
 void Solver::init_physics() {
-    if (!input.contains("physics")) throw InputError("missing [physics] table.");
+    if (!input.contains("physics")) {
+        throw InputError({.key = "physics",
+                          .message = "the [physics] table is missing; every input needs one",
+                          .fix = "Add [physics] with type = \"euler\" (inviscid) or \"navier_stokes\" (viscous) "
+                                 "and the gas properties, e.g. gamma = 1.4"});
+    }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
+    record_options("physics.gas", {"perfect", "mixture"});
+    const std::string unit_system = find_value_or<std::string>(input, "physics", "units", "SI");
+    record_options("physics.units", {"SI", "nondimensional"});
+    if (unit_system != "SI" && unit_system != "nondimensional") {
+        throw not_accepted(input.at("physics"), "physics.units", unit_system, {"SI", "nondimensional"});
+    }
+    if (unit_system == "nondimensional" && gas == "mixture") {
+        throw InputError({.key = "physics.units",
+                          .line = line_of(input.at("physics"), "units"),
+                          .message = "a gas mixture reads real thermochemistry, so its numbers are always in SI units",
+                          .fix = "Remove units = \"nondimensional\" from [physics]",
+                          .docs = "docs/guide/input_files.md#units"});
+    }
+    units::set_system(unit_system == "SI" ? units::System::SI : units::System::NONDIMENSIONAL);
     if (gas == "perfect") {
-        if (input.contains("chemistry")) throw InputError("[chemistry] needs physics.gas = \"mixture\".");
+        if (input.contains("chemistry")) {
+            throw InputError({.key = "chemistry",
+                              .line = line_of(input, "chemistry"),
+                              .message = "[chemistry] needs a mixture of species, but physics.gas is \"perfect\"",
+                              .fix = "Set gas = \"mixture\" in [physics], or remove [chemistry]",
+                              .docs = "docs/guide/thermochemistry.md"});
+        }
         physics = Euler::from_input(input);
         return;
     }
     if (gas != "mixture") {
-        throw InputError("physics.gas = \"" + gas + "\" is not one of: perfect, mixture.");
+        throw not_accepted(input.at("physics"), "physics.gas", gas, {"mixture", "perfect"});
     }
     mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
     mixture = mixture_model->device();
@@ -552,7 +821,7 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
     }
     std::string text;
     for (const auto & [zone, n] : faces) {
-        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n) + " faces)";
+        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n, "face") + ")";
     }
     return text;
 }
@@ -566,39 +835,62 @@ void Solver::init_boundaries() {
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
     wall_model_specs.clear();
-    dirichlet_boundaries.clear();
+    std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
-    // Faces of upt boundaries whose composition varies along them, as (boundary, face):
+    // Faces of inlet_state boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
     std::vector<std::array<uint32_t, 2>> profiled_faces;
-    // Faces of each nscbc_inlet on this rank, by input boundary
+    // Mass-flow inlets with a mass flux varying along them: the flux of each profiled face, else NaN
+    std::vector<double> profiled_flux;
+    // Faces of each inlet_state with nscbc on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
+    // Mass-flow inlets whose profile depends on t, by input boundary
+    std::vector<std::pair<size_t, MassFlowProfile>> mass_flow_profiles;
+    boundary_fields.assign(input_boundaries.size(), nullptr);
+    boundary_composition.assign(input_boundaries.size(), nullptr);
+    field_faces.clear();
+    timed_fields = TimedBoundaryFields();
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
+        const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
         if (!bound.contains("name")) {
-            throw std::runtime_error("Boundary name not specified.");
-        }
-        if (!bound.contains("type")) {
-            throw std::runtime_error("Boundary type not specified.");
+            throw missing_key(bound, entry + ".name",
+                              "Add name = \"...\": the mesh zone this condition applies to");
         }
         const std::string name = find_value<std::string>(bound, "name");
+        const std::string where_name = "boundaries[name = \"" + name + "\"]";
+        if (!bound.contains("type")) {
+            std::vector<std::string> types;
+            for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
+            std::sort(types.begin(), types.end());
+            Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
+            d.valid = types;
+            d.fix = "Add type = \"...\"";
+            d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
+            throw InputError(d);
+        }
         const auto & periodic = mesh->periodic_zones;
         if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
-            throw InputError("boundaries: zone \"" + name + "\" is periodic and takes no condition.");
+            throw InputError({.key = where_name,
+                              .line = line_of(bound),
+                              .message = "zone \"" + name + "\" is periodic, so it takes no condition",
+                              .fix = "Remove this [[boundaries]] entry, or the periodic pairing of the zone",
+                              .docs = "docs/guide/meshes.md#periodic-boundaries"});
         }
         FaceZone * zone = mesh->get_face_zone(name);
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
         // A rank's part of the mesh may not touch every zone
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            std::vector<std::string> names;
-            for (const FaceZone & z : *mesh->face_zones()) {
-                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-            }
-            std::sort(names.begin(), names.end());
-            std::string zones;
-            for (const auto & z : names) zones += (zones.empty() ? "" : ", ") + z;
-            throw InputError("boundaries: no boundary zone \"" + name + "\" in the mesh (zones: " + zones + ").");
+            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+            throw InputError({.key = where_name + ".name",
+                              .line = line_of(bound, "name"),
+                              .message = "the mesh has no boundary zone \"" + name + "\"",
+                              .valid = names,
+                              .suggestion = suggest_value(name, names),
+                              .fix = "Use a zone of the mesh: the physical names of a mesh file, or left, right, "
+                                     "bottom, top (back, front in 3D) for generated meshes",
+                              .docs = "docs/guide/boundary_conditions.md"});
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
         WallModelSpec wall_model_spec;
@@ -616,57 +908,139 @@ void Solver::init_boundaries() {
         DirichletBoundary dirichlet;
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             for (const char * key : {"rho", "u", "p"}) {
-                if (!bound.contains(key)) {
-                    throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
-                }
+                if (!bound.contains(key)) throw missing_key(bound, where_name + "." + key);
             }
             if (!bound.at("u").is_array() || bound.at("u").as_array().size() != N_DIM) {
-                throw std::runtime_error("Invalid u for boundary: " + name + ".");
+                throw InputError({.key = where_name + ".u",
+                                  .line = line_of(bound, "u"),
+                                  .message = "must be an array of " + std::to_string(N_DIM) + " components",
+                                  .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             const auto & u = bound.at("u").as_array();
-            dirichlet.W.emplace_back(name + ".rho", quantity_or_expression(bound.at("rho"), name + ".rho", dim::density));
-            FOR_I_DIM {
-                const std::string key = name + ".u[" + std::to_string(i) + "]";
-                dirichlet.W.emplace_back(key, quantity_or_expression(u[i], key, dim::velocity));
-            }
-            dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
+            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
+                dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), expression_unit_hint));
+            };
+            add_state(bound.at("rho"), name + ".rho", dim::density);
+            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
+            add_state(bound.at("p"), name + ".p", dim::pressure);
         }
-        const bool profiled = is_mixture() && bcs.back().prescribes_composition() &&
-                              MixtureModel::composition_varies(bound);
+        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back(), "boundaries[name = \"" + name + "\"]");
+        boundary_fields[i_bc] = fields;
+        const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
+                                 MixtureModel::composition_varies(bound);
+        // The target of an average-pressure outlet is one number, of t at most: one entry of timed_fields
+        const bool average = bcs.back().has(BoundaryCondition::AVERAGE);
+        const bool profiled = composition || (!average && (fields->varies() || fields->per_face()));
         rtype direction[N_DIM];
         FOR_I_DIM direction[i] = bcs.back().data[1 + i];
-        const bool directed = bcs.back().type == BoundaryType::STAGNATION_INLET && dot<N_DIM>(direction, direction) > 0.0_r;
+        const bool directed = (bcs.back().type == BoundaryType::INLET_STAGNATION ||
+                               bcs.back().type == BoundaryType::INLET_MASS_FLOW) &&
+                              dot<N_DIM>(direction, direction) > 0.0_r;
+        // A direction of x, y, z (and t) is checked at every face, at t = 0 (later times on the device)
+        const bool directed_field = (bcs.back().type == BoundaryType::INLET_STATE ||
+                                     bcs.back().type == BoundaryType::INLET_STAGNATION ||
+                                     bcs.back().type == BoundaryType::INLET_MASS_FLOW) &&
+                                    fields->is_directed() && !fields->get_direction().constant();
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
+        std::string twice, outward;
+        std::vector<double> selected;
+        if (where && zone) {
+            std::vector<uint32_t> zone_faces(zone->n_faces());
+            for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
+            selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
+        }
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
-            if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
-                continue;
-            }
-            if (face_bc[i_face] != -1) {
-                throw std::runtime_error("Boundary " + name + " assigned more than once.");
+            if (where && selected[i] == 0.0) continue;
+            if (face_bc[i_face] != -1 && twice.empty()) {
+                const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
+                std::string at;
+                for (uint8_t d = 0; d < N_DIM; d++) {
+                    at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                }
+                twice = "the face at " + at + ") already has a condition, from the entry on line " +
+                        std::to_string(line_of(first)) + " (name = \"" + find_value<std::string>(first, "name") + "\")";
             }
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
                 rtype inward = 0.0_r;
                 for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
                 if (!(inward > 0.0_r)) {
-                    throw InputError("boundaries[name = \"" + name + "\"].direction must point into the domain at "
-                                     "every face of the boundary.");
+                    if (outward.empty()) {
+                        std::string at;
+                        for (uint8_t d = 0; d < N_DIM; d++) {
+                            at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                        }
+                        outward = "points out of the domain at the face at " + at + ")";
+                    }
                 }
             }
-            if (profiled) profiled_faces.push_back({static_cast<uint32_t>(i_bc), i_face});
+            if (directed_field && outward.empty()) {
+                Point x{}, n_in{};
+                std::string at;
+                for (uint8_t d = 0; d < N_DIM; d++) {
+                    x[d] = double(mesh->h_face_coords(i_face, d));
+                    n_in[d] = -double(mesh->h_face_normals(i_face, d)) / double(mesh->h_face_area(i_face));
+                    at += (d ? ", " : "(") + logging::real(x[d]);
+                }
+                try {
+                    const Point d = fields->get_direction().at(x, 0.0);
+                    double into = 0.0;
+                    for (size_t j = 0; j < N_DIM; j++) into += d[j] * n_in[j];
+                    if (!(into > 0.0)) {
+                        outward = "points out of the domain at the face at " + at + "), t = 0 (" +
+                                  logging::real(into) + " along the inward normal)";
+                    }
+                } catch (const InputError &) {
+                    outward = "is zero at the face at " + at + "), t = 0";
+                }
+            }
+
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
         }
-        if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
-            throw std::runtime_error("Boundary " + name + " selects no faces.");
+        // Faces are checked where they are, so every rank throws what the first one found
+        if (const std::string message = comm::first_error(twice); !message.empty()) {
+            throw InputError({.key = where_name,
+                              .line = line_of(bound),
+                              .message = message,
+                              .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
+                                     "filters that do not overlap",
+                              .docs = "docs/guide/boundary_conditions.md"});
         }
-        if (bcs.back().type == BoundaryType::NSCBC_INLET) inlets.emplace_back(i_bc, dirichlet.faces);
+        if (const std::string message = comm::first_error(outward); !message.empty()) {
+            throw InputError({.key = where_name + ".direction",
+                              .line = line_of(bound, "direction"),
+                              .message = message,
+                              .fix = "Give a nonzero direction into the domain at every face of the zone, or "
+                                     "remove it to use each face's inward normal",
+                              .docs = "docs/guide/boundary_conditions.md#" + BOUNDARY_NAMES.at(bcs.back().type)});
+        }
+        if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
+            throw InputError({.key = where ? where_name + ".where" : where_name,
+                              .line = where ? line_of(bound, "where") : line_of(bound),
+                              .message = where ? "selects no face of zone \"" + name + "\""
+                                               : "zone \"" + name + "\" has no faces",
+                              .fix = where ? "Check the expression against the zone's coordinates; a face is kept "
+                                             "where it is nonzero"
+                                           : "Remove this entry, or check the zone in the mesh file",
+                              .docs = "docs/guide/boundary_conditions.md"});
+        }
+        MassFlowProfile timed_profile;
+        const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back(), timed_profile);
+        if (timed_profile.shape) mass_flow_profiles.emplace_back(i_bc, std::move(timed_profile));
+        for (size_t k = 0; k < dirichlet.faces.size(); k++) {
+            if (!profiled && flux.empty()) break;
+            profiled_faces.push_back({static_cast<uint32_t>(i_bc), dirichlet.faces[k]});
+            profiled_flux.push_back(flux.empty() ? std::nan("") : flux[k]);
+        }
+        if (bcs.back().type == BoundaryType::INLET_STATE && bcs.back().is_characteristic()) inlets.emplace_back(i_bc, dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
-        } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
+        } else if (bcs.back().type == BoundaryType::OUTLET_PRESSURE && bcs.back().has(BoundaryCondition::AVERAGE)) {
             // The area average runs over faces of owned cells only, so no face counts twice
             std::vector<uint32_t> owned;
             for (uint32_t f : dirichlet.faces) {
@@ -676,33 +1050,40 @@ void Solver::init_boundaries() {
             auto h_faces = Kokkos::create_mirror_view(faces);
             for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(faces, h_faces);
-            // Sum in an order every rank count agrees on: by global cell, then by
-            // the face's position in that cell
-            std::vector<uint64_t> keys;
-            for (uint32_t f : owned) {
-                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
-                uint32_t k = 0;
-                while (mesh->h_face_of_cell(c, k) != f) k++;
-                keys.push_back(mesh->h_global_cell(c) * 8 + k);  // No cell has 8 faces
-            }
-            if (is_distributed()) keys = comm::allgatherv(keys);
-            std::vector<uint32_t> order(keys.size());
-            std::iota(order.begin(), order.end(), 0u);
-            std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
-            average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order)});
+            average_pressure_outlets.push_back(
+                {static_cast<int32_t>(i_bc), faces, Kokkos::View<double *[2]>("outlet_pA_A", owned.size()),
+                 ExactSums(2, static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
-        std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
-        if (where) text += ", where " + find_value<std::string>(bound, "where");
-        if (profiled) text += ", varying composition";
-        if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
-        boundary_summary.emplace_back(name, text);
+        std::string details;
+        auto detail = [&](const std::string & text) { details += (details.empty() ? "" : ", ") + text; };
+        if (where) detail("where " + find_value<std::string>(bound, "where"));
+        if (composition) detail("varying composition");
+        if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
+        if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
+        if (bcs.back().modeled) detail(wall_model_spec.summary());
+        boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
-    for (const auto & [i_bc, i_face] : profiled_faces) {
-        const BoundaryCondition copy = bcs[i_bc];
-        face_bc[i_face] = static_cast<int32_t>(bcs.size());
-        bcs.push_back(copy);
-    }
+    on_every_rank([&] {
+        for (size_t k = 0; k < profiled_faces.size(); k++) {
+            const auto [i_bc, i_face] = profiled_faces[k];
+            BoundaryCondition copy = bcs[i_bc];
+            if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
+            Point x{}, n_in{};
+            FOR_I_DIM {
+                x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+                n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) /
+                          static_cast<double>(mesh->h_face_area(i_face));
+            }
+            // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
+            const BoundaryFields & fields = *boundary_fields[i_bc];
+            if (fields.varies() || fields.per_face()) fields.apply(copy, x, 0.0, double(physics.R), n_in);
+            face_bc[i_face] = static_cast<int32_t>(bcs.size());
+            field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
+            bcs.push_back(copy);
+            wall_model_specs.push_back(wall_model_specs[i_bc]);
+        }
+    });
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
         BoundaryCondition bc;
@@ -711,15 +1092,25 @@ void Solver::init_boundaries() {
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
     const std::string uncovered = zones_without_condition(face_bc);
-    if (!uncovered.empty()) throw InputError("boundaries: no condition for " + uncovered + ".");
+    if (!uncovered.empty()) {
+        throw InputError({.key = "boundaries",
+                          .message = "no condition for " + uncovered + "; every boundary face needs one",
+                          .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
+                                 "\"symmetry\" or \"outlet_pressure\") for each zone",
+                          .docs = "docs/guide/boundary_conditions.md#available-boundary-conditions"});
+    }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
         if (axisymmetric && mesh->h_cells_of_face(i_face, 1) < 0 && mesh->h_face_measure(i_face) == 0.0_r) {
             const BoundaryType type = bcs[static_cast<size_t>(face_bc[i_face])].type;
             if (type != BoundaryType::SYMMETRY && type != BoundaryType::PARTITION) {
-                throw InputError("physics.axisymmetric: boundary faces on the axis (y = 0) need type = "
-                                 "\"symmetry\", not \"" + BOUNDARY_NAMES.at(type) + "\".");
+                throw InputError({.key = "physics.axisymmetric",
+                                  .line = line_of(input.at("physics"), "axisymmetric"),
+                                  .message = "boundary faces on the axis (y = 0) have type = \"" +
+                                             BOUNDARY_NAMES.at(type) + "\", but the axis is a line of symmetry",
+                                  .fix = "Give the zone on the axis type = \"symmetry\"",
+                                  .docs = "docs/input.md#axisymmetric-flows"});
             }
         }
     }
@@ -730,7 +1121,7 @@ void Solver::init_boundaries() {
     t_characteristic = -1.0;
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
-    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics, &image_reach);
     boundary_data.mixture = is_mixture();
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
@@ -738,39 +1129,62 @@ void Solver::init_boundaries() {
         boundary_data.thermo = mixture.thermo;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
-        auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
-        auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
-        for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-            for (uint32_t k = 0; k < n_species; k++) {
-                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
-            }
-            h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
-            h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
-        }
-        Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
-        Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
         if (is_viscous()) {
             bc_transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_transport_values", bcs.size(),
                                                                               n_species + 1);
-            auto h_values = Kokkos::create_mirror_view(bc_transport_values);
-            for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-                if (bc_mass_fractions[i_bc].empty()) continue;
-                const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
-                h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
-                for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
-            }
-            Kokkos::deep_copy(bc_transport_values, h_values);
+        }
+        copy_boundary_gas();
+    }
+    for (const auto & [base, i_face, i_bc] : field_faces) {
+        const auto & composition = boundary_composition[base];
+        if (!boundary_fields[base]->depends_on_time() && !composition) continue;
+        Point x{}, n_in{};
+        FOR_I_DIM {
+            x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) / static_cast<double>(mesh->h_face_area(i_face));
+        }
+        timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
+    }
+    for (const auto & outlet : average_pressure_outlets) {
+        if (outlet.fields->depends_on_time()) {
+            timed_fields.add(static_cast<uint32_t>(outlet.i_bc), Point{}, Point{}, outlet.fields, nullptr, false);
         }
     }
-    h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
-    h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
-    t_boundary_states = -1.0;
-    boundary_states_steady = false;
+    for (const auto & [base, profile] : mass_flow_profiles) {
+        std::vector<uint32_t> own;
+        std::vector<Point> x;
+        for (const auto & [b, i_face, i_bc] : field_faces) {
+            if (b != base) continue;
+            own.push_back(i_bc);
+            x.emplace_back();
+            FOR_I_DIM x.back()[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        }
+        // Only ranks with faces of the inlet integrate its profile
+        if (!own.empty()) timed_fields.add(profile, own, x);
+    }
+    if (!timed_fields.empty()) timed_fields.finish();
+    dirichlet_states = DirichletStates();
+    const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
+    for (const DirichletBoundary & d : dirichlet_boundaries) {
+        std::vector<int32_t> states;
+        std::vector<Point> x(d.faces.size());
+        for (size_t k = 0; k < d.faces.size(); k++) {
+            states.push_back(h_state_index(d.faces[k]));
+            FOR_I_DIM x[k][i] = static_cast<double>(mesh->h_face_coords(d.faces[k], i));
+        }
+        dirichlet_states.add(d.W, states, x);
+    }
+    dirichlet_states.finish(boundary_data.face_state);
+    if (!stage_time.is_allocated()) {
+        stage_time = Kokkos::View<rtype>("stage_time");
+    }
     init_inlets(input_boundaries, inlets);
+    const bool timed = !timed_fields.empty() || !dirichlet_states.empty() || !timed_inlets.empty();
+    timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
 }
 
-void Solver::init_sources() {
-    sources::CellFields fields;
+region::CellFields Solver::cell_fields() const {
+    region::CellFields fields;
     fields.coords = mesh->cell_coords;
     fields.W = W_cells;
     if (is_mixture()) {
@@ -779,10 +1193,16 @@ void Solver::init_sources() {
         fields.R_universal = chemistry::GAS_CONSTANT;
     } else {
         fields.R = double(physics.R);
+        fields.gamma = double(physics.get_gamma());
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields);
+    return fields;
+}
+
+void Solver::init_sources(region::Regions & regions) {
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, cell_fields(), regions,
+                                                         is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
-        for (const auto & item : terms->summary()) source_summary.push_back(item);
+        source_summary.add(terms->summary());
         source_terms = std::move(terms);
         stage_time = Kokkos::View<rtype>("stage_time");
     }
@@ -793,66 +1213,121 @@ void Solver::init_sources() {
     if (source.contains("gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
         if (g.size() != N_DIM) {
-            throw std::runtime_error("source.gravity must have " + std::to_string(N_DIM) + " components.");
+            throw InputError({.key = "source.gravity",
+                              .line = line_of(source, "gravity"),
+                              .message = "has " + logging::count(g.size(), "component") + ", but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write gravity = [gx, gy, gz]" : "Write gravity = [gx, gy]"});
         }
         has_gravity = true;
         FOR_I_DIM gravity[i] = g[i];
         FOR_I_DIM boundary_data.gravity[i] = g[i];
         face_reconstruction->set_boundaries(boundary_data);
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
-        source_summary.emplace_back("Gravity", text + "]");
+        FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
+                                          units::column("m/s^2"), "");
     }
     if (source.contains("mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
         if (m.size() != N_DIM) {
-            throw InputError("source.mass_flow must have " + std::to_string(N_DIM) + " components.");
+            throw InputError({.key = "source.mass_flow",
+                              .line = line_of(source, "mass_flow"),
+                              .message = "has " + logging::count(m.size(), "component") + ", but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write mass_flow = [mx, my, mz]" : "Write mass_flow = [mx, my]"});
         }
         rtype norm = 0.0_r;
         FOR_I_DIM norm += m[i] * m[i];
         norm = std::sqrt(norm);
         if (!(norm > 0.0_r) || !std::isfinite(norm)) {
-            throw InputError("source.mass_flow must be a finite, nonzero vector.");
+            throw InputError({.key = "source.mass_flow",
+                              .line = line_of(source, "mass_flow"),
+                              .message = "must be a finite, nonzero vector: its direction is the flow's",
+                              .fix = "Give the target mass flux per unit area along the flow, e.g. [1.0, 0.0]"});
         }
         hold_mass_flow = true;
         mass_flow_target = double(norm);
         FOR_I_DIM mass_flow_direction[i] = m[i] / norm;
-        double volume = 0.0;
-        for (uint32_t i_cell = 0; i_cell < mesh->n_owned(); i_cell++) {
-            volume += static_cast<double>(mesh->h_cell_volume(i_cell));
-        }
-        domain_volume = comm::allreduce(volume, comm::Op::SUM);
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
-        source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
+        const uint64_t n_global = is_distributed() ? n_cells_global : mesh->n_owned();
+        const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
+        mass_flow_unit = std::ldexp(1.0, bits);
+        mass_flow_terms = Kokkos::View<double *[2]>("mass_flow_terms", mesh->n_owned());
+        mass_flow_largest = Kokkos::View<double *>("mass_flow_largest", 2);
+        mass_flow_sums = Kokkos::View<int64_t *>("mass_flow_sums", 2);
+        mass_flow_totals = Kokkos::View<double *>("mass_flow_totals", 3);
+        init_mass_flow_volume();
+        source_summary.setting("Mass flow", "volume average of rho u, held by a uniform body force");
+        FOR_I_DIM source_summary.quantity(std::string("mass flow ") + "xyz"[i], logging::real(double(m[i])),
+                                          units::column("kg/(m^2 s)"), "volume average of rho u");
     }
+}
+
+void Solver::init_mass_flow_volume() {
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    const Kokkos::View<rtype *> vol = mesh->cell_volume;
+    Kokkos::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
+        terms(i_cell, 0) = static_cast<double>(vol(i_cell));
+        terms(i_cell, 1) = 0.0;
+    });
+    sum_mass_flow_terms();
+    Kokkos::deep_copy(domain_volume, Kokkos::subview(mass_flow_totals, 0));
+}
+
+void Solver::sum_mass_flow_terms() {
+    const uint32_t n_owned = mesh->n_owned();
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    for (int k = 0; k < 2; k++) {
+        Kokkos::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+            m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k)));
+        }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mass_flow_largest.data() + k)));
+    }
+    if (is_distributed()) comm::allreduce_device(mass_flow_largest, comm::Op::MAX, halo.uses_nccl());
+    const Kokkos::View<double *> largest = mass_flow_largest;
+    const double unit = mass_flow_unit;
+    for (int k = 0; k < 2; k++) {
+        Kokkos::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+            if (largest(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit / largest(k))));
+        }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(mass_flow_sums.data() + k)));
+    }
+    if (is_distributed()) comm::allreduce_device(mass_flow_sums, comm::Op::SUM, halo.uses_nccl());
+    const Kokkos::View<int64_t *> sums = mass_flow_sums;
+    const Kokkos::View<double *> totals = mass_flow_totals;
+    Kokkos::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
+        for (int k = 0; k < 2; k++) totals(k) = largest(k) > 0.0 ? static_cast<double>(sums(k)) / (unit / largest(k)) : 0.0;
+    });
 }
 
 void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     const uint32_t n_owned = mesh->n_owned();
-    Kokkos::View<rtype *> vol = mesh->cell_volume;
+    const Kokkos::View<rtype *> vol = mesh->cell_volume;
     Kokkos::Array<rtype, N_DIM> e;
     FOR_I_DIM e[i] = mass_flow_direction[i];
     // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
-    double momentum = 0.0, rate = 0.0;
-    Kokkos::parallel_reduce("mass_flow_sums", n_owned,
-                            KOKKOS_LAMBDA(const uint32_t i_cell, double & sum_momentum, double & sum_rate) {
+    const Kokkos::View<double *[2]> terms = mass_flow_terms;
+    Kokkos::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype m = 0.0_r, r = 0.0_r;
         FOR_I_DIM {
             m += solution(i_cell, 1 + i) * e[i];
             r += rhs(i_cell, 1 + i) * e[i];
         }
-        sum_momentum += static_cast<double>(m * vol(i_cell));
-        sum_rate += static_cast<double>(r);
-    }, momentum, rate);
-    const std::array<double, 2> sums = comm::allreduce(std::array<double, 2>{momentum, rate}, comm::Op::SUM);
-    // Cancel the other terms, and close the gap to the target within a step
-    double force = -sums[1] / domain_volume;
-    if (dt > 0.0_r) force += (mass_flow_target - sums[0] / domain_volume) / static_cast<double>(dt);
-    mass_flow_force = force;
-    Kokkos::Array<rtype, N_DIM> f;
-    FOR_I_DIM f[i] = static_cast<rtype>(force) * e[i];
+        terms(i_cell, 0) = static_cast<double>(m * vol(i_cell));
+        terms(i_cell, 1) = static_cast<double>(r);
+    });
+    sum_mass_flow_terms();
+    // Cancel the other terms, and close the gap to the target within the step, whose dt a captured step has only on the device
+    const Kokkos::View<double *> totals = mass_flow_totals;
+    const double target = mass_flow_target, volume = domain_volume;
+    const rtype * dt_device = recording_step ? step_dt_device() : nullptr;
+    const rtype dt_host = dt;
+    Kokkos::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
+        const rtype dt_ = dt_device ? *dt_device : dt_host;
+        double force = -totals(1) / volume;
+        if (dt_ > 0.0_r) force += (target - totals(0) / volume) / static_cast<double>(dt_);
+        totals(2) = force;
+    });
     Kokkos::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+        Kokkos::Array<rtype, N_DIM> f;
+        FOR_I_DIM f[i] = static_cast<rtype>(totals(2)) * e[i];
         const rtype V = vol(i_cell);
         rtype work = 0.0_r;
         FOR_I_DIM {
@@ -863,55 +1338,88 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     });
 }
 
+double Solver::get_mass_flow_force() const {
+    const comm::SelfScope scope = communication_scope();
+    if (!hold_mass_flow) return 0.0;
+    double force = 0.0;
+    Kokkos::deep_copy(force, Kokkos::subview(mass_flow_totals, 2));
+    return force;
+}
+
 void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
+    const Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
+    const Kokkos::View<rtype *> face_area = mesh->face_measure;
+    const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
     for (const auto & outlet : average_pressure_outlets) {
-        Kokkos::View<uint32_t *> faces = outlet.faces;
-        Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
-        Kokkos::View<rtype *> face_area = mesh->face_measure;
-        Kokkos::View<rtype *[2], Kokkos::LayoutRight> pA_A("outlet_pA_A", faces.extent(0));
+        const Kokkos::View<uint32_t *> faces = outlet.faces;
+        const Kokkos::View<double *[2]> pA_A = outlet.pA_A;
         Kokkos::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t f = faces(k);
             const int32_t c = cells_of_face(f, 0);
             rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U[i] = solution(c, i);
             phys.compute_W_from_conservatives(W, U);
-            pA_A(k, 0) = W[N_DIM + 1] * face_area(f);
-            pA_A(k, 1) = face_area(f);
+            pA_A(k, 0) = static_cast<double>(W[N_DIM + 1]) * static_cast<double>(face_area(f));
+            pA_A(k, 1) = static_cast<double>(face_area(f));
         });
-        auto h_pA_A = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), pA_A);
-        std::vector<rtype> local(h_pA_A.data(), h_pA_A.data() + h_pA_A.size());
-        const std::vector<rtype> all = is_distributed() ? comm::allgatherv(local) : local;
-        rtype pA = 0.0, A = 0.0;
-        for (uint32_t k : outlet.sum_order) {
-            pA += all[2 * k];
-            A += all[2 * k + 1];
-        }
-        auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
-        auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
-        h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
-        Kokkos::deep_copy(bc, h_bc);
+        outlet.sums.sum(pA_A);
+        const Kokkos::View<double *> sums = outlet.sums.sums();
+        const int32_t i_bc = outlet.i_bc;
+        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - static_cast<rtype>(sums(0) / sums(1));
+        });
     }
 }
 
-void Solver::update_boundary_states(rtype t_eval) {
-    update_inflow(t_eval);
-    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
-        return;
-    }
-    for (const auto & bc : dirichlet_boundaries) {
-        for (uint32_t i_face : bc.faces) {
-            const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
-            const int32_t k = h_face_state_index(i_face);
-            if (k < 0) throw std::logic_error("Dirichlet boundary face " + std::to_string(i_face) + " has no state.");
-            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = static_cast<rtype>(bc.W[i].at(x, N_DIM, double(t_eval)));
+void Solver::copy_boundary_gas() {
+    const uint32_t n_species = mixture.n_species;
+    auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
+    auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
+    for (size_t i_bc = 0; i_bc < h_bc_Y.extent(0); i_bc++) {
+        for (uint32_t k = 0; k < n_species; k++) {
+            h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
         }
+        h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
+        h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
     }
-    Kokkos::deep_copy(boundary_data.face_state, h_face_state);
-    t_boundary_states = t_eval;
-    boundary_states_steady = std::none_of(dirichlet_boundaries.begin(), dirichlet_boundaries.end(), [](const auto & bc) {
-        return std::any_of(bc.W.begin(), bc.W.end(), [](const Expression & w) { return w.depends_on_time(); });
-    });
+    Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
+    Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
+    if (bc_transport_values.extent(0) == 0) return;
+    auto h_values = Kokkos::create_mirror_view(bc_transport_values);
+    for (size_t i_bc = 0; i_bc < h_values.extent(0); i_bc++) {
+        if (bc_mass_fractions[i_bc].empty()) continue;
+        const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
+        h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+        for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
+    }
+    Kokkos::deep_copy(bc_transport_values, h_values);
+}
+
+void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
+    if (timed_fields.empty() && !dirichlet_states.depends_on_time()) return;
+    set_stage_time(t_eval, c);
+    apply_boundary_fields();
+}
+
+void Solver::apply_boundary_fields() {
+    dirichlet_states.apply(stage_time, boundary_data.face_state);
+    if (timed_fields.empty()) return;
+    TimedBoundaryFields::Gas gas;
+    gas.R = double(physics.R);
+    if (is_mixture()) {
+        gas.mixture = true;
+        gas.thermo = boundary_data.thermo;
+        gas.bc_Y = boundary_data.bc_Y;
+        gas.bc_thermo = boundary_data.bc_thermo;
+        gas.transport = bc_transport_values;
+    }
+    timed_fields.apply(stage_time, boundary_data.bcs, gas);
+}
+
+void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
+    update_boundary_fields(t_eval, c);
+    update_inflow(t_eval, c);
 }
 
 void Solver::init_numerics() {
@@ -921,9 +1429,15 @@ void Solver::init_numerics() {
     const std::string riemann_solver_str = find_value_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = find_value_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
 
-    auto it_face = find_option(FACE_RECONSTRUCTION_TYPES, "numerics.face_reconstruction.type", face_reconstruction_str);
-    auto it_riemann = find_option(RIEMANN_SOLVER_TYPES, "numerics.riemann_solver", riemann_solver_str);
-    auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str);
+    const auto numerics_line = [&](const char * key) {
+        return input.contains("numerics") ? line_of(input.at("numerics"), key) : size_t(0);
+    };
+    auto it_face = find_option(FACE_RECONSTRUCTION_TYPES, "numerics.face_reconstruction.type", face_reconstruction_str,
+                               line_of(face_reconstruction_input, "type"));
+    auto it_riemann =
+        find_option(RIEMANN_SOLVER_TYPES, "numerics.riemann_solver", riemann_solver_str, numerics_line("riemann_solver"));
+    auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
+                               numerics_line("time_integrator"));
 
     switch (it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
@@ -963,48 +1477,100 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
+    describe_stencil_shapes();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture()) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
-        throw InputError("numerics.double_flux needs gas = \"mixture\".");
+        throw InputError({.key = "numerics.double_flux",
+                          .line = line_of(input.at("numerics"), "double_flux"),
+                          .message = "is for mixtures, but physics.gas is \"perfect\"",
+                          .fix = "Remove double_flux, or set gas = \"mixture\" in [physics]"});
     }
     if (double_flux && simpler) {
-        throw InputError("numerics.double_flux is not available with chemistry.coupling = \"simpler\" (its "
-                         "thermodynamics are frozen over a step, which the reaction substep would leave stale).");
+        throw InputError({.key = "numerics.double_flux",
+                          .line = line_of(input.at("numerics"), "double_flux"),
+                          .message = "is not available with chemistry.coupling = \"simpler\": its thermodynamics "
+                                     "are frozen over a step, which the reaction substep would leave stale",
+                          .fix = "Set coupling = \"strang\" in [chemistry], or remove double_flux"});
     }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) { calc_rhs(solution, rhs, t_stage, c); };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
-        throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
+        throw InputError({.key = "numerics.low_mach_cutoff",
+                          .line = line_of(input.at("numerics"), "low_mach_cutoff"),
+                          .message = "must be positive",
+                          .fix = "Use a value in (0, 1]; 1 disables the low-Mach correction"});
     }
     const std::string flux = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann");
+    record_options("numerics.convective_flux", {"riemann", "hybrid"});
     if (flux != "riemann" && flux != "hybrid") {
-        throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
+        throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
     if (hybrid_flux && simpler) {
-        throw InputError(
-            "numerics.convective_flux = \"hybrid\" is not available with chemistry.coupling = \"simpler\": SIMPLER "
-            "turns the flow integrator into 1 + z + z^2/2 + z^3/8 + z^4/48, which amplifies every mode on the "
-            "imaginary axis, and the hybrid flux's central part has no dissipation to damp them. Use "
-            "chemistry.coupling = \"strang\", or convective_flux = \"riemann\".");
+        throw InputError({.key = "numerics.convective_flux",
+                          .line = line_of(input.at("numerics"), "convective_flux"),
+                          .message = "\"hybrid\" is not available with chemistry.coupling = \"simpler\": SIMPLER "
+                                     "turns the flow integrator into 1 + z + z^2/2 + z^3/8 + z^4/48, which amplifies "
+                                     "every mode on the imaginary axis, and the hybrid flux's central part has no "
+                                     "dissipation to damp them",
+                          .fix = "Use chemistry.coupling = \"strang\", or convective_flux = \"riemann\""});
     }
     const Input hybrid_input = toml::find_or(input, "numerics", "hybrid", Input(Input::table_type{}));
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
-        throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
+        throw InputError({.key = "numerics.hybrid",
+                          .line = line_of(input.at("numerics"), "hybrid"),
+                          .message = "has no effect: numerics.convective_flux is \"riemann\"",
+                          .fix = "Set convective_flux = \"hybrid\" in [numerics], or remove [numerics.hybrid]"});
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
+    static const std::map<std::string, CentralFlux> central_fluxes = {
+        {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
+    // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
+    const std::string central =
+        find_value_or<std::string>(hybrid_input, "central", teno ? "cell_averages" : "reconstructed");
+    if (!central_fluxes.contains(central)) {
+        throw not_accepted(hybrid_input, "numerics.hybrid.central", central, {"cell_averages", "reconstructed"});
+    }
+    hybrid_central = central_fluxes.at(central);
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
-        throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
+        throw InputError({.key = "numerics.hybrid",
+                          .line = line_of(hybrid_input),
+                          .message = "sensor_threshold and upwind_floor must be in [0, 1]",
+                          .fix = "The defaults are sensor_threshold = 0.65 and upwind_floor = 0.0"});
     }
     init_error_control();
+}
+
+void Solver::describe_stencil_shapes() {
+    // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
+    const FaceReconstructionType type = face_reconstruction->get_type();
+    if (type == FaceReconstructionType::FIRST_ORDER) return;
+    uint32_t reach = 1;
+    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
+        reach = 0;
+        for (const uint8_t depth : teno->gather_depth) reach = std::max<uint32_t>(reach, depth);
+        reach = comm::allreduce(reach, comm::Op::MAX);
+    }
+    const StencilShapes shapes = stencil_shapes(*mesh, reach);
+    const uint64_t interior = comm::allreduce(
+        uint64_t(std::count_if(shapes.shape.begin(), shapes.shape.end(), [](uint32_t s) { return s != StencilShapes::NONE; })),
+        comm::Op::SUM);
+    if (interior == 0) return;
+    const uint64_t most = comm::allreduce(uint64_t(shapes.first.size()), comm::Op::MAX);
+    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks with a stencil shape, ",
+                                             100.0 * double(interior) / double(n_cells_global)) +
+                             (is_distributed() ? "up to " + logging::count(most, "shape") + " per rank"
+                                               : logging::count(most, "shape"));
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -1029,21 +1595,43 @@ void Solver::init_axisymmetric_weights() {
 
 void Solver::init_run_parameters() {
     if (!input.contains("run")) {
-        throw InputError("missing [run] table.");
+        throw InputError({.key = "run",
+                          .message = "the [run] table is missing; it sets the time step and when the run stops",
+                          .fix = "Add [run] with cfl = 0.5 (or a fixed dt) and t_stop or n_steps"});
     }
     const Input & run = input.at("run");
     if (run.contains("dt") == run.contains("cfl")) {
-        throw InputError("run: specify exactly one of dt and cfl.");
+        throw InputError({.key = "run",
+                          .line = line_of(run),
+                          .message = run.contains("dt") ? "sets both dt and cfl; specify exactly one"
+                                                        : "specify exactly one of dt and cfl",
+                          .fix = "Use cfl (e.g. cfl = 0.5) for a time step that adapts to the flow, or dt for a "
+                                 "fixed one"});
     }
     if (!run.contains("n_steps") && !run.contains("t_stop") && !run.contains("t_wall_stop")) {
-        throw InputError("run: specify at least one of n_steps, t_stop and t_wall_stop.");
+        throw InputError({.key = "run",
+                          .line = line_of(run),
+                          .message = "nothing stops the run: specify at least one of n_steps, t_stop and t_wall_stop",
+                          .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)"});
     }
     use_cfl = run.contains("cfl");
     if (use_cfl) {
         cfl = find_real(input, "run", "cfl", dim::none);
+        if (!(cfl > 0.0_r)) {
+            throw InputError({.key = "run.cfl",
+                              .line = line_of(run, "cfl"),
+                              .message = "must be positive",
+                              .fix = "Start from cfl = 0.5; most explicit schemes are stable up to about 1"});
+        }
     } else {
         dt_fixed = find_real(input, "run", "dt", dim::time);
         dt = dt_fixed;
+        if (!(dt_fixed > 0.0_r)) {
+            throw InputError({.key = "run.dt",
+                              .line = line_of(run, "dt"),
+                              .message = "must be positive",
+                              .fix = "Give the time step in seconds, or use cfl for one that adapts to the flow"});
+        }
     }
     n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
     cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
@@ -1052,17 +1640,30 @@ void Solver::init_run_parameters() {
     keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
     control_socket = find_value_or<bool>(input, "run", "control_socket", true);
     control_file_interval = find_value_or<uint64_t>(input, "run", "control_file_interval", 0);
+    step_queue_depth = find_value_or<uint64_t>(input, "run", "step_queue", 3);
+    if (step_queue_depth > 64) {
+        throw InputError({.key = "run.step_queue",
+                          .line = line_of(input.at("run"), "step_queue"),
+                          .message = "must be at most 64",
+                          .fix = "A few steps ahead keep the GPU busy: use 3, or 1 to wait for every step"});
+    }
 }
 
-void Solver::init_output() {
+void Solver::init_output(region::Regions & regions) {
     check_interval = find_value_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
-        throw InputError("output.check_interval must be positive.");
+        throw InputError({.key = "output.check_interval",
+                          .line = line_of(input.at("output"), "check_interval"),
+                          .message = "must be positive",
+                          .fix = "Use 1 to check every step"});
     }
     const bool async_output = find_value_or<bool>(input, "output", "async", true);
     const uint32_t io_threads = find_value_or<uint32_t>(input, "output", "io_threads", 1);
     if (io_threads == 0) {
-        throw InputError("output.io_threads must be positive.");
+        throw InputError({.key = "output.io_threads",
+                          .line = line_of(input.at("output"), "io_threads"),
+                          .message = "must be positive",
+                          .fix = "Use 1 (the default), or more to write several files at once"});
     }
     if (input.contains("forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
@@ -1071,7 +1672,12 @@ void Solver::init_output() {
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
             if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                throw std::runtime_error("forces: unknown boundary zone " + monitor.zone + ".");
+                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+                throw InputError({.key = "forces.zone",
+                                  .line = line_of(entry, "zone"),
+                                  .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
+                                  .valid = names,
+                                  .suggestion = suggest_value(monitor.zone, names)});
             }
             std::vector<uint32_t> owned;
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -1094,24 +1700,28 @@ void Solver::init_output() {
             monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
             monitor.interval = find_value_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
-                throw std::runtime_error("forces: interval must be positive.");
+                throw InputError({.key = "forces.interval",
+                                  .line = line_of(entry, "interval"),
+                                  .message = "must be positive",
+                                  .fix = "Use 1 to write the forces every step"});
             }
             const std::string file = find_value_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             monitor.file = file;
             if (comm::is_root() && output_files_enabled()) {
-                const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-                if (!parent.empty()) std::filesystem::create_directories(parent);
+                create_parent_directories("the forces file", file);
                 // init_output runs before the restart state is read, so check the input
                 const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                                     std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+                if (!monitor.out->good()) throw cannot_write("the forces file", file);
                 if (!resume) {
+                    std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
-                    for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                    for (const auto & [name, dimension] : force_columns(monitor.modeled)) {
+                        *monitor.out << "," << name;
+                        units.push_back(dimension);
                     }
-                    if (monitor.modeled) *monitor.out << ",Q";
-                    *monitor.out << "\n";
+                    *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
             }
             force_monitors.push_back(monitor);
@@ -1120,7 +1730,10 @@ void Solver::init_output() {
     if (input.contains("integrals")) {
         integral_monitor.interval = find_value_or<uint64_t>(input, "integrals", "interval", 1);
         if (integral_monitor.interval == 0) {
-            throw std::runtime_error("integrals: interval must be positive.");
+            throw InputError({.key = "integrals.interval",
+                              .line = line_of(input.at("integrals"), "interval"),
+                              .message = "must be positive",
+                              .fix = "Use 1 to write the integrals every step"});
         }
         if (!viscous_gradients.is_allocated()) {
             viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
@@ -1134,38 +1747,48 @@ void Solver::init_output() {
         const std::string file = find_value_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
         if (comm::is_root() && output_files_enabled()) {
-            const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-            if (!parent.empty()) std::filesystem::create_directories(parent);
+            create_parent_directories("the integrals file", file);
             const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                                 std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+            if (!integral_monitor.out->good()) throw cannot_write("the integrals file", file);
             if (!resume) {
+                std::vector<Dimension> units = {dim::none, dim::time};
                 *integral_monitor.out << "step,t";
-                for (const auto & name : integral_names()) *integral_monitor.out << "," << name;
-                *integral_monitor.out << "\n";
+                for (const auto & [name, dimension] : integral_columns()) {
+                    *integral_monitor.out << "," << name;
+                    units.push_back(dimension);
+                }
+                *integral_monitor.out << "\n" << field_units::csv_line(units) << "\n";
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
-    const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
-    run_log_on = !run_log_file.empty() && output_files_enabled();
+    probes.set_reconstruction(face_reconstruction.get());
+    probes.set_cell_fields(cell_fields());
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
+                statistics);
+    // An undistributed solver runs on every rank (tests): no run log or report unless asked for
+    const std::string run_log_file =
+        find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");
+    const std::string report_file = find_value_or<std::string>(input, "output", "report", distribute ? "report.html" : "");
+    run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
+    divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
-        run_log::open(run_log_file, resume);
+        run_log::open(run_log_file, resume, report_file);
     } else {
         run_log::close();
     }
-    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
-        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
-    }
     if (input.contains("write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            data_writers.push_back(std::make_unique<DataWriter>());
-            data_writers.back()->init(output, data, mesh, restart_variables());
-            data_writers.back()->set_async(async_output, io_threads);
+            add_data_writers(output, regions, async_output, io_threads);
         }
+    }
+    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
+        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
     if (std::none_of(data_writers.begin(), data_writers.end(),
                      [](const auto & writer) { return writer->get_format() == DataFormat::RESTART; })) {
@@ -1173,19 +1796,178 @@ void Solver::init_output() {
         checkpoint_writer = std::make_unique<DataWriter>();
         checkpoint_writer->init(table, data, mesh, restart_variables());
     }
+    init_triggers();
 }
 
-std::vector<std::string> Solver::integral_names() const {
-    std::vector<std::string> names = {"kinetic_energy", "enstrophy", "dilatation_squared", "pressure_dilatation",
-                                      "velocity_squared", "vorticity_squared", "density_squared", "temperature",
-                                      "temperature_squared"};
-    if (integral_monitor.budget) {
-        names.insert(names.end(),
-                     {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"});
+void Solver::add_data_writers(const Input & output, region::Regions & regions, bool async_output,
+                              uint32_t io_threads) {
+    auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
+        data_writers.push_back(std::make_unique<DataWriter>());
+        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->set_async(async_output, io_threads);
+    };
+    const bool one = output.contains("region"), several = output.contains("regions");
+    if (!one && !several) {
+        add_writer(nullptr, "");
+        return;
     }
-    if (les_on && les.dynamic) names.emplace_back("les_C");
-    if (dynamic_efficiency()) names.emplace_back("tf_beta");
-    return names;
+    if (one && several) {
+        throw InputError({.key = "write_data.regions",
+                          .line = line_of(output, "regions"),
+                          .message = "is given with region",
+                          .fix = "Give region for one region, or regions = [...] for several"});
+    }
+    if (!output.contains("prefix")) {
+        throw missing_key(output, "write_data.prefix", "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
+    }
+    const std::string prefix = find_value<std::string>(output, "prefix");
+    const std::string entry_key = "write_data[prefix = \"" + prefix + "\"]";
+    std::vector<std::pair<const Input *, std::string>> values;
+    if (one) {
+        values.emplace_back(&output.at("region"), entry_key + ".region");
+    } else {
+        const Input & list = output.at("regions");
+        if (!list.is_array() || list.as_array().empty()) {
+            throw InputError({.key = "write_data.regions",
+                              .line = line_of(output, "regions"),
+                              .message = "must be a non-empty list of regions or their names",
+                              .fix = "For example regions = [\"x0\", \"x1\"]"});
+        }
+        for (size_t i = 0; i < list.as_array().size(); i++) {
+            values.emplace_back(&list.as_array()[i], entry_key + ".regions[" + std::to_string(i) + "]");
+        }
+    }
+    for (size_t i = 0; i < values.size(); i++) {
+        const auto & [value, key] = values[i];
+        const probe::RegionValue r = probe::classify_region(input, regions, *value, key);
+        const std::string file_prefix = one ? prefix : prefix + "_" + (r.name.empty() ? std::to_string(i) : r.name);
+        if (r.kind == probe::RegionValue::Kind::WHOLE_MESH) {
+            add_writer(nullptr, file_prefix);
+        } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
+            const region::Region & region = regions.get(*value, key);
+            region::require_full_dimension(region, *value, key);
+            CellSubset subset;
+            subset.name = region.summary();
+            if (region.moving() || region.solution()) {
+                // Its cells at each write: those of positive fraction where it is then
+                std::shared_ptr<const region::SolutionLevels> levels;
+                if (region.solution()) {
+                    levels = std::make_shared<region::SolutionLevels>(*mesh, region.conditions(), species_names,
+                                                                      cell_fields());
+                }
+                auto fractions = std::make_shared<region::MovingFractions>(*mesh, region, levels);
+                subset.at = [fractions](double time) {
+                    fractions->update(time);
+                    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fractions->fractions());
+                    return std::vector<double>(f.data(), f.data() + f.extent(0));
+                };
+                subset.solution = region.solution();
+            } else {
+                subset.fractions = regions.fractions(*value, key);
+                for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                    if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
+                }
+                if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
+                    throw InputError(key + " contains no part of any cell.");
+                }
+            }
+            add_writer(&subset, file_prefix);
+        } else {
+            // Boundary zones, cut planes, surfaces, curves and points: point values, written as a probe writes them
+            const std::string format = find_value_or<std::string>(output, "format", have_hdf5() ? "vtkhdf" : "vtu");
+            if (format != "vtkhdf" && format != "vtu") {
+                throw InputError({.key = "write_data.format",
+                                  .line = line_of(output, "format"),
+                                  .message = "\"" + format + "\" does not hold surfaces, curves or points",
+                                  .fix = "Use format = \"vtkhdf\" (one file of every snapshot) or \"vtu\" (VTK PolyData "
+                                         "files and a .pvd series)"});
+            }
+            if (format == "vtkhdf" && !have_hdf5()) {
+                throw InputError({.key = "write_data.format",
+                                  .line = line_of(output, "format"),
+                                  .message = "\"vtkhdf\" needs a build with HDF5, and this one has none",
+                                  .fix = "Use format = \"vtu\", or rebuild with -DMallard_ENABLE_HDF5=ON"});
+            }
+            if (output.contains("series") && !find_value<bool>(output, "series")) {
+                throw InputError({.key = "write_data.series",
+                                  .line = line_of(output, "series"),
+                                  .message = "is false, but a surface, curve or points is written as one series file",
+                                  .fix = "Remove series"});
+            }
+            const bool vtkhdf = format == "vtkhdf";
+            Probes::Snapshot snapshot{file_prefix, entry_key, value, key, file_prefix + (vtkhdf ? ".vtkhdf" : ".pvd"),
+                                      vtkhdf ? Probes::Format::VTKHDF : Probes::Format::VTP};
+            if (output_files_enabled()) create_parent_directories("the output", file_prefix);
+            probes.add_snapshot(input, *mesh, regions, species_names,
+                                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(),
+                                output, snapshot, data);
+        }
+    }
+}
+
+Dimension Solver::measure_dimension() const {
+    return axisymmetric ? dim::of(0, N_DIM + 1, 0, 0, 0, -1) : dim::of(0, N_DIM, 0);
+}
+
+std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const {
+    const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);
+    const Dimension energy = dim::pressure.times(V), power = energy.times(dim::time, -1);
+    std::vector<std::pair<std::string, Dimension>> columns = {
+        {"kinetic_energy", energy},
+        {"enstrophy", dim::density.times(rate2).times(V)},
+        {"dilatation_squared", rate2.times(V)},
+        {"pressure_dilatation", dim::pressure.times(dim::rate).times(V)},
+        {"velocity_squared", dim::velocity_squared.times(V)},
+        {"vorticity_squared", rate2.times(V)},
+        {"density_squared", dim::density.times(dim::density).times(V)},
+        {"temperature", dim::temperature.times(V)},
+        {"temperature_squared", dim::temperature.times(dim::temperature).times(V)}};
+    if (integral_monitor.budget) {
+        for (const char * name : {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"}) {
+            columns.emplace_back(name, power);
+        }
+    }
+    if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
+    if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
+    return columns;
+}
+
+std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool modeled) const {
+    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+    const Dimension area = measure_dimension().times(dim::length, -1);
+    std::vector<std::pair<std::string, Dimension>> columns;
+    for (const char * kind : {"pressure", "viscous"}) {
+        FOR_I_DIM columns.emplace_back(std::string("F") + "xyz"[i] + "_" + kind, dim::pressure.times(area));
+    }
+    if (modeled) columns.emplace_back("Q", dim::heat_flux.times(area));
+    return columns;
+}
+
+std::string Solver::progress_units() const {
+    const bool si = units::system() == units::System::SI;
+    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
+    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+        json::Object o;
+        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        return o.str();
+    };
+    json::Object u;
+    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
+    for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
+        u.add(memory, "B");
+    }
+    u.raw("monitors", object({{"min_rho", dim::density}, {"min_p", dim::pressure}, {"max_mach", dim::none},
+                              {"troubled_cells", dim::none}, {"min_T", dim::temperature},
+                              {"max_T", dim::temperature}, {"max_sum_Y_error", dim::none},
+                              {"reacting_cells", dim::none}, {"max_chemistry_cost", dim::none}}));
+    u.raw("margins", object({{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}));
+    if (integral_monitor.interval > 0) u.raw("integrals", object(integral_columns()));
+    for (const auto & monitor : force_monitors) u.raw("forces_" + monitor.zone, object(force_columns(monitor.modeled)));
+    json::Object by_probe;
+    for (const auto & [name, columns] : probes.recorded_columns()) by_probe.raw(name, object(columns));
+    if (!by_probe.empty()) u.raw("probes", by_probe.str());
+    return u.str();
 }
 
 void Solver::allocate_memory() {
@@ -1194,28 +1976,41 @@ void Solver::allocate_memory() {
     species = SpeciesView("species", mesh->n_cells, n_species);
     primitives = Kokkos::View<rtype *[N_PRIMITIVE]>("primitives", mesh->n_cells);
     W_cells = Kokkos::View<rtype *[N_CONSERVATIVE]>("W_cells", mesh->n_cells);
-    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("face_solution",
-                                                              mesh->n_faces,
-                                                              face_reconstruction->n_face_quadrature_points());
-    face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
-    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (writes_variable(input, "P_MAX")) {
         p_max = Kokkos::View<rtype *>("p_max", mesh->n_cells);
-        h_p_max = Kokkos::create_mirror_view(p_max);
+        h_p_max = pinned_mirrors(p_max);
     }
     bool vortex_output = false;
-    for (const char * name : {"Q", "VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
+    for (const char * name : {"VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
         vortex_output = vortex_output || writes_variable(input, name);
     }
     if (vortex_output) {
-        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 2 : 4);
-        h_vortex_fields = Kokkos::create_mirror_view(vortex_fields);
+        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 1 : 3);
+        h_vortex_fields = pinned_mirrors(vortex_fields);
     }
-    if (is_viscous() || vortex_output) {
+    derived_settings = derived::Settings::from_input(input, physics, mixture_model.get(), is_viscous());
+    derived_selection = {};
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        const auto field = static_cast<derived::Field>(f);
+        if (!writes_variable(input, derived::FIELDS[f].name)) continue;
+        derived_settings.require(field, input);
+        derived_selection.add(field);
+    }
+    for (const derived::Field field : Statistics::derived_fields(input)) {
+        derived_settings.require(field, input);
+        derived_selection.add(field);
+    }
+    if (derived_selection.any()) {
+        derived_fields = Kokkos::View<rtype **>("derived_fields", mesh->n_cells, derived_selection.n_columns);
+        h_derived_fields = pinned_mirrors(derived_fields);
+    }
+    if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) derived_workspace = derived::Workspace(mesh->n_cells);
+    if (is_viscous() || vortex_output || derived_selection.any()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
         if (!viscous_gradients.is_allocated()) {
@@ -1225,9 +2020,10 @@ void Solver::allocate_memory() {
     }
     if (is_mixture() && is_viscous()) {
         cell_transport =Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
-        h_cell_transport = Kokkos::create_mirror_view(cell_transport);
+        h_cell_transport = pinned_mirrors(cell_transport);
         const uint32_t n_diffusion = (mixture.transport.thermal_diffusion ? 2 : 1) * n_species;
         cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_diffusion);
+        h_cell_diffusion = pinned_mirrors(cell_diffusion);
         transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
                                                                        N_DIM + 1 + n_species);
         transport_gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("transport_gradients", mesh->n_cells,
@@ -1235,17 +2031,10 @@ void Solver::allocate_memory() {
         h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_diffusion);
     }
     if (is_mixture()) {
-        const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
         cell_scalars = ScalarView("cell_scalars", mesh->n_cells, n_species + 2);
         T_seed = Kokkos::View<rtype *>("T_seed", mesh->n_cells);
-        h_T_seed = Kokkos::create_mirror_view(T_seed);
-        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
-        face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
-        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
-        if (double_flux) {
-            frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
-            face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
-        }
+        h_T_seed = pinned_mirrors(T_seed);
+        if (double_flux) frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
         if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
             cell_molar_mass = Kokkos::View<rtype *>("cell_molar_mass", mesh->n_cells);
             teno->set_mixture(Kokkos::subview(cell_scalars, Kokkos::ALL(), n_species), cell_molar_mass);
@@ -1255,11 +2044,28 @@ void Solver::allocate_memory() {
         if (reacting) allocate_chemistry();
         if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
-    h_conservatives = Kokkos::create_mirror_view(conservatives);
-    h_species = Kokkos::create_mirror_view(species);
-    h_primitives = Kokkos::create_mirror_view(primitives);
-    h_cfl_local = Kokkos::create_mirror_view(cfl_local);
+    h_conservatives = pinned_mirrors(conservatives);
+    h_species = pinned_mirrors(species);
+    h_primitives = pinned_mirrors(primitives);
+    h_cfl_local = pinned_mirrors(cfl_local);
+}
 
+void Solver::allocate_time_stepping() {
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
+    const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
+    // The species slots are filled after the fluxes, the last to read the face states of a stage
+    const size_t n_states = size_t(mesh->n_faces) * n_quad * 2 * N_CONSERVATIVE;
+    const size_t n_slots = is_mixture() ? size_t(mesh->n_faces) * 2 * n_species : 0;
+    face_storage = Kokkos::View<rtype *>("face_solution", std::max(n_states, n_slots));
+    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>(face_storage.data(), mesh->n_faces, n_quad);
+    face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
+    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
+    if (is_mixture()) {
+        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
+        face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
+        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), mesh->n_faces, 2, n_species);
+        if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
+    }
     solution_vec.clear();
     rhs_vec.clear();
     solution_vec.push_back(state());
@@ -1281,16 +2087,72 @@ void Solver::copy_host_to_device() {
 }
 
 void Solver::copy_device_to_host() {
-    Kokkos::deep_copy(h_conservatives, conservatives);
-    if (species.span() > 0) Kokkos::deep_copy(h_species, species);
+    output_arrays_to_host();
+    Kokkos::fence("copy_device_to_host");
+    finish_output_arrays();
+}
+
+void Solver::output_arrays_to_host() {
+    const auto copy = [&](const auto & mirror, const auto & v) { copy_to_pinned(pinned_mirrors, mirror, v); };
+    // The mirrors are copies, also off GPUs: their ghost cells hold the current state too
+    halo.exchange(state());
+    copy(h_conservatives, conservatives);
+    copy(h_species, species);
     if (is_mixture()) {
-        Kokkos::deep_copy(h_T_seed, T_seed);
+        copy(h_T_seed, T_seed);
         if (is_viscous()) {
             // Coefficients of the current state; W and the scalars are work arrays the next RHS refills
             update_cell_states(state(), false);
             update_transport();
-            Kokkos::deep_copy(h_cell_transport, cell_transport);
-            auto h_c = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cell_diffusion);
+            copy(h_cell_transport, cell_transport);
+            copy(h_cell_diffusion, cell_diffusion);
+        }
+        if (reacting) {
+            update_heat_release_rate();
+            copy(h_hrr, hrr);
+            copy(h_production, production);
+            copy(h_chem_h, chem_h);
+            copy(h_chem_cost, chem_cost);
+        }
+    }
+    copy(h_primitives, primitives);
+    copy(h_cfl_local, cfl_local);
+    if (les_on) {
+        eddy_viscosity_of_state(mesh->n_cells);
+        copy(h_les_coefficients, les_coefficients);
+    }
+    if (tfles_on) copy(h_tfles_fields, tfles_fields);
+    if (pasr_on) copy(h_chem_time_scale, chem_time_scale);
+    statistics.stage_output();
+    if (p_max.is_allocated()) copy(h_p_max, p_max);
+    if (vortex_fields.is_allocated() || derived_fields.is_allocated()) update_velocity_gradients();
+    if (vortex_fields.is_allocated()) {
+        update_vortex_fields();
+        copy(h_vortex_fields, vortex_fields);
+    }
+    if (derived_fields.is_allocated()) {
+        update_derived_fields();
+        copy(h_derived_fields, derived_fields);
+    }
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) copy(h_teno_sigma, teno->troubled);
+    // What restart files carry besides the cells
+    allocate_restart_mirrors();
+    if (step_controller.enabled()) copy(h_step_control, step_controller.slots());
+    if (characteristic_state_set) copy(h_char_state, boundary_data.char_state);
+}
+
+void Solver::allocate_restart_mirrors() {
+    if (step_controller.enabled() && h_step_control.data() == nullptr) h_step_control = pinned_mirrors(step_controller.slots());
+    const size_t n_char = boundary_data.char_state.extent(0);
+    if (n_char > 0 && (h_char_state.data() == nullptr || h_char_state.extent(0) != n_char)) {
+        h_char_state = pinned_mirrors(boundary_data.char_state);
+        h_char_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_faces);
+    }
+}
+
+void Solver::finish_output_arrays() {
+    if (is_mixture()) {
+        if (is_viscous()) {
             const auto & mech = mixture_model->mechanism();
             for (uint32_t c = 0; c < mesh->n_cells; c++) {
                 const double rho = static_cast<double>(h_conservatives(c, 0));
@@ -1299,17 +2161,12 @@ void Solver::copy_device_to_host() {
                     n += static_cast<double>(h_species(c, k)) / (rho * mech.species[k].molecular_weight);
                 }
                 for (size_t k = 0; k < species_names.size(); k++) {
-                    h_D(c, k) = static_cast<rtype>(h_c(c, k) / (rho * mech.species[k].molecular_weight * n));
+                    h_D(c, k) = static_cast<rtype>(h_cell_diffusion(c, k) / (rho * mech.species[k].molecular_weight * n));
                 }
-                for (size_t k = species_names.size(); k < h_D.extent(1); k++) h_D(c, k) = static_cast<rtype>(h_c(c, k));
+                for (size_t k = species_names.size(); k < h_D.extent(1); k++) {
+                    h_D(c, k) = static_cast<rtype>(h_cell_diffusion(c, k));
+                }
             }
-        }
-        if (reacting) {
-            update_heat_release_rate();
-            Kokkos::deep_copy(h_hrr, hrr);
-            Kokkos::deep_copy(h_production, production);
-            Kokkos::deep_copy(h_chem_h, chem_h);
-            Kokkos::deep_copy(h_chem_cost, chem_cost);
         }
         std::vector<double> Y(species_names.size());
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -1322,30 +2179,14 @@ void Solver::copy_device_to_host() {
             }
         }
     }
-    Kokkos::deep_copy(h_primitives, primitives);
     if (radiating) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
             const PartialDensities rho_k{CellSpecies{&h_species(c, 0), h_species.stride(1)}, 1.0};
             h_qrad(c) = static_cast<rtype>(radiation.loss(static_cast<double>(h_primitives(c, N_DIM + 1)), rho_k));
         }
     }
-    Kokkos::deep_copy(h_cfl_local, cfl_local);
-    if (les_on) {
-        halo.exchange(state());
-        eddy_viscosity_of_state(mesh->n_cells);
-        Kokkos::deep_copy(h_les_coefficients, les_coefficients);
-    }
-    if (tfles_on) Kokkos::deep_copy(h_tfles_fields, tfles_fields);
-    if (pasr_on) Kokkos::deep_copy(h_chem_time_scale, chem_time_scale);
-    statistics.copy_device_to_host();
-    if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
-    if (vortex_fields.is_allocated()) {
-        update_vortex_fields();
-        Kokkos::deep_copy(h_vortex_fields, vortex_fields);
-    }
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
-        Kokkos::deep_copy(h_teno_sigma, teno->troubled);
-    }
+    statistics.finish_output();
+    // Evaluated at the host's t: outputs of runs with sources are never staged
     if (source_terms) {
         update_cell_fields(state());
         Kokkos::deep_copy(h_source_values, source_terms->evaluate(state(), t));
@@ -1414,21 +2255,112 @@ void Solver::register_data() {
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
-        data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         if constexpr (N_DIM == 2) {
-            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1)));
+            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         } else {
             FOR_I_DIM {
                 data.push_back(Data(std::string("VORTICITY_") + "XYZ"[i],
-                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1 + i)));
+                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), i)));
             }
         }
     }
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (derived_selection.column[f] < 0) continue;
+        data.push_back(Data(derived::FIELDS[f].name, Kokkos::subview(h_derived_fields, Kokkos::ALL(),
+                                                                     static_cast<uint32_t>(derived_selection.column[f]))));
+    }
+    for (size_t k = 0; k < mesh_field_names.size(); k++) {
+        data.push_back(Data(mesh_field_names[k], Kokkos::subview(h_mesh_fields, Kokkos::ALL(), k)));
+    }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
-        h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
+        if (h_teno_sigma.span() != teno->troubled.span()) h_teno_sigma = pinned_mirrors(teno->troubled);
         data.push_back(Data("TENO_SIGMA", h_teno_sigma));
     }
+    if (output_data) output_data(*mesh, data);
+}
+
+namespace {
+
+/** @brief The fields setup computes only when a writer asks for them (the derived ones the case can have). */
+std::vector<std::string> on_request_fields(const derived::Settings & derived_settings) {
+    std::vector<std::string> names = {"P_MAX"};
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (derived_settings.available(static_cast<derived::Field>(f))) names.emplace_back(derived::FIELDS[f].name);
+    }
+    for (const char * name : MeshQuality::FIELDS) names.emplace_back(name);
+    for (const char * name : stencils::FIELDS) names.emplace_back(name);
+    if constexpr (N_DIM == 2) {
+        names.emplace_back("VORTICITY");
+    } else {
+        FOR_I_DIM names.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+    }
+    return names;
+}
+
+} // namespace
+
+std::vector<std::string> Solver::output_fields() const {
+    const std::vector<std::string> on_request = on_request_fields(derived_settings);
+    std::vector<std::string> names;
+    for (const auto & d : data) {
+        if (std::find(on_request.begin(), on_request.end(), d.name()) == on_request.end()) names.push_back(d.name());
+    }
+    names.insert(names.end(), on_request.begin(), on_request.end());
+    return names;
+}
+
+std::vector<std::string> Solver::init_fields(const Input & input_in) {
+    input = input_in;
+    deprecated_keys = input_upgrade::apply(input);
+    preset = numerics_preset::apply(input);
+    init_physics();
+    derived_settings = derived::Settings::from_input(input, physics, mixture_model.get(), is_viscous());
+    // In the order of register_data
+    std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    for (const auto & s : species_names) names.push_back("RHOY_" + s);
+    if (is_mixture()) {
+        for (const auto & s : species_names) {
+            names.push_back("Y_" + s);
+            names.push_back("X_" + s);
+        }
+        names.emplace_back("T_SEED");
+        if (is_viscous()) {
+            names.emplace_back("MU");
+            names.emplace_back("LAMBDA");
+            for (const auto & s : species_names) names.push_back("D_" + s);
+            if (mixture.transport.thermal_diffusion) {
+                for (const auto & s : species_names) names.push_back("DT_" + s);
+            }
+        }
+        if (reacting) {
+            for (const char * name : {"CHEM_H", "CHEM_COST", "HRR"}) names.emplace_back(name);
+            for (const auto & s : species_names) names.push_back("OMEGA_" + s);
+        }
+        if (radiating) names.emplace_back("QRAD");
+    }
+    names.insert(names.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    names.emplace_back("CFL");
+    if (sources::SourceTerms::in_input(input)) {
+        for (const auto & name : CONSERVATIVE_NAMES) names.push_back("SOURCE_" + std::string(name));
+        for (const auto & s : species_names) names.push_back("SOURCE_RHOY_" + s);
+    }
+    if (LES::in_input(input)) {
+        names.emplace_back("MU_T");
+        if (input.at("les").contains("combustion")) {
+            if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
+                names.emplace_back("PASR_KAPPA");
+            } else {
+                for (const char * name : {"TF_F", "TF_E", "TF_OMEGA"}) names.emplace_back(name);
+            }
+        }
+    }
+    for (const auto & name : Statistics::data_names(input)) names.push_back(name);
+    const Input reconstruction = toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+    if (find_value_or<std::string>(reconstruction, "type", "FO") == "TENO") names.emplace_back("TENO_SIGMA");
+    const std::vector<std::string> on_request = on_request_fields(derived_settings);
+    names.insert(names.end(), on_request.begin(), on_request.end());
+    return names;
 }
 
 std::vector<std::string> Solver::restart_variables() const {
@@ -1437,7 +2369,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
-    for (const auto & name : statistics.variables()) names.push_back(name);
+    for (const auto & name : statistics.restart_variables()) names.push_back(name);
     return names;
 }
 
@@ -1453,19 +2385,33 @@ struct DiagnosticsFunctor {
     rtype sigma_threshold;
     Euler physics;
 
+    using value_type = step_queue::Diagnostics;
+
+    KOKKOS_INLINE_FUNCTION void init(value_type & d) const {
+        d.min_rho = d.min_p = Kokkos::reduction_identity<rtype>::min();
+        d.max_mach = Kokkos::reduction_identity<rtype>::max();
+        d.n_troubled = 0;
+    }
+
+    KOKKOS_INLINE_FUNCTION void join(value_type & dst, const value_type & src) const {
+        dst.min_rho = Kokkos::fmin(dst.min_rho, src.min_rho);
+        dst.min_p = Kokkos::fmin(dst.min_p, src.min_p);
+        dst.max_mach = Kokkos::fmax(dst.max_mach, src.max_mach);
+        dst.n_troubled += src.n_troubled;
+    }
+
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i_cell, rtype & min_rho, rtype & min_p, rtype & max_mach,
-                    uint64_t & n_troubled) const {
+    void operator()(const uint32_t i_cell, value_type & d) const {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         physics.compute_W_from_conservatives(W, cons);
         const rtype rho = W[0], p = W[N_DIM + 1];
         rtype u2 = 0.0;
         FOR_I_DIM u2 += W[1 + i] * W[1 + i];
-        min_rho = Kokkos::fmin(min_rho, rho);
-        min_p = Kokkos::fmin(min_p, p);
-        max_mach = Kokkos::fmax(max_mach, Kokkos::sqrt(u2) / physics.get_sound_speed_from_pressure_density(p, rho));
-        if (sigma.extent(0) > 0 && sigma(i_cell) >= sigma_threshold) n_troubled++;
+        d.min_rho = Kokkos::fmin(d.min_rho, rho);
+        d.min_p = Kokkos::fmin(d.min_p, p);
+        d.max_mach = Kokkos::fmax(d.max_mach, Kokkos::sqrt(u2) / physics.get_sound_speed_from_pressure_density(p, rho));
+        if (sigma.extent(0) > 0 && sigma(i_cell) >= sigma_threshold) d.n_troubled++;
     }
 };
 
@@ -1474,8 +2420,21 @@ constexpr int HEADER_EVERY = 25;
 } // namespace
 
 int Solver::run() {
+    const comm::SelfScope scope = communication_scope();
+    end_recorded = false;
+    try {
+        return run_loop();
+    } catch (const std::exception & e) {
+        // An error on rank 0, which writes the log; one on another rank alone ends the job without it
+        if (!end_recorded) write_end_record({"error", "", e.what()});
+        throw;
+    }
+}
+
+int Solver::run_loop() {
     logging::section("Run");
     step_run_start = step;
+    progress_history.clear();
     step_last_check = step;
     t_wall_run_start = timer.seconds();
     t_stepping_last_check = t_wall_stepping;
@@ -1490,87 +2449,115 @@ int Solver::run() {
     } accepting(control_enabled);
     run_control::Server server;
     publishing = control_enabled && control_socket && comm::is_root() && server.start();
-    control_stop.clear();
+    control_stop = {};
+    trigger_stop = {};
+    if (control_file_interval > 0) control_files_polled = step / control_file_interval;
+    wall_time_reached = false;
     checkpoint_requested = false;
 
-    std::string stop;
+    RunEnd stop;
     try {
+        // A restart's pending half step, where this run does not fuse it into its first step
+        if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
+        if (!reacting || simpler) chemistry_pending = 0.0;
         calc_dt();
-        // Monitors before the progress row, which reports their values
+        // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
             Kokkos::Timer output_timer;
             write_integrals();
-            t_wall_output += output_timer.seconds();
-        }
-        print_progress();
-        publish_status();
-        if (step == 0) {
-            Kokkos::Timer output_timer;
             copy_device_to_host();
+            const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
+            update_convergence();
             t_wall_output += output_timer.seconds();
         }
-        // Strang splitting with the half steps of consecutive steps fused into one
-        // chemistry call, except where output, checks or the end read the state
+        flush_chemistry();
+        print_progress();
+        unflush_chemistry();
+        publish_status();
+        // Strang splitting with the half steps of consecutive steps fused into one chemistry call
         defer_chemistry = reacting && fuse_chemistry;
-        use_step_graph = step_graph_unsupported().empty();
+        use_device_steps = device_steps_unsupported().empty();
+        use_step_graph = use_device_steps && step_graph_unsupported().empty();
         while ((stop = stop_reason()).empty()) {
-            Kokkos::Timer step_timer;
             // The first step runs kernel by kernel, which also sets up what the
             // kernels allocate on first use
-            if (use_step_graph && step > step_run_start) {
-                graph_step();
-            } else {
-                calc_dt();
-                take_step();
+            if (use_device_steps && step > step_run_start) {
+                Kokkos::Timer step_timer;
+                if (n_launched == n_taken) resume_device_steps();
+                while (n_launched - n_taken < queue_depth) {
+                    post_requests();
+                    launch_device_step();
+                }
+                const step_queue::Record record = next_record();
+                take_record(record);
+                if (record.outcome != step_queue::ACCEPTED) continue;
+                if (record.reasons != 0) {
+                    // The steps enqueued after this one do nothing
+                    drain_device_steps();
+                    after_step(step_timer, true);
+                    continue;
+                }
+                n_queued_steps++;
+                t_wall_stepping += step_timer.seconds();
+                Kokkos::Timer output_timer;
+                if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
+                write_staged_monitors(record);
+                write_staged_probes(record);
+                update_convergence();
+                write_staged_outputs(record);
+                t_wall_output += output_timer.seconds();
+                for (auto & writer : data_writers) writer->publish_written();
+                if (record.progress) {
+                    Kokkos::Timer check_timer;
+                    const size_t n_totals = progress_staging.extent(1);
+                    const double * const totals =
+                        progress_staging.data() + (record.seq - 1) % step_records.extent(0) * n_totals;
+                    print_progress(record.progress_locals, std::vector<double>(totals, totals + n_totals));
+                    t_wall_checks += check_timer.seconds();
+                }
+                publish_status();
+                continue;
             }
-            act_on_requests();
-            if (chemistry_pending > 0.0 && state_needed()) {
-                advance_chemistry(chemistry_pending);
-                chemistry_pending = 0.0;
-                halo_current = false;
-            }
-            check_fields();
-            if (p_max.is_allocated()) update_p_max();
-            if (statistics.due(step, t)) {
-                update_primitives();
-                statistics.sample(step, t, cell_sampler(), mesh->n_owned());
-            }
-            t_wall_stepping += step_timer.seconds();
-            Kokkos::Timer output_timer;
-            write_forces();
-            write_integrals();
-            t_wall_output += output_timer.seconds();
-            if (step % check_interval == 0) {
-                Kokkos::Timer check_timer;
-                print_progress();
-                t_wall_checks += check_timer.seconds();
-            }
-            output_timer.reset();
-            write_data();
-            write_probes();
-            if (checkpoint_requested) write_checkpoint();
-            t_wall_output += output_timer.seconds();
-            poll_control_files();
-            publish_status();
+            // Acted on by every rank after the next step, whose time-step reduction carries it
+            if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
+            Kokkos::Timer step_timer;
+            calc_dt();
+            take_step();
+            after_step(step_timer, false);
         }
     } catch (const DivergedError &) {
+        unflush_chemistry();
         defer_chemistry = false;
         destroy_step_graph();
+        check_timed_boundaries();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
-    if (step != step_last_check) print_progress();
+    check_timed_boundaries();
+    flush_chemistry();
+    const bool row_due = step != step_last_check;
     Kokkos::Timer output_timer;
+    probes.finish(step, t);
     copy_device_to_host();
     write_data(true);
-    const std::string restart_file = control_stop.empty() ? std::string() : write_restarts();
+    const snapshot_block::Reason reason(snapshot_block::reason::STOP);
+    const std::string restart_file =
+        control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
+    t_wall_output += output_timer.seconds();
+    // The solver is left at the state of t
+    chemistry_flushed = false;
+    chemistry_pending = 0.0;
+    // Files written at the step of the last row get a row of their own (rank 0 counts them)
+    if (row_due || comm::allreduce(int(logging::written_pending()), comm::Op::MAX) > 0) print_progress();
+    output_timer.reset();
     for (auto & writer : data_writers) writer->finish();
     if (checkpoint_writer) checkpoint_writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
+    write_end_record(stop);
     for (auto & command : stop_replies) {
         run_control::reply(command, "stopped at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                                         "; restart: " + restart_file);
@@ -1579,15 +2566,53 @@ int Solver::run() {
     return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
-std::string Solver::stop_reason() const {
-    if (!control_stop.empty()) return control_stop;
-    if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
-    if (t_stop > 0 && t >= t_stop) return "t_stop = " + logging::real(double(t_stop)) + " reached";
-    if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) {
-        return "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached";
+void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
+    act_on_requests();
+    check_fields();
+    // Steps on the device update p_max themselves
+    if (p_max.is_allocated() && !on_device) update_p_max();
+    if (state_needed()) flush_chemistry();
+    if (statistics.due(step, t)) sample_statistics();
+    if (probes.averages_due(step, t)) sample_probe_averages();
+    t_wall_stepping += step_timer.seconds();
+    Kokkos::Timer output_timer;
+    write_forces();
+    write_integrals();
+    // Probes first, so that triggers read this step's values and restarts carry their state
+    write_probes();
+    update_convergence();
+    act_on_triggers();
+    write_data();
+    if (checkpoint_requested) write_checkpoint();
+    t_wall_output += output_timer.seconds();
+    // The last row comes after the end's own output
+    if (step % check_interval == 0 && stop_reason().empty()) {
+        Kokkos::Timer check_timer;
+        check_timed_boundaries();
+        print_progress();
+        t_wall_checks += check_timer.seconds();
     }
-    return "";
+    poll_control_files();
+    publish_status();
+    // The end of the run reads the state too
+    if (stop_reason().empty()) unflush_chemistry();
 }
+
+RunEnd Solver::stop_reason() const {
+    if (!control_stop.empty()) return control_stop;
+    if (!trigger_stop.empty()) return trigger_stop;
+    if (n_steps > 0 && step >= n_steps) return {"finished", "n_steps", "n_steps = " + logging::count(n_steps) + " reached"};
+    // Within round-off: an output time n * time_interval that rounds just below t_stop lands there
+    if (t_stop > 0 && t >= t_stop_reached()) {
+        return {"finished", "t_stop", "t_stop = " + logging::real(double(t_stop)) + " reached"};
+    }
+    if (wall_time_reached) {
+        return {"wall_time_limit", "", "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached"};
+    }
+    return {};
+}
+
+rtype Solver::t_stop_reached() const { return t_stop - precision_tol(1e-9, 1e-5) * t_stop; }
 
 bool Solver::state_needed() const {
     if (!stop_reason().empty() || checkpoint_requested || step % check_interval == 0) return true;
@@ -1598,7 +2623,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t);
+           probes.due(step, t) || probes.averages_due(step, t);
 }
 
 double Solver::progress() const {
@@ -1609,18 +2634,46 @@ double Solver::progress() const {
     return std::min(f, 1.0);
 }
 
-void Solver::print_progress() {
+void Solver::progress_reductions() {
+    using Memory = Kokkos::DefaultExecutionSpace::memory_space;
+    if (!progress_device.is_allocated()) progress_device = Kokkos::View<step_queue::ProgressLocals>("step_progress");
+    step_queue::ProgressLocals * const out = progress_device.data();
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     DiagnosticsFunctor functor{conservatives, teno ? teno->troubled : Kokkos::View<rtype *>(),
                                teno ? teno->sigma_threshold : rtype(0), physics};
-    rtype min_rho = 0.0, min_p = 0.0, max_mach = 0.0;
-    uint64_t n_troubled = 0;
     Kokkos::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
-                            Kokkos::Min<rtype>(min_rho), Kokkos::Min<rtype>(min_p), Kokkos::Max<rtype>(max_mach),
-                            Kokkos::Sum<uint64_t>(n_troubled));
+                            Kokkos::View<step_queue::Diagnostics, Memory>(&out->diagnostics));
+    if (is_mixture()) mixture_reductions(&out->mixture);
+    if (reacting) chemistry_reductions(&out->chemistry);
+    if (run_health.on) health_reductions();
+}
+
+step_queue::ProgressLocals Solver::progress_locals(std::vector<double> & values) {
+    progress_reductions();
+    step_queue::ProgressLocals locals;
+    Kokkos::deep_copy(Kokkos::View<step_queue::ProgressLocals, Kokkos::HostSpace>(&locals), progress_device);
+    values.assign(progress_values.extent(0), 0.0);
+    if (run_health.on) {
+        Kokkos::deep_copy(Kokkos::View<double *, Kokkos::HostSpace>(values.data(), values.size()), progress_values);
+    }
+    return locals;
+}
+
+void Solver::print_progress() {
+    std::vector<double> values;
+    const step_queue::ProgressLocals locals = progress_locals(values);
+    print_progress(locals, values);
+}
+
+void Solver::print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & values) {
+    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
+    const step_queue::Diagnostics & d = locals.diagnostics;
+    rtype min_rho = d.min_rho, min_p = d.min_p, max_mach = d.max_mach;
+    uint64_t n_troubled = d.n_troubled;
     std::array<rtype, 6> mix = {};  // min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|
     if (is_mixture()) {
-        mix = mixture_diagnostics();
+        for (size_t i = 0; i < 6; i++) mix[i] = locals.mixture.v[i];
+        mix = comm::allreduce(mix, comm::Op::MIN);
         min_rho = mix[0];
         min_p = mix[1];
         max_mach = -mix[2];
@@ -1629,30 +2682,34 @@ void Solver::print_progress() {
     n_troubled = comm::allreduce(n_troubled, comm::Op::SUM);
 
     using logging::format;
+    const ProgressColumns columns{teno != nullptr, is_mixture(), reacting};
+    const report::Stream table = progress_stream(columns, logging::color_stdout());
+    if (n_progress_rows == 0) {
+        report::Text legend(logging::color_stdout());
+        legend.note(progress_legend(columns));
+        legend.print();
+    }
     if (n_progress_rows % HEADER_EVERY == 0) {
-        std::string header = format("%8s %10s %8s %6s  %9s %7s %7s  %9s %9s %6s", "step", "t", "dt", "done",
-                                    "wall/step", "cells/s", "ETA", "min rho", "min p", "max Ma");
-        if (teno) header += format(" %8s", "troubled");
-        if (is_mixture()) header += format(" %8s %8s %9s", "min T", "max T", "sum Y-1");
-        if (reacting) header += format(" %8s %6s", "reacting", "chem/c");
-        logging::line(logging::style(header, logging::Style::BOLD));
+        for (const std::string & line : table.header()) logging::line(line);
     }
     n_progress_rows++;
 
     RunStatus status = run_status();
-    const double eta = status.eta;
-    const std::string eta_text =
-        status.progress >= 1.0 ? "0 s" : (eta >= 0.0 && eta < 1.0 ? "<1 s" : logging::duration(eta));
-    const bool timed = status.wall_per_step >= 0.0;
-    std::string row = format("%8llu %10.4e %8.2e %5.1f%%  %9s %7s %7s  %9.2e %9.2e %6.3f",
-                             static_cast<unsigned long long>(step), static_cast<double>(t), static_cast<double>(dt),
-                             100.0 * status.progress, timed ? logging::duration(status.wall_per_step).c_str() : "--",
-                             timed ? logging::si(status.cells_per_second).c_str() : "--", eta_text.c_str(),
-                             static_cast<double>(mins[0]), static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
-    if (teno) row += format(" %7.2f%%", 100.0 * static_cast<double>(n_troubled) / static_cast<double>(n_cells_global));
+    ProgressRow row{.step = step,
+                    .t = double(t),
+                    .dt = double(dt),
+                    .done = status.progress,
+                    .wall_per_step = status.wall_per_step,
+                    .cells_per_second = status.cells_per_second,
+                    .eta = status.eta,
+                    .min_rho = double(mins[0]),
+                    .min_p = double(mins[1]),
+                    .max_mach = double(-mins[2]),
+                    .troubled = static_cast<double>(n_troubled) / static_cast<double>(n_cells_global)};
     if (is_mixture()) {
-        row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
-                      static_cast<double>(-mix[5]));
+        row.min_T = double(mix[3]);
+        row.max_T = double(-mix[4]);
+        row.sum_Y_error = double(-mix[5]);
     }
     status.monitors = {{"min_rho", double(mins[0])}, {"min_p", double(mins[1])}, {"max_mach", double(-mins[2])}};
     if (teno) {
@@ -1664,18 +2721,28 @@ void Solver::print_progress() {
                                {{"min_T", double(mix[3])}, {"max_T", double(-mix[4])}, {"max_sum_Y_error", double(-mix[5])}});
     }
     if (reacting) {
-        const auto [active, max_cost] = chemistry_statistics();
-        row += format(" %7.2f%% %6.0f", 100.0 * static_cast<double>(active) / static_cast<double>(n_cells_global), max_cost);
+        const uint64_t active = comm::allreduce(locals.chemistry.last_active, comm::Op::SUM);
+        const double max_cost = double(comm::allreduce(locals.chemistry.max_cost, comm::Op::MAX));
+        row.reacting = static_cast<double>(active) / static_cast<double>(n_cells_global);
+        row.chemistry_steps = max_cost;
         status.monitors.insert(status.monitors.end(),
                                {{"reacting_cells", static_cast<double>(active) / static_cast<double>(n_cells_global)},
                                 {"max_chemistry_cost", max_cost}});
     }
-    logging::line(row);
+    row.written = logging::take_written();
+    logging::line(table.row(progress_cells(columns, row)));
 
+    progress_history.push_back({step, double(t), double(dt), dt_cfl1 > 0.0_r ? double(dt / dt_cfl1) : 0.0, double(mins[0]),
+                                double(mins[1]), is_mixture() ? double(mix[3]) : divergence::UNKNOWN});
+    if (progress_history.size() > 8) progress_history.pop_front();
     monitor_values = {{"monitors_step", std::to_string(step)}};
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
-    if (run_log_on) {
+    if (run_health.on) {
+        report_health(locals, values);
+        status.health = run_health.last;
+    }
+    if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
@@ -1684,7 +2751,10 @@ void Solver::print_progress() {
             if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
-        run_log::write(status.record());
+        if (!convergence.last().name.empty()) status.monitored.push_back(convergence.last());
+        for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
+        status.probes = probes.recorded();
+        run_log::write_progress(status.record());
     }
 
     step_last_check = step;
@@ -1712,148 +2782,193 @@ RunStatus Solver::run_status() const {
     return s;
 }
 
-void Solver::print_setup() const {
+void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
-    logging::section("Mesh");
-    logging::items(mesh_summary);
+    std::vector<SetupSection> sections = {mesh_section(mesh_setup)};
 
-    logging::section("Physics");
-    logging::items(is_mixture() ? mixture_model->summary() : physics.summary());
-    logging::items(source_summary);
-    logging::item("Initial state", initial_state);
+    SetupSection physics_section{.title = "Physics"};
+    Settings & physical = physics_section.settings;
+    physical.emplace_back("Units", units::system() == units::System::SI
+                                       ? "SI (physics.units)"
+                                       : "nondimensional: numbers carry no units (physics.units)");
+    physics_section.add(is_mixture() ? mixture_model->summary() : physics.summary());
+    physics_section.add(source_summary);
+    physical.emplace_back("Initial state", initial_state);
+    sections.push_back(std::move(physics_section));
 
-    logging::section("Numerics");
-    if (!preset.name.empty()) logging::item("Preset", preset.summary());
-    logging::items(face_reconstruction->summary());
-    logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
+    SetupSection numerics{.title = "Numerics"};
+    Settings & numerical = numerics.settings;
+    numerics.quantities = time_quantities({.use_cfl = use_cfl,
+                                           .cfl = double(cfl),
+                                           .dt = double(dt_fixed),
+                                           .controlled = step_controller.enabled(),
+                                           .n_steps = n_steps,
+                                           .t_stop = double(t_stop),
+                                           .wall_stop = double(t_wall_stop)});
+    if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
+    numerics.add(face_reconstruction->summary());
+    if (!stencil_shapes_setting.empty()) numerical.emplace_back("Structured blocks", stencil_shapes_setting);
+    numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        logging::item("Convective flux", "hybrid: KEEP central, Riemann solver where the compression sensor exceeds " +
-                                             real(double(hybrid_threshold)) + " (upwind floor " +
-                                             real(double(hybrid_floor)) + ")");
+        numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +
+                                                      (hybrid_central == CentralFlux::CELL_AVERAGES
+                                                           ? "cell values"
+                                                           : "reconstructed states") +
+                                                      ", the Riemann solver where the compression sensor exceeds "
+                                                      "its threshold");
     }
-    logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    if (step_controller.enabled()) {
-        logging::item("Time step", step_controller.summary() + "; first step " +
-                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
-    } else {
-        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
-    }
-    std::string stop;
-    if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
-    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
-    if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
-    logging::item("Stop at", stop);
+    numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
+    if (step_controller.enabled()) numerics.add(step_controller.summary());
 #ifdef KOKKOS_ENABLE_CUDA
     const std::string no_graph = step_graph_unsupported();
-    logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+    numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
 #endif
-    if (check_nan) logging::item("NaN check", "every step");
-    logging::item("Divergence", std::string("stop at the first non-finite value") +
-                                    (keep_last_good ? ", writing the last valid state" : ""));
-    if (les_on) logging::items(les.summary());
-    if (tfles_on) logging::items(thickened_flame.summary());
-    if (pasr_on) logging::items(pasr.summary());
-    if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    const std::string by_host = device_steps_unsupported();
+    numerical.emplace_back("Steps", by_host.empty() ? "decided on the device, up to " +
+                                                          logging::count(step_queue_depth) + " ahead"
+                                                    : "taken by the host: " + by_host);
+    if (check_nan) numerical.emplace_back("NaN check", "every step");
+    numerical.emplace_back("Divergence", std::string("stop at the first non-finite value") +
+                                             (keep_last_good ? ", writing the last valid state" : ""));
+    if (les_on) numerics.add(les.summary());
+    if (tfles_on) numerics.add(thickened_flame.summary());
+    if (pasr_on) numerics.add(pasr.summary());
+    if (double_flux) numerical.emplace_back("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    if (hybrid_flux) {
+        numerics.quantities.push_back({report::Status::NONE, {"compression sensor threshold",
+                                                              real(double(hybrid_threshold)), "-", "", "hybrid flux"}});
+        numerics.quantities.push_back(
+            {report::Status::NONE, {"upwind floor", real(double(hybrid_floor)), "-", "", "hybrid flux"}});
+    }
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
-                                       (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
-                                       (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
-                                       real(chemistry_options.integrator.rtol) + ", atol " +
-                                       real(chemistry_options.atol_Y) + ")" +
-                                       (T_frozen > 0.0 ? ", frozen below " + real(T_frozen) + " K" : "") + ", " +
-                                       (cell_chemistry.lanes() == 1 ? std::string("one thread per cell")
-                                                                    : std::to_string(cell_chemistry.lanes()) +
-                                                                          " lanes per cell"));
+        numerical.emplace_back("Chemistry", logging::count(uint64_t(kinetics.n_reactions), "reaction") + ", " +
+                                                (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
+                                                (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
+                                                (cell_chemistry.lanes() == 1
+                                                     ? std::string("one thread per cell")
+                                                     : std::to_string(cell_chemistry.lanes()) + " lanes per cell"));
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry rtol", real(chemistry_options.integrator.rtol),
+                                                              "-", "", "relative tolerance"}});
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry atol", real(chemistry_options.atol_Y), "-", "",
+                                                              "absolute tolerance of the mass fractions"}});
+        if (T_frozen > 0.0) {
+            numerics.quantities.push_back({report::Status::NONE, {"chemistry frozen below", real(T_frozen),
+                                                                  units::column("K"), "", "temperature"}});
+        }
     }
+    sections.push_back(std::move(numerics));
 
-    logging::section("Boundaries");
-    logging::items(boundary_summary);
+    SetupSection boundaries{.title = "Boundaries"};
+    boundaries.tables.push_back(boundary_table(boundary_summary));
+    sections.push_back(std::move(boundaries));
 
-    logging::section("Output");
-    logging::item("Progress", "every " + logging::count(check_interval) + " steps");
-    for (const auto & writer : data_writers) {
-        const auto [kind, text] = writer->summary();
-        logging::item(kind, text);
-    }
+    SetupSection output{.title = "Output"};
+    std::vector<OutputSummary> outputs = {{.kind = "progress", .file = "", .steps = check_interval,
+                                           .contents = "a row of the progress table"}};
+    for (const auto & writer : data_writers) outputs.push_back(writer->summary());
     for (const auto & monitor : force_monitors) {
-        logging::item("forces", monitor.file + " (" + monitor.zone + ") every " + logging::count(monitor.interval) +
-                                    " steps");
+        outputs.push_back({.kind = "forces", .file = monitor.file, .steps = monitor.interval, .contents = monitor.zone});
     }
     if (integral_monitor.interval > 0) {
-        logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
-                                       " steps");
+        outputs.push_back({.kind = "integrals", .file = integral_monitor.file, .steps = integral_monitor.interval});
     }
-    logging::items(statistics.summary());
-    logging::items(probes.summary());
+    for (auto && o : statistics.summary()) outputs.push_back(std::move(o));
+    for (auto && o : probes.summary()) outputs.push_back(std::move(o));
+    for (auto && o : convergence.summary()) outputs.push_back(std::move(o));
+    output.tables.push_back(output_table(outputs));
+    SetupSection::Table trigger_table{.note = "", .columns = {"trigger", "condition and action"}, .rows = {}};
+    for (const auto & [name, text] : triggers.summary()) trigger_table.rows.push_back({report::Status::NONE, {name, text}});
+    output.tables.push_back(std::move(trigger_table));
+    sections.push_back(std::move(output));
+
+    report::Text text(logging::color_stdout());
+    setup_text(text, sections);
+    text.print();
 }
 
-void Solver::print_summary(const std::string & stop) const {
+void Solver::print_summary(const RunEnd & end) const {
     using logging::duration;
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
-    logging::section("Summary");
-    logging::item("Stopped", stop + " at step " + logging::count(step) + ", t = " + logging::real(double(t)));
-    logging::item("Wall time", duration(total) + ": setup " + duration(t_wall_setup) + ", time stepping " +
-                                   duration(t_wall_stepping) + ", diagnostics " + duration(t_wall_checks) +
-                                   ", output " + duration(t_wall_output));
-    if (reacting && t_wall_stepping > 0.0) {
-        logging::item("Chemistry", duration(t_wall_chemistry) + " (" +
-                                       logging::format("%.0f%%", 100.0 * t_wall_chemistry / t_wall_stepping) +
-                                       " of time stepping)");
-        if (t_chemistry_mean > 0.0) {
-            const double waiting = t_chemistry_slowest - t_chemistry_mean;
-            logging::item("Chemistry ranks", "slowest " + duration(t_chemistry_slowest) + ", mean " +
-                                                 duration(t_chemistry_mean) + ": " + duration(waiting) + " waiting (" +
-                                                 logging::format("%.1f%%", 100.0 * waiting / t_wall_stepping) +
-                                                 " of time stepping)" +
-                                                 (chemistry_load_balance && chem_cells_integrated > 0.0
-                                                      ? logging::format(", %.1f%% of the integrations on other ranks",
-                                                                        100.0 * chem_cells_sent / chem_cells_integrated)
-                                                      : std::string()));
-        }
-    }
-    if (steps > 0 && t_wall_stepping > 0.0) {
-        logging::item("Throughput", logging::si(static_cast<double>(n_cells_global * steps) / t_wall_stepping) + " cells/s, " +
-                                        duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
-                                        logging::count(steps) + " steps");
-    }
-    if (step_controller.enabled()) {
-        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
+    RunSummary s{.outcome = end.outcome,
+                 .stop = end.reason,
+                 .step = step,
+                 .steps = steps,
+                 .t = double(t),
+                 .n_cells = n_cells_global,
+                 .total = total,
+                 .setup = t_wall_setup,
+                 .stepping = t_wall_stepping,
+                 .diagnostics = t_wall_checks,
+                 .output = t_wall_output,
+                 .reacting = reacting,
+                 .chemistry = t_wall_chemistry,
+                 .rejected_counted = step_controller.enabled(),
+                 .rejected = n_rejected};
+    if (reacting && comm::size() > 1) {
+        const CellChemistry::Statistics totals = cell_chemistry.statistics();
+        const auto sums = comm::allreduce(
+            std::array<double, 3>{t_wall_chemistry, double(totals.active), double(totals.sent)}, comm::Op::SUM);
+        s.chemistry_slowest = comm::allreduce(t_wall_chemistry, comm::Op::MAX);
+        s.chemistry_mean = sums[0] / comm::size();
+        if (chemistry_load_balance && sums[1] > 0.0) s.chemistry_sent = sums[2] / sums[1];
     }
     if (!data_writers.empty()) {
-        double writing = 0.0;
         uint64_t bytes = 0;
         for (const auto & writer : data_writers) {
-            writing += writer->writing_seconds();
+            s.writing += writer->writing_seconds();
+            s.hashing += writer->hashing_seconds();
+            s.hash_queue += writer->hash_queue_seconds();
             bytes += writer->bytes_written();
         }
         // Ranks write their parts at the same time
-        writing = comm::allreduce(writing, comm::Op::MAX);
-        bytes = comm::allreduce(bytes, comm::Op::SUM);
-        logging::item("Writing", logging::si(static_cast<double>(bytes)) + "B of files in " + duration(writing) +
-                                     (data_writers.front()->is_async() ? " (in the background)" : ""));
+        s.writers = true;
+        s.writing = comm::allreduce(s.writing, comm::Op::MAX);
+        s.hashing = comm::allreduce(s.hashing, comm::Op::MAX);
+        s.hash_queue = comm::allreduce(s.hash_queue, comm::Op::MAX);
+        s.bytes = static_cast<double>(comm::allreduce(bytes, comm::Op::SUM));
+        s.background = data_writers.front()->is_async();
     }
-    std::string files;
-    auto add = [&](const std::string & text) { files += (files.empty() ? "" : ", ") + text; };
     for (const auto & writer : data_writers) {
-        const uint64_t n = writer->files_written();
-        if (writer->get_format() == DataFormat::RESTART) {
-            add(logging::count(n) + " restart");
-        } else {
-            add(logging::count(n) + " vtu (" + writer->get_prefix() + ".pvd)");
-        }
+        const bool restart = writer->get_format() == DataFormat::RESTART;
+        s.files.push_back({restart ? "restart" : FORMAT_NAMES.at(writer->get_format()), writer->files_written(),
+                           restart ? (writer->last_written().empty() ? "-" : "last " + writer->last_written())
+                                   : writer->index_file()});
     }
-    for (const auto & monitor : force_monitors) add(monitor.file);
-    if (integral_monitor.interval > 0) add(integral_monitor.file);
-    for (const auto & file : probes.files()) add(file);
-    if (!files.empty()) logging::item("Files", files);
+    for (const auto & monitor : force_monitors) s.files.push_back({"forces", 0, monitor.file});
+    if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
+    if (convergence.enabled()) s.files.push_back({"convergence", 0, convergence.file_name()});
+    for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
+    report::Text text(logging::color_stdout());
+    summary_section(text, s);
+    if (run_health.on) health_section(text, run_health.last);
+    logging::line();
+    text.print();
+}
 
+void Solver::write_end_record(const RunEnd & how) {
+    end_recorded = true;
+    const double total = timer.seconds();
+    const uint64_t steps = step - step_run_start;
+    std::optional<DataWriter::Recorded> snapshot, restart;
+    auto latest = [](std::optional<DataWriter::Recorded> & last, const DataWriter::Recorded & r) {
+        if (!last || r.step >= last->step) last = r;
+    };
+    for (const auto & writer : data_writers) {
+        if (const auto & r = writer->last_recorded()) latest(r->kind == "restart" ? restart : snapshot, *r);
+    }
+    if (checkpoint_writer && checkpoint_writer->last_recorded()) latest(restart, *checkpoint_writer->last_recorded());
+    auto file = [](const DataWriter::Recorded & r) {
+        return json::Object().add("step", r.step).add("t", r.t).add("path", r.path).str();
+    };
     json::Object end;
-    end.add("type", "end")
-        .add("reason", stop)
-        .add("step", step)
-        .add("t", double(t))
-        .add("steps", steps)
+    end.add("type", "end").add("outcome", how.outcome);
+    if (!how.cause.empty()) end.add("cause", how.cause);
+    if (!how.trigger.empty()) end.add("trigger", how.trigger);
+    end.add("reason", how.reason).add("step", step).add("t", double(t));
+    if (snapshot) end.raw("last_snapshot", file(*snapshot));
+    if (restart) end.raw("last_restart", file(*restart));
+    end.add("steps", steps)
         .add("wall", total)
         .add("wall_setup", t_wall_setup)
         .add("wall_stepping", t_wall_stepping)
@@ -1871,82 +2986,187 @@ void Solver::check_fields() {
     if (!check_nan) {
         return;
     }
-    StateView U = conservatives;
-    uint32_t n_bad = 0;
-    Kokkos::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
-        FOR_I_CONSERVATIVE {
-            if (!Kokkos::isfinite(U(i_cell, i))) bad++;
-        }
-    }, n_bad);
-    n_bad = comm::allreduce(n_bad, comm::Op::SUM);
-    if (species.span() > 0) {
-        SpeciesView Y = species;
-        const uint32_t n_species = static_cast<uint32_t>(Y.extent(1));
-        uint32_t n_bad_species = 0;
-        Kokkos::parallel_reduce("check_nan_species", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
-            for (uint32_t k = 0; k < n_species; k++) {
-                if (!Kokkos::isfinite(Y(i_cell, k))) bad++;
-            }
-        }, n_bad_species);
-        n_bad += comm::allreduce(n_bad_species, comm::Op::SUM);
-    }
+    count_nonfinite();
+    int64_t n_bad = 0;
+    Kokkos::deep_copy(n_bad, Kokkos::subview(n_nonfinite, 0));
     if (n_bad > 0) throw DivergedError();
 }
 
 RestartAttributes Solver::restart_attributes() const {
     RestartAttributes attributes = statistics.attributes();
+    for (const auto & a : probes.attributes()) attributes.push_back(a);
     if (step_controller.enabled()) {
-        for (const auto & a : step_controller.attributes()) attributes.push_back(a);
+        for (const auto & a : StepController::attributes(h_step_control.data())) attributes.push_back(a);
     }
+    for (const auto & writer : data_writers) {
+        const std::string name = writer->snapshot_attribute();
+        if (!name.empty()) attributes.emplace_back(name, static_cast<double>(writer->snapshots_written()));
+    }
+    for (const auto & a : triggers.attributes()) attributes.push_back(a);
+    for (const auto & a : convergence.attributes()) attributes.push_back(a);
+    if (chemistry_pending > 0.0) attributes.emplace_back("CHEMISTRY_PENDING", chemistry_pending);
     return attributes;
 }
 
 void Solver::write_data(bool force) {
-    bool any_due = force;
+    const bool snapshots = probes.snapshots_due(step, t) || (force && probes.any_snapshots());
+    bool any_due = force || snapshots;
     for (auto & writer : data_writers) {
+        writer->publish_written();
         any_due = any_due || writer->due(step, t);
     }
     if (!any_due) {
         return;
     }
+    if (std::any_of(data_writers.begin(), data_writers.end(),
+                    [&](const auto & w) { return w->follows_solution() && (force || w->due(step, t)); })) {
+        update_cell_W();
+    }
     update_primitives();
     copy_device_to_host();
-    const RestartAttributes attributes = restart_attributes();
-    const RestartFaces faces = characteristic_restart_faces();
-    const RestartArrays arrays = statistics.arrays();
-    for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes, faces, arrays);
+    write_outputs(force);
+    if (snapshots) {
+        // Regions of lower dimension: point values, written as probes write them
+        update_cell_W();
+        if (is_mixture() && probes.snapshots_need_transport()) update_transport();
+        if (probes.all_gradients_due(step, t, wall_model_on, true, force)) update_probe_gradients();
+        ProbeFluxes fluxes;
+        probes.write(step, t, probe_fields(fluxes), true, force);
     }
-    statistics.write(step, t);
 }
 
-void Solver::write_probes() {
-    if (!probes.due(step, t)) return;
-    if (probes.point_values_due(step, t)) {
-        update_cell_W();
+void Solver::write_outputs(const bool force) {
+    if (statistics.means_enabled() || statistics.get_phase().enabled()) statistics.set_snapshot_averages();
+    // Snapshots first, so that a restart file at this step counts them
+    for (auto & writer : data_writers) {
+        if (writer->get_format() != DataFormat::RESTART) writer->write(step, t, force);
+    }
+    const RestartAttributes attributes = restart_attributes();
+    const RestartFaces faces = characteristic_restart_faces();
+    const RestartArrays arrays = restart_arrays();
+    swap_unflushed();
+    for (auto & writer : data_writers) {
+        if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
+    }
+    swap_unflushed();
+    statistics.write(step, t, snapshot_block::current_reason(force));
+}
+
+void Solver::write_output_of_state(bool next) {
+    const comm::SelfScope scope = communication_scope();
+    if (next) apply_output_state(state_reader(*mesh));
+    flush_chemistry();
+    write_data(true);
+    write_probes();
+    for (auto & writer : data_writers) writer->finish();
+}
+
+void Solver::sample_statistics() {
+    update_statistics_fields();
+    statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+}
+
+void Solver::update_statistics_fields() {
+    if (statistics.samples_derived()) {
+        update_velocity_gradients();
+        update_derived_fields();
     } else {
         update_primitives();
     }
-    probes.write(step, t, probe_fields());
+    if (statistics.samples_chemistry()) update_heat_release_rate();
 }
 
-ProbeFields Solver::probe_fields() {
-    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
-                       physics.gamma, {}};
-    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+CellSampler Solver::sample_statistics_of_state(bool next) {
+    const comm::SelfScope scope = communication_scope();
+    if (next) apply_output_state(state_reader(*mesh));
+    sample_statistics();
+    if (probes.averages_due(step, t)) sample_probe_averages();
+    statistics.copy_device_to_host();
+    return cell_sampler();
+}
+
+void Solver::write_probes() {
+    if (!probes.probes_due(step, t)) return;
+    if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
+        update_cell_W();
+        if (is_mixture() && probes.transport_due(step, t)) update_transport();
+        if (probes.all_gradients_due(step, t, wall_model_on)) update_probe_gradients();
+    } else {
+        update_primitives();
+    }
+    if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
+    ProbeFluxes fluxes;
+    probes.write(step, t, probe_fields(fluxes));
+}
+
+void Solver::sample_probe_averages() {
+    const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on);
+    if (cell_W) {
+        update_cell_W();
+        if (is_mixture() && transport) update_transport();
+        if (all_gradients) update_probe_gradients();
+    } else {
+        update_primitives();
+    }
+    ProbeFluxes fluxes;
+    probes.sample_averages(step, t, probe_fields(fluxes));
+}
+
+RestartArrays Solver::restart_arrays() const {
+    RestartArrays arrays = statistics.arrays();
+    for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
+    for (auto && a : convergence.arrays()) arrays.push_back(std::move(a));
+    return arrays;
+}
+
+void Solver::update_probe_gradients() {
+    // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
+    Kokkos::parallel_for("probe_all_gradients", mesh->n_cells, viscous_gradient);
+    if (wall_model_on) update_wall_model();
+}
+
+ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
+    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
+                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
+                       {},             {}};
+    if (is_mixture()) {
+        fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        if (is_viscous()) fields.transport = cell_transport;
+    }
+    if (wall_model_on) {
+        fields.wall_model = WallModelFunctor{wall_model,        mesh->face_normals, mesh->face_area, W_cells,
+                                             viscous_gradients, boundary_data,      wall_model::Gas{physics}};
+    }
+    fields.fluxes = &fluxes;
+    if (is_viscous() && is_mixture()) {
+        fluxes.mixture = MixtureViscousFluxFunctor<true>{
+            mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+            mesh->periodic_maps(), mesh->face_shift, boundary_data, mixture, cell_scalars, transport_values,
+            transport_gradients, cell_transport, cell_diffusion, {}, {}, axisymmetric, mesh->cell_covariance,
+            {}, false, {}};
+    } else if (is_viscous()) {
+        fluxes.viscous = ViscousFluxFunctor{
+            mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+            mesh->periodic_maps(), mesh->face_shift, W_cells, viscous_gradients, boundary_data, {}, physics,
+            axisymmetric, mesh->cell_covariance, {}, false, wall_model.out};
+    }
     return fields;
 }
 
 void Solver::take_step() {
+    const comm::SelfScope scope = communication_scope();
     if (simpler) {
+        cell_chemistry.begin_step();
         take_simpler_step();
         halo_current = false;
         Kokkos::fence();
+        if (cell_chemistry.adapt_balance()) destroy_step_graph();
         step++;
         t += dt;
         return;
     }
     if (reacting) {
+        cell_chemistry.begin_step();
         Kokkos::deep_copy(chem_cost, 0.0_r);
         advance_chemistry(chemistry_pending + 0.5 * static_cast<double>(dt));
         chemistry_pending = 0.0;
@@ -1965,9 +3185,12 @@ void Solver::take_step() {
     for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
         n_rejected++;
         check_rejections(tries);
+        // The retry advances the characteristic faces again, from the step's start
+        t_characteristic = -std::numeric_limits<rtype>::infinity();
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1981,6 +3204,7 @@ void Solver::take_step() {
     }
     halo_current = false;
     Kokkos::fence();
+    if (reacting && cell_chemistry.adapt_balance()) destroy_step_graph();
     step++;
     t += dt;
 }
@@ -2002,6 +3226,14 @@ void Solver::update_primitives() {
     });
 }
 
+void Solver::check_timed_boundaries() const {
+    on_every_rank([&] {
+        timed_fields.check();
+        dirichlet_states.check();
+        timed_inlets.check();
+    });
+}
+
 void Solver::update_p_max() {
     update_primitives();
     Kokkos::View<rtype *> peak = p_max;
@@ -2011,19 +3243,18 @@ void Solver::update_p_max() {
     });
 }
 
-rtype Solver::next_target_time() const {
+rtype Solver::next_target_time(const bool unstaged) const {
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
     for (const auto & writer : data_writers) {
-        t_target = std::min(t_target, writer->next_time());
+        if (!(unstaged && staged_outputs)) t_target = std::min(t_target, writer->next_time());
     }
-    return std::min(t_target, probes.next_time());
+    return std::min(t_target, probes.next_time(unstaged));
 }
 
 void Solver::calc_dt() {
     // Halo values are stale after the last stage of the previous step; the
     // first stage of the next one reuses them
-    halo.exchange(state());
-    halo_current = true;
+    exchange_for_first_stage();
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
     if (!(dt_cfl1 > 0.0_r)) throw DivergedError();
@@ -2041,7 +3272,10 @@ void Solver::calc_dt() {
         dt = t_target - t;
     }
     if (!(dt > 0.0_r)) {
-        throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
+        throw std::runtime_error("the time step is " + logging::real(double(dt)) + " at step " + std::to_string(step) +
+                                 ", t = " + logging::real(double(t)) +
+                                 ": it must be positive. Check run.dt, run.cfl, the sponges' and the step "
+                                 "controller's limits, and that t_stop is after the initial time.");
     }
     // cfl_local holds dt_cfl1 per cell; convert to local CFL number
     Kokkos::View<rtype *> c = cfl_local;
@@ -2149,7 +3383,7 @@ struct TimeStepFunctor {
 };
 
 rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
-    if (is_mixture()) return calc_dt_cfl1_mixture();
+    if (is_mixture()) return calc_dt_cfl1_mixture(on_device);
     TimeStepFunctor functor{mesh->offsets_faces_of_cell,
                             mesh->faces_of_cell,
                             mesh->cells_of_face,
@@ -2169,31 +3403,44 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {
             update_dynamic_constant();
-            update_eddy_viscosity(mesh->n_owned());
+            update_eddy_viscosity(mesh->n_owned(), true);
         }
     }
+    // On comm_space, so that the reduction ahead of the allreduce does not wait
+    // for the reconstruction that exchange_for_first_stage() started
+    comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+    const Kokkos::RangePolicy<> cells(comm_space, 0, mesh->n_owned());
     if (on_device.data()) {
-        Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+        Kokkos::parallel_reduce("time_step", cells, functor,
                                 Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         return 0.0;
     }
-    rtype dt_min = std::numeric_limits<rtype>::max();
-    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return reduce_dt(dt_min);
+    Kokkos::parallel_reduce("time_step", cells, functor,
+                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+    return reduce_dt();
 }
 
-rtype Solver::reduce_dt(rtype local) {
+Kokkos::View<rtype> Solver::dt_reduce_slot() {
+    if (!step_reduce.is_allocated()) step_reduce = Kokkos::View<rtype *>("step_reduce", N_STEP_REDUCE);
+    return Kokkos::View<rtype>(step_reduce.data());
+}
+
+rtype Solver::reduce_dt() {
     control_contributed = run_control::pending();
-    std::array<rtype, 1 + run_control::N_REQUESTS> values{local};
-    for (int k = 0; k < run_control::N_REQUESTS; k++) {
-        values[size_t(k) + 1] = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
-    }
-    values = comm::allreduce(values, comm::Op::MIN);
+    const Kokkos::View<rtype *> values = step_reduce;
+    const int contributed = control_contributed;
+    Kokkos::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
+        values(k + 1) = (contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    });
+    if (is_distributed()) comm::allreduce_device(values, comm::Op::MIN, halo.uses_nccl());
+    const auto reduced = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     control_reduced = 0;
     for (int k = 0; k < run_control::N_REQUESTS; k++) {
-        if (values[size_t(k) + 1] < 0) control_reduced |= 1 << k;
+        if (reduced(k + 1) < 0) control_reduced |= 1 << k;
     }
-    return values[0];
+    return reduced(0);
 }
 
 /**
@@ -2275,20 +3522,10 @@ struct ForceFunctor {
     }
 };
 
-std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
-    // The wall model reads exchange cells of the halo, stale after the last stage
-    if (wall_model_on) halo.exchange(state());
-    const Euler phys = physics;
-    StateView U = conservatives;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
-        update_cell_states(state(), false);
-    } else Kokkos::parallel_for("force_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
-        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
-        phys.compute_W_from_conservatives(W_c, cons);
-        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
-    });
+void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) {
+    const comm::SelfScope scope = communication_scope();
+    // The gradients and the wall model read the halo, stale after the last stage
+    update_cell_W();
     if (is_viscous()) {
         Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
         if (is_mixture()) update_transport();
@@ -2297,33 +3534,52 @@ std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t 
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
                          is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric, wall_model.out};
-    ForceFunctor::value_type result;
-    Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    constexpr size_t n = 2 * N_DIM + 1;
+    const Kokkos::View<rtype *> sum = monitor_sums;
+    Kokkos::parallel_reduce("force", faces.extent(0), functor,
+                            Kokkos::View<ForceFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
+                                reinterpret_cast<ForceFunctor::value_type *>(sum.data())));
+    if (is_distributed()) comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), n), comm::Op::SUM, halo.uses_nccl());
+    Kokkos::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
+        for (size_t i = 0; i < n; i++) out[i] = static_cast<double>(sum(i));
+    });
+}
+
+std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    const comm::SelfScope scope = communication_scope();
+    allocate_monitors();
+    reduce_force(faces, monitor_results.data());
+    const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
     std::array<rtype, 2 * N_DIM + 1> F;
-    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
-    return comm::allreduce(F, comm::Op::SUM);
+    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = static_cast<rtype>(values(i));
+    return F;
+}
+
+void Solver::write_force_row(ForceMonitor & monitor, const double * values) {
+    monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
+    const auto columns = force_columns(monitor.modeled);
+    for (size_t i = 0; i < columns.size(); i++) monitor.last.values.emplace_back(columns[i].first, values[i]);
+    if (!monitor.out) return;
+    *monitor.out << step << "," << std::setprecision(12) << t;
+    for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << static_cast<rtype>(values[i]);
+    if (monitor.modeled) *monitor.out << "," << static_cast<rtype>(values[2 * N_DIM]);
+    *monitor.out << "\n";
+    monitor.out->flush();
 }
 
 void Solver::write_forces() {
-    for (auto & monitor : force_monitors) {
-        if (step % monitor.interval != 0) continue;
-        const auto F = calc_force(monitor.faces);
-        monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
-        for (size_t i = 0; i < 2 * N_DIM; i++) {
-            monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
-                                             double(F[i]));
-        }
-        if (monitor.modeled) monitor.last.values.emplace_back("Q", double(F[2 * N_DIM]));
-        if (!monitor.out) continue;
-        *monitor.out << step << "," << std::setprecision(12) << t;
-        for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];
-        if (monitor.modeled) *monitor.out << "," << F[2 * N_DIM];
-        *monitor.out << "\n";
-        monitor.out->flush();
+    for (size_t k = 0; k < force_monitors.size(); k++) {
+        if (step % force_monitors[k].interval != 0) continue;
+        allocate_monitors();
+        monitor_reductions(k);
+        const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
+        write_force_row(force_monitors[k], all.data() + monitor_offsets[k]);
     }
 }
 
 std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
+    const comm::SelfScope scope = communication_scope();
     std::array<rtype, N_CONSERVATIVE> total;
     StateView U = conservatives;
     Kokkos::View<rtype *> vol = mesh->cell_measure;
@@ -2334,7 +3590,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         }, sum);
         total[i_var] = sum;
     }
-    return comm::allreduce(total, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(total, comm::Op::SUM) : total;
 }
 
 /**
@@ -2406,12 +3662,14 @@ void Solver::update_velocity_gradients() {
 void Solver::update_cell_W() {
     halo.exchange(state());
     update_boundary_states(t);
+    if (is_mixture()) {
+        update_cell_states_and_primitives();
+        return;
+    }
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
-        update_cell_states(state(), false);
-    } else Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);
@@ -2420,62 +3678,90 @@ void Solver::update_cell_W() {
     update_primitives();
 }
 
-std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
+void Solver::reduce_flow_statistics(double * out) {
+    const comm::SelfScope scope = communication_scope();
     update_velocity_gradients();
     FlowStatisticsFunctor functor{W_cells, primitives, viscous_gradients, mesh->cell_measure,
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
-    FlowStatisticsFunctor::value_type result;
-    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    const Kokkos::View<rtype *> sum = monitor_sums;
+    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor,
+                            Kokkos::View<FlowStatisticsFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
+                                reinterpret_cast<FlowStatisticsFunctor::value_type *>(sum.data())));
+    if (is_distributed()) {
+        comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), N_FLOW_STATISTICS), comm::Op::SUM, halo.uses_nccl());
+    }
+    Kokkos::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
+        for (size_t i = 0; i < N_FLOW_STATISTICS; i++) out[i] = static_cast<double>(sum(i));
+    });
+}
+
+std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
+    const comm::SelfScope scope = communication_scope();
+    allocate_monitors();
+    reduce_flow_statistics(monitor_results.data());
+    const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
     std::array<rtype, N_FLOW_STATISTICS> sums;
-    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
-    return comm::allreduce(sums, comm::Op::SUM);
+    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = static_cast<rtype>(values(i));
+    return sums;
 }
 
 void Solver::update_vortex_fields() {
-    update_velocity_gradients();
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::View<rtype *[N_DIM]> radius_coords = axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>();
     Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        // g(c, 1 + k, i) = d u_k / d x_i, and |S|^2 - |Omega|^2 = d u_k / d x_i d u_i / d x_k,
-        // plus the hoop strain (u_r / r)^2 in axisymmetric runs
-        rtype gg = 0.0;
-        FOR_I_DIM {
-            for (uint8_t k = 0; k < N_DIM; k++) gg += g(c, 1 + k, i) * g(c, 1 + i, k);
+#if N_DIM == 2
+        out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
+#else
+        for (uint8_t k = 0; k < 3; k++) {
+            const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
+            out(c, k) = g(c, 1 + b, a) - g(c, 1 + a, b);
         }
-        if (radius_coords.extent(0) > 0) {
-            const rtype hoop = W(c, 2) / radius_coords(c, 1);
-            gg += hoop * hoop;
-        }
-        out(c, 0) = -0.5_r * gg;
-        if constexpr (N_DIM == 2) {
-            out(c, 1) = g(c, 2, 0) - g(c, 1, 1);
-        } else {
-            for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
-                out(c, 1 + k) = g(c, 1 + b, a) - g(c, 1 + a, b);
-            }
-        }
+#endif
     });
+}
+
+void Solver::update_derived_fields() {
+    derived::Inputs inputs{.W = W_cells,
+                           .gradients = viscous_gradients,
+                           .gamma = physics.get_gamma(),
+                           .radius_coords = axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(),
+                           .primitives = primitives};
+    if (is_mixture()) {
+        inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        inputs.Y = cell_scalars;
+        inputs.thermo = mixture.thermo;
+        if (derived_selection.need(derived::need::VISCOUS)) {
+            update_transport();
+            inputs.transport = cell_transport;
+        }
+        if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) {
+            derived::scalar_gradients(derived_settings, cell_scalars, viscous_gradient, boundary_data.bc_Y,
+                                      mesh->n_cells, mesh->n_owned(), derived_workspace);
+            inputs.scalar_gradients = derived_workspace.gradients;
+        }
+    }
+    derived::compute(derived_selection, derived_settings, inputs, mesh->n_owned(), derived_fields);
 }
 
 void Solver::write_integrals() {
     if (integral_monitor.interval == 0 || step % integral_monitor.interval != 0) return;
-    const auto sums = integrate_flow_statistics();
-    KineticEnergyBudget rates;
-    if (integral_monitor.budget) rates = kinetic_energy_budget();
-    std::vector<double> values(sums.begin(), sums.end());
-    if (integral_monitor.budget) {
-        // The exact convective rate is the pressure work; the rest is numerical
-        values.insert(values.end(), {double(rates.convective), double(rates.viscous), double(rates.sgs),
-                                     double(rates.pressure_work - rates.convective), double(rates.pressure_work)});
-    }
-    if (les_on && les.dynamic) values.push_back(double(les.C));
-    if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
-    const std::vector<std::string> names = integral_names();
+    allocate_monitors();
+    monitor_reductions(force_monitors.size());
+    const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
+    write_integral_row(all.data() + monitor_offsets[force_monitors.size()]);
+}
+
+void Solver::write_integral_row(const double * monitored) {
+    std::vector<double> values;
+    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) values.push_back(double(static_cast<rtype>(monitored[i])));
+    if (integral_monitor.budget) values.insert(values.end(), monitored + N_FLOW_STATISTICS + 2,
+                                               monitored + N_FLOW_STATISTICS + 2 + N_BUDGET);
+    if (les_on && les.dynamic) values.push_back(double(static_cast<rtype>(monitored[N_FLOW_STATISTICS])));
+    if (dynamic_efficiency()) values.push_back(monitored[N_FLOW_STATISTICS + 1]);
+    const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
-    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(names[i], values[i]);
+    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);
     if (!integral_monitor.out) return;
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const double v : values) *integral_monitor.out << "," << v;

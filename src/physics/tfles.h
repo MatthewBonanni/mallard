@@ -18,6 +18,7 @@
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 /**
  * @brief Thickening F, efficiency E and flame sensor Omega of a cell. The
@@ -37,7 +38,7 @@ struct ThickenedFlame {
     double n_res = 5.0;
     enum class Efficiency : uint8_t { NONE, CHARLETTE, DYNAMIC };
     Efficiency efficiency = Efficiency::DYNAMIC;
-    double beta = 0.0;  // CHARLETTE: input (default 0.5); DYNAMIC: the dynamic procedure's latest exponent
+    double beta = 0.0;  // CHARLETTE: input (default 0.5); DYNAMIC: the initial exponent (then the solver's, on the device)
     bool eddy_viscosity_velocity = false;  // u' = C_u nu_t / Delta instead of Colin et al.'s operator
     double C_u = 28.0;
 
@@ -47,7 +48,7 @@ struct ThickenedFlame {
     /** @brief [les.combustion] of an input with one. */
     static ThickenedFlame from_input(const Input & table);
 
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     /** @brief Flame sensor: 1 inside the flame (preheat zone included), 0 in fresh and burnt gas. */
     KOKKOS_INLINE_FUNCTION
@@ -85,9 +86,9 @@ struct ThickenedFlame {
         return Kokkos::pow(1.0 + Kokkos::fmin(F - 1.0, gamma * r), beta);
     }
 
-    /** @brief Dynamic efficiency F^beta: Charlette et al.'s saturated form at Delta_e / delta_L = F. */
+    /** @brief Dynamic efficiency F^beta_: Charlette et al.'s saturated form at Delta_e / delta_L = F. */
     KOKKOS_INLINE_FUNCTION
-    double dynamic_wrinkling(const double F) const { return F > 1.0 ? Kokkos::pow(F, beta) : 1.0; }
+    static double dynamic_wrinkling(const double F, const double beta_) { return F > 1.0 ? Kokkos::pow(F, beta_) : 1.0; }
 };
 
 #endif // TFLES_H

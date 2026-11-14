@@ -225,7 +225,15 @@ $$
 $$
 
 with $\theta_D$ = `[numerics.hybrid] sensor_threshold` (default 0.65) and
-$\phi_\mathrm{floor}$ = `upwind_floor` (default 0). A face takes the larger
+$\phi_\mathrm{floor}$ = `upwind_floor` (default 0).
+
+![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-light.svg#gh-light-mode-only)
+![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-dark.svg#gh-dark-mode-only)
+
+*A cell is upwind where it compresses and $\lvert\nabla\times\mathbf{u}\rvert < \lvert\nabla\cdot\mathbf{u}\rvert\sqrt{(1 - \theta_D)/\theta_D}$:
+shocks, not vortices or expansions. A larger threshold narrows the wedge.*
+
+A face takes the larger
 fraction of its two cells, $\phi_f = \max(\phi_L, \phi_R)$; boundary faces
 take 1, except walls and symmetry planes, whose mirror states make the
 central flux exact and which take their cell's. At every face point,
@@ -298,7 +306,7 @@ with $Y_{k,q}^{L,R}$ the reconstructed face mass fractions of each side
 ([chapter 6](finite_volume.md#gas-mixtures)). Each cell writes the mass of
 every species leaving it through each of its faces, so no two threads write
 the same entry. On boundary faces the inflowing mass fractions are the
-prescribed ones (`nscbc_inlet`, `upt`), those of the image face or image
+prescribed ones (`inlet_state`, also with `nscbc`), those of the image face or image
 cell of transmissive boundaries, or the interior ones. Since the face mass
 fractions lie in $[0, 1]$ and sum to one, the species fluxes sum to the
 mass flux, and $\rho Y_k$ stays non-negative under the flow's CFL limit.
@@ -349,7 +357,7 @@ Boundary faces:
     and gradients of that interior face, eq. $\eqref{eq:face-values-and-gradients}$;
 - **outflow, far-field and characteristic faces** (and transmissive faces
     without an image): the cell's values with the normal derivatives removed;
-- **mixture `upt` faces**: the cell's values and gradients.
+- **mixture `inlet_state` faces**: the cell's values and gradients.
 
 ### Single gas
 

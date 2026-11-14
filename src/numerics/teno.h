@@ -38,6 +38,14 @@ constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
+ * @brief Relative widening of the neighbor range in bound-preserving scaling:
+ *        a smooth extremum overshoots its neighbors' averages, and where a
+ *        quantity barely varies (the pressure of a low-Mach flame) that
+ *        overshoot is far below the quantity but not below its range.
+ */
+constexpr rtype BOUND_SLACK = 1.0e-3_r;
+
+/**
  * @brief Stencil entries reached across a periodic rotation. The face field
  *        of a stencil slot holds the mirror face (or -1) of an entry whose
  *        cell and mirror face do not turn. Otherwise it holds
@@ -104,21 +112,33 @@ constexpr uint8_t SLICE_SHIFT =
 
 /**
  * @brief Per-cell stencils of different sizes, stored without padding to the
- *        largest one in the mesh. Slot s of a cell's stencil holds the stencil
- *        cell, its mirror boundary face (or -1) and `width` pseudo-inverse
- *        entries. Consecutive cells form slices of 2^shift cells; a slice is
- *        padded to its largest stencil and interleaves its cells' slots.
- *        With single, pinv holds the pseudo-inverse entries as floats, two to
- *        an element, at the same indices.
+ *        largest one in the mesh. Slot s of a cell's stencil holds an entry
+ *        and `width` pseudo-inverse entries. An entry e >= 0 is the stencil
+ *        cell e, without a mirror face; e < 0 is the image -1 - e, whose cell
+ *        and mirror boundary face (TENO's face field) images holds at
+ *        2 (-1 - e) and 2 (-1 - e) + 1: images are rare, so the face field
+ *        is stored only for them. Consecutive cells form slices of 2^shift
+ *        cells; a slice is padded to its largest stencil and interleaves its
+ *        cells' slots. The pseudo-inverse entries are packed the same way,
+ *        in blocks of 2^shift tables, and a cell finds its own through
+ *        pinv_index: (first slot of its block) << shift | its lane. Without
+ *        shared tables, a cell's block is its slice and its lane its own;
+ *        with them (always, outside tests), the cells of a stencil shape point
+ *        to one table. With single, pinv holds the pseudo-inverse entries as
+ *        floats, two to an element, at the same indices.
  */
 struct PackedStencils {
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
+    Kokkos::View<uint64_t *> pinv_index;   // (cell): where its pseudo-inverse entries are
     Kokkos::View<int32_t *> cells;
-    Kokkos::View<int32_t *> faces;
+    Kokkos::View<int32_t *> images;        // (2 image + {0: cell, 1: face field})
     Kokkos::View<rtype *> pinv;
     uint8_t shift = SLICE_SHIFT;
     uint8_t width = 0;
     bool single = false;
+    bool shared = false;  // cells share pseudo-inverses (host-side flag)
+    // shared, host: (2 shape + {0: its pinv_index, 1: global id of the cell whose table it is}), by pinv_index
+    Kokkos::View<uint64_t *, Kokkos::HostSpace> shape_owner;
 
     /** @brief Elements of pinv that hold n entries. */
     KOKKOS_INLINE_FUNCTION
@@ -126,19 +146,29 @@ struct PackedStencils {
         return single ? (n * sizeof(float) + sizeof(rtype) - 1) / sizeof(rtype) : n;
     }
 
+    /** @brief The entry of image k. */
+    KOKKOS_INLINE_FUNCTION
+    static int32_t image_entry(const uint64_t k) { return -1 - static_cast<int32_t>(k); }
+
     /** @brief One cell's stencil, resolved once per cell, for pseudo-inverse entries of type T. */
     template <typename T>
     struct RowT {
         const T * pinv_;
         const int32_t * cells_;
-        const int32_t * faces_;
+        const int32_t * images_;
         uint8_t shift;
 
         KOKKOS_INLINE_FUNCTION
-        int32_t cell(const uint32_t s) const { return cells_[s << shift]; }
+        int32_t cell(const uint32_t s) const {
+            const int32_t e = cells_[s << shift];
+            return e >= 0 ? e : images_[2 * (-1 - e)];
+        }
 
         KOKKOS_INLINE_FUNCTION
-        int32_t face(const uint32_t s) const { return faces_[s << shift]; }
+        int32_t face(const uint32_t s) const {
+            const int32_t e = cells_[s << shift];
+            return e >= 0 ? -1 : images_[2 * (-1 - e) + 1];
+        }
 
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
@@ -156,9 +186,11 @@ struct PackedStencils {
     KOKKOS_INLINE_FUNCTION
     RowT<T> row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
-        const uint32_t lane = c & ((1u << shift) - 1);
-        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start * width) << shift) + lane,
-                       cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift};
+        const uint64_t own = pinv_index(c);
+        const uint32_t mask = (1u << shift) - 1;
+        const uint32_t lane = c & mask;
+        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + (((own >> shift) * width) << shift) + (own & mask),
+                       cells.data() + (start << shift) + lane, images.data(), shift};
     }
 };
 
@@ -168,8 +200,9 @@ using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
 /**
  * @brief The terms of the smoothness-indicator matrix (3D): entry e
  *        (upper_index(l, m)) is sum_t weight(t) moments(cell, moment(t)) over
- *        t in [start(e), start(e + 1)), with products of D^beta factors (whole
- *        numbers below 2^16) as weights; term(t) holds weight(t) << 16 | moment(t).
+ *        t in [start(e), start(e + 1)), with products of D^beta factors and
+ *        multinomial coefficients (whole numbers below 2^16) as weights;
+ *        term(t) holds weight(t) << 16 | moment(t).
  */
 struct SmoothnessTerms {
     Kokkos::View<uint32_t *> start;
@@ -271,11 +304,16 @@ T ipow(const T x, const uint8_t n) {
  */
 template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, T * phi) {
-    const uint8_t nk = n_dof(r);
-    for (uint8_t l = 0; l < nk; l++) {
-        uint8_t a, b;
-        exponents(l, a, b);
-        phi[l] = ipow(xi, a) * ipow(eta, b);
+    // Powers by repeated multiplication, as ipow forms them
+    T px[MAX_DEGREE + 1], py[MAX_DEGREE + 1];
+    px[0] = py[0] = T(1);
+    for (uint8_t k = 1; k <= r; k++) {
+        px[k] = px[k - 1] * xi;
+        py[k] = py[k - 1] * eta;
+    }
+    uint8_t l = 0;
+    for (uint8_t d = 1; d <= r; d++) {
+        for (uint8_t b = 0; b <= d; b++) phi[l++] = px[d - b] * py[b];
     }
 }
 
@@ -299,13 +337,18 @@ void monomial_gradients(const uint8_t r, const T xi, const T eta, T * d_xi, T * 
  */
 template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) {
+    // Powers by repeated multiplication, as ipow forms them
+    T px[MAX_DEGREE + 1], py[MAX_DEGREE + 1], pz[MAX_DEGREE + 1];
+    px[0] = py[0] = pz[0] = T(1);
+    for (uint8_t k = 1; k <= r; k++) {
+        px[k] = px[k - 1] * xi;
+        py[k] = py[k - 1] * eta;
+        pz[k] = pz[k - 1] * zeta;
+    }
     uint8_t l = 0;
     for (uint8_t d = 1; d <= r; d++) {
         for (int i = d; i >= 0; i--) {
-            for (int j = d - i; j >= 0; j--) {
-                phi[l++] = ipow(xi, static_cast<uint8_t>(i)) * ipow(eta, static_cast<uint8_t>(j)) *
-                           ipow(zeta, static_cast<uint8_t>(d - i - j));
-            }
+            for (int j = d - i; j >= 0; j--) phi[l++] = px[i] * py[j] * pz[d - i - j];
         }
     }
 }

@@ -86,8 +86,8 @@ void Solver::init_radiation() {
     r.T_ambient4 = T_ambient * T_ambient * T_ambient * T_ambient;
     radiation = r;
     radiating = true;
-    source_summary.emplace_back("Radiation", "optically thin, Planck-mean absorption of " + present +
-                                                 " (TNF), T_ambient = " + logging::real(T_ambient) + " K");
+    source_summary.setting("Radiation", "optically thin, Planck-mean absorption of " + present + " (TNF)");
+    source_summary.quantity("radiation T_ambient", logging::real(T_ambient), units::column("K"), "ambient temperature");
 }
 
 void Solver::add_radiation(StateView rhs, SpeciesView rhoY) {

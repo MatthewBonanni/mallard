@@ -1,0 +1,10 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/detonation_3d/input.toml",
+  "examples/sedov_3d/input.toml"
+ ]
+}

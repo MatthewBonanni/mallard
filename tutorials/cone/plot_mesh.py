@@ -96,7 +96,7 @@ def main():
         bx.set_ylim(0, R)
         bx.set_aspect("equal")
         bx.grid(False)
-        bx.legend(loc="upper left")
+        bx.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), frameon=False)
         bx.set_title(f'Faces on "symmetry_z" ({len(cells):,} tetrahedra in all)')
         bx.set_xlabel("x")
         bx.set_ylabel("y")

@@ -16,17 +16,22 @@ the commands stay working.
 | 4 | [Supersonic flow over a cone](cone.md) | 3D builds, tetrahedra, symmetry planes, a characteristic far field, surface output, MPI ranks and GPUs | minutes, laptop | Taylor-Maccoll solution |
 | 5 | [Premixed flame](premixed_flame.md) | Gas mixtures, mechanisms, finite-rate chemistry, mixture-averaged transport, flame speed from φ = 0.6 to 1.4 | | Cantera's `FreeFlame` |
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
+| 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
+| 8 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
+| 9 | [From run to figure](post_processing.md) | What a run wrote (the run report, `mallard info`), probes, fields and averages after the run (`mallard post extract`, `post derive`, `post average`), a grid convergence study (`mallard post convergence`), figures with the Python package | 16 minutes, laptop | Steady wake at Re = 40: reference computations and experiment |
 
-Tutorials 1 to 4 run on a laptop CPU. For more cases, the
+Tutorials 1 to 4 and 7 to 9 run on a laptop CPU; 8 and 9 follow on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
 each with what it demonstrates and how long it takes, and the
-[validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.
+[verification and validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.
 
 The tutorials assume a build of Mallard (see the
 [first simulation](first_simulation.md)), here with MPI for the
 multi-rank runs, and Python 3 with the packages of
-`tutorials/requirements.txt` (numpy, scipy, matplotlib, gmsh, cantera), which
-also provide the `gmsh` command:
+`tutorials/requirements.txt` (numpy, scipy, matplotlib, h5py, gmsh, cantera), which
+also provide the `gmsh` command, and the [Python package](../guide/python.md) of `tools/`, which reads
+the output through Mallard's own reader: tutorial 9's scripts use it, and so can your own analysis.
+The builds below make its library:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -36,7 +41,7 @@ cmake -S . -B build-3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
       -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
 cmake --build build-3d -j
 python3 -m venv .venv
-.venv/bin/pip install -r tutorials/requirements.txt
+.venv/bin/pip install -r tutorials/requirements.txt -e tools
 export PATH=$PWD/.venv/bin:$PATH
 ```
 
@@ -48,8 +53,10 @@ inside the repository and refer to the repository as `$MALLARD`:
 export MALLARD=$PWD
 ```
 
-`tutorials/ci.sh` runs the same steps at reduced size, as CI does:
+`tutorials/ci.sh` runs the same steps at reduced size, as CI does, through the
+`mallard` of an install with both dimensions:
 
 ```bash
-tutorials/ci.sh build/src/mallard build-3d/src/mallard /tmp/tutorials
+cmake --install build --prefix install && cmake --install build-3d --prefix install
+tutorials/ci.sh install/bin/mallard /tmp/tutorials
 ```

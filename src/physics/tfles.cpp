@@ -41,14 +41,17 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
             }
         }
     }
-    tf.beta = tf.efficiency == Efficiency::DYNAMIC ? 0.0 : find_double_or(table, "beta", dim::none, 0.5);
-    const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
-    if (velocity != "colin" && velocity != "eddy_viscosity") {
-        throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
+    // Read only where they are accepted, so that the resolved input does not write them
+    if (tf.efficiency != Efficiency::DYNAMIC) {
+        tf.beta = find_double_or(table, "beta", dim::none, 0.5);
+        const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
+        if (velocity != "colin" && velocity != "eddy_viscosity") {
+            throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
+        }
+        tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
+        tf.C_u = find_double_or(table, "C_u", dim::none, 28.0);
+        if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     }
-    tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
-    tf.C_u = find_double_or(table, "C_u", dim::none, 28.0);
-    if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     if (!(tf.delta_L > 0.0) || !(tf.s_L > 0.0) || !(tf.n_res > 0.0) ||
         (tf.efficiency == Efficiency::CHARLETTE && !(tf.beta > 0.0))) {
         throw InputError("les.combustion: delta_L, s_L, n_res and beta must be positive.");
@@ -57,14 +60,24 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     return tf;
 }
 
-logging::Items ThickenedFlame::summary() const {
+report::Summary ThickenedFlame::summary() const {
     using logging::real;
     std::string e = "no efficiency";
     if (efficiency == Efficiency::DYNAMIC) e = "dynamic efficiency F^beta";
     if (efficiency == Efficiency::CHARLETTE) {
-        e = "Charlette efficiency (beta " + real(beta) + "), " +
-            (eddy_viscosity_velocity ? "u' = " + real(C_u) + " nu_t / Delta" : "u' = 2 Delta^3 |lap(curl u)|");
+        e = std::string("Charlette efficiency, ") +
+            (eddy_viscosity_velocity ? "u' = C_u nu_t / Delta" : "u' = 2 Delta^3 |lap(curl u)|");
     }
-    return {{"Combustion", "thickened flame, " + real(n_res) + " cells across delta_L " + real(delta_L) + " m, s_L " +
-                               real(s_L) + " m/s, sensor on T from " + real(T_u) + " to " + real(T_b) + " K, " + e}};
+    report::Summary s;
+    s.setting("Combustion", "thickened flame, sensor on T, " + e);
+    s.quantity("TFLES n_res", real(n_res), "cells", "across delta_L");
+    s.quantity("TFLES delta_L", real(delta_L), units::column("m"), "laminar flame thickness");
+    s.quantity("TFLES s_L", real(s_L), units::column("m/s"), "laminar flame speed");
+    s.quantity("TFLES T_unburnt", real(T_u), units::column("K"), "the flame sensor's 0");
+    s.quantity("TFLES T_burnt", real(T_b), units::column("K"), "the flame sensor's 1");
+    if (efficiency == Efficiency::CHARLETTE) {
+        s.quantity("TFLES beta", real(beta), "-", "efficiency exponent");
+        if (eddy_viscosity_velocity) s.quantity("TFLES C_u", real(C_u), "-", "subgrid velocity constant");
+    }
+    return s;
 }

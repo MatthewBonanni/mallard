@@ -25,6 +25,7 @@
 #include "log.h"
 #include "mixture.h"
 #include "reactor.h"
+#include "report.h"
 #include "thermo.h"
 
 namespace {
@@ -125,10 +126,10 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
-    logging::items(model.summary());
+    logging::items(model.summary().settings);
     logging::items({
-        {"Benchmark", std::to_string(n_cells) + " cells from " + std::to_string(n_samples) + " trajectory states (" +
-                          std::to_string(n_igniting) + " igniting cells)"},
+        {"Benchmark", logging::count(n_cells, "cell") + " from " + logging::count(n_samples, "trajectory state") + " (" +
+                          logging::count(n_igniting, "igniting cell") + ")"},
         {"Execution", (cells.lanes() == 1 ? std::string("one thread per cell")
                                            : std::to_string(cells.threads()) + " x " + std::to_string(cells.lanes()) +
                                                  " lanes per cell" +
@@ -152,7 +153,20 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     result.shared_bytes = cells.shared_bytes();
     result.cells = n_cells;
     result.igniting = n_igniting;
+    using Kind = report::Column::Kind;
+    const report::Stream steps_table({{"dt", "s", 9},
+                                      {"throughput", "cells/s", 9},
+                                      {"wall", "ms", 10},
+                                      {"active", "cells", 9},
+                                      {"mean", "sub-steps", 9},
+                                      {"max", "sub-steps", 9},
+                                      {"cells by sub-steps", "sub-steps:cells", 0, Kind::TEXT}},
+                                     logging::color_stdout());
+    logging::line();
+    for (const std::string & line : steps_table.header()) logging::line(line);
+    const Kokkos::View<double> dt_device("chemistry_benchmark_dt");
     for (const double dt : dts) {
+        Kokkos::deep_copy(dt_device, dt);
         double best = 1e300, mean_steps = 0.0, max_steps = 0.0;
         uint64_t active = 0;
         // Cells per bin of sub-steps (accepted and rejected): 0 (skipped), 1, 2, 3-4, 5-8, ..., more than 2^13
@@ -164,15 +178,17 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
             Kokkos::deep_copy(rhoY, h_rhoY);
             Kokkos::deep_copy(T_seed, h_T);
             Kokkos::deep_copy(chem_cost, 0.0_r);
+            const uint64_t failed = cells.statistics().failures;
             Kokkos::fence();
             const auto start = std::chrono::steady_clock::now();
-            const CellChemistry::Statistics stats = cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt);
+            cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt_device);
             Kokkos::fence();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (stats.failures > 0) throw std::runtime_error("benchmark: the integrator failed in some cells.");
+            const CellChemistry::Statistics stats = cells.statistics();
+            if (stats.failures > failed) throw std::runtime_error("benchmark: the integrator failed in some cells.");
             if (r == 0) continue;
             best = std::min(best, seconds);
-            active = stats.active;
+            active = stats.last_active;
             auto h_cost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), chem_cost);
             double sum = 0.0, largest = 0.0;
             std::fill(histogram.begin(), histogram.end(), 0);
@@ -194,10 +210,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
                     (high > low ? (b + 1 == histogram.size() ? "+" : "-" + std::to_string(high)) : "") + ":" +
                     std::to_string(histogram[b]);
         }
-        logging::items({{"dt = " + brief(dt) + " s", brief(n_cells / best) + " cells/s (" + brief(best * 1e3) +
-                                                         " ms), " + std::to_string(active) + " active, sub-steps mean " +
-                                                         brief(mean_steps) + ", max " + brief(max_steps)},
-                        {"  sub-steps: cells", bins}});
+        logging::line(steps_table.row({logging::format("%.2e", dt), logging::format("%.2e", n_cells / best),
+                                       logging::format("%.3f", best * 1e3), logging::count(active),
+                                       logging::format("%.2f", mean_steps), logging::format("%.0f", max_steps), bins}));
         result.steps.push_back({dt, best, active, mean_steps, max_steps, bins});
     }
     return result;

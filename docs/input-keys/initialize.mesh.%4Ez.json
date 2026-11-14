@@ -1,0 +1,10 @@
+{
+ "default": "100",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/taylor_green_3d/remap.toml"
+ ],
+ "type": "integer"
+}

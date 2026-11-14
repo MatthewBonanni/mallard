@@ -19,29 +19,22 @@
 #include "comm.h"
 #include "commands.h"
 #include "mesh_block.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
-int mesh_main(int argc, char ** argv) {
+int mesh_convert_main(const cli::Args & args) {
+    int argc = args.argc;
+    char ** argv = args.argv;
     comm::Session session(argc, argv);
-    if (argc != 3 || std::string(argv[0]) != "convert") {
-        if (comm::is_root()) {
-            std::cerr << "Usage: mallard mesh convert INPUT OUTPUT.h5\n"
-                      << "  INPUT is a mesh file (Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns, OpenFOAM\n"
-                      << "  polyMesh directory), or a Mallard input file (.toml) whose [mesh] table\n"
-                      << "  describes the mesh (and its [mesh.transform]). Several ranks write in\n"
-                      << "  parallel (needs parallel HDF5); each reads the whole mesh file but\n"
-                      << "  generates only its block.\n";
-        }
-        return 1;
-    }
     if (!have_hdf5()) {
         if (comm::is_root()) {
-            std::cerr << "mallard mesh convert: this build has no HDF5 support "
-                         "(configure with -DMallard_ENABLE_HDF5=ON).\n";
+            logging::error(diagnostic_code::MESH_CONVERT, "mallard mesh convert: this build has no HDF5 support "
+                                                          "(configure with -DMallard_ENABLE_HDF5=ON).");
         }
         return 1;
     }
     try {
-        const std::string in = argv[1], out = argv[2];
+        const std::string & in = args.positional[0], & out = args.positional[1];
         const MeshBlock block = std::filesystem::path(in).extension() == ".toml" ? read_mesh_block(parse_input(in))
                                                                                  : read_file_block(in);
         write_mesh_h5(out, block);
@@ -49,7 +42,7 @@ int mesh_main(int argc, char ** argv) {
         const uint64_t n_nodes = comm::allreduce(block.n_nodes(), comm::Op::SUM);
         if (comm::is_root()) std::cout << "Wrote " << out << ": " << n_cells << " cells, " << n_nodes << " nodes\n";
     } catch (const std::exception & e) {
-        std::cerr << "mallard mesh convert: " << e.what() << std::endl;
+        logging::error(diagnostic_code::MESH_CONVERT, std::string("mallard mesh convert: ") + e.what());
         return 1;
     }
     return 0;

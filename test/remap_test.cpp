@@ -172,7 +172,7 @@ TEST(RemapTest, SmoothPeriodicFieldsConvergeAtTheDegreePlusOne) {
         return std::sin(2.0 * M_PI * x[0]) * std::cos(2.0 * M_PI * x[1] / 0.8) +
                (N_DIM == 3 ? 0.5 * std::sin(2.0 * M_PI * x[N_DIM - 1] / 0.6) : 0.0);
     };
-    const std::string periodic = N_DIM == 2 ? "periodic = [\"x\", \"y\"]\n" : "periodic = [\"x\", \"y\", \"z\"]\n";
+    const std::string periodic = N_DIM == 2 ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     const auto target = serial_mesh(mesh_table(TARGET_TYPE, N_DIM == 2 ? 37 : 7));
     const auto exact = averages(*target, target->n_cells, f);
     for (uint8_t p = 1; p <= (N_DIM == 2 ? 3 : 2); p++) {

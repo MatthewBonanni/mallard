@@ -21,8 +21,8 @@ faces, and its own stencil selection by a Lebesgue bound.
 | File | Contents |
 |---|---|
 | `src/numerics/teno.h` | Monomials, Euler eigenvectors, the adaptive cutoff, packed stencil storage |
-| `src/numerics/teno.cpp` | Options, the 2D setup, the cache, and the reconstruction kernels |
-| `src/numerics/teno_setup.h`, `teno_setup.cpp` | The 3D setup on the device: stencil search, ranking metric, moments, fits |
+| `src/numerics/teno.cpp` | Options, the cache, and the reconstruction kernels |
+| `src/numerics/teno_setup.h`, `teno_setup.cpp` | The setup on the device: stencil search, ranking metric, moments, fits |
 | `src/numerics/teno_scalars.h` | Mixture scalars reconstructed with the flow's stencil choices |
 | `src/numerics/face_reconstruction.h`, `face_reconstruction.cpp` | Face quadrature, and the interface shared with first order and MUSCL |
 
@@ -264,6 +264,17 @@ most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged.
 
+**Meshes one cell thick.** A cell whose central-stencil candidates (mirror
+images aside) all lie level with it along a coordinate axis, as on a 2D strip
+or a 3D slab or pencil one cell thick, has no data across that axis: its
+mirror images only repeat its own column, and every monomial in that
+coordinate makes the fit rank deficient. Its central and sector fits (`flat_axes`,
+`fit_columns`) take only the monomials of the other axes, in a polynomial of
+the same degree (so the design order holds along the strip), from
+$\lceil f N'\rceil$ entries for their number $N'$; the coefficients of the
+dropped monomials are zero, so the run-time kernels are unchanged. A strip
+not aligned with an axis is not detected and still fails as below.
+
 If no size has full rank, the setup stops ("could not build a full-rank
 large stencil"), unless the search was cut off by the halo of an MPI
 partition, in which case the cell is redone once the halo is deep enough.
@@ -280,7 +291,7 @@ fan from the face's first vertex. The stencil has $n_s$ entries
 (`small_stencil_size`: 10 in 2D, $2N_2 = 18$ in 3D), up to $2n_s$ so as not to
 split a tie. A face whose cone holds fewer than $n_s$ candidates, whose tie
 cannot be resolved within $2n_s$, or whose fit is rejected has no sector
-stencil; the log counts these ("sector stencils cut by boundaries"), which
+stencil; the terminal output counts these ("sector stencils cut by boundaries"), which
 occur at corners of the domain. A troubled cell then chooses among the
 stencils it has.
 
@@ -291,15 +302,20 @@ form in them,
 
 $$
 \begin{equation}
-\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
+\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
 = \mathbf{a}^T\mathbf{S}\,\mathbf{a}, \qquad
-S_{lm} = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i} D^{\boldsymbol{\alpha}}\phi_l\,D^{\boldsymbol{\alpha}}\phi_m\,\mathrm{d}\boldsymbol{\xi},
+S_{lm} = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i} D^{\boldsymbol{\alpha}}\phi_l\,D^{\boldsymbol{\alpha}}\phi_m\,\mathrm{d}\boldsymbol{\xi},
 \label{eq:si}
 \end{equation}
 $$
 
 with derivatives and the integral over the target cell in the scaled frame,
-so that $\beta$ does not depend on the cell size. The sector polynomials use
+so that $\beta$ does not depend on the cell size. The multinomial weight
+$\lvert\boldsymbol{\alpha}\rvert!/\boldsymbol{\alpha}!$ counts every ordering
+of the derivatives, so each degree's sum is the squared Frobenius norm of
+that derivative tensor and $\beta$ does not depend on the orientation of the
+axes (the unweighted sum of Jiang & Shu's indicators does: a rotation by 30
+degrees changed the solution at $10^{-3}$ after one step, #436). The sector polynomials use
 the leading $N_2\times N_2$ block of the same $\mathbf{S}$. 2D stores the
 upper triangle of $\mathbf{S}$ per cell, integrated with the rule of the cell
 averages. 3D stores the cell's central moments $\eqref{eq:moments}$ instead
@@ -360,7 +376,14 @@ conservative-variable eigenvectors with the gas's $\gamma$; mixtures the
 primitive-variable ones, valid for any equation of state, with the mean of
 the two cells' $\gamma$ in the sound speed. The variables are ordered
 $u_n - a$, $u_n$ (entropy), $u_n + a$, then one shear wave per tangent.
-`characteristic = false` uses the identity instead.
+In 3D the two shear waves select together, on the sum of their indicators
+($\beta_m$ below), since the tangents are an arbitrary basis of the face's
+plane (`tangent_basis` projects out the coordinate axis least aligned with
+the normal); selecting them one by one made the solution depend on the
+orientation of the axes and on the cell numbering, which flips normals (#436).
+`characteristic = false` uses the identity instead; its momentum
+components then select their stencils separately, so that, unlike the
+characteristic default, the solution depends on the orientation of the axes.
 
 For each characteristic variable $v$, with the central coefficients
 $\mathbf{c}_K = \mathbf{L}_v\mathbf{a}_K$ and the sector ones
@@ -451,8 +474,22 @@ $$
 
 over the face points $q$ and $v \in \{\rho, p\}$, where $m_v$ and $M_v$ are
 the extrema of $v$ over the cell and its face neighbors (boundary faces add
-none). The scaled values are checked again, and an inadmissible cell still
-falls back to first order.
+none), widened by $10^{-3}\,|v_i|$ (`teno::BOUND_SLACK`). A smooth extremum
+overshoots its neighbors' averages; where a quantity barely varies, such as
+the pressure of a low-Mach flame (ripples of $10^{-4}\,p$), that overshoot is
+small against the quantity but not against its range, and without the
+widening $\theta$ fell to 0 in such cells: first order in the flame made it
+4-6% too fast. The overshoot at a shock is a fraction of the jump, which the
+widening leaves limited. The scaled values are checked again, and an
+inadmissible cell still falls back to first order.
+
+Admissible face values do not make the cell update admissible, since a
+troubled cell's face values come from different stencils and do not average
+to the cell's mean. In planar single-gas runs `bound_preserving = true` also
+limits the convective fluxes so that every forward-Euler stage keeps each
+cell's density and pressure positive at $\mathrm{CFL} \le 0.5$
+([Hu, Adams & Shu 2013](../references.md#hu-adams-shu-2013); details in the
+[theory manual](../theory/finite_volume.md#reconstruction)).
 
 ### Face quadrature
 
@@ -473,24 +510,49 @@ The same points enter the Lebesgue constant $\eqref{eq:lebesgue}$.
 
 ## Setup and storage
 
-**2D** runs the setup on the host, a cell at a time on host threads.
-**3D** runs it on the device (`teno_setup::Setup3DHandle`): the geometry
-(scales $h_c$, moments, bounding boxes, ranking metrics) once, then the
-stencils, fits and Lebesgue constants of batches of cells sized to the free
-device memory, a team of threads per cell on GPUs. Cells whose search
+The setup runs on the device (`teno_setup::SetupHandle`): the geometry
+(scales $h_c$ and ranking metrics; the rules of curved cells in 2D; moments
+and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
+and, in 2D, smoothness-indicator matrices of batches of cells sized to the
+free device memory: a thread per cell in 2D, a team of threads per cell on
+GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
+the cells the searches gather), and a batch takes as many cells as fit what
+16,384 cells take with twice that scratch, up to one wave of threads on the
+GPU; meshes of at least 16,384 cells share one batch size, so that the
+setup's workspace does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
-where it ran. The log's "TENO setup" row gives the execution space and the
+where it ran. The terminal output's "TENO setup" row gives the execution space and the
 time of each phase.
 
 The tables are packed without padding to the largest stencil: per cell, the
 scale $h_i$, the means $\overline{\phi}_{l,i}$, the 2D matrix $\mathbf{S}$ or
-the 3D moments, and per stencil entry its cell, its mirror face (or none)
-and its column of $\mathbf{P}$. On GPUs, 32 consecutive cells form a slice
+the 3D moments, and per stencil entry its cell and its column of
+$\mathbf{P}$. A mirror image's entry instead points into a list of the
+rank's images, which holds the cell and the mirror face. On GPUs, 32 consecutive cells form a slice
 whose entries are interleaved, so that a warp reads consecutive words.
 `single_precision_tables` (3D, single gas) keeps $\mathbf{P}$, and the moments' values, in single
 precision on the device.
+
+**Shared tables.** The cells of one stencil shape share one table of
+pseudo-inverses (`teno_sharing.h`). The slots of a
+stencil are ranked by their columns of $\mathbf{P}$ on a grid of $2^{-30}$ of
+its largest entry, within the central stencil and within each sector, so that
+equal stencils of a lattice, whose equidistant entries the search ranks
+differently from cell to cell, list their entries in the same order. Two cells
+have the same shape if their tables are equal on that grid in that order (on a
+lattice they differ by about $5\times 10^{-14}$); the shape's table is that of
+its cell with the lowest global id, agreed over the ranks at setup, so a cell's
+table does not depend on the partition, the batches, the thread count or the
+slice width. A shape whose entries straddle a grid line becomes two shapes,
+which costs memory only. The tables of the shapes are packed like the cells'
+stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
+own through `pinv_index` (block and lane); on a mesh with a shape per cell this
+is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+A caller that knows its stencil shapes, such as a structured block's offset
+pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
+tables; such shapes are agreed over the ranks by their key in the same way.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used
@@ -577,8 +639,8 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
     fourth at the walls. The fine cylinder at order 5 keeps a small drag
     noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`upt`,
-    `p_out`, `farfield`) shows, mirrored or not.
+    along the far field, which every far-field condition tried (`inlet_state`,
+    `outlet_pressure`, `farfield`) shows, mirrored or not.
 
 - **Thin cells.** Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
@@ -611,6 +673,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     | order 6, walls, 4³ | 4.7e-3 | 8.5e-6 |
 
     Order 4 on that lattice is stable only from 85 stencil entries
-    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Mixed meshes with
-    pyramids improve with the bound (table above). Pure pyramid lattices are
-    rare in practice; prefer orders 3 or 5 there.
+    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Thin pyramids grow
+    faster: a 6 × 6 × 4 box of aspect ratio 6.25, with side walls and periodic
+    in z, grows at $+0.033$ through the solver at order 4 and is bounded at
+    orders 3 and 5 ([order of `high_order`](../design/teno4_robustness.md#linear-stability)).
+    Mixed meshes with pyramids improve with the bound (table above). Pure
+    pyramid lattices are rare in practice; prefer orders 3 or 5 there.

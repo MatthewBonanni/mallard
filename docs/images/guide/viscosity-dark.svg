@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="384.059375pt" height="228.602406pt" viewBox="0 0 384.059375 228.602406" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="577.955pt" height="228.602406pt" viewBox="0 0 577.955 228.602406" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 228.602406 
-L 384.059375 228.602406 
-L 384.059375 0 
+L 577.955 228.602406 
+L 577.955 0 
 L 0 0 
 L 0 228.602406 
 z
@@ -257,31 +257,31 @@ L 367.833125 191.376
    </g>
    <g id="legend_1">
     <g id="line2d_14">
-     <path d="M 43.833125 18.48 
-L 55.833125 18.48 
-L 67.833125 18.48 
+     <path d="M 378.633125 78.933469 
+L 390.633125 78.933469 
+L 402.633125 78.933469 
 " style="fill: none; stroke-dasharray: 7.4,3.2; stroke-dashoffset: 0; stroke: #a99ea3; stroke-width: 2"/>
     </g>
     <g id="text_13">
-     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="77.433125" y="22.68" transform="rotate(-0 77.433125 22.68)">"constant"</text>
+     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="412.233125" y="83.133469" transform="rotate(-0 412.233125 83.133469)">"constant"</text>
     </g>
     <g id="line2d_15">
-     <path d="M 43.833125 35.519062 
-L 55.833125 35.519062 
-L 67.833125 35.519062 
+     <path d="M 378.633125 95.972531 
+L 390.633125 95.972531 
+L 402.633125 95.972531 
 " style="fill: none; stroke: #5fcfc1; stroke-width: 2.2; stroke-linecap: square"/>
     </g>
     <g id="text_14">
-     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="77.433125" y="39.719062" transform="rotate(-0 77.433125 39.719062)">"sutherland" (air: S = 110.4 K)</text>
+     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="412.233125" y="100.172531" transform="rotate(-0 412.233125 100.172531)">"sutherland" (air: S = 110.4 K)</text>
     </g>
     <g id="line2d_16">
-     <path d="M 43.833125 52.967812 
-L 55.833125 52.967812 
-L 67.833125 52.967812 
+     <path d="M 378.633125 113.421281 
+L 390.633125 113.421281 
+L 402.633125 113.421281 
 " style="fill: none; stroke: #f2a04d; stroke-width: 2.2; stroke-linecap: square"/>
     </g>
     <g id="text_15">
-     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="77.433125" y="57.167812" transform="rotate(-0 77.433125 57.167812)">"power_law", exponent 0.7</text>
+     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #ece4e7" x="412.233125" y="117.621281" transform="rotate(-0 412.233125 117.621281)">"power_law", exponent 0.7</text>
     </g>
    </g>
   </g>

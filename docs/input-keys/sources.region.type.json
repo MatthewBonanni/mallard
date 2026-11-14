@@ -1,0 +1,34 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/hot_gas_regions/input.toml",
+  "examples/source_regions/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "annulus",
+  "boundary",
+  "circle",
+  "cone",
+  "cylinder",
+  "difference",
+  "disk",
+  "ellipse",
+  "ellipsoid",
+  "frustum",
+  "half_space",
+  "implicit",
+  "interior",
+  "intersection",
+  "isosurface",
+  "polygon",
+  "rectangle",
+  "sphere",
+  "torus",
+  "union",
+  "where"
+ ]
+}
