@@ -1,9 +1,9 @@
 # Chemistry and radiation
 
-This chapter gives the chemical source terms $\dot\omega_k$ of eq. (2) of [chapter 1](governing_equations.md#conservation-laws), the
+This chapter gives the chemical source terms $\dot\omega_k$ of eq. (2) of [Governing equations](governing_equations.md#conservation-laws), the
 stiff integrator that advances them, how they are coupled to the flow by
 operator splitting, and the optically thin radiation model. Chemistry needs
-a gas mixture ([chapter 2](thermodynamics_transport.md)) and a `[chemistry]`
+a gas mixture ([Thermodynamics and transport of mixtures](thermodynamics_transport.md)) and a `[chemistry]`
 table. Usage: [Thermochemistry](../guide/thermochemistry.md); measured
 splitting errors: [Numerical methods](../numerics/overview.md#time-step).
 
@@ -99,7 +99,7 @@ PLOG and Chebyshev reactions use the pressure $p = R_u T\sum_k C_k$.
 ### Reverse rates
 
 Reversible reactions take $k_{r,j} = k_{f,j}/K_{c,j}$, with the equilibrium
-constant from the molar standard Gibbs energies $\hat g_k^\circ = W_k(h_k - T s_k^\circ)$ of eq. (1) of [chapter 2](thermodynamics_transport.md#species-thermodynamics),
+constant from the molar standard Gibbs energies $\hat g_k^\circ = W_k(h_k - T s_k^\circ)$ of eq. (1) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#species-thermodynamics),
 
 $$
 \begin{equation}
@@ -134,7 +134,7 @@ Other non-integer orders use $\max(C, 0)^o$.
 Each cell's chemistry is an adiabatic, constant-volume reactor at its
 density: over a chemistry substep $\rho$, $\rho\mathbf{u}$ and $\rho E$ are
 fixed, and since $e$ includes the enthalpies of formation
-([chapter 2](thermodynamics_transport.md#species-thermodynamics)) the
+([Thermodynamics and transport of mixtures](thermodynamics_transport.md#species-thermodynamics)) the
 specific internal energy is constant. The state
 $\mathbf{y} = (Y_1,\dots,Y_{N_s}, T)$ obeys (`ConstantVolumeReactor`,
 `src/chemistry/reactor.h`)
@@ -249,7 +249,7 @@ $$
 where $\mathcal{R}_\tau$ integrates eq. $\eqref{eq:reactor-equations-1}$ in every cell over $\tau$ and
 $\mathcal{T}_{\Delta t}$ is one step of the explicit time integrator on the
 flow's right-hand side (fluxes, sources, sponges, radiation;
-[chapter 8](time_integration.md)). With `fuse_half_steps = true` (the
+[Time integration](time_integration.md)). With `fuse_half_steps = true` (the
 default) the trailing half step of one time step and the leading half step of
 the next are fused into one call over $(\Delta t^n + \Delta t^{n+1})/2$; the
 reactor equations are autonomous, so this is the same splitting. Output at a
@@ -311,7 +311,7 @@ stable with upwind fluxes but not on the imaginary axis, so SIMPLER rejects
 the non-dissipative hybrid flux, as well as `double_flux` and
 `fuse_half_steps` ([design notes](../design/chemistry.md#simpler-balanced-splitting-option)).
 
-With TFLES or PaSR ([chapter 4](les.md)), a cell's reaction rates are
+With TFLES or PaSR ([Large-eddy simulation](les.md)), a cell's reaction rates are
 scaled by a factor $s$: its reactor is integrated over $s\,\tau$ instead
 (with forcing $\mathbf{g}/s$), which is the same ODE.
 

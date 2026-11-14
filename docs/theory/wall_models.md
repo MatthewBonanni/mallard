@@ -13,7 +13,7 @@ validation: [wall model design notes](../design/wall_model.md).
 
 ## Wall-modeled LES
 
-A wall-resolved LES ([chapter 4](les.md)) places its first cell at
+A wall-resolved LES ([Large-eddy simulation](les.md)) places its first cell at
 $y^+ \approx 1$, so the cell count of a wall-bounded flow grows like
 $Re_\tau^2$ ([Choi & Moin 2012](../references.md#choi-moin-2012)).
 Wall-modeled LES (WMLES) resolves only the outer part of the boundary layer,
@@ -78,7 +78,7 @@ offset $\mathbf{x}_e - \mathbf{x}_c$ are stored per face.
 $\mathbf{W} = [\rho, \mathbf{u}, p]$ at the point is reconstructed linearly
 in the containing cell from its cell average and its gradient for the
 viscous terms
-([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)):
+([Finite-volume discretization and reconstruction](finite_volume.md#gradients-for-the-viscous-terms)):
 
 $$
 \begin{equation}
@@ -316,7 +316,7 @@ per unit area of the face, opposite to the velocity relative to the wall
 and including the work of a moving wall; there is no normal viscous stress
 and no SGS flux on the face (`ViscousFluxFunctor::modeled_flux`,
 `src/numerics/viscous_flux.h`). The exterior state of the face is that of
-a slip wall ([chapter 9](boundaries_sources.md#walls)): the normal velocity
+a slip wall ([Boundary conditions and sources](boundaries_sources.md#walls)): the normal velocity
 mirrored, the tangential velocity, density and pressure of the interior. The
 convective flux therefore carries the pressure force only, and the
 reconstruction, the gradients and the eddy viscosity of the wall cells see

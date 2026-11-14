@@ -2,7 +2,7 @@
 
 This chapter gives the exterior states through which every boundary
 condition acts, the characteristic (NSCBC) boundaries, and the source terms
-$\mathbf{S}$ of eq. (3) of [chapter 1](governing_equations.md#conservation-laws). Usage:
+$\mathbf{S}$ of eq. (3) of [Governing equations](governing_equations.md#conservation-laws). Usage:
 [Boundary conditions](../guide/boundary_conditions.md) and
 [Sources and sponges](../guide/sources.md); design:
 [characteristic boundaries](../design/nscbc.md),
@@ -15,9 +15,9 @@ flux is the Riemann solver applied to the interior face state
 $\mathbf{W}^L$ and an exterior state $\mathbf{W}^b$
 (`BoundaryData::exterior_W`, `src/boundary/boundary.h`), with the unit
 normal $\mathbf{n}$ pointing out of the domain. Ghost states also feed the
-least-squares gradients ([chapter 6](finite_volume.md#muscl)) and the
+least-squares gradients ([Finite-volume discretization and reconstruction](finite_volume.md#muscl)) and the
 mirror images of TENO-E stencils. The viscous fluxes of each boundary type
-are in [chapter 7](fluxes.md#face-values-and-gradients). With
+are in [Numerical fluxes](fluxes.md#face-values-and-gradients). With
 $u_n = \mathbf{u}^L\cdot\mathbf{n}$, the exterior states $\mathbf{W}^b = [\rho, \mathbf{u}, p]^b$ are:
 
 - `symmetry`, inviscid walls: $[\rho^L,\ \mathbf{u}^L - 2u_n\mathbf{n},\ p^L]$;
@@ -82,7 +82,7 @@ zero-gradient copy of the boundary cell would feed the cell back to itself
 at inflow boundaries, and on triangles, whose centroids are offset from the
 face, create an O(1) mass imbalance at moving shocks. The gradient stencils
 of `outlet_extrapolation` boundaries continue across them the same way, through the
-image cells ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)).
+image cells ([Finite-volume discretization and reconstruction](finite_volume.md#gradients-for-the-viscous-terms)).
 
 ### Periodic boundaries
 
@@ -97,11 +97,11 @@ while scalars carry over unchanged (`src/mesh/periodic_maps.h`).
 ### Walls
 
 The ghost states above, together with the viscous wall fluxes of
-[chapter 7](fluxes.md#face-values-and-gradients), give no-slip walls with
+[Numerical fluxes](fluxes.md#face-values-and-gradients), give no-slip walls with
 one-sided wall gradients. In LES the wall faces carry the molecular fluxes
 only, with no SGS stress, heat or species flux. Walls with a wall model
 take a slip wall's exterior state and the model's stress and heat flux
-([chapter 5](wall_models.md#coupling-to-the-les)).
+([Wall models](wall_models.md#coupling-to-the-les)).
 
 ## Characteristic boundaries
 
@@ -184,8 +184,8 @@ $a = 1$, by default), and $\rho^b = p^b/(R_t T^b)$ at the target's gas
 constant. Supersonic outflow takes $\mathbf{W}^L$, supersonic inflow the
 target. The low-Mach correction applies at characteristic faces, and
 MUSCL boundary cells there reconstruct without the zero-gradient ghosts
-([chapter 6](finite_volume.md#muscl)). An inlet's target velocity is per
-face and may carry synthetic turbulence ([chapter 4](les.md#synthetic-inflow-turbulence)).
+([Finite-volume discretization and reconstruction](finite_volume.md#muscl)). An inlet's target velocity is per
+face and may carry synthetic turbulence ([Large-eddy simulation](les.md#synthetic-inflow-turbulence)).
 
 ![Waves at characteristic boundaries](../images/theory/characteristics-light.svg#gh-light-mode-only)
 ![Waves at characteristic boundaries](../images/theory/characteristics-dark.svg#gh-dark-mode-only)
@@ -247,10 +247,10 @@ by strength. The time step is limited to $\Delta t \le 1/\max_i\sigma_i$.
 ### Radiation
 
 `[radiation]` adds the optically thin loss of
-[chapter 3](chemistry_radiation.md#optically-thin-radiation), at every stage.
+[Chemistry and radiation](chemistry_radiation.md#optically-thin-radiation), at every stage.
 
 ### Axisymmetric source
 
 Axisymmetric runs add the radial momentum source of
-[chapter 1](governing_equations.md#axisymmetric-flows), integrated as in
-[chapter 6](finite_volume.md#axisymmetric-cells).
+[Governing equations](governing_equations.md#axisymmetric-flows), integrated as in
+[Finite-volume discretization and reconstruction](finite_volume.md#axisymmetric-cells).

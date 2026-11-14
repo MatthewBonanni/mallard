@@ -5,9 +5,9 @@ conservative form, for a single calorically perfect gas or for a thermally
 perfect mixture of $N_s$ species, in planar 2D, 3D or axisymmetric (r-z)
 geometry. This chapter states the equations and the constitutive laws of a
 single gas; the thermodynamics and transport of mixtures are in
-[chapter 2](thermodynamics_transport.md), the chemical source terms in
-[chapter 3](chemistry_radiation.md), and the filtered equations of
-large-eddy simulation in [chapter 4](les.md). Usage:
+[Thermodynamics and transport of mixtures](thermodynamics_transport.md), the chemical source terms in
+[Chemistry and radiation](chemistry_radiation.md), and the filtered equations of
+large-eddy simulation in [Large-eddy simulation](les.md). Usage:
 [Physics](../guide/physics.md).
 
 ## Conservation laws
@@ -25,7 +25,7 @@ $$
 where the partial densities $\rho Y_k$ are present for mixtures only
 (`[physics] gas = "mixture"`). All $N_s$ species are transported, besides
 $\rho$; the discretization keeps $\sum_k \rho Y_k = \rho$
-([chapter 7](fluxes.md)). The equations are
+([Numerical fluxes](fluxes.md)). The equations are
 
 $$
 \begin{equation}
@@ -54,8 +54,8 @@ release appears as a change of composition at constant $\rho E$ and the
 energy equation has no chemical source. The source $\mathbf{S}$ collects the
 momentum and energy sources $\mathbf{s}_u$, $s_E$ of gravity, mass-flow
 forcing, user expressions, sponge layers and radiation, and the production
-rates $\dot\omega_k$ ([chapter 9](boundaries_sources.md#sources),
-[chapter 3](chemistry_radiation.md)).
+rates $\dot\omega_k$ ([Boundary conditions and sources](boundaries_sources.md#sources),
+[Chemistry and radiation](chemistry_radiation.md)).
 
 With `[physics] type = "euler"` (the default) the viscous flux
 $\mathbf{F}^v$ is dropped; `type = "navier_stokes"` keeps it.
@@ -123,7 +123,7 @@ $$
 
 For a single gas there are no species fluxes. For mixtures, $\mu$, $\lambda$
 and the diffusive mass fluxes $\mathbf{j}_k$ come from the transport model of
-[chapter 2](thermodynamics_transport.md#transport), and the heat flux also
+[Thermodynamics and transport of mixtures](thermodynamics_transport.md#transport), and the heat flux also
 carries the enthalpy of the diffusing species,
 $\mathbf{q} = -\lambda\nabla T + \sum_k h_k\mathbf{j}_k$.
 
@@ -165,6 +165,6 @@ uniform pressure is an exact discrete steady state, because
 $\oint p\,n_r\,r\,\mathrm{d}l = \int_\Omega p\,\mathrm{d}A$ for uniform $p$.
 The cell unknowns are r-weighted averages
 $\overline{\mathbf{U}} = \int_\Omega \mathbf{U}\,r\,\mathrm{d}A \big/ \int_\Omega r\,\mathrm{d}A$;
-the discretization is in [chapter 6](finite_volume.md#axisymmetric-cells) and
+the discretization is in [Finite-volume discretization and reconstruction](finite_volume.md#axisymmetric-cells) and
 the design in [Axisymmetric flows](../design/axisymmetric.md). All integral
 outputs (forces, integrals, conserved totals) are per radian.

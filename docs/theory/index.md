@@ -12,6 +12,8 @@ accuracy of every method, from the convergence tests; the sources are in
 
 ## Chapters
 
+Part I, the continuous model:
+
 1. [Governing equations](governing_equations.md): the compressible
     Navier-Stokes equations, the single-gas constitutive laws and the
     axisymmetric form.
@@ -27,15 +29,18 @@ accuracy of every method, from the convergence tests; the sources are in
 5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.
+
+Part II, the discretization, in the order a step assembles it:
+
 6. [Finite-volume discretization and reconstruction](finite_volume.md):
     face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
     the viscous terms.
 7. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
     central-upwind flux, species fluxes and viscous fluxes.
-8. [Time integration](time_integration.md): Runge-Kutta methods, the time
-    step and the order of operations within a step.
-9. [Boundary conditions and sources](boundaries_sources.md): exterior
+8. [Boundary conditions and sources](boundaries_sources.md): exterior
     states, characteristic boundaries, body forces and sponges.
+9. [Time integration](time_integration.md): Runge-Kutta methods, the time
+    step and the order of operations within a step.
 
 ## Notation
 
@@ -59,6 +64,6 @@ accuracy of every method, from the convergence tests; the sources are in
 
 Vectors and tensors are bold; $\delta_{ij}$ is the Kronecker delta and
 $S_{ij} = \tfrac12(\partial_j u_i + \partial_i u_j)$ the strain rate.
-Units are SI. Chapter 4 alone distinguishes filtered quantities
+Units are SI. The LES chapter alone distinguishes filtered quantities
 ($\overline{\phi}$, and Favre-filtered $\widetilde{\phi}$); elsewhere
 filter symbols are dropped. Equations are numbered within each chapter.
