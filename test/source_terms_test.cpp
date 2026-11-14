@@ -174,7 +174,7 @@ std::string error_of(const std::string & input) {
 } // namespace
 
 TEST(SourceTermsTest, NamedRegionsActAsTheTablesTheyName) {
-    const std::string dir = (scratch_dir() / "sources_named_regions").string();
+    const std::string dir = (rank_scratch_dir() / "sources_named_regions").string();
     Rates r[2];
     for (const bool named : {false, true}) {
         Solver solver;

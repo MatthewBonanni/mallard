@@ -1731,8 +1731,10 @@ void Solver::init_output(region::Regions & regions) {
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
-    const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
-    const std::string report_file = find_value_or<std::string>(input, "output", "report", "report.html");
+    // An undistributed solver runs on every rank (tests): no run log or report unless asked for
+    const std::string run_log_file =
+        find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");
+    const std::string report_file = find_value_or<std::string>(input, "output", "report", distribute ? "report.html" : "");
     run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {

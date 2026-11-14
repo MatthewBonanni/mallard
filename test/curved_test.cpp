@@ -770,7 +770,7 @@ TEST(CurvedTENO, StencilDegreeFieldShowsTheWallDegree) {
     // STENCIL_DEGREE of mallard check --mesh-fields: the wall degree where the
     // central stencil reaches a curved wall, the scheme's elsewhere
     const std::string file = write_temp("curved_degree.msh", annulus_gmsh(12, 192));
-    const std::string prefix = (scratch_dir() / "mallard_curved_degree" / "mesh").string();
+    const std::string prefix = (rank_scratch_dir() / "mallard_curved_degree" / "mesh").string();
     for (const int wall_degree : {3, 4}) {
         CheckOptions options;
         options.mesh_fields = prefix;

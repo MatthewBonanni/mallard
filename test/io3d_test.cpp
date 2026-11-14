@@ -460,7 +460,7 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (scratch_dir() / "mallard_vtkhdf_shell").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_vtkhdf_shell").string();
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool prisms : {false, true}) {
         const std::string file = write_temp("vtkhdf_shell.msh", shell_gmsh(3, 3, prisms, false));

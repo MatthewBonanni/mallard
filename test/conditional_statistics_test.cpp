@@ -215,7 +215,8 @@ TEST(ConditionalStatisticsTest, SamplesAreWeightedByTheTimeSinceThePreviousOne) 
     // A uniform state: every sample falls in one bin, so its weight is the domain's volume times the window,
     // t_start to the last sample, and the variance of a constant field is zero
     const std::string extra = "[statistics]\nt_start = 0.015\ninterval = 2\n"
-                              "[[statistics.conditional]]\non = \"P\"\nbins = 4\nrange = [0.5, 1.5]\nfields = [\"RHO\"]\n";
+                              "[[statistics.conditional]]\non = \"P\"\nbins = 4\nrange = [0.5, 1.5]\nfields = [\"RHO\"]\n"
+                              "file = \"" + (rank_scratch_dir() / "conditional_P.csv").string() + "\"\n";
     std::string input = flow_case(7, extra);
     const size_t at = input.find("[initialize]");
     input = input.substr(0, at) + "[initialize]\ntype = \"constant\"\nT = 1.0\np = 1.0\nu = " +
@@ -302,7 +303,8 @@ TEST(ConditionalStatisticsTest, HeatReleaseOnTemperatureIsTheCellsHeatRelease) {
       << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
       << "[chemistry]\n[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
       << "[statistics]\nfields = [\"HRR\"]\n"
-      << "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1100.0, 1500.0]\nfields = [\"HRR\", \"OMEGA_H2O\"]\n";
+      << "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1100.0, 1500.0]\nfields = [\"HRR\", \"OMEGA_H2O\"]\n"
+      << "file = \"" << (rank_scratch_dir() / "conditional_T.csv").string() << "\"\n";
     Solver solver;
     solver.set_distributed(false);
     std::vector<Data> rates;  // the HRR and OMEGA_H2O the run writes

@@ -338,7 +338,7 @@ TEST(Stencils, WriteDataWritesTheMeshAndStencilFieldsOfTheCheck) {
     const std::string prefix = scratch("mallard_stencils_write_data");
     const std::string dir = std::filesystem::path(prefix).parent_path().string();
     const std::string input = box("type = \"TENO\"\norder = 3\n",
-                                  "[[write_data]]\nprefix = \"" + dir + "/run\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\n"
+                                  "[[write_data]]\nprefix = \"" + dir + "/" + serial_name("run") + "\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\n"
                                   "fields = [\"NON_ORTHOGONALITY\", \"STENCIL_SIZE\", \"STENCIL_WALL\"]\n");
     const CheckReport r = check_fields(input, {}, prefix);
     ASSERT_TRUE(r.ok()) << r.errors().front();
@@ -365,7 +365,7 @@ TEST(Stencils, FileOfADistributedRunMatchesTheSerialOne) {
     distributed.init(parse_input_string(input("d")));
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_input_string(input("s")));
+    serial.init(parse_input_string(input(serial_name("s"))));
     comm::barrier();
     if (!comm::is_root()) return;
     const auto a = h5_all_datasets(dir + "/d.h5"), b = h5_all_datasets(dir + "/s.h5");

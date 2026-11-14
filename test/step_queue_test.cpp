@@ -206,7 +206,7 @@ std::string box_input(const Case & c, const std::string & dir, int depth) {
           << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
           << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
     }
-    s << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\n";
+    s << "[output]\nrun_log = \"" << dir << "/mallard.jsonl\"\ndivergence_report = \"" << dir << "/divergence_report\"\n";
     std::string extra = c.extra;
     for (size_t at; (at = extra.find("{dir}")) != std::string::npos;) extra.replace(at, 5, dir);
     s << extra;
