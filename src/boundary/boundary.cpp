@@ -668,7 +668,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             h_face_state_index(f) = n_dirichlet++;
         }
         if (h_face_bc_vec[f] < 0 || !h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_transmissive()) continue;
-        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic()) {
+        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic() && f < mesh.n_state_faces()) {
             h_face_char(f) = static_cast<int32_t>(char_faces.size());
             char_faces.push_back(f);
             const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
