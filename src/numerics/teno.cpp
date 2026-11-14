@@ -1298,9 +1298,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     // Cells per batch: whole slices of the packed stencils
     const uint32_t slice = 1u << slice_shift;
     const uint32_t n_target = subset ? static_cast<uint32_t>(subset->size()) : mesh->n_reconstructed();
-    uint32_t batch = std::max(setup.batch_cells() / slice * slice, slice);
-    batch = std::min(batch, (n_target + slice - 1) / slice * slice);
-    batch = std::max(batch, slice);
+    const uint32_t batch = std::max(setup.batch_cells() / slice * slice, slice);
     teno_setup::TableBatch out(batch, n_dof_large, setup.max_large(), setup.max_small(), teno_setup::batch_interleaved());
     Kokkos::View<uint32_t *> cells("teno_setup_batch_cells", batch);
     std::unique_ptr<TableBuilder> builder;
@@ -1360,6 +1358,38 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                                  logging::count(n_failed_large, "cell") + " (mesh too small for this order?).");
     }
     if (subset == nullptr) n_sector_unavailable = n_invalid_small;
+}
+
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+[[maybe_unused]] constexpr bool HOST_FMA = true;
+#else
+[[maybe_unused]] constexpr bool HOST_FMA = false;
+#endif
+
+/**
+ * @brief a b + c, fused where the hardware fuses (std::fma would be a library
+ *        call on CPUs without FMA). teno.cpp is compiled without contraction,
+ *        so these are its only FMAs and its results do not depend on how the
+ *        compiler schedules a kernel.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype fmadd(const rtype a, const rtype b, const rtype c) {
+    KOKKOS_IF_ON_DEVICE((return Kokkos::fma(a, b, c);))
+    KOKKOS_IF_ON_HOST((
+        if constexpr (HOST_FMA) {
+            return std::fma(a, b, c);
+        } else {
+            return a * b + c;
+        }))
+}
+
+/** @brief a . a, with fmadd. */
+template <uint8_t N>
+KOKKOS_INLINE_FUNCTION
+rtype norm2(const rtype * a) {
+    rtype q = a[0] * a[0];
+    for (uint8_t i = 1; i < N; i++) q = fmadd(a[i], a[i], q);
+    return q;
 }
 
 /**
@@ -1442,7 +1472,7 @@ struct TENOFunctor {
         rtype u[N_DIM];
         FOR_I_DIM {
             u[i] = 0.0_r;
-            for (uint8_t j = 0; j < N_DIM; j++) u[i] += entry_rotations(row, i, j) * W_e[1 + j];
+            for (uint8_t j = 0; j < N_DIM; j++) u[i] = fmadd(entry_rotations(row, i, j), W_e[1 + j], u[i]);
         }
         FOR_I_DIM W_e[1 + i] = u[i];
     }
@@ -1501,10 +1531,30 @@ struct TENOFunctor {
         } else {
             rtype W_e[N_CONSERVATIVE];
             entry_W(c, f, W_e);
-            U[0] = W_e[0];
-            FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-            U[N_DIM + 1] = W_e[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_e[0] * dot<N_DIM>(W_e + 1, W_e + 1);
+            conservatives_of(W_e, U);
         }
+    }
+
+    /** @brief entry_conservatives, with W_e holding W(c) already. */
+    KOKKOS_INLINE_FUNCTION
+    void entry_conservatives_loaded(const int32_t c, const int32_t f, rtype * W_e, rtype * U) const {
+        if (f < -1) {
+            entry_conservatives(c, f, U);
+            return;
+        }
+        if (f >= 0) ghost_W(c, f, W_e);
+        if constexpr (PRIM) {
+            FOR_I_CONSERVATIVE U[i] = W_e[i];
+        } else {
+            conservatives_of(W_e, U);
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void conservatives_of(const rtype * W_e, rtype * U) const {
+        U[0] = W_e[0];
+        FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
+        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], norm2<N_DIM>(W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1514,9 +1564,7 @@ struct TENOFunctor {
         } else {
             rtype W_c[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W_c[i] = W(c, i);
-            U[0] = W_c[0];
-            FOR_I_DIM U[1 + i] = W_c[0] * W_c[1 + i];
-            U[N_DIM + 1] = W_c[N_DIM + 1] / (gamma - 1.0_r) + 0.5_r * W_c[0] * dot<N_DIM>(W_c + 1, W_c + 1);
+            conservatives_of(W_c, U);
         }
     }
 
@@ -1527,7 +1575,7 @@ struct TENOFunctor {
         } else {
             Wq[0] = U[0];
             FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-            Wq[N_DIM + 1] = (gamma - 1.0_r) * (U[N_DIM + 1] - 0.5_r * U[0] * dot<N_DIM>(Wq + 1, Wq + 1));
+            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], norm2<N_DIM>(Wq + 1), U[N_DIM + 1]);
         }
     }
 
@@ -1617,7 +1665,7 @@ struct TENOFunctor {
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
             FOR_I_DIM {
                 const rtype P = stencil.template pinv<NK>(s, i) * inv_h;
-                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] += P * (U[v] - U0[v]);
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] = fmadd(P, U[v] - U0[v], dU[v][i]);
             }
         }
         store_gradients(i_cell, dU);
@@ -1649,17 +1697,17 @@ struct TENOFunctor {
             const rtype g = Kokkos::fabs(U[0] - rho0) / rho0;
             const rtype delta = g - g_mean;
             g_mean += delta / (s + 1);
-            g_m2 += delta * (g - g_mean);
+            g_m2 = fmadd(delta, g - g_mean, g_m2);
             if constexpr (PRIM) {
                 const rtype M0 = cell_molar_mass(i_cell);
                 const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
                 const rtype delta_m = m - m_mean;
                 m_mean += delta_m / (s + 1);
-                m_m2 += delta_m * (m - m_mean);
+                m_m2 = fmadd(delta_m, m - m_mean, m_m2);
             }
             for (uint8_t l = 0; l < NK; l++) {
                 const rtype P = stencil.template pinv<NK>(s, l);
-                FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+                FOR_I_CONSERVATIVE aK[l][i] = fmadd(P, U[i] - U0[i], aK[l][i]);
             }
         }
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
@@ -1674,7 +1722,7 @@ struct TENOFunctor {
             rtype U[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U[i] = U0[i];
             for (uint8_t l = 0; l < NK; l++) {
-                FOR_I_CONSERVATIVE U[i] += aK[l][i] * (psi[l] - basis_mean(i_cell, l));
+                FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(i_cell, l), U[i]);
             }
             rtype Wq[N_CONSERVATIVE];
             to_primitives(U, Wq);
@@ -1706,17 +1754,17 @@ struct TENOFunctor {
             const rtype g = Kokkos::fabs(U[0] - W0[0]) / W0[0];
             const rtype delta = g - g_mean;
             g_mean += delta / (s + 1);
-            g_m2 += delta * (g - g_mean);
+            g_m2 = fmadd(delta, g - g_mean, g_m2);
             if constexpr (PRIM) {
                 const rtype M0 = cell_molar_mass(i_cell);
                 const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
                 const rtype delta_m = m - m_mean;
                 m_mean += delta_m / (s + 1);
-                m_m2 += delta_m * (m - m_mean);
+                m_m2 = fmadd(delta_m, m - m_mean, m_m2);
             }
             for (uint8_t l = 0; l < NK; l++) {
                 const rtype P = stencil.template pinv<NK>(s, l);
-                FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+                FOR_I_CONSERVATIVE aK[l][i] = fmadd(P, U[i] - U0[i], aK[l][i]);
             }
         }
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
@@ -1751,7 +1799,7 @@ struct TENOFunctor {
                 rtype U_f[N_CONSERVATIVE];
                 FOR_I_CONSERVATIVE U_f[i] = U0[i];
                 for (uint8_t l = 0; l < NK; l++) {
-                    FOR_I_CONSERVATIVE U_f[i] += aK[l][i] * psi[l];
+                    FOR_I_CONSERVATIVE U_f[i] = fmadd(aK[l][i], psi[l], U_f[i]);
                 }
                 rtype Wq[N_CONSERVATIVE];
                 to_primitives(U_f, Wq);
@@ -1774,9 +1822,7 @@ struct TENOFunctor {
     // so that the central coefficients fit in registers. Over the stencil each
     // thread accumulates a chunk of them; the coefficients then go through
     // team scratch to the face points, which the cell's threads share out.
-    // The arithmetic is SmoothPass's, with compile-time chunk bounds as its
-    // loop indices: runtime ones change which multiplies the compiler fuses
-    // into FMAs, and with them the results' last bits
+    // The arithmetic is SmoothPass's, operation for operation (see fmadd)
     struct SmoothTeamPass {};
     static constexpr uint32_t TEAM_CELLS = 32;
     // Measured on A100s: faster than SmoothPass only when its coefficients spill
@@ -1785,6 +1831,11 @@ struct TENOFunctor {
     static constexpr uint32_t TEAM_SIZE = TEAM_CELLS * PARTS;
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
     static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
+    // Stencil entries per round of staged_coefficients, a multiple of PARTS. At
+    // order 6 the staged entries leave room for one team per SM only: none
+    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
+    static constexpr size_t SMOOTH_SCRATCH =
+        TEAM_SCRATCH + (STAGE ? sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -1824,24 +1875,107 @@ struct TENOFunctor {
                 const rtype g = Kokkos::fabs(U[0] - W0_rho) / W0_rho;
                 const rtype delta = g - g_mean;
                 g_mean += delta / (s + 1);
-                g_m2 += delta * (g - g_mean);
+                g_m2 = fmadd(delta, g - g_mean, g_m2);
                 if constexpr (PRIM) {
                     const rtype M0 = cell_molar_mass(i_cell);
                     const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
                     const rtype delta_m = m - m_mean;
                     m_mean += delta_m / (s + 1);
-                    m_m2 += delta_m * (m - m_mean);
+                    m_m2 = fmadd(delta_m, m - m_mean, m_m2);
                 }
             }
             for (uint8_t l = L0; l < L1; l++) {
                 const rtype P = stencil.template pinv<NK>(s, l);
-                FOR_I_CONSERVATIVE aK[l - L0][i] += P * (U[i] - U0[i]);
+                FOR_I_CONSERVATIVE aK[l - L0][i] = fmadd(P, U[i] - U0[i], aK[l - L0][i]);
             }
         }
         for (uint8_t l = L0; l < L1; l++) {
             FOR_I_CONSERVATIVE aK_team[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = aK[l - L0][i];
         }
         if constexpr (C == 0 && QUEUE) {
+            const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
+            sigma_out(i_cell) = sigma;
+            const bool smooth = sigma < sigma_threshold;
+            const uint32_t j = smooth ? 0 : Kokkos::atomic_fetch_add(&n_troubled(), 1u);
+            if (!smooth) troubled_cells(j) = i_cell;
+            smooth_team[lane] = smooth ? -1 : static_cast<int>(j);
+        }
+    }
+
+    /**
+     * @brief smooth_coefficients<C> for the whole team, with the stencil
+     *        entries' states staged in team scratch: in rounds of STAGE
+     *        entries, each of a cell's threads converts every PARTS-th entry,
+     *        then every thread accumulates its chunk over the round's entries
+     *        in order. Every thread of the team calls it.
+     */
+    template <uint8_t C, typename Member>
+    KOKKOS_INLINE_FUNCTION
+    void staged_coefficients(const Member & team, const bool active, const uint32_t i_cell, const uint8_t part,
+                             const rtype * U0, rtype * aK_team, rtype * U_team, int * ns_team, int * smooth_team,
+                             const uint32_t lane) const {
+        constexpr uint8_t L0 = C * CHUNK;
+        constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
+        constexpr uint32_t PER = STAGE / PARTS;
+        if (part == 0) ns_team[lane] = active ? stencil_large_size(i_cell) : 0;
+        team.team_barrier();
+        int ns_max = 0;
+        for (uint32_t k = 0; k < TEAM_CELLS; k++) ns_max = Kokkos::max(ns_max, ns_team[k]);
+        const uint16_t ns = static_cast<uint16_t>(ns_team[lane]);
+        rtype aK[CHUNK][N_CONSERVATIVE] = {};
+        rtype g_mean = 0.0, g_m2 = 0.0;
+        rtype m_mean = 0.0, m_m2 = 0.0;
+        const auto stencil = stencil_large.template row<TABLE>(active ? i_cell : 0);
+        for (uint16_t s0 = 0; s0 < ns_max; s0 = static_cast<uint16_t>(s0 + STAGE)) {
+            // Every load of the thread's entries first, so that they are in flight together
+            int32_t c[PER], f[PER];
+            rtype W_e[PER][N_CONSERVATIVE];
+            for (uint32_t j = 0; j < PER; j++) {
+                const uint32_t s = s0 + part + j * PARTS;
+                c[j] = s < ns ? stencil.cell(s) : -1;
+                f[j] = s < ns ? stencil.face(s) : -1;
+            }
+            for (uint32_t j = 0; j < PER; j++) {
+                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
+            }
+            for (uint32_t j = 0; j < PER; j++) {
+                if (c[j] < 0) continue;
+                rtype U[N_CONSERVATIVE];
+                entry_conservatives_loaded(c[j], f[j], W_e[j], U);
+                const uint32_t e = part + j * PARTS;
+                FOR_I_CONSERVATIVE U_team[(e * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = U[i];
+            }
+            team.team_barrier();
+            const uint16_t s1 = Kokkos::min<uint16_t>(ns, static_cast<uint16_t>(s0 + STAGE));
+            for (uint16_t s = s0; s < s1; s++) {
+                rtype U[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE U[i] = U_team[((s - s0) * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
+                if constexpr (C == 0) {
+                    const rtype W0_rho = W(i_cell, 0);
+                    const rtype g = Kokkos::fabs(U[0] - W0_rho) / W0_rho;
+                    const rtype delta = g - g_mean;
+                    g_mean += delta / (s + 1);
+                    g_m2 = fmadd(delta, g - g_mean, g_m2);
+                    if constexpr (PRIM) {
+                        const rtype M0 = cell_molar_mass(i_cell);
+                        const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
+                        const rtype delta_m = m - m_mean;
+                        m_mean += delta_m / (s + 1);
+                        m_m2 = fmadd(delta_m, m - m_mean, m_m2);
+                    }
+                }
+                for (uint8_t l = L0; l < L1; l++) {
+                    const rtype P = stencil.template pinv<NK>(s, l);
+                    FOR_I_CONSERVATIVE aK[l - L0][i] = fmadd(P, U[i] - U0[i], aK[l - L0][i]);
+                }
+            }
+            team.team_barrier();
+        }
+        if (!active) return;
+        for (uint8_t l = L0; l < L1; l++) {
+            FOR_I_CONSERVATIVE aK_team[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = aK[l - L0][i];
+        }
+        if constexpr (C == 0) {
             const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
             sigma_out(i_cell) = sigma;
             const bool smooth = sigma < sigma_threshold;
@@ -1882,7 +2016,14 @@ struct TENOFunctor {
             admissible_team[lane] = 1;
         }
         team.team_barrier();
-        if (active) {
+        if constexpr (STAGE > 0) {
+            rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+            int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+            if (active) conservatives(i_cell, U0);
+            with_chunk(part, [&](auto C) {
+                staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, U_team, ns_team, smooth_team, lane);
+            });
+        } else if (active) {
             conservatives(i_cell, U0);
             with_chunk(part, [&](auto C) {
                 smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
@@ -1923,7 +2064,7 @@ struct TENOFunctor {
             rtype U_f[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U_f[i] = U0[i];
             for (uint8_t l = 0; l < NK; l++) {
-                FOR_I_CONSERVATIVE U_f[i] += aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane] * psi[l];
+                FOR_I_CONSERVATIVE U_f[i] = fmadd(aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane], psi[l], U_f[i]);
             }
             rtype Wq[N_CONSERVATIVE];
             to_primitives(U_f, Wq);
@@ -2000,7 +2141,7 @@ struct TENOFunctor {
     KOKKOS_INLINE_FUNCTION
     static rtype project(const rtype L[][N_CONSERVATIVE], const uint8_t var, const rtype * a) {
         rtype c = 0.0;
-        for (uint8_t m = 0; m < N_CONSERVATIVE; m++) c += L[var][m] * a[m];
+        for (uint8_t m = 0; m < N_CONSERVATIVE; m++) c = fmadd(L[var][m], a[m], c);
         return c;
     }
 
@@ -2015,9 +2156,9 @@ struct TENOFunctor {
         for (uint8_t l = 0; l < N; l++) {
             rtype row = 0.0;
             for (uint8_t m = 0; m < N; m++) {
-                row += S((l <= m) ? teno::upper_index(l, m, NK) : teno::upper_index(m, l, NK)) * c[m];
+                row = fmadd(S((l <= m) ? teno::upper_index(l, m, NK) : teno::upper_index(m, l, NK)), c[m], row);
             }
-            si += c[l] * row;
+            si = fmadd(c[l], row, si);
         }
         return si;
     }
@@ -2042,7 +2183,7 @@ struct TENOFunctor {
             entry_conservatives(stencil.cell(start + e), stencil.face(start + e), U);
             for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
                 const rtype P = stencil.template pinv<teno::NK_SMALL>(start + e, l);
-                FOR_I_CONSERVATIVE aS[l][i] += P * (U[i] - U0[i]);
+                FOR_I_CONSERVATIVE aS[l][i] = fmadd(P, U[i] - U0[i], aS[l][i]);
             }
         }
         for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
@@ -2158,13 +2299,13 @@ struct TENOFunctor {
             if (!face_point_basis(f, q, i_cell, psi)) continue;
             rtype v_char = c0_char;
             if (use_large) {
-                for (uint8_t l = 0; l < NK; l++) v_char += cK[l] * psi[l];
+                for (uint8_t l = 0; l < NK; l++) v_char = fmadd(cK[l], psi[l], v_char);
             } else {
                 for (uint8_t s = 0; s < n_faces; s++) {
                     if (!valid[s] || w_small[s] == 0.0_r) continue;
                     rtype p_s = 0.0;
-                    for (uint8_t l = 0; l < teno::NK_SMALL; l++) p_s += cS[s][l] * psi[l];
-                    v_char += w_small[s] * p_s;
+                    for (uint8_t l = 0; l < teno::NK_SMALL; l++) p_s = fmadd(cS[s][l], psi[l], p_s);
+                    v_char = fmadd(w_small[s], p_s, v_char);
                 }
             }
             face_solution(f, q, side, var) = v_char;
@@ -2193,7 +2334,7 @@ struct TENOFunctor {
             FOR_I_CONSERVATIVE v_char[i] = face_solution(f, q, side, i);
             FOR_I_CONSERVATIVE {
                 rtype U_f = 0.0;
-                for (uint8_t m = 0; m < N_CONSERVATIVE; m++) U_f += R[i][m] * v_char[m];
+                for (uint8_t m = 0; m < N_CONSERVATIVE; m++) U_f = fmadd(R[i][m], v_char[m], U_f);
                 face_solution(f, q, side, i) = U_f;
             }
         }
@@ -2239,7 +2380,7 @@ struct TENOFunctor {
                 entry_conservatives(stencil.cell(s), stencil.face(s), U);
                 for (uint8_t l = 0; l < NK; l++) {
                     const rtype P = stencil.template pinv<NK>(s, l);
-                    FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+                    FOR_I_CONSERVATIVE aK[l][i] = fmadd(P, U[i] - U0[i], aK[l][i]);
                 }
             }
             for (uint8_t l = 0; l < NK; l++) {
@@ -2299,7 +2440,7 @@ struct TENOFunctor {
                 entry_conservatives(stencil.cell(s), stencil.face(s), U);
                 for (uint8_t l = 0; l < NK; l++) {
                     const rtype P = stencil.template pinv<NK>(s, l);
-                    FOR_I_CONSERVATIVE aK[l][i] += P * (U[i] - U0[i]);
+                    FOR_I_CONSERVATIVE aK[l][i] = fmadd(P, U[i] - U0[i], aK[l][i]);
                 }
             }
             const rtype h = scale(i_cell);
@@ -2324,7 +2465,7 @@ struct TENOFunctor {
                     rtype U[N_CONSERVATIVE];
                     FOR_I_CONSERVATIVE U[i] = U0[i];
                     for (uint8_t l = 0; l < NK; l++) {
-                        FOR_I_CONSERVATIVE U[i] += aK[l][i] * (psi[l] - basis_mean(i_cell, l));
+                        FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(i_cell, l), U[i]);
                     }
                     rtype Wq[N_CONSERVATIVE];
                     to_primitives(U, Wq);
@@ -2336,8 +2477,8 @@ struct TENOFunctor {
                         rtype dU[N_CONSERVATIVE][N_DIM] = {};
                         for (uint8_t l = 0; l < NK; l++) {
                             FOR_I_CONSERVATIVE {
-                                dU[i][0] += aK[l][i] * d_xi[l];
-                                dU[i][1] += aK[l][i] * d_eta[l];
+                                dU[i][0] = fmadd(aK[l][i], d_xi[l], dU[i][0]);
+                                dU[i][1] = fmadd(aK[l][i], d_eta[l], dU[i][1]);
                             }
                         }
                         // du_x/dx and du_r/dr, from the conservative variables unless PRIM
@@ -2588,7 +2729,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
             using Policy = Kokkos::TeamPolicy<Space, typename Functor::SmoothTeamPass,
                                               Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
             const Policy policy = Policy(exec, static_cast<int>((n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS), Functor::TEAM_SIZE)
-                                      .set_scratch_size(0, Kokkos::PerTeam(Functor::TEAM_SCRATCH));
+                                      .set_scratch_size(0, Kokkos::PerTeam(Functor::SMOOTH_SCRATCH));
             Kokkos::parallel_for("teno_smooth", policy, functor);
         }
         return;

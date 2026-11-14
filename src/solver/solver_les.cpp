@@ -387,10 +387,11 @@ struct TestFilterWidthFunctor {
         for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
             const uint32_t n = neighbors(k);
             const double w = static_cast<double>(volume(n));
+            const uint32_t s = neighbor_shift(k);
             w_sum += w;
             FOR_I_DIM {
                 const double dx = static_cast<double>(cell_coords(n, i) - cell_coords(c, i)) +
-                                  static_cast<double>(shifts(neighbor_shift(k), i));
+                                  static_cast<double>(shifts(s, i));
                 x1[i] += w * dx;
                 x2[i] += w * dx * dx;
             }
@@ -529,14 +530,15 @@ struct DynamicProcedureFunctor {
     KOKKOS_INLINE_FUNCTION
     double relative(const uint32_t c, const uint32_t k, const uint32_t end, const uint8_t i) const {
         if (k == end) return 0.0;
+        const uint32_t s = neighbor_shift(k);
         if (periodic.rotated()) {
             rtype x[N_DIM], y[N_DIM];
             for (uint8_t d = 0; d < N_DIM; d++) x[d] = cell_coords(neighbors(k), d);
-            periodic.forward(neighbor_shift(k), x, y);
+            periodic.forward(s, x, y);
             return static_cast<double>(y[i] - cell_coords(c, i));
         }
         return static_cast<double>(cell_coords(neighbors(k), i) - cell_coords(c, i)) +
-               static_cast<double>(periodic.shifts(neighbor_shift(k), i));
+               static_cast<double>(periodic.shifts(s, i));
     }
 
     /** @brief A = Q A Q^T for the 3 x 3 tensor A, Q the rotation of shift row s in its first N_DIM rows and columns. */
@@ -937,7 +939,7 @@ void Solver::init_les() {
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
     les_state = Kokkos::View<double *>("les_state", 3);
     Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
-    h_les_coefficients = Kokkos::create_mirror_view(les_coefficients);
+    h_les_coefficients = pinned_mirrors(les_coefficients);
     if (les.reconstruction_gradients) {
         if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
             throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
@@ -949,7 +951,12 @@ void Solver::init_les() {
         reconstruction_gradients.polynomial =
             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("les_polynomial_gradients", mesh->n_cells);
         dynamic_cast<TENO &>(*face_reconstruction).smooth_gradients = reconstruction_gradients.polynomial;
-        if (halo.active()) reconstruction_gradients.halo = State("les_gradients_halo", mesh->n_cells, N_DIM * N_DIM);
+        reconstruction_gradients.of_state =
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("les_state_polynomial_gradients", mesh->n_owned());
+        if (halo.active()) {
+            reconstruction_gradients.halo = State("les_gradients_halo", mesh->n_cells, N_DIM * N_DIM);
+            reconstruction_gradients.troubled = Kokkos::View<rtype *>("les_troubled", mesh->n_owned());
+        }
         les_velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("les_velocity_gradients", mesh->n_cells);
     }
     if (!input.at("les").contains("combustion")) return;
@@ -961,7 +968,7 @@ void Solver::init_les() {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
-        h_chem_time_scale = Kokkos::create_mirror_view(chem_time_scale);
+        h_chem_time_scale = pinned_mirrors(chem_time_scale);
         Kokkos::deep_copy(chem_time_scale, 1.0_r);
         return;
     }
@@ -969,7 +976,7 @@ void Solver::init_les() {
     tfles_on = true;
     Kokkos::deep_copy(Kokkos::subview(les_state, 2), thickened_flame.beta);
     tfles_fields = Kokkos::View<rtype *[3]>("tfles_fields", mesh->n_cells);
-    h_tfles_fields = Kokkos::create_mirror_view(tfles_fields);
+    h_tfles_fields = pinned_mirrors(tfles_fields);
     chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
     tfles_halo = State("tfles_halo", mesh->n_cells, 3);
     if (thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC) {
@@ -980,8 +987,8 @@ void Solver::init_les() {
     tfles_gradients = Kokkos::View<rtype *[3][N_DIM]>("tfles_gradients", mesh->n_cells);
 }
 
-void Solver::update_eddy_viscosity(const uint32_t n) {
-    if (les.reconstruction_gradients) update_reconstruction_gradients(n);
+void Solver::update_eddy_viscosity(const uint32_t n, const bool of_state) {
+    if (les.reconstruction_gradients) update_reconstruction_gradients(n, of_state);
     if (is_mixture()) {
         Kokkos::parallel_for("eddy_viscosity", n,
                              MixtureEddyViscosityFunctor{les, mixture, W_cells, cell_scalars, transport_values,
@@ -994,13 +1001,13 @@ void Solver::update_eddy_viscosity(const uint32_t n) {
     }
 }
 
-void Solver::update_reconstruction_gradients(const uint32_t n) {
+void Solver::update_reconstruction_gradients(const uint32_t n, const bool of_state) {
     const uint32_t n_owned = mesh->n_owned();
     ReconstructionGradients & r = reconstruction_gradients;
     const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
-    Kokkos::View<rtype *> sigma = teno.troubled;
+    Kokkos::View<rtype *> sigma = of_state && reconstruction_started ? r.troubled : teno.troubled;
     const rtype threshold = teno.sigma_threshold;
-    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> P = r.polynomial, G = viscous_gradients;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> P = of_state ? r.of_state : r.polynomial, G = viscous_gradients;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> T = transport_gradients;
     Kokkos::View<rtype *[N_DIM][N_DIM]> g = les_velocity_gradients;
     const bool mixture_gradients = is_mixture();
@@ -1052,11 +1059,12 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         });
         Kokkos::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
     }
-    // The right-hand side's reconstruction writes the polynomials' gradients of its stage; here, those of this state
+    // The right-hand side's reconstruction writes the polynomials' gradients of its stage, and may be running;
+    // here, those of this state
     if (les.reconstruction_gradients) {
-        face_reconstruction->cell_gradients(W_cells, reconstruction_gradients.polynomial, mesh->n_owned());
+        face_reconstruction->cell_gradients(W_cells, reconstruction_gradients.of_state, mesh->n_owned());
     }
-    update_eddy_viscosity(n);
+    update_eddy_viscosity(n, true);
 }
 
 

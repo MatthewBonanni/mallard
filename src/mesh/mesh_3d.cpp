@@ -247,14 +247,12 @@ void Mesh::compute_cell_volumes_and_centroids() {
     }
 }
 
-void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                           const std::vector<std::vector<uint32_t>> & cells, std::vector<uint32_t> & offsets,
-                           std::vector<uint32_t> & cell_nodes) {
-    offsets.assign(1, 0);
-    cell_nodes.clear();
+void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells) {
+    std::vector<uint32_t> c;
     std::vector<Vec3> p;
     std::vector<std::array<Vec3, 4>> tets;
-    for (const auto & c : cells) {
+    for (uint32_t cell = 0; cell < cells.size(); cell++) {
+        c.assign(cells[cell].begin(), cells[cell].end());
         cell_local_faces(static_cast<uint32_t>(c.size()));
         p.clear();
         for (uint32_t node : c) {
@@ -264,11 +262,8 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
         }
         if (signed_volume(p, tets) < 0.0) {
             const auto r = reflected(c);
-            cell_nodes.insert(cell_nodes.end(), r.begin(), r.end());
-        } else {
-            cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
+            std::copy(r.begin(), r.end(), cells.nodes.begin() + cells.offsets[cell]);
         }
-        offsets.push_back(static_cast<uint32_t>(cell_nodes.size()));
     }
 }
 

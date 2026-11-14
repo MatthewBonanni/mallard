@@ -398,12 +398,12 @@ holds it as placed:
   cells: the cells each touches. A region of the case that touches no cell is an error.
   status  region                        kind    measure  units  cells  made from
   ok      domain                        filled  2        m^2    128    the mesh's
-  ok      bottom                        curve   2        m      16     the mesh's
-  ok      left                          curve   1        m      8      the mesh's
-  ok      right                         curve   1        m      8      the mesh's
-  ok      top                           curve   2        m      16     the mesh's
-  ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
-  ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+  ok      bottom                        curve   2        m       16    the mesh's
+  ok      left                          curve   1        m        8    the mesh's
+  ok      right                         curve   1        m        8    the mesh's
+  ok      top                           curve   2        m       16    the mesh's
+  ERROR   sponges[0].region             filled  0        m^2      0    cell fractions
+  ok      probes[name = "ring"].region  curve   1.5708   m       13    exact
   Filled regions: their part in the domain (its surface: theirs inside the domain and the
   domain's boundary inside them) and their own measures, independent of the mesh ("-" for
   regions of the mesh or unbounded ones), exact or within a relative tolerance; outside: the

@@ -125,7 +125,7 @@ int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const st
             const int32_t i_bc = face_bc[f];
             return (i_bc >= 0 && bcs[static_cast<size_t>(i_bc)].type == BoundaryType::PARTITION) ? FRONTIER : OUTSIDE;
         }
-        const uint8_t s = mesh.h_face_shift(f);
+        const uint32_t s = mesh.h_face_shift(f);
         if (mesh.h_rotated_row(s)) return ROTATED;
         if (c0 == static_cast<int32_t>(c)) {
             FOR_I_DIM p[i] -= mesh.h_shifts(s, i);

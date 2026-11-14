@@ -80,6 +80,8 @@ class StepController {
 
         /** @brief Controller history for restart files. */
         std::vector<std::pair<std::string, double>> attributes() const;
+        /** @brief attributes() from a host copy of the slots. */
+        static std::vector<std::pair<std::string, double>> attributes(const rtype * slots);
         /** @brief Restores the history written by attributes (absent names leave the defaults). */
         void restore(const std::vector<std::pair<std::string, double>> & attributes);
 

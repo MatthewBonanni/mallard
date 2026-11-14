@@ -30,6 +30,7 @@
 #include "field_units.h"
 #include "global_order.h"
 #include "mesh.h"
+#include "output_clock.h"
 #include "snapshot_block.h"
 
 enum class DataFormat {
@@ -277,6 +278,10 @@ class DataWriter {
         rtype next_time() const;
         /** @brief Time-based writers: due once t is at least this. */
         rtype due_time() const;
+        /** @brief When outputs are due, as the step graph decides it too. */
+        OutputClock output_clock() const { return {interval, time_interval, n_written}; }
+        /** @brief Whether its cells change between snapshots (a region that moves or follows the solution). */
+        bool moving_subset() const { return static_cast<bool>(subset_at); }
 
         /**
          * @brief Continue numbering and the .pvd (.xmf) series of a previous

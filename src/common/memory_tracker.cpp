@@ -178,8 +178,8 @@ const char * category_name(const Category c) { return NAMES[static_cast<size_t>(
 bool scales_with_cells(const Category c) { return c != Category::SETUP && c != Category::WORK && c != Category::RUNTIME; }
 
 Category category(const std::string_view label) {
-    // Host copies of device views (create_mirror, create_mirror_view in device builds)
-    if (ends_with(label, "_mirror")) return Category::OUTPUT;
+    // Host copies of device views (create_mirror, create_mirror_view in device builds; pinned staging)
+    if (ends_with(label, "_mirror") || ends_with(label, "_pinned")) return Category::OUTPUT;
     // GrowingBuffer: the rest of its last page
     if (ends_with(label, "_pages")) return Category::RUNTIME;
     for (const Rule & rule : RULES) {

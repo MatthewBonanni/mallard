@@ -525,30 +525,34 @@ void Mesh::compute_cell_neighbors() {
     // them next to it: L(a) - L(b) for the cell's node a and the other's node b
     const bool periodic = !h_node_key.empty();
     auto key = [&](uint32_t n) { return periodic ? h_node_key[n] : n; };
-    // Cells of every key and their node of that key (CSR, cells by global id)
+    // Cells of every key and, if periodic, their node of that key (CSR, cells by global id)
+    const std::vector<uint32_t> by_global_id = cells_by_global_id();
     std::vector<uint32_t> key_offsets(n_nodes + 1, 0);
-    std::vector<std::array<uint32_t, 2>> key_cells;
+    std::vector<uint32_t> key_cells, key_nodes;
     for (uint32_t c = 0; c < n_cells; c++) {
         for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) key_offsets[key(h_node_of_cell(c, k)) + 1]++;
     }
     for (uint32_t n = 0; n < n_nodes; n++) key_offsets[n + 1] += key_offsets[n];
     key_cells.resize(key_offsets[n_nodes]);
+    if (periodic) key_nodes.resize(key_offsets[n_nodes]);
     {
         std::vector<uint32_t> fill(key_offsets.begin(), key_offsets.end() - 1);
-        for (uint32_t c : cells_by_global_id()) {
+        for (uint32_t c : by_global_id) {
             for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
                 const uint32_t n = h_node_of_cell(c, k);
-                key_cells[fill[key(n)]++] = {c, n};
+                const uint32_t i = fill[key(n)]++;
+                key_cells[i] = c;
+                if (periodic) key_nodes[i] = n;
             }
         }
     }
     // Rows of new translations numbered visiting cells by global id, as for the faces
     if (periodic) {
-        for (uint32_t c : cells_by_global_id()) {
+        for (uint32_t c : by_global_id) {
             for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
                 const uint32_t a = h_node_of_cell(c, k);
                 for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
-                    const uint32_t b = key_cells[i][1];
+                    const uint32_t b = key_nodes[i];
                     std::array<int8_t, 3> lattice;
                     for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
                     shift_index(lattice);
@@ -556,16 +560,18 @@ void Mesh::compute_cell_neighbors() {
             }
         }
     }
-    // Neighbors as (cell << 8 | shift row)
-    std::vector<uint32_t> offsets(n_cells + 1, 0);
-    std::vector<uint64_t> flat, nb;
-    std::vector<uint64_t> seen(n_cells, ~uint64_t(0));  // the last (cell << 8 | shift) each neighbor entered for
-    for (uint32_t c = 0; c < n_cells; c++) {
+    // Neighbors as (cell << 8 | shift row), counted, then written into the views
+    std::vector<uint64_t> nb;
+    std::vector<uint64_t> seen;  // the last (cell << 8 | shift) each neighbor entered for
+    // Unsorted, each neighbor once
+    auto neighbors = [&](uint32_t c) {
         nb.clear();
+        bool two_shifts = false;
         for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
             const uint32_t a = h_node_of_cell(c, k);
             for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
-                const auto [other, b] = key_cells[i];
+                const uint32_t other = key_cells[i];
+                const uint32_t b = periodic ? key_nodes[i] : a;
                 uint8_t shift = 0;
                 if (periodic && a != b) {
                     std::array<int8_t, 3> lattice;
@@ -579,38 +585,47 @@ void Mesh::compute_cell_neighbors() {
                 }
                 const uint64_t entry = uint64_t(c) << 8 | shift;
                 if (seen[other] == entry) continue;
+                if (seen[other] >> 8 == c) {
+                    two_shifts = true;
+                    continue;
+                }
                 seen[other] = entry;
                 nb.push_back(uint64_t(other) << 8 | shift);
             }
         }
-        std::sort(nb.begin(), nb.end());
-        nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+        if (two_shifts) {
+            throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
+                                     "periodic directions need at least 3 cells.");
+        }
+    };
+    offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
+    h_offsets_cells_of_cell = Kokkos::create_mirror_view(offsets_cells_of_cell);
+    h_offsets_cells_of_cell(0) = 0;
+    seen.assign(n_cells, ~uint64_t(0));
+    for (uint32_t c = 0; c < n_cells; c++) {
+        neighbors(c);
+        h_offsets_cells_of_cell(c + 1) = h_offsets_cells_of_cell(c) + static_cast<uint32_t>(nb.size());
+    }
+    cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", h_offsets_cells_of_cell(n_cells));
+    cells_of_cell_shift = Kokkos::View<uint8_t *>("cells_of_cell_shift", h_offsets_cells_of_cell(n_cells));
+    h_cells_of_cell = Kokkos::create_mirror_view(cells_of_cell);
+    h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
+    seen.assign(n_cells, ~uint64_t(0));
+    for (uint32_t c = 0; c < n_cells; c++) {
+        neighbors(c);
         // By global id, so that neighbor order does not depend on the local numbering
         if (!h_global_cell_id.empty()) {
             std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
                 return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) <
                        std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
             });
+        } else {
+            std::sort(nb.begin(), nb.end());
         }
-        for (size_t i = 1; i < nb.size(); i++) {
-            if (nb[i] >> 8 == nb[i - 1] >> 8) {
-                throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
-                                         "periodic directions need at least 3 cells.");
-            }
+        for (size_t i = 0; i < nb.size(); i++) {
+            h_cells_of_cell(h_offsets_cells_of_cell(c) + i) = static_cast<uint32_t>(nb[i] >> 8);
+            h_cells_of_cell_shift(h_offsets_cells_of_cell(c) + i) = nb[i] & 0xff;
         }
-        flat.insert(flat.end(), nb.begin(), nb.end());
-        offsets[c + 1] = static_cast<uint32_t>(flat.size());
-    }
-    offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
-    cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", flat.size());
-    cells_of_cell_shift = Kokkos::View<uint8_t *>("cells_of_cell_shift", flat.size());
-    h_offsets_cells_of_cell = Kokkos::create_mirror_view(offsets_cells_of_cell);
-    h_cells_of_cell = Kokkos::create_mirror_view(cells_of_cell);
-    h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
-    for (uint32_t i = 0; i <= n_cells; i++) h_offsets_cells_of_cell(i) = offsets[i];
-    for (size_t i = 0; i < flat.size(); i++) {
-        h_cells_of_cell(i) = static_cast<uint32_t>(flat[i] >> 8);
-        h_cells_of_cell_shift(i) = flat[i] & 0xff;
     }
 
     shifts = Kokkos::View<rtype *[N_DIM]>("shifts", shift_lattice.size());
@@ -636,7 +651,7 @@ void Mesh::compute_cell_neighbors() {
     Kokkos::deep_copy(face_shift, h_face_shift);
 }
 
-void Mesh::h_forward(const uint8_t s, const rtype * x, rtype * y) const {
+void Mesh::h_forward(const uint32_t s, const rtype * x, rtype * y) const {
     FOR_I_DIM y[i] = x[i];
     if (is_rotational()) {
         rtype r[N_DIM];
@@ -649,7 +664,7 @@ void Mesh::h_forward(const uint8_t s, const rtype * x, rtype * y) const {
     FOR_I_DIM y[i] = y[i] + h_shifts(s, i);
 }
 
-void Mesh::h_backward(const uint8_t s, const rtype * x, rtype * y) const {
+void Mesh::h_backward(const uint32_t s, const rtype * x, rtype * y) const {
     rtype d[N_DIM];
     FOR_I_DIM d[i] = x[i] - h_shifts(s, i);
     FOR_I_DIM y[i] = d[i];
@@ -672,11 +687,12 @@ std::array<rtype, N_DIM> Mesh::h_face_point(const uint32_t f, const uint32_t c) 
 std::array<rtype, N_DIM> Mesh::h_face_normal(const uint32_t f, const uint32_t c) const {
     std::array<rtype, N_DIM> n;
     FOR_I_DIM n[i] = h_face_normals(f, i);
-    if (h_cells_of_face(f, 1) != int32_t(c) || !h_rotated_row(h_face_shift(f))) return n;
+    const uint32_t s = h_face_shift(f);
+    if (h_cells_of_face(f, 1) != int32_t(c) || !h_rotated_row(s)) return n;
     std::array<rtype, N_DIM> m;
     FOR_I_DIM {
         m[i] = 0.0_r;
-        for (uint8_t j = 0; j < N_DIM; j++) m[i] += h_shift_rotations(h_face_shift(f), j, i) * n[j];
+        for (uint8_t j = 0; j < N_DIM; j++) m[i] += h_shift_rotations(s, j, i) * n[j];
     }
     return m;
 }

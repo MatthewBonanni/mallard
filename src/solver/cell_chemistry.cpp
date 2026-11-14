@@ -755,6 +755,27 @@ void CellChemistry::begin_step() {
     if (balance) balance->begin_step();
 }
 
+void CellChemistry::allocate_kept() {
+    if (kept_tally.is_allocated()) return;
+    kept_tally = Kokkos::View<uint64_t *>("chem_kept_tally", N_TALLIES);
+    if (counters.is_allocated()) kept_counters = Kokkos::View<uint64_t[2]>("chem_kept_substeps");
+    kept_cost = Kokkos::View<float *>("chem_kept_cost", previous_cost.extent(0));
+}
+
+void CellChemistry::keep() {
+    const Kokkos::DefaultExecutionSpace exec;
+    Kokkos::deep_copy(exec, kept_tally, tally);
+    if (counters.is_allocated()) Kokkos::deep_copy(exec, kept_counters, counters);
+    Kokkos::deep_copy(exec, kept_cost, previous_cost);
+}
+
+void CellChemistry::restore() {
+    const Kokkos::DefaultExecutionSpace exec;
+    Kokkos::deep_copy(exec, tally, kept_tally);
+    if (counters.is_allocated()) Kokkos::deep_copy(exec, counters, kept_counters);
+    Kokkos::deep_copy(exec, previous_cost, kept_cost);
+}
+
 bool CellChemistry::adapt_balance(const bool after_last_call) {
     if (!balance || !balance->adapt(after_last_call)) return false;
     // Guests are sorted in the same scratch as the queue

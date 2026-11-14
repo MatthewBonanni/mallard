@@ -514,9 +514,12 @@ The setup runs on the device (`teno_setup::SetupHandle`): the geometry
 (scales $h_c$ and ranking metrics; the rules of curved cells in 2D; moments
 and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
-free device memory (at most 16,384 cells in 2D, so that the setup's
-workspace does not grow with the mesh): a thread per cell in 2D, a team of threads per cell on
-GPUs in 3D. Cells whose search
+free device memory: a thread per cell in 2D, a team of threads per cell on
+GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
+the cells the searches gather), and a batch takes as many cells as fit what
+16,384 cells take with twice that scratch, up to one wave of threads on the
+GPU; meshes of at least 16,384 cells share one batch size, so that the
+setup's workspace does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
@@ -670,6 +673,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     | order 6, walls, 4³ | 4.7e-3 | 8.5e-6 |
 
     Order 4 on that lattice is stable only from 85 stencil entries
-    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Mixed meshes with
-    pyramids improve with the bound (table above). Pure pyramid lattices are
-    rare in practice; prefer orders 3 or 5 there.
+    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Thin pyramids grow
+    faster: a 6 × 6 × 4 box of aspect ratio 6.25, with side walls and periodic
+    in z, grows at $+0.033$ through the solver at order 4 and is bounded at
+    orders 3 and 5 ([order of `high_order`](../design/teno4_robustness.md#linear-stability)).
+    Mixed meshes with pyramids improve with the bound (table above). Pure
+    pyramid lattices are rare in practice; prefer orders 3 or 5 there.
