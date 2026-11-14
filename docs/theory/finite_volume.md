@@ -1,13 +1,13 @@
 # Finite-volume discretization and reconstruction
 
-Mallard discretizes eq. (3) of [chapter 1](governing_equations.md#conservation-laws) with a cell-centered finite-volume method on
+Mallard discretizes eq. (3) of [Governing equations](governing_equations.md#conservation-laws) with a cell-centered finite-volume method on
 unstructured meshes: triangles and quadrilaterals in 2D, tetrahedra,
 hexahedra, prisms and pyramids in 3D, with optionally curved boundary
 faces. This chapter covers the semi-discrete equations, face quadrature,
 curved geometry, the reconstruction of face states (first order, MUSCL,
 TENO-E), the low-Mach correction of those states and the cell gradients of
-the viscous terms. The numerical fluxes are in [chapter 7](fluxes.md) and
-the time integration in [chapter 8](time_integration.md). Usage:
+the viscous terms. The numerical fluxes are in [Numerical fluxes](fluxes.md) and
+the time integration in [Time integration](time_integration.md). Usage:
 [Numerics](../guide/numerics.md); measured stability and accuracy limits:
 [Numerical methods](../numerics/overview.md).
 
@@ -15,7 +15,7 @@ the time integration in [chapter 8](time_integration.md). Usage:
 
 The unknowns are the cell averages
 $\overline{\mathbf{U}}_i = \lvert\Omega_i\rvert^{-1}\int_{\Omega_i}\mathbf{U}\,\mathrm{d}V$.
-Integrating eq. (3) of [chapter 1](governing_equations.md#conservation-laws) over cell $i$,
+Integrating eq. (3) of [Governing equations](governing_equations.md#conservation-laws) over cell $i$,
 
 $$
 \begin{equation}
@@ -39,13 +39,13 @@ $$
 
 with face weights normalized to $\sum_q w_{f,q} = 2$ (Gauss-Legendre on
 $[-1, 1]$ in 2D; 3D rules rescaled to that sum). The viscous flux uses one
-point per face ([chapter 7](fluxes.md#viscous-fluxes)). Each face's flux is
+point per face ([Numerical fluxes](fluxes.md#viscous-fluxes)). Each face's flux is
 computed and stored once, and every cell sums its faces in a fixed order
 without atomic operations (`FaceFluxSumFunctor`,
 `src/numerics/flux_functor.h`), so the result is bitwise independent of
 thread count and scheduling. Boundary faces use the exterior state of the
 boundary condition as $\mathbf{U}^R$
-([chapter 9](boundaries_sources.md#weak-imposition)). The source term is
+([Boundary conditions and sources](boundaries_sources.md#weak-imposition)). The source term is
 evaluated at the cell average.
 
 ## Face quadrature
@@ -161,11 +161,11 @@ $$
 $$
 
 The neighbors are the face neighbors. A boundary face contributes its ghost
-state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
+state ([Boundary conditions and sources](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
 the centroid's distance to the face; prescribed states (`dirichlet`, `inlet_state`,
 `farfield`) sit at the face centroid instead. Across `outlet_extrapolation` faces
-with an image face ([chapter 9](boundaries_sources.md#transmissive-boundaries))
+with an image face ([Boundary conditions and sources](boundaries_sources.md#transmissive-boundaries))
 the neighbor is the image cell, moved outward by the translation that takes
 the image face onto the boundary face. Tetrahedra, whose four face
 neighbors make weakly limited MUSCL unstable, and cells on characteristic
@@ -424,8 +424,8 @@ face point:
     cells, every scalar within its neighbors' range.
 
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
-([chapter 7](fluxes.md#gas-mixtures)), and the face mass fractions the
-species fluxes ([chapter 7](fluxes.md#species-fluxes)).
+([Numerical fluxes](fluxes.md#gas-mixtures)), and the face mass fractions the
+species fluxes ([Numerical fluxes](fluxes.md#species-fluxes)).
 
 ## Low-Mach correction
 
@@ -493,11 +493,11 @@ $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate
 $[\mathbf{u}, T, X_1,\dots,X_{N_s}]$ directly, with the wall velocity at
 viscous walls and the prescribed $T$ and $X_k$ at `inlet_state` boundaries
 (the cell's own values elsewhere). The face gradients built from these are
-in [chapter 7](fluxes.md#viscous-fluxes).
+in [Numerical fluxes](fluxes.md#viscous-fluxes).
 
 ## Axisymmetric cells
 
-In axisymmetric runs ([chapter 1](governing_equations.md#axisymmetric-flows)),
+In axisymmetric runs ([Governing equations](governing_equations.md#axisymmetric-flows)),
 each cell keeps its planar geometry for reconstruction stencils and
 limiters, and adds the revolved measures
 (`Mesh::make_axisymmetric`; [design notes](../design/axisymmetric.md)):
@@ -507,6 +507,6 @@ the one-point viscous fluxes and the time step; the revolved centroid
 $\int_\Omega\mathbf{x}\,r\,\mathrm{d}A/\int_\Omega r\,\mathrm{d}A$, at which a
 linear function equals its r-weighted average; and convective face weights
 $w_{f,q}\,r_q$ in eq. $\eqref{eq:semi-discrete-equations-2}$. The radial momentum source $\int_\Omega(p - \tau_{\theta\theta})\,\mathrm{d}A$
-of eq. (9) of [chapter 1](governing_equations.md#axisymmetric-flows) uses the cell values (first order, MUSCL, troubled TENO cells)
+of eq. (9) of [Governing equations](governing_equations.md#axisymmetric-flows) uses the cell values (first order, MUSCL, troubled TENO cells)
 or, in smooth TENO cells, the central polynomial at a collapsed Gauss rule
 exact to its degree; both are exactly well balanced for uniform pressure.

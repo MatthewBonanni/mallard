@@ -1,4 +1,4 @@
-# Design: inlets
+# Inlets
 
 Status: implemented (`inlet_stagnation`, `inlet_mass_flow`, numbers as expressions of x, y, z, t).
 

@@ -1,6 +1,6 @@
-# Design: distributed memory (MPI)
+# Distributed memory (MPI)
 
-Status: accepted design (reviewed in #32), implemented through milestone 5 (see Milestones). Tracks issue #2.
+Status: implemented (milestones 1 to 6, reviewed in #32, issue #2); milestone 7, dynamic load balancing, was measured and not adopted.
 
 ## Goals
 
@@ -214,7 +214,7 @@ gathers the periodic zones.
      - Host-staged MPI is 15-25% slower; the overlap recovers about 10% of it.
      - dKaMinPar partitions give the same times within a few percent, and 0.141 s on 1M cells at 16 GPUs.
      - What remains at small per-GPU sizes is the cost of troubled cells concentrated on the ranks crossed by shocks, and of the smooth TENO pass's last partial wave of threads. Dynamic load balancing (section 10) was measured against the first and does not pay off.
-6. **Multi-node:** runs across nodes; HDF5/XDMF solution output. Runs across nodes work, with GPUDirect RDMA (milestone 5 table). HDF5/XDMF output is still to do.
+6. **Multi-node:** runs across nodes, with GPUDirect RDMA (milestone 5 table); every rank writes its cells into one shared VTKHDF file per snapshot (parallel HDF5).
 7. **Dynamic load balancing** (section 10): prototyped (weighted partitioners, runtime migration with TENO data carried over, measured cost model and trigger, bitwise tests) and measured on 8 and 16 A100s; not adopted, since a rebalance costs more than the imbalance it removes before the shocks move on. The prototype stays in draft PRs.
 
 ## Decisions from review
