@@ -1,4 +1,4 @@
-# Design: periodic boundaries
+# Periodic boundaries
 
 Status: implemented for generated meshes and mesh files, serial and distributed,
 for translations and rotations. Motivated by the canonical Taylor-Green vortex (the full
