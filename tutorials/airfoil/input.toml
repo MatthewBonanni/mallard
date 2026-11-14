@@ -43,6 +43,7 @@ limiter = "venkatakrishnan"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
@@ -60,6 +61,5 @@ file = "forces_airfoil.csv"
 
 [[write_data]]
 prefix = "./solut/flow"
-format = "vtu"
 time_interval = 20.0
-variables = ["RHO", "U", "P", "T", "VORTICITY"]
+fields = ["RHO", "U_X", "U_Y", "P", "T", "VORTICITY"]

@@ -51,7 +51,7 @@ def coefficients(run):
 
 def wall(run):
     """Cells next to the airfoil: wall-face midpoints, Cp, Cf, upper-surface flags."""
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow.pvd")))
+    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow")))
     polys, c = snapshots.cells(pts, conn, offs)
     starts = np.concatenate([[0], offs[:-1]])
     owner = {}
@@ -75,7 +75,7 @@ def wall(run):
         d = np.dot(c[k, :2] - mid, n)
         if d < 0:
             n, d = -n, -d
-        u = a["U"][k, :2]
+        u = np.array([a["U_X"][k], a["U_Y"][k]])
         rows.append((mid[0], mid[1], (a["P"][k] - P_INF) / Q, MU * np.dot(u, t) / d / Q))
     rows = np.array(sorted(rows))
     return rows[:, 0], rows[:, 1], rows[:, 2], rows[:, 3]
@@ -128,9 +128,9 @@ def main():
         fig.tight_layout()
         return fig
 
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.runs[-1], "solut", "flow.pvd")))
+    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.runs[-1], "solut", "flow")))
     polys, cent = snapshots.cells(pts, conn, offs)
-    mach = np.linalg.norm(a["U"][:, :2], axis=1) / np.sqrt(GAMMA * a["P"] / a["RHO"])
+    mach = np.hypot(a["U_X"], a["U_Y"]) / np.sqrt(GAMMA * a["P"] / a["RHO"])
 
     def field(th):
         from scipy.interpolate import griddata
@@ -144,8 +144,8 @@ def main():
             ax.add_collection(pc)
             gx, gy = np.meshgrid(np.linspace(*xl, 300), np.linspace(*yl, 160))
             sel = near
-            u = griddata(cent[sel, :2], a["U"][sel, 0], (gx, gy), method="linear")
-            v = griddata(cent[sel, :2], a["U"][sel, 1], (gx, gy), method="linear")
+            u = griddata(cent[sel, :2], a["U_X"][sel], (gx, gy), method="linear")
+            v = griddata(cent[sel, :2], a["U_Y"][sel], (gx, gy), method="linear")
             ax.streamplot(gx, gy, u, v, color=th["fg"], linewidth=0.5, density=1.6 if xl[0] > 0 else 1.0,
                           arrowsize=0.6)
             ax.set_xlim(*xl)
