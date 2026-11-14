@@ -1850,7 +1850,7 @@ struct TENOFunctor {
     // order 6 the staged entries leave room for one team per SM only: none
     static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
     static constexpr size_t SMOOTH_SCRATCH =
-        TEAM_SCRATCH + 8 + (STAGE ?sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
+        TEAM_SCRATCH + (STAGE ? sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -2020,7 +2020,6 @@ struct TENOFunctor {
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-        int * block_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int)));
 
         const bool active = idx < n;
         const uint32_t i_cell = active ? (cells.extent(0) ? cells(idx) : idx) : 0;
@@ -2029,33 +2028,23 @@ struct TENOFunctor {
         if (part == 0) {
             smooth_team[lane] = 0;
             admissible_team[lane] = 1;
-            if (lane == 0) block_team[0] = 1;
         }
         team.team_barrier();
-        // The team takes the block rows if all its cells have them, so that its barriers stay uniform
-        if (active && k == teno::BlockStencils::NONE) block_team[0] = 0;
-        team.team_barrier();
-        auto coefficients = [&](const auto & stencil) {
-            if constexpr (STAGE > 0) {
-                rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
-                int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-                if (active) conservatives(i_cell, U0);
-                with_chunk(part, [&](auto C) {
-                    staged_coefficients<decltype(C)::value>(team, active, i_cell, stencil, part, U0, aK, U_team, ns_team,
-                                                            smooth_team, lane);
-                });
-            } else if (active) {
-                conservatives(i_cell, U0);
-                with_chunk(part, [&](auto C) {
-                    smooth_coefficients<decltype(C)::value>(i_cell, stencil, U0, aK, smooth_team, lane);
-                });
-            }
-        };
-        if (block_team[0]) {
-            coefficients(stencil_large.template block_row<TABLE>(
-                i_cell, block.offsets_of(k == teno::BlockStencils::NONE ? 0 : k)));
-        } else {
-            coefficients(stencil_large.template row<TABLE>(i_cell));
+        const auto stencil =
+            stencil_large.template mixed_row<TABLE>(i_cell, k == teno::BlockStencils::NONE ? nullptr : block.offsets_of(k));
+        if constexpr (STAGE > 0) {
+            rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+            int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+            if (active) conservatives(i_cell, U0);
+            with_chunk(part, [&](auto C) {
+                staged_coefficients<decltype(C)::value>(team, active, i_cell, stencil, part, U0, aK, U_team, ns_team,
+                                                        smooth_team, lane);
+            });
+        } else if (active) {
+            conservatives(i_cell, U0);
+            with_chunk(part, [&](auto C) {
+                smooth_coefficients<decltype(C)::value>(i_cell, stencil, U0, aK, smooth_team, lane);
+            });
         }
         team.team_barrier();
         const int slot = smooth_team[lane];

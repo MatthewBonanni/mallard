@@ -200,6 +200,27 @@ struct PackedStencils {
         rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(pinv_[(s * WIDTH + l) << shift]); }
     };
 
+    /**
+     * @brief BlockRowT if offsets_ is set, else RowT: for threads of one team
+     *        whose cells take either.
+     */
+    template <typename T>
+    struct MixedRowT {
+        RowT<T> packed;
+        const int32_t * offsets_;
+        int32_t cell_;
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t cell(const uint32_t s) const { return offsets_ ? cell_ + offsets_[s] : packed.cell(s); }
+
+        KOKKOS_INLINE_FUNCTION
+        int32_t face(const uint32_t s) const { return offsets_ ? -1 : packed.face(s); }
+
+        template <uint8_t WIDTH>
+        KOKKOS_INLINE_FUNCTION
+        rtype pinv(const uint32_t s, const uint32_t l) const { return packed.template pinv<WIDTH>(s, l); }
+    };
+
     // The arrays are single allocations whose base pointers reach the kernels
     // as parameters: pointers loaded from device memory (e.g. a table of
     // separately allocated chunks) compile to generic loads, which made the
@@ -219,6 +240,14 @@ struct PackedStencils {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
         return RowT<T>{pinv_of<T>(c), cells.data() + (start << shift) + lane, images.data(), shift};
+    }
+
+    /** @brief block_row(c, offsets) if offsets, else row(c). */
+    template <typename T = rtype>
+    KOKKOS_INLINE_FUNCTION
+    MixedRowT<T> mixed_row(const uint32_t c, const int32_t * offsets) const {
+        if (offsets) return MixedRowT<T>{RowT<T>{pinv_of<T>(c), nullptr, nullptr, shift}, offsets, static_cast<int32_t>(c)};
+        return MixedRowT<T>{row<T>(c), nullptr, static_cast<int32_t>(c)};
     }
 
     /** @brief The row of cell c, whose slot s holds cell c + offsets[s]. */
