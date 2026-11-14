@@ -93,7 +93,7 @@ Each rank numbers its cells along a Hilbert curve when that reads fewer cache li
 
 With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; each rank picks its own (see [Running on clusters](#running-on-clusters)).
 
-With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard mesh convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
+With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard mesh convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh and other mesh files are read whole by rank 0, which sends each rank its share, so convert large meshes to HDF5 first.
 
 ### Output
 

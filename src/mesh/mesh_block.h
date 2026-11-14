@@ -149,7 +149,8 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axis
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see
- *        read_mesh_file); every rank reads the whole file.
+ *        read_mesh_file): rank 0 reads the file and sends the other ranks
+ *        their blocks (collective).
  */
 MeshBlock read_file_block(const std::string & filename);
 

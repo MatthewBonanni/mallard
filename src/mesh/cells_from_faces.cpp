@@ -112,9 +112,8 @@ std::vector<std::vector<uint32_t>> sorted_faces(const std::vector<const Face *> 
 
 } // namespace
 
-std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std::vector<std::vector<uint32_t>> & faces,
-                                                    const std::vector<std::array<int64_t, 2>> & face_cells,
-                                                    const std::string & source) {
+MeshFileData::Cells cells_from_faces(uint32_t n_cells, const std::vector<std::vector<uint32_t>> & faces,
+                                     const std::vector<std::array<int64_t, 2>> & face_cells, const std::string & source) {
     std::vector<std::vector<const Face *>> cell_faces(n_cells);
     for (size_t f = 0; f < faces.size(); f++) {
         for (int64_t c : face_cells[f]) {
@@ -123,7 +122,7 @@ std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std:
             cell_faces[size_t(c)].push_back(&faces[f]);
         }
     }
-    std::vector<std::vector<uint32_t>> cells(n_cells);
+    MeshFileData::Cells cells;
     for (uint32_t c = 0; c < n_cells; c++) {
         const auto & cf = cell_faces[c];
         std::vector<uint32_t> corners;
@@ -162,7 +161,7 @@ std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std:
                                                  : "tetrahedra, pyramids, prisms and hexahedra") +
                                      " (no general polygons or polyhedra).");
         }
-        cells[c] = std::move(corners);
+        cells.add(corners);
     }
     return cells;
 }

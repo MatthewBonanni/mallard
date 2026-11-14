@@ -24,6 +24,7 @@
 #include "input.h"
 #include "mesh.h"
 #include "mesh_block.h"
+#include "mesh_file.h"
 #include "test_fixtures.h"
 #include "scratch.h"
 
@@ -243,6 +244,61 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
         if (zone.get_type() == FaceZoneType::BOUNDARY) zones.insert(zone.get_name());
     }
     EXPECT_EQ(zones, (std::set<std::string>{"bottom", "top"}));
+}
+
+/**
+ * @brief Every rank's block of a mesh file is its part of the file's
+ *        contents, which rank 0 alone reads: cells, nodes, boundary faces
+ *        and their zones, cell zones and high-order nodes.
+ */
+TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshFile) {
+#if N_DIM == 2
+    const std::vector<std::string> files = {write_temp_shared("mallard_part_zones.msh", jittered_mixed_mesh(6, true)),
+                                            write_temp_shared("mallard_part_curved.msh", annulus_gmsh(3, 16, 2))};
+#else
+    const std::vector<std::string> files = {write_temp_shared("mallard_part_curved.msh", shell_gmsh(2, 2, false, true))};
+#endif
+    const int r = comm::rank(), p = comm::size();
+    for (const std::string & file : files) {
+        SCOPED_TRACE(file);
+        const MeshFileData data = read_mesh_file(file);
+        const MeshBlock block = read_file_block(file);
+        ASSERT_EQ(block.first_cell, block_begin(data.cells.size(), r, p));
+        ASSERT_EQ(block.n_cells(), block_begin(data.cells.size(), r + 1, p) - block.first_cell);
+        for (uint64_t c = 0; c < block.n_cells(); c++) {
+            const auto cell = data.cells[block.first_cell + c];
+            ASSERT_EQ(std::vector<uint64_t>(block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c]),
+                                            block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c + 1])),
+                      std::vector<uint64_t>(cell.begin(), cell.end()));
+        }
+        ASSERT_EQ(block.first_node, block_begin(data.nodes.size(), r, p));
+        ASSERT_EQ(block.n_nodes(), block_begin(data.nodes.size(), r + 1, p) - block.first_node);
+        for (uint64_t n = 0; n < block.n_nodes(); n++) {
+            FOR_I_DIM EXPECT_EQ(block.node_coords[n][i], double(data.nodes[block.first_node + n][i]));
+        }
+        const uint64_t first_face = block_begin(data.boundary_faces.size(), r, p);
+        ASSERT_EQ(block.n_faces(), block_begin(data.boundary_faces.size(), r + 1, p) - first_face);
+        std::vector<std::array<double, N_DIM>> high_order;
+        for (uint64_t f = 0; f < block.n_faces(); f++) {
+            const Mesh::BoundaryFace & face = data.boundary_faces[first_face + f];
+            EXPECT_EQ(block.zone_names[block.face_zone[f]], face.zone);
+            EXPECT_EQ(std::vector<uint64_t>(block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f]),
+                                            block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f + 1])),
+                      std::vector<uint64_t>(face.nodes.begin(), face.nodes.end()));
+            for (const curved::Vec3 & x : data.boundary_high_order[first_face + f]) {
+                std::array<double, N_DIM> y;
+                FOR_I_DIM y[i] = x[i];
+                high_order.push_back(y);
+            }
+        }
+        EXPECT_EQ(block.face_high_order_nodes, high_order);
+        EXPECT_EQ(block.cell_zone_names, data.cell_zone_names);
+        ASSERT_EQ(block.cell_zone.size(), data.cell_zone_names.empty() ? 0 : block.n_cells());
+        for (uint64_t c = 0; c < block.cell_zone.size(); c++) {
+            const uint64_t g = block.first_cell + c;
+            EXPECT_EQ(block.cell_zone[c], g < data.cell_zone.size() ? data.cell_zone[g] : Mesh::NO_CELL_ZONE);
+        }
+    }
 }
 
 TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
