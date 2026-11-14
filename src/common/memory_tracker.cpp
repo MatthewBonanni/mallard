@@ -51,8 +51,11 @@ constexpr Rule RULES[] = {
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
     {"transport_gradients", false, C::FACES},
     // TENO setup's workspace
-    {"teno_batch_", true, C::SETUP}, {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
-    {"teno_rows", false, C::SETUP}, {"teno_boxes", false, C::SETUP}, {"teno_cell_rule", false, C::SETUP},
+    {"teno_batch_", true, C::SETUP},
+    // The setup's geometry of every cell (freed with it)
+    {"teno_setup_h", false, C::MESH}, {"teno_setup_metric", false, C::MESH}, {"teno_boxes", false, C::MESH},
+    {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
+    {"teno_rows", false, C::SETUP}, {"teno_cell_rule", false, C::SETUP},
     {"teno_pack_", true, C::SETUP}, {"teno_large_size_rows", false, C::SETUP},
     {"teno_small_size_rows", false, C::SETUP}, {"teno_scale_rows", false, C::SETUP},
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},

@@ -3451,9 +3451,7 @@ class Setup3D {
         uint32_t batch_cells() const {
             if (options.batch_cells > 0) return options.batch_cells;
             if constexpr (DEVICE_IS_HOST) return 8192;
-            // Batch outputs within about a quarter of the free device memory and
-            // BATCH_BYTES_PER_CELL per cell to set up, so that the setup's peak
-            // stays below the memory the run allocates after it
+            // Batch outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
             size_t total = 0;
@@ -3461,14 +3459,15 @@ class Setup3D {
 #endif
             const size_t out_bytes = (size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
                                       8 * (size_t(nk) + 1) + 32);
-            size_t n = std::min(free_bytes / 4, BATCH_BYTES_PER_CELL * n_target) / out_bytes;
-            n = std::min<size_t>(n, 65536);
-            n = std::max<size_t>(n / 1024 * 1024, 4096);
+            size_t n = free_bytes / 4 / out_bytes;
+            n = std::min<size_t>(n, MAX_BATCH);
+            n = std::max<size_t>(n / 1024 * 1024, 1024);
             return static_cast<uint32_t>(n);
         }
 
         static constexpr int TEAM_SIZE = 128;
-        static constexpr size_t BATCH_BYTES_PER_CELL = 2048;
+        // The initial solution's chunk of cells: meshes larger than it share the setup's workspace, sized by the device
+        static constexpr size_t MAX_BATCH = 16384;
 
         /** @brief Upper bound on the teams of the device kernel resident at once. */
         static size_t resident_teams([[maybe_unused]] const size_t shared_bytes) {
