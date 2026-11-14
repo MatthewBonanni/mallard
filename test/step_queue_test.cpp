@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <sstream>
 #include <string>
@@ -886,6 +887,39 @@ TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
         for (const auto & line : o.log) firings += line.find("trigger") != std::string::npos;
         EXPECT_GT(firings, 3u);
     }
+}
+
+TEST(StepQueueTest, TriggersOfProbeValuesAreEvaluatedOnTheDevice) {
+    // The probe, written every 3 steps, stops the queue at its writes alone; between them the device evaluates
+    // the condition on its latest value, which crosses a threshold at a write and fires one step later
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string probe = "check_interval = 1000\n" + RESTARTS +
+                              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+                              "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probe;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("probe_triggers_reference", c, 0);
+    std::vector<double> p;
+    if (comm::is_root()) {
+        std::istringstream in(reference.files.at("pt.csv"));
+        for (std::string line; std::getline(in, line);) {
+            if (line.empty() || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+            p.push_back(std::stod(line.substr(line.rfind(',') + 1)));
+        }
+    }
+    p = comm::allgatherv(p);
+    // The first write past every earlier one, after the second
+    size_t k = 2;
+    while (k < p.size() && !(p[k] > *std::max_element(p.begin(), p.begin() + static_cast<std::ptrdiff_t>(k)))) k++;
+    ASSERT_LT(k, p.size() - 1);
+    const double threshold = 0.5 * (p[k] + *std::max_element(p.begin(), p.begin() + static_cast<std::ptrdiff_t>(k)));
+    std::ostringstream trigger;
+    trigger << std::setprecision(17) << "[[triggers]]\nname = \"rise\"\nwhen = \"pt_P > " << threshold
+            << " and step % 3 == 1\"\ndo = \"stop\"\n";
+    c.extra = probe + trigger.str();
+    const Outcome o = expect_queue_invariant("probe_triggers", c);
+    EXPECT_EQ(o.step, 3 * k + 1);
 }
 
 TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {

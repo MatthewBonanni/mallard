@@ -418,8 +418,12 @@ class Solver {
         /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;
         void act_on_triggers();
-        /** @brief Whether the step graph evaluates the triggers: none reads the wall time or a probe's value. */
+        /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
+        /** @brief Whether the step graph's triggers read a value of probe k, which the host reduces: the probe is
+         *         left to the host, so the queue stops at its writes and the device holds its values in between. */
+        bool triggers_read_probe(size_t k) const;
+        bool triggers_read_probes() const;
         /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
         bool convergence_on_device() const;
         /** @brief Where the queue stops for those rows: the monitors' steps, and whether probe k is left to the host. */

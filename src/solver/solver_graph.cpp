@@ -975,7 +975,7 @@ void Solver::begin_device_steps() {
             "step_monitor_staging", n_records, monitor_offsets.back());
     }
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
-        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k)) continue;
+        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k) || triggers_read_probe(k)) continue;
         probes.stage(k, n_records, statistics);
         staged_probes.push_back(k);
     }
@@ -1071,7 +1071,11 @@ void Solver::resume_device_steps() {
     if (triggers_on_device() && triggers_evaluated_by_host) {
         // The values and states the host's last evaluation left; else the device's own are current
         triggers_evaluated_by_host = false;
-        const std::vector<double> values = trigger_values();
+        std::vector<double> values = trigger_values();
+        // Rank 0 holds the probes' values
+        if (is_distributed() && triggers_read_probes()) {
+            values = comm::allgatherv(comm::is_root() ? values : std::vector<double>{});
+        }
         Kokkos::deep_copy(trigger_vars, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                             values.data(), values.size()));
         const std::vector<Triggers::DeviceState> states = triggers.device_states();
