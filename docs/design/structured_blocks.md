@@ -386,7 +386,28 @@ One pull request per step, as a stack on #431:
 
 1. Detection and the block numbering.
 2. The $(i, j, k)$ to stencil shape map, on #431's table store.
-3. The TENO and MUSCL block kernels.
+3. The TENO block kernel (below). The MUSCL block kernel, which needs a
+   least-squares table per stencil shape, is #1035; keyed tables and one fit
+   per shape at setup are #986.
 4. Mirror images at straight walls.
 5. `mallard check` reporting.
 6. The documentation of [Documentation](#documentation).
+
+**Block shapes (step 3).** The TENO smooth pass takes the block path for the
+cells of a block whose packed central stencil holds no mirror image. Each such
+cell's slots are the cell plus a list of offsets, and the cells with one list
+form a block shape (`teno::BlockStencils`: the per-cell shape and the shapes'
+offsets). The kernel reads cell $c$'s entry $s$ as $c + o_s$, with the
+pseudo-inverse it would read anyway (#994's shared table, through the cell's
+index). Only the source of the entries changes, so the two paths are bitwise
+equal by construction, and the shapes need no agreement over the ranks: a
+partition changes which cells take the block path, never what they compute.
+A periodic box that is one block on its rank keeps its cells along the seams on
+the block path too: their offsets wrap the index, and each position along the
+seam is one more block shape. The shapes are found from the packed stencils at
+setup and after `rebuild_cells`. They do not use the keys of step 2, which
+depend on the partition near partition faces (#986).
+
+On GPUs the team pass gives each thread its own cell's row, by offsets or
+packed, so a team that straddles the edge of the block path stays on it for
+its block cells.
