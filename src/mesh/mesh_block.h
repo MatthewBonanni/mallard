@@ -42,6 +42,8 @@ struct MeshBlock {
     std::vector<uint64_t> face_nodes;
     std::vector<uint32_t> face_zone;        // index into zone_names
     std::vector<std::string> zone_names;    // every zone, on every rank
+    std::vector<uint32_t> cell_zone;          // per cell, index into cell_zone_names; empty without cell zones
+    std::vector<std::string> cell_zone_names; // every rank
     // High-order boundary faces: CSR per boundary face (empty if none at all)
     // into the coordinates of all its nodes, corners first in Gmsh order;
     // linear faces have none
@@ -139,10 +141,26 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
 MeshBlock read_mesh_block(const Input & input);
 
 /**
+ * @brief Volume and centroid of each of the block's cells, as Mesh computes
+ *        them, without building faces (collective: nodes of other ranks'
+ *        blocks are fetched). Straight-sided cells; see cell_geometry.
+ */
+std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric = false);
+
+/**
  * @brief This rank's block of a mesh file other than HDF5 (see
  *        read_mesh_file); every rank reads the whole file.
  */
 MeshBlock read_file_block(const std::string & filename);
+
+/**
+ * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
+ *        and the directory relative paths start from if no such file exists.
+ */
+std::string mesh_filename(const Input & input);
+
+/** @brief The error of a generated mesh.type that this dimension's solver does not make. */
+InputError mesh_type_dimension_error(const Input & input, const std::string & type);
 
 /** @brief Whether a mesh file name denotes an HDF5 mesh file (.h5 or .hdf5). */
 bool is_hdf5_mesh(const std::string & filename);
@@ -152,6 +170,9 @@ bool have_hdf5();
 
 /** @brief Whether several ranks can write one HDF5 mesh file together. */
 bool have_parallel_hdf5();
+
+/** @brief The dimension (2 or 3) of an HDF5 mesh file, read by this rank alone. */
+int mesh_h5_dimension(const std::string & filename);
 
 /**
  * @brief Read this rank's block of an HDF5 mesh file (collective): cells,

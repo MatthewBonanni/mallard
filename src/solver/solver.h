@@ -13,6 +13,7 @@
 #define SOLVER_H
 
 #include <array>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -24,6 +25,7 @@
 
 #include "mesh.h"
 #include "boundary.h"
+#include "boundary_fields.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
@@ -37,23 +39,36 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
+#include "statistical_convergence.h"
+#include "triggers.h"
+#include "health_state.h"
+#include "step_queue.h"
+#include "divergence_report.h"
 #include "synthetic_inflow.h"
 #include "source_terms.h"
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
+#include "run_control.h"
+#include "exact_sums.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
+#include "face_exchange.h"
+#include "partition.h"
+#include "pinned_mirrors.h"
 #include "halo_exchange.h"
 #include "log.h"
-#include "run_control.h"
 #include "check.h"
+#include "run_report.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
+#include "region_input.h"
+#include "stencils.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -92,7 +107,7 @@ struct KineticEnergyBudget {
  */
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
-    std::vector<Expression> W;
+    std::vector<std::shared_ptr<const kexpr::Program>> W;
 };
 
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
@@ -103,17 +118,48 @@ struct DivergedError : std::exception {
 /** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
 
+/** @brief How a run ended, as its end record gives it. */
+struct RunEnd {
+    std::string outcome;  // finished, stopped, signal, wall_time_limit, diverged or error; empty while running
+    std::string cause;    // finished: n_steps or t_stop; stopped: stop_file, mallard_ctl or trigger; signal: its name
+    std::string reason;   // in words
+    std::string trigger;  // the trigger that stopped the run
+    RunEnd() = default;
+    RunEnd(std::string outcome_, std::string cause_, std::string reason_, std::string trigger_ = {})
+        : outcome(std::move(outcome_)), cause(std::move(cause_)), reason(std::move(reason_)), trigger(std::move(trigger_)) {}
+    bool empty() const { return outcome.empty(); }
+};
+
+struct ViscousFluxFunctor;
+template <typename T_riemann_solver>
+struct ConvectiveFluxFunctor;
+struct CentralStates;
+
+/** @brief Whether some [[write_data]] of the input writes the variable. */
+bool writes_variable(const Input & input, const std::string & name);
+
 class Solver {
     public:
+        /** @brief Values of the step's time-step reduction: dt_cfl1, the run-control requests and minus the wall time. */
+        static constexpr int N_STEP_REDUCE = 3 + run_control::N_REQUESTS;
+
         Solver();
         ~Solver();
 
         /**
          * @brief Initialize the solver from an input file.
          * @param input_file_name Path to the TOML input file.
+         * @param restart_file If given, start from this restart file instead of the input's [initialize].
          * @return Exit status.
          */
-        int init(const std::string & input_file_name);
+        int init(const std::string & input_file_name, const std::string & restart_file = {});
+
+        /**
+         * @brief Replaces the input's [initialize] by a start from restart_file (`--restart`).
+         *        "latest" is the newest complete restart file the input's restart writers
+         *        wrote (newest_restart), or, if there is none, the input's [initialize].
+         */
+        static void start_from_restart(Input & input, const std::string & restart_file);
 
         /**
          * @brief Initialize the solver from a parsed TOML input.
@@ -128,6 +174,32 @@ class Solver {
          *        tells about the run (see check.h).
          */
         CheckReport check(const Input & input, const CheckOptions & options);
+
+        /**
+         * @brief Post-processing of output (`mallard post extract`), set before init(): the
+         *        state comes from reader instead of [initialize], and init() does not fail on unused
+         *        keys. reader gives a state on the mesh's local cells: a restart file's data, or a
+         *        snapshot's fields (vectors by component, U_X, U_Y, ...) with its step and time.
+         */
+        void set_state_reader(std::function<RestartData(const Mesh &)> reader) { state_reader = std::move(reader); }
+
+        /**
+         * @brief Post-processing: with next, takes the next state from the reader; then writes
+         *        every [[write_data]] snapshot and probe of the input at its step and time, as a run
+         *        writes them, and waits for the files.
+         */
+        void write_output_of_state(bool next);
+
+        /**
+         * @brief Post-processing (`mallard post average`): with next, takes the next state from the
+         *        reader; then adds it to the [statistics] means, and to the time averages of probes, as a
+         *        sample at its step and time (both start at statistics.t_start, not from the files'),
+         *        updates the means' host copies, and returns the cell values sampled.
+         */
+        CellSampler sample_statistics_of_state(bool next);
+
+        /** @brief Post-processing, set before init(): fields of the caller's own on the mesh's cells, for [[write_data]]. */
+        void set_output_data(std::function<void(const Mesh &, std::vector<Data> &)> add) { output_data = std::move(add); }
 
         /**
          * @brief Run until a stop condition is reached.
@@ -177,7 +249,7 @@ class Solver {
         void update_p_max();
 
         /**
-         * @brief Copy the device solution to the host mirrors.
+         * @brief Copy the device solution to the host mirrors: output_arrays_to_host, then finish_output_arrays.
          */
         void copy_device_to_host();
 
@@ -192,6 +264,8 @@ class Solver {
          *        modeled walls), then the modeled heat flux into the fluid.
          */
         std::array<rtype, 2 * N_DIM + 1> calc_force(const Kokkos::View<uint32_t *> & faces);
+        /** @brief calc_force's values, as doubles, into out on the device (capturable). */
+        void reduce_force(const Kokkos::View<uint32_t *> & faces, double * out);
 
         /**
          * @brief Sum of each conservative variable integrated over the domain.
@@ -212,6 +286,8 @@ class Solver {
          *        else least-squares ones.
          */
         std::array<rtype, N_FLOW_STATISTICS> integrate_flow_statistics();
+        /** @brief integrate_flow_statistics' values, as doubles, into out on the device (capturable). */
+        void reduce_flow_statistics(double * out);
 
         /**
          * @brief W = [rho, u, p] in W_cells and its gradients in
@@ -227,17 +303,39 @@ class Solver {
          */
         void update_cell_W();
 
-        /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
+        /**
+         * @brief The vorticity of each owned cell, into vortex_fields, after
+         *        update_velocity_gradients.
+         */
         void update_vortex_fields();
+
+        /**
+         * @brief The written derived fields of each owned cell, into derived_fields, after
+         *        update_velocity_gradients (and the transport coefficients and mass-fraction gradients they need).
+         */
+        void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
         void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
         /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
         void update_cell_fields(const State & solution);
+        /** @brief At a row on the device: stops it where check_timed_boundaries would throw on any rank. */
+        void flag_timed_boundaries();
+        /** @brief The budget pass's rates of this rank, into budget_rates on the device (calc_rhs). */
+        void budget_rates_of_fluxes(int stage);
         /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
         void record_stage_time(rtype c);
+        /** @brief Inside a captured step: the step's dt on the device. */
+        const rtype * step_dt_device() const;
+        /** @brief The step's start time on the device, inside a step graph. */
+        const rtype * step_time_device() const;
+        /** @brief Minus rank 0's wall time as the host posted it before the step, reduced over the ranks; in a step graph. */
+        const rtype * step_wall_device() const;
+        /** @brief bc.data[0] of each average-pressure outlet: its target p (of t, from timed_fields) less the mean p. */
         void update_average_pressure_outlets(StateView solution);
+        /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
+        void set_stage_time(rtype t_stage, rtype c);
         /**
          * @brief Add the uniform body force along the mass flow direction that
          *        holds the volume average of rho u at its target: it cancels the
@@ -247,6 +345,12 @@ class Solver {
          *        the force's work.
          */
         void add_mass_flow_force(StateView solution, StateView rhs);
+        /** @brief mass_flow_totals[0, 1]: the sums over all ranks of mass_flow_terms' columns, exact in fixed point
+         *         (each term rounded to 2^-b of the largest), so independent of the rank count; no host
+         *         synchronization inside a captured step. */
+        void sum_mass_flow_terms();
+        /** @brief domain_volume, as an exact sum. */
+        void init_mass_flow_volume();
         /**
          * @brief At the first stage of each step: the transverse terms of the
          *        characteristic boundaries and their incoming waves, advanced
@@ -260,9 +364,14 @@ class Solver {
         /** @brief Rank-count independent key of a boundary face in restart files. */
         uint64_t restart_face_key(uint32_t i_face) const;
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
-        void apply_sponges(const State & solution, const State & rhs);
+        void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
+        /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
+        void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         void calc_dt();
-        rtype reduce_dt(rtype local);
+        /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
+        Kokkos::View<rtype> dt_reduce_slot();
+        /** @brief The time step and run-control requests in step_reduce, reduced over the ranks. */
+        rtype reduce_dt();
         /**
          * @brief Error-controlled steps: whether step_controller accepts the
          *        step just taken (else the solution is back at U^n).
@@ -271,8 +380,8 @@ class Solver {
         void init_error_control();
         /** @brief Throws once the same step has been rejected too many times. */
         void check_rejections(int tries) const;
-        /** @brief The time the next step must not pass: t_stop or the next time-based output. */
-        rtype next_target_time() const;
+        /** @brief The time the next step must not pass: t_stop or the next time-based output (unstaged: of the host's). */
+        rtype next_target_time(bool unstaged = false) const;
         void check_fields();
 
         // Run control and divergence (see run_control.h)
@@ -282,6 +391,15 @@ class Solver {
         void restore_last_good();
         std::string describe_invalid_cells();
         [[noreturn]] void diverged();
+        int run_loop();  // run() but for the end record of an error
+        /**
+         * @brief The divergence report's evidence (collective): what failed in each local cell of the failing
+         *        state, then, with the last valid state in place (if has_valid), its neighborhood.
+         */
+        divergence::Evidence diagnose_divergence(bool has_valid, std::vector<int> & failed, MeshQuality & quality);
+        /** @brief Ranks the causes, prints the report and writes its files and the snapshot of the neighborhood. */
+        std::vector<divergence::Cause> write_divergence_report(divergence::Evidence & e, const std::vector<int> & failed,
+                                                               const MeshQuality & quality);
         void act_on_requests();
         void apply_commands();
         std::string write_restarts();
@@ -289,14 +407,117 @@ class Solver {
         RestartAttributes restart_attributes() const;
         void write_checkpoint();
         void poll_control_files();
+        // Triggers (see triggers.h) and the convergence of monitored values (convergence.h)
+        /** @brief Names (as triggers read them) and dimensions of the values of [integrals], [[forces]] and [[probes]]. */
+        std::vector<Convergence::Monitored> monitored() const;
+        /** @brief Their latest values (NaN before the first; probes' on rank 0 only when distributed). */
+        std::vector<double> monitored_values() const;
+        /** @brief The step each was last written at (Probes::NO_VALUE before), on every rank. */
+        std::vector<uint64_t> monitored_steps() const;
+        void init_triggers();
+        /** @brief The values triggers read, in the order of init_triggers' names. */
+        std::vector<double> trigger_values() const;
+        void act_on_triggers();
+        /** @brief Whether the step graph evaluates the triggers: none reads the wall time or a probe's value. */
+        bool triggers_on_device() const;
+        /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
+        bool convergence_on_device() const;
+        /** @brief Where the queue stops for those rows: the monitors' steps, and whether probe k is left to the host. */
+        void convergence_due_limits(step_queue::Horizon & h) const;
+        bool convergence_reads_probe(size_t k) const;
+        /** @brief In the step graph: the triggers' variables and states at the step; stops the device before one fires. */
+        void evaluate_triggers();
+        /** @brief The device's trigger states into the host's, after the queue drained. */
+        void pull_trigger_states();
+        /** @brief Variable i of the triggers from monitor_results' column (rtype: as the row rounds it), by monitor bit. */
+        struct TriggerSource {
+            uint32_t variable;
+            uint32_t monitor;
+            uint32_t column;
+            uint32_t rounded;
+        };
+        /** @brief Adds the samples of the convergence signals written at this step; collective where a probe's is. */
+        void update_convergence();
+        /** @brief Start of the [statistics] averages, -inf before they run. */
+        double averages_start() const;
         void publish_status();
         std::string stop_conditions() const;
 
-        // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
+        // Steps decided on the device, enqueued ahead of it, in CUDA builds as one CUDA graph each; see solver_graph.cpp
+        /** @brief Why steps are not decided on the device ([run] step_queue, the host taking part), else empty. */
+        std::string device_steps_unsupported() const;
+        /** @brief Why steps are not captured as CUDA graphs, else empty. */
         std::string step_graph_unsupported() const;
-        void graph_step();
         void record_step();
         void destroy_step_graph();
+        void begin_device_steps();
+        /** @brief After the host acted at a step: what the device needs for the steps until the next stop. */
+        void resume_device_steps();
+        step_queue::Horizon step_horizon() const;
+        /** @brief Enqueues one step, which does nothing once the device stopped for the host. */
+        void launch_device_step();
+        void step_prologue();
+        /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
+        void captured_launch();
+        void device_step_body();
+        /**
+         * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
+         *        flags is set and the launch has not yet flushed, for the parts of the step's end that read the state.
+         */
+        void flush_chemistry_if(const uint32_t * flags, uint32_t n);
+        /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
+        void unflush_chemistry_on_device();
+        void capture_step_graph();
+        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
+        bool conditional_nodes_work();
+        template <typename F>
+        void device_if(const uint32_t * flag, F && body);
+        /** @brief The record of the oldest launch not yet taken, once it ran; passes on requests while waiting. */
+        const step_queue::Record & next_record();
+        /** @brief What the host does at the end of a step when it waits for every step, from the step's record. */
+        void take_record(const step_queue::Record & record);
+        /** @brief Waits for every launch: the steps after a stop do nothing. */
+        void drain_device_steps();
+        /** @brief Run-control requests (and the wall time) to the device's next step reductions. */
+        void post_requests();
+        void count_nonfinite();
+        /** @brief Enqueues a progress row's local values into progress_device and progress_values. */
+        void progress_reductions();
+        void health_reductions();
+        uint32_t n_progress_values() const;
+        void mixture_reductions(step_queue::MixtureDiagnostics * out);
+        void chemistry_reductions(step_queue::Chemistry * out);
+        /** @brief The means sampled in the step graph. */
+        bool statistics_on_device() const;
+        /** @brief Whether the step graph stages snapshots and restarts in the host's mirrors (set by begin_device_steps). */
+        bool outputs_stageable() const;
+        /**
+         * @brief What copy_device_to_host enqueues on the device: the output fields, then their copies into the
+         *        pinned mirrors with the clocks and states restart files carry (capturable).
+         */
+        void output_arrays_to_host();
+        /** @brief The mirrors of the step controller and the characteristic faces, outside step graphs. */
+        void allocate_restart_mirrors();
+        /** @brief What copy_device_to_host computes on the host from the mirrors once output_arrays_to_host ran. */
+        void finish_output_arrays();
+        /** @brief write_data's files from the mirrors: snapshots, restarts and the statistics' files. */
+        void write_outputs(bool force);
+        /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
+        void decide_outputs();
+        /** @brief Writes the outputs the record staged (collective), then frees the mirrors for the next. */
+        void write_staged_outputs(const step_queue::Record & record);
+        /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
+        bool monitors_on_device() const;
+        void allocate_monitors();
+        /** @brief Monitor k's columns (forces of zone k, or the integrals after the zones) into monitor_results. */
+        void monitor_reductions(size_t k);
+        void write_force_row(ForceMonitor & monitor, const double * values);
+        void write_integral_row(const double * values);
+        void write_staged_monitors(const step_queue::Record & record);
+        /** @brief Writes the probes the record staged (collective). */
+        void write_staged_probes(const step_queue::Record & record);
+        /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
+        void after_step(Kokkos::Timer & step_timer, bool on_device);
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -306,7 +527,7 @@ class Solver {
         void add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu);
         void update_primitives_mixture();
         void init_temperature_seed();
-        rtype calc_dt_cfl1_mixture();
+        rtype calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device);
         /**
          * @brief Double flux: freeze each cell's [gamma, e0] from the true
          *        equation of state at the start of a step, and after the step
@@ -315,8 +536,6 @@ class Solver {
          */
         void freeze_thermodynamics();
         void reset_energy();
-        /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
-        std::array<rtype, 6> mixture_diagnostics();
         /**
          * @brief Gas mixtures: W = [rho, u, p] and the scalars [Y, gamma, e0]
          *        of every cell, with the temperature found by Newton from the
@@ -325,6 +544,8 @@ class Solver {
          *        and the last bits of T, do not depend on output or diagnostics.
          */
         void update_cell_states(const State & solution, bool update_seed);
+        /** @brief update_cell_states of the state and update_primitives, solving each cell's temperature once. */
+        void update_cell_states_and_primitives();
         /**
          * @brief Viscous mixtures, after update_cell_states: transport
          *        coefficients of every cell and the gradients of [u, T, X].
@@ -336,7 +557,15 @@ class Solver {
          *        (viscous_gradients, or transport_gradients for mixtures, whose
          *        time-step diffusivity NU_EFF also grows).
          */
-        void update_eddy_viscosity(uint32_t n);
+        void update_eddy_viscosity(uint32_t n, bool of_state = false);
+        /**
+         * @brief [les] gradients = "reconstruction": les_velocity_gradients of the owned cells from TENO's
+         *        central polynomials where its last reconstruction found the cell smooth, else the
+         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo. With
+         *        of_state, eddy_viscosity_of_state's polynomials, and the flags of the reconstruction before
+         *        the one exchange_for_first_stage() started.
+         */
+        void update_reconstruction_gradients(uint32_t n, bool of_state);
         void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
@@ -358,7 +587,7 @@ class Solver {
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
-         * @brief Global dynamic procedure: les.C from the Germano identity of the current state, summed over
+         * @brief Global dynamic procedure: les_state(0), the constant, from the Germano identity of the current state, summed over
          *        the domain exactly (fixed point), so the constant is independent of the rank count. The
          *        velocity gradients of the state must be up to date on owned cells.
          */
@@ -375,7 +604,23 @@ class Solver {
          */
         void init_chemistry();
         void allocate_chemistry();
-        void advance_chemistry(double dt_chem);
+        void advance_chemistry(double dt_chem, bool audited = true);
+        /**
+         * @brief Fused half steps: applies the pending half step for what reads the state now (output,
+         *        checks, the end of the run), keeping the state to continue from; idempotent.
+         */
+        void flush_chemistry();
+        /** @brief Puts back the state flush_chemistry kept: the run goes on as if no output had read it. */
+        void unflush_chemistry();
+        void allocate_unflushed();
+        /** @brief Copies what a flush changes (state, T seeds, last sub-steps, costs, tallies) to the kept buffers. */
+        void keep_unflushed();
+        void restore_unflushed();
+        /**
+         * @brief Exchanges the state with the one flush_chemistry kept, also on the host: restart files hold the
+         *        state the run continues from. Called again, it puts them back.
+         */
+        void swap_unflushed();
         /**
          * @brief SIMPLER balanced splitting (Wu, Ma & Ihme 2019): with
          *        c = -T(U^n), the reaction substep dU/dt = R(U) - c over dt,
@@ -385,13 +630,22 @@ class Solver {
         /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
         void subtract_transport_rate(const State & rhs);
         /**
-         * @brief Counts the active cells of a chemistry call begun at `start` (timer), adds its rank
-         *        times to the imbalance sums; throws if any cell failed on any rank.
+         * @brief Counts the active and sent cells of a chemistry call; throws if any cell failed on
+         *        any rank.
          */
-        void check_chemistry(const CellChemistry::Statistics & stats, double start);
+        void check_chemistry();
+        /** @brief Throws if more cells failed than the last check saw (chem_io, written by the device). */
+        void check_chemistry_failures();
+        /** @brief The chemistry call over chem_dt(), with the repair audit; capturable in a step graph. */
+        void run_chemistry(const ChemistryForcing * forcing, bool audited = true);
+        void set_chemistry_dt(double dt_chem);
+        /** @brief chem_io's failed cells, over the ranks, from the device. */
+        void reduce_chemistry_failures();
+        /** @brief SIMPLER's transport half step's rhs: T(U) + c. */
+        RHSFunction simpler_transport_rhs();
+        /** @brief Inside a captured step: times a chemistry call (the device clock in CUDA builds). */
+        void mark_chemistry_time(bool start);
         void update_heat_release_rate();
-        /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
-        std::pair<uint64_t, double> chemistry_statistics();
 
         /**
          * @brief Rates of change of the resolved kinetic energy by the
@@ -401,11 +655,11 @@ class Solver {
          */
         KineticEnergyBudget kinetic_energy_budget();
         /** @brief LES: the model constant in use (the dynamic procedure's latest with les.dynamic). */
-        rtype les_constant() const { return les.C; }
+        rtype les_constant() const { return les_state.is_allocated() ? static_cast<rtype>(les_value(0)) : les.C; }
         /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
-        double les_dynamic_ratio() const { return dynamic_ratio; }
+        double les_dynamic_ratio() const { return les_value(1); }
         /** @brief Thickened flame: the efficiency's exponent beta (the dynamic procedure's latest with efficiency = "dynamic"). */
-        double tfles_beta() const { return thickened_flame.beta; }
+        double tfles_beta() const { return les_value(2); }
         bool dynamic_efficiency() const {
             return tfles_on && thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC;
         }
@@ -417,6 +671,8 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief [les] gradients = "reconstruction": the models' velocity gradients of the latest update (device). */
+        const Kokkos::View<rtype *[N_DIM][N_DIM]> & get_les_velocity_gradients() const { return les_velocity_gradients; }
         /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
         const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
         /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
@@ -436,31 +692,77 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+        /** @brief Scope of a call that communicates: this rank alone unless distributed. */
+        comm::SelfScope communication_scope() const { return comm::SelfScope(!distribute); }
+        /**
+         * @brief Off CUDA, takes the steps a CUDA build would graph through the
+         *        graph's step path without capture, so tests check that path's
+         *        captured code on every backend (Kokkos profiling section
+         *        "step_graph_capture"). Call before run().
+         */
+        void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
+        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
+        enum class CaptureFault {
+            NONE,
+            FENCE,         // fails while the stream captures
+            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+        };
+        void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
-        double chemistry_cells_sent() const { return chem_cells_sent; }
+        double chemistry_cells_sent() const {
+            const comm::SelfScope scope = communication_scope();
+            return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
+        }
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
-        double get_mass_flow_force() const { return mass_flow_force; }
+        double get_mass_flow_force() const;
 
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
+        Probes & get_probes() { return probes; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps launched as a captured CUDA graph so far. */
+        uint64_t get_graph_steps() const { return graph_steps; }
+        /** @brief Steps the host took from their records without acting on them (steps run ahead of it). */
+        uint64_t get_queued_steps() const { return n_queued_steps; }
+        /** @brief Launches the host keeps ahead of the device's steps. */
+        uint32_t get_queue_depth() const { return queue_depth; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
-        /** @brief The numerics preset and the value and origin of each of its keys. */
+        /** @brief The numerics preset and the origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
+
+        /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
+        void set_ledger_mutation(const LedgerMutation & m) { run_health.mutation = m; }
+        /** @brief The run health of the latest report (empty without [output] health). */
+        const health::Report & get_health() const { return run_health.last; }
+        /** @brief Collects the health report now, as a progress row does (collective). */
+        void report_health();
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
 
         /** @brief Names of the transported species, empty for a single gas. */
         const std::vector<std::string> & get_species_names() const { return species_names; }
+
+        /**
+         * @brief After init: every field [[write_data]] variables accept in this case, those computed
+         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included, last.
+         */
+        std::vector<std::string> output_fields() const;
+
+        /**
+         * @brief Instead of init, without the mesh (mallard list fields and species): the input's upgrades and
+         *        numerics preset and the physics, which loads the mechanism (get_species_names).
+         * @return The output_fields() of init, decided from the input alone.
+         */
+        std::vector<std::string> init_fields(const Input & input);
 
         StateView conservatives;
         SpeciesView species;
@@ -470,9 +772,15 @@ class Solver {
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
         Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
         Kokkos::View<rtype *>::host_mirror_type h_p_max;
-        // Q, then the vorticity (one component in 2D), if any of them is written
+        // The vorticity (one component in 2D), if written
         Kokkos::View<rtype **> vortex_fields;
         Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
+        // The derived fields written (derived_catalog.h), in the columns of derived_selection
+        derived::Selection derived_selection;
+        derived::Settings derived_settings;
+        derived::Workspace derived_workspace;
+        Kokkos::View<rtype **> derived_fields;
+        Kokkos::View<rtype **>::host_mirror_type h_derived_fields;
 
     protected:
         void init_mesh();
@@ -484,16 +792,37 @@ class Solver {
         void init_boundaries();
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
-        void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
+        void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
+        /** @brief The rank owning each local cell. */
+        std::vector<int> cell_owners() const;
+        /** @brief The stencils of the owned cells, with the members of targets (stencils::build). */
+        stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
+        /**
+         * @brief The mesh and stencil fields [[write_data]] asks for, once, and
+         *        the stencil file of [output] write_stencils.
+         */
+        void init_mesh_fields();
+        /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
+        CheckFields check_resolution(CheckReport & report);
+        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
+                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
-        void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
+        void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
+        void check_sizing(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
+        PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
+        void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
+        std::string setup_check();
         void init_run_parameters();
-        void init_output();
+        void init_output(region::Regions & regions);
+        /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
+        void add_data_writers(const Input & output, region::Regions & regions, bool async_output,
+                              uint32_t io_threads);
         void init_solution();
         void init_solution_constant();
-        void init_solution_analytical();
         void init_solution_restart();
         /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
         void init_solution_remap();
@@ -502,56 +831,166 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        void update_boundary_states(rtype t_eval);
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*; the primitives are left to their users. */
+        void apply_output_state(RestartData state);
+        void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
-        void update_inflow(rtype t_eval);
-        void init_sources();
-        void init_sponges();
+        void update_inflow(rtype t_eval, rtype c = 0.0_r);
+        /** @brief The faces' own conditions and dirichlet states that depend on t, on the device at the stage time. */
+        void update_boundary_fields(rtype t_eval, rtype c);
+        /** @brief The faces' own conditions and dirichlet states that depend on t, at the time in stage_time. */
+        void apply_boundary_fields();
+        /**
+         * @brief Mass fluxes of the faces of an inlet_mass_flow entry: per
+         *        face for a mass_flux expression or an mdot with a profile,
+         *        else empty (an mdot without profile sets bc's uniform flux).
+         *        A profile of t gives the fluxes at t = 0 and fills `timed`.
+         */
+        std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
+                                                   BoundaryCondition & bc, MassFlowProfile & timed) const;
+        void init_sources(region::Regions & regions);
+        void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
+        void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
-        std::string stop_reason() const;  // Empty while no stop condition holds
+        RunEnd stop_reason() const;       // Empty while no stop condition holds
+        rtype t_stop_reached() const;     // The run has reached t_stop once t is at least this
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
-        void print_setup() const;
+        void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
-        void print_summary(const std::string & stop) const;
+        void print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & values);
+        step_queue::ProgressLocals progress_locals(std::vector<double> & values);
+        void report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & rank_values);
+        void print_summary(const RunEnd & end) const;
+        /** @brief The run log's end record: how the run ended, its last snapshot and restart, its timings. */
+        void write_end_record(const RunEnd & end);
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
         RunStatus run_status() const;
         void record_mesh_provenance() const;
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
-        std::vector<std::string> integral_names() const;
+        // Run health (solver_health.cpp)
+        void init_health();
+        /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
+        void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        /** @brief The columns of the integrals file after step and t, and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> force_columns(bool modeled) const;
+        /** @brief The units of the progress records' quantities, for the start record (udunits; "1": none). */
+        std::string progress_units() const;
+        /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
+        Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
         void write_forces();
         void write_integrals();
         void write_probes();
-        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
-        ProbeFields probe_fields();
+        /** @brief Adds the current samples to the averaging probes' time averages. */
+        void sample_probe_averages();
+        /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
+        RestartArrays restart_arrays() const;
+        CellSampler cell_sampler() const {
+            return CellSampler{conservatives, species, primitives, derived_fields, hrr, production};
+        }
+        /** @brief The cell fields that source expressions and regions defined by the solution read. */
+        region::CellFields cell_fields() const;
+        /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
+        void sample_statistics();
+        /** @brief The fields [statistics] sample: the primitives, and the derived fields and HRR they read (capturable). */
+        void update_statistics_fields();
+        /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
+        ProbeFields probe_fields(ProbeFluxes & fluxes);
+        /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
+        void update_probe_gradients();
 
     private:
-        // Step graph (solver_graph.cpp)
+        /**
+         * @brief Runs f, a check of this rank's faces or cells; if it throws on
+         *        any rank, every rank throws the error of the first one
+         *        (collective), so that none waits in a later collective.
+         */
+        template <typename F>
+        static void on_every_rank(F && f) {
+            std::string error;
+            try {
+                f();
+            } catch (const std::exception & e) {
+                error = e.what();
+            }
+            if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
+        }
+        /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
+        void check_timed_boundaries() const;
+        bool timed_boundaries = false;  // on any rank, so every rank's steps stop at the same rows
+        Kokkos::View<double *> boundary_failed;  // [any timed boundary failed], over the ranks
+
+        // Steps on the device (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
-        bool use_step_graph = false;
+        uint64_t step_queue_depth = 3;         // [run] step_queue
+        bool use_device_steps = false;
+        bool use_step_graph = false;           // captured, in CUDA builds
+        bool uncaptured_step_graphs = false;
+        CaptureFault capture_fault = CaptureFault::NONE;
+        uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
-        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
+        void * capture_graph = nullptr;        // cudaGraph_t being captured
+        uint64_t graph_steps = 0;
+        uint64_t n_launched = 0, n_taken = 0;
+        uint64_t n_queued_steps = 0;
+        bool conditional_steps = false;        // launches after a stop do nothing
+        Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
+        Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> requests_posted;  // pinned: written by the host any time
+        Kokkos::View<step_queue::Loop> step_loop;                                // device
+        Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> step_records;  // pinned: one per queued launch
+        std::vector<void *> step_events;       // cudaEvent_t, one per record
+        Kokkos::View<step_queue::ProgressLocals> progress_device;
+        Kokkos::View<double *> progress_values;  // run health: ledger totals, element drift, repairs (rank's values)
+        Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> progress_staging;  // (record, value)
+        Kokkos::View<double *> monitor_results;  // columns of every monitor
+        Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
+        std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
+        Kokkos::View<uint32_t *> statistics_due;  // the current launch samples [the means, the spectra, the phases, each conditional entry, any]
+        Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
+        Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
+        std::vector<size_t> staged_probes;       // probes the step graph evaluates
+        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
+        Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
+        bool staged_time_probes = false;
+        bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs
+        bool staged_time_outputs = false;        // some of them by time
+        Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
+        Kokkos::View<uint32_t> output_due;       // the current launch stages its outputs
+        uint64_t n_staged_outputs = 0;           // records whose outputs the host wrote
+        PinnedMirrors pinned_mirrors;            // the host mirrors output_arrays_to_host fills
+        Kokkos::View<rtype *>::host_mirror_type h_step_control;  // the step controller's slots
+        Kokkos::View<rtype *[2]>::host_mirror_type h_char_state;  // the characteristic faces' [p, u_n]
+        Kokkos::View<uint32_t *>::host_mirror_type h_char_faces;
+        Kokkos::View<Triggers::DeviceState *>::host_mirror_type h_trigger_states;
+        Kokkos::View<uint64_t *> monitor_intervals;
+        Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)
 
         // Run control
         bool control_enabled = false;
         bool control_socket = true;              // [run] control_socket
         uint64_t control_file_interval = 0;      // [run] control_file_interval
+        uint64_t control_files_polled = 0;       // step / control_file_interval at the last look
         int control_contributed = 0;             // this rank's requests in the last time-step reduction
         int control_reduced = 0;                 // every rank's
         bool checkpoint_requested = false;
-        std::string control_stop;                // why a request stopped the run, else empty
+        RunEnd control_stop;                     // a request that stopped the run, else empty
+        bool wall_time_reached = false;          // on some rank, so on every rank at the same step
+        bool end_recorded = false;
         std::string stop_file_note;
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
@@ -567,6 +1006,8 @@ class Solver {
         rtype last_good_t = 0.0;
         double last_good_pending = 0.0;
         bool stepped_past_divergence = false;    // a step graph went on from the invalid state
+        std::string divergence_prefix = "divergence_report";  // [output] divergence_report
+        std::deque<divergence::Sample> progress_history;       // the last progress rows, for the report
 
         bool distribute = true;
         int halo_layers = 0;
@@ -587,16 +1028,40 @@ class Solver {
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
         void update_upwind_sensor();
+        /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
+        void start_reconstruction(StateView solution);
+        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
+        void exchange_halo(const State & state);
+        /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
+        void discard_reconstruction();
+        /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
+        void exchange_for_first_stage();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /** @brief kinetic_energy_rate into *out on the device. */
+        void kinetic_energy_rate(rtype * out) const;
         /**
          * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
          *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
          */
         rtype pressure_work_rate() const;
+        /** @brief kinetic_energy_budget's rates over the ranks into budget_rates, on the device (capturable). */
+        void enqueue_kinetic_energy_budget();
+        void allocate_budget();
 
         template <typename T_riemann_solver>
-        void launch_flux_functor();
+        ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
+        CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
+        template <typename T_riemann_solver>
+        void launch_flux_functor(Kokkos::View<uint32_t *> faces);
+        /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
+        bool exchanges_partition_faces() const;
+        /**
+         * @brief Blend the convective face fluxes toward first order where the
+         *        update would leave a cell without positive density or pressure
+         *        (bound-preserving TENO; see PositivityFluxFunctor).
+         */
+        void limit_flux_positivity(StateView solution);
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
@@ -604,15 +1069,28 @@ class Solver {
         void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
+        /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
+        void copy_boundary_gas();
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
+        // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
+        std::string stencil_shapes_setting;
+        void describe_stencil_shapes();
         Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
+        // another rank, and those that do (partition faces, transmissive faces with a remote image)
+        FaceExchange face_exchange;
+        Kokkos::View<uint32_t *> local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
+        bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
+        Kokkos::DefaultExecutionSpace comm_space;      // high priority: exchanges and the work around them
 
         Input input;
         bool check_only = false;  // within check()
+        std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
+        std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
@@ -631,9 +1109,9 @@ class Solver {
         uint64_t n_cells_global = 0;
 
         // Run log
-        logging::Items mesh_summary;
-        logging::Items boundary_summary;
-        logging::Items source_summary;
+        MeshSetup mesh_setup;
+        std::vector<CheckBoundary> boundary_summary;
+        report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
         double t_wall_stepping = 0.0;
@@ -646,10 +1124,12 @@ class Solver {
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
         bool input_from_file = false;  // init(file) has recorded the input's provenance
-        bool run_log_on = false;       // [output] run_log is set
+        bool run_log_on = false;       // the run's records are built: [output] run_log or report is set
+        std::string setup_check_json;  // the start record's check, when run_log_on
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
+        std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
@@ -659,24 +1139,32 @@ class Solver {
         std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
-        std::vector<DirichletBoundary> dirichlet_boundaries;
+        std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
+        DirichletStates dirichlet_states;
         struct AveragePressureOutlet {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
-            std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
+            Kokkos::View<double *[2]> pA_A;   // Per face: p A, A
+            ExactSums sums;                    // of pA_A over the ranks
+            std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t (in timed_fields)
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
-        Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
-        Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
-        rtype t_boundary_states;
-        bool boundary_states_steady = false;  // evaluated, and no expression depends on t
+        // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
+        // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
+        std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
+        std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
+        std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
+        CentralFlux hybrid_central = CentralFlux::RECONSTRUCTED;  // [numerics.hybrid] central
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
+        bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
+        Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V
         std::unique_ptr<TimeIntegrator> time_integrator;
         StepController step_controller;  // [numerics.error_control], else not enabled
         uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
@@ -692,7 +1180,8 @@ class Solver {
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;  // in face_storage
+        Kokkos::View<rtype *> face_storage;  // face_solution, and in gas mixtures species_slots too
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
         LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
@@ -709,6 +1198,14 @@ class Solver {
         Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
         Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
+        // [les] gradients = "reconstruction": the models' velocity gradients (cell, i, j) = d u_i / d x_j
+        Kokkos::View<rtype *[N_DIM][N_DIM]> les_velocity_gradients;
+        struct ReconstructionGradients {
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W, by the reconstruction
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> of_state;    // (owned cell): eddy_viscosity_of_state's
+            Kokkos::View<rtype *> troubled;  // (owned cell): TENO's flags, kept from the first stage's early start
+            State halo;
+        } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
         bool tfles_on = false;                         // [les.combustion]: thickened flame
@@ -725,12 +1222,19 @@ class Solver {
         std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
         Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
+        ExactSums tfles_dynamic_sums;                  // of tfles_dynamic_terms over the ranks
         uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
+        ExactSums dynamic_sums;                        // of dynamic_terms over the ranks
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
-        double dynamic_ratio = 0.0;
-        KineticEnergyBudget budget;
+        Kokkos::View<double *> les_state;  // device: [C, <L:M> / <M:M>, TFLES beta] of the dynamic procedures
+        /** @brief les_state(k), 0 without LES. */
+        double les_value(int k) const;
+        Kokkos::View<rtype *> budget_rates;  // device: [convective, viscous, sgs, pressure work]
+        static constexpr size_t N_BUDGET = 5;  // integrals' budget columns
+        State budget_rhs;
+        Kokkos::View<rtype *> budget_T_seed;
 
         // Wall-modeled LES (docs/design/wall_model.md)
         bool wall_model_on = false;
@@ -749,13 +1253,14 @@ class Solver {
         Kokkos::View<rtype *>::host_mirror_type h_T_seed;
         Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])
         Kokkos::View<rtype **> face_mdot;                     // (face, q)
-        Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k)
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k), in face_storage
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
+        Kokkos::View<double **, Kokkos::LayoutRight>::host_mirror_type h_cell_diffusion;
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
-        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
+        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
@@ -774,23 +1279,33 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
         CellChemistry cell_chemistry;
-        uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
-        double t_wall_chemistry = 0.0;
-        double t_chemistry_slowest = 0.0;  // sums over chemistry calls of the slowest rank's time
-        double t_chemistry_mean = 0.0;     // and of the mean of the ranks' times
-        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls and ranks; sent: load balancing
+        double t_wall_chemistry = 0.0;    // this rank's
+        Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks
+        Kokkos::View<double> chem_dt;           // the chemistry call's time, on the device
+        // [chemistry_pending at the step's start (in), failed cells so far over the ranks (out)]
+        Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> chem_io;
+        uint64_t chem_failures_seen = 0;
+        bool simpler_half_step = false;         // inside a captured step: stage times of SIMPLER's transport half step
+        double chemistry_started = 0.0;         // timer.seconds() at the start of a step's chemistry call (no CUDA)
         bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool simpler = false;             // SIMPLER balanced splitting instead of Strang
         State transport_rate;             // SIMPLER: -c = T(U^n), the transport tendency at the step's start
         bool defer_chemistry = false;     // take_step leaves its last half step pending
         double chemistry_pending = 0.0;   // chemistry time not yet applied to the state
+        // flush_chemistry: the state before the pending half step, while output reads the state after it
+        bool chemistry_flushed = false;
+        State unflushed;
+        Kokkos::View<rtype *> unflushed_T_seed, unflushed_chem_h, unflushed_chem_cost;
 
         // Optically thin radiation ([radiation])
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
+        // Output: the mesh and stencil fields [[write_data]] asks for, constant over the run
+        std::vector<std::string> mesh_field_names;
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_mesh_fields;  // (cell, field)
 
         // Source terms
         bool has_gravity = false;
@@ -802,7 +1317,11 @@ class Solver {
         double mass_flow_target = 0.0;      // volume average of rho u along the direction
         rtype mass_flow_direction[N_DIM] = {};
         double domain_volume = 0.0;
-        double mass_flow_force = 0.0;
+        double mass_flow_unit = 0.0;                // 2^b of the exact sums
+        Kokkos::View<double *[2]> mass_flow_terms;  // device, per owned cell
+        Kokkos::View<double *> mass_flow_largest;   // device: the largest |term| of each column
+        Kokkos::View<int64_t *> mass_flow_sums;     // device: in units of 2^-b of the largest
+        Kokkos::View<double *> mass_flow_totals;    // device: [sum of rho u . e V, of the RHS along e, the force]
 
         // Sponge layers: owned cells of positive total strength sum_i sigma_i,
         // and sum_i sigma_i U_ref,i of the conservatives, then the partial densities
@@ -810,17 +1329,28 @@ class Solver {
         Kokkos::View<rtype *> sponge_strength;
         Kokkos::View<rtype **, Kokkos::LayoutRight> sponge_target;
         rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
+        struct MovingSponge {
+            std::shared_ptr<region::MovingFractions> fractions;
+            Kokkos::View<rtype *> strength;                        // per owned cell, inside the region
+            Kokkos::View<rtype **, Kokkos::LayoutRight> target;    // strength times the target state
+        };
+        std::vector<MovingSponge> moving_sponges;
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
+        Kokkos::View<rtype> characteristic_time;  // device: t + dt, the time of the inlet targets at the step end
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
+        Kokkos::View<rtype *[2]> characteristic_start;  // error control: char_state at the step's start
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        // Velocities of inlet_state with nscbc depending on t
+        TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 
         // Checks
         uint32_t check_interval;
         bool check_nan;
+        Kokkos::View<int64_t *> n_nonfinite;  // check_fields: [values that are not finite], over the ranks
 
         // Outputs
         std::vector<Data> data;
@@ -829,6 +1359,15 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        Triggers triggers;
+        Kokkos::View<double *> trigger_vars;                   // the triggers' variables at the device's step
+        Kokkos::View<Triggers::DeviceState *> trigger_states;  // between firings
+        Kokkos::View<TriggerSource *> trigger_sources;
+        kexpr::ProgramTable<> trigger_conditions;
+        bool triggers_evaluated_by_host = true;  // since the device's states were last pushed or pulled
+        Convergence convergence;
+        RunEnd trigger_stop;  // a trigger that stopped the run, else empty
+        HealthState run_health;
 };
 
 #endif // SOLVER_H

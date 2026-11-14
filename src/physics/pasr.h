@@ -17,6 +17,7 @@
 #include "input.h"
 
 #include "log.h"
+#include "report.h"
 
 /**
  * @brief Each cell's rates are those of its filtered state times the reacting
@@ -35,7 +36,7 @@ struct PartiallyStirredReactor {
     /** @brief [les.combustion] of an input with model = "pasr". */
     static PartiallyStirredReactor from_input(const Input & table);
 
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     /** @brief kappa of a cell: rho_cp_T = rho cp T, q the heat release rate, nu and nu_t kinematic viscosities. */
     KOKKOS_INLINE_FUNCTION

@@ -1,0 +1,13 @@
+{
+ "default": "1.0",
+ "dimension": "length (m)",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/riemann_2d_quads/remap.toml",
+  "examples/taylor_green_3d/remap.toml"
+ ],
+ "type": "number"
+}

@@ -1,0 +1,1 @@
+- **Distributed TENO runs on meshes with rotational periodicity reconstruct only the cells each rank owns**, as on other meshes: owners send the turned sides of seam faces cut by the partition. Results are bitwise unchanged (#911).

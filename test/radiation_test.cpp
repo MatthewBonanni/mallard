@@ -54,7 +54,7 @@ std::string box(const std::string & radiation, uint32_t n_steps, double dt) {
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = " << dt << "\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 3\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n" : "") << "periodic = " << periodic << "\n"
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n" : "") << periodic_sides(periodic)
       << "[initialize]\ntype = \"constant\"\np = 101325.0\nT = 2000.0\nu = "
       << (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]")
       << "\nX = { H2O = 0.2, CO2 = 0.1, CO = 0.05, CH4 = 0.02, N2 = 0.63 }\n"
@@ -114,6 +114,7 @@ TEST(RadiationTest, HomogeneousGasCoolsLikeTheEnergyODE) {
     const double dt = 2e-4, t_end = 0.2;
     const uint32_t n_steps = static_cast<uint32_t>(std::lround(t_end / dt));
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box("[radiation]\nT_ambient = 1000.0\n", n_steps, dt)));
     solver.copy_device_to_host();
     const auto mech = chemistry::read_mechanism(GRI30);
@@ -145,7 +146,7 @@ TEST(RadiationTest, HomogeneousGasCoolsLikeTheEnergyODE) {
     solver.run();
     solver.copy_device_to_host();
     const bool single = sizeof(rtype) == sizeof(float);
-    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         const double e_c = double(solver.h_conservatives(c, N_DIM + 1)) / double(solver.h_conservatives(c, 0));
         EXPECT_NEAR(thermo.T_from_e(e_c, y, T_ref), T_ref, (single ? 1e-4 : 1e-6) * T_ref) << "cell " << c;
         FOR_I_DIM EXPECT_NEAR(double(solver.h_conservatives(c, 1 + i)), 0.0, single ? 1e-4 : 1e-9);

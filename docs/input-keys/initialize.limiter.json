@@ -1,0 +1,11 @@
+{
+ "default": "\"bounds\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/taylor_green_3d/remap.toml"
+ ],
+ "type": "string"
+}

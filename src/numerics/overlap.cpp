@@ -95,7 +95,8 @@ void add_piece(Region & r, const Simplex & s) {
     if (!h.empty()) r.pieces.push_back(std::move(h));
 }
 
-/** @brief Gauss-Legendre nodes and weights on [0, 1]. */
+} // namespace
+
 void gauss_legendre(uint32_t n, std::vector<double> & x, std::vector<double> & w) {
     x.resize(n);
     w.resize(n);
@@ -120,7 +121,6 @@ void gauss_legendre(uint32_t n, std::vector<double> & x, std::vector<double> & w
     }
 }
 
-} // namespace
 
 double volume(const Simplex & s) {
     return std::abs(signed_measure(s)) / (N_DIM == 2 ? 2.0 : 6.0);

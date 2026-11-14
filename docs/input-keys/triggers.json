@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/source_regions/input.toml"
+ ],
+ "type": "array"
+}

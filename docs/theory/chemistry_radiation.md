@@ -249,10 +249,11 @@ $$
 where $\mathcal{R}_\tau$ integrates eq. $\eqref{eq:reactor-equations-1}$ in every cell over $\tau$ and
 $\mathcal{T}_{\Delta t}$ is one step of the explicit time integrator on the
 flow's right-hand side (fluxes, sources, sponges, radiation;
-[chapter 8](time_integration.md)). With `fuse_half_steps = true` the
-trailing half step of one time step and the leading half step of the next
-are fused into one call over $\Delta t$, except where output, checks or the
-end of the run read the state at a step boundary. The splitting is second
+[chapter 8](time_integration.md)). With `fuse_half_steps = true` (the
+default) the trailing half step of one time step and the leading half step of
+the next are fused into one call over $(\Delta t^n + \Delta t^{n+1})/2$; the
+reactor equations are autonomous, so this is the same splitting. Output at a
+step boundary applies the pending half step to a copy of the state. The splitting is second
 order, but its fixed point moves with $\Delta t$.
 
 ### SIMPLER balanced splitting

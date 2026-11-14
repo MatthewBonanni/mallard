@@ -23,7 +23,7 @@ equations, so the stream also has a Mach number. At Mach 0.2 compressibility cha
 | Mean drag coefficient C_D | 1.33-1.35 |
 | Lift amplitude C_L' | 0.33-0.34 |
 
-The [validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page lists the
+The [verification and validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page lists the
 computations behind these ranges, and runs the same case on a much finer mesh.
 
 ## 2. Mesh
@@ -70,7 +70,7 @@ One time unit is D / a. The flow passes the cylinder in 5, and a shedding period
 | `[numerics]` | HLLC, SSPRK3, third-order TENO-E |
 | `[physics]` | `navier_stokes`, γ = 1.4, μ = 0.002, Pr = 0.72 |
 | `[[forces]]` | The force on `cylinder`, pressure and viscous parts, every 20 steps: `forces_cylinder.csv` |
-| `[[write_data]]` | Every 2 time units: density, velocity, pressure and vorticity, `solut/cylinder_*.vtu` |
+| `[[write_data]]` | Every 2 time units: density, velocity, pressure and vorticity, every snapshot in `solut/cylinder.vtkhdf` |
 
 The kick matters. A perfectly symmetric start keeps the wake symmetric until round-off breaks the
 symmetry, and the instability only grows by a factor e every ~50 time units. With the kick, shedding
@@ -116,7 +116,7 @@ of the lift (its upward zero crossings) after t = 60.
 
 The frequency and the drag fall within the references. The lift amplitude is 5% low: this mesh is coarse
 around the cylinder, and the 384 × 128 O-grid of the
-[validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page gets 0.331.
+[verification and validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page gets 0.331.
 
 ## 6. The vortex street
 
@@ -128,8 +128,8 @@ follow them further.
 ![Vorticity in the wake: alternating vortices shed from the cylinder](../images/tutorials/cylinder_field-light.svg#gh-light-mode-only)
 ![Vorticity in the wake: alternating vortices shed from the cylinder](../images/tutorials/cylinder_field-dark.svg#gh-dark-mode-only)
 
-In ParaView, open `solut/cylinder.pvd` and color by `VORTICITY` to watch the street form.
-`python3 $MALLARD/tools/animate.py solut cylinder --var VORTICITY --xlim -2 16 --ylim -3 3` makes a movie
+In ParaView, open `solut/cylinder.vtkhdf` (`solut/cylinder.pvd` in builds without HDF5) and color by `VORTICITY` to watch the street form.
+`python3 $MALLARD/tools/post/animate.py solut cylinder --var VORTICITY --xlim -2 16 --ylim -3 3` makes a movie
 of it.
 
 ## 7. Things to try
@@ -143,4 +143,5 @@ of it.
   mesh with second-order elements, `gmsh ... -order 2`, lets Mallard curve the wall
   ([curved boundaries](../guide/meshes.md#curved-boundaries)).
 
-Next: [Supersonic flow over a cone](cone.md), in 3D.
+Next: [Supersonic flow over a cone](cone.md), in 3D; or measure this wake further, with regions, fluxes and
+phase averages, in [Measuring a flow](measuring.md).

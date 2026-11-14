@@ -1,0 +1,1 @@
+- The Numerics section of the log reports the share of the cells in structured blocks that have a stencil shape, and the number of shapes. Cells with the same geometry within the reconstruction's reach (TENO's gather depth), boundary faces and their zones included, to 1e-9 of their size, share a shape (#440).

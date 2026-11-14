@@ -20,8 +20,8 @@
 inline constexpr const char * PARTITION_ZONE = "__partition__";
 
 /**
- * @brief Local numbering: owned cells first (in global order), then halo
- *        layer 1, 2, ... Every local cell keeps its global id.
+ * @brief Local numbering: owned cells first, then halo layer 1, 2, ...,
+ *        each in the mesh's cell order. Every local cell keeps its global id.
  */
 struct Distribution {
     uint32_t n_owned = 0;

@@ -2,7 +2,7 @@
  * @file mesh_import_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Third-party mesh formats against the Gmsh export of the same mesh
- *        (fixtures from tools/make_import_meshes.py).
+ *        (fixtures from tools/dev/make_import_meshes.py).
  * @version 0.9
  * @date 2026-10-15
  *
@@ -82,7 +82,10 @@ void expect_keys_near(const std::vector<Key> & a, const std::vector<Key> & b, do
     }
 }
 
-/** @brief The same cells (by centroid and volume, any order), face count and boundary zones (by name and faces). */
+/**
+ * @brief The same cells (by centroid and volume, any order), face count,
+ *        boundary zones (by name and faces) and cell zones.
+ */
 void expect_same_mesh(const std::string & reference, const std::string & other, double tol = 1e-12) {
     Mesh a, b;
     a.init_file(fixture(reference));
@@ -98,6 +101,11 @@ void expect_same_mesh(const std::string & reference, const std::string & other, 
     std::sort(names_b.begin(), names_b.end());
     EXPECT_EQ(names_b, names_a);
     for (const std::string & name : names_a) expect_keys_near(zone_keys(a, name), zone_keys(b, name), tol, name);
+    // Every fixture's cells are one cell zone ("fluid"; Fluent's 3D export calls it "fluid-1")
+    EXPECT_EQ(a.cell_zone_names, std::vector<std::string>{"fluid"});
+    ASSERT_EQ(b.cell_zone_names.size(), 1u);
+    EXPECT_EQ(b.cell_zone_names[0].substr(0, 5), "fluid");
+    EXPECT_EQ(b.h_cell_zone, std::vector<uint32_t>(b.n_cells, 0));
 }
 
 const double TOL = precision_tol<double>(1e-12, 1e-5);
@@ -202,7 +210,7 @@ const std::string FOAM_HEADER = "FoamFile\n{\n    format ascii;\n}\n";
 
 /** @brief An OpenFOAM polyMesh directory of the given files' data (after their header). */
 std::string write_foam(const std::string & name, const std::array<std::string, 5> & data) {
-    const auto dir = std::filesystem::temp_directory_path() / name / "constant" / "polyMesh";
+    const auto dir = rank_scratch_dir() / name / "constant" / "polyMesh";
     std::filesystem::create_directories(dir);
     const char * files[5] = {"points", "faces", "owner", "neighbour", "boundary"};
     for (size_t k = 0; k < 5; k++) {
@@ -241,6 +249,7 @@ TEST(MeshImportTest, MalformedOpenFoamIsRejected) {
 
 TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "writes one rank's block";
     auto block_with = [](std::vector<uint64_t> offsets, std::vector<uint64_t> nodes) {
         MeshBlock block;
         block.node_coords.assign(N_DIM + 1, {});
@@ -254,7 +263,7 @@ TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
     for (size_t k = 0; k < cell.size(); k++) cell[k] = k;
     std::vector<uint64_t> missing_node = cell;
     missing_node.back() = 99;
-    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_fuzz.h5").string();
+    const std::string h5 = (scratch_dir() / "mallard_fuzz.h5").string();
     const std::vector<MeshBlock> blocks = {
         block_with({0, cell.size()}, missing_node),     // a node that is not there
         block_with({0, cell.size(), 1}, cell),          // decreasing offsets
@@ -268,7 +277,7 @@ TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
 
 #ifdef Mallard_HAS_CGNS
 TEST(MeshImportTest, CgnsBadElementRangeIsRejected) {
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_fuzz_range.cgns").string();
+    const std::string file = (rank_scratch_dir() / "mallard_fuzz_range.cgns").string();
     int fn = 0, B = 0, Z = 0, C = 0, S = 0;
     ASSERT_EQ(cg_open(file.c_str(), CG_MODE_WRITE, &fn), CG_OK);
     ASSERT_EQ(cg_base_write(fn, "base", N_DIM, 3, &B), CG_OK);

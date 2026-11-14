@@ -1,0 +1,10 @@
+{
+ "default": "\"conditional_PROGRESS_VARIABLE.csv\"",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/flame_turbulence/input.toml"
+ ],
+ "type": "string"
+}

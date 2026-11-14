@@ -1,0 +1,12 @@
+{
+ "default": "\"volume_fraction\"",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "string",
+ "values": [
+  "center",
+  "volume_fraction"
+ ]
+}

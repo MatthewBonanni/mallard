@@ -1,0 +1,13 @@
+# The volume that holds the cases and their output, for job.yaml and mpijob.yaml.
+#
+#   kubectl apply -f pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mallard-data
+spec:
+  accessModes: [ReadWriteOnce]   # ReadWriteMany for mpijob.yaml, whose pods are on several nodes
+  # storageClassName: ...        # the cluster's default otherwise
+  resources:
+    requests:
+      storage: 50Gi

@@ -34,20 +34,20 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
     }
     WallModelSpec spec;
     const std::string model = find_value_or<std::string>(table, "model", "gfm");
-    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model);
+    const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model, line_of(table, "model"));
     WallModelParameters & P = spec.parameters;
     P.type = it->second;
-    P.kappa = find_real_or(table, "kappa", dim::none, rtype(P.kappa));
-    P.A_plus = find_real_or(table, "A_plus", dim::none, rtype(P.A_plus));
-    P.Pr_t = find_real_or(table, "Pr_t", dim::none, rtype(P.Pr_t));
-    P.s = find_real_or(table, "s", dim::none, rtype(P.s));
+    P.kappa = static_cast<double>(find_real_or(table, "kappa", dim::none, rtype(P.kappa)));
+    P.A_plus = static_cast<double>(find_real_or(table, "A_plus", dim::none, rtype(P.A_plus)));
+    P.Pr_t = static_cast<double>(find_real_or(table, "Pr_t", dim::none, rtype(P.Pr_t)));
+    P.s = static_cast<double>(find_real_or(table, "s", dim::none, rtype(P.s)));
     if (!(P.kappa > 0.0) || !(P.A_plus > 0.0) || !(P.Pr_t > 0.0) || !(P.s > 0.0)) {
         throw InputError(where + ": kappa, A_plus, Pr_t and s must be positive.");
     }
     const bool distance = table.contains("exchange_distance"), cells = table.contains("exchange_cells");
     if (distance == cells) throw InputError(where + " needs exactly one of exchange_distance and exchange_cells.");
-    if (distance) spec.exchange_distance = find_real(table, "exchange_distance", dim::length);
-    if (cells) spec.exchange_cells = find_real(table, "exchange_cells", dim::none);
+    if (distance) spec.exchange_distance = static_cast<double>(find_real(table, "exchange_distance", dim::length));
+    if (cells) spec.exchange_cells = static_cast<double>(find_real(table, "exchange_cells", dim::none));
     if (!(spec.exchange_distance > 0.0) && !(spec.exchange_cells > 0.0)) {
         throw InputError(where + ": the exchange height must be positive.");
     }
@@ -60,7 +60,7 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
             throw InputError(where + ".edge_distance (the boundary-layer thickness, or a channel's half-height) is "
                              "needed by model \"gfm\".");
         }
-        spec.edge_distance = find_real(table, "edge_distance", dim::length);
+        spec.edge_distance = static_cast<double>(find_real(table, "edge_distance", dim::length));
         if (!(spec.edge_distance > 0.0)) throw InputError(where + ".edge_distance must be positive.");
     } else if (table.contains("edge_distance")) {
         throw InputError(where + ".edge_distance applies to model \"gfm\" only.");
@@ -125,7 +125,7 @@ int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const st
             const int32_t i_bc = face_bc[f];
             return (i_bc >= 0 && bcs[static_cast<size_t>(i_bc)].type == BoundaryType::PARTITION) ? FRONTIER : OUTSIDE;
         }
-        const uint8_t s = mesh.h_face_shift(f);
+        const uint32_t s = mesh.h_face_shift(f);
         if (mesh.h_rotated_row(s)) return ROTATED;
         if (c0 == static_cast<int32_t>(c)) {
             FOR_I_DIM p[i] -= mesh.h_shifts(s, i);

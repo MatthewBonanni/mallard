@@ -8,16 +8,27 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <map>
+#include <numeric>
 #include <numbers>
+#include <regex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
+#include "hdf5_output.h"
+#include "json.h"
+#include "mesh_block.h"
 #include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
+#include "case_image.h"
 #include "check.h"
 #include "comm.h"
 #include "common_io.h"
@@ -25,6 +36,8 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "region_input.h"
+#include "report.h"
 #include "scratch.h"
 #include "solver.h"
 
@@ -32,7 +45,8 @@ namespace {
 
 const char * const U_ZERO = N_DIM == 3 ? "[\"0.0\", \"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\"]";
 
-/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x. */
+/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x;
+ *         first order unless `extra` sets the reconstruction. */
 std::string box(const std::string & u_x = "1.0", const std::string & run = "t_stop = 0.5\ncfl = 0.8\n",
                 const std::string & extra = "", const std::vector<std::string> & zones = {}) {
     std::ostringstream s;
@@ -50,12 +64,21 @@ std::string box(const std::string & u_x = "1.0", const std::string & run = "t_st
     }
     for (const auto & name : names) s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"symmetry\"\n";
     s << extra;
+    if (extra.find("[numerics.face_reconstruction]") == std::string::npos) {
+        s << "[numerics.face_reconstruction]\ntype = \"FO\"\n";
+    }
     return s.str();
 }
 
 CheckReport check(const std::string & input, const CheckOptions & options = {}) {
     Solver solver;
     return solver.check(parse_input_string(input), options);
+}
+
+/** @brief The first error's message, or empty. */
+std::string first_error(const CheckReport & r) {
+    const std::vector<std::string> errors = r.errors();
+    return errors.empty() ? "" : errors.front();
 }
 
 bool mentions(const std::vector<std::string> & messages, const std::string & text) {
@@ -85,13 +108,45 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     EXPECT_FALSE(r.ok());
 }
 
+TEST(CheckKeys, UnclosedNestedArrayBeforeAKeyIsASyntaxError) {
+    // Once an endless loop in toml11's error recovery (test/fuzz/corpus/input/unclosed_nested_array)
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), InputError);
+}
+
+TEST(CheckKeys, MalformedNestingIsASyntaxErrorNotACrash) {
+    // Once a stack overflow and endless loops in toml11's error recovery (test/fuzz/corpus/input/
+    // deep_unclosed_array, comment_in_unclosed_array, key_on_the_line_of_a_nested_array)
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\"" + std::string(1000000, '[')), InputError);
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\"[#\n"), InputError);
+    EXPECT_THROW(parse_input_string("s=[\n\"\",[\"\"[="), InputError);
+}
+
+TEST(CheckKeys, NestingDeeperThan64IsAnInputError) {
+    const auto nested = [](size_t depth) { return std::string(depth, '[') + std::string(depth, ']'); };
+    const auto error = [](const std::string & text) {
+        try {
+            parse_input_string(text);
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string("no error");
+    };
+    const std::string too_deep = "tables, arrays and inline tables are nested more than 64 deep";
+    EXPECT_NO_THROW(parse_input_string("a = " + nested(64)));
+    EXPECT_TRUE(mentions({error("x = 1\na = " + nested(65))}, "line 2: a: " + too_deep));
+    EXPECT_TRUE(mentions({error("[t]\na = " + nested(64))}, "line 2: t.a: " + too_deep));
+    std::string dotted = "a";
+    for (int i = 0; i < 64; i++) dotted += ".a";
+    EXPECT_TRUE(mentions({error(dotted + " = 1")}, too_deep));
+}
+
 TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     std::string input = box();
     input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
     const CheckReport r = check(input);
     EXPECT_FALSE(r.ok());
-    EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
-    EXPECT_TRUE(mentions(r.errors, "mallard upgrade-input"));
+    EXPECT_TRUE(mentions(r.errors(), "physics.p_min was removed in 0.2.0")) << first_error(r);
+    EXPECT_TRUE(mentions(r.errors(), "mallard input upgrade"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
@@ -116,7 +171,7 @@ TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
     const std::string dir = (scratch_dir() / "mallard_check_valid").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 5\n"
-                                    "variables = [\"RHO\", \"P\"]\n[[forces]]\nzone = \"bottom\"\nfile = \"" + dir +
+                                    "fields = [\"RHO\", \"P\"]\n[[forces]]\nzone = \"bottom\"\nfile = \"" + dir +
                                         "/forces.csv\"\n"));
     EXPECT_TRUE(r.unused.empty()) << (r.unused.empty() ? "" : describe(r.unused[0]));
     EXPECT_TRUE(r.ok());
@@ -155,8 +210,8 @@ TEST(CheckBoundaries, ZonesWithoutAConditionAreNamed) {
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", zones));
     EXPECT_FALSE(r.setup_done);
     const uint32_t n_top = N_DIM == 3 ? 16 * 2 : 16;
-    EXPECT_TRUE(mentions(r.errors, "no condition for zone top (" + std::to_string(n_top) + " faces)"))
-        << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_TRUE(mentions(r.errors(), "no condition for zone top (" + std::to_string(n_top) + " faces)"))
+        << (first_error(r));
     EXPECT_FALSE(r.ok());
 }
 
@@ -165,7 +220,7 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     // flow is 3 times faster for x > 1.5, so that is where dt is set
     const double a = std::sqrt(1.4), h = 2.0 / 16;
     const CheckReport r = check(box("1.0 + 2.0 * (x > 1.5)"));
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     if (N_DIM == 2) {
         EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
     }
@@ -180,9 +235,9 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     const CheckReport ok = check(box("1.0", "t_stop = 0.5\ndt = 1e-3\n"));
     EXPECT_NEAR(ok.dt, 1e-3, roundoff(1e-18));
     EXPECT_NEAR(ok.cfl, 1e-3 / ok.dt_cfl1, roundoff(1e-12));
-    EXPECT_FALSE(mentions(ok.warnings, "stability limit"));
+    EXPECT_FALSE(mentions(ok.warnings(), "stability limit"));
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
-    EXPECT_TRUE(mentions(fast.warnings, "stability limit of SSPRK3"));
+    EXPECT_TRUE(mentions(fast.warnings(), "stability limit of SSPRK3"));
     EXPECT_TRUE(fast.ok());  // a warning, not an error
 }
 
@@ -212,7 +267,7 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
     CheckOptions options;
     options.ranks = 4;
     const CheckReport r = check(box(), options);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     // Conservatives alone are N_CONSERVATIVE reals per cell
     EXPECT_GT(r.bytes, r.n_cells * N_CONSERVATIVE * sizeof(rtype));
     EXPECT_GE(r.bytes_peak, r.bytes);
@@ -223,22 +278,111 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
     EXPECT_NEAR(double(r.target_bytes), per_cell * double(r.target_owned + r.target_halo), 1.0);
 }
 
+namespace {
+
+/** @brief The box at Nx x Ny cells (x 2 in 3D), with TENO3 or first order. */
+std::string sized_box(const int nx, const int ny, const bool teno = true) {
+    std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+            teno ? "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" : "");
+    const std::string mesh = "Nx = 16\nNy = 8\n";
+    input.replace(input.find(mesh), mesh.size(), "Nx = " + std::to_string(nx) + "\nNy = " + std::to_string(ny) + "\n");
+    return input;
+}
+
+uint64_t sum(const memory::Bytes & b) { return std::accumulate(b.begin(), b.end(), uint64_t(0)); }
+
+} // namespace
+
+TEST(CheckMemory, CategoriesSumToTheTotalsAndNameEveryAllocation) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    const CheckReport r = check(sized_box(16, 8));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_EQ(sum(r.setup_bytes), r.bytes_peak);
+    EXPECT_EQ(sum(r.steady_bytes), r.bytes);
+    EXPECT_EQ(r.setup_bytes[size_t(memory::Category::OTHER)], 0u);
+    EXPECT_GT(r.steady_bytes[size_t(memory::Category::TABLES)], 0u);
+    // The setup's workspace is freed by the time stepping
+    EXPECT_GT(r.setup_bytes[size_t(memory::Category::SETUP)], 0u);
+    EXPECT_EQ(r.steady_bytes[size_t(memory::Category::SETUP)], 0u);
+}
+
+TEST(CheckMemory, PeakPredictedFromACoarseMeshMatchesTheMeasuredOne) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    // From 16,384 cells, the size of the initial solution's chunks, to four times as many along x (the same
+    // share of cells near the walls across y and z, whose TENO stencils are smaller)
+    const int ny = N_DIM == 2 ? 128 : 64;
+    const CheckReport coarse = check(sized_box(128, ny)), fine = check(sized_box(512, ny));
+    ASSERT_TRUE(coarse.ok() && fine.ok());
+    const double predicted = predicted_peak(coarse, double(fine.local_cells));
+    EXPECT_NEAR(predicted, double(fine.bytes_peak), 0.05 * double(fine.bytes_peak));
+}
+
+TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
+    if (comm::size() > 1) GTEST_SKIP() << "partitions the whole mesh";
+    const std::string input = sized_box(256, 64, false);
+    CheckOptions options;
+    options.memory = 1ull << 40;
+    options.memory_name = "1TiB";
+    const CheckReport whole = check(input, options);
+    ASSERT_TRUE(whole.ok());
+    EXPECT_EQ(whole.min_ranks, 1);
+    EXPECT_GT(whole.max_local_cells, whole.n_cells);
+    // Room for a third of the cells: three parts with their halos do not fit, four do
+    const double third = predicted_peak(whole, double(whole.n_cells) / 3.0);
+    options.memory = static_cast<uint64_t>(third / (1.0 - SIZING_MARGIN));
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok());
+    EXPECT_EQ(r.min_ranks, 4);
+    EXPECT_GT(r.min_halo, 0u);
+    EXPECT_LE(double(r.min_peak), third);
+    EXPECT_NEAR(double(r.min_peak), predicted_peak(r, double(r.min_owned + r.min_halo)), 1.0);
+    EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
+}
+
+TEST(CheckSizing, MemoryIsASizeWithItsUnitOrAGpu) {
+    CheckOptions options;
+    EXPECT_EQ(set_memory_target("40GB", options), "");
+    EXPECT_EQ(options.memory, 40'000'000'000u);
+    EXPECT_EQ(set_memory_target("512MiB", options), "");
+    EXPECT_EQ(options.memory, 512u << 20);
+    EXPECT_EQ(set_memory_target("A100-80", options), "");
+    EXPECT_EQ(options.memory_name, "A100-80GB");
+    EXPECT_TRUE(options.memory_gpu);
+    EXPECT_NE(set_memory_target("40", options).find("a100-40"), std::string::npos);
+    EXPECT_NE(set_memory_target("-3GB", options), "");
+    EXPECT_NE(set_memory_target("a100", options), "");
+}
+
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     const std::filesystem::path dir = scratch_dir() / "mallard_check_files";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;
-    options.quality_file = (dir / "quality" / "mesh").string();
+    options.mesh_fields = (dir / "quality" / "mesh").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + (dir / "out" / "flow").string() +
-                                        "\"\nformat = \"vtu\"\ninterval = 5\nvariables = [\"RHO\"]\n[[forces]]\n"
+                                        "\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"RHO\"]\n[[forces]]\n"
                                         "zone = \"bottom\"\nfile = \"" + (dir / "forces.csv").string() +
                                         "\"\n[integrals]\nfile = \"" + (dir / "integrals.csv").string() + "\"\n"),
                                 options);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
+    EXPECT_TRUE(output_files_enabled());
+    // The default snapshot format: VTKHDF, or VTU pieces without (parallel) HDF5
+#ifdef Mallard_HAS_HDF5
+    if (comm::size() == 1 || have_parallel_hdf5()) {
+        comm::barrier();
+        if (!comm::is_root()) return;
+        const auto datasets = h5_all_datasets((dir / "quality" / "mesh_000000.vtkhdf").string());
+        for (const char * field : MeshQuality::FIELDS) {
+            EXPECT_TRUE(datasets.count(std::string("VTKHDF/CellData/") + field)) << field;
+        }
+        return;
+    }
+#endif
     std::ostringstream piece;  // each rank's own piece
     piece << "mesh_000000" << (comm::size() > 1 ? "_p" + std::string(3, '0') + std::to_string(comm::rank()) : "")
           << ".vtu";
@@ -246,7 +390,24 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
-    EXPECT_TRUE(output_files_enabled());
+}
+
+TEST(CheckUnits, PhysicsUnitsSetsTheUnitsOfWhatIsPrinted) {
+    std::string nondimensional = box();
+    nondimensional.replace(nondimensional.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"nondimensional\"");
+    ASSERT_TRUE(check(nondimensional).ok());
+    EXPECT_EQ(units::system(), units::System::NONDIMENSIONAL);
+    EXPECT_EQ(units::with("0.5", "s"), "0.5");
+    ASSERT_TRUE(check(box()).ok());
+    EXPECT_EQ(units::system(), units::System::SI);
+    EXPECT_EQ(units::with("0.5", "s"), "0.5 s");
+
+    std::string unknown = box();
+    unknown.replace(unknown.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"cgs\"");
+    EXPECT_NE(first_error(check(unknown)).find("physics.units"), std::string::npos);
+    std::string mixture = box();
+    mixture.replace(mixture.find("gamma = 1.4"), 11, "gas = \"mixture\"\nunits = \"nondimensional\"");
+    EXPECT_NE(first_error(check(mixture)).find("always in SI units"), std::string::npos);
 }
 
 TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
@@ -254,7 +415,7 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     auto input = [](double delta_L) {
         std::ostringstream s;
         s << "[run]\nn_steps = 1\ndt = 1e-7\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
-          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
           << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0\"\nu = " << U_ZERO << "\n"
           << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n"
@@ -266,10 +427,91 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     };
     const double delta = 0.01;
     const CheckReport fine = check(input(5.0 * delta / 4.0));    // F = 4
-    ASSERT_TRUE(fine.ok()) << (fine.errors.empty() ? describe(fine.unused[0]) : fine.errors[0]);
-    EXPECT_FALSE(mentions(fine.warnings, "TFLES"));
+    ASSERT_TRUE(fine.ok()) << (first_error(fine));
+    EXPECT_FALSE(mentions(fine.warnings(), "TFLES"));
     const CheckReport coarse = check(input(5.0 * delta / 10.0));  // F = 10
-    EXPECT_TRUE(mentions(coarse.warnings, "F = 10"));
+    EXPECT_TRUE(mentions(coarse.warnings(), "F = 10"));
+    EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
+    EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
+}
+
+namespace {
+
+/** @brief A periodic box of n^d cells and side 2 pi with viscosity mu, rho = 1; velocity components as expressions. */
+std::string periodic_box(const int n, const double mu, const std::vector<std::string> & u) {
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 6.283185307179586\nLy = 6.283185307179586\n"
+      << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 6.283185307179586\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\nu = [";
+    for (size_t i = 0; i < N_DIM; i++) s << (i ? ", " : "") << "\"" << u[i] << "\"";
+    s << "]\n[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 100.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << mu << "\nPr = 0.72\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
+    // epsilon = 2 nu |k|^2 E: |k|^2 = d, E = 1/4 (2D) or 1/8 (3D); u'^2 = 2 E / d
+    const double nu = 0.01;
+    const std::vector<std::string> u = N_DIM == 3
+        ? std::vector<std::string>{"sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"}
+        : std::vector<std::string>{"sin(x) * cos(y)", "-cos(x) * sin(y)"};
+    const double E = N_DIM == 3 ? 0.125 : 0.25, epsilon = 2.0 * nu * N_DIM * E;
+    const int n = N_DIM == 3 ? 48 : 64;
+    const CheckReport r = check(periodic_box(n, nu, u));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
+    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-11) * r.eta);
+    EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
+    EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
+    EXPECT_FALSE(mentions(r.warnings(), "DNS"));
+    // A hundredth of the viscosity dissipates a hundredth as much: eta ten times smaller
+    const CheckReport coarse = check(periodic_box(n, nu / 100.0, u));
+    EXPECT_TRUE(mentions(coarse.warnings(), "DNS: cells of"));
+}
+
+TEST(CheckResolution, AFlowWithoutGradientsOrForcingHasNoKolmogorovLength) {
+    const CheckReport r = check(periodic_box(8, 0.01, std::vector<std::string>(N_DIM, "1.0")));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_EQ(r.eta, 0.0);
+    bool said = false;
+    for (const CheckEstimate & e : r.resolution) {
+        said |= e.id == "eta" && std::isnan(e.value) && e.basis.rfind("not estimated", 0) == 0;
+    }
+    EXPECT_TRUE(said);
+}
+
+TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
+    // Re_b = U_b 2h / nu = 5600, for which Dean's correlation gives Re_tau = u_tau h / nu = 182 (Re_tau 180 cases)
+    const double nu = 1.0 / 2800.0;
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 16\nLx = 4.0\nLy = 2.0\n"
+      << (N_DIM == 3 ? "Nz = 4\nLz = 2.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"17.857142857142858\"\n"
+      << "u = [\"1.5 * (1 - (y - 1) * (y - 1))\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[source]\nmass_flow = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 17.857142857142858\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << nu << "\nPr = 0.72\n";
+    const CheckReport r = check(s.str());
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_NEAR(r.u_tau / nu, 180.0, 0.03 * 180.0);
+    const double y1 = 1.0 / 16.0;  // the first cell centers: half of 2 / 16
+    EXPECT_NEAR(r.y_plus_max, y1 * r.u_tau / nu, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.y_plus_mean, r.y_plus_max, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.x_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.x_plus_max);
+    if (N_DIM == 3) {
+        EXPECT_NEAR(r.z_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.z_plus_max);
+    }
+    EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
+    EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
+    EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
 }
 
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
@@ -357,4 +599,624 @@ TEST(MemoryTracker, CountsLiveAllocationsAndThePeak) {
     }
     EXPECT_EQ(usage().current, 0u);
     EXPECT_GE(usage().peak, 32000u);
+    EXPECT_EQ(tracker.unclassified(), (std::vector<std::string>{"a", "b"}));
+    Kokkos::View<double *> c("conservatives", 500);
+    tracker.reset_peak();
+    EXPECT_EQ(usage().peak, usage().current);
+    EXPECT_GE(usage().at_peak[size_t(memory::Category::STATE)], 4000u);
+}
+
+TEST(SetupMemory, NothingOnlyTheSetupReadsSurvivesIt) {
+    const bool device = !Kokkos::SpaceAccessibility<Kokkos::HostSpace,
+                                                    Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [1.0, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [1.0, 0.5, 0.125], radius = 0.3}";
+    const std::string source = "[[sources]]\nrhoE = \"1.0 + x\"\nregion = " + ball + "\n";
+    // Setup scratch of the initial state, the TENO tables and the mesh: what the run would hold from setup
+    const std::vector<std::string> setup = {"init_", "teno_setup_", "teno_batch_", "teno_boxes"};
+    const std::vector<std::string> mesh_device = {"node_coords", "nodes_of_cell", "offsets_nodes_of_cell",
+                                                  "nodes_of_face", "offsets_nodes_of_face", "zone_"};
+    const std::vector<std::string> mesh_host = {"cells_of_cell_mirror", "offsets_cells_of_cell_mirror",
+                                                "cells_of_cell_shift_mirror"};
+    // Host builds share the mesh's device views with the host copies that output reads
+    auto survivors = [&](const std::string & reconstruction, const bool mesh) {
+        memory::Tracker tracker;
+        Solver solver;
+        solver.init(parse_input_string(box("1.0 + 0.1 * x", "n_steps = 1\ncfl = 0.5\n", source + reconstruction)));
+        std::vector<std::string> held;
+        auto find = [&](const bool space, const std::vector<std::string> & prefixes) {
+            for (const auto & [label, bytes] : tracker.live(space)) {
+                for (const std::string & prefix : prefixes) {
+                    if (bytes > 0 && label.rfind(prefix, 0) == 0) held.push_back(label);
+                }
+            }
+        };
+        find(true, setup);
+        find(false, setup);
+        if (mesh && device) {
+            find(true, mesh_device);
+            find(false, mesh_host);
+        }
+        return held;
+    };
+    EXPECT_EQ(survivors("[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n", false),
+              std::vector<std::string>());
+    EXPECT_EQ(survivors("[numerics.face_reconstruction]\ntype = \"MUSCL\"\n", true), std::vector<std::string>());
+}
+
+TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
+    // The box is 2 x 1 (x 0.25): its regions, a probe's ball and the ball's surface
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3"
+                                        : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1";
+    const std::string extra = "[regions]\nball = " + ball + "}\n[[probes]]\nname = \"in\"\nfields = [\"P\"]\n"
+                              "region = \"ball\"\n[[probes]]\nname = \"on\"\nfields = [\"P\"]\nregion = " + ball +
+                              ", filled = false}\n";
+    auto report = [&](const bool distributed) {
+        Solver solver;
+        solver.set_distributed(distributed);
+        return solver.check(parse_input_string(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", extra)), CheckOptions{});
+    };
+    const CheckReport r = report(true);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    std::map<std::string, CheckRegion> regions;
+    for (const CheckRegion & g : r.regions) regions[g.name] = g;
+    const CheckRegion & domain = regions.at("domain");
+    EXPECT_TRUE(domain.of_mesh);
+    EXPECT_EQ(domain.dimension, N_DIM);
+    EXPECT_DOUBLE_EQ(domain.measure, N_DIM == 2 ? 2.0 : 0.5);
+    EXPECT_EQ(domain.cells, N_DIM == 2 ? 128u : 256u);
+    const CheckRegion & left = regions.at("left");
+    EXPECT_EQ(left.dimension, N_DIM - 1);
+    EXPECT_DOUBLE_EQ(left.measure, N_DIM == 2 ? 1.0 : 0.25);
+    EXPECT_EQ(left.cells, N_DIM == 2 ? 8u : 16u);
+    EXPECT_EQ(regions.at("ball").dimension, N_DIM);
+    EXPECT_FALSE(regions.at("ball").of_mesh);
+    const CheckRegion & on = regions.at("probes[name = \"on\"].region");
+    EXPECT_EQ(on.dimension, N_DIM - 1);
+    const double sphere = N_DIM == 2 ? 2.0 * std::numbers::pi * 0.3 : 4.0 * std::numbers::pi * 0.01;
+    EXPECT_NEAR(on.measure, sphere, 1e-6 * sphere);
+    EXPECT_TRUE(on.exact);
+    // The same on one rank as on several
+    const CheckReport serial = report(false);
+    ASSERT_EQ(serial.regions.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(serial.regions[i].name, r.regions[i].name);
+        EXPECT_EQ(serial.regions[i].cells, r.regions[i].cells);
+        EXPECT_DOUBLE_EQ(serial.regions[i].measure, r.regions[i].measure);
+    }
+}
+
+TEST(CheckRegions, RegionsOfTheSolutionAreMeasuredOnTheInitialSolution) {
+    // u = (x, 0) on the 2 x 1 box (x 0.25), first order: MACH = x / sqrt(1.4) and Q = -1/2, so both regions
+    // are x < 0.55, across five of the 16 columns of cells, and the isosurface the line (plane) x = 0.55;
+    // MACH within the cell averages' pressure, rho E averaged with the kinetic energy of the linear u
+    const std::string extra = "[regions]\nslow = {type = \"where\", condition = \"MACH * sqrt(1.4) < 0.55\"}\n"
+                              "strained = {type = \"where\", condition = \"Q_CRITERION * x > -0.275\"}\n"
+                              "level = {type = \"isosurface\", field = \"MACH\", value = 0.46483484010068415}\n";
+    std::string probes;
+    for (const char * name : {"slow", "strained", "level"}) {
+        probes += std::string("[[probes]]\nname = \"") + name + "\"\nfields = [\"P\"]\nregion = \"" + name + "\"\n";
+    }
+    auto report = [&](const bool distributed) {
+        Solver solver;
+        solver.set_distributed(distributed);
+        return solver.check(parse_input_string(box("x", "t_stop = 0.5\ncfl = 0.8\n", extra + probes)), CheckOptions{});
+    };
+    const CheckReport r = report(true);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    std::map<std::string, CheckRegion> regions;
+    for (const CheckRegion & g : r.regions) regions[g.name] = g;
+    const double depth = N_DIM == 2 ? 1.0 : 0.25;
+    for (const char * name : {"slow", "strained"}) {
+        EXPECT_TRUE(regions.at(name).solution) << name;
+        EXPECT_NEAR(regions.at(name).measure, 0.55 * depth, (name == std::string("slow") ? 2e-4 : 1e-12) * depth) << name;
+        EXPECT_EQ(regions.at(name).cells, N_DIM == 2 ? 40u : 80u) << name;
+    }
+    EXPECT_NEAR(regions.at("level").measure, depth, 1e-12);
+    EXPECT_EQ(regions.at("level").cells, N_DIM == 2 ? 8u : 16u);
+    const CheckReport serial = report(false);
+    ASSERT_EQ(serial.regions.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(serial.regions[i].cells, r.regions[i].cells) << r.regions[i].name;
+        EXPECT_DOUBLE_EQ(serial.regions[i].measure, r.regions[i].measure) << r.regions[i].name;
+    }
+}
+
+TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
+    const std::string far = N_DIM == 2 ? "{type = \"rectangle\", center = [5, 5], size = [1, 2]}"
+                                       : "{type = \"box\", center = [5, 5, 5], size = [1, 2, 1]}";
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                                    "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
+                                        "\np = 1.0\nT = 1.0\n"));
+    EXPECT_TRUE(mentions(r.errors(), "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
+        << (first_error(r));
+}
+
+namespace {
+
+std::string read_file(const std::filesystem::path & path) {
+    std::ifstream file(path);
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+/** @brief A box with an inlet, an outlet and walls, a named region, a line and a point probe, and one on a curve. */
+std::string view_case() {
+    const std::string two = N_DIM == 2 ? "" : ", 0.125";
+    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const std::string heater = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
+                                          : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1}";
+    std::string zones = N_DIM == 2 ? "" : "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                                          "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+    zones += "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.2\n"
+             "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n[regions]\nheater = " + heater + "\n"
+             "[[sources]]\nregion = \"heater\"\nrhoE = 1.0\n"
+             "[[probes]]\nname = \"s\"\nfields = [\"P\"]\nregion = " + surface + "\n"
+             "[[probes]]\nname = \"wake\"\nfields = [\"P\"]\nstart = [1.5, 0.1" + two + "]\nend = [1.5, 0.9" + two + "]\n"
+             "n_points = 5\n[[probes]]\nname = \"tap\"\nfields = [\"P\"]\npoint = [0.25, 0.75" + two + "]\n";
+    std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", zones, {"none"});
+    const std::string none = "[[boundaries]]\nname = \"none\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(none), none.size(),
+                  "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [1.0, 0.0" + std::string(N_DIM == 3 ? ", 0.0" : "") +
+                      "]\np = 1.0\nT = 1.0\n[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\n");
+    return input;
+}
+
+} // namespace
+
+TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case(), options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_EQ(r.view_images.size(), 2u);
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::vector<std::string> blocks = {"domain", "left", "right", "bottom", "top", "heater",
+                                       "probes[name = \"s\"].region", "probes[name = \"wake\"]", "probes[name = \"tap\"]"};
+    if (N_DIM == 3) blocks.insert(blocks.end(), {"back", "front"});
+#ifdef Mallard_HAS_HDF5
+    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
+    const auto datasets = h5_all_datasets(r.view_file);
+    for (const std::string & block : blocks) EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
+    EXPECT_TRUE(datasets.count("VTKHDF/probes[name = \"s\"].region/CellData/normal"));
+#else
+    EXPECT_EQ(r.view_file, (dir / "case.vtm").string());
+    const std::string vtm = read_file(r.view_file);
+    for (const std::string & block : blocks) {
+        EXPECT_NE(vtm.find("name=\"" + case_image::xml_text(block) + "\""), std::string::npos) << block;
+    }
+#endif
+    // Every block but the mesh labeled in both images; the zones with their conditions and values in units
+    for (const std::string & image : r.view_images) {
+        const std::string svg = read_file(image);
+        for (size_t k = 1; k < blocks.size(); k++) {
+            EXPECT_NE(svg.find(">" + case_image::xml_text(blocks[k])), std::string::npos) << blocks[k] << " in " << image;
+        }
+        EXPECT_NE(svg.find(">left: inlet_state, T = 1.0 K, p = 1.0 Pa, u = [1.0, 0.0"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">bottom: wall_isothermal, T = 1.2 K<"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">right: outlet_pressure, p = 1.0 Pa<"), std::string::npos) << image;
+    }
+}
+
+TEST(CaseView, PeriodicFacesAndTheirImagesLieOnThePairsZones) {
+    Mesh mesh;
+    mesh.init(parse_input_string("[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 3\nLx = 2.0\nLy = 1.0\n" +
+                                 std::string(N_DIM == 3 ? "Nz = 2\nLz = 0.5\n" : "") +
+                                 "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    const MeshView view = mesh_view(mesh, region::MeshRegions(mesh));
+    std::vector<const case_view::Block *> periodic;
+    for (const case_view::Block & b : view.blocks) {
+        if (b.kind == case_view::Kind::PERIODIC) periodic.push_back(&b);
+        EXPECT_TRUE(b.name != "left" && b.name != "right") << b.name;
+    }
+    ASSERT_EQ(periodic.size(), 1u);
+    const case_view::Block & b = *periodic[0];
+    EXPECT_EQ(b.label, N_DIM == 2 ? "periodic left / right: translation (2, 0) m"
+                                  : "periodic left / right: translation (2, 0, 0) m");
+    const size_t faces = N_DIM == 2 ? 3 : 6;
+    ASSERT_EQ(b.n_cells(), 2 * faces);
+    for (size_t c = 0; c < b.n_cells(); c += 2) {
+        // The face on one zone, its image on the other
+        const double x_face = b.points[size_t(b.connectivity[size_t(b.offsets[c])])][0];
+        const double x_image = b.points[size_t(b.connectivity[size_t(b.offsets[c + 1])])][0];
+        EXPECT_NEAR(std::abs(x_face - x_image), 2.0, 1e-12);
+        EXPECT_EQ(b.fields[0].values[c], 0.0);
+        EXPECT_EQ(b.fields[0].values[c + 1], 1.0);
+    }
+}
+
+// A wall projected onto a circle (3D: a sphere) is drawn on it, not on its faces' chords, in the faces' own order
+TEST(CaseView, CurvedWallsLieOnTheirShapes) {
+    const std::string shapes = N_DIM == 2 ? "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                                          : "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\n"
+                                            "center = [0.0, 0.0, 0.0]\nradius = 1.0\n";
+    std::vector<std::string> files;
+#if N_DIM == 2
+    files.push_back(write_temp("case_view_annulus.msh", annulus_gmsh(2, 12)));
+#else
+    for (const bool prisms : {false, true}) {
+        files.push_back(write_temp(prisms ? "case_view_shell_prisms.msh" : "case_view_shell.msh", shell_gmsh(2, 1, prisms, false)));
+    }
+#endif
+    for (const std::string & file : files) {
+        auto inner = [&](Mesh & mesh, const bool curved) {
+            const std::string input = "[mesh]\nfilename = \"" + file + "\"\n";
+            mesh.init(parse_input_string(input));
+            if (curved) mesh.apply_curved(curved::surfaces_of_mesh(mesh, parse_input_string(input + shapes)));
+            mesh.copy_host_to_device();
+            for (case_view::Block & b : mesh_view(mesh, region::MeshRegions(mesh)).blocks) {
+                if (b.name == "inner") return b;
+            }
+            return case_view::Block{};
+        };
+        Mesh straight_mesh, curved_mesh;
+        const case_view::Block straight = inner(straight_mesh, false), curved = inner(curved_mesh, true);
+        ASSERT_GT(straight.n_cells(), 0u) << file;
+        ASSERT_EQ(curved.n_cells(), straight.n_cells()) << file;
+        ASSERT_EQ(curved.fields.size(), straight.fields.size());
+        for (size_t f = 0; f < curved.fields.size(); f++) EXPECT_EQ(curved.fields[f].values.size(), straight.fields[f].values.size());
+        for (size_t c = 0; c < curved.n_cells(); c++) {
+            const int64_t n = straight.offsets[c + 1] - straight.offsets[c], m = curved.offsets[c + 1] - curved.offsets[c];
+            ASSERT_GT(m, 2 * n) << "cell " << c << " of " << file;
+            // On the shape to the round-off of the rtype nodes its faces are fitted to
+            const double tol = std::max(1e-9, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
+            for (int64_t k = 0; k < m; k++) {
+                const auto & x = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k)])];
+                EXPECT_NEAR(std::hypot(x[0], x[1], x[2]), 1.0, tol) << "cell " << c << " of " << file;
+            }
+            // The corners where the straight face has them: every (m - 1) / (n - 1)-th point in 2D, m / n-th in 3D
+            const int64_t step = N_DIM == 2 ? (m - 1) / (n - 1) : m / n;
+            for (int64_t k = 0; k < n; k++) {
+                const auto & a = straight.points[size_t(straight.connectivity[size_t(straight.offsets[c] + k)])];
+                const auto & b = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k * step)])];
+                for (size_t i = 0; i < 3; i++) EXPECT_NEAR(a[i], b[i], 1e-12) << "corner " << k << " of cell " << c;
+            }
+        }
+    }
+}
+
+namespace {
+
+/** @brief The titled groups of an SVG image (each block, legend entry, scale bar and extent): title -> contents. */
+std::vector<std::pair<std::string, std::string>> svg_groups(const std::string & svg) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (size_t at = svg.find("<g"); at != std::string::npos; at = svg.find("<g", at + 1)) {
+        const size_t open = svg.find("<title>", at), end = svg.find("</g>", at);
+        if (open == std::string::npos || end == std::string::npos || open > end) continue;
+        const size_t close = svg.find("</title>", open);
+        out.emplace_back(svg.substr(open + 7, close - open - 7), svg.substr(at, end - at));
+    }
+    return out;
+}
+
+std::string group(const std::vector<std::pair<std::string, std::string>> & groups, const std::string & prefix) {
+    for (const auto & [title, body] : groups) {
+        if (title.starts_with(prefix)) return body;
+    }
+    return "";
+}
+
+/** @brief The first stroke color in a group. */
+std::string stroke(const std::string & body) {
+    const size_t at = body.find("stroke=\"");
+    return at == std::string::npos ? "" : body.substr(at + 8, body.find('"', at + 8) - at - 8);
+}
+
+/** @brief The numbers of the k-th path of a group: x0 y0 x1 y1 ... */
+std::vector<double> path_numbers(const std::string & body, const size_t k = 0) {
+    size_t at = body.find("<path d=\"");
+    for (size_t i = 0; i < k && at != std::string::npos; i++) at = body.find("<path d=\"", at + 1);
+    std::vector<double> out;
+    if (at == std::string::npos) return out;
+    std::string d = body.substr(at + 9, body.find('"', at + 9) - at - 9);
+    for (char & c : d) {
+        if (c == 'M' || c == 'L' || c == 'Z') c = ' ';
+    }
+    std::istringstream in(d);
+    for (double v; in >> v;) out.push_back(v);
+    return out;
+}
+
+} // namespace
+
+// What the images must show, whatever their palette and layout: every block drawn in its condition's legend
+// color, a scale bar and an extent drawn to the plot's scale, and a filled region's own boundary
+TEST(CaseView, TheImagesDrawEveryBlockInItsLegendColorAndToScale) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_images";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case(), options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::map<std::string, std::string> wall_color;
+    for (const std::string theme : {"light", "dark"}) {
+        const auto groups = svg_groups(read_file(dir / ("case-" + theme + ".svg")));
+        auto legend = [&](const std::string & name) { return stroke(group(groups, "legend: " + name)); };
+        const std::map<std::string, std::string> expected = {
+            {"left: ", "inlet"},   {"right: ", "outlet"}, {"bottom: ", "wall"},
+            {"top: ", "wall"},     {"heater", "region"},  {"probes[name = \"s\"].region", "probe"},
+            {"probes[name = \"wake\"]", "probe"}, {"probes[name = \"tap\"]", "probe"}};
+        for (const auto & [block, entry] : expected) {
+            const std::string body = group(groups, case_image::xml_text(block));
+            ASSERT_FALSE(body.empty()) << block << " is not drawn in the " << theme << " image";
+            EXPECT_TRUE(body.find("<path") != std::string::npos || body.find("<circle") != std::string::npos) << block;
+            EXPECT_FALSE(legend(entry).empty()) << "no legend entry " << entry;
+            const std::string color = block == "probes[name = \"tap\"]" ? body.substr(body.find("fill=\"") + 6, 7)
+                                                                          : stroke(body);
+            EXPECT_EQ(color, legend(entry)) << block << " in the " << theme << " image";
+        }
+        EXPECT_NE(legend("wall"), legend("inlet"));
+        EXPECT_NE(legend("inlet"), legend("outlet"));
+        wall_color[theme] = legend("wall");
+        // A scale bar in every view, its length that of its label at the plot's scale
+        size_t bars = 0;
+        double px_per_m = 0.0;
+        for (const auto & [title, body] : groups) {
+            if (!title.starts_with("scale bar: ")) continue;
+            bars++;
+            const double length = std::stod(title.substr(11));
+            const std::vector<double> bar = path_numbers(body);
+            ASSERT_GE(bar.size(), 4u);
+            if (bars == 1) px_per_m = (bar[2] - bar[0]) / length;
+        }
+        EXPECT_EQ(bars, N_DIM == 2 ? 1u : 4u);
+        if constexpr (N_DIM == 2) {
+            // The extent's dimension lines: 2 m and 1 m at the scale bar's scale
+            const std::string extent = group(groups, "domain extent: 2 m by 1 m");
+            const std::vector<double> x = path_numbers(extent, 0), y = path_numbers(extent, 1);
+            ASSERT_EQ(x.size(), 4u);
+            ASSERT_EQ(y.size(), 4u);
+            EXPECT_NEAR(x[2] - x[0], 2.0 * px_per_m, 0.2);
+            EXPECT_NEAR(y[1] - y[3], 1.0 * px_per_m, 0.2);
+            // The heater, a disk of radius 0.2 about (0.5, 0.5): its boundary, not its cells' outline
+            const std::vector<double> heater = path_numbers(group(groups, "heater"));
+            ASSERT_GT(heater.size(), 40u);
+            for (size_t k = 0; k + 1 < heater.size(); k += 2) {
+                const double wx = (heater[k] - x[0]) / px_per_m, wy = (y[1] - heater[k + 1]) / px_per_m;
+                EXPECT_NEAR(std::hypot(wx - 0.5, wy - 0.5), 0.2, 2e-3) << "at (" << wx << ", " << wy << ")";
+            }
+        }
+    }
+    EXPECT_NE(wall_color["light"], wall_color["dark"]);
+}
+
+namespace {
+
+/** @brief Where two images differ, beyond one step of their numbers' last digit (0.1 px), or empty. */
+std::string image_difference(const std::string & a, const std::string & b) {
+    // Numbers, and colors (#7b3f6e), which are text
+    const std::regex number(R"(#[0-9a-fA-F]+|-?[0-9]+(\.[0-9]+)?)");
+    auto split = [&](const std::string & s, std::vector<std::string> & text, std::vector<double> & values) {
+        size_t at = 0;
+        for (auto it = std::sregex_iterator(s.begin(), s.end(), number); it != std::sregex_iterator(); ++it) {
+            if (it->str()[0] == '#') continue;
+            text.push_back(s.substr(at, size_t(it->position()) - at));
+            values.push_back(std::stod(it->str()));
+            at = size_t(it->position() + it->length());
+        }
+        text.push_back(s.substr(at));
+    };
+    std::vector<std::string> ta, tb;
+    std::vector<double> va, vb;
+    split(a, ta, va);
+    split(b, tb, vb);
+    if (va.size() != vb.size()) return std::to_string(va.size()) + " numbers vs " + std::to_string(vb.size());
+    for (size_t k = 0; k < ta.size(); k++) {
+        if (ta[k] != tb[k]) return "text \"" + ta[k] + "\" vs \"" + tb[k] + "\" after number " + std::to_string(k);
+    }
+    for (size_t k = 0; k < va.size(); k++) {
+        if (std::abs(va[k] - vb[k]) > 0.1 + 1e-9) {
+            return "number " + std::to_string(k) + ": " + std::to_string(va[k]) + " vs " + std::to_string(vb[k]) +
+                   " after \"" + ta[k] + "\"";
+        }
+    }
+    return "";
+}
+
+} // namespace
+
+// The 2D image is the same whatever the order of the cells (the device backends number them otherwise), up to the
+// rounding of its numbers. After a deliberate change of the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites the expected
+// image (then look at it and review its diff).
+TEST(CaseView, The2DImageMatchesTheGoldenImageInAnyCellOrder) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
+    }
+    const std::filesystem::path golden =
+        std::filesystem::path(source_dir()) / "test" / "data" / "check" / "case_view_2d.svg";
+    for (const std::string order : {"input", "hilbert"}) {
+        const std::filesystem::path dir = scratch_dir() / ("mallard_check_view_golden_" + order);
+        std::filesystem::remove_all(dir);
+        CheckOptions options;
+        options.view_dir = dir.string();
+        std::string input = view_case();
+        input.replace(input.find("[mesh]\n"), 7, "[mesh]\ncell_order = \"" + order + "\"\n");
+        const CheckReport r = check(input, options);
+        ASSERT_TRUE(r.ok()) << (first_error(r));
+        const std::string svg = read_file(dir / "case-light.svg");
+        if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1" && order == "input") {
+            std::ofstream(golden) << svg;
+        }
+        const std::string expected = read_file(golden);
+        ASSERT_FALSE(expected.empty()) << golden;
+        EXPECT_EQ(image_difference(svg, expected), "")
+            << "cell order " << order << ": the image differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+    }
+}
+
+namespace {
+
+/**
+ * @brief The check of a 2D box with an unused key, a CFL above SSPRK3's limit, a sponge outside the domain and
+ *        a probe on a circle, with the numbers that depend on the build or the machine (memory) set by hand.
+ */
+CheckReport report_case() {
+    const std::string far = N_DIM == 2 ? "{type = \"rectangle\", center = [5, 5], size = [1, 2]}"
+                                       : "{type = \"box\", center = [5, 5, 5], size = [1, 2, 1]}";
+    const std::string ring = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                        : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const std::string extra = "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
+                              "\np = 1.0\nT = 1.0\n[[probes]]\nname = \"ring\"\nfields = [\"P\"]\nregion = " + ring +
+                              "\n";
+    std::string input = box("1.0", "t_stop = 0.5\ncfl = 1.5\n", extra);
+    input.replace(input.find("riemann_solver"), 14, "riemann_solvr");
+    CheckOptions options;
+    options.input_file = "input.toml";
+    options.throughput = 1e6;
+    CheckReport r = check(input, options);
+    r.device_memory = false;
+    r.device_capacity = 0;
+    r.outside_kokkos = 0;
+    r.sizing_name = "A100-80GB";
+    r.sizing_gpu = true;
+    r.sizing_memory = 80'000'000'000;
+    r.sizing_overhead = 1'600'000'000;
+    r.overhead_measured = false;
+    r.bytes_per_cell = 547.0;
+    r.fixed_bytes = 58'100;
+    r.sizing_setup = true;
+    r.max_local_cells = 128'683'729;
+    r.min_ranks = 1;
+    r.min_owned = 128;
+    r.min_halo = 0;
+    r.min_peak = 1'600'128'100;
+    r.min_partitioned = true;
+    r.halo_ranks = 0;
+    r.setup_bytes.fill(0);
+    r.steady_bytes.fill(0);
+    r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
+    r.setup_bytes[size_t(memory::Category::MESH)] = r.steady_bytes[size_t(memory::Category::MESH)] = 42'900;
+    r.setup_bytes[size_t(memory::Category::SETUP)] = 58'100;
+    r.bytes = r.target_bytes = 70'000;
+    r.bytes_peak = r.target_bytes_peak = 128'100;
+    return r;
+}
+
+} // namespace
+
+// Guards every section, column, unit and status of the text report. After a deliberate change of the report,
+// MALLARD_UPDATE_GOLDEN=1 rewrites the expected text (then review its diff).
+TEST(CheckReportText, MatchesTheGoldenReport) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden report is of a serial 2D double-precision check";
+    }
+    const std::string text = check_text(report_case(), false);
+    const std::filesystem::path golden =
+        std::filesystem::path(source_dir()) / "test" / "data" / "check" / "report_2d.txt";
+    if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
+        std::ofstream(golden) << text;
+    }
+    std::ifstream file(golden);
+    ASSERT_TRUE(file) << golden;
+    const std::string expected((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(text, expected) << "the report differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+}
+
+TEST(ReportTable, KeepsEveryValueOfAUnitsColumnTableBare) {
+    using Kind = report::Column::Kind;
+    const std::vector<report::Column> header = {"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "basis"};
+    auto table = [&](const std::string & value, const std::string & units) {
+        report::Text text(false);
+        text.table(header, {{report::Status::NONE, {"wall time", value, units, "on 4 GPUs"}}});
+    };
+    for (const char * value : {"21.0", "1,024", "-1.5e-06", "-", "none"}) EXPECT_NO_THROW(table(value, "s")) << value;
+    for (const char * value : {"21.0 s", "5%", "1.60 GB", "2h 05m", "(1, 2) m"}) {
+        EXPECT_THROW(table(value, "s"), std::logic_error) << value;
+    }
+    EXPECT_THROW(table("21.0", ""), std::logic_error);
+    EXPECT_NO_THROW(table("-", ""));
+    report::Text text(false);
+    EXPECT_THROW(text.table({"quantity", "value", "units"}, {}), std::logic_error);
+    EXPECT_THROW(text.quantities({{report::Status::NONE, {"memory per GPU", "80.0 GB", "", "", "A100-80GB"}}}),
+                 std::logic_error);
+}
+
+TEST(CheckReportText, ColorChangesOnlyTheStyles) {
+    const CheckReport r = report_case();
+    std::string colored = check_text(r, true);
+    EXPECT_NE(colored.find("\033["), std::string::npos);
+    for (size_t at = colored.find("\033["); at != std::string::npos; at = colored.find("\033[")) {
+        colored.erase(at, colored.find('m', at) + 1 - at);
+    }
+    EXPECT_EQ(colored, check_text(r, false));
+}
+
+TEST(CheckReportJson, ReadsBackTheReportsNumbersAndDiagnostics) {
+    const CheckReport r = report_case();
+    const json::Value v = json::parse(check_json(r));
+    EXPECT_EQ(v["version"].number, 1.0);
+    EXPECT_EQ(v["status"].string, "error");
+    EXPECT_EQ(v["errors"].number, double(r.errors().size()));
+    EXPECT_EQ(v["warnings"].number, double(r.warnings().size()));
+    ASSERT_EQ(v["diagnostics"].array.size(), r.diagnostics.size());
+    for (size_t i = 0; i < r.diagnostics.size(); i++) {
+        const json::Value & d = v["diagnostics"].array[i];
+        EXPECT_EQ(d["code"].string, r.diagnostics[i].code);
+        EXPECT_EQ(d["message"].string, r.diagnostics[i].message);
+        EXPECT_EQ(d["severity"].string, report::status_name(r.diagnostics[i].severity));
+        EXPECT_EQ(d["docs"].string, r.diagnostics[i].docs());
+    }
+    ASSERT_EQ(v["unused_keys"].array.size(), 1u);
+    EXPECT_EQ(v["unused_keys"].array[0]["suggestion"].string, "numerics.riemann_solver");
+    EXPECT_EQ(v["time_step"]["dt"].number, r.dt);
+    EXPECT_EQ(v["time_step"]["cfl"].number, r.cfl);
+    EXPECT_EQ(v["time_step"]["cfl_limit"].number, 1.2);
+    EXPECT_EQ(v["time_step"]["limiting_cell"].number, double(r.limiting_cell));
+    ASSERT_EQ(v["regions"].array.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(v["regions"].array[i]["name"].string, r.regions[i].name);
+        EXPECT_EQ(v["regions"].array[i]["measure"].number, r.regions[i].measure);
+        EXPECT_EQ(v["regions"].array[i]["cells"].number, double(r.regions[i].cells));
+    }
+    ASSERT_FALSE(r.resolution.empty());
+    for (const CheckEstimate & e : r.resolution) {
+        const json::Value & j = v["resolution"][e.id];
+        if (std::isnan(e.value)) {
+            EXPECT_TRUE(j["value"].is_null()) << e.id;
+        } else {
+            EXPECT_EQ(j["value"].number, e.value) << e.id;
+        }
+        EXPECT_EQ(j["units"].string, e.units) << e.id;
+    }
+    EXPECT_EQ(v["memory"]["bytes_peak"].number, double(r.bytes_peak));
+    EXPECT_EQ(v["memory"]["at_setup_peak"]["setup"].number, 58'100.0);
+    EXPECT_EQ(v["cost"]["wall_per_time"].number, r.wall_per_time);
+    EXPECT_EQ(v["mesh_quality"]["ASPECT_RATIO"]["max"].number, r.quality[2].max);
+}
+
+TEST(CheckReportJson, ASetupThatStopsStillGivesEveryTopLevelKey) {
+    std::string input = box();
+    input.replace(input.find("Nx = 16"), 7, "Nx = 16.0");
+    const json::Value v = json::parse(check_json(check(input)));
+    EXPECT_EQ(v["status"].string, "error");
+    EXPECT_EQ(v["diagnostics"].array.at(0)["code"].string, diagnostic_code::INPUT);
+    for (const char * key : {"time_step", "memory", "sizing", "cost", "mesh_quality"}) {
+        EXPECT_TRUE(v[key].is_null()) << key;
+    }
+}
+
+TEST(Diagnostics, AWarningNamesItsCodeAndTheDocsThatExplainIt) {
+    EXPECT_EQ(logging::diagnostic(false, diagnostic_code::CUDA_GRAPH, "steps run kernel by kernel", false),
+              "warning W-CUDA-GRAPH: steps run kernel by kernel\n  docs/guide/running.md#w-cuda-graph");
+    EXPECT_EQ(logging::diagnostic(true, diagnostic_code::INPUT, "input.toml: line 6", false),
+              "error E-INPUT: input.toml: line 6\n  docs/guide/input_files.md#e-input");
+    EXPECT_THROW(diagnostic_code::docs("W-NOT-A-CODE"), std::logic_error);
+}
+
+TEST(Diagnostics, EveryCodeIsExplainedInTheDocs) {
+    if (!std::filesystem::exists(std::filesystem::path(source_dir()) / "docs")) GTEST_SKIP() << "no docs in an install tree";
+    for (const auto & [code, page] : diagnostic_code::ALL) {
+        std::ifstream file(std::filesystem::path(source_dir()) / page);
+        const std::string docs((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const std::string link = diagnostic_code::docs(code);
+        const std::string anchor = link.substr(link.find('#') + 1);
+        EXPECT_NE(docs.find("<a id=\"" + anchor + "\"></a>`" + code + "`"), std::string::npos) << code << " in " << page;
+    }
 }

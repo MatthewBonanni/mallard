@@ -10,7 +10,9 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "mesh.h"
@@ -33,6 +35,8 @@ struct MeshQuality {
                                                                   "volume ratio"};
     static constexpr std::array<const char *, N_METRICS> FIELDS = {"NON_ORTHOGONALITY", "SKEWNESS", "ASPECT_RATIO",
                                                                    "VOLUME_RATIO"};
+    static constexpr std::array<const char *, N_METRICS> UNITS = {"deg", "dimensionless", "dimensionless",
+                                                                  "dimensionless"};
     // Values above which a cell is questionable
     static constexpr std::array<double, N_METRICS> LIMITS = {70.0, 0.5, 1000.0, 10.0};
     // Values worth listing the worst cells for
@@ -59,5 +63,16 @@ struct QualitySummary {
 /** @brief Over all ranks: largest, mean, cells over the limit and the n_worst worst cells of each metric. */
 std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, const MeshQuality & quality,
                                                               size_t n_worst);
+
+/** @brief A point as the quality report prints it: "(0.5, 1.25)". */
+std::string quality_point(const std::array<double, N_DIM> & x);
+
+/**
+ * @brief Writes the quality fields, then the extra (name, per-owned-cell values)
+ *        fields, as a snapshot PREFIX_000000 in the default format (collective).
+ * @return The file written.
+ */
+std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix,
+                          const std::vector<std::pair<std::string, std::vector<double>>> & extra = {});
 
 #endif // MESH_QUALITY_H

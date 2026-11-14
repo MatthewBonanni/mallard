@@ -275,7 +275,11 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
     for (const auto & pair : pairs) {
         for (const std::string & zone : {pair.zone_a, pair.zone_b}) {
             if (!faces_of_zone.count(zone)) {
-                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+                std::string zones;
+                for (const auto & [name, faces] : faces_of_zone) zones += (zones.empty() ? "" : ", ") + name;
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh (zones: " +
+                                         zones + "). Pair zones of the mesh in [[periodic]] zones. See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
         }
     }
@@ -307,7 +311,9 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
         if (nodes_a.size() != nodes_b.size()) {
             throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + " have " +
                                      std::to_string(nodes_a.size()) + " and " + std::to_string(nodes_b.size()) +
-                                     " nodes.");
+                                     " nodes, but periodic zones need matching nodes. Make the mesh periodic in "
+                                     "the generator (in Gmsh: Periodic Curve or Surface). See "
+                                     "docs/guide/meshes.md#periodic-boundaries.");
         }
 
         PeriodicGrid grid(h);
@@ -323,7 +329,10 @@ PeriodicNodes match_periodic_nodes(const std::vector<std::array<rtype, N_DIM>> &
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +
                                          periodic_point_string(nodes[a]) + " of " + pair.zone_a + " has " +
                                          (n_found ? "several matches" : "no match") + " in " + pair.zone_b +
-                                         " after " + periodic_map_string(pair) + ".");
+                                         " after " + periodic_map_string(pair) +
+                                         ". Check the translation (its sign: it maps the first zone onto the "
+                                         "second) or the angle and center, and that the mesh is periodic. See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
             if (matched[match]) {
                 throw std::runtime_error("Periodic zones " + pair.zone_a + " and " + pair.zone_b + ": node " +

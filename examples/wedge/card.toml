@@ -3,3 +3,4 @@
 build = "2d"
 demonstrates = ["generated wedge mesh", "oblique shock against theory"]
 tutorial = "wedge"
+validation = [{anchor = "oblique-shock", regime = "Mach 1.76 oblique shock, against shock theory"}]

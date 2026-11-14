@@ -262,7 +262,7 @@ remaining error from the conservative update is of the order of the jump in
 reaction zones, but percent-level at sharp fuel/oxidizer or hot/cold contacts
 (e.g. hydrogen injected into air), which is what double flux addresses
 ([Houim & Kuo 2011](https://doi.org/10.1016/j.jcp.2011.07.031) is the closest
-analogue to Mallard: WENO with double flux for thermally perfect reacting
+analog to Mallard: WENO with double flux for thermally perfect reacting
 flow).
 
 The design:
@@ -483,7 +483,7 @@ U^{n+1} = U(t_n + dt)  of  dU/dt = T(U) + c,  U(t_n + dt/2) = U*   (transport su
   still growing at step 3000.
 - **Cost.** One more evaluation of `T` per step (four with SSPRK3) and one
   chemistry call per step instead of two half steps (no fused half steps
-  needed, and none to restart).
+  needed).
 
 As implemented: `Solver::take_simpler_step` evaluates `T(U^n)` into one
 extra state (`transport_rate`), then `CellChemistry::advance` with a
@@ -516,14 +516,14 @@ same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
 double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
 poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
 after 40 steps); SIMPLER runs are bitwise independent of the rank count
-and across restarts (`MPITest.GasMixtureMatchesSerial`,
+and across restarts (`MPITest.GasMixtureMatchesSerialWithAndWithoutStepGraphs`,
 `ThickenedFlameMatchesSerial`, `MixtureTest.RestartedRunMatchesUninterruptedRunExactly`).
 
 Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
 
 - **V7 detonation** (`examples/detonation_1d`, 10 and 20 cells per ZND
   induction length). Induction length against the ZND value, first with
-  `tools/plot_detonation.py` (cell-quantized, as quoted above), then with
+  `examples/detonation_1d/plot_detonation.py` (cell-quantized, as quoted above), then with
   sub-cell shock and heat-release positions (shock at half its pressure
   rise, which puts the whole table half a cell to a cell short) and the standard
   deviation over the outputs of the second half:
@@ -641,7 +641,7 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   of 2H2-O2-7Ar at 6.67 kPa is about 0.8 m (ZND), so a detonation started by
   a driver at a closed end stays under-supported over practical tubes (it
   ran steadily 9% below $D_\mathrm{CJ}$ over 0.6 m). The case therefore starts from the
-  ZND profile (`tools/znd_restart.py`) instead of an overdriven start. Front
+  ZND profile (`tools/setup/znd_restart.py`) instead of an overdriven start. Front
   speed against $D_\mathrm{CJ}$ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
@@ -698,7 +698,7 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
   chemistry. After 0.2 s, by which `T` has fallen by more than 100 K, it
   matches RK4 on `de/dt = -q / rho` to 1e-6.
 - **1D flames against Cantera with the same model.**
-  - Setup: `tools/flame_restart.py --radiation cantera`, 12 cells per
+  - Setup: `tools/setup/flame_restart.py --radiation cantera`, 12 cells per
     thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
   - $S_c$ is the consumption speed averaged over the last third of each run.
   - The runs last 3.5 ($\phi = 0.6$), 5 ($\phi = 0.5$) or 3 ($\phi = 0.44$) flame
@@ -1037,8 +1037,9 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   from 16 species, one thread per cell otherwise (and on CPUs).
 - **Wide teams for expensive cells** (GPUs, with a warp per cell): after the
   cost ordering, the queued cells whose last call took at least 16 sub-steps
-  get 8 warps each (16 from 512 species), launched on a second stream
-  concurrently with the other cells' one-warp teams. These few igniting cells
+  get 8 warps each (16 from 512 species, at most 2048 cells per call),
+  launched on a second stream concurrently with the other cells' one-warp
+  teams. These few igniting cells
   set the time at dt = 1e-6 s; with more lanes each of their sub-steps
   (rates, Jacobian entries, the sparse LU's updates per pivot, the solves)
   takes fewer rounds. Since a team's result does not depend on its width
@@ -1050,8 +1051,9 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   global memory for their work. Cells that take one or two sub-steps never
   take this path, so the other cases are unchanged.
 - **Cost ordering** (GPUs only; `bin_by_cost` in the benchmark): the queued
-  cells are sorted by the sub-steps they took in their last call, most
-  expensive first. With one thread per cell a warp's cells then take similar
+  cells are binned by the sub-steps they took in their last call, most
+  expensive first, in classes of a quarter octave (a counting sort on the
+  device, so that the queue's length never reaches the host). With one thread per cell a warp's cells then take similar
   numbers of sub-steps; with a team per cell the expensive teams start first
   and cheap ones fill in behind them instead of leaving a tail. Only the order
   of work changes, never a cell's result.
@@ -1086,18 +1088,32 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   bitwise against elimination column by column), up to the sign of zeros.
   n-hexane: 203 stages instead of 1269 pivots, a chain of 145 (573 padded
   entries), 59 + 58 levels in the solves outside it.
-- **Fused half steps** (`[chemistry] fuse_half_steps`, default off): the
-  half steps of consecutive steps are one chemistry call, except where output,
-  checks or the end of the run read the state (and the next step's `dt` comes
-  from the state before the pending half step). One
-  chemistry call per step instead of two halves the chemistry's cost where
-  cells take one or two sub-steps per call: on the H2 flame (V8, one CPU
-  core) chemistry falls from 7.7 to 3.8 s over 3000 steps and the step from
-  3.8 to 2.5 ms. It is off by default because the result then depends on the
-  output schedule (`check_interval`, writers, monitors): a run stopped by
-  `t_wall_stop`, or restarted from a step at which the uninterrupted run wrote
-  nothing, no longer reproduces that run bitwise. Making it the default needs
-  the pending half step in the restart file and output from a flushed copy.
+- **Fused half steps** (`[chemistry] fuse_half_steps`, default on with
+  Strang splitting): the closing half step of a step and the opening one of
+  the next are one chemistry call over `(dt^n + dt^(n+1)) / 2`; the reactor
+  equations are autonomous, so the splitting is the same and only the
+  integrator's error differs. One chemistry call per step instead of two
+  halves the chemistry's cost where cells take one or two sub-steps per call:
+  on the H2 flame (V8, one CPU core) chemistry falls from 7.7 to 3.8 s over
+  3000 steps and the step from 3.8 to 2.5 ms. The run continues from the
+  state before the pending half step (`chemistry_pending`), which also gives
+  the next step's `dt`. Whatever reads the state at the end of a step (output,
+  checks, progress rows, probes, statistics, triggers, the end of the run)
+  reads it with the pending half step applied: `Solver::flush_chemistry`
+  keeps the conservatives, species, temperature seeds and last sub-steps and
+  applies the half step (outside the repair audit, which counts it in the
+  call it is fused into), and `unflush_chemistry` puts them back before the
+  next step. Restart files hold the kept state with the attribute
+  `CHEMISTRY_PENDING` (`stage_unflushed_restart`), so a restarted run takes
+  the same fused call as the uninterrupted one. Results thus depend neither
+  on the output schedule nor on restarts or `t_wall_stop`
+  (`MixtureTest.FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts`); the
+  extra call at an output step costs what the separate half step there would.
+  These steps stop the device's step queue anyway, so the step graph holds no
+  host work for it. A restart file read without fusing applies the pending
+  half step in the first step's opening call (Strang) or before the first
+  step (SIMPLER); a run without chemistry ignores it. At its end the run
+  leaves the solver at the flushed state.
 - **Layout**: `SpeciesLayout` is a CMake option (`Mallard_SPECIES_LAYOUT_LEFT`);
   every kernel indexes through the view. On the full-solver benchmark (A100)
   `LayoutLeft` (cells contiguous per species) takes 58.7 ms per step and the
@@ -1112,7 +1128,7 @@ Validation: V3 at 100 species (n-dodecane/air, 20 atm, $\phi$ 0.5-2, 1000-1400 K
 of Cantera's with the dense and the sparse LU, `T` at 0.5 and 2 delays within
 1% (the mechanism's irreversible soot-precursor reactions keep it from its UV
 equilibrium, which is therefore not compared). At 1268 species
-(`tools/v3_check.py`, 10 atm, $\phi$ 1, 1000-1400 K): delays within 4e-6, about a
+(`tools/dev/v3_check.py`, 10 atm, $\phi$ 1, 1000-1400 K): delays within 4e-6, about a
 second per case on one CPU core with the sparse LU (128 s with the dense one).
 V1/V2/V6/V7 unchanged within their tolerances.
 
@@ -1271,12 +1287,24 @@ compacts one queue (before: per chunk of the work memory), then integrates it
 in batches of the work memory. Between the two, `ChemistryBalance`:
 
 - gathers each rank's work, the sum over its queued cells of the sub-steps
-  of their last call (at least 1): one `allgatherv` of two numbers per rank
-  and call;
+  of their last call (at least 1): one gather of two numbers per rank
+  and call, on the device;
 - if the largest exceeds the mean by more than 5%, pairs ranks above the
   mean with ranks below it in rank order and turns each pair's share into a
-  count of cells (the sender's mean cost per cell): every rank computes the
-  same plan from the same numbers;
+  count of cells (the sender's mean cost per cell), at most the pair's
+  capacity: every rank computes the same plan from the same numbers, in a
+  one-thread kernel, and the cells over the capacity stay in the sender's
+  queue;
+- the capacities: each pair's, the most cells one sends the other in a call,
+  is 0 at the start; the plan records on the device the most cells each pair
+  asked for in a step, and between steps (after the step's own fence) every
+  rank sets the capacities from these numbers alike: 1.25 times the most asked
+  for, in blocks of 64 cells, at once when a pair asked for more, and after 256
+  steps in which a pair asked for less than half of its capacity. Pairs of
+  capacity 0 exchange nothing, so a balanced run sends no cells; a change of
+  the capacities records the step's CUDA graph again. With NCCL the messages
+  hold every slot of the capacity (their sizes are fixed for the graph), with
+  MPI only the planned cells;
 - each sender packs the end of its queue (the cheapest cells: the queue is
   ordered by cost on GPUs) as raw bits, `N_CONSERVATIVE + Ns + 4` values per
   cell (state, partial densities, `T_SEED`, `CHEM_H`, last cost, multiplier
@@ -1288,19 +1316,20 @@ in batches of the work memory. Between the two, `ChemistryBalance`:
   over the sender's integration made receivers wait for it (det2d on 4 GPUs:
   45 ms per call instead of 37.5 without balancing);
 - receivers integrate their own queue, then the guests with the same kernel
-  (sorted by cost, in batches), and return `Ns + 3` values per cell
+  (binned by cost, in batches), and return `Ns + 3` values per cell
   (partial densities, those of the end state with SIMPLER, `CHEM_H`,
   sub-steps, last cost).
 
 Each cell's integration reads only its own inputs and takes the same code
 path on every rank (decision 6, [Determinism](#determinism)), so results are
 bitwise those of an unbalanced run and of a serial one;
-`MPITest.ChemistryLoadBalancingMatchesSerial` checks it on 1-4 ranks (Euler,
+`MPITest.ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs` checks it on 1-4 ranks (Euler,
 Navier-Stokes with fused half steps, the thickened flame's multiplier of
 `dt`, SIMPLER with and without it) and that cells did move. Restarts are unaffected: the plan uses only
 the last call's costs, which are not restarted, and changes only where cells
 are integrated. The summary reports, for every distributed reacting run,
-the sum over calls of the slowest rank's chemistry time against the mean,
+the chemistry time of the slowest rank against the mean over the ranks (each
+rank sums its own calls; the ranks reduce once, for the summary),
 and with balancing the share of integrations done elsewhere.
 
 **Measurements** (A100-80GB, CUDA-aware Open MPI; 4 GPUs: three on one node
@@ -1409,7 +1438,7 @@ q    = -lambda grad T + sum_k h_k j_k
   4 in `ln T` over 50 points of the common thermo range). Species viscosities,
   conductivities and binary diffusion coefficients match Cantera's to 1e-6
   relative (worst seen: 2e-12) for h2o2 and GRI-3.0
-  (`tools/transport_reference.py`).
+  (`tools/dev/transport_reference.py`).
 - **Mixture rules** as Cantera's `mixture-averaged` and `unity-Lewis-number`
   models, including its floor of 1e-20 on mole fractions in the mixing rules,
   with two deviations that only matter where Cantera's formula breaks down:
@@ -1425,7 +1454,7 @@ q    = -lambda grad T + sum_k h_k j_k
   half the `O(Ns^2)` work on hexahedra and a third on triangles, at the same
   order. The gradients of `[u, T, X_1 .. X_Ns]` use the viscous gradient's
   stencil and weights; boundary ghosts take the ghost state's velocity
-  (no-slip walls), and the prescribed `T` and `X` at `upt` faces; isothermal
+  (no-slip walls), and the prescribed `T` and `X` at `inlet_state` faces; isothermal
   walls give the mirror image of the centroid `2 T_w - T`, heat-flux walls
   `T + 2 d q / lambda`. Symmetry planes carry no heat or species flux;
   transmissive faces take their image face's values; outflow faces have zero
@@ -1486,14 +1515,14 @@ total energy, between adiabatic walls), with hydrogen gathering at the hot
 end. Isothermal and heat-flux walls with chemistry and Soret, and with
 double flux (inert), are bitwise identical on 1-4 ranks.
 
-V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
+V8 (`examples/premixed_flame`, `tools/setup/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
 the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
 and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
 thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
 outlet; 20 cells per `delta_T` (cells ten times taller than wide, so that the
 cross-stream faces do not limit the time step); fresh mixture entering at
-Cantera's flame speed through `upt` and a pressure outlet at 1 atm; MUSCL,
+Cantera's flame speed through `inlet_state` and a pressure outlet at 1 atm; MUSCL,
 HLLC, SSPRK3, CFL 0.2 (and 0.1), two flame times `delta_T / S_L`. Why this
 setup: a frame moving with the flame would need moving-frame terms the solver
 does not have, and a flame propagating into gas at rest needs a domain many
@@ -1501,7 +1530,7 @@ flame lengths long; holding it near its Cantera position keeps the domain at
 15 `delta_T`. The flame speed is measured as the consumption speed of the
 deficient reactant, `S_c = -int W_k omega_k dx / (rho_u (Y_k,u - Y_k,b))`
 (H2 or CH4 lean, O2 rich), which equals the flame speed of a steady flame in
-any frame, so the inflow velocity need not match it: the `upt` inlet, which
+any frame, so the inflow velocity need not match it: the `inlet_state` inlet, which
 imposes `p` as well as `u`, lets the inflow settle 3% below the imposed
 velocity, and the flame drifts upstream at a few cm/s. The displacement speed
 `u_inlet - dx_f/dt` of the mid-temperature point is the cross-check; both
@@ -1522,7 +1551,7 @@ All within the 2% criterion at 20 cells per `delta_T`. CFL 0.1 against 0.2
 ($\phi$ 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
 0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
 error at these steps. Temperature and heat-release profiles overlay
-Cantera's (`tools/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
+Cantera's (`examples/premixed_flame/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
 release within 2%, temperature within 10-30 K where the profile is steepest
 (a fraction of a cell of offset). The unity-Lewis flames are consistently
 0.6-0.8% slow; Cantera's "unity-Lewis-number" model with its default
@@ -1534,7 +1563,7 @@ not a modeling difference, but its source has not been isolated.
 CH4/air with GRI-3.0 (53 species) costs about 15x more per step and needs
 4-20x more steps per flame time (slower flames, the acoustic time step):
 0.4-1.0 million steps for five flame times at 20 cells per `delta_T`. The
-sweep (`tools/flame_sweep.py`, `examples/premixed_flame/ch4` for $\phi = 1$)
+sweep (`examples/premixed_flame/flame_sweep.py`, `examples/premixed_flame/ch4` for $\phi = 1$)
 therefore runs on A100s, one 300-cell flame at 16.5 ms per step, or 5-8
 flames sharing a GPU through MPS at 13-28 ms per step each. Every flame runs
 five flame times at CFL 1 (the [time step](../numerics/overview.md#time-step)
@@ -1633,7 +1662,7 @@ Fickian relaxation, `-D^T k^2 dT_0 / (rho T_0) (exp(-a k^2 t) - exp(-D_12 k^2 t)
 `lambda / (rho cp)` (to 0.03%); runs are bitwise identical on 1 and 2+ ranks.
 
 Validation against Cantera's `FreeFlame` with the same model
-(`soret_enabled`, mixture-averaged; `tools/flame_reference.py --soret`,
+(`soret_enabled`, mixture-averaged; `tools/setup/flame_reference.py --soret`,
 `examples/premixed_flame/reference/soret_flames.csv`): the V8 setup above
 (20 cells per `delta_T`, CFL 0.2, two flame times, consumption speed over the
 last third), H2/air at 300 K and 1 atm:
@@ -1771,7 +1800,7 @@ X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }     # or Y = {...}; normalized; unlisted sp
 
 [[boundaries]]
 zone = "left"
-type = "upt"
+type = "inlet_state"
 u = [10.0, 0.0]
 p = 101325.0
 T = 300.0
@@ -1788,18 +1817,18 @@ surrogate `(gamma, e0)`:
 
 | Boundary | Species | Thermo |
 |---|---|---|
-| `extrapolation`, image faces | from the image | from the image |
+| `outlet_extrapolation`, image faces | from the image | from the image |
 | `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior (wall temperatures and heat fluxes enter the diffusive fluxes only) |
-| `upt`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
-| `p_out`, `p_out_average` | interior `Y` | interior `gamma` |
+| `inlet_state`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
+| `outlet_pressure`, `outlet_pressure` with `average` | interior `Y` | interior `gamma` |
 
 `farfield` uses the Riemann invariants with each side's frozen `gamma`.
 Catalytic walls and species-specific wall fluxes are out of scope.
 
-Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
-`euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
-`farfield`, `dirichlet` and `p_out_average` are rejected at input until they
-are needed. The composition of `upt` may vary along the boundary (stratified
+Milestone 3 supports `outlet_extrapolation`, `symmetry`, `wall_adiabatic` (slip for
+`euler`, no-slip for `navier_stokes` from milestone 9), `inlet_state` and `outlet_pressure` for mixtures;
+`farfield`, `dirichlet` and `outlet_pressure` with `average` are rejected at input until they
+are needed. The composition of `inlet_state` may vary along the boundary (stratified
 inflows such as a mixing layer feeding a triple flame): each value of `X` or
 `Y` can be an expression in `x`, `y`, `z`, with an optional `balance` species
 as in `[initialize]`. Each face then gets its own copy of the condition, with
@@ -1940,7 +1969,7 @@ Species counts are taken from the files when they are added.
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
 | V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |
 
-V10 (`examples/counterflow_diffusion`, `tools/counterflow_reference.py`,
+V10 (`examples/counterflow_diffusion`, `examples/counterflow_diffusion/counterflow_reference.py`,
 `counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
 300 K and 1 atm, nozzles 10 mm apart, momentum-balanced, against Cantera's
 `CounterflowDiffusionFlame` swept in strain up to extinction. Cantera's is
@@ -1971,7 +2000,7 @@ resolution and domain-size variants are in the example's README.
 
 ![Peak temperature against strain](../images/counterflow_strain.png)
 
-Flame-wall interaction (`tools/flame_wall.py`): head-on quenching of the
+Flame-wall interaction (`tools/dev/flame_wall.py`): head-on quenching of the
 stoichiometric H2/air flame (h2o2.yaml, mixture-averaged transport, 300 K,
 1 atm; Cantera: `S_L` = 2.332 m/s, `T_b` = 2379 K, thermal thickness
 `delta_T` = 329 um, `delta_L = lambda_u / (rho_u cp_u S_L)` = 19.9 um)

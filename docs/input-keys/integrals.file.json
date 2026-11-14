@@ -1,0 +1,15 @@
+{
+ "default": "\"integrals.csv\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/isotropic_turbulence/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/taylor_green_3d/remap.toml",
+  "examples/turbulent_hot_spot_2d/input.toml"
+ ],
+ "type": "string"
+}

@@ -40,9 +40,9 @@ struct Case3D {
     std::string recon = "FO";
     std::string recon_options;
     std::string riemann = "HLLC";
-    std::string bc[6] = {"type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
-                         "type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
-                         "type = \"extrapolation\"\n", "type = \"extrapolation\"\n"};
+    std::string bc[6] = {"type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                         "type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                         "type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n"};
     std::string init;
     std::string run = "n_steps = 10\ncfl = 0.25\n";
     std::string physics = "type = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
@@ -68,6 +68,7 @@ std::unique_ptr<Solver> init_case(const Case3D & c) {
       << "[physics]\n" << c.physics
       << "[output]\ncheck_interval = 1000000\n" << c.extra;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
     return solver;
 }
@@ -175,8 +176,8 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
         c.L[d] = (d == axis) ? 1.0 : 2.0 / n;
     }
     c.set_all_bcs("type = \"symmetry\"\n");
-    c.bc[2 * axis] = "type = \"extrapolation\"\n";
-    c.bc[2 * axis + 1] = "type = \"extrapolation\"\n";
+    c.bc[2 * axis] = "type = \"outlet_extrapolation\"\n";
+    c.bc[2 * axis + 1] = "type = \"outlet_extrapolation\"\n";
     c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = std::string(1, "xyz"[axis]);
     c.init = "type = \"analytical\"\nrho = \"" + s + " < 0.5 ? 1.0 : 0.125\"\n"
@@ -351,8 +352,8 @@ TEST_P(Couette3D, LinearVelocityAndWallForces) {
     }
     EXPECT_LT(max_err, 1e-3 * 0.1);
     // Shear mu U / H on the unit-area plates opposes the relative motion; p = 1 pushes outward
-    const auto front = solver->calc_force(m->get_face_zone("front")->faces);
-    const auto back = solver->calc_force(m->get_face_zone("back")->faces);
+    const auto front = solver->calc_force(device_zone_faces(*m, "front"));
+    const auto back = solver->calc_force(device_zone_faces(*m, "back"));
     EXPECT_NEAR(front[2], 1.0, 1e-3);
     EXPECT_NEAR(back[2], -1.0, 1e-3);
     EXPECT_NEAR(front[0], 0.0, 1e-12);
@@ -410,7 +411,7 @@ TEST_P(ForcedChannel3D, SteadyProfileConvergesAtSecondOrder) {
             c.L[d] = d == wall ? 1.0 : double(c.n[d]) / n;
         }
         if (periodic) {
-            c.mesh_options = wall == 1 ? "periodic = [\"x\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n";
+            c.mesh_options = wall == 1 ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
             for (int k = 0; k < 6; k++) c.bc[k].clear();
         }
         c.bc[2 * wall] = c.bc[2 * wall + 1] = "type = \"wall_isothermal\"\nT = 1.0\n";
@@ -483,7 +484,7 @@ TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
     EXPECT_NEAR(s[4], 0.0, roundoff(1e-14));
 }
 
-TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
+TEST(Solver3DValidation, QCriterionAndVorticityOutputOfALinearVelocityField) {
     // u = (x + 2y - z, 3z - 2x, 5x + y): Q = -(d u_k / d x_i d u_i / d x_k) / 2
     // = 5.5 and omega = (-2, -6, -4) in every cell, exact for least squares
     Case3D c;
@@ -493,13 +494,15 @@ TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
     c.extra = "[[write_data]]\nprefix = \"" + (scratch_dir() / "mallard_vortex").string() +
-              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
+              "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"Q_CRITERION\", \"VORTICITY\"]\n";
     auto solver = init_case(c);
     solver->copy_device_to_host();
-    const double expected[4] = {5.5, -2.0, -6.0, -4.0};
+    const double omega[3] = {-2.0, -6.0, -4.0};
+    const auto q = static_cast<uint32_t>(solver->derived_selection.column[derived::Q_CRITERION]);
     for (uint32_t i = 0; i < solver->get_mesh()->n_owned(); i++) {
-        for (int k = 0; k < 4; k++) {
-            EXPECT_NEAR(solver->h_vortex_fields(i, k), expected[k], roundoff(1e-10)) << "cell " << i << ", field " << k;
+        EXPECT_NEAR(solver->h_derived_fields(i, q), 5.5, roundoff(1e-10)) << "cell " << i;
+        for (uint32_t k = 0; k < 3; k++) {
+            EXPECT_NEAR(solver->h_vortex_fields(i, k), omega[k], roundoff(1e-10)) << "cell " << i << ", component " << k;
         }
     }
 }

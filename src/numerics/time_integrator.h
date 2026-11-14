@@ -51,6 +51,14 @@ static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR
 };
 
 /**
+ * @brief t + c dt in one rounding, so that a stage time formed on the host and
+ *        one formed on the device (captured steps) agree bit for bit whether
+ *        or not the compiler contracts the multiply and add.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype time_of_stage(const rtype t, const rtype c, const rtype dt) { return Kokkos::fma(c, dt, t); }
+
+/**
  * @brief dU/dt = rhs(U, t) at the stage time t = t_n + c dt of a step from
  *        t_n; c lets graph-captured steps, whose t_n and dt live on the
  *        device, form the stage time there.

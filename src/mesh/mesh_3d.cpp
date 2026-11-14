@@ -38,8 +38,7 @@ Vec3 average(const std::vector<Vec3> & p) {
     return c;
 }
 
-double signed_volume(const std::vector<Vec3> & nodes) {
-    std::vector<std::array<Vec3, 4>> tets;
+double signed_volume(const std::vector<Vec3> & nodes, std::vector<std::array<Vec3, 4>> & tets) {
     cell_tetrahedra(nodes, tets);
     double v = 0.0;
     for (const auto & t : tets) v += dot3(sub(t[1], t[0]), cross(sub(t[2], t[0]), sub(t[3], t[0]))) / 6.0;
@@ -81,19 +80,106 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
     tets.clear();
     const Vec3 o = average(nodes);
     for (const auto & face : cell_local_faces(static_cast<uint32_t>(nodes.size()))) {
-        std::vector<Vec3> p;
-        for (uint8_t k : face) p.push_back(nodes[k]);
-        if (p.size() == 3) {
-            tets.push_back({o, p[0], p[1], p[2]});
+        const size_t n = face.size();
+        if (n == 3) {
+            tets.push_back({o, nodes[face[0]], nodes[face[1]], nodes[face[2]]});
             continue;
         }
-        const Vec3 c = average(p);
-        for (size_t k = 0; k < p.size(); k++) tets.push_back({o, c, p[k], p[(k + 1) % p.size()]});
+        Vec3 c = {0.0, 0.0, 0.0};
+        for (uint8_t k : face) {
+            for (size_t i = 0; i < 3; i++) c[i] += nodes[k][i];
+        }
+        for (size_t i = 0; i < 3; i++) c[i] /= static_cast<double>(n);
+        for (size_t k = 0; k < n; k++) tets.push_back({o, c, nodes[face[k]], nodes[face[(k + 1) % n]]});
     }
 }
 
+CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes, bool axisymmetric) {
+    CellGeometry g{};
+    if constexpr (N_DIM == 2) {
+        // Counterclockwise, as Mesh::init_from_connectivity stores it
+        rtype area2 = 0.0;
+        for (size_t k = 0; k < cell_nodes.size(); k++) {
+            const auto & a = cell_nodes[k];
+            const auto & b = cell_nodes[(k + 1) % cell_nodes.size()];
+            area2 += a[0] * b[1] - b[0] * a[1];
+        }
+        thread_local std::vector<std::array<rtype, N_DIM>> reversed;
+        if (area2 < 0.0_r) reversed.assign(cell_nodes.rbegin(), cell_nodes.rend());
+        const auto & nodes = area2 < 0.0_r ? reversed : cell_nodes;
+        if (nodes.size() == 3) {
+            g.volume = triangle_area<2>(nodes[0].data(), nodes[1].data(), nodes[2].data());
+        } else if (nodes.size() == 4) {
+            const rtype a1 = triangle_area<2>(nodes[0].data(), nodes[1].data(), nodes[2].data());
+            const rtype a2 = triangle_area<2>(nodes[0].data(), nodes[2].data(), nodes[3].data());
+            g.volume = a1 + a2;
+        } else {
+            throw std::runtime_error("Unknown cell type.");
+        }
+        // Area centroid of the polygon (the vertex average is only correct for
+        // triangles and parallelograms), relative to the cell's first node: in
+        // absolute coordinates the cross products cancel, leaving errors of
+        // eps |x|^2 / h, which break the equidistance of mirror-equivalent
+        // stencil entries on fine meshes away from the origin
+        const size_t n = nodes.size();
+        const rtype x0 = nodes[0][0], y0 = nodes[0][1];
+        rtype A = 0.0, Cx = 0.0, Cy = 0.0;
+        for (size_t k = 0; k < n; ++k) {
+            const auto & a = nodes[k];
+            const auto & b = nodes[(k + 1) % n];
+            const rtype xa = a[0] - x0, ya = a[1] - y0;
+            const rtype xb = b[0] - x0, yb = b[1] - y0;
+            const rtype cross = xa * yb - xb * ya;
+            A += 0.5_r * cross;
+            Cx += (xa + xb) * cross;
+            Cy += (ya + yb) * cross;
+        }
+        g.centroid[0] = x0 + Cx / (6.0_r * A);
+        g.centroid[1] = y0 + Cy / (6.0_r * A);
+        g.measure = g.volume;
+        if (axisymmetric) {
+            const AxisymmetricCell a = axisymmetric_cell(nodes);
+            g.measure = rtype(a.measure);
+            g.centroid[0] = rtype(a.centroid[0]);
+            g.centroid[1] = rtype(a.centroid[1]);
+        }
+    } else {
+        if (axisymmetric) throw std::runtime_error("Axisymmetric flows need the 2D solver.");
+        thread_local std::vector<Vec3> p;
+        thread_local std::vector<std::array<Vec3, 4>> tets;
+        p.resize(cell_nodes.size());
+        for (size_t k = 0; k < p.size(); k++) {
+            for (size_t i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(cell_nodes[k][i]) : 0.0;
+        }
+        double V = 0.0;
+        Vec3 x = {0.0, 0.0, 0.0};
+        // Twice for a negatively oriented cell: reflected, as Mesh::orient_cells_3d stores it
+        for (int pass = 0; pass < 2; pass++) {
+            cell_tetrahedra(p, tets);
+            V = 0.0;
+            x = {0.0, 0.0, 0.0};
+            for (const auto & t : tets) {
+                const double v = dot3(sub(t[1], t[0]), cross(sub(t[2], t[0]), sub(t[3], t[0]))) / 6.0;
+                V += v;
+                for (size_t i = 0; i < 3; i++) x[i] += v * (t[0][i] + t[1][i] + t[2][i] + t[3][i]) / 4.0;
+            }
+            if (V >= 0.0 || pass == 1) break;
+            std::vector<uint32_t> order(p.size());
+            for (uint32_t k = 0; k < order.size(); k++) order[k] = k;
+            const std::vector<Vec3> q = p;
+            const std::vector<uint32_t> r = reflected(order);
+            for (size_t k = 0; k < p.size(); k++) p[k] = q[r[k]];
+        }
+        g.volume = static_cast<rtype>(V);
+        g.measure = g.volume;
+        FOR_I_DIM g.centroid[i] = static_cast<rtype>(x[i] / V);
+    }
+    return g;
+}
+
 void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const {
-    std::vector<Vec3> p(h_n_nodes_of_cell(i_cell));
+    thread_local std::vector<Vec3> p;
+    p.resize(h_n_nodes_of_cell(i_cell));
     for (uint32_t k = 0; k < p.size(); k++) {
         const uint32_t node = h_node_of_cell(i_cell, k);
         for (size_t i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(h_node_coords(node, i)) : 0.0;
@@ -104,8 +190,7 @@ void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<
 void Mesh::compute_geometry() {
     if constexpr (N_DIM == 2) {
         compute_face_areas();
-        compute_cell_volumes();
-        compute_cell_centroids();
+        compute_cell_volumes_and_centroids();
         compute_face_normals();
         compute_face_centroids();
         compute_cell_neighbors();
@@ -118,12 +203,13 @@ void Mesh::compute_geometry() {
     };
     // Faces: area vector and centroid from a triangle fan around the vertex
     // average, which stays exact for warped quadrilaterals and closes every cell
+    std::vector<Vec3> p, a;
     for (uint32_t f = 0; f < n_faces; f++) {
-        std::vector<Vec3> p(h_n_nodes_of_face(f));
+        p.resize(h_n_nodes_of_face(f));
         for (uint32_t k = 0; k < p.size(); k++) p[k] = coords(h_node_of_face(f, k));
         const Vec3 c = average(p);
         Vec3 A = {0.0, 0.0, 0.0};
-        std::vector<Vec3> a(p.size());
+        a.resize(p.size());
         for (size_t k = 0; k < p.size(); k++) {
             a[k] = cross(sub(p[k], c), sub(p[(k + 1) % p.size()], c));
             for (size_t i = 0; i < 3; i++) A[i] += 0.5 * a[k][i];
@@ -143,33 +229,30 @@ void Mesh::compute_geometry() {
             h_face_coords(f, i) = static_cast<rtype>(x[i] / w_sum);
         }
     }
-    // Cells: volume and centroid by tetrahedral decomposition
-    std::vector<std::array<Vec3, 4>> tets;
-    for (uint32_t c = 0; c < n_cells; c++) {
-        h_cell_tetrahedra(c, tets);
-        double V = 0.0;
-        Vec3 x = {0.0, 0.0, 0.0};
-        for (const auto & t : tets) {
-            const double v = dot3(sub(t[1], t[0]), cross(sub(t[2], t[0]), sub(t[3], t[0]))) / 6.0;
-            V += v;
-            for (size_t i = 0; i < 3; i++) x[i] += v * (t[0][i] + t[1][i] + t[2][i] + t[3][i]) / 4.0;
-        }
-        if (V <= 0.0) {
-            throw std::runtime_error("Mesh: cell " + std::to_string(c) + " has non-positive volume.");
-        }
-        h_cell_volume(c) = static_cast<rtype>(V);
-        FOR_I_DIM h_cell_coords(c, i) = static_cast<rtype>(x[i] / V);
-    }
+    compute_cell_volumes_and_centroids();
     compute_cell_neighbors();
 }
 
-void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
-                           const std::vector<std::vector<uint32_t>> & cells, std::vector<uint32_t> & offsets,
-                           std::vector<uint32_t> & cell_nodes) {
-    offsets.assign(1, 0);
-    cell_nodes.clear();
+void Mesh::compute_cell_volumes_and_centroids() {
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        nodes.resize(h_n_nodes_of_cell(c));
+        for (uint32_t k = 0; k < nodes.size(); k++) FOR_I_DIM nodes[k][i] = h_node_coords(h_node_of_cell(c, k), i);
+        const CellGeometry g = cell_geometry(nodes);
+        if (N_DIM == 3 && g.volume <= 0.0_r) {
+            throw std::runtime_error("Mesh: cell " + std::to_string(c) + " has non-positive volume.");
+        }
+        h_cell_volume(c) = g.volume;
+        FOR_I_DIM h_cell_coords(c, i) = g.centroid[i];
+    }
+}
+
+void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells) {
+    std::vector<uint32_t> c;
     std::vector<Vec3> p;
-    for (const auto & c : cells) {
+    std::vector<std::array<Vec3, 4>> tets;
+    for (uint32_t cell = 0; cell < cells.size(); cell++) {
+        c.assign(cells[cell].begin(), cells[cell].end());
         cell_local_faces(static_cast<uint32_t>(c.size()));
         p.clear();
         for (uint32_t node : c) {
@@ -177,13 +260,10 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
             FOR_I_DIM x[i] = double(nodes[node][i]);
             p.push_back(x);
         }
-        if (signed_volume(p) < 0.0) {
+        if (signed_volume(p, tets) < 0.0) {
             const auto r = reflected(c);
-            cell_nodes.insert(cell_nodes.end(), r.begin(), r.end());
-        } else {
-            cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
+            std::copy(r.begin(), r.end(), cells.nodes.begin() + cells.offsets[cell]);
         }
-        offsets.push_back(static_cast<uint32_t>(cell_nodes.size()));
     }
 }
 

@@ -5,10 +5,11 @@ examples whose input files use the feature, found by reading them.
     python tools/docs/used_in.py --check   exit 1 if a line is out of date
 
 Each section of RULES names a guide page and heading, and a test of a parsed input
-file. The line is the first one starting with "*Used in:*" in that section; it
+file. The line is the first paragraph starting with "*Used in:*" in that section; it
 lists up to five examples in the order of examples/README.md, linked to their cards
 on the website's Examples page, or the rule's fallback text when no example uses the
-feature.
+feature. Each example is on a line of its own, so that changes to different examples
+of a line touch different lines.
 """
 import re
 import sys
@@ -33,18 +34,34 @@ def boundaries(t):
     return t.get("boundaries", [])
 
 
+def bc_type(name):
+    return lambda t: any(b.get("type") == name for b in boundaries(t))
+
+
 def recon(t):
     return num(t).get("face_reconstruction", {})
 
 
 RULES = {
-    ("boundary_conditions.md", "## Choosing a condition"): (lambda t: bool(boundaries(t)), None),
-    ("boundary_conditions.md", "## Characteristic boundaries"):
-        (lambda t: any(b.get("type", "").startswith("nscbc") for b in boundaries(t)), None),
-    ("boundary_conditions.md", "## Synthetic turbulence"):
+    ("boundary_conditions.md", "# Boundary conditions"): (lambda t: bool(boundaries(t)), None),
+    **{("boundary_conditions.md", f"### `{name}`"): (bc_type(name), fallback) for name, fallback in [
+        ("wall_adiabatic", None), ("wall_isothermal", None),
+        ("wall_heat_flux", None),
+        ("inlet_state", None), ("inlet_stagnation", None), ("inlet_mass_flow", None), ("outlet_pressure", None),
+        ("outlet_extrapolation", None), ("farfield", None), ("symmetry", None), ("dirichlet", None)]},
+    ("boundary_conditions.md", "### Wall models (`wall_model`)"):
+        (lambda t: any("wall_model" in b for b in boundaries(t)), None),
+    ("boundary_conditions.md", "#### `average`: area-averaged pressure"):
+        (lambda t: any(b.get("average") for b in boundaries(t)), None),
+    ("boundary_conditions.md", "### Periodic"): (lambda t: "periodic" in t, None),
+    ("boundary_conditions.md", "### `nscbc`: characteristic boundaries"):
+        (lambda t: any("nscbc" in b for b in boundaries(t)), None),
+    ("boundary_conditions.md", "### Synthetic turbulence (`turbulence`)"):
         (lambda t: any("turbulence" in b for b in boundaries(t)), None),
     ("initialization.md", "## Uniform state"): (lambda t: t.get("initialize", {}).get("type") == "constant", None),
     ("initialization.md", "## Expressions"): (lambda t: t.get("initialize", {}).get("type") == "analytical", None),
+    ("initialization.md", "## Regions"): (lambda t: "regions" in t.get("initialize", {}), None),
+    ("initialization.md", "## Tabulated data and point clouds"): (lambda t: "data" in t.get("initialize", {}), None),
     ("initialization.md", "## Restarts"): (lambda t: t.get("initialize", {}).get("type") == "restart", None),
     ("initialization.md", "## Remap from another mesh"):
         (lambda t: t.get("initialize", {}).get("type") == "remap", None),
@@ -69,24 +86,27 @@ RULES = {
         (lambda t: str(mesh(t).get("filename", "")).endswith(".h5"),
          "any example, after `mallard mesh convert input.toml mesh.h5`"),
     ("meshes.md", "## Curved boundaries"):
-        (lambda t: "curved" in mesh(t), "the curved-boundary validation (`tools/curved_convergence.py`)"),
+        (lambda t: "curved" in mesh(t), "the curved-boundary validation (`tools/dev/curved_convergence.py`)"),
     ("numerics.md", "## Presets"): (lambda t: "preset" in num(t), None),
     ("numerics.md", "## Time step and stopping"): (lambda t: "cfl" in t.get("run", {}), None),
     ("numerics.md", "## Reconstruction"): (lambda t: "type" in recon(t), None),
     ("numerics.md", "### TENO-E options"): (lambda t: recon(t).get("bound_preserving", False), None),
     ("numerics.md", "## Riemann solvers"): (lambda t: "riemann_solver" in num(t), None),
     ("numerics.md", "## Time integration and other options"):
-        (lambda t: num(t).get("time_integrator", "SSPRK3") != "SSPRK3",
+        (lambda t: num(t).get("time_integrator", "SSPRK54" if num(t).get("preset") == "les" else "SSPRK3") != "SSPRK3",
          "every example keeps the default, `SSPRK3`; the others are in the time-integration tests"),
-    ("output.md", "## Snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
-    ("output.md", "## The log"): (lambda t: "check_interval" in t.get("output", {}), None),
-    ("output.md", "## Wall forces: `[[forces]]`"): (lambda t: "forces" in t, None),
-    ("output.md", "## Domain integrals: `[integrals]`"): (lambda t: "integrals" in t, None),
-    ("output.md", "## Statistics"): (lambda t: "statistics" in t, None),
-    ("output.md", "### Spectra and two-point correlations: `[statistics.spectra]`"):
+    ("output.md", "## Solution snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
+    ("output.md", "### Terminal output"): (lambda t: "check_interval" in t.get("output", {}), None),
+    ("probes.md", "## Wall forces: `[[forces]]`"): (lambda t: "forces" in t, None),
+    ("probes.md", "## Domain integrals: `[integrals]`"): (lambda t: "integrals" in t, None),
+    ("statistics.md", "## Time averages: `[statistics]`"): (lambda t: "statistics" in t, None),
+    ("statistics.md", "## Spectra and two-point correlations: `[statistics.spectra]`"):
         (lambda t: "spectra" in t.get("statistics", {}), "the in-situ statistics tests"),
-    ("output.md", "### Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
-    ("output.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
+    ("statistics.md", "## Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
+    ("statistics.md", "## Conditional statistics and PDFs: `[[statistics.conditional]]`"):
+        (lambda t: "conditional" in t.get("statistics", {}), None),
+    ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
+    ("probes.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),
     ("physics.md", "### Viscosity laws"): (lambda t: "viscosity_model" in t.get("physics", {}), None),
     ("physics.md", "## Gas mixtures"): (lambda t: t.get("physics", {}).get("gas") == "mixture", None),
@@ -127,8 +147,8 @@ def line(test, fallback, cases):
     if not names:
         return f"*Used in:* {fallback or 'no example yet'}."
     links = [f"[`{n}`]({CARDS}#{n.replace('_', '-')})" for n in names[:MAX]]
-    more = f" and {len(names) - MAX} more" if len(names) > MAX else ""
-    return "*Used in:* " + ", ".join(links) + more + "."
+    more = f"\nand {len(names) - MAX} more" if len(names) > MAX else ""
+    return "*Used in:*\n" + ",\n".join(links) + more + "."
 
 
 def section_end(text, start, level):
@@ -151,7 +171,7 @@ def update(check):
         text = path.read_text()
         start = text.index(heading + "\n")
         end = section_end(text, start, len(heading.split(" ")[0]))
-        m = re.compile(r"^\*Used in:\*.*$", re.M).search(text, start, end)
+        m = re.compile(r"^\*Used in:\*.*(?:\n.+)*", re.M).search(text, start, end)
         if not m:
             sys.exit(f"{page}: no *Used in:* line under {heading!r}")
         new = line(test, fallback, cases)

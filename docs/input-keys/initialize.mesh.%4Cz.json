@@ -1,0 +1,11 @@
+{
+ "default": "1.0",
+ "dimension": "length (m)",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/taylor_green_3d/remap.toml"
+ ],
+ "type": "number"
+}

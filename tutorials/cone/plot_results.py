@@ -30,8 +30,8 @@ Q_INF = 0.5 * MACH**2  # 0.5 rho U^2 with rho = 1, U = M
 
 
 def load(run, prefix):
-    """Cells (node coordinates), centroids and arrays of the last snapshot of solut/PREFIX.pvd."""
-    pts, conn, offs, arrays = snapshots.read(snapshots.last(os.path.join(run, "solut", f"{prefix}.pvd")))
+    """Cells (node coordinates), centroids and arrays of the last snapshot of series solut/PREFIX."""
+    pts, conn, offs, arrays = snapshots.read(snapshots.last(os.path.join(run, "solut", prefix)))
     polys, c = snapshots.cells(pts, conn, offs)
     return polys, c, arrays
 

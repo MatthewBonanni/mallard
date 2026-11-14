@@ -58,11 +58,11 @@ stretching are in [Meshes](../guide/meshes.md#generated-meshes).
 | `[run]` | `t_stop = 0.02` s (six passes of the flow through the 2 m domain), at CFL 1 |
 | `[mesh]` | `type = "wedge"`, 160 × 120 cells on 2 m × 1.5 m |
 | `[initialize]` | The inflow state everywhere (`type = "constant"`): u = (600, 0) m/s, p = 101,325 Pa, T = 300 K |
-| `[[boundaries]]` | `left`: `upt`, the inflow imposed (supersonic: every characteristic enters); `right`: `extrapolation` (supersonic outflow: every characteristic leaves); `bottom` (the ramp) and `top`: `symmetry`, a slip wall |
+| `[[boundaries]]` | `left`: `inlet_state`, the inflow imposed (supersonic: every characteristic enters); `right`: `outlet_extrapolation` (supersonic outflow: every characteristic leaves); `bottom` (the ramp) and `top`: `symmetry`, a slip wall |
 | `[numerics]` | HLLC, SSPRK3, MUSCL with the Venkatakrishnan limiter |
 | `[physics]` | `euler`, γ = 1.4, and the reference state that sets R |
 | `[[probes]]` | 66 points on the vertical line x = 1.5 m, every 10 steps: `probe_line.csv` |
-| `[[write_data]]` | Every 2 ms: density, velocity, pressure and temperature, `solut/wedge_*.vtu` with the series `solut/wedge.pvd` |
+| `[[write_data]]` | Every 2 ms: density, velocity, pressure and temperature, every snapshot in `solut/wedge.vtkhdf` |
 
 The slip wall is the right condition for the ramp because the Euler equations have no viscosity, so
 there is no boundary layer. The [Boundary conditions](../guide/boundary_conditions.md) page lists the
@@ -81,7 +81,7 @@ two ranks and gives the same result bit for bit.
 
 ## 5. Look at the output
 
-**ParaView.** Open `solut/wedge.pvd` (*File → Open*), click *Apply*, color by `P` and step through time:
+**ParaView.** Open `solut/wedge.vtkhdf` (`solut/wedge.pvd` in builds without HDF5; *File → Open*), click *Apply*, color by `P` and step through time:
 the shock forms at the corner, travels up and out of the domain, and settles at its final angle. The
 values are cell averages, one per cell, so choose *Surface* rather than interpolated colors to see them
 as they are.
@@ -89,8 +89,11 @@ as they are.
 **Python.** Mallard's [tools](../../tools/README.md) read the same files without ParaView:
 
 ```bash
-python3 $MALLARD/tools/plot_vtu.py solut/wedge_000010.vtu pressure.png --var P --contours 20
+python3 $MALLARD/tools/post/plot_vtu.py solut/wedge.vtkhdf pressure.png --var P --contours 20
 ```
+
+and the [Python package](../guide/python.md) reads them into numpy arrays for your own analysis
+(`mallard.open("solut/wedge.vtkhdf").read("P")`).
 
 **The probe.** `probe_line.csv` holds the pressure on the line x = 1.5 m every 10 steps, one row per
 point and time (`step,t,point,x,y,P`). It shows how the shock forms: by t = 4 ms it has reached its

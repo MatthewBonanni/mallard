@@ -32,8 +32,12 @@ struct Dimension {
 
     /** @brief "pressure (kg m^-1 s^-2)", or the SI base units alone if the dimension has no name. */
     std::string describe() const;
+    /** @brief The SI base units in UDUNITS syntax, as CF metadata wants them: "kg m-3", or "1" if dimensionless. */
+    std::string udunits() const;
     /** @brief Units of this dimension to suggest, e.g. "Pa, kPa, bar, atm, psi", or empty. */
     std::string examples() const;
+    /** @brief The unit of a plain number of this dimension: "Pa", "kg/s", "deg", "kg m^-1" without a name; "" if dimensionless. */
+    std::string symbol() const;
 };
 
 namespace dim {
@@ -69,6 +73,7 @@ inline constexpr Dimension density = of(1, -3, 0);
 inline constexpr Dimension dynamic_viscosity = of(1, -1, -1);
 inline constexpr Dimension heat_flux = of(1, 0, -3);
 inline constexpr Dimension mass_flux = of(1, -2, -1);          // kg/(m^2 s), e.g. rho u
+inline constexpr Dimension mass_flow = of(1, 0, -1);           // kg/s
 inline constexpr Dimension mass_source = of(1, -3, -1);        // kg/(m^3 s)
 inline constexpr Dimension momentum_source = of(1, -2, -2);    // N/m^3
 inline constexpr Dimension power_density = of(1, -1, -3);      // W/m^3
@@ -116,5 +121,22 @@ bool has_unit(const std::string & text);
  *        are in SI units, if a unit symbol appears in it, else empty.
  */
 std::string expression_unit_hint(const std::string & expression);
+
+namespace units {
+
+/** @brief The units the case's numbers are in (physics.units): SI, or none for a nondimensional case. */
+enum class System { SI, NONDIMENSIONAL };
+
+/** @brief Sets the case's units, for everything printed after. SI until set. */
+void set_system(System s);
+System system();
+
+/** @brief The unit for a units row or column: si, or "-" in a nondimensional case. */
+std::string column(const std::string & si);
+
+/** @brief A number with its unit, for prose: "0.02 s", or "0.02" in a nondimensional case. */
+std::string with(const std::string & number, const std::string & si);
+
+} // namespace units
 
 #endif // UNITS_H

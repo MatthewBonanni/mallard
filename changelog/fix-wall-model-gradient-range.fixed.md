@@ -1,1 +1,0 @@
-- MPI runs with a modeled wall and without `[les]` now compute the viscous gradients of the halo cells holding exchange and edge points, which the wall model read stale, so they match serial runs again (#422).

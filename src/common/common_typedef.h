@@ -18,6 +18,8 @@
 
 #include <Kokkos_Macros.hpp>
 
+#include "lock_arrays.h"
+
 #ifndef Mallard_DIM
 #define Mallard_DIM 2
 #endif
@@ -94,5 +96,11 @@ const std::array<std::string, N_PRIMITIVE> PRIMITIVE_NAMES = {
     "H"
 };
 #endif
+
+/** @brief Free a container's memory now (assigning {} to a std::vector only empties it). */
+template <typename T>
+void release(T & container) {
+    T().swap(container);
+}
 
 #endif // COMMON_TYPEDEF_H

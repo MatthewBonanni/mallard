@@ -16,7 +16,7 @@ Except `he_air.yaml`, `c3h8_2step.yaml` and `ch4_bfer.yaml` (assembled from them
 | `nDodecane_Reitz.yaml` | `nDodecane_IG` (ideal gas), `nDodecane_RK` | 100 | Reduced n-dodecane-PAH mechanism of Wang, Ra, Jia & Reitz (2014), 432 reactions; the ~100-species chemistry benchmark (only the ideal-gas phase is supported) |
 
 `external/` holds mechanisms too large to keep in the repository, copied from
-the Cantera installation by `tools/cantera_mechanisms.py`: the n-hexane
+the Cantera installation by `tools/setup/cantera_mechanisms.py`: the n-hexane
 mechanism of Zhang et al. (2015, NUIG; 1268 species, 5336 reactions) for the
 large-mechanism benchmark and V3.
 

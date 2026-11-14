@@ -22,7 +22,7 @@ TEST(PhysicsTest, ReferenceStateDefinesGasConstants) {
     EXPECT_RTYPE_EQ(euler.R, R);
     EXPECT_RTYPE_EQ(euler.cp, R * 1.4_r / 0.4_r);
     EXPECT_RTYPE_EQ(euler.cv, R / 0.4_r);
-    EXPECT_NEAR(euler.get_pressure_from_density_temperature(1.225_r, 298.15_r), 101325.0_r, roundoff(1e-8_r));
+    EXPECT_NEAR(euler.get_pressure_from_density_temperature(1.225_r, 298.15_r), 101325.0_r, roundoff(1e-8));
 }
 
 TEST(PhysicsTest, PrimitivesFromConservatives) {

@@ -12,12 +12,13 @@ if [ "${1:-}" = --one ]; then
     seeds=$work/seeds/$harness
     mkdir -p "$seeds" "$work/corpus/$harness" "$work/crashes"
     case $harness in
-        input) find "$root/examples" "$root/tutorials" -name '*.toml' -exec cp {} "$seeds" \; ;;
+        input) find "$root/examples" "$root/tutorials" -name '*.toml' -exec cp {} "$seeds" \;
+               cp "$root"/test/fuzz/corpus/input/* "$seeds" ;;
         expression) cp "$root"/test/fuzz/corpus/expression/* "$seeds" ;;
         gmsh) for f in "$root"/test/data/meshes/*.msh; do
                   case $f in *fluent*) ;; *) cp "$f" "$seeds" ;; esac
               done ;;
-        fluent) cp "$root"/test/data/meshes/*fluent*.msh "$seeds" ;;
+        fluent) cp "$root"/test/data/meshes/*fluent*.msh "$root"/test/fuzz/corpus/fluent/* "$seeds" ;;
         openfoam) for d in "$root"/test/data/meshes/*_foam*; do
                       for f in points faces owner neighbour boundary; do
                           cat "$d/constant/polyMesh/$f"

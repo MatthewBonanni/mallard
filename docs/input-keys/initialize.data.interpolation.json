@@ -1,0 +1,14 @@
+{
+ "default": "\"linear\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/shock_bubble_2d/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "cubic",
+  "linear"
+ ]
+}
