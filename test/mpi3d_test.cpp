@@ -285,7 +285,7 @@ TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
     };
     Solver reference;
     reference.set_distributed(false);
-    reference.init(parse_toml(input("serial")));
+    reference.init(parse_toml(input(serial_name("serial"))));
     reference.run();
     Solver distributed;
     distributed.init(parse_toml(input("ranks")));

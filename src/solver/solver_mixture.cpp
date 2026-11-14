@@ -687,6 +687,7 @@ void Solver::update_primitives_mixture() {
 }
 
 std::vector<rtype> Solver::integrate_species() {
+    const comm::SelfScope scope = communication_scope();
     std::vector<rtype> total(species_names.size());
     for (uint32_t k = 0; k < total.size(); k++) {
         rtype sum = 0.0_r;

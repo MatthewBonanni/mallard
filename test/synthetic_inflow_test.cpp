@@ -341,7 +341,7 @@ TEST(SyntheticInflowTest, FluctuationsRideOnAMeanOfTime) {
 
 TEST(SyntheticInflowTest, TurbulentInletWithAMeanOfTimeRuns) {
     const std::string steady = "u = [\"1.0 + 0.1 * y\",";
-    std::string input = duct_input((scratch_dir() / "mallard_inflow_mean_of_t").string(), duct_constant(), 30);
+    std::string input = duct_input((rank_scratch_dir() / "mallard_inflow_mean_of_t").string(), duct_constant(), 30);
     input.replace(input.find(steady), steady.size(), "u = [\"1.0 + 0.1 * y + 0.2 * sin(20 * t)\",");
     Solver solver;
     solver.set_distributed(false);
@@ -386,7 +386,7 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
-    const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_inflow_restart_test").string();
     Solver straight;
     straight.set_distributed(false);
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));

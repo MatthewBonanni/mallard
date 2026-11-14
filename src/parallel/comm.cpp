@@ -27,6 +27,20 @@ namespace comm {
 
 namespace {
 
+int self_scopes = 0;
+
+} // namespace
+
+SelfScope::SelfScope(const bool on_) : on(on_) {
+    if (on) self_scopes++;
+}
+
+SelfScope::~SelfScope() {
+    if (on) self_scopes--;
+}
+
+namespace {
+
 template <typename T>
 MPI_Datatype mpi_type() {
     if constexpr (std::is_same_v<T, double>) return MPI_DOUBLE;
@@ -63,7 +77,7 @@ void broadcast_chars(std::string & out, const int root) {
     const uint64_t n = out.size();
     for (uint64_t at = 0; at < n; at += detail::mpi_max_count) {
         check(MPI_Bcast(out.data() + at, static_cast<int>(std::min(detail::mpi_max_count, n - at)), MPI_CHAR, root,
-                        MPI_COMM_WORLD),
+                        communicator()),
               "MPI_Bcast");
     }
 }
@@ -73,6 +87,7 @@ void broadcast_chars(std::string & out, const int root) {
 MPI_Comm messages_comm = MPI_COMM_NULL;
 
 MPI_Comm messages() {
+    if (self_scopes > 0) return MPI_COMM_SELF;
     if (messages_comm == MPI_COMM_NULL) check(MPI_Comm_dup(MPI_COMM_WORLD, &messages_comm), "MPI_Comm_dup");
     return messages_comm;
 }
@@ -106,25 +121,25 @@ Session::~Session() {
     if (owns_mpi && !finalized) MPI_Finalize();
 }
 
-MPI_Comm world() { return MPI_COMM_WORLD; }
+MPI_Comm communicator() { return self_scopes > 0 ? MPI_COMM_SELF : MPI_COMM_WORLD; }
 
 int rank() {
     int r = 0;
-    if (started()) MPI_Comm_rank(MPI_COMM_WORLD, &r);
+    if (started()) MPI_Comm_rank(communicator(), &r);
     return r;
 }
 
 int size() {
     int s = 1;
-    if (started()) MPI_Comm_size(MPI_COMM_WORLD, &s);
+    if (started()) MPI_Comm_size(communicator(), &s);
     return s;
 }
 
-void barrier() { check(MPI_Barrier(MPI_COMM_WORLD), "MPI_Barrier"); }
+void barrier() { check(MPI_Barrier(communicator()), "MPI_Barrier"); }
 
 std::string broadcast(const std::string & value) {
     uint64_t n = value.size();
-    check(MPI_Bcast(&n, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD), "MPI_Bcast");
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, 0, communicator()), "MPI_Bcast");
     std::string out = is_root() ? value : std::string(n, '\0');
     broadcast_chars(out, 0);
     return out;
@@ -133,10 +148,10 @@ std::string broadcast(const std::string & value) {
 std::string first_error(const std::string & error) {
     const int n_ranks = size();
     int from = error.empty() ? n_ranks : rank();
-    check(MPI_Allreduce(MPI_IN_PLACE, &from, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD), "MPI_Allreduce");
+    check(MPI_Allreduce(MPI_IN_PLACE, &from, 1, MPI_INT, MPI_MIN, communicator()), "MPI_Allreduce");
     if (from == n_ranks) return "";
     uint64_t n = error.size();
-    check(MPI_Bcast(&n, 1, MPI_UINT64_T, from, MPI_COMM_WORLD), "MPI_Bcast");
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, from, communicator()), "MPI_Bcast");
     std::string out = rank() == from ? error : std::string(n, '\0');
     broadcast_chars(out, from);
     return out;
@@ -146,7 +161,7 @@ std::vector<std::string> allgather(const std::string & value) {
     const size_t p = static_cast<size_t>(size());
     uint64_t n_local = value.size();
     std::vector<uint64_t> counts(p);
-    check(MPI_Allgather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, MPI_COMM_WORLD), "MPI_Allgather");
+    check(MPI_Allgather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, communicator()), "MPI_Allgather");
     const std::vector<uint64_t> offsets = prefix_sum(counts);
     std::string all(offsets[p], '\0');
     detail::alltoallv<char>(value.data(), std::vector<uint64_t>(p, n_local), std::vector<uint64_t>(p, 0), all.data(),
@@ -167,7 +182,7 @@ void abort(int code) {
 template <typename T>
 void allreduce(std::span<T> data, Op op) {
     check(MPI_Allreduce(MPI_IN_PLACE, data.data(), static_cast<int>(data.size()), mpi_type<T>(), mpi_op(op),
-                        MPI_COMM_WORLD),
+                        communicator()),
           "MPI_Allreduce");
 }
 
@@ -201,7 +216,7 @@ std::vector<std::vector<T>> alltoallv(const std::vector<std::vector<T>> & send) 
     if (send.size() != p) throw std::invalid_argument("comm::alltoallv: one list per rank");
     std::vector<uint64_t> send_counts(p), recv_counts(p);
     for (size_t r = 0; r < p; r++) send_counts[r] = send[r].size();
-    check(MPI_Alltoall(send_counts.data(), 1, MPI_UINT64_T, recv_counts.data(), 1, MPI_UINT64_T, MPI_COMM_WORLD),
+    check(MPI_Alltoall(send_counts.data(), 1, MPI_UINT64_T, recv_counts.data(), 1, MPI_UINT64_T, communicator()),
           "MPI_Alltoall");
     const std::vector<uint64_t> send_offsets = prefix_sum(send_counts), recv_offsets = prefix_sum(recv_counts);
     std::vector<T> send_flat(send_offsets[p]), recv_flat(recv_offsets[p]);
@@ -223,7 +238,7 @@ Received<T> exchange(std::vector<std::vector<T>> && send) {
     if (send.size() != p) throw std::invalid_argument("comm::exchange: one list per rank");
     std::vector<uint64_t> send_counts(p), recv_counts(p);
     for (size_t r = 0; r < p; r++) send_counts[r] = send[r].size();
-    check(MPI_Alltoall(send_counts.data(), 1, MPI_UINT64_T, recv_counts.data(), 1, MPI_UINT64_T, MPI_COMM_WORLD),
+    check(MPI_Alltoall(send_counts.data(), 1, MPI_UINT64_T, recv_counts.data(), 1, MPI_UINT64_T, communicator()),
           "MPI_Alltoall");
     const std::vector<uint64_t> send_offsets = prefix_sum(send_counts);
     std::vector<T> send_flat;
@@ -245,7 +260,7 @@ std::vector<T> allgatherv(const std::vector<T> & local) {
     const size_t p = static_cast<size_t>(size());
     uint64_t n_local = local.size();
     std::vector<uint64_t> counts(p);
-    check(MPI_Allgather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, MPI_COMM_WORLD), "MPI_Allgather");
+    check(MPI_Allgather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, communicator()), "MPI_Allgather");
     const std::vector<uint64_t> offsets = prefix_sum(counts);
     std::vector<T> all(offsets[p]);
     detail::alltoallv<T>(local.data(), std::vector<uint64_t>(p, n_local), std::vector<uint64_t>(p, 0), all.data(),
@@ -258,7 +273,7 @@ std::vector<T> gatherv(const std::vector<T> & local) {
     const size_t p = static_cast<size_t>(size());
     uint64_t n_local = local.size();
     std::vector<uint64_t> counts(p, 0), send_counts(p, 0);
-    check(MPI_Gather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, 0, MPI_COMM_WORLD), "MPI_Gather");
+    check(MPI_Gather(&n_local, 1, MPI_UINT64_T, counts.data(), 1, MPI_UINT64_T, 0, communicator()), "MPI_Gather");
     if (!is_root()) counts.assign(p, 0);
     send_counts[0] = n_local;
     const std::vector<uint64_t> offsets = prefix_sum(counts);
@@ -268,6 +283,9 @@ std::vector<T> gatherv(const std::vector<T> & local) {
 }
 
 #else
+
+SelfScope::SelfScope(const bool on_) : on(on_) {}
+SelfScope::~SelfScope() { static_cast<void>(on); }
 
 Session::Session(int &, char **&) {}
 Session::~Session() {}

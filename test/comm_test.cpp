@@ -158,7 +158,7 @@ TEST(CommTest, FileWritesGoInPieces) {
         (std::filesystem::temp_directory_path() / ("mallard_comm_test_" + comm::broadcast(std::to_string(getpid()))))
             .string();
     MPI_File fh;
-    ASSERT_EQ(MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh),
+    ASSERT_EQ(MPI_File_open(comm::communicator(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh),
               MPI_SUCCESS);
     const MPI_Offset keys_at = MPI_Offset(header.size()), values_at = keys_at + MPI_Offset(n_total * sizeof(uint64_t));
     bool ok = MPI_File_set_size(fh, 0) == MPI_SUCCESS;

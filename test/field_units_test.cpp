@@ -573,7 +573,7 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
 TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     // mallard list fields input.toml lists Solver::output_fields(): a writer of all of them writes exactly them
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
-    const std::string dir = (scratch_dir() / "listed_fields").string();
+    const std::string dir = (rank_scratch_dir() / "listed_fields").string();
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ndt = 1.0e-4\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";

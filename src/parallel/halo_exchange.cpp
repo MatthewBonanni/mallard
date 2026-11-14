@@ -109,11 +109,11 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
     requests.clear();
     for (size_t n = 0; n < ranks.size(); n++) {
         comm::irecv(recv_ptr + size_t(recv_offsets[n]) * stride, uint64_t(recv_offsets[n + 1] - recv_offsets[n]) * stride,
-                    type, ranks[n], 0, comm::world(), requests);
+                    type, ranks[n], 0, comm::communicator(), requests);
     }
     for (size_t n = 0; n < ranks.size(); n++) {
         comm::isend(send_ptr + size_t(send_offsets[n]) * stride, uint64_t(send_offsets[n + 1] - send_offsets[n]) * stride,
-                    type, ranks[n], 0, comm::world(), requests);
+                    type, ranks[n], 0, comm::communicator(), requests);
     }
 #else
     (void)U;

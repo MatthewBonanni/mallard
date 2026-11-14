@@ -78,12 +78,8 @@ std::vector<std::array<double, 3>> centroids(const std::string & file) {
     return out;
 }
 
-std::string scratch(const std::string & name) {
-    const std::filesystem::path dir = scratch_dir() / name;
-    if (comm::is_root()) std::filesystem::remove_all(dir);
-    comm::barrier();
-    return (dir / "mesh").string();
-}
+/** @brief The mesh fields prefix of a check, whose undistributed solver writes on every rank. */
+std::string scratch(const std::string & name) { return (rank_scratch_dir() / name / "mesh").string(); }
 
 }  // namespace
 
@@ -357,7 +353,7 @@ TEST(Stencils, WriteDataWritesTheMeshAndStencilFieldsOfTheCheck) {
 }
 
 TEST(Stencils, FileOfADistributedRunMatchesTheSerialOne) {
-    const std::string dir = std::filesystem::path(scratch("mallard_stencils_ranks")).parent_path().string();
+    const std::string dir = (scratch_dir() / "mallard_stencils_ranks").string();
     auto input = [&](const std::string & name) {
         return box("type = \"TENO\"\norder = 3\n", "[output]\nwrite_stencils = \"" + dir + "/" + name + ".h5\"\n");
     };
@@ -365,7 +361,7 @@ TEST(Stencils, FileOfADistributedRunMatchesTheSerialOne) {
     distributed.init(parse_input_string(input("d")));
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_input_string(input("s")));
+    serial.init(parse_input_string(input(serial_name("s"))));
     comm::barrier();
     if (!comm::is_root()) return;
     const auto a = h5_all_datasets(dir + "/d.h5"), b = h5_all_datasets(dir + "/s.h5");
