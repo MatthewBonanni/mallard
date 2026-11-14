@@ -70,6 +70,12 @@ void abandon_capture() {
 }
 #endif
 
+/** @brief Sets gate to whether flag and the enclosing gate parent (null: none) are set, whatever gate is open. */
+void set_gate(uint32_t * gate, const uint32_t * parent, const uint32_t * flag) {
+    const gated::Scope always(nullptr);
+    gated::parallel_for("step_gate", 1, KOKKOS_LAMBDA(const int) { *gate = (!parent || *parent) && *flag; });
+}
+
 } // namespace
 
 std::string Solver::device_steps_unsupported() const {
@@ -250,10 +256,7 @@ void Solver::device_if(const uint32_t * flag, F && body) {
         if (gate_depth >= step_gates.extent(0)) throw std::logic_error("Solver::device_if: nested too deeply");
         const uint32_t * const parent = gated::flag();
         uint32_t * const gate = step_gates.data() + gate_depth;
-        {
-            const gated::Scope always(nullptr);
-            gated::parallel_for("step_gate", 1, KOKKOS_LAMBDA(const int) { *gate = (!parent || *parent) && *flag; });
-        }
+        set_gate(gate, parent, flag);
         const gated::Scope scope(gate);
         gate_depth++;
         body();
