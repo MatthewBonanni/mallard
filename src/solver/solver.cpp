@@ -1856,11 +1856,8 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                                                                       cell_fields());
                 }
                 auto fractions = std::make_shared<region::MovingFractions>(*mesh, region, levels);
-                subset.at = [fractions](double time) {
-                    fractions->update(time);
-                    const auto f = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), fractions->fractions());
-                    return std::vector<double>(f.data(), f.data() + f.extent(0));
-                };
+                subset.update = [fractions](const Kokkos::View<const rtype> & time) { fractions->update(time); };
+                subset.moving_fractions = fractions->fractions();
                 subset.solution = region.solution();
             } else {
                 subset.fractions = regions.fractions(*value, key);
@@ -2087,8 +2084,10 @@ void Solver::copy_host_to_device() {
 }
 
 void Solver::copy_device_to_host() {
+    mirrors_unflushed = chemistry_flushed;
     output_arrays_to_host();
     Kokkos::fence("copy_device_to_host");
+    if (source_terms) source_terms->check_loops();
     finish_output_arrays();
 }
 
@@ -2135,7 +2134,18 @@ void Solver::output_arrays_to_host() {
         copy(h_derived_fields, derived_fields);
     }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) copy(h_teno_sigma, teno->troubled);
-    // What restart files carry besides the cells
+    if (source_terms) {
+        update_cell_fields(state());
+        source_terms->evaluate(state(), output_time(), source_values);
+        copy(h_source_values, source_values);
+    }
+    // What restart files carry besides the cells; step graphs stage outputs at flushed steps only
+    if (recording_step ? defer_chemistry : chemistry_flushed) {
+        copy(h_unflushed, unflushed.flow);
+        copy(h_unflushed_species, unflushed.species);
+        copy(h_unflushed_T_seed, unflushed_T_seed);
+        copy(h_unflushed_chem_h, unflushed_chem_h);
+    }
     allocate_restart_mirrors();
     if (step_controller.enabled()) copy(h_step_control, step_controller.slots());
     if (characteristic_state_set) copy(h_char_state, boundary_data.char_state);
@@ -2186,11 +2196,6 @@ void Solver::finish_output_arrays() {
         }
     }
     statistics.finish_output();
-    // Evaluated at the host's t: outputs of runs with sources are never staged
-    if (source_terms) {
-        update_cell_fields(state());
-        Kokkos::deep_copy(h_source_values, source_terms->evaluate(state(), t));
-    }
 }
 
 void Solver::register_data() {
@@ -2238,8 +2243,11 @@ void Solver::register_data() {
     }
     data.push_back(Data("CFL", h_cfl_local));
     if (source_terms) {
-        h_source_values = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
-            "SOURCE", mesh->n_cells, N_CONSERVATIVE + species_names.size());
+        if (!source_values.is_allocated()) {
+            source_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("SOURCE", mesh->n_cells,
+                                                                        N_CONSERVATIVE + species_names.size());
+            h_source_values = pinned_mirrors(source_values);
+        }
         for (size_t i = 0; i < h_source_values.extent(1); i++) {
             const std::string name = i < N_CONSERVATIVE ? CONSERVATIVE_NAMES[i] : "RHOY_" + species_names[i - N_CONSERVATIVE];
             data.push_back(Data("SOURCE_" + name, Kokkos::subview(h_source_values, Kokkos::ALL(), i)));

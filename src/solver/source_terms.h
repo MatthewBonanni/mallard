@@ -132,8 +132,12 @@ class SourceTerms {
         /** @brief Recompute the domain averages from the solution (a global sum). */
         void update_means(const State & solution);
 
-        /** @brief The total sources per unit volume (cell, [conservatives, species]) of the given state at time t. */
-        Kokkos::View<rtype **, Kokkos::LayoutRight> evaluate(const State & solution, rtype t);
+        /**
+         * @brief The total sources per unit volume (cell, [conservatives, species]) of the given state at the
+         *        device's time time() into out, enqueued without host work (capturable).
+         */
+        void evaluate(const State & solution, const Kokkos::View<rtype> & time,
+                      const Kokkos::View<rtype **, Kokkos::LayoutRight> & out);
 
         /**
          * @brief Throws the error of an expression whose evaluation on any

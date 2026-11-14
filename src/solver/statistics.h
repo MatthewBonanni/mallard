@@ -118,13 +118,15 @@ class PhaseAverage {
 
         /** @brief PHASE_<bin>_<field>, bins zero-padded, bin-major. */
         std::vector<std::string> variables() const;
-        /** @brief What each of variables() averages, for the snapshot blocks. */
+        /** @brief What each of variables() averages, for the snapshot blocks, from the clock stage_output copied. */
         std::vector<std::pair<std::string, snapshot_block::Average>> field_averages() const;
         void register_data(std::vector<Data> & data) const;
-        void copy_device_to_host();
+        /** @brief Enqueues copies of the means, the bins' weights and the clock into pinned memory (capturable). */
+        void stage_output();
         void start(rtype t);
         void set_start(rtype t);
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        /** @brief From the clock and weights stage_output copied. */
         RestartAttributes attributes() const;
         /** @brief The output as the setup banner lists it. */
         OutputSummary summary() const;
@@ -154,7 +156,7 @@ class PhaseAverage {
         };
         /** @brief The clock in device memory, for a step graph's due(). */
         Kokkos::View<const Clock> device_clock() const { return clock; }
-        /** @brief Host copy (see copy_device_to_host): (cell, bin * n_fields + field). */
+        /** @brief Host copy (see stage_output): (cell, bin * n_fields + field). */
         const auto & host_means() const { return h_mean; }
 
     private:
@@ -180,6 +182,9 @@ class PhaseAverage {
 
         Kokkos::View<Clock> clock;
         Kokkos::View<double *> d_weight;  // per bin
+        PinnedMirrors pinned;
+        Kokkos::View<Clock>::host_mirror_type h_clock;      // copied by stage_output
+        Kokkos::View<double *>::host_mirror_type h_weight;  // copied by stage_output
         /** @brief The device's clock and weights into the host's copies. */
         void pull() const;
         void push();
@@ -304,9 +309,12 @@ class Statistics {
         void register_data(std::vector<Data> & data) const;
         /** @brief stage_output, then finish_output. */
         void copy_device_to_host();
-        /** @brief Enqueues the copies of the means, covariances, batches and their clocks into pinned memory (capturable). */
+        /**
+         * @brief Enqueues the copies of the means, covariances, batches, averaged spectra, phase averages and their
+         *        clocks into pinned memory (capturable).
+         */
         void stage_output();
-        /** @brief From the copies stage_output made: the intervals of the batches; the phase averages' host copies. */
+        /** @brief From the copies stage_output made: the intervals of the batches and the averaged spectra. */
         void finish_output();
         /** @brief The snapshot blocks' averages, from the clock stage_output copied. */
         void set_snapshot_averages() const;

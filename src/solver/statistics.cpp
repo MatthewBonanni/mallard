@@ -450,6 +450,8 @@ void Statistics::copy_device_to_host() {
 void Statistics::stage_output() {
     for (auto & c : conditional) c.stage_output();
     if (clock.is_allocated()) copy_to_pinned(pinned_mirrors, h_clock, clock);
+    if (spectra.enabled()) spectra.stage_output();
+    phase.stage_output();
     if (!means_enabled()) return;
     copy_to_pinned(pinned_mirrors, h_mean, mean);
     copy_to_pinned(pinned_mirrors, h_cov, cov);
@@ -468,7 +470,7 @@ void Statistics::set_snapshot_averages() const {
 }
 
 void Statistics::finish_output() {
-    phase.copy_device_to_host();
+    if (spectra.enabled()) spectra.finish_output();
     if (!means_enabled() || !batches_enabled()) return;
     const uint64_t n_batches = h_batch_clock().n_closed;
     const double t = n_batches >= 2 ? time_series::student_t(confidence, static_cast<uint32_t>(n_batches - 1)) : 0.0;
@@ -671,10 +673,12 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
         signal = Kokkos::View<double *>("phase_signal", 1);
     }
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("phase_mean", n_cells, size_t(bins) * fields.size());
-    h_mean = Kokkos::create_mirror_view(mean);
+    h_mean = pinned(mean);
     weight.assign(bins, 0.0);
     clock = Kokkos::View<Clock>("phase_clock");
     d_weight = Kokkos::View<double *>("phase_weight", bins);
+    h_clock = pinned(clock);
+    h_weight = pinned(d_weight);
     push();
 }
 
@@ -800,9 +804,9 @@ std::vector<std::string> PhaseAverage::variables() const {
 
 std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
     const std::vector<std::string> names = variables();
-    pull();
+    const Clock k = h_clock();
     double total = 0.0;
-    for (const double w : weight) total += w;
+    for (uint32_t b = 0; b < bins; b++) total += h_weight(b);
     std::vector<std::pair<std::string, snapshot_block::Average>> out;
     for (uint32_t b = 0; b < bins; b++) {
         for (size_t f = 0; f < fields.size(); f++) {
@@ -810,15 +814,15 @@ std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field
             a.kind = "phase";
             a.of = {fields[f]};
             a.weighting = "time";
-            if (n_samples > 0) {
-                a.start = double(t_last) - total;
-                a.end = double(t_last);
+            if (k.n_samples > 0) {
+                a.start = double(k.t_last) - total;
+                a.end = double(k.t_last);
             }
-            a.samples = static_cast<int64_t>(n_samples);
+            a.samples = static_cast<int64_t>(k.n_samples);
             a.interval = static_cast<int64_t>(interval);
             a.bin = b;
             a.bins = bins;
-            a.bin_weight = b < weight.size() ? weight[b] : 0.0;
+            a.bin_weight = h_weight(b);
             if (trigger_variable.empty()) {
                 a.period = period;
             } else {
@@ -835,8 +839,11 @@ void PhaseAverage::register_data(std::vector<Data> & data) const {
     for (size_t i = 0; i < names.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
 }
 
-void PhaseAverage::copy_device_to_host() {
-    if (enabled()) Kokkos::deep_copy(h_mean, mean);
+void PhaseAverage::stage_output() {
+    if (!enabled()) return;
+    copy_to_pinned(pinned, h_clock, clock);
+    copy_to_pinned(pinned, h_weight, d_weight);
+    copy_to_pinned(pinned, h_mean, mean);
 }
 
 void PhaseAverage::restore(const RestartData & restart, const std::string & file, rtype t, bool reset) {
@@ -884,16 +891,16 @@ void PhaseAverage::restore(const RestartData & restart, const std::string & file
 
 RestartAttributes PhaseAverage::attributes() const {
     if (!enabled()) return {};
-    pull();
-    RestartAttributes a = {{PHASE_T_LAST, static_cast<double>(t_last)}, {PHASE_SAMPLES, static_cast<double>(n_samples)}};
-    for (uint32_t b = 0; b < bins; b++) a.emplace_back(phase_weight_name(b), weight[b]);
+    const Clock k = h_clock();
+    RestartAttributes a = {{PHASE_T_LAST, static_cast<double>(k.t_last)}, {PHASE_SAMPLES, static_cast<double>(k.n_samples)}};
+    for (uint32_t b = 0; b < bins; b++) a.emplace_back(phase_weight_name(b), h_weight(b));
     if (trigger_cell != NO_TRIGGER) {
-        a.emplace_back(std::string(PHASE_SIGNAL) + "_HAVE", have_signal ? 1.0 : 0.0);
-        a.emplace_back(std::string(PHASE_SIGNAL) + "_T", t_signal);
-        a.emplace_back(std::string(PHASE_SIGNAL) + "_VALUE", v_signal);
-        a.emplace_back(std::string(PHASE_CROSSINGS) + "_COUNT", static_cast<double>(n_crossings));
-        a.emplace_back(std::string(PHASE_CROSSINGS) + "_PREVIOUS", crossing[0]);
-        a.emplace_back(std::string(PHASE_CROSSINGS) + "_LAST", crossing[1]);
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_HAVE", k.have_signal ? 1.0 : 0.0);
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_T", k.t_signal);
+        a.emplace_back(std::string(PHASE_SIGNAL) + "_VALUE", k.v_signal);
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_COUNT", static_cast<double>(k.n_crossings));
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_PREVIOUS", k.crossing[0]);
+        a.emplace_back(std::string(PHASE_CROSSINGS) + "_LAST", k.crossing[1]);
     }
     return a;
 }
