@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
+    view_entries_test.cpp
     kexpr_test.cpp
     region_test.cpp
     region_mesh_test.cpp
@@ -29,6 +30,7 @@ set(MALLARD_TEST_SOURCES
     mesh_block_test.cpp
     mesh_import_test.cpp
     distributed_mesh_test.cpp
+    structured_blocks_test.cpp
     statistics_test.cpp
     conditional_statistics_test.cpp
     probes_test.cpp

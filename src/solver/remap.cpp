@@ -62,53 +62,53 @@ double binomial(uint32_t n, uint32_t k) {
     return b;
 }
 
-/** @brief Index of each exponent triple in a monomial list, by a * (p+1)^2 + b * (p+1) + c. */
-std::vector<uint32_t> exponent_index(const std::vector<std::array<uint8_t, 3>> & e, uint8_t p) {
-    const uint32_t s = uint32_t(p) + 1;
-    std::vector<uint32_t> index(s * s * s, UINT32_MAX);
-    for (uint32_t l = 0; l < e.size(); l++) index[(e[l][0] * s + e[l][1]) * s + e[l][2]] = l;
-    return index;
-}
-
 /**
- * @brief Least squares by Householder QR of the m x n matrix a (column-major,
- *        m >= n); rhs[k] holds column k of the right-hand sides (length m).
- *        Returns false if a column is dependent on the others (relative to tol).
+ * @brief Least squares by Householder QR of the m x n matrix in the first n
+ *        columns of a (row-major, m x (n + n_rhs), m >= n), the right-hand
+ *        sides in the last n_rhs columns, which end with the solutions in
+ *        their first n rows. Each reflection updates a whole row at a time, so
+ *        that its dot products run across the columns at once. Returns false
+ *        if a column is dependent on the others (relative to tol).
  */
-bool least_squares(std::vector<double> & a, uint32_t m, uint32_t n, std::vector<std::vector<double>> & rhs,
-                   double tol) {
-    double max_norm = 0.0;
-    for (uint32_t j = 0; j < n; j++) {
-        double s = 0.0;
-        for (uint32_t i = 0; i < m; i++) s += a[j * m + i] * a[j * m + i];
-        max_norm = std::max(max_norm, std::sqrt(s));
+bool least_squares(std::vector<double> & a, uint32_t m, uint32_t n, uint32_t n_rhs, double tol) {
+    const uint32_t cols = n + n_rhs;
+    auto at = [&](uint32_t i, uint32_t j) -> double & { return a[size_t(i) * cols + j]; };
+    std::vector<double> norms(n, 0.0);
+    for (uint32_t i = 0; i < m; i++) {
+        for (uint32_t j = 0; j < n; j++) norms[j] += at(i, j) * at(i, j);
     }
-    std::vector<double> diag(n);
+    double max_norm = 0.0;
+    for (uint32_t j = 0; j < n; j++) max_norm = std::max(max_norm, std::sqrt(norms[j]));
+    std::vector<double> diag(n), s(cols);
     for (uint32_t j = 0; j < n; j++) {
         double norm = 0.0;
-        for (uint32_t i = j; i < m; i++) norm += a[j * m + i] * a[j * m + i];
+        for (uint32_t i = j; i < m; i++) norm += at(i, j) * at(i, j);
         norm = std::sqrt(norm);
         if (!(norm > tol * max_norm)) return false;
-        const double alpha = a[j * m + j] > 0.0 ? -norm : norm;
+        const double alpha = at(j, j) > 0.0 ? -norm : norm;
         // v = x - alpha e1, stored in place of the column
-        a[j * m + j] -= alpha;
+        at(j, j) -= alpha;
         double vv = 0.0;
-        for (uint32_t i = j; i < m; i++) vv += a[j * m + i] * a[j * m + i];
-        auto reflect = [&](double * x) {
-            double s = 0.0;
-            for (uint32_t i = j; i < m; i++) s += a[j * m + i] * x[i];
-            s = 2.0 * s / vv;
-            for (uint32_t i = j; i < m; i++) x[i] -= s * a[j * m + i];
-        };
-        for (uint32_t k = j + 1; k < n; k++) reflect(&a[k * m]);
-        for (auto & b : rhs) reflect(b.data());
+        for (uint32_t i = j; i < m; i++) vv += at(i, j) * at(i, j);
+        std::fill(s.begin() + j + 1, s.end(), 0.0);
+        for (uint32_t i = j; i < m; i++) {
+            const double v = at(i, j);
+            const double * row = &at(i, 0);
+            for (uint32_t k = j + 1; k < cols; k++) s[k] += v * row[k];
+        }
+        for (uint32_t k = j + 1; k < cols; k++) s[k] = 2.0 * s[k] / vv;
+        for (uint32_t i = j; i < m; i++) {
+            const double v = at(i, j);
+            double * row = &at(i, 0);
+            for (uint32_t k = j + 1; k < cols; k++) row[k] -= s[k] * v;
+        }
         diag[j] = alpha;
     }
-    for (auto & b : rhs) {
+    for (uint32_t r = n; r < cols; r++) {
         for (uint32_t jj = n; jj-- > 0;) {
-            double s = b[jj];
-            for (uint32_t k = jj + 1; k < n; k++) s -= a[k * m + jj] * b[k];
-            b[jj] = s / diag[jj];
+            double b = at(jj, r);
+            for (uint32_t k = jj + 1; k < n; k++) b -= at(jj, k) * at(k, r);
+            at(jj, r) = b / diag[jj];
         }
     }
     return true;
@@ -127,9 +127,9 @@ std::shared_ptr<Mesh> source_mesh(const Input & input, uint8_t degree) {
     return setup.build_local_mesh(halo_layers(degree), dist);
 }
 
-Source::Source(std::shared_ptr<const Mesh> mesh_in, const std::vector<std::vector<double>> & values,
-               const std::vector<int> & groups, const Options & options_in)
-    : mesh(std::move(mesh_in)), options(options_in) {
+Source::Source(std::shared_ptr<const Mesh> mesh_in, const std::vector<std::vector<double>> & values_in,
+               const std::vector<int> & groups_in, const Options & options_in)
+    : mesh(std::move(mesh_in)), options(options_in), values(values_in), groups(groups_in) {
     if (options.degree > MAX_DEGREE) {
         throw InputError("initialize.degree must be at most " + std::to_string(MAX_DEGREE) + ".");
     }
@@ -178,18 +178,9 @@ Source::Source(std::shared_ptr<const Mesh> mesh_in, const std::vector<std::vecto
         if (c < n_owned) regions[c] = r;
     }
 
+    fitted.assign(n_owned, 0);
     degree.assign(n_owned, options.degree);
-    mean.resize(size_t(n_owned) * n_vars);
     coefficients.assign(size_t(n_owned) * n_vars * n_max, 0.0);
-    for (uint32_t c = 0; c < n_owned; c++) {
-        for (uint32_t v = 0; v < n_vars; v++) mean[size_t(c) * n_vars + v] = values[v][c];
-    }
-    Kokkos::parallel_for("remap_fit", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_owned),
-                         [&](const uint32_t c) {
-                             fit(c, values);
-                             if (options.limit) limit(c, values, groups);
-                         });
-    for (uint32_t c = 0; c < n_owned; c++) n_reduced += degree[c] < options.degree;
 
     std::vector<Box> boxes(n_owned);
     for (uint32_t c = 0; c < n_owned; c++) {
@@ -213,10 +204,26 @@ void Source::monomials(uint32_t c, const Point & x, double * phi) const {
     }
 }
 
-void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
+void Source::fit(const std::vector<uint8_t> & need) const {
+    std::vector<uint32_t> cells;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        if (need[c] && !fitted[c]) cells.push_back(c);
+    }
+    Kokkos::parallel_for("remap_fit", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, cells.size()),
+                         [&](const size_t i) {
+                             fit(cells[i]);
+                             if (options.limit) limit(cells[i]);
+                         });
+    for (uint32_t c : cells) {
+        fitted[c] = 1;
+        n_reduced += degree[c] < options.degree;
+    }
+}
+
+void Source::fit(uint32_t c) const {
     const Mesh & m = *mesh;
     const bool shifted = m.h_cells_of_cell_shift.extent(0) > 0;
-    // Rings of vertex neighbors, each cell with its translation into c's frame
+    // Rings of vertex neighbors, gathered as the stencils need them, each cell with its translation into c's frame
     std::unordered_map<uint32_t, Point> offset{{c, Point{}}};
     struct Member {
         uint64_t gid;
@@ -225,40 +232,44 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
     };
     std::vector<Member> all;
     std::vector<uint32_t> ring{c}, next;
-    const int rings = halo_layers(options.degree);
-    for (int r = 1; r <= rings; r++) {
-        next.clear();
-        for (uint32_t a : ring) {
-            for (uint32_t k = m.h_offsets_cells_of_cell(a); k < m.h_offsets_cells_of_cell(a + 1); k++) {
-                const uint32_t b = m.h_cells_of_cell(k);
-                if (offset.count(b)) continue;
-                Point o = offset[a];
-                if (shifted) {
-                    const uint8_t row = m.h_cells_of_cell_shift(k);
-                    for (size_t d = 0; d < N_DIM; d++) o[d] += double(m.h_shifts(row, d));
+    int gathered = 0;
+    auto gather = [&](const int r) {
+        for (; gathered < r; gathered++) {
+            next.clear();
+            for (uint32_t a : ring) {
+                for (uint32_t k = m.h_offsets_cells_of_cell(a); k < m.h_offsets_cells_of_cell(a + 1); k++) {
+                    const uint32_t b = m.h_cells_of_cell(k);
+                    if (offset.count(b)) continue;
+                    Point o = offset[a];
+                    if (shifted) {
+                        const uint8_t row = m.h_cells_of_cell_shift(k);
+                        for (size_t d = 0; d < N_DIM; d++) o[d] += double(m.h_shifts(row, d));
+                    }
+                    offset.emplace(b, o);
+                    next.push_back(b);
+                    all.push_back({m.h_global_cell(b), b, gathered + 1});
                 }
-                offset.emplace(b, o);
-                next.push_back(b);
-                all.push_back({m.h_global_cell(b), b, r});
             }
+            std::swap(ring, next);
         }
-        std::swap(ring, next);
-    }
-    std::sort(all.begin(), all.end(), [](const Member & x, const Member & y) { return x.gid < y.gid; });
+    };
+    const int rings = halo_layers(options.degree);
     const uint32_t s = uint32_t(options.degree) + 1;
-    const std::vector<uint32_t> index = exponent_index(exponents, options.degree);
     const double * Mc = &moments[size_t(c) * n_max];
-    std::vector<uint32_t> stencil;
+    std::vector<Member> stencil;
     double binomials[MAX_DEGREE + 1][MAX_DEGREE + 1];
     for (uint32_t a = 0; a <= options.degree; a++) {
         for (uint32_t b = 0; b <= a; b++) binomials[a][b] = binomial(a, b);
     }
+    // Means over a cell of ((x - x_c) / h_c)^a for |a| <= p, by (a0 * s + a1) * s + a2
+    double shift[2][(MAX_DEGREE + 1) * (MAX_DEGREE + 1) * (MAX_DEGREE + 1)];
     // The fewest rings with twice as many cells as unknowns, more while the
     // fit is rank deficient, then lower degrees
     for (uint8_t p = options.degree; p > 0; p--) {
         const uint32_t n = n_monomials(p) - 1;
         int first = rings;
         for (int r = 1; r <= rings; r++) {
+            gather(r);
             const auto count = std::count_if(all.begin(), all.end(), [&](const Member & x) { return x.ring <= r; });
             if (size_t(count) >= 3 * size_t(n) / 2) {
                 first = r;
@@ -266,16 +277,18 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
             }
         }
         for (int r = first; r <= rings; r++) {
+            gather(r);
             stencil.clear();
             for (const Member & x : all) {
-                if (x.ring <= r) stencil.push_back(x.cell);
+                if (x.ring <= r) stencil.push_back(x);
             }
+            std::sort(stencil.begin(), stencil.end(), [](const Member & x, const Member & y) { return x.gid < y.gid; });
             const uint32_t rows = static_cast<uint32_t>(stencil.size());
             if (rows < n) continue;
-            std::vector<double> a(size_t(rows) * n);
-            std::vector<std::vector<double>> rhs(n_vars, std::vector<double>(rows));
+            const uint32_t cols = n + n_vars;
+            std::vector<double> a(size_t(rows) * cols);
             for (uint32_t i = 0; i < rows; i++) {
-                const uint32_t j = stencil[i];
+                const uint32_t j = stencil[i].cell;
                 const Point & o = offset[j];
                 double delta[3] = {0.0, 0.0, 0.0};
                 double dist = 0.0;
@@ -287,33 +300,43 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
                 const double rho = size[j] / size[c];
                 const double * Mj = &moments[size_t(j) * n_max];
                 double rho_pow[MAX_DEGREE + 1], delta_pow[3][MAX_DEGREE + 1];
-                for (uint32_t k = 0; k <= p; k++) {
-                    rho_pow[k] = std::pow(rho, double(k));
-                    for (size_t d = 0; d < 3; d++) delta_pow[d][k] = std::pow(delta[d], double(k));
+                rho_pow[0] = 1.0;
+                for (size_t d = 0; d < 3; d++) delta_pow[d][0] = 1.0;
+                for (uint32_t k = 1; k <= p; k++) {
+                    rho_pow[k] = rho_pow[k - 1] * rho;
+                    for (size_t d = 0; d < 3; d++) delta_pow[d][k] = delta_pow[d][k - 1] * delta[d];
                 }
-                for (uint32_t l = 1; l <= n; l++) {
-                    const auto & al = exponents[l];
-                    // Mean over j of ((x - x_c) / h_c)^al, from j's own moments
-                    double sum = 0.0;
-                    for (uint32_t b0 = 0; b0 <= al[0]; b0++) {
-                        for (uint32_t b1 = 0; b1 <= al[1]; b1++) {
-                            for (uint32_t b2 = 0; b2 <= al[2]; b2++) {
-                                const uint32_t beta = index[(b0 * s + b1) * s + b2];
-                                sum += binomials[al[0]][b0] * binomials[al[1]][b1] * binomials[al[2]][b2] *
-                                       rho_pow[b0 + b1 + b2] * delta_pow[0][al[0] - b0] * delta_pow[1][al[1] - b1] *
-                                       delta_pow[2][al[2] - b2] * Mj[beta];
-                            }
+                // ((x - x_c) / h_c)^a = prod_d (delta_d + rho (x - x_j)_d / h_j)^a_d, expanded one direction at a time
+                for (uint32_t l = 0; l < n_monomials(p); l++) {
+                    const auto & e = exponents[l];
+                    shift[0][(e[0] * s + e[1]) * s + e[2]] = rho_pow[e[0] + e[1] + e[2]] * Mj[l];
+                }
+                for (size_t d = 0; d < N_DIM; d++) {
+                    const double * in = shift[d % 2];
+                    double * out = shift[(d + 1) % 2];
+                    for (uint32_t l = 0; l < n_monomials(p); l++) {
+                        const auto & e = exponents[l];
+                        std::array<uint32_t, 3> b = {e[0], e[1], e[2]};
+                        double sum = 0.0;
+                        for (b[d] = 0; b[d] <= e[d]; b[d]++) {
+                            sum += binomials[e[d]][b[d]] * delta_pow[d][e[d] - b[d]] * in[(b[0] * s + b[1]) * s + b[2]];
                         }
+                        out[(e[0] * s + e[1]) * s + e[2]] = sum;
                     }
-                    a[size_t(l - 1) * rows + i] = w * (sum - Mc[l]);
                 }
-                for (uint32_t v = 0; v < n_vars; v++) rhs[v][i] = w * (values[v][j] - values[v][c]);
+                const double * mean_j = shift[N_DIM % 2];
+                double * row = &a[size_t(i) * cols];
+                for (uint32_t l = 1; l <= n; l++) {
+                    const auto & e = exponents[l];
+                    row[l - 1] = w * (mean_j[(e[0] * s + e[1]) * s + e[2]] - Mc[l]);
+                }
+                for (uint32_t v = 0; v < n_vars; v++) row[n + v] = w * (values[v][j] - values[v][c]);
             }
-            if (!least_squares(a, rows, n, rhs, 1e-8)) continue;
+            if (!least_squares(a, rows, n, n_vars, 1e-8)) continue;
             degree[c] = p;
             for (uint32_t v = 0; v < n_vars; v++) {
                 double * coef = &coefficients[(size_t(c) * n_vars + v) * n_max];
-                for (uint32_t l = 1; l <= n; l++) coef[l] = rhs[v][l - 1];
+                for (uint32_t l = 1; l <= n; l++) coef[l] = a[size_t(l - 1) * cols + n + v];
             }
             return;
         }
@@ -321,7 +344,7 @@ void Source::fit(uint32_t c, const std::vector<std::vector<double>> & values) {
     degree[c] = 0;
 }
 
-void Source::limit(uint32_t c, const std::vector<std::vector<double>> & values, const std::vector<int> & groups) {
+void Source::limit(uint32_t c) const {
     if (degree[c] == 0) return;
     const Mesh & m = *mesh;
     std::vector<double> lo(n_vars), hi(n_vars);
@@ -369,21 +392,12 @@ void Source::limit(uint32_t c, const std::vector<std::vector<double>> & values, 
     if (limited) Kokkos::atomic_inc(&n_limited);
 }
 
-double Source::evaluate(uint32_t c, uint32_t v, const Point & x) const {
-    std::vector<double> phi(n_max);
-    monomials(c, x, phi.data());
-    const double * coef = &coefficients[(size_t(c) * n_vars + v) * n_max];
-    const double * Mc = &moments[size_t(c) * n_max];
-    double u = mean[size_t(c) * n_vars + v];
-    for (uint32_t l = 1; l < n_max; l++) u += coef[l] * (phi[l] - Mc[l]);
-    return u;
-}
-
 void Source::integrate(uint32_t c, const std::vector<Simplex> & simplices, double * out) const {
     const overlap::Rule & rule = overlap::simplex_rule(std::max<uint32_t>(degree[c] + (options.axisymmetric ? 1u : 0u), 1u));
     std::vector<double> phi(n_max), m(n_max, 0.0);
     for (const auto & s : simplices) {
         const double vol = overlap::volume(s);
+        if (vol == 0.0) continue;
         for (size_t k = 0; k < rule.weights.size(); k++) {
             const Point x = overlap::map(s, rule.points[k]);
             monomials(c, x, phi.data());
@@ -395,7 +409,7 @@ void Source::integrate(uint32_t c, const std::vector<Simplex> & simplices, doubl
     out[0] = m[0];
     for (uint32_t v = 0; v < n_vars; v++) {
         const double * coef = &coefficients[(size_t(c) * n_vars + v) * n_max];
-        double sum = mean[size_t(c) * n_vars + v] * m[0];
+        double sum = values[v][c] * m[0];
         for (uint32_t l = 1; l < n_max; l++) sum += coef[l] * (m[l] - Mc[l] * m[0]);
         out[1 + v] = sum;
     }
@@ -477,31 +491,68 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     }
     const size_t R = 3 + n_vars;
     std::vector<std::vector<double>> results(requests.size());
+    auto target_region = [&](const size_t q, Box & box) {
+        const double * p = received.data.data() + requests[q].at;
+        std::vector<Point> nodes(static_cast<size_t>(p[1]));
+        for (size_t k = 0; k < nodes.size(); k++) {
+            for (size_t d = 0; d < N_DIM; d++) nodes[k][d] = p[2 + k * N_DIM + d];
+            box.add(nodes[k].data());
+        }
+        return overlap::region(nodes);
+    };
+    auto add = [&](const size_t q, const uint32_t c, const std::vector<double> & integrals) {
+        auto & out = results[q];
+        out.push_back(received.data[requests[q].at]);
+        out.push_back(double(mesh->h_global_cell(c)));
+        out.insert(out.end(), integrals.begin(), integrals.end());
+    };
+    // Source cells wholly inside a target cell give their own measure and averages, which their polynomials
+    // integrate to by construction; only the cells a target cuts need theirs
+    std::vector<std::vector<uint32_t>> cut(requests.size());
     Kokkos::parallel_for("remap_intersect",
                          Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, requests.size()),
                          [&](const size_t q) {
-                             const double * p = received.data.data() + requests[q].at;
-                             std::vector<Point> nodes(static_cast<size_t>(p[1]));
                              Box box;
-                             for (size_t k = 0; k < nodes.size(); k++) {
-                                 for (size_t d = 0; d < N_DIM; d++) nodes[k][d] = p[2 + k * N_DIM + d];
-                                 box.add(nodes[k].data());
-                             }
-                             const overlap::Region target_region = overlap::region(nodes);
+                             const overlap::Region region = target_region(q, box);
                              std::vector<uint32_t> candidates;
                              tree.overlapping(box, candidates, true);
                              std::vector<Simplex> pieces;
-                             std::vector<double> values(1 + n_vars);
+                             std::vector<double> integrals(1 + n_vars);
                              for (uint32_t c : candidates) {
                                  pieces.clear();
-                                 overlap::intersect(target_region.simplices, regions[c], pieces);
-                                 if (pieces.empty()) continue;
-                                 integrate(c, pieces, values.data());
-                                 if (!(values[0] > 0.0)) continue;
-                                 auto & out = results[q];
-                                 out.push_back(p[0]);
-                                 out.push_back(double(mesh->h_global_cell(c)));
-                                 out.insert(out.end(), values.begin(), values.end());
+                                 overlap::intersect(region.simplices, regions[c], pieces);
+                                 double volume = 0.0;
+                                 for (const auto & piece : pieces) volume += overlap::volume(piece);
+                                 if (!(volume > 0.0)) continue;
+                                 if (std::abs(volume - regions[c].volume) > 1e-12 * regions[c].volume) {
+                                     cut[q].push_back(c);
+                                     continue;
+                                 }
+                                 integrals[0] = measure[c];
+                                 for (uint32_t v = 0; v < n_vars; v++) {
+                                     integrals[1 + v] = values[v][c] * measure[c];
+                                 }
+                                 add(q, c, integrals);
+                             }
+                         });
+    std::vector<uint8_t> need(n_owned, 0);
+    for (const auto & cells : cut) {
+        for (uint32_t c : cells) need[c] = 1;
+    }
+    fit(need);
+    Kokkos::parallel_for("remap_integrate",
+                         Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, requests.size()),
+                         [&](const size_t q) {
+                             if (cut[q].empty()) return;
+                             Box box;
+                             const overlap::Region region = target_region(q, box);
+                             std::vector<Simplex> pieces;
+                             std::vector<double> integrals(1 + n_vars);
+                             for (uint32_t c : cut[q]) {
+                                 pieces.clear();
+                                 overlap::intersect(region.simplices, regions[c], pieces);
+                                 integrate(c, pieces, integrals.data());
+                                 if (integrals[0] > 0.0) add(q, c, integrals);
                              }
                          });
     std::vector<std::vector<double>> reply(static_cast<size_t>(n_ranks));
@@ -557,7 +608,7 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
             }, d2);
             best.push_back(d2);
             best.push_back(c == UINT32_MAX ? std::numeric_limits<double>::max() : double(mesh->h_global_cell(c)));
-            for (uint32_t v = 0; v < n_vars; v++) best.push_back(c == UINT32_MAX ? 0.0 : mean[size_t(c) * n_vars + v]);
+            for (uint32_t v = 0; v < n_vars; v++) best.push_back(c == UINT32_MAX ? 0.0 : values[v][c]);
         }
         const std::vector<double> all_best = comm::allgatherv(best);
         const size_t W = 2 + n_vars, per_rank = n_lost * W;
@@ -586,8 +637,8 @@ std::vector<std::vector<double>> Source::to(const Mesh & target, uint32_t n, Rep
     std::vector<double> totals(3 * size_t(n_vars) + 1, 0.0);
     for (uint32_t c = 0; c < n_owned; c++) {
         for (uint32_t v = 0; v < n_vars; v++) {
-            totals[v] += mean[size_t(c) * n_vars + v] * measure[c];
-            totals[2 * size_t(n_vars) + 1 + v] += std::abs(mean[size_t(c) * n_vars + v]) * measure[c];
+            totals[v] += values[v][c] * measure[c];
+            totals[2 * size_t(n_vars) + 1 + v] += std::abs(values[v][c]) * measure[c];
         }
     }
     for (uint32_t t = 0; t < n_counted; t++) {

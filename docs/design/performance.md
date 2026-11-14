@@ -454,9 +454,23 @@ before 12.4, or a failed capture of NCCL operations under one, tried on every ra
 launch one step at a time with the IF bodies always run.
 
 Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host), and runs with boundary conditions of `t` or fused chemistry at every progress row (the rows check the
-expressions' errors on the host, or follow the half step the host completes). Outputs stop the device at
-their steps.
+the host).
+
+Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
+`DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
+step the device goes on from and advances their clocks, and the step's target time (the next output time, as
+`next_target_time` has it) follows them. Under an IF node on that decision the graph does `write_data`'s
+device work at the device's `t` (the primitives, the transport, the heat release, the eddy viscosity, the
+gradients and derived fields) and copies every array the files read, with the statistics' clocks, the step
+controller's slots, the characteristic faces' state and the triggers' states, into the host's mirrors. The
+mirrors are pinned (never the device's own arrays, also off GPUs), so the copies are kernels, and the host
+writes the files from them as it takes the record, after the step's probes and before its progress row, as
+`after_step` orders them. One set of mirrors serves every output: each rank posts the number of staged outputs
+it has written in the step's time-step reduction, whose minimum the device compares with the number it
+staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
+`[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
+spectra, phase averages (whose files and restart arrays read the device) stop the
+device at their steps, as do all outputs of builds without conditional nodes.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -469,11 +483,9 @@ monitor (the step is accepted, the device goes on, and the step is a multiple of
 each monitor's reduction sits under an IF node on its flag and is reduced over the ranks on the device
 (NCCL in NCCL builds), then copied into a pinned array per record slot with a bit in the record. The host
 writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
-monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
-kinetic-energy budget or fused chemistry stay on the host.
+monitors itself, with the same device reduction, so rows match at any depth.
 
-The statistics sample in the graph too (means, spectra, phase averages and conditional statistics), unless
-chemistry is fused. Each part is due by its own interval and
+The statistics sample in the graph too (means, spectra, phase averages and conditional statistics). Each part is due by its own interval and
 `t_start`, which its clock in device memory holds. The means' clock (weight, last sample time, `t_start`, sample count) lives
 in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
 (`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
@@ -493,6 +505,17 @@ derived fields the due probes read are updated (the cell states, transport and g
 array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
+
+With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
+host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
+of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
+flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
+last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
+audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code
+on the same inputs, so the samples are the host-flushed ones bit for bit, and since the kept buffers include
+the integrator's counts and costs, a flush leaves no trace in the steps after it: a step the device flushed
+for and the host then takes (a trigger fires) is flushed again by the host from the same state. A failed
+flush stops the device and the host's own flush reports it.
 
 ### 11. Read-only loads (#641, not kept)
 
@@ -580,7 +603,51 @@ Apple M4 Pro, 2 Threads, TENO5, `numerics` setup phase, the better of 2 alternat
 The 3D moments (5.6 s for 64³, the same before and after), the QR and the search are left: their
 operations are already in order, and changing their order would change the tables.
 
-### 14. Working set beyond the TENO tables (#552)
+### 14. TENO table memory (#431)
+
+Bytes per cell of the TENO tables (the "reconstruction tables" row of `mallard check --memory a100-80`, CPU build,
+periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the cells per A100-80GB that
+`mallard check` predicts:
+
+| case | before | compact stencil entries | cells per A100-80GB before / after |
+|---|---|---|---|
+| TENO3, hexahedra | 10.3 kB | 9.77 kB | 5.64M / 5.85M |
+| TENO4, hexahedra | 18.1 kB | 17.4 kB | 3.58M / 3.69M |
+| TENO5, hexahedra | 32.0 kB | 31.3 kB | 2.08M / 2.12M |
+| TENO6, hexahedra | 65.1 kB | 64.2 kB | 1.10M / 1.12M |
+| TENO3, tetrahedra | 8.52 kB | 8.10 kB | 6.46M / 6.69M |
+| TENO4, tetrahedra | 14.4 kB | 13.9 kB | 4.31M / 4.43M |
+| TENO5, tetrahedra | 44.0 kB | 43.1 kB | 1.63M / 1.66M |
+| TENO6, tetrahedra | 72.0 kB | 71.1 kB | 1.02M / 1.04M |
+
+- **Compact stencil entries.** Each stencil slot held its cell and its mirror face (or -1), 8 bytes. Mirror
+  images are rare (cells next to straight walls and symmetry planes), so a slot now holds one word: the cell, or,
+  for an image, its index in a per-rank list of (cell, face) pairs. Results are bitwise unchanged.
+- **Shared tables.** The pseudo-inverses are 90% of the tables, and on a lattice
+  every cell's differ only in the order of their equidistant entries and at round-off (5e-14), so no two are
+  bitwise equal. Ranked by their own columns on a grid of 2^-30 of their magnitude, the entries of one stencil
+  shape come in one order; the cells of a shape then read the table of its cell with the lowest global id,
+  agreed over the ranks, through a per-cell index. Bytes per cell of the tables and cells per A100-80GB
+  (`mallard check`; the GPU's packing in blocks of 32 tables measured with the CPU build packing slices of 32):
+
+  | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
+  |---|---|---|---|---|
+  | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
+  | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
+  | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
+  | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
+  | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
+  | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
+  | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
+  | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
+
+  What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
+  states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
+  per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
+  mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
+  count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+
+### 15. Working set beyond the TENO tables (#552)
 
 `mallard check --memory a100-80` (CPU, 2 Threads, one step) of 3D TENO5 cases, HLLC, SSPRK3: the Taylor-Green
 vortex of the performance set on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra (perfect gas, viscous; LES adds

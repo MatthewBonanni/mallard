@@ -29,6 +29,8 @@ namespace logging {
 namespace {
 
 bool phase_open = false;
+// Wide enough for the longest setup phase, "mesh quality and resolution"
+constexpr size_t PHASE_WIDTH = static_cast<size_t>(KEY_WIDTH) + 10;
 
 bool env_set(const char * name) {
     const char * value = std::getenv(name);
@@ -91,6 +93,48 @@ const char * micro() {
     return prefix;
 }
 
+bool digit(const char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
+
+/// Where a number cell's decimal point is (or would be) and where its number ends and its unit or "%" begins;
+/// point is npos if the cell is no number.
+struct NumberCell {
+    size_t point, end;
+};
+
+NumberCell number_cell(std::string_view s) {
+    constexpr size_t NONE = std::string_view::npos;
+    if (s == "-") return {1, 1};
+    size_t i = 0;
+    if (i < s.size() && (s[i] == '-' || s[i] == '+')) i++;
+    size_t point = NONE;
+    if (s.substr(i, 3) == "inf" || s.substr(i, 3) == "nan") {
+        i += 3;
+        point = i;
+    } else {
+        size_t digits = 0;
+        // A comma groups digits: "1,024"
+        auto grouping = [&](const size_t j) { return s[j] == ',' && digits > 0 && j + 1 < s.size() && digit(s[j + 1]); };
+        for (; i < s.size() && (digit(s[i]) || grouping(i)); i++) digits += digit(s[i]);
+        point = i;
+        if (i < s.size() && s[i] == '.') {
+            for (i++; i < s.size() && digit(s[i]); i++) digits++;
+        }
+        if (digits == 0) return {NONE, NONE};
+        if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+            i++;
+            if (i < s.size() && (s[i] == '+' || s[i] == '-')) i++;
+            const size_t exponent = i;
+            while (i < s.size() && digit(s[i])) i++;
+            if (i == exponent) return {NONE, NONE};
+        }
+    }
+    const std::string_view rest = s.substr(i);
+    const bool word = rest.size() > 1 && rest[0] == ' ' && rest.find_first_of(" \n", 1) == NONE;
+    return rest.empty() || rest == "%" || word ? NumberCell{point, i} : NumberCell{NONE, NONE};
+}
+
+size_t decimal_point(std::string_view s) { return number_cell(s).point; }
+
 void close_phase() {
     if (phase_open) {
         std::cout << "\n";
@@ -111,6 +155,27 @@ std::string format(const char * fmt, ...) {
     if (n > 0) std::vsnprintf(out.data(), static_cast<size_t>(n) + 1, fmt, args);
     va_end(args);
     return out;
+}
+
+std::vector<std::string> align_decimals(std::vector<std::string> column) {
+    // The decimal points share a column, and so do the first letters of the units after the numbers
+    std::vector<NumberCell> cell(column.size());
+    size_t left = 0, right = 0, unit = 0;
+    for (size_t i = 0; i < column.size(); i++) {
+        cell[i] = number_cell(column[i]);
+        if (cell[i].point == std::string_view::npos) continue;
+        left = std::max(left, cell[i].point);
+        right = std::max(right, cell[i].end - cell[i].point);
+        unit = std::max(unit, columns(column[i]) - cell[i].end);
+    }
+    for (size_t i = 0; i < column.size(); i++) {
+        const auto [point, end] = cell[i];
+        if (point == std::string_view::npos) continue;
+        const size_t tail = columns(column[i]) - end;
+        column[i] = std::string(left - point, ' ') + column[i].substr(0, end) + std::string(right - (end - point), ' ') +
+                    column[i].substr(end) + std::string(unit - tail, ' ');
+    }
+    return column;
 }
 
 bool color_stdout() {
@@ -156,7 +221,19 @@ void items(const Items & list) {
     for (const auto & [key, value] : list) item(key, value);
 }
 
-void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows) {
+void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & input) {
+    std::vector<std::vector<std::string>> rows = input;
+    for (size_t c = 0; c < header.size(); c++) {
+        std::vector<std::string> column;
+        for (const auto & row : rows) {
+            if (c < row.size()) column.push_back(row[c]);
+        }
+        column = align_decimals(std::move(column));
+        size_t k = 0;
+        for (auto & row : rows) {
+            if (c < row.size()) row[c] = column[k++];
+        }
+    }
     std::vector<size_t> width(header.size());
     for (size_t c = 0; c < header.size(); c++) width[c] = columns(header[c]);
     for (const auto & row : rows) {
@@ -180,7 +257,7 @@ void begin_phase(std::string_view name) {
     if (!comm::is_root()) return;
     close_phase();
     std::string padded(name);
-    if (padded.size() < KEY_WIDTH + 8) padded.resize(KEY_WIDTH + 8, ' ');
+    if (padded.size() < PHASE_WIDTH) padded.resize(PHASE_WIDTH, ' ');
     std::cout << "  " << padded << std::flush;
     phase_open = true;
 }
@@ -188,8 +265,12 @@ void begin_phase(std::string_view name) {
 void end_phase(double seconds) {
     if (!comm::is_root()) return;
     // Something printed since begin_phase moved the time onto its own line
-    if (!phase_open) std::cout << "  " << std::string(KEY_WIDTH + 8, ' ');
-    std::cout << format("%10s", duration(seconds).c_str()) << std::endl;
+    if (!phase_open) std::cout << "  " << std::string(PHASE_WIDTH, ' ');
+    // The decimal points of the durations share a column; "2m 05s" ends where "1.23 ms" does
+    const std::string text = duration(seconds);
+    const size_t point = decimal_point(text), width = columns(text);
+    const size_t pad = point == std::string_view::npos ? (width < 10 ? 10 - width : 0) : (point < 4 ? 4 - point : 0);
+    std::cout << std::string(pad, ' ') << text << std::endl;
     phase_open = false;
 }
 

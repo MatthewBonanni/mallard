@@ -301,13 +301,15 @@ TEST(DistributedMeshTest, AutoCellOrderRenumbersOnlyWhenItSavesCacheLines) {
     std::mt19937 rng(7);
     std::shuffle(cells.begin(), cells.end(), rng);
     const uint32_t n = static_cast<uint32_t>(cells.size());
-    const LocalityOrder shuffled = locality_order({CellOrder::AUTO, 1}, nodes, cells, {n});
+    CellNodes shuffled_cells;
+    for (const auto & c : cells) shuffled_cells.add(c);
+    const LocalityOrder shuffled = locality_order({CellOrder::AUTO, 1}, nodes, shuffled_cells, {n});
     EXPECT_EQ(shuffled.choice.order, CellOrder::HILBERT);
     EXPECT_LT(shuffled.choice.hilbert_lines, 0.5 * shuffled.choice.input_lines);
-    EXPECT_EQ(shuffled.order, locality_order({CellOrder::HILBERT}, nodes, cells, {n}).order);
+    EXPECT_EQ(shuffled.order, locality_order({CellOrder::HILBERT}, nodes, shuffled_cells, {n}).order);
 
-    std::vector<std::vector<uint32_t>> along(n);
-    for (uint32_t c = 0; c < n; c++) along[c] = cells[shuffled.order[c]];
+    CellNodes along;
+    for (uint32_t c = 0; c < n; c++) along.add(cells[shuffled.order[c]]);
     const LocalityOrder kept = locality_order({CellOrder::AUTO, 1}, nodes, along, {n});
     EXPECT_EQ(kept.choice.order, CellOrder::INPUT);
     for (uint32_t c = 0; c < n; c++) ASSERT_EQ(kept.order[c], c);
@@ -317,7 +319,8 @@ TEST(DistributedMeshTest, AutoCellOrderRenumbersOnlyWhenItSavesCacheLines) {
  * @brief Numbering a rank's cells by locality permutes the owned cells and
  *        each halo layer among themselves and renumbers the faces, but every
  *        cell, face orientation and geometry by global id stays bitwise the
- *        same, and so do the cells exchanged with each neighbor.
+ *        same, and so do the cells exchanged with each neighbor. Auto with
+ *        structured blocks puts each block's owned cells first.
  */
 TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
     for (const std::string & mesh_input : mesh_inputs()) {
@@ -345,9 +348,9 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
         std::set<std::vector<double>> ref_faces;
         for (uint32_t f = 0; f < ref->n_faces; f++) ref_faces.insert(face(*ref, f));
 
-        {
+        for (const CellNumbering numbering : {CellNumbering{CellOrder::HILBERT}, CellNumbering{CellOrder::AUTO, 1, true}}) {
             Distribution dist;
-            const auto mesh = distributed.build_local_mesh(3, dist, {CellOrder::HILBERT});
+            const auto mesh = distributed.build_local_mesh(3, dist, numbering);
             ASSERT_EQ(mesh->n_cells, ref->n_cells);
             EXPECT_EQ(mesh->n_owned(), ref->n_owned());
             EXPECT_EQ(mesh->n_reconstructed(), ref->n_reconstructed());
@@ -362,8 +365,13 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
                 EXPECT_EQ(mesh->h_cell_volume(c), ref->h_cell_volume(r));
                 FOR_I_DIM EXPECT_EQ(mesh->h_cell_coords(c, i), ref->h_cell_coords(r, i));
             }
-            if (comm::size() == 1) {
+            if (comm::size() == 1 && numbering.order == CellOrder::HILBERT) {
                 EXPECT_GT(moved, 0u);
+            }
+            for (const StructuredBlock & block : mesh->structured_blocks) {
+                uint32_t size = 1;
+                for (uint32_t e : block.n) size *= e;
+                EXPECT_LE(block.first + size, mesh->n_owned());
             }
             // The same cells go to and come from each neighbor (in the receiver's order)
             auto global = [](const Mesh & m, const std::vector<uint32_t> & cells) {

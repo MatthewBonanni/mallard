@@ -31,6 +31,7 @@
 #include "data_writer.h"
 #include "derived_fields.h"
 #include "mesh.h"
+#include "pinned_mirrors.h"
 #include "snapshot_block.h"
 #include "spectra.h"
 #include "state.h"
@@ -293,8 +294,6 @@ class Statistics {
 
         /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., CI_ of each with batches, PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
-        /** @brief What each of variables() averages, for the snapshot blocks. */
-        std::vector<std::pair<std::string, snapshot_block::Average>> field_averages() const;
         /** @brief What restart files carry: the averages, the batch state BATCH_<average>, BATCH_AVG_<average>, BATCH_M2_<average> and the phases. */
         std::vector<std::string> restart_variables() const;
         /** @brief Whether the averages have confidence intervals by batches. */
@@ -303,7 +302,14 @@ class Statistics {
         /** @brief The fields register_data adds for the [statistics] of an input, from the input alone (no mesh). */
         static std::vector<std::string> data_names(const Input & input);
         void register_data(std::vector<Data> & data) const;
+        /** @brief stage_output, then finish_output. */
         void copy_device_to_host();
+        /** @brief Enqueues the copies of the means, covariances, batches and their clocks into pinned memory (capturable). */
+        void stage_output();
+        /** @brief From the copies stage_output made: the intervals of the batches; the phase averages' host copies. */
+        void finish_output();
+        /** @brief The snapshot blocks' averages, from the clock stage_output copied. */
+        void set_snapshot_averages() const;
 
         /**
          * @brief Continue the averages of a restart file, or start afresh at
@@ -315,6 +321,7 @@ class Statistics {
         void start(rtype t);
         /** @brief Sample from time t on (as t_start = t), in the means, spectra and phases. */
         void set_start(rtype t);
+        /** @brief The means' attributes from the clocks stage_output copied, the spectra's and the phases'. */
         RestartAttributes attributes() const;
         RestartArrays arrays() const;
         /** @brief Write the averaged spectra and conditional statistics (rank 0), with the other output. */
@@ -359,6 +366,8 @@ class Statistics {
 
         Kokkos::View<Clock> clock;
         Kokkos::View<rtype> t_sample;
+        PinnedMirrors pinned_mirrors;
+        Kokkos::View<Clock>::host_mirror_type h_clock;  // copied by stage_output
 
         // Batches: (cell, average) of the current batch, and the mean and m2 of the closed ones
         rtype batch = 0.0;  // duration; 0: none
@@ -367,12 +376,15 @@ class Statistics {
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_batch_value, h_batch_avg, h_batch_m2;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_ci;
         Kokkos::View<BatchClock> batch_clock;
+        Kokkos::View<BatchClock>::host_mirror_type h_batch_clock;  // copied by stage_output
 
         Spectra spectra;
         PhaseAverage phase;
         std::vector<ConditionalStatistics> conditional;
 
         void start_means(rtype t);
+        /** @brief The averages of the snapshot blocks with the means' clock k. */
+        std::vector<std::pair<std::string, snapshot_block::Average>> field_averages(const Clock & k) const;
         Clock host_clock() const;
         void set_clock(const Clock & k);
         BatchClock host_batch_clock() const;

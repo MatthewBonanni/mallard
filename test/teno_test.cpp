@@ -633,7 +633,7 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
     for (const teno::PackedStencils * s : {&teno.stencil_large, &teno.stencil_small}) {
         add(s->slice_start);
         add(s->cells);
-        add(s->faces);
+        add(s->images);
         add(s->pinv);
     }
     out.emplace_back(teno.gather_depth.begin(), teno.gather_depth.end());
@@ -662,6 +662,23 @@ TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemU
     const auto reference = teno_tables(*make_teno(mesh, bd, 5));
     EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
     EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+}
+
+TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
+    // A thin annulus with symmetry walls: each search reaches more straight wall faces than the scratch
+    // holds mirror lines, so every cell is redone on the host with a larger scratch
+    Input input = parse_toml("[mesh]\ntype = \"annulus\"\nNtheta = 64\nNr = 4\nr_outer = 1.1\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto teno = make_teno(mesh, bd, 3);
+    std::string status;
+    for (const auto & [name, value] : teno->summary().settings) {
+        if (name == "TENO setup") status = value;
+    }
+    EXPECT_NE(status.find("256 cells redone on the host"), std::string::npos) << status;
+    EXPECT_TRUE(teno_tables(*teno) == tables_with(mesh, bd, 3, [](TENO & t) { t.setup_on_host = true; }));
 }
 
 TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {

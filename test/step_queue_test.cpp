@@ -353,7 +353,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
                 if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
             }
         } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos) {
-            o.files[file] = without_records(read_file(entry.path()));
+            // Restart attributes name the writers by their prefixes
+            o.files[file] = strip(without_records(read_file(entry.path())));
         } else {
             o.files[file] = "";
         }
@@ -516,6 +517,22 @@ void expect_graphed(const Outcome & o, const std::string & what) {
     }
 }
 
+/** @brief A periodic H2/O2/N2 mixture with a temperature and composition wave, reacting; chemistry: [chemistry]'s keys. */
+std::string reacting_body(const std::string & chemistry, const std::string & T = "1100.0") {
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 4\nLx = 1.0e-3\nLy = 1.0e-3\n";
+    if (N_DIM == 3) body << "Nz = 3\nLz = 1.0e-3\n";
+    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if (N_DIM == 3) body << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    body << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"" << T << " + 400.0 * sin(pi * x / 1.0e-3)\"\n"
+         << "u = " << vector_of("0.0", "0.0", "0.0")
+         << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+         << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
+         << "[chemistry]\n" << chemistry;
+    return body.str();
+}
+
 } // namespace
 
 TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
@@ -539,18 +556,7 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
     // HRR and OMEGA_<species> of a reacting mixture, with a flame index of its species gradients
     Case reacting;
     reacting.run = "n_steps = 12\ndt = 1.0e-8\n";
-    std::ostringstream body;
-    body << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 4\nLx = 1.0e-3\nLy = 1.0e-3\n";
-    if (N_DIM == 3) body << "Nz = 3\nLz = 1.0e-3\n";
-    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
-    if (N_DIM == 3) body << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
-    body << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1100.0 + 400.0 * sin(pi * x / 1.0e-3)\"\n"
-         << "u = " << vector_of("0.0", "0.0", "0.0")
-         << "\nX = { H2 = \"2.0 + sin(pi * x / 1.0e-3)\", O2 = 1.0, N2 = 3.76 }\n"
-         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
-         << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
-         << "[chemistry]\nfuse_half_steps = false\n";
-    reacting.body = body.str();
+    reacting.body = reacting_body("fuse_half_steps = false\n");
     reacting.extra = restarts + "[output.mixture]\nfuel_species = \"H2\"\noxidizer_species = \"O2\"\n"
                                 "[statistics]\ninterval = 2\nfields = [\"HRR\", \"MACH\"]\nproducts = [\"HRR*FLAME_INDEX\"]\n"
                                 "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1100.0, 1500.0]\n"
@@ -566,6 +572,42 @@ TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
     const Outcome reacting_queued = run_case("rates", reacting, 3);
     expect_graphed(reacting_queued, "rates");
     EXPECT_EQ(reacting_queued.queued, run_case("rates_bare", reacting_bare, 3).queued);
+}
+
+TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
+    // Rows, monitors, probes, means and conditional statistics of a run with fused half steps read the state with
+    // the pending half step applied on the device, as the host's flush applies it; a trigger fires at a monitor's
+    // step, which the device flushed for before the host flushes again
+    const std::string base = "check_interval = 1000\n"
+                             "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 8\n"
+                             "[[triggers]]\nname = \"save\"\nwhen = \"step == 9\"\ndo = \"checkpoint\"\n";
+    std::string samples = "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\n"
+                          "[[probes]]\nname = \"point\"\nfile = \"{dir}/point.csv\"\ninterval = 2\npoint = " +
+                          point_of("4.0e-4", "5.0e-4", "5.0e-4") + "\nfields = [\"T\", \"P\", \"RHO\"]\n"
+                          "[statistics]\ninterval = 2\nfields = [\"T\", \"HRR\"]\n"
+                          "[[statistics.conditional]]\non = \"T\"\nbins = 5\nrange = [1400.0, 2400.0]\n"
+                          "fields = [\"OMEGA_H2O\"]\ninterval = 3\nfile = \"{dir}/conditional_T.csv\"\n";
+    Case c;
+    c.run = "n_steps = 16\ncfl = 0.5\n";
+    c.body = reacting_body("", "1800.0");
+    c.extra = "check_interval = 2\n" + base.substr(base.find('\n') + 1) + samples;
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("fused", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"integrals.csv", "point.csv", "conditional_T.csv", "restart_000009.restart"}) {
+            EXPECT_TRUE(o.files.count(file)) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = base;
+    const Outcome queued = run_case("fused", c, 3), quiet = run_case("fused_bare", bare, 3);
+    expect_graphed(queued, "fused");
+    EXPECT_EQ(queued.queued, quiet.queued);
+    // The flushes leave the run as it was
+    ASSERT_EQ(queued.U.size(), quiet.U.size());
+    size_t differ = 0;
+    for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
+    EXPECT_EQ(differ, 0u);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -697,6 +739,47 @@ TEST(StepQueueTest, OutputsByTimeAndTStop) {
     EXPECT_EQ(o.t, 0.1_r);
 }
 
+TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
+    // Restarts by step and snapshots by time (the device shortens the steps to their times), with the means and
+    // their batches and the step controller's history in the restarts
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.integrator = "RDPK3Sp35";
+    c.numerics = "[numerics.error_control]\ntolerance = 1e-3\n";
+    const std::string outputs = "check_interval = 4\n"
+                                "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n"
+                                "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ntime_interval = 0.15\n"
+                                "variables = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
+    c.extra = outputs + "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("staged_outputs", c);
+    if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000012.restart"));
+        EXPECT_GT(std::count_if(o.files.begin(), o.files.end(), [](const auto & f) {
+                      return f.first.find("flow_") == 0 && f.first.find(".vtu") != std::string::npos;
+                  }), 2);
+    }
+    // Restarts further apart than the queue is deep: as many steps run ahead as without them
+    const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
+    Case spaced = c;
+    spaced.extra = "check_interval = 4\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 7\n" +
+                   statistics;
+    Case bare = c;
+    bare.extra = "check_interval = 4\n" + statistics;
+    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, OutputsDueBeforeTheLastOneIsWrittenStopTheDevice) {
+    // A restart every 2 steps with 3 enqueued: the next is due while the host still writes the last one; the
+    // restarts carry a characteristic outlet's faces
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.right = "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n";
+    c.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    c.distributed = comm::size() > 1;
+    expect_queue_invariant("busy_outputs", c);
+}
+
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
     // A row every step, its health and ledger evaluated on the device, and check_nan after every step
     Case c;
@@ -718,6 +801,19 @@ TEST(StepQueueTest, RejectedStepsAreRetriedAsTheHostRetriesThem) {
     const Outcome o = expect_queue_invariant("rejections", c);
     EXPECT_GT(o.rejected, 0u);
     EXPECT_EQ(o.t, 0.3_r);
+}
+
+TEST(StepQueueTest, RejectedStepsOfCharacteristicOutletsStartFromTheStep) {
+    // A retry advances the faces' incoming waves from the step's start, with its own dt
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1\n";
+    c.integrator = "RDPK3Sp35";
+    c.numerics = "[numerics.error_control]\ntolerance = 1e-3\n";
+    c.right = "type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0 }\n";
+    const Outcome o = expect_queue_invariant("characteristic_rejections", c);
+    EXPECT_GT(o.rejected, 0u);
+    EXPECT_EQ(o.step, 30u);
 }
 
 TEST(StepQueueTest, ControlFilesStopAsRequests) {
@@ -840,7 +936,6 @@ struct ExampleOutcome {
     uint64_t step = 0, rejected = 0, queued = 0;
     rtype t = 0.0;
     std::vector<std::string> rows;
-    bool rows_on_device = false;
 };
 
 ExampleOutcome run_example(const ExampleCase & c, const int depth) {
@@ -868,14 +963,6 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
-    // Rows of runs with fused chemistry (Strang's default) follow the host's half step
-    bool fused = false;
-    if (input.contains("chemistry")) {
-        const Input & chemistry = input.at("chemistry");
-        const bool simpler = chemistry.contains("coupling") && chemistry.at("coupling").as_string() == "simpler";
-        fused = chemistry.contains("fuse_half_steps") ? chemistry.at("fuse_half_steps").as_boolean() : !simpler;
-    }
-    o.rows_on_device = solver.progress_on_device() && !fused;
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
@@ -897,10 +984,8 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome host = run_example(GetParam(), 0);
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
-    // A progress row every step
-    if (host.rows_on_device) {
-        EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
-    }
+    // A progress row every step, also of runs with fused chemistry
+    EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);

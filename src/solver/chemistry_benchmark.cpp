@@ -25,6 +25,7 @@
 #include "log.h"
 #include "mixture.h"
 #include "reactor.h"
+#include "report.h"
 #include "thermo.h"
 
 namespace {
@@ -152,6 +153,17 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     result.shared_bytes = cells.shared_bytes();
     result.cells = n_cells;
     result.igniting = n_igniting;
+    using Kind = report::Column::Kind;
+    const report::Stream steps_table({{"dt", "s", 9},
+                                      {"throughput", "cells/s", 9},
+                                      {"wall", "ms", 10},
+                                      {"active", "cells", 9},
+                                      {"mean", "sub-steps", 9},
+                                      {"max", "sub-steps", 9},
+                                      {"cells by sub-steps", "sub-steps:cells", 0, Kind::TEXT}},
+                                     logging::color_stdout());
+    logging::line();
+    for (const std::string & line : steps_table.header()) logging::line(line);
     const Kokkos::View<double> dt_device("chemistry_benchmark_dt");
     for (const double dt : dts) {
         Kokkos::deep_copy(dt_device, dt);
@@ -198,10 +210,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
                     (high > low ? (b + 1 == histogram.size() ? "+" : "-" + std::to_string(high)) : "") + ":" +
                     std::to_string(histogram[b]);
         }
-        logging::items({{"dt = " + brief(dt) + " s", brief(n_cells / best) + " cells/s (" + brief(best * 1e3) +
-                                                         " ms), " + std::to_string(active) + " active, sub-steps mean " +
-                                                         brief(mean_steps) + ", max " + brief(max_steps)},
-                        {"  sub-steps: cells", bins}});
+        logging::line(steps_table.row({logging::format("%.2e", dt), logging::format("%.2e", n_cells / best),
+                                       logging::format("%.3f", best * 1e3), logging::count(active),
+                                       logging::format("%.2f", mean_steps), logging::format("%.0f", max_steps), bins}));
         result.steps.push_back({dt, best, active, mean_steps, max_steps, bins});
     }
     return result;

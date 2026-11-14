@@ -514,9 +514,12 @@ The setup runs on the device (`teno_setup::SetupHandle`): the geometry
 (scales $h_c$ and ranking metrics; the rules of curved cells in 2D; moments
 and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
-free device memory (at most 16,384 cells in 2D, so that the setup's
-workspace does not grow with the mesh): a thread per cell in 2D, a team of threads per cell on
-GPUs in 3D. Cells whose search
+free device memory: a thread per cell in 2D, a team of threads per cell on
+GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
+the cells the searches gather), and a batch takes as many cells as fit what
+16,384 cells take with twice that scratch, up to one wave of threads on the
+GPU; meshes of at least 16,384 cells share one batch size, so that the
+setup's workspace does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
@@ -525,11 +528,31 @@ time of each phase.
 
 The tables are packed without padding to the largest stencil: per cell, the
 scale $h_i$, the means $\overline{\phi}_{l,i}$, the 2D matrix $\mathbf{S}$ or
-the 3D moments, and per stencil entry its cell, its mirror face (or none)
-and its column of $\mathbf{P}$. On GPUs, 32 consecutive cells form a slice
+the 3D moments, and per stencil entry its cell and its column of
+$\mathbf{P}$. A mirror image's entry instead points into a list of the
+rank's images, which holds the cell and the mirror face. On GPUs, 32 consecutive cells form a slice
 whose entries are interleaved, so that a warp reads consecutive words.
 `single_precision_tables` (3D, single gas) keeps $\mathbf{P}$, and the moments' values, in single
 precision on the device.
+
+**Shared tables.** The cells of one stencil shape share one table of
+pseudo-inverses (`teno_sharing.h`). The slots of a
+stencil are ranked by their columns of $\mathbf{P}$ on a grid of $2^{-30}$ of
+its largest entry, within the central stencil and within each sector, so that
+equal stencils of a lattice, whose equidistant entries the search ranks
+differently from cell to cell, list their entries in the same order. Two cells
+have the same shape if their tables are equal on that grid in that order (on a
+lattice they differ by about $5\times 10^{-14}$); the shape's table is that of
+its cell with the lowest global id, agreed over the ranks at setup, so a cell's
+table does not depend on the partition, the batches, the thread count or the
+slice width. A shape whose entries straddle a grid line becomes two shapes,
+which costs memory only. The tables of the shapes are packed like the cells'
+stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
+own through `pinv_index` (block and lane); on a mesh with a shape per cell this
+is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+A caller that knows its stencil shapes, such as a structured block's offset
+pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
+tables; such shapes are agreed over the ranks by their key in the same way.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used
@@ -650,6 +673,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     | order 6, walls, 4³ | 4.7e-3 | 8.5e-6 |
 
     Order 4 on that lattice is stable only from 85 stencil entries
-    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Mixed meshes with
-    pyramids improve with the bound (table above). Pure pyramid lattices are
-    rare in practice; prefer orders 3 or 5 there.
+    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Thin pyramids grow
+    faster: a 6 × 6 × 4 box of aspect ratio 6.25, with side walls and periodic
+    in z, grows at $+0.033$ through the solver at order 4 and is bounded at
+    orders 3 and 5 ([order of `high_order`](../design/teno4_robustness.md#linear-stability)).
+    Mixed meshes with pyramids improve with the bound (table above). Pure
+    pyramid lattices are rare in practice; prefer orders 3 or 5 there.

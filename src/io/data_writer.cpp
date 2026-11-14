@@ -407,17 +407,9 @@ std::string DataWriter::index_file() const {
     }
 }
 
-bool DataWriter::due(uint64_t step, rtype t) const {
-    if (interval > 0) {
-        return step % interval == 0;
-    }
-    return t >= due_time();
-}
+bool DataWriter::due(uint64_t step, rtype t) const { return output_clock().due(step, t); }
 
-rtype DataWriter::due_time() const {
-    // Relative tolerance absorbs round-off in accumulated time
-    return next_time() - precision_tol(1e-9, 1e-5) * time_interval;
-}
+rtype DataWriter::due_time() const { return output_clock().due_time(); }
 
 void DataWriter::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
     if (interval > 0) {
@@ -427,12 +419,7 @@ void DataWriter::due_limits(const uint64_t step, uint64_t & step_limit, rtype & 
     }
 }
 
-rtype DataWriter::next_time() const {
-    if (interval > 0) {
-        return std::numeric_limits<rtype>::infinity();
-    }
-    return static_cast<rtype>(n_written) * time_interval;
-}
+rtype DataWriter::next_time() const { return output_clock().next_time(); }
 
 DataWriter::~DataWriter() {
     try {
@@ -695,14 +682,9 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             if (!run(std::move(job))) hash_written();
         }
     }
-    if (interval == 0) {
-        // Skip any output times already passed (e.g. if dt exceeded time_interval)
-        while (next_time() <= t + precision_tol(1e-9, 1e-5) * time_interval) {
-            n_written++;
-        }
-    } else {
-        n_written++;
-    }
+    OutputClock clock = output_clock();
+    clock.written(t);
+    n_written = clock.n_written;
     if (format != DataFormat::RESTART) n_snapshots++;
     step_last = step;
     t_last = t;

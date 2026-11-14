@@ -110,7 +110,7 @@ std::vector<double> Solver::trigger_values() const {
 }
 
 bool Solver::triggers_on_device() const {
-    if (triggers.empty() || defer_chemistry || !triggers.fit_device() || triggers.size() > 64) return false;
+    if (triggers.empty() || !triggers.fit_device() || triggers.size() > 64) return false;
     // Probes' values are reduced by the host
     const size_t end = triggers.variables().size() - (convergence.enabled() ? convergence.columns().size() : 0);
     for (size_t v = end - probes.value_names().size(); v < end; v++) {

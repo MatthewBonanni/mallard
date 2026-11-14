@@ -285,7 +285,7 @@ L 612.704375 98.907692
     <text style="font-size: 9.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #6b6166" x="269.118089" y="87.463846" transform="rotate(-0 269.118089 87.463846)">6, 7: nothing</text>
    </g>
    <g id="text_9">
-    <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="300.436946" y="35.915895" transform="rotate(-0 300.436946 35.915895)">output</text>
+    <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="300.436946" y="35.915895" transform="rotate(-0 300.436946 35.915895)">checkpoint</text>
    </g>
    <g id="text_10">
     <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="355.705518" y="69.879641" transform="rotate(-0 355.705518 69.879641)">6</text>
@@ -503,7 +503,7 @@ L 612.704375 228.552
     <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="304.121518" y="199.523949" transform="rotate(-0 304.121518 199.523949)">5</text>
    </g>
    <g id="text_25">
-    <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="364.916946" y="165.560203" transform="rotate(-0 364.916946 165.560203)">output</text>
+    <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="364.916946" y="165.560203" transform="rotate(-0 364.916946 165.560203)">checkpoint</text>
    </g>
    <g id="text_26">
     <text style="font-size: 10.5px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="430.778661" y="199.523949" transform="rotate(-0 430.778661 199.523949)">6</text>

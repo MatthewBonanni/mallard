@@ -1,0 +1,1 @@
+- A rank holding so many cells that a multi-dimensional array would need more than 2^31 entries stops at setup with an error naming the array and the most cells that fit on a rank, instead of silently reading and writing the wrong entries once Kokkos's 32-bit offsets wrap (#984).
