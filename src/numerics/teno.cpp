@@ -1832,8 +1832,8 @@ struct TENOFunctor {
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
     static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
     // Stencil entries per round of staged_coefficients, a multiple of PARTS. At
-    // order 6 the staged entries leave room for one team per SM only: none
-    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
+    // order 6 rounds of 2 * PARTS would leave room for one team per SM only
+    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : PARTS;
     static constexpr size_t SMOOTH_SCRATCH =
         TEAM_SCRATCH + (STAGE ? sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
