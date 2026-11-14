@@ -37,7 +37,7 @@ balance = "N2"
 
 [[boundaries]]
 name = "inlet"
-type = "upt"
+type = "inlet_state"
 u = [2.332374, 0.0]
 p = 101325.0
 T = 300.0
@@ -45,7 +45,7 @@ X = { "H2" = 0.2958579882, "O2" = 0.1479289941, "N2" = 0.5562130178 }
 
 [[boundaries]]
 name = "outlet"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]
@@ -76,6 +76,5 @@ check_interval = 5000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 1.415466e-05
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

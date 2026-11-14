@@ -61,10 +61,10 @@ sh mesh.sh    # gmsh .../strip.geo -2 -setnumber L 4.952096e-03 -setnumber n 300
 | `[run]` | Four flame times δ / S_L, at CFL 1 |
 | `[mesh]` | `strip.msh` |
 | `[initialize]` | `analytical`: temperature, velocity and mole fractions blend from the fresh to the burnt gas of Cantera's flame along c(x) = (1 + tanh(2 (x − x_f) / δ)) / 2, with N2 as the `balance` species; the mole fractions are a subtable, `[initialize.X]`, one expression per species |
-| `[[boundaries]]` | `inlet`: `upt` at S_L, 300 K, 1 atm and the fresh composition `X`; `outlet`: `p_out` at 1 atm; `sides`: `symmetry`, which makes the strip one-dimensional |
+| `[[boundaries]]` | `inlet`: [`inlet_state`](../guide/boundary_conditions.md#inlet_state) at S_L, 300 K, 1 atm and the fresh composition `X`; `outlet`: [`outlet_pressure`](../guide/boundary_conditions.md#outlet_pressure) at 1 atm; `sides`: `symmetry`, which makes the strip one-dimensional |
 | `[numerics]` | HLLC, SSPRK3, MUSCL |
-| `[physics]` | `navier_stokes`, `gas = "mixture"`, `mechanism = "../../mechanisms/h2o2.yaml"` (9 species, 29 reactions; the path is relative to the run directory), `transport = "mixture_averaged"` |
-| `[chemistry]` | Strang splitting with the Rosenbrock integrator, `rtol = 1e-6`, `atol = 1e-10` |
+| `[physics]` | `navier_stokes`, `gas = "mixture"`, `mechanism = "../../mechanisms/h2o2.yaml"` (9 species, 29 reactions; the path is relative to the run directory), `transport = "mixture_averaged"`; see [gas mixtures](../guide/thermochemistry.md#gas-mixtures) |
+| `[chemistry]` | Strang splitting with the Rosenbrock integrator, `rtol = 1e-6`, `atol = 1e-10`; see [finite-rate chemistry](../guide/thermochemistry.md#finite-rate-chemistry) |
 | `[[write_data]]` | Every 0.1 flame time: density, velocity, pressure, temperature, heat release, mass fractions (`Y_*`) and production rates (`OMEGA_*`) |
 
 The tanh profile is only a start: the flame builds its own structure within
@@ -75,8 +75,8 @@ this input self-contained.
 
 ## 4. Run
 
-The strip is small, so one thread is enough (73,000 steps, about 15 minutes
-on one core; the chemistry takes 60% of the time):
+The strip is small, so one thread is enough (73,000 steps, about 4 minutes
+on one core; the chemistry takes 56% of the time):
 
 ```bash
 $MALLARD/build/src/mallard -i input.toml --kokkos-num-threads=1
@@ -101,7 +101,7 @@ frame. This **consumption speed** needs only one snapshot, so it can follow
 the run:
 
 ```bash
-python3 $MALLARD/tools/flame_speed.py . 2.33237
+python3 $MALLARD/tools/post/flame_speed.py . 2.33237
 ```
 
 prints it for every snapshot written so far (and the displacement speed, from
@@ -111,8 +111,8 @@ the motion of the flame). `plot_flame.py` draws it:
 python3 $MALLARD/tutorials/premixed_flame/plot_flame.py results . --out .
 ```
 
-![Consumption speed over time: from the tanh start it overshoots by 2% and settles on Cantera's after two flame times](../images/tutorials/premixed_flame_history-light.svg#gh-light-mode-only)
-![Consumption speed over time: from the tanh start it overshoots by 2% and settles on Cantera's after two flame times](../images/tutorials/premixed_flame_history-dark.svg#gh-dark-mode-only)
+![Consumption speed over time: from the tanh start it overshoots by 2% and is within 1% of Cantera's after two flame times](../images/tutorials/premixed_flame_history-light.svg#gh-light-mode-only)
+![Consumption speed over time: from the tanh start it overshoots by 2% and is within 1% of Cantera's after two flame times](../images/tutorials/premixed_flame_history-dark.svg#gh-dark-mode-only)
 
 The flame settles after about two flame times; the comparison averages over
 the last one.
@@ -154,11 +154,16 @@ With several runs, `plot_flame.py results` compares their flame speeds:
 
 | φ | Cantera S_L (m/s) | Mallard S_c (m/s) | Error |
 |---|---|---|---|
-| 0.6 | 0.8083 | 0.8265 | +2.3% (still falling: run stopped at 4.6 of 10 flame times) |
+| 0.6 | 0.8083 | 0.8175 | +1.14% |
 | 0.8 | 1.6568 | 1.6602 | +0.21% |
 | 1.0 | 2.3324 | 2.3296 | −0.12% |
 | 1.2 | 2.7814 | 2.7832 | +0.07% |
 | 1.4 | 3.0346 | 3.0308 | −0.13% |
+
+The rich and stoichiometric flames settle within three flame times and the
+flame at φ = 0.8 within five. The flame at φ = 0.6 (397,000 steps, about 20
+minutes on one core) takes seven and then stays 1.1% faster than Cantera's;
+why is open ([#1036](https://github.com/MatthewBonanni/mallard/issues/1036)).
 
 ## 7. Things to try
 

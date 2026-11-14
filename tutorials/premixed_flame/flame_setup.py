@@ -114,7 +114,7 @@ balance = "N2"
 
 [[boundaries]]
 name = "inlet"
-type = "upt"
+type = "inlet_state"
 u = [{s_l:.6f}, 0.0]
 p = {P}
 T = {T_U}
@@ -122,7 +122,7 @@ X = {{ {fresh} }}
 
 [[boundaries]]
 name = "outlet"
-type = "p_out"
+type = "outlet_pressure"
 p = {P}
 
 [[boundaries]]
@@ -153,9 +153,8 @@ check_interval = 5000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = {t_flame / 10:.6e}
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
 """
     with open(os.path.join(args.run_dir, "input.toml"), "w") as fh:
         fh.write(text)
