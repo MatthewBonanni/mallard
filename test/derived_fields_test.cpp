@@ -53,7 +53,7 @@ std::unique_ptr<Solver> init_flow(const std::string & rho, const std::string & u
       << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << (physics.empty() ? "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n" : physics)
       << "[output]\ncheck_interval = 1000000\n" << output << "[[write_data]]\nprefix = \""
-      << (scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = ["
+      << (rank_scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = ["
       << variables << "]\n";
     auto solver = std::make_unique<Solver>();
     solver->set_distributed(false);
@@ -313,7 +313,7 @@ TEST(DerivedFields, MachOfAUniformArgonFlowTakesTheMixtureGamma) {
     }
     s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" << mixture
       << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
-      << (scratch_dir() / "mallard_derived_argon").string()
+      << (rank_scratch_dir() / "mallard_derived_argon").string()
       << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"MACH\"]\n";
     Solver solver;
     solver.set_distributed(false);
@@ -404,7 +404,7 @@ std::unique_ptr<Solver> init_mixture(const std::string & Y, const std::string & 
       << "[physics]\ntype = \"" << (viscous ? "navier_stokes" : "euler") << "\"\ngas = \"mixture\"\nmechanism = \""
       << source_dir() << "/mechanisms/h2o2.yaml\"\n"
       << (viscous ? "transport = \"unity_lewis\"\n" : "") << "[output]\ncheck_interval = 1000000\n"
-      << mixture << "[[write_data]]\nprefix = \"" << (scratch_dir() / prefix).string()
+      << mixture << "[[write_data]]\nprefix = \"" << (rank_scratch_dir() / prefix).string()
       << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [" << variables << "]\n";
     auto solver = std::make_unique<Solver>();
     solver->set_distributed(false);
@@ -461,7 +461,7 @@ TEST(DerivedFields, MixtureFractionStreamsFromBoundaries) {
     s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
       << "[output]\ncheck_interval = 1000000\n[output.mixture]\nfuel = \"left\"\noxidizer = \"right\"\n"
-      << "[[write_data]]\nprefix = \"" << (scratch_dir() / "mallard_derived_streams").string()
+      << "[[write_data]]\nprefix = \"" << (rank_scratch_dir() / "mallard_derived_streams").string()
       << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"MIXTURE_FRACTION\"]\n";
     Solver solver;
     solver.set_distributed(false);
@@ -506,7 +506,7 @@ TEST(DerivedFields, ScalarDissipationIsTwiceTheDiffusivityForAUnitGradient) {
                                "[output.mixture]\nfuel = {Y = {H2 = " + A + ", AR = " + B + "}}\noxidizer = {Y = {O2 = 1.0}}\n",
                                "\"SCALAR_DISSIPATION\", \"D_N2\"", true, "mallard_derived_chi");
     solver->write_output_of_state(false);
-    const std::string file = (scratch_dir() / "mallard_derived_chi_000000.vtu").string();
+    const std::string file = (rank_scratch_dir() / "mallard_derived_chi_000000.vtu").string();
     const output::Contents contents = output::open(file);
     const std::vector<double> chi = output::read(contents, "SCALAR_DISSIPATION", 0);
     const std::vector<double> D = output::read(contents, "D_N2", 0);
@@ -539,7 +539,7 @@ TEST(DerivedFields, MixtureEntropyOfMixingAndPressure) {
         s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
           << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
           << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
-          << (scratch_dir() / "mallard_derived_entropy").string()
+          << (rank_scratch_dir() / "mallard_derived_entropy").string()
           << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"ENTROPY\"]\n";
         Solver solver;
         solver.set_distributed(false);

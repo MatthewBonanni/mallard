@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <span>
@@ -251,4 +252,10 @@ std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, const ui
         block_cells.insert(block_cells.end(), box.begin(), box.end());
     }
     return blocks;
+}
+
+uint32_t structured_block_cells(const std::vector<StructuredBlock> & blocks) {
+    if (blocks.empty()) return 0;
+    const StructuredBlock & last = blocks.back();
+    return last.first + std::accumulate(last.n.begin(), last.n.end(), 1u, std::multiplies<>());
 }

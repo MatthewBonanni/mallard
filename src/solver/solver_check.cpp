@@ -63,6 +63,7 @@ double cfl_limit(const TimeIntegratorType type) {
 } // namespace
 
 CheckReport Solver::check(const Input & input_in, const CheckOptions & options) {
+    const comm::SelfScope scope = communication_scope();
     CheckReport r;
     r.input_file = options.input_file;
     struct Restore {

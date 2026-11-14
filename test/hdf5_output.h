@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "hdf5_util.h"
+#include "scratch.h"
 #include "snapshot_block.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -71,7 +72,7 @@ inline void expect_hdf5_output_matches_serial(const std::string & input, const s
     distributed.run();
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(with_writer("s")));
+    serial.init(parse_toml(with_writer(serial_name("s"))));
     serial.run();
     comm::barrier();
     if (comm::is_root()) {
@@ -156,7 +157,7 @@ inline void expect_vtkhdf_output_matches_serial(const std::string & input, const
     distributed.run();
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(with_writer("s")));
+    serial.init(parse_toml(with_writer(serial_name("s"))));
     serial.run();
     comm::barrier();
     if (comm::is_root()) {

@@ -259,6 +259,7 @@ void Solver::apply_commands() {
 }
 
 std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value) {
+    const comm::SelfScope scope = communication_scope();
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
     double x = 0.0;

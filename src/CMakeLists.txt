@@ -42,6 +42,7 @@ add_library(MallardCore STATIC
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
+    mesh/stencil_shapes.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp

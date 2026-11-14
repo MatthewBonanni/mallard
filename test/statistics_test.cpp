@@ -134,7 +134,7 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
 TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
     // The oscillating flow above: 64 samples every 2 steps over t in (1/4, 5/4], four phase bins of one period
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
-    const std::string dir = (scratch_dir() / "statistics_snapshot_averages").string();
+    const std::string dir = (rank_scratch_dir() / "statistics_snapshot_averages").string();
     std::filesystem::remove_all(dir);
     std::ostringstream force;
     force << std::setprecision(17) << 0.1 * 2.0 * M_PI << " * cos(" << 2.0 * M_PI << " * t)";
@@ -205,7 +205,7 @@ TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
 TEST(StatisticsTest, AveragedProbesRecordTheirOwnWindow) {
     // Probe averages sample on the [statistics] schedule but keep their own window, here without any [statistics] means
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
-    const std::string dir = (scratch_dir() / "statistics_probe_window").string();
+    const std::string dir = (rank_scratch_dir() / "statistics_probe_window").string();
     std::filesystem::remove_all(dir);
     const std::string extra = "[statistics]\nt_start = 0.02\ninterval = 2\n[[probes]]\nname = \"p\"\nformat = \"vtp\"\n"
                               "file = \"" + dir + "/p.pvd\"\npoint = " + numbers3("0.45", "0.55", "0.5") +
@@ -285,7 +285,7 @@ TEST(StatisticsTest, BatchIntervalsAreThoseOfTheBatchAveragesOfTheOscillation) {
 }
 
 TEST(StatisticsTest, BatchIntervalsRestartBitwise) {
-    const std::string dir = (scratch_dir() / "mallard_statistics_batch_test").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_statistics_batch_test").string();
     auto extra = [&](const std::string & sub) {
         return "[statistics]\nt_start = 0.005\ninterval = 2\nfields = [\"T\"]\nproducts = [\"U_X*U_Y\"]\nbatch = 0.004\n"
                "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 21\n";
@@ -317,7 +317,7 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
     // Samples every 3 steps, a restart at step 20 between two of them: the
     // continued averages (their weights and the last sample's time carry over)
     // and the appended probe series equal those of an uninterrupted run
-    const std::string dir = (scratch_dir() / "mallard_statistics_test").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_statistics_test").string();
     auto extra = [&](const std::string & sub) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\nfields = [\"T\"]\n"
                "products = [\"U_X*U_X\", \"U_X*U_Y\", \"RHO*T\"]\n"
@@ -378,7 +378,7 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
 
 TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
     // Points on faces between cells take the cell with the lowest id; the values are the cell's, bitwise
-    const std::string dir = (scratch_dir() / "mallard_probe_test").string();
+    const std::string dir = (rank_scratch_dir() / "mallard_probe_test").string();
     const std::string probes =
         "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
         "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n";
