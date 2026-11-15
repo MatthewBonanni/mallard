@@ -2011,13 +2011,16 @@ mechanism and mixture-averaged transport, marched in x in von Mises and
 similarity variables with Cantera; it has no streamwise diffusion and stays
 steady. With 201 to 801 points across the layer and tolerances of 1e-6 and
 1e-7 its lift-off length changes by less than 0.03 mm. Mallard's 2D runs
-(30 mm by 20 mm, inlet steps and characteristic pressure outlets, started
-from the reference) put the lift-off length, where the peak `Y_OH` reaches
-2e-3, 2.2% short of the reference's 15.26 mm on cells of 100 x 30 um, and the
-layer stays steady downstream of the flame base. The layer is convectively
-unstable (Kelvin-Helmholtz), so the boundaries must not return sound to the
-plate: with reflecting pressure outlets the start-up transient keeps
-re-seeding waves that roll the flame into the fuel side. The
+(30 mm by 20 mm and a 10 mm outlet buffer, inlet steps and characteristic
+pressure outlets, started from the reference) put the lift-off length, where
+the peak `Y_OH` reaches 2e-3, 6.1% and 2.2% short of the reference's 15.26
+mm and 0.6% beyond it on cells of 200 x 60, 100 x 30 and 50 x 15 um (where
+the peak temperature exceeds the air's by 250 K: -5.8%, -2.1%, +0.5%), and
+the layer stays steady with its profiles on the reference's; so V11 passes.
+The layer is convectively unstable (Kelvin-Helmholtz), so no disturbance may
+return to the plate: reflecting pressure outlets, or waves making sound at an
+outlet without a buffer, keep re-seeding waves that roll the flame into the
+fuel side. The
 example's README has the table and the profiles.
 
 ![Peak temperature, Y_OH and heat release rate along the mixing layer](../images/guide/mixing_layer_peaks-light.svg#gh-light-mode-only)

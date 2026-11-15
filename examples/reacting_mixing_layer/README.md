@@ -21,14 +21,16 @@ mixing layer, so the march starts 1 nm from the plate and the layer is
 resolved by the same points at every x.
 
 The Mallard run (2D build) covers 30 mm downstream of the plate and
-y = -8 to 12 mm: fuel enters through the left boundary below y = 0 and air
-above it (two `inlet_state` conditions), and the right, top and bottom
-boundaries are characteristic `outlet_pressure` conditions at 1 atm
-(`nscbc`), through which the layer's displacement leaves (outward on both
-sides) and acoustic waves leave too. The mesh (`mixing_layer_setup.py`) is a tensor product of
-quadrilaterals, uniform along x, uniform across the layer and growing by 8%
-per cell outside it; the run starts from the reference solution and lasts
-two flow-throughs of the slower stream (1.2 ms). MUSCL, HLLC, SSPRK3, CFL 0.8.
+y = -8 to 12 mm, with a buffer of 10 mm beyond it: fuel enters through the
+left boundary below y = 0 and air above it (two `inlet_state` conditions),
+and the right, top and bottom boundaries are characteristic `outlet_pressure`
+conditions at 1 atm (`nscbc`), through which acoustic waves leave and the
+layer's displacement flows out (outward on both sides). The mesh
+(`mixing_layer_setup.py`) is a tensor product of quadrilaterals, uniform
+along x up to 30 mm and growing by 10% per cell in the buffer, uniform across
+the layer and growing by 8% per cell outside it; the run starts from the
+reference solution and lasts two flow-throughs of the slower stream
+(1.2 ms). MUSCL, HLLC, SSPRK3, CFL 0.8.
 
 ## Running
 
@@ -62,39 +64,56 @@ rate is also printed, but its maximum is too flat to locate within 1 mm.
 | Run | Cells (dx, dy) | Cost on one A100 | `x_OH` [mm] | error | `x_T` [mm] | error | peak T at 20 / 30 mm [K] |
 |---|---|---|---|---|---|---|---|
 | reference | 401 points across | | 15.26 | | 16.40 | | 1782 / 2072 |
-| base (this input) | 69,600 (100, 30 um) | 88,000 steps | 14.93 | -2.2% | 16.04 | -2.2% | 1806 / 2056 |
+| coarse | 23,352 (200, 60 um) | 37,654 steps, 2.3 min | 14.33 | -6.1% | 15.44 | -5.8% | 1841 / 2070 |
+| base (this input) | 75,168 (100, 30 um) | 87,898 steps, 12 min | 14.93 | -2.2% | 16.05 | -2.1% | 1805 / 2062 |
+| fine | 260,603 (50, 15 um) | 226,466 steps, 89 min | 15.36 | +0.6% | 16.47 | +0.5% | 1770 / 2058 |
 
 ![Peak temperature, Y_OH and heat release rate along the layer](../../docs/images/guide/mixing_layer_peaks-light.svg#gh-light-mode-only)
 ![Peak temperature, Y_OH and heat release rate along the layer](../../docs/images/guide/mixing_layer_peaks-dark.svg#gh-dark-mode-only)
 
+The lift-off length converges to the reference's: from 200 to 50 um cells
+the error of `x_OH` goes from -0.93 to -0.33 to +0.10 mm, and on the fine mesh
+`x_OH` and `x_T` are within 0.6% and 0.5% of the reference's. The peak temperature at 25 and 30 mm
+is 13 and 14 K below the reference on the fine mesh.
+
+Across the layer (aligned at the stoichiometric mixture fraction `Z_st` =
+0.304), temperature and species on the fine mesh overlay the reference at
+every station.
+
 ![Temperature and species across the layer](../../docs/images/guide/mixing_layer_profiles-light.svg#gh-light-mode-only)
 ![Temperature and species across the layer](../../docs/images/guide/mixing_layer_profiles-dark.svg#gh-dark-mode-only)
 
-Across the layer (aligned at the stoichiometric mixture fraction `Z_st` =
-0.304), temperature and species follow the reference at every station. At 30
-mm, 1.5 mm into the fuel side of `Z_st`, the base mesh has 360 K against the
-reference's 318 K, and the peak temperature at 25 and 30 mm is within 5 and
-15 K of it.
+On the fine mesh the largest temperature difference across the layer is
+124 K, at 25 mm, on the steep fuel-side flank 0.5 mm below `Z_st`: a shift of the profile by about
+0.06 mm. It is 42 K at 30 mm. 1.5 mm into the fuel side the fine mesh has
+300 and 319 K at 25 and 30 mm, against the reference's 301 and 318 K.
 
-The layer is steady because no acoustic wave returns to the plate. The
-mixing layer is convectively unstable (Kelvin-Helmholtz). In linear
-stability theory for the reference's own profiles (inviscid and with
-viscosity, variable density), the spatial growth rate peaks at about 500,
-300 and 230 1/m at 5, 15 and 20 mm, at 25-45 kHz, and disturbances grow by a
-factor of e^5 or more between 5 and 25 mm, more from closer to the plate.
-Disturbances that reach the plate are amplified into waves that roll the
-layer up downstream of the flame base and carry products into the fuel side.
-With reflecting `outlet_pressure` sides and outlet, the start-up transient
-keeps returning to the plate as sound. The waves then persist (several m/s
-of transverse velocity at 15-25 mm on 50 x 15 um cells after two
-flow-throughs), and their time average puts 1000 K and `Y_H2O` = 0.1 1.5 mm
-into the fuel side at 30 mm. With characteristic boundaries the start-up
-wave packet convects out by about 0.5 ms and the transverse velocity along
-the layer falls below 0.1 m/s at 10-15 mm, with intermittent waves of
-under 1 m/s at 20-30 mm on the base mesh. A smooth inflow profile in place
-of the step at the plate makes no difference while the boundaries reflect.
-Characteristic conditions on the inlet across the step drive spurious
-velocities at the step
+The layer is steady because no disturbance returns to the plate. The mixing
+layer is convectively unstable (Kelvin-Helmholtz). Linear stability theory
+for the reference's own profiles (variable density, viscous) gives spatial
+growth rates of about 500, 300 and 230 1/m at 5, 15 and 20 mm, at 25-45 kHz.
+Disturbances grow by a factor of e^5 or more between 5 and 25 mm, and by more
+from closer to the plate. A disturbance that reaches the plate grows into
+waves that roll the layer up downstream of the flame base, carrying products
+into the fuel side. Sound returns to the plate in two ways:
+- **Reflecting boundaries.** With fixed-pressure `outlet_pressure` sides and
+  outlet, the start-up transient keeps returning to the plate as sound, and
+  the waves persist: several m/s of transverse velocity at 15-25 mm on
+  50 x 15 um cells after two flow-throughs. Their time average then puts
+  1000 K and `Y_H2O` = 0.1 1.5 mm into the fuel side at 30 mm.
+- **Waves reaching the outlet.** With characteristic boundaries the start-up
+  wave packet convects out by about 0.5 ms. Waves that reach the outlet still
+  make sound there, and on 50 x 15 um cells they return as intermittent
+  waves of 1-4 m/s at 20-30 mm. The buffer, where the growing cells damp the
+  waves before the outlet, removes them: on the fine mesh `x_OH` stays
+  between 15.35 and 15.37 mm over the last 0.6 ms.
+
+The buffer leaves the flow upstream unchanged: it changes the base mesh's
+profiles up to 15 mm by less than 1 K, and its `x_OH` by 0.005 mm.
+
+A smooth inflow profile in place of the step at the plate makes no
+difference while the boundaries reflect. Characteristic conditions on the
+inlet across the step drive spurious velocities at the step
 ([#1179](https://github.com/MatthewBonanni/mallard/issues/1179)), so the
 inlet keeps its fixed states.
 

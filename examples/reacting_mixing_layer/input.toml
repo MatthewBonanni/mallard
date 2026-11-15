@@ -6,8 +6,9 @@
 # Reference: the steady boundary-layer equations with the same chemistry and
 # transport (Cantera), marched in x by mixing_layer_reference.py. Two
 # inlet_state halves at x = 0, characteristic outlet_pressure (nscbc) on the
-# other sides, which let acoustic waves leave; cells of
-# 100 um along x and 30 um across the layer, growing by 8% outside it. Make
+# other sides, which let acoustic waves leave, and a buffer of 10 mm of
+# growing cells before the outlet; cells of 100 um along x and 30 um across
+# the layer, growing by 8% outside it. Make
 # the reference, the mesh and the initial state (the reference solution)
 # first, from this directory; the second command rewrites this file without
 # this header:
@@ -20,14 +21,14 @@
 #   python plot_mixing_layer.py --run base . --average 8 --history
 #
 # Results (README.md): lift-off length (peak Y_OH reaching 2e-3) 14.93 mm,
-# 2.2% short of the reference's 15.26 mm; the layer is steady and its
-# profiles follow the reference's downstream of the flame base. Cost: 88,000
-# steps, 10 minutes on one A100.
+# 2.2% short of the reference's 15.26 mm (+0.6% on 50 x 15 um cells:
+# mixing_layer_setup.py --dx 50e-6 --dy 15e-6); the layer is steady and its
+# profiles overlay the reference's. Cost: 87,898 steps, 12 minutes on one A100.
 #
 # Laminar reacting mixing layer (V11) from field.npz: fuel H2:1,N2:1 at 300 K and
-# 50 m/s (y < 0), air at 1150 K and 100 m/s (y > 0), p = 101325 Pa; 300 x 232 = 69600 quadrilaterals,
+# 50 m/s (y < 0), air at 1150 K and 100 m/s (y > 0), p = 101325 Pa; 324 x 232 = 75168 quadrilaterals,
 # dx = 100 um, dy = 30 um over y = [-1.800, 2.850] mm, growing by
-# 1.08 to [-8, 12] mm; length 30 mm; t_stop = 2 flow-through(s)
+# 1.08 to [-8, 12] mm; length 30 mm and a buffer of 10 mm; t_stop = 2 flow-through(s)
 # of the slower stream
 
 [run]
@@ -64,19 +65,19 @@ X = { "O2" = 0.21, "N2" = 0.79 }
 name = "outlet"
 type = "outlet_pressure"
 p = 101325
-nscbc = { L = 0.03 }
+nscbc = { L = 0.04 }
 
 [[boundaries]]
 name = "bottom"
 type = "outlet_pressure"
 p = 101325
-nscbc = { L = 0.03 }
+nscbc = { L = 0.04 }
 
 [[boundaries]]
 name = "top"
 type = "outlet_pressure"
 p = 101325
-nscbc = { L = 0.03 }
+nscbc = { L = 0.04 }
 
 [numerics]
 riemann_solver = "HLLC"
