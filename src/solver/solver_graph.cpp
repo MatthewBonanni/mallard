@@ -21,6 +21,7 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -477,15 +478,15 @@ void Solver::device_step_body() {
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
         recording_step = false;
     };
+    uint64_t reduced = 0;
+    for (uint32_t k = 0; k < n_probes; k++) {
+        if (probe_trigger_vars[k] != NO_TRIGGER_VARS) reduced |= uint64_t(1) << k;
+    }
     if (!staged_probes.empty()) {
         const Kokkos::View<uint32_t *> due = probe_due;
         const Kokkos::View<Probes::StagedClock *> clocks = probe_clocks;
         const uint64_t average_interval = probes.get_average_interval();
         const rtype average_start = probes.get_average_start();
-        uint64_t reduced = 0;
-        for (uint32_t k = 0; k < n_probes; k++) {
-            if (probe_trigger_vars[k] != NO_TRIGGER_VARS) reduced |= uint64_t(1) << k;
-        }
         Kokkos::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
@@ -580,7 +581,7 @@ void Solver::device_step_body() {
             });
         }
     }
-    if (!staged_probes.empty()) evaluate_probes(false);
+    if (static_cast<uint32_t>(std::popcount(reduced)) < n_probes) evaluate_probes(false);
     if (staged_outputs) {
         // write_data's work on the device, into the host's mirrors; boundary states at the step's end
         const uint32_t n_writers = static_cast<uint32_t>(data_writers.size());
