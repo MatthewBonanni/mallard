@@ -2,7 +2,7 @@
  * @file teno_shapes.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Stencil-shape keys of TENO cells, known before their tables are
- *        fitted, so that the setup fits one cell of each shape (host side).
+ *        fitted, so that the setup fits one cell of each shape.
  * @version 0.1
  * @date 2026-11-14
  *
@@ -13,12 +13,14 @@
 #ifndef TENO_SHAPES_H
 #define TENO_SHAPES_H
 
-#include <array>
 #include <cstdint>
 #include <vector>
 
+#include <Kokkos_Core.hpp>
+
 #include "boundary.h"
 #include "mesh.h"
+#include "teno_setup.h"
 
 namespace teno {
 
@@ -35,6 +37,68 @@ struct ShapeKeyHash {
     size_t operator()(const ShapeKey & k) const { return static_cast<size_t>(k.hash ^ (k.check * 0x9e3779b97f4a7c15ULL)); }
 };
 
+/** @brief One cell's scratch of a neighborhood search. */
+struct ShapeLanes {
+    teno_setup::Lane<uint32_t> cell, lattice, order;
+    teno_setup::Lane<int64_t> q;
+    teno_setup::Lane<uint64_t> hash;
+};
+
+/**
+ * @brief The cells within a cell's search layers, on the device: the
+ *        mesh's views it reads and the scratch of a batch of searches.
+ */
+struct ShapeSearch {
+    Kokkos::View<rtype *[N_DIM]> cell_coords, face_coords, node_coords, shifts;
+    Kokkos::View<uint32_t *> offsets_cells_of_cell, cells_of_cell, offsets_faces_of_cell, faces_of_cell,
+        offsets_nodes_of_cell, nodes_of_cell;
+    Kokkos::View<uint8_t *> cells_of_cell_shift, face_shift;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<int32_t *> face_bc;
+    Kokkos::View<int8_t *[3]> shift_lattice;
+    Kokkos::View<double *[3]> translations;
+    Kokkos::View<double *> h;        // (cell): its size, as the setup scales it
+    Kokkos::View<uint64_t *> shape;  // (cell): hash of its nodes and boundary faces in its own units (0: none)
+    uint32_t n_translations = 0, n_complete = 0, n_large = 0, n_small = 0;
+    uint32_t cap = 0;  // visits per search
+    teno_setup::SlotArray<uint32_t> cell, lattice, order;
+    teno_setup::SlotArray<int64_t> q;
+    teno_setup::SlotArray<uint64_t> hash;
+
+    struct Result {
+        uint32_t n = 0;      // cells visited
+        uint32_t layers = 0;
+        bool ok = false;     // within the scratch, every cell once, none in the outermost halo layer, no ties
+    };
+
+    KOKKOS_INLINE_FUNCTION ShapeLanes lanes(const size_t slot) const {
+        return ShapeLanes{cell.lane(slot), lattice.lane(slot), order.lane(slot), q.lane(slot), hash.lane(slot)};
+    }
+
+    /**
+     * @brief Search of cell c: the layers of the setup's central and sector
+     *        searches; on success, w.order holds the visits in key order
+     *        (by layer, then position) and the hash set maps each visited
+     *        cell to its position in that order. end: the layers' ends.
+     */
+    KOKKOS_FUNCTION Result search(uint32_t c, const ShapeLanes & w, uint32_t * end) const;
+
+    /** @brief Empties the hash set of a search that visited n cells. */
+    KOKKOS_FUNCTION void clear(const ShapeLanes & w, uint32_t n) const;
+
+    /** @brief Position of cell c in the key order of the last search (-1: not visited). */
+    KOKKOS_FUNCTION int64_t position(const ShapeLanes & w, uint32_t c) const;
+
+    /** @brief Position of boundary face f among cell c's boundary faces, by position (-1: not one, or a tie). */
+    KOKKOS_FUNCTION int boundary_rank(uint32_t c, uint32_t f) const;
+
+    /** @brief Boundary face at that position among cell c's (-1: none). */
+    KOKKOS_FUNCTION int64_t boundary_face(uint32_t c, int rank) const;
+
+    /** @brief Grid point of a length in units of a cell's size. */
+    KOKKOS_FUNCTION static int64_t on_grid(double v);
+};
+
 /**
  * @brief The setup of a reconstructed cell reads the geometry of the cells
  *        within its search's vertex-neighbor layers (their centroids, nodes
@@ -46,20 +110,22 @@ struct ShapeKeyHash {
  *        cell's faces in its own order (sector stencils follow it). The
  *        number of layers is that of the search, a function of the layers'
  *        cell counts. Cells of one key have the same tables up to round-off.
+ *        Everything runs on the device, so that every backend has the same
+ *        keys.
  */
 class ShapeKeys {
     public:
         static constexpr int SHAPE_GRID_BITS = 30;
 
-        /** @brief Whether keys describe the mesh's setups: no curved geometry or rotational periodicity. */
+        /** @brief Whether keys describe the mesh's setups: no curved geometry, rotational periodicity or axisymmetry. */
         static bool supported(const Mesh & mesh);
 
         /**
          * @brief Keys of a mesh's cells whose central search stops past
          *        n_large cells and sector search past n_small cells (or 6
-         *        layers), as the setup's do.
+         *        layers), as the setup's do, at most batch at a time.
          */
-        ShapeKeys(const Mesh & mesh, const BoundaryData & boundaries, uint32_t n_large, uint32_t n_small);
+        ShapeKeys(const Mesh & mesh, const BoundaryData & boundaries, uint32_t n_large, uint32_t n_small, uint32_t batch);
 
         /**
          * @brief Keys of cells [0, n) (collective). No key for a cell whose
@@ -68,47 +134,47 @@ class ShapeKeys {
          */
         std::vector<ShapeKey> keys(uint32_t n) const;
 
-        /** @brief Scratch of neighborhood(), one per thread. */
-        struct Scan;
+        /**
+         * @brief Rewrites the stencils of slots [0, n) of batch, the tables of
+         *        cells[0, n), as positions in the key order: an entry's cell's
+         *        position, and its face's (-1: none) as its cell's position
+         *        times 64 plus its rank among that cell's boundary faces.
+         *        size(j): the number of cells of slot j's neighborhood, or 0
+         *        if its tables failed or its key does not describe them.
+         */
+        void encode(const Kokkos::View<uint32_t *> & cells, uint32_t n, const teno_setup::TableBatch & batch,
+                    const Kokkos::View<uint32_t *> & size) const;
 
         /**
-         * @brief The cells of c's layers, in key order (equal positions for
-         *        cells of one key), and the number of layers; with max_layers,
-         *        only its first max_layers layers (the first cells of that
-         *        order).
+         * @brief The records of slots [0, n) of an encoded batch, on the host:
+         *        {1, neighborhood size, depth, left-out sectors, central size,
+         *        sector sizes, basis means, smoothness matrix, central cells
+         *        and faces, pseudo-inverses, sector cells and faces,
+         *        pseudo-inverses}, values as double bits; {0} without one.
          */
-        bool neighborhood(uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & scratch,
-                          uint32_t max_layers = 0) const;
+        static std::vector<std::vector<uint64_t>> records(const teno_setup::TableBatch & batch, uint32_t n,
+                                                          const Kokkos::View<uint32_t *> & size);
 
-        /** @brief Position of boundary face f among cell c's boundary faces, in key order (-1: not one). */
-        int boundary_rank(uint32_t c, uint32_t f) const;
+        /** @brief Records per group, on the device. */
+        struct Records {
+            Kokkos::View<uint64_t *> offset;  // (group + 1)
+            Kokkos::View<uint64_t *> data;
+        };
+        static Records upload(const std::vector<std::vector<uint64_t>> & records);
 
-        /** @brief Boundary face at that position among cell c's (-1: none). */
-        int64_t boundary_face(uint32_t c, int rank) const;
+        /**
+         * @brief Tables of the cells c0 + t, t < n, with a group (group(c) !=
+         *        NONE) into slot t of out from their group's record: its
+         *        stencils mapped to the cell's own neighborhood, and its own
+         *        scale. bad(t): the cell's neighborhood does not match it.
+         */
+        void decode(uint32_t c0, uint32_t n, const Kokkos::View<uint32_t *> & group, const Records & records,
+                    const teno_setup::TableBatch & out, const Kokkos::View<uint8_t *> & bad) const;
 
     private:
-        bool scan(uint32_t c, Scan & s, uint32_t max_layers = 0) const;
-        std::vector<uint32_t> sorted_boundary_faces(uint32_t c) const;
-
         const Mesh & mesh;
-        std::vector<int32_t> face_bc;     // (face)
-        std::vector<uint64_t> shape;      // (cell): hash of its nodes and boundary faces, in its own units
-        std::vector<double> h;            // (cell)
-        uint32_t n_large, n_small;
-};
-
-struct ShapeKeys::Scan {
-    struct Entry {
-        int32_t layer;
-        std::array<int64_t, N_DIM> q;
-        uint32_t cell;
-    };
-    std::vector<uint32_t> stamp, index;  // (cell): scan that visited it, and its visit
-    uint32_t generation = 0;
-    std::vector<uint32_t> cell;
-    std::vector<std::array<int16_t, 3>> lattice;
-    std::vector<uint32_t> end;
-    std::vector<Entry> entries;
+        ShapeSearch s;
+        uint32_t slots = 0;
 };
 
 /**

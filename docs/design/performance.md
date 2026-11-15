@@ -739,9 +739,9 @@ Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas,
 
 ### 16. TENO setup: one fit per stencil shape (#986)
 
-With shared tables, the host backends key each cell's stencil geometry before the fit and fit one cell per key
-(`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table packing of
-#1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
+cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
+packing of #1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
 Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
 restart file (`--fields Q_CRITERION`):
 
@@ -757,32 +757,23 @@ of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixe
 2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
 ranks give the 1-rank result bit for bit.
 
-**Packing once per key** (#1079). The packing above ranked every cell's table although the cells of a key
-share it. Each batch now ranks, hashes and compares a key's table once, at its first cell, with the lowest global
-id of its cells, so the store sees the same tables in the same order; the cells taking a key's tables walk only
-the vertex-neighbor layers its stencils use. Same case and machine, under a load average of about 140, two
-alternating runs each, base = #986:
+On one A100 (base = #1069, device packing), restart files after 3 steps are bitwise those of the base, and a
+GPU run that reads the tables cache an OpenMP run wrote gives its own result bit for bit; the two caches differ
+only in the producer's name. Seconds of the numerics setup:
 
-| $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
-|---|---|---|---|---|
-| base | 104.7 / 97.1 s | 25.3 / 0.08 / 48.1 / 12.9 s, 23.9 / 0.08 / 44.8 / 11.4 s | 113.6 / 104.1 s | 2.02 / 2.43 GB |
-| once per key | 55.2 / 53.1 s | 23.0 / 0.02 / 2.6 / 10.9 s, 20.3 / 0.09 / 4.7 / 10.4 s | 64.5 / 62.5 s | 1.83 / 2.30 GB |
+| A100 | base: tables / packing | keyed: tables / packing / shapes | fitted |
+|---|---|---|---|
+| double Mach $2048 \times 512 \times 2$, TENO3 | 0.87 / 0.96 | 0.17 / 1.17 / 0.40 | 323 of 2,097,152 |
+| TENO4 | 1.43 / 0.96 | 0.20 / 1.24 / 0.40 | 323 |
+| TENO5 | 4.52 / 1.16 | 0.32 / 1.47 / 0.46 | 323 |
+| TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
+| $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
+| 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+| TENO5 | 90.10 / 30.83 | 90.05 / 31.19 / 0.18 | 750,000 |
 
-The per-cell geometry (the moments) now dominates, then the keys.
-
-The keyed setup now runs in GPU builds too: the host keys and records feed the device packing, and the tables
-are bitwise those of fitting every cell on the device. One A100-SXM4-80GB, 16 host threads, base = #986 (fits
-every cell on GPUs), two alternating runs each:
-
-| one A100, TENO5 | cells fitted | tables | packing | keys | setup, wall | peak RSS |
-|---|---|---|---|---|---|---|
-| $96^3$ Taylor-Green, base | 884,736 | 5.3 s | 1.1-1.2 s | - | 24.8-25.2 s | 2.28 GB |
-| $96^3$ Taylor-Green, keyed | 873 | 0.08 s | 1.6 s | 2.0 s | 22.5-23.6 s | 2.28 GB |
-| 1,053,696 tetrahedra, base | 1,053,696 | 23.5 s | 1.7-4.3 s | - | 33.7-33.9 s | 1.91 GB |
-| 1,053,696 tetrahedra, keyed | 2,022 | 0.18 s | 4.2 s | 3.0-3.1 s | 15.9-17.6 s | 2.18 GB |
-
-The base's tetrahedral packing took 1.7-1.9 s in one session and 4.1-4.3 s in another on the same pod. Restart
-files after 2 steps are bitwise those of the base.
+The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
+tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
+base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
 
 ## Scaling (one node)
 
