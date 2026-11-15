@@ -36,16 +36,6 @@ void set_primitives(const Kokkos::View<rtype *[N_PRIMITIVE]> & P, const uint32_t
     P(c, N_DIM + 2) = W[N_DIM + 1] / W[0] * gamma / (gamma - 1.0_r) + e0;
 }
 
-/** @brief Applies a per-face functor to the entries of a list. */
-template <typename F>
-struct OverFaces {
-    F f;
-    Kokkos::View<uint32_t *> faces;
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t k) const { f(faces(k)); }
-};
-
 /** @brief W, the scalars [Y, gamma, e0] and (optionally) the temperature seed of each cell. */
 struct MixtureCellFunctor {
     Mixture gas;
@@ -544,13 +534,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
                 transport_gradients, cell_transport, cell_diffusion, face_flux, species_slots, axisymmetric,
                 mesh->cell_covariance, les_coefficients, sgs_only,
                 double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
-            if (rhs_faces.extent(0) == 0) {
-                Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, functor);
-            } else {
-                Kokkos::View<uint32_t *> list = rhs_faces;
-                Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
-                                     OverFaces<decltype(functor)>{functor, list});
-            }
+            parallel_for_set("mixture_viscous_flux", rhs_faces, functor);
         });
     };
     if (is_viscous()) {
@@ -629,12 +613,7 @@ void Solver::launch_mixture_flux_functor() {
         face_reconstruction->face_quad_normals,
         central_states()};
     // Faces of owned cells, as the single-gas flux
-    if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
-    } else {
-        Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
-    }
+    parallel_for_set<HeavyBounds>("mixture_flux", rhs_faces, functor);
 }
 
 template <typename T_riemann_solver>
@@ -658,13 +637,7 @@ void Solver::launch_double_flux_functor() {
         cell_upwind,
         face_reconstruction->face_quad_normals,
         central_states()};
-    if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
-    } else {
-        Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
-                             OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
-    }
+    parallel_for_set<HeavyBounds>("double_flux", rhs_faces, functor);
 }
 
 rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
