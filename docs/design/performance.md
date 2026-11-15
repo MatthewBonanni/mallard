@@ -775,6 +775,20 @@ The peak device memory is unchanged except for double Mach at order 6 (6,995 to 
 tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
 base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
 
+**Ranking a key's table once** (#1079). The packing ranked, hashed and compared every cell's table although the
+cells of a key carry it bit for bit. Each batch now does that once per key, at its first cell there, with the
+lowest global id of its cells, so the store sees the same tables in the same order and gives the same shapes.
+The $64^3$ Taylor-Green vortex at TENO5 as above, under a load average of about 140, two alternating runs, base =
+the keyed setup above; the packing includes the decode of the records:
+
+| $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
+|---|---|---|---|---|
+| base | 77.2 / 92.5 s | 21.9 / 0.07 / 28.0 / 9.2 s, 23.9 / 0.03 / 41.2 / 10.6 s | 86.1 / 100.2 s | 2.43 / 2.35 GB |
+| once per key | 70.0 / 60.1 s | 25.8 / 0.07 / 11.7 / 14.6 s, 18.3 / 0.04 / 11.6 / 12.8 s | 77.1 / 68.0 s | 2.32 / 2.43 GB |
+
+Restart files are bitwise those of the base. What remains: the decode's search of every layer (#1178), the
+per-cell geometry (#1166) and the keys (#1167).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
