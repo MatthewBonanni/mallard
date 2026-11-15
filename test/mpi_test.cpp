@@ -228,6 +228,14 @@ TEST(MPITest, MUSCLMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
 }
 
+TEST(MPITest, MUSCLTablesLeaveOutTheOutermostHaloLayer) {
+    // Its missing faces would look like boundary faces: a row from them, equal on the grid to its owner's
+    // but not bitwise, could be the one that the owner's cells share
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
+}
+
 TEST(MPITest, TENOOnQuadsMatchesSerial) {
     // Stencils reach several layers into neighboring ranks and mirror across
     // physical boundaries, never across partition faces

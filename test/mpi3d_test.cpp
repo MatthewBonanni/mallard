@@ -108,13 +108,8 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
 }
 
 TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
+    // Rows shared over the ranks, with block cells and boundary cells
     expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"));
-}
-
-TEST(MPI3DTest, MUSCLTablesLeaveOutTheOutermostHaloLayer) {
-    // Its missing faces would look like boundary faces: a row from them, equal on the grid to its owner's
-    // but not bitwise, could be the one that the owner's cells share
-    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
 
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
