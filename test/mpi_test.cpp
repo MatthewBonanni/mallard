@@ -245,6 +245,25 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
 }
 
+TEST(MPITest, StreamsWaitForEachOtherWhenOneRunsLate) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "other backends fence instead of enqueuing waits";
+#else
+    // The halo exchange, the early cells' reconstruction and the face exchange run on their own streams. With
+    // every stream held back after each wait, the reconstruction and the fluxes read nothing a wait does not order
+    struct Delay {
+        Delay() { comm::set_wait_delay(uint64_t(1) << 18); }
+        ~Delay() { comm::set_wait_delay(0); }
+    } delay;
+    const std::string sides = bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                  "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n");
+    expect_matches_serial_with_and_without_step_graphs(box_input("cartesian", "type = \"TENO\"\norder = 3\n", NS, sides, 8));
+    expect_matches_serial_with_and_without_step_graphs(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER, sides, 8));
+    expect_matches_serial_with_and_without_step_graphs(
+        mixture_input("", "type = \"TENO\"\norder = 3\n", "", "navier_stokes"));
+#endif
+}
+
 namespace {
 
 /**

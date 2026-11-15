@@ -76,7 +76,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     const std::string name = find_value<std::string>(bound, "name");
     const std::string where = "boundaries[name = \"" + name + "\"]";
     // An expression for mass_flux is BoundaryFields'
-    if (!bound.contains("mdot")) return {};
+    if (!contains_optional(bound, "mdot")) return {};
     // mdot: a number, or an expression of t, a total over the inlet
     double mdot = 0.0;
     std::shared_ptr<const kexpr::Program> mdot_program;
