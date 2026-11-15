@@ -285,6 +285,18 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("cannot read the file.").what()), "cannot read the file.");
 }
 
+TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
+    const std::string input = replaced(box(), "T = 1.0", "T = \"1 + (x\"");
+    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"1 + (x\": expected ')'",
+                                    "at position 7", "See docs/guide/expressions.md."});
+    CheckOptions options;
+    options.input_file = "case.toml";
+    Solver solver;
+    const CheckReport report = solver.check(parse_input_string(input), options);
+    ASSERT_EQ(report.errors().size(), 1u);
+    EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+}
+
 TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {
     const std::string input = replaced(box(), "Nx = 16", "Nx = 16.0");
     CheckOptions options;

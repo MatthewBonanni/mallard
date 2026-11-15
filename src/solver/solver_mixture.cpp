@@ -316,7 +316,7 @@ class CompositionExpressions {
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
                 texts.push_back(quantity_or_expression(value, species, dim::none));
-                values.emplace_back(where + "." + key + "." + species, texts.back());
+                values.emplace_back(where + "." + key + "." + species, line_of(value), texts.back());
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");

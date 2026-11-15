@@ -16,7 +16,9 @@
 #define KEXPR_H
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -427,6 +429,12 @@ struct ArrayVariables {
 /** @brief Text added to the error for an unknown symbol, from the symbol (e.g. a hint about units), or empty. */
 using SymbolHint = std::string (*)(const std::string & symbol);
 
+/** @brief An expression that does not compile: what() names it and quotes it; reason says what is wrong where. */
+struct SyntaxError : std::invalid_argument {
+    SyntaxError(const std::string & message, std::string why) : std::invalid_argument(message), reason(std::move(why)) {}
+    std::string reason;  // e.g. "unexpected end of expression at position 4"
+};
+
 class Program {
     public:
         /**
@@ -434,6 +442,7 @@ class Program {
          * @param text The expression.
          * @param variables Names of the variables it may read, by index.
          * @param hint Adds to the error for an unknown symbol, or null.
+         * @throws SyntaxError if the text does not compile.
          */
         Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
                 SymbolHint hint = nullptr);

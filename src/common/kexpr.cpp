@@ -299,8 +299,8 @@ class Parser {
         uint16_t n_locals() const { return max_live; }
 
         [[noreturn]] void fail(const std::string & what, const size_t pos) const {
-            throw std::invalid_argument("Failed to parse expression for " + name + " (\"" + text + "\"): " + what +
-                                        " at position " + std::to_string(pos + 1) + ".");
+            const std::string reason = what + " at position " + std::to_string(pos + 1);
+            throw SyntaxError("Failed to parse expression for " + name + " (\"" + text + "\"): " + reason + ".", reason);
         }
 
     private:
@@ -1020,8 +1020,10 @@ Program::Program(const std::string & name, const std::string & text, const std::
     m_loops = emitter.has_loops;
     const int slots = parser.n_locals() + emitter.max_depth;
     if (slots > MAX_STACK) {
-        throw std::invalid_argument("Expression for " + name + " is too deeply nested or has too many variables (needs " +
-                                    std::to_string(slots) + " stack slots, at most " + std::to_string(MAX_STACK) + ").");
+        const std::string needs = std::to_string(slots) + " stack slots, at most " + std::to_string(MAX_STACK);
+        throw SyntaxError("Expression for " + name + " is too deeply nested or has too many variables (needs " + needs +
+                              ").",
+                          "needs " + needs + ": it is too deeply nested or has too many variables");
     }
     for (const Instr & in : m_code) {
         if (in.op == Op::VAR) m_uses[in.index] = true;

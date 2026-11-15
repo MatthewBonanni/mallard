@@ -167,7 +167,7 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
         Field f;
         if (v.is_string() && !has_unit(v.as_string())) {
-            f.expression = std::make_shared<Expression>(name, v.as_string());
+            f.expression = std::make_shared<Expression>(name, line_of(v), v.as_string());
             varies = true;
         } else {
             f.value = as_double(v, name, dimension);

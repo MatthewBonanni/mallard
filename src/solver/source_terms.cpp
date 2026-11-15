@@ -17,6 +17,7 @@
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "expression.h"
 #include "input.h"
 #include "region_input.h"
 #include "region_motion.h"
@@ -196,13 +197,14 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         const bool total = !legacy && find_value_or<bool>(*entry, "total", false);
         // A total is integrated over the region: per unit volume times a volume
         const auto per = [total](const Dimension & d) { return total ? d.times(dim::length, 3) : d; };
-        // (column, expression, name)
-        std::vector<std::tuple<uint32_t, std::string, std::string>> values;
+        // (column, expression, name, line)
+        std::vector<std::tuple<uint32_t, std::string, std::string, std::size_t>> values;
         if (entry->contains("rho")) {
             if (mixture) {
                 throw InputError(where + ".rho: in gas mixtures mass enters through rhoY (rho gains their sum).");
             }
-            values.emplace_back(0u, quantity_or_expression(entry->at("rho"), where + ".rho", per(dim::mass_source)), "rho");
+            values.emplace_back(0u, quantity_or_expression(entry->at("rho"), where + ".rho", per(dim::mass_source)), "rho",
+                                line_of(entry->at("rho")));
         }
         if (entry->contains("rhou")) {
             const Input & v = entry->at("rhou");
@@ -212,12 +214,12 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             FOR_I_DIM values.emplace_back(1u + i,
                                           quantity_or_expression(v.as_array()[i], where + ".rhou",
                                                                  per(dim::momentum_source)),
-                                          "rhou_" + std::string(1, "xyz"[i]));
+                                          "rhou_" + std::string(1, "xyz"[i]), line_of(v.as_array()[i]));
         }
         if (entry->contains("rhoE")) {
             values.emplace_back(uint32_t(N_DIM + 1),
                                 quantity_or_expression(entry->at("rhoE"), where + ".rhoE", per(dim::power_density)),
-                                "rhoE");
+                                "rhoE", line_of(entry->at("rhoE")));
         }
         if (entry->contains("rhoY")) {
             if (!mixture) throw InputError(where + ".rhoY needs a gas mixture.");
@@ -227,15 +229,15 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
                 if (k == species.end()) throw InputError(where + ".rhoY: no species " + name + " in the mechanism.");
                 values.emplace_back(uint32_t(N_CONSERVATIVE + (k - species.begin())),
                                     quantity_or_expression(value, where + ".rhoY." + name, per(dim::mass_source)),
-                                    "rhoY_" + name);
+                                    "rhoY_" + name, line_of(value));
             }
         }
         if (values.empty()) throw InputError(where + " sets none of rho, rhou, rhoE, rhoY.");
 
         std::vector<kexpr::Program> compiled;
         bool per_copy = false;
-        for (const auto & [column, text, name] : values) {
-            kexpr::Program p(where + "." + name, text, names, expression_unit_hint);
+        for (const auto & [column, text, name, line] : values) {
+            kexpr::Program p = compile_expression(where + "." + name, line, text, names);
             if (total) {
                 for (uint16_t i = 0; i < n_variables; i++) {
                     if (i != TIME && i != COPY && p.uses(i)) {

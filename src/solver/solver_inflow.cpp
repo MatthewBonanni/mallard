@@ -100,7 +100,8 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     std::unique_ptr<Expression> shape;
     if (bound.contains("profile")) {
         shape = std::make_unique<Expression>(
-            where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
+            where + ".profile", line_of(bound, "profile"),
+            quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
     }
     const bool profile_of_t = shape && shape->depends_on_time();
     // Either of t: the faces' fluxes are recomputed on the device at every stage

@@ -23,6 +23,7 @@
 
 #include "comm.h"
 #include "distribution.h"
+#include "expression.h"
 #include "log.h"
 #include "mesh.h"
 #include "units.h"
@@ -516,7 +517,7 @@ class Parser {
         double scalar(const Input & v, const std::string & key, const Dimension & dimension, int32_t & program) {
             program = -1;
             if (!v.is_string() || has_unit(v.as_string())) return as_double(v, key, dimension);
-            kexpr::Program p(key, quantity_or_expression(v, key, dimension), {"t"}, expression_unit_hint);
+            kexpr::Program p = compile_expression(key, line_of(v), quantity_or_expression(v, key, dimension), {"t"});
             const double t0 = 0.0;
             const double value = p(&t0);
             if (p.uses(0)) {
@@ -674,7 +675,8 @@ class Parser {
                 }
                 c.text = find_value<std::string>(t, "condition");
                 c.key = where + ".condition";
-                c.level = condition_level(c.text, c.key, line_of(t, "condition"));
+                c.line = line_of(t, "condition");
+                c.level = condition_level(c.text, c.key, c.line);
             } else {
                 for (const char * key : {"field", "value"}) {
                     if (!t.contains(key)) {
@@ -685,6 +687,7 @@ class Parser {
                 const std::string field = find_value<std::string>(t, "field");
                 const double value = as_double(t.at("value"), where + ".value", field_dimension(field));
                 c.key = where + ".field";
+                c.line = line_of(t, "field");
                 c.text = field + " = " + logging::real(value);
                 std::ostringstream exact;
                 exact << std::setprecision(17) << value;
@@ -1315,8 +1318,8 @@ class Parser {
                 n.kind = Kind::IMPLICIT;
                 if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z, t (inside: f < 0).");
                 n.first = static_cast<uint32_t>(programs.size());
-                programs.emplace_back(where + ".f", find_value<std::string>(t, "f"),
-                                      std::vector<std::string>{"x", "y", "z", "t"}, expression_unit_hint);
+                programs.push_back(compile_expression(where + ".f", line_of(t, "f"), find_value<std::string>(t, "f"),
+                                                      {"x", "y", "z", "t"}));
                 bounded = false;
             } else {
                 throw InputError(where + ".type = \"" + type + "\" is not one of: " + join(types()) + ".");

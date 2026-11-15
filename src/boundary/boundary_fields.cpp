@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <sstream>
 
+#include "expression.h"
 #include "input.h"
 #include "synthetic_inflow.h"
 
@@ -43,7 +44,7 @@ const std::vector<std::string> & BoundaryValue::variables() {
 
 BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension) {
     if (is_expression(v)) {
-        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables(), expression_unit_hint);
+        program = std::make_shared<kexpr::Program>(compile_expression(name, line_of(v), v.as_string(), variables()));
     } else {
         program = constant(as_double(v, name, dimension), name);
     }
@@ -990,7 +991,8 @@ bool TimedInletTargets::depends_on_time(const Input & entry, const std::string &
     for (size_t d = 0; d < u.items.size(); d++) {
         const Input & v = u.items[d];
         if (!BoundaryValue::is_expression(v)) continue;
-        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables(), expression_unit_hint);
+        const kexpr::Program p =
+            compile_expression(where + ".u[" + std::to_string(d) + "]", line_of(v), v.as_string(), BoundaryValue::variables());
         if (p.uses(3)) return true;
     }
     return false;

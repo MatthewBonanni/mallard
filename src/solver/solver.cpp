@@ -898,7 +898,8 @@ void Solver::init_boundaries() {
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
         if (bound.contains("where")) {
-            where = std::make_unique<Expression>(name + ".where", find_value<std::string>(bound, "where"));
+            where = std::make_unique<Expression>(name + ".where", line_of(bound, "where"),
+                                                 find_value<std::string>(bound, "where"));
         }
         DirichletBoundary dirichlet;
         if (bcs.back().type == BoundaryType::DIRICHLET) {
