@@ -7,8 +7,8 @@
 #
 #   tools/dev/gpu_runtime_tests.sh [--full] BUILD_DIR
 #
-# MPIEXEC: the launcher of the MPI checks (default "mpiexec -n 2"); each rank takes the GPU of its
-# rank on its node.
+# MPIEXEC: the launcher of the MPI checks (default "mpiexec -n 2"; "none" skips them, e.g. on one
+# GPU); each rank takes the GPU of its rank on its node.
 set -u
 
 full=0
@@ -55,10 +55,11 @@ check() {
 for tool in "${tools[@]}"; do
     sanitizer=(compute-sanitizer --tool "$tool" --error-exitcode 99 --print-limit 20)
     check "$tool, 1 GPU" "${sanitizer[@]}" "$bin" --gtest_color=no --gtest_filter="$serial"
+    [ "${mpiexec[*]}" = none ] && continue
     check "$tool, ${mpiexec[*]}" "${mpiexec[@]}" "${sanitizer[@]}" "$bin" --gtest_color=no \
         --gtest_filter="$distributed" --kokkos-map-device-id-by=mpi_rank
 done
-if [ "$full" = 1 ]; then
+if [ "$full" = 1 ] && [ "${mpiexec[*]}" != none ]; then
     check "MPI tests, ${mpiexec[*]}" "${mpiexec[@]}" "$bin" --gtest_color=no --gtest_filter="$mpi_tests" \
         --kokkos-map-device-id-by=mpi_rank
 fi
