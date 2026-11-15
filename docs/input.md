@@ -1564,7 +1564,8 @@ primitives have a signed distance (negative inside) that never exceeds the
 distance to their surface, which gives smooth edges their width and lets cell
 volume fractions skip cells away from the surface. Volume fractions are cell
 averages of the region's indicator over each cell's triangles (2D) or
-tetrahedra (3D): cut exactly along flat faces (without a smooth edge), and
+tetrahedra (3D): cut exactly along flat faces (without a smooth edge, and
+unless faces smaller than a cell need more cuts than a cell allows), and
 elsewhere sampled, subdivided where the surface or the smooth edge crosses
 them; cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
 slices of the 3D primitives (`z` components may be left out). Lengths take
