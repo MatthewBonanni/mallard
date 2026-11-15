@@ -283,18 +283,37 @@ The design:
      minimum of Barth-Jespersen (or Venkatakrishnan) over all scalars, with
      the flow block's neighbors and ghost placement. The gradients are
      stored (`N_DIM` words per scalar and cell; recomputing them in the
-     species-flux kernel instead is a milestone-10 memory option), and the
-     limiter value is reduced further so that every `Y_k` stays in `[0, 1]`
-     and `gamma - 1` keeps at least half its cell value at every face
-     (the physical bounds of item 3).
+     species-flux kernel instead is a milestone-10 memory option). Each
+     `Y_k` then scales its own gradient so that it stays in `[0, 1]` at
+     every face, and the cell's most abundant species takes the gradient the
+     others give up, so the gradients still sum to zero; the limiter value is
+     reduced further only so that this species stays in `[0, 1]` and
+     `gamma - 1` keeps at least half its cell value at every face (the
+     physical bounds of item 3).
    Least-squares reconstruction reproduces constants, so with shared weights
    `sum_k Y_k = 1` at every face point to round-off.
    A mass fraction within 16 machine epsilons of its cell value over the
-   whole stencil is reconstructed constant and left out of the limiter and
-   the bounds (MUSCL and TENO alike, issue #1169): otherwise a species absent
-   from a cell (`Y_k = 0`) next to round-off in a neighbor (`1e-34`) sets the
-   cell's shared limiter to zero, and every scalar of the cell goes first
-   order.
+   whole stencil is reconstructed constant and left out of the limiter (MUSCL
+   and TENO alike).
+
+   As implemented (issue #1169): the bounds of item 3 were first applied to
+   the shared limiter value, so a species about to vanish in a cell put every
+   scalar of the cell at first order, mass fractions, `gamma` and `e0` alike:
+   a species absent from a cell next to round-off in a neighbor (`1e-34`
+   against `0`), the onset of `CO` at the frozen-chemistry boundary
+   (`1e-11` against `0`), or the fuel's tail in burnt gas (`1e-14` against
+   `1e-19`). On `flame_3d` (MUSCL without limiter) two thirds of the cells
+   were at first order, and which ones followed the chemistry's noise:
+   after 100 steps `explicit_step` moved the temperature by up to 0.86 K,
+   `rtol` 1e-7 against 1e-8 by 0.55 K, and so did `atol` 1e-11 against
+   1e-12. Per-species bounds leave no cell below a limiter value of 1 there,
+   and the three differences fall to 1e-5, 2e-7 and 5e-7 K. Excluding only
+   round-off species (16 machine epsilons) or tolerating 16 machine epsilons
+   below zero leaves 8% of the cells at first order and 0.3 K between the
+   two `atol`, since the chemistry's noise in burnt gas reaches `1e-14`.
+   TENO keeps one `theta` per cell with the round-off exclusion; per-species
+   factors would need the most abundant species' face values to depend on
+   every other species' polynomial.
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and

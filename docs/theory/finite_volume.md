@@ -415,19 +415,23 @@ face point:
 - MUSCL and first order: eq. $\eqref{eq:muscl-2}$ and one limiter value per cell for all
     scalars, the smallest of eq. $\eqref{eq:muscl-3}$ over them (thresholds scaled by 1 for
     $Y_k$, by $\gamma$, and by $\lvert e_0\rvert + p/(\rho(\gamma - 1))$ for
-    $e_0$), further reduced so that every face value keeps $0 \le Y_k \le 1$
-    and $\gamma - 1$ above half its cell value;
+    $e_0$). Each $Y_k$ then scales its own gradient so that its face values
+    stay in $[0, 1]$, and the cell's most abundant species takes the gradient
+    the others give up, so that the gradients still sum to zero; the shared
+    value is reduced further only to keep that species in $[0, 1]$ and
+    $\gamma - 1$ above half its cell value. Shared, the bounds put every
+    scalar of a cell at first order wherever one species is about to vanish,
+    e.g. a trace of $10^{-14}$ next to a cell without it;
 - TENO-E: the central-stencil weights in smooth cells, and in troubled
     cells, on each face, the stencils selected for the entropy (contact)
     characteristic field; a factor $\theta$ per cell then keeps
     $Y_k\in[0, 1]$, $\gamma - 1$ above half its cell value and, in troubled
     cells, every scalar within its neighbors' range.
 
-A mass fraction that differs from its cell value by at most 16 machine
-epsilons over the whole stencil (a species absent from the cell next to
-round-off, say $10^{-34}$) is reconstructed constant instead: it stays
-non-negative and no longer limits the other scalars of the cell, and the face
-values still sum to one to round-off.
+In both, a mass fraction that differs from its cell value by at most 16
+machine epsilons over the whole stencil (a species absent from the cell next
+to round-off, say $10^{-34}$) is reconstructed constant: it takes no part in
+the limiter, and TENO's $\theta$ ignores it.
 
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
 ([Numerical fluxes](fluxes.md#gas-mixtures)), and the face mass fractions the

@@ -39,7 +39,8 @@ using FacePointValues = rtype[teno::MAX_FACE_QUAD];
 /**
  * @brief Face values of the cell scalars: the cell value (first order) or the
  *        linear reconstruction S_c + phi_c grad S_c . r with one limiter value
- *        phi_c per cell shared by all scalars (MUSCL); one point per face.
+ *        phi_c per cell shared by all scalars (MUSCL; the gradients of the
+ *        mass fractions already scaled to their bounds); one point per face.
  *        Least-squares reconstruction reproduces constants, so mass fractions
  *        summing to one in every cell sum to one at every face point to
  *        round-off.
@@ -102,9 +103,11 @@ struct ScalarFaceValues {
  *        that the flow block uses:
  *        - first order;
  *        - MUSCL: least-squares gradients and one limiter value per cell, the
- *          minimum over all scalars of the flow block's limiter type, further
- *          reduced so that every mass fraction stays in [0, 1] and gamma above
- *          1 at every face;
+ *          minimum over all scalars of the flow block's limiter type; each
+ *          mass fraction then scales its own slope to stay in [0, 1] at every
+ *          face, the cell's most abundant species taking what the others give
+ *          up (the slopes still sum to zero), and the limiter value is reduced
+ *          further only to keep that species in [0, 1] and gamma above 1;
  *        - TENO: the flow block's linear weights (TENOScalarValues) with one
  *          bound-preserving factor theta per cell (Zhang & Shu 2010), the
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at
