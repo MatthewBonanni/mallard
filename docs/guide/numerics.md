@@ -184,6 +184,9 @@ Read off the curves (interpolated between the measured meshes):
   For smooth flow, setting `order = 4` under
   `[numerics.face_reconstruction]` is the cheaper choice.
 
+The same comparison on squares, in 3D, with a shock and on a GPU is in
+[Performance: choosing a scheme for an accuracy target](performance.md#accuracy-target).
+
 The advantage is for **smooth flow**. At shocks and contacts TENO-E falls
 back to its ENO sector stencils and every scheme is first order there, so on
 a flow dominated by discontinuities the gain shrinks to the smooth regions
