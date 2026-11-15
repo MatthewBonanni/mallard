@@ -274,6 +274,29 @@ command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)
 | <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
 | <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
 
+## compute-sanitizer
+
+To check a CUDA build's kernels with NVIDIA's `compute-sanitizer` (`memcheck`, `racecheck`, `synccheck`,
+`initcheck`), turn the step graphs off so that the steps run kernel by kernel, with the same results:
+
+```toml
+[run]
+cuda_graphs = false
+```
+
+```bash
+compute-sanitizer --tool memcheck mallard2d -i input.toml   # mallard3d in 3D
+```
+
+With step graphs on, each step runs in the body of a CUDA graph conditional node, and compute-sanitizer
+(tested with 2026.4 on driver 595) misreports kernels there: `synccheck` and `initcheck` stop correct kernels
+with an illegal memory access or report divergent barriers, `racecheck` reports hazards across `__syncthreads()`
+or aborts with heap corruption in its own library, and `memcheck` reports reads of a kernel's own parameters.
+A body of two kernels is enough; the same kernels in a graph without conditional nodes, or launched one by one,
+are clean ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)). Reports on the step graph's
+kernels (a host backtrace through `cuGraphLaunch`) are therefore not to be trusted: check those kernels with
+`cuda_graphs = false`.
+
 ## Kubernetes
 
 The [container images](https://matthewbonanni.github.io/mallard/docs/installation/#container) run as Kubernetes workloads. Manifests, in [`docs/guide/k8s`](k8s):

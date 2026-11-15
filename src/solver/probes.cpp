@@ -68,6 +68,7 @@ std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
                                         const std::vector<std::pair<std::string, Dimension>> & columns) {
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
+    resume = resume && std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw cannot_write("the probe file", file);
     if (!resume) {
