@@ -20,6 +20,7 @@
 #include <complex>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <string>
@@ -331,7 +332,7 @@ TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
 
 TEST(InitialStateTest, DataFilesRejectValuesThatAreNotFinite) {
     for (const std::string v : {"nan", "inf", "-Infinity"}) {
-        const std::string file = write_temp("mallard_not_finite.csv", "s, u\n0, 1\n1, " + v + "\n");
+        const std::string file = write_temp("mallard_not_finite_" + v + ".csv", "s, u\n0, 1\n1, " + v + "\n");
         try {
             tabulated::read_csv(file);
             ADD_FAILURE() << v << " was accepted";
@@ -346,7 +347,7 @@ TEST(InitialStateTest, DataFilesRejectValuesThatAreNotFinite) {
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("row 2 of value column 2"), std::string::npos) << e.what();
     }
-    EXPECT_THROW(data.add_points({{0.0, 1.0}}, {{1.0, INFINITY}}, 1, "p"), InputError);
+    EXPECT_THROW(data.add_points({{0.0, 1.0}}, {{1.0, std::numeric_limits<double>::infinity()}}, 1, "p"), InputError);
 }
 
 TEST(InitialStateTest, PointCloudsFindTheirNearestPoints) {
