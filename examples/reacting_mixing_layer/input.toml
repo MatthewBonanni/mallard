@@ -5,7 +5,8 @@
 # the layer about 15 mm downstream and holds a lifted diffusion flame.
 # Reference: the steady boundary-layer equations with the same chemistry and
 # transport (Cantera), marched in x by mixing_layer_reference.py. Two
-# inlet_state halves at x = 0, outlet_pressure on the other sides; cells of
+# inlet_state halves at x = 0, characteristic outlet_pressure (nscbc) on the
+# other sides, which let acoustic waves leave; cells of
 # 100 um along x and 30 um across the layer, growing by 8% outside it. Make
 # the reference, the mesh and the initial state (the reference solution)
 # first, from this directory; the second command rewrites this file without
@@ -18,11 +19,10 @@
 #
 #   python plot_mixing_layer.py --run base . --average 8 --history
 #
-# Results (README.md): lift-off length (peak Y_OH reaching 2e-3) 14.86 mm,
-# 2.6% short of the reference's 15.26 mm (0.5% on 50 x 15 um cells:
-# mixing_layer_setup.py --dx 50e-6 --dy 15e-6); peaks along the layer and
-# profiles across it overlay the reference's up to the Kelvin-Helmholtz waves
-# downstream of the flame base. Cost: 88,759 steps, 10 minutes on one A100.
+# Results (README.md): lift-off length (peak Y_OH reaching 2e-3) 14.93 mm,
+# 2.2% short of the reference's 15.26 mm; the layer is steady and its
+# profiles follow the reference's downstream of the flame base. Cost: 88,000
+# steps, 10 minutes on one A100.
 #
 # Laminar reacting mixing layer (V11) from field.npz: fuel H2:1,N2:1 at 300 K and
 # 50 m/s (y < 0), air at 1150 K and 100 m/s (y > 0), p = 101325 Pa; 300 x 232 = 69600 quadrilaterals,
@@ -64,16 +64,19 @@ X = { "O2" = 0.21, "N2" = 0.79 }
 name = "outlet"
 type = "outlet_pressure"
 p = 101325
+nscbc = { L = 0.03 }
 
 [[boundaries]]
 name = "bottom"
 type = "outlet_pressure"
 p = 101325
+nscbc = { L = 0.03 }
 
 [[boundaries]]
 name = "top"
 type = "outlet_pressure"
 p = 101325
+nscbc = { L = 0.03 }
 
 [numerics]
 riemann_solver = "HLLC"

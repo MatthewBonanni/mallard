@@ -7,9 +7,10 @@
 FIELD.npz is the boundary-layer solution from mixing_layer_reference.py
 --field, which also gives the streams. Fuel enters through the inlet (x = 0)
 below y = 0, hot air above it (two inlet_state conditions, a step at the
-trailing edge of a splitter plate of zero thickness); the outlet (x = --length) and the sides (y = --y-min, --y-max)
-are pressure outlets at the streams' pressure, through which the free streams
-also entrain.
+trailing edge of a splitter plate of zero thickness); the outlet (x = --length)
+and the sides (y = --y-min, --y-max) are characteristic pressure outlets at the
+streams' pressure (`nscbc`), so that acoustic waves leave instead of returning
+to the plate, where the unstable layer would amplify them.
 
 The mesh is a tensor product of quadrilaterals written as a Gmsh file:
 uniform cells of --dx along x; across, cells of --dy through the layer (where
@@ -197,16 +198,19 @@ X = {{ "O2" = 0.21, "N2" = 0.79 }}
 name = "outlet"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length:g} }}
 
 [[boundaries]]
 name = "bottom"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length:g} }}
 
 [[boundaries]]
 name = "top"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length:g} }}
 
 [numerics]
 riemann_solver = "HLLC"
