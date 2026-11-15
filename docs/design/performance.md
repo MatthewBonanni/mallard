@@ -453,8 +453,11 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host).
+Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
+so the probes they read are left to the host: the device stops at their writes, the host writes them and
+evaluates the triggers, and on resuming copies the values into the device's trigger variables (rank 0's, sent
+to every rank with one host `allgatherv` at the probe's interval). Between writes the device evaluates the
+conditions on those values, as the host would on the probes' latest values.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
