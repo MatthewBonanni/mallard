@@ -177,8 +177,8 @@ struct ScalarLimiterFunctor {
                 FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
                 if (j < n_species) {
-                    if (d > 0.0_r) phi = Kokkos::fmin(phi, (1.0_r - S_c) / d);
-                    if (d < 0.0_r) phi = Kokkos::fmin(phi, S_c / -d);
+                    if (d > 0.0_r) phi = Kokkos::fmin(phi, (1.0_r + SPECIES_BOUND_TOL - S_c) / d);
+                    if (d < 0.0_r) phi = Kokkos::fmin(phi, (S_c + SPECIES_BOUND_TOL) / -d);
                 } else if (d < 0.0_r) {
                     phi = Kokkos::fmin(phi, 0.5_r * (S_c - 1.0_r) / -d);
                 }
@@ -251,6 +251,10 @@ struct ScalarThetaFunctor {
                 }
                 lo = Kokkos::fmax(lo, n_lo);
                 hi = Kokkos::fmin(hi, n_hi);
+            }
+            if (j < n_species) {
+                lo -= SPECIES_BOUND_TOL;
+                hi += SPECIES_BOUND_TOL;
             }
             FacePointValues S[teno::MAX_FACES];
             values.cell_values(c, j, S);

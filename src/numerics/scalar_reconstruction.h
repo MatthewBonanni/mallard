@@ -25,6 +25,13 @@
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
 using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
 
+/**
+ * @brief Tolerance of the bounds 0 <= Y_k <= 1 at faces: a species absent
+ *        from a cell (0) next to round-off (e.g. 1e-34) moves by at most
+ *        this much instead of cutting the cell's shared limiter.
+ */
+constexpr rtype SPECIES_BOUND_TOL = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
+
 /** @brief Per-face storage of scalar values at a face's quadrature points. */
 using FacePointValues = rtype[teno::MAX_FACE_QUAD];
 
