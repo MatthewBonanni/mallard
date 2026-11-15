@@ -1,9 +1,10 @@
 /**
  * @file flamelet_table.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Tabulated chemistry: Mallard's table format (.mtab, written by
- *        tools/setup/flamelet_table.py), multilinear lookup on the host and in
- *        device kernels, and the flamelet/progress-variable (FPV) map from the
+ * @brief Tabulated chemistry: Mallard's table format (.mtab, written by an
+ *        external table generator; contract in docs/design/flamelet.md,
+ *        section 3), multilinear lookup on the host and in device kernels,
+ *        and the flamelet/progress-variable (FPV) map from the
  *        transported mean mixture fraction, its variance and the mean progress
  *        variable to a table point (docs/design/flamelet.md).
  * @version 0.1
@@ -24,7 +25,7 @@
 
 namespace flamelet {
 
-/** @brief Axes of a table, at most (Z, its variance, the progress variable and an enthalpy defect). */
+/** @brief The most axes this build reads; the format itself sets no limit. */
 constexpr uint32_t MAX_AXES = 4;
 
 /** @brief A table coordinate: per axis, the lower node of its cell and the fraction t in [0, 1] across it. */
@@ -152,40 +153,53 @@ struct FPV {
 };
 
 /**
- * @brief A table read from a .mtab file: one line "mallard-table 1", one line
- *        of JSON (axes with their nodes, fields with their units, the model
- *        and provenance), then the values as little-endian float64.
+ * @brief A table read from a .mtab file (docs/design/table_format.md): one
+ *        line "mallard-table 1", one line of JSON (model and thermodynamics
+ *        tags, axes, fields, species, pressure, model data, provenance), then
+ *        the values as little-endian float64.
  */
 class Table {
     public:
-        /** @brief An axis: its name and nodes (strictly increasing). */
+        /** @brief An axis: a control variable's name, its nodes (strictly increasing) and units. */
         struct Axis {
             std::string name;
             std::vector<double> nodes;
+            std::string units = "1";
         };
 
-        /** @brief A field: its name and units (UDUNITS syntax). */
+        /** @brief A stored quantity: its name and units. */
         struct Field {
             std::string name;
             std::string units;
         };
 
         /**
-         * @brief Read and check a table file.
+         * @brief Read a table file and check it against the format and the contract of its
+         *        model and thermodynamics tags.
          * @throws std::runtime_error naming the file and what is wrong with it
          */
         static Table read(const std::string & file);
 
-        /** @brief A table from its parts (tests and converters); checked as read() checks a file. */
+        /**
+         * @brief A table from its parts, for tests: checked as a container (axes, fields, values),
+         *        not against a model's contract until fpv() is called.
+         */
         Table(std::string model, std::vector<Axis> axes, std::vector<Field> fields, std::vector<double> values,
               const std::string & where = "table");
 
         const std::string & model() const { return m_model; }
+        const std::string & thermodynamics() const { return m_thermodynamics; }
         const std::vector<Axis> & axes() const { return m_axes; }
         const std::vector<Field> & fields() const { return m_fields; }
         const std::vector<double> & values() const { return m_values; }
-        /** @brief The header's JSON text, provenance included, as read. */
+        /** @brief The species of the species block; species k is the field "Y_k". */
+        const std::vector<std::string> & species() const { return m_species; }
+        /** @brief The header's JSON text, model data and provenance included; empty for a table built from parts. */
         const std::string & header() const { return m_header; }
+        /** @brief The pressure the table was generated at (Pa); 0 for a table built from parts. */
+        double pressure() const { return m_pressure; }
+        /** @brief "<name> <version>" of the generator that wrote the table, for the run log. */
+        const std::string & generator() const { return m_generator; }
 
         /** @brief Index of the named field, or -1. */
         int32_t field(const std::string & name) const;
@@ -196,8 +210,8 @@ class Table {
         TableView<> device() const;
 
         /**
-         * @brief The FPV map of a table of model "fpv" with axes Z, S and c and a field C.
-         * @throws std::runtime_error if it is not one
+         * @brief The FPV map of a table that meets the contract of model "fpv".
+         * @throws std::runtime_error naming what the table lacks
          */
         FPV<> fpv() const;
         /** @brief As fpv(), in host memory. */
@@ -205,15 +219,21 @@ class Table {
 
     private:
         Table() = default;
-        void finish(const std::string & where);  // checks, and gathers the axes' nodes
-        uint32_t fpv_field(const std::string & where) const;
+        void finish();          // container checks, and gathers the axes' nodes
+        void check_contract() const;  // the model's and thermodynamics' axes, fields and values
+        uint32_t fpv_field() const;
 
+        std::string m_where = "table";  // the file, in errors
         std::string m_model;
+        std::string m_thermodynamics;
         std::vector<Axis> m_axes;
         std::vector<Field> m_fields;
         std::vector<double> m_values;
+        std::vector<std::string> m_species;
         std::vector<double> m_axis_nodes;  // every axis' nodes, in order
         std::string m_header;
+        std::string m_generator;
+        double m_pressure = 0.0;
 };
 
 } // namespace flamelet

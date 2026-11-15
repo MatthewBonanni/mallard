@@ -1,10 +1,12 @@
 # Tabulated chemistry: flamelets, FPV and FGM
 
-Status: proposed (#631). [Stage](#11-stages) 1 is implemented: the table
-generator, the table format and the device lookup, verified against Cantera.
-Recommendations are marked **Decision**; the alternatives considered are listed
-with each, and the [open questions](#12-open-questions) need an answer before
-stage 2 changes the solver.
+Status: proposed (#631). [Stage](#11-stages) 1 is this design, the table
+format ([table_format.md](table_format.md), the contract with table
+generators) and Mallard's reader and device lookup. Mallard does not generate
+tables. Tables come from an external generator library, **`<generator, name
+TBD>`**: a separate project that starts from FPVgen (IhmeGroup/FPVgen), credited
+in its README. The [open questions](#12-open-questions) of the first draft are
+resolved. Stage 2 couples the tables to the solver.
 
 Mallard's reacting flows today carry every species of a mechanism and integrate
 finite-rate chemistry in each cell ([chemistry.md](chemistry.md)); in LES the
@@ -25,24 +27,32 @@ than non-reacting LES.
   (SLFM), and heat loss and slow chemistry (NOx, #280) through further table
   axes and unsteady flamelets. They differ in how the table is generated and in
   which control variables are transported, not in the solver.
-- **Our own table generator on Cantera's 1D solvers.** Mallard does not write a
-  flamelet solver: `tools/setup/flamelet_table.py` drives Cantera's counterflow
-  and free flames, integrates the presumed PDFs and writes the table.
-- **A versioned table format with provenance**, read by every build (no
-  optional dependency) and by numpy.
+- **Table generation outside Mallard.** The generator library
+  (`<generator, name TBD>`, starting from FPVgen) drives Cantera's counterflow
+  and free flames, integrates the presumed PDFs and writes the table. It will
+  grow to FGM/FPI, heat loss, several streams and other thermodynamics.
+  Mallard's side is the format and the reader.
+- **A generic, versioned table format with provenance**
+  ([table_format.md](table_format.md)): N axes of named control variables,
+  named fields, a species block, model and thermodynamics tags, read by every
+  build (no optional dependency) and by NumPy.
 - **Device lookup** in the RHS and the output kernels: multilinear, a few cache
   lines per lookup, bitwise independent of the backend, thread and rank count.
 - **Ignorable when off.** A run without `gas = "flamelet"` compiles to and runs
   the code it runs today, byte-identical; the model's code sits in its own files
   and is reached from a few well-defined points.
-- **Validation** against the table's own flamelets, independent Cantera
-  solutions, FPVgen's tables, Mallard's finite-rate solutions of the same
+- **Validation** against the table's own flamelets and independent Cantera
+  solutions (in the generator), Mallard's finite-rate solutions of the same
   laminar flames, and the standard turbulent flames (section 10).
 
 ## Non-goals
 
+- Table generation in Mallard: no generator in `tools/`. Generation, its
+  tests and its validation against Cantera live in the generator library.
 - A flamelet solver of our own, interactive flamelet models (RIF), CMC,
   transported PDFs, linear-eddy models.
+- A Strang-split or implicit update of `C`: `omega_C` is an explicit source
+  (decision 9).
 - Tables with more than four axes, adaptive or sparse tables, neural-network
   regression of tables. The format leaves room for them.
 - Multiphase and spray flamelets.
@@ -53,14 +63,16 @@ than non-reacting LES.
 
 | # | Decision | Main alternatives | Why |
 |---|---|---|---|
-| 1 | Tables generated offline by a Python tool on Cantera's 1D flames (counterflow S-curves by two-point flame control; free flames for FGM) | FPVgen; FlameMaster; a flamelet solver in Mallard | Cantera is already Mallard's chemistry reference; FPVgen's continuation is reproduced, its gaps (section 2.5) are not |
-| 2 | Presumed PDFs integrated at generation: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); FPVgen's copies of the laminar flamelet along the variance axis | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
-| 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda` | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
-| 4 | Mallard's table format: one magic line, one line of JSON (axes, fields, units, provenance), little-endian float64 values, node-major with a node's fields contiguous | HDF5; netCDF; CSV | Readable in every build and with numpy alone; self-describing; one lookup reads 2^d short runs |
+| 1 | Tables generated offline by an external library, `<generator, name TBD>`, that starts from FPVgen and runs Cantera's 1D flames (counterflow S-curves by two-point flame control; free flames for FGM) | A generator in Mallard's `tools/`; FlameMaster; a flamelet solver in Mallard | Generation is a separate product with its own users, tests and release cycle, and it will cover more models than Mallard reads. Mallard keeps only the contract |
+| 2 | Presumed PDFs integrated by the generator: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); copies of the laminar flamelet along the variance axis, as FPVgen does today | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
+| 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda`, with `C` linear in `c` (a checked part of the contract) | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
+| 4 | Mallard's table format ([table_format.md](table_format.md)): one magic line, one line of JSON (model and thermodynamics tags, axes, fields, species, pressure, model data, provenance), little-endian float64 values, node-major with a node's fields contiguous | HDF5; netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Readable in every build and with NumPy alone; self-describing; generic over models; one lookup reads 2^d short runs |
 | 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Up to 4 axes, 64-bit offsets, weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
-| 6 | (proposed) A third gas model, `gas = "flamelet"`, whose control variables live in the species block | Control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
-| 7 | (proposed) Compressible FPV thermodynamics after Saghafian et al. (2015): tabulated `T0`, `e0`, `R`, `gamma0`, `a_gamma`, closed form `T(e)` | Tabulated `T(Z, C)` with `p = rho R T` (low-Mach FPV); a Newton solve on tabulated `cp(T)` | Consistent energy with heat release and acoustics; closed form, no iteration; fits the Riemann solvers' `(gamma, e0)` surrogate (chemistry.md, decision 3) |
-| 8 | (proposed) Unity Lewis number for all control variables, with the table generated with unity-Lewis transport by default | Differential diffusion in the table | Consistent transport and table; differential diffusion is an option of the generator for later studies |
+| 6 | A third gas model, `gas = "flamelet"`, whose `Z` and `C` live in the existing species block, with the mixture path's functors templated on the gas model | A separate scalar block in `State`; control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
+| 7 | Compressible FPV thermodynamics after Saghafian et al. (2015): tabulated `T0`, `e0`, `R`, `gamma0`, `a_gamma`, closed form `T(e)` (thermodynamics tag `saghafian2015`) | Low-Mach FPV (tabulated `T`, `rho`); a Newton solve on tabulated `cp(T)` | Consistent energy with heat release and acoustics; closed form, no iteration; fits the Riemann solvers' `(gamma, e0)` surrogate (chemistry.md, decision 3) |
+| 8 | Unity Lewis number for all control variables, `rho D = kappa / cp`, with tables generated with unity-Lewis transport by default | Differential diffusion in the table | Consistent transport and table; differential diffusion is a generator option for later studies |
+| 9 | `omega_C` an explicit source in the RHS | A Strang-split implicit update of `C` | The FPV progress source is not stiff: its time scale is the resolved flame's, not the fastest radicals' |
+| 10 | Table values in float64 | float32 values | Simplest and exact; a float32 variant is a format version 2 question, for when lookups show up in profiles |
 
 ## 1. Models and control variables
 
@@ -79,139 +91,83 @@ for hydrogen, `Y_CO2 + Y_CO + Y_H2O + Y_H2` for hydrocarbons), `Lambda` the
 flamelet parameter (`C` at the stoichiometric `Z`, Ihme & Pitsch 2008a), and
 `c` the normalized mean progress variable of decision 3.
 
-## 2. Table generation (`tools/setup/flamelet_table.py`)
+## 2. Table generation (external)
 
-### 2.1 Input
+Mallard does not generate tables. The generator library, **`<generator, name
+TBD>`**, is a separate project that starts from FPVgen (IhmeGroup/FPVgen, MIT
+License), not a GitHub fork of it, and credits FPVgen in its README. It writes
+[Mallard's table format](table_format.md). Mallard's tests read a small
+synthetic fixture in that format and do not need the generator. Generation is
+verified in the generator's own tests, against Cantera.
 
-TOML, with the solver's conventions: paths relative to the input file, unknown
-keys are errors, every key has a default except the mechanism, the streams and
-the progress variable.
+What Mallard needs from the generator, for `fpv` tables:
 
-```toml
-output = "h2_fpv.mtab"
+- **The S-curve.** One counterflow flamelet is solved, then Cantera's two-point
+  flame control (the continuation of Nishioka, Law & Takeno 1996, as in
+  Cantera's `diffusion_flame_continuation` sample and FPVgen) walks the stable
+  branch to extinction and continues on the unstable branch. The mixing
+  solution closes the table at `Lambda = 0`. For LES of lifted flames the lower
+  part of the unstable branch matters (Ihme & See 2010).
+- **The laminar table `phi(Z, Lambda)`.** Each flamelet is mapped to Bilger's
+  `Z` and labeled by `Lambda = C(Z_st)` (Ihme & Pitsch 2008a).
+- **Presumed PDFs (decision 2).** `P(Z, Lambda) = beta(Z; Z_mean, S)
+  delta(Lambda - Lambda_mean)`. For a field piecewise linear in `Z` on a fine
+  grid, the beta mean is a fixed linear combination of the nodal values:
 
-[mechanism]
-file = "../../mechanisms/h2o2.yaml"
-phase = "ohmech"
-transport = "unity-Lewis-number"   # or "mixture-averaged"
+  $$
+  \int_0^1 \phi(Z) P(Z) \mathrm{d}Z = \sum_i \frac{z_{i+1} \Delta F_i - \Delta G_i}{h_i} \phi_i + \frac{\Delta G_i - z_i \Delta F_i}{h_i} \phi_{i+1},
+  $$
 
-[streams]
-pressure = 101325.0
-fuel = { T = 300.0, X = { H2 = 0.25, N2 = 0.75 } }
-oxidizer = { T = 300.0, X = { O2 = 0.21, N2 = 0.79 } }
+  with `F = I(Z; a, b)` the regularized incomplete beta function, `G = Z_mean
+  I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/S - 1)`,
+  `b = (1 - Z_mean)(1/S - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
+  exact for any singularity of the PDF at 0 and 1. `S = 0` is the laminar
+  value, and `S = 1` gives the two pure streams. FPVgen today fills the
+  variance axis with copies of the laminar flamelet; the generator replaces
+  that with this integration. A first implementation, verified against an
+  independent integration by parts, is in the history of #1222 and can seed
+  the generator.
+- **The `Lambda -> c` remap (decision 3).** After integration, each `(Z, S)`
+  column is retabulated against `c`, with `C` exactly linear in `c` (a checked
+  part of the format). `C` must increase with `Lambda` at each `(Z, S)`. Where
+  integration breaks monotonicity, the generator follows the running maximum
+  and reports how many nodes did.
+- **The fields of the contract**: `C`, `omega_C`, `rho0`, the Saghafian
+  coefficients `T0`, `e0`, `R`, `gamma0`, `a_gamma`, transport `mu`, `kappa`,
+  `cp`, and the species block. FPVgen already computes the Saghafian
+  coefficients and power-law transport for CharLES^X. The generator writes
+  them in this format, together with the provenance.
 
-[flamelets]
-width = 0.01            # nozzle separation (m)
-U_ox = 0.1              # oxidizer velocity of the first, most burning flamelet (m/s)
-temperature_step = 10.0 # two-point control decrement (K)
-T_min = 500.0           # stop below this peak temperature
-max_flamelets = 1000
-
-[progress_variable]
-H2O = 1.0
-
-[table]
-Z_points = 101          # sinh-clustered about Z_st by Z_cluster (4)
-S_points = 9            # quadratic in [0, 1]
-c_points = 41           # uniform in [0, 1]
-lambda_points = 101     # internal Lambda grid
-integration_points = 2001
-species = ["H2", "O2", "H2O", "OH"]
-```
-
-### 2.2 The S-curve
-
-One flamelet is solved at `U_ox` (momentum-balanced jets), then Cantera's
-two-point flame control (`two_point_control_enabled`; the continuation of
-Nishioka, Law & Takeno 1996, as in Cantera's `diffusion_flame_continuation`
-sample and FPVgen) lowers the temperature at two control points on either side
-of the peak by `temperature_step` per flamelet. This walks the stable branch
-to the turning point (extinction) and continues on the unstable branch, with
-the strain rate as an unknown. When a step fails the tool restarts from the
-last flamelet with half the step, so the turning point is passed with small
-steps and the step grows back afterwards.
-
-The unstable branch of a flame whose streams cannot autoignite ends at
-vanishing strain: the mass flux goes to zero and the solver stops. For the H2/N2
-test table, the stable branch runs from 1404 K (`U_ox` = 0.1 m/s) to the turning
-point at 1161 K (maximum axial velocity gradient 1718 1/s) and the unstable
-branch to 1033 K, 28 flamelets in 35 s. Between the last flamelet and the
-mixing solution (`Lambda` = 0) the table interpolates linearly in `Lambda`; for
-LES of lifted flames the lower part of the unstable branch matters
-(Ihme & See 2010), and stage 4 extends it (smaller domain at low strain, or
-the ignition branch of preheated streams, which is how the Cabra flame's
-vitiated coflow ends it).
-
-### 2.3 The laminar table `phi(Z, Lambda)`
-
-Each flamelet is mapped to `Z` (Bilger, per grid point) and interpolated to a
-fine `Z` grid (`integration_points`, clustered about `Z_st`); where a flamelet's
-nozzles do not reach `Z = 0` or `1` (diffusion through the inlet at low strain)
-it is closed by the pure streams. The flamelets are sorted by `Lambda`, the
-mixing solution (frozen adiabatic mixture of the streams) is added at
-`Lambda = 0`, and each field is interpolated to a uniform `Lambda` grid at every
-`Z`. Fields: `C`, `omega_C` (kg/m^3/s), `T`, `rho`, the mean molar mass `W`,
-`cp`, the internal energy `e` (with formation energies), `mu`, `kappa`, the heat
-release rate, and the mass fractions of the listed species.
-
-### 2.4 Presumed PDFs (decision 2)
-
-`P(Z, Lambda) = beta(Z; Z_mean, S) delta(Lambda - Lambda_mean)` (Ihme & Pitsch
-2008a). For a field piecewise linear in `Z` on the fine grid, the beta mean is a
-fixed linear combination of the nodal values:
-
-$$
-\int_0^1 \phi(Z) P(Z) \mathrm{d}Z = \sum_i \frac{z_{i+1} \Delta F_i - \Delta G_i}{h_i} \phi_i + \frac{\Delta G_i - z_i \Delta F_i}{h_i} \phi_{i+1},
-$$
-
-with `F = I(Z; a, b)` the regularized incomplete beta function, `G = Z_mean
-I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/S - 1)`,
-`b = (1 - Z_mean)(1/S - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
-exact, whatever the singularities of the PDF at 0 and 1 where `a` or `b` is
-below one, where adaptive quadrature of the PDF reports round-off and agrees
-only to about 1e-8 (`S` = 0.8 in the generator's tests). `S = 0` is the laminar value, `S = 1` the two pure
-streams `(1 - Z_mean) phi(0) + Z_mean phi(1)`. The weights are computed once per
-`(Z_mean, S)` and applied to every field and `Lambda` at once.
-
-Alternatives: beta in `C` too (Ihme & Pitsch 2008a, part 1, found the delta
-adequate for Sandia D/E away from extinction); statistically most likely
-distributions (Ihme & Pitsch 2008a). Both change only this step.
-
-### 2.5 What is not taken from FPVgen
-
-FPVgen (IhmeGroup/FPVgen) is the reference for the continuation logic. Not
-taken: it fills the variance axis with copies of the laminar flamelet instead of
-integrating a PDF, has no premixed or heat-loss flamelets, writes only
-CharLES^X's layout, and has no tests. An importer for CharLES^X and FlameMaster
-tables (writing this format) is optional, later.
+Later models (FGM/FPI from free premixed flames, heat-loss axes, several
+streams, other thermodynamics) are added to the generator first, and to the
+format as new tags ([table_format.md](table_format.md#8-versioning-and-new-models)).
 
 ## 3. Table format (decision 4)
 
-```
-mallard-table 1\n
-{"format":"mallard-table","version":1,"model":"fpv","axes":[{"name":"Z","values":[...]},...],
- "fields":[{"name":"C","units":"1"},...],"Z_st":...,"progress_variable":{...},"streams":{...},
- "flamelets":{...},"provenance":{"tool":...,"cantera":"3.2.0","created":...,
- "mechanism":{"file":...,"sha256":...},"input":"<the table input, verbatim>"}}\n
-<little-endian float64 values>
-```
+The specification is [table_format.md](table_format.md). In short:
 
-- The first line names the format and its version; a reader refuses any other.
-- The header is one line of JSON: the axes (name, strictly increasing nodes),
-  the fields (name, UDUNITS units), the model, and what produced the table: the
-  tool, Cantera's version, the mechanism's SHA-256, the time, and the table
-  input verbatim, so a table regenerates from its own header.
-- The values follow: node-major, the last axis fastest, the fields of a node
-  contiguous. A lookup of `n` fields in `d` dimensions reads `2^d` runs of `n`
-  values.
-- Readers check the magic, the version, the axes, the value count and that
-  every value is finite, and name the file and the problem in their errors.
+- A magic line `mallard-table 1`, one line of JSON, then little-endian float64
+  values. The data is node-major with the last axis fastest, and the fields of
+  a node are contiguous: a lookup of `n` fields in `d` dimensions reads `2^d`
+  runs of `n` values.
+- The format is generic. It has N axes of named control variables, named
+  fields with units, and a species block (`Y_k` fields). A **model tag**
+  (`fpv`) sets the axes and the model's fields. A **thermodynamics tag**
+  (`saghafian2015`) sets the fields the equation of state reads. FGM/FPI, heat
+  loss, several streams and other thermodynamics are new tags in the same
+  format. Mallard refuses tags it does not support, by name.
+- Provenance (generator and version, creation time, mechanism SHA-256, the
+  generator's input verbatim) is required, so that a table can be regenerated
+  from its own header.
+- Mallard checks the format and the contract of the table's tags at setup:
+  the magic and version, the required members, the axes, the units of every
+  field it uses, physical bounds, `C` linear in `c`, the value count and
+  finiteness. Its errors name the file and the problem.
 - Why not HDF5: Mallard builds without it (`Mallard_ENABLE_HDF5` is optional),
-  and a table must be readable by every build and by numpy alone. Tables are at
-  most a few hundred MB (200 x 30 x 100 nodes x 40 fields in float64 is 190 MB),
-  read once at setup.
-- Values are float64. A float32 variant (half the bandwidth and memory) is a
-  version-2 question for when lookups show up in profiles.
+  and a table must be readable by every build and by NumPy alone. Tables are at
+  most a few hundred MB (200 x 30 x 100 nodes x 40 fields in float64 is 190 MB)
+  and are read once at setup.
+- Values are float64 (decision 10).
 
 ## 4. Lookup on the device
 
@@ -249,7 +205,7 @@ The transported `(Z, Zvar, C)` is mapped to the table's `(Z, S, c)`:
    vanishes: at `Z = 0`, `Z = 1` and `S = 1` every `Lambda` gives the same
    state).
 
-The generator tabulates `C` exactly linear in `c` at each `(Z, S)` node, so the
+The format requires `C` exactly linear in `c` at each `(Z, S)` node, so the
 multilinear lookup of `C` returns the transported `C` itself (to round-off)
 wherever it lies within the bounds: the table cannot drift from the transported
 variable it is indexed by. Three lookups of one field and one of all the fields
@@ -261,10 +217,11 @@ search in disguise.
 `C` must increase with `Lambda` at each `(Z_mean, S)` for `c` to be a coordinate.
 `Lambda` is chosen because it is monotonic along the S-curve at `Z_st`; away
 from it the generator checks monotonicity after integration and follows the
-running maximum where it fails, reporting how many nodes did. In the test table
-none do (the only non-monotonic nodes are those where `C` does not vary at all).
+running maximum where it fails, reporting how many nodes did. In the first
+draft's H2/N2 table none did (the only non-monotonic nodes were those where `C`
+does not vary at all).
 
-## 5. Transported scalars and coupling with the flow (stage 2, proposed)
+## 5. Transported scalars and coupling with the flow (stage 2)
 
 ### 5.1 Equations
 
@@ -279,7 +236,9 @@ $$
 $$
 
 with `rho D = kappa / cp` from the table (unity Lewis number, decision 8),
-`rho D_t = mu_t / Sc_t` from the eddy viscosity, and `omega_C` from the table.
+`rho D_t = mu_t / Sc_t` from the eddy viscosity, and `omega_C` from the table
+as an explicit source (decision 9), scaled from the flamelet density `rho0` to
+the local `rho`.
 The variance has two closures, selected in the input:
 
 - **algebraic** (default): `Zvar = C_Z Delta^2 |grad Z|^2` (Pierce & Moin
@@ -310,9 +269,9 @@ ignore the energy equation. The Riemann solvers' surrogate `(gamma, e0')`
 (chemistry.md, decision 3) is `gamma = gamma(T)`, `e0' = e - p / (rho (gamma -
 1))`, so the flux kernels are unchanged.
 
-### 5.3 Where the control variables live (decision 6, open question 1)
+### 5.3 Where the control variables live (decision 6)
 
-**Proposed:** `gas = "flamelet"`, a third gas model beside the perfect gas and
+**Decision:** `gas = "flamelet"`, a third gas model beside the perfect gas and
 `Mixture`, whose state is `[rho, rho u, rho E]` plus the species block holding
 `[rho Z, rho C]` (and `rho Z2`, `rho h` when transported). The species block
 already has everything a transported scalar needs: storage beside the flow
@@ -329,8 +288,7 @@ model:
 - transport: `mu`, `kappa` and `rho D = kappa / cp` from the same lookup, in
   place of the mixture-averaged model; one diffusivity for all scalars;
 - the chemistry step: `omega_C` from the table as an explicit source in the RHS
-  in place of the Strang-split reactors (its time scale is that of the resolved
-  flame, not of the fastest radicals);
+  in place of the Strang-split reactors (decision 9);
 - output: `T`, `Y_<species>`, `HRR` and any table field as derived fields.
 
 **Alternatives.** (a) Control variables beside a mechanism's species
@@ -340,9 +298,9 @@ meant to save, and the transported species and the table disagree. (b) One-way
 passive scalars on any gas model: no feedback on density and temperature, so not
 a combustion model; useful only as a verification step. (c) A new scalar block
 in `State` beside the species: cleaner naming, but duplicates every loop the
-species block already has. The open question is how the mixture path's
-functors become generic over the gas model: templated on it (as the RHS already
-is over `PerfectGas` / `Mixture`) or dispatched once per stage.
+species block already has. The mixture path's functors become generic over the
+gas model by templating on it, as the RHS already is over `PerfectGas` /
+`Mixture`.
 
 ### 5.4 Boundary and initial values
 
@@ -395,7 +353,7 @@ Z = 1.0
 C = 0.0
 ```
 
-`model` comes from the table's header (`fpv`, `fgm`, `slfm`); the solver checks
+`model` and `thermodynamics` come from the table's header; the solver checks
 that the table's pressure matches the run's reference pressure within 10% and
 warns otherwise (flamelet tables are generated at one pressure; the
 pressure-dependent table axis is a stage-6 option).
@@ -414,35 +372,34 @@ case.
 
 Each must fail under a plausible bug (CONTRIBUTING.md).
 
-- **Generator (Python, `test/python/test_flamelet_table.py`)**: beta weights
-  against an independent integration by parts with the beta CDF for profiles
-  with a sharp peak at `Z_st`, at singular and regular PDFs; the `S = 0`,
-  `S = 1` and `Z = 0, 1` limits and continuity towards them; the `Lambda -> c`
-  remap reproduces `C` linearly and fields that are functions of `C`; the file
-  round trip; the repository table regenerates from its header's input and is
-  monotonic in `c`. Needs scipy (skipped without it).
-- **Lookup (C++, `test/flamelet_table_test.cpp`)**: multilinear functions of
-  four uneven axes reproduced to round-off in a device kernel, and clamped
-  outside; the FPV map returns the transported `C` within its bounds and
-  clamps outside; malformed files (truncated, wrong version, NaN, wrong axes)
-  refused with the file and reason.
-- **Verification against Cantera (C++)**: a counterflow flamelet at
-  `U_ox` = 1.5 m/s, which is not one of the table's, looked up from its own `Z`
-  and `C` through the device FPV map on the 41 x 5 x 21 test table:
-  `T` within 4.6 K (peak 1256 K), `Y_OH` within 7% and `omega_C` within 3% of
-  their peaks (tolerances twice these).
+- **Reader and lookup (C++, `test/flamelet_table_test.cpp`)**: the fixture
+  ([table_format.md](table_format.md#10-reference-fixture)), written by an
+  independent Python writer, reads with its tags, species, pressure and
+  provenance. Every field looks up in a device kernel as the writer computed
+  it, which catches node order, field order, stride and byte order.
+  Multilinear functions of four uneven axes are reproduced to round-off and
+  clamped outside the axes. The FPV map returns the transported `C` within its
+  bounds and clamps outside. Files that break the format or the contract are
+  refused with the file and the reason: truncated data, a wrong version, NaN,
+  an unknown model or thermodynamics tag, wrong units, a missing field, a `Y_`
+  field outside the species block, wrong axes, bad provenance, `Z_st` out of
+  range, `gamma0 <= 1`, a mass fraction outside [0, 1], and `C` not linear in `c`.
+- **Generation** (the generator library): beta weights against an independent
+  integration, the PDF limits, the `Lambda -> c` remap, and off-table flamelets
+  against direct Cantera solutions. The first draft of #1222 measured, on a
+  41 x 5 x 21 H2/N2 table, `T` within 4.6 K of an off-table Cantera flamelet.
 - **Stage 2**: the gas model's `cell_state` against the table's `T0`, `p` at
-  the flamelet states and the closed-form `T(e)` against a quadrature of
+  the flamelet states, and the closed-form `T(e)` against a quadrature of
   `cv(T)`; transport of `Z` with constant diffusivity against the exact error
-  function solution; a 2D counterflow (below) against Cantera.
+  function solution; a 2D counterflow (below) against Cantera, with a
+  generator-made table committed for it.
 
 ## 10. Validation
 
 | Case | Model | Reference | Target |
 |---|---|---|---|
-| Table flamelets and off-table flamelets (stage 1) | FPV | Cantera counterflow, unity Lewis | `T` within 0.5% of the peak on the test table |
-| PDF integration (stage 1) | all | direct integration of the beta PDF | 1e-9 relative |
-| FPVgen tables on the same flamelets | FPV | FPVgen (laminar part) | node values within interpolation error |
+| Table flamelets and off-table flamelets (generator) | FPV | Cantera counterflow, unity Lewis | `T` within 0.5% of the peak |
+| PDF integration (generator) | all | direct integration of the beta PDF | 1e-9 relative |
 | 2D laminar counterflow, `examples/counterflow_diffusion` | FPV | Cantera (as `counterflow_reference.py --match`), Mallard finite-rate on the same mesh | `T_max`, flame position and `Y_OH` peak within 2% of Cantera; same extinction strain within 5% |
 | Sandia flame D (Barlow & Frank 1998) | FPV, SLFM | TNF data: mean and rms `Z`, `T`, `Y_k` profiles at x/D = 7.5 to 45 | within the scatter of the TNF FPV results (Ihme & Pitsch 2008b) |
 | Cabra lifted H2/N2 flame (Cabra et al. 2002) | FPV | lift-off height, centerline and radial `Z`, `T` | lift-off within 20% of the measured height; the methane variant against Ihme & See (2010) |
@@ -451,43 +408,53 @@ Each must fail under a plausible bug (CONTRIBUTING.md).
 
 ## 11. Stages
 
-1. **Table generator, format and device lookup** (this change): the FPV
-   generator, the format, `flamelet::Table` / `TableView` / `FPV`, and their
-   tests and verification against Cantera. No solver change; no input key.
+1. **Design, table format and reader** (this change): this design,
+   [table_format.md](table_format.md), `flamelet::Table` (reading and checking
+   the contract), `TableView` and `FPV` (device lookup), the fixture and their
+   tests. No solver change, no input key. Table generation moves to the
+   generator library.
 2. **Laminar FPV in the solver**: `gas = "flamelet"` with transported `Z` and
-   `C`, compressible thermodynamics (table fields `T0`, `e0`, `R`, `gamma0`,
-   `a_gamma` added by the generator), table transport, `omega_C`, inlet values,
-   derived fields; the 2D counterflow against Cantera and Mallard's finite-rate
-   run. Device code: GPU CI.
+   `C`, `saghafian2015` thermodynamics, table transport, explicit `omega_C`,
+   inlet values, derived fields; the 2D counterflow against Cantera and
+   Mallard's finite-rate run, with a table from the generator. Device code: GPU
+   CI.
 3. **LES closures**: algebraic and transported variance, SGS scalar fluxes;
    Sandia flame D.
 4. **Unstable branch and lifted flames**: the low-strain end of the unstable
    branch, preheated streams; the Cabra flame.
-5. **FGM**: free premixed flamelets over `Z`, the FGM table model, optional
+5. **FGM**: the `fgm` tag (free premixed flamelets, from the generator), optional
    thickening with TFLES; Volvo or the premixed jet; the shared case against
    finite-rate + TFLES.
-6. **Heat loss and slow chemistry**: enthalpy-defect axis from burner-stabilized
-   or radiating flamelets, radiation; `Y_NO` with tabulated production and
-   consumption, unsteady flamelets (#280); pressure axis.
-7. **Importers** (optional): CharLES^X and FlameMaster tables.
+6. **Heat loss and slow chemistry**: an enthalpy-defect axis, radiation; `Y_NO`
+   with tabulated production and consumption, unsteady flamelets (#280);
+   pressure axis.
+
+Importers of CharLES^X and FlameMaster tables, if wanted, belong in the
+generator library, which writes this format.
 
 ## 12. Open questions
 
-1. **Gas-model structure (decision 6).** A third gas model whose control
-   variables use the species block, with the mixture path's functors templated
-   on the gas model, is proposed. Is reusing the species block (and its naming:
-   `RHOY_Z`, `RHOY_C` in restarts) acceptable, or should control variables get
-   their own block in `State` (alternative c)?
-2. **Thermodynamics.** Saghafian's linearized `gamma(T)` is proposed for the
-   compressible coupling. Low-Mach FPV (tabulated `rho` and `T`, pressure from
-   the EOS only) is simpler but inconsistent with Mallard's compressible
-   energy equation; is there a case that needs the pressure axis earlier?
-3. **Progress-variable source.** Explicit in the RHS is proposed. FPV sources
-   near extinction are stiff on fine meshes; a Strang-split implicit update of
-   `C` alone (one scalar ODE per cell, through the existing chemistry step) is
-   the fallback.
-4. **Table precision.** float64 now; float32 values as a format option when
-   lookups are measured to matter.
+Resolved with the maintainer before stage 2:
+
+1. **Gas-model structure (decision 6). Resolved:** a third gas model whose `Z`
+   and `C` live in the existing species block, with the mixture path's functors
+   templated on the gas model; no separate scalar block in `State`. The species
+   block already has storage, transport, halo exchange, restart and time
+   integration, and a second block would duplicate all of it.
+2. **Thermodynamics (decision 7). Resolved:** compressible FPV with linearized
+   `gamma(T)` after Saghafian et al. (2015), not low-Mach FPV. Mallard solves
+   the compressible energy equation, and low-Mach FPV would ignore it at
+   shocks and acoustics.
+3. **Progress-variable source (decision 9). Resolved:** `omega_C` is an explicit
+   RHS source, because the FPV progress source is not stiff. The Strang-split
+   fallback is dropped and is listed as a non-goal.
+4. **Table precision (decision 10). Resolved:** float64 for now. It is exact and
+   simple, tables are read once and fit in GPU memory. float32 is a later
+   format version if lookups show up in profiles.
+5. **Table generation. Resolved:** outside Mallard, in a separate library
+   (`<generator, name TBD>`) that starts from FPVgen and credits it. Mallard
+   specifies the format and reads it. Generation has its own users and tests
+   and will cover more models than Mallard reads.
 
 ## References
 
