@@ -37,7 +37,13 @@ Kokkos::View<const T *> upload(const std::vector<T> & v, const std::string & lab
     return d;
 }
 
-/** @brief The signed distance of a run of nodes at time t. */
+/** @brief No implicit shapes: kernels of regions without them do not carry the evaluation of programs. */
+struct NoImplicit {
+    KOKKOS_INLINE_FUNCTION double operator()(uint32_t, const double *) const { return 0.0; }
+};
+
+/** @brief The signed distance of a run of nodes at time t, of a region with implicit shapes (IMPLICIT) or without. */
+template <bool IMPLICIT = true>
 struct Distance {
     const Node * nodes;
     uint32_t count;
@@ -46,7 +52,11 @@ struct Distance {
     double t;
 
     KOKKOS_INLINE_FUNCTION double operator()(const double * x) const {
-        return region::distance(nodes, count, vertices, implicit_programs(programs, t), x);
+        if constexpr (IMPLICIT) {
+            return region::distance(nodes, count, vertices, implicit_programs(programs, t), x);
+        } else {
+            return region::distance(nodes, count, vertices, NoImplicit{}, x);
+        }
     }
 };
 
@@ -115,7 +125,7 @@ constexpr bool GPU_SAMPLING = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecuti
  *        straight ones, a team per cell: two kernels, so that the straight
  *        cells' does not carry the registers and stack of the cones.
  */
-template <bool CURVED>
+template <bool CURVED, bool IMPLICIT>
 struct ShapeSampler {
     Kokkos::View<Node *> nodes;
     Kokkos::View<const double *> vertices;
@@ -139,9 +149,9 @@ struct ShapeSampler {
         const double t = static_cast<double>(time());
         for (uint32_t i = 0; i < leaves.extent(0); i++) {
             const MovingFractions::Leaf leaf = leaves(i);
-            const sampler::Shape<Distance> shape{Distance{nodes.data() + leaf.first, leaf.count, vertices.data(),
-                                                          implicit, t},
-                                                 leaf.edge, bounded};
+            const sampler::Shape<Distance<IMPLICIT>> shape{
+                Distance<IMPLICIT>{nodes.data() + leaf.first, leaf.count, vertices.data(), implicit, t}, leaf.edge,
+                bounded};
             const double center[3] = {spheres(c, 0), spheres(c, 1), spheres(c, 2)};
             const double phi = shape.distance(center);
             double value = 0.0;
@@ -183,8 +193,8 @@ struct ShapeSampler {
 };
 
 /** @brief Launches a ShapeSampler: 8 teams per SM where its shared memory holds them, otherwise as many as it does. */
-template <bool CURVED>
-void launch(const ShapeSampler<CURVED> & sample, const uint32_t n_cells) {
+template <bool CURVED, bool IMPLICIT>
+void launch(const ShapeSampler<CURVED, IMPLICIT> & sample, const uint32_t n_cells) {
     const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
     Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
     if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
@@ -494,6 +504,7 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
     for (const auto & program : region.programs()) implicit.push_back(&program);
     for (const auto & program : region.times()) of_t.push_back(&program);
     programs = kexpr::ProgramTable<>(implicit);
+    implicit_shapes = !implicit.empty();
     times = kexpr::ProgramTable<>(of_t);
     motions = upload(region.motions(), "region_motions");
     steps = upload(region.steps(), "region_steps");
@@ -672,15 +683,32 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const auto sampled = shapes;
     const bool axi = axisymmetric;
     if (leaves.extent(0) > 0) {
-        const ShapeSampler<false> straight{n, vertices, programs, leaves, spheres, curved, curved_offsets,
-                                           curved_faces, coefficients, coords, cell_nodes, cell_offsets,
-                                           sampled, time, bounded, axisymmetric};
-        launch(straight, n_cells);
-        if (curved_faces.extent(0) > 0) {
-            const ShapeSampler<true> curved_cells{n, vertices, programs, leaves, spheres, curved, curved_offsets,
-                                                  curved_faces, coefficients, coords, cell_nodes, cell_offsets,
-                                                  sampled, time, bounded, axisymmetric};
-            launch(curved_cells, n_cells);
+        auto sample = [&](auto kernel) {
+            kernel.nodes = n;
+            kernel.vertices = vertices;
+            kernel.implicit = programs;
+            kernel.leaves = leaves;
+            kernel.spheres = spheres;
+            kernel.curved = curved;
+            kernel.curved_offsets = curved_offsets;
+            kernel.faces = curved_faces;
+            kernel.coefficients = coefficients;
+            kernel.coords = coords;
+            kernel.cell_nodes = cell_nodes;
+            kernel.cell_offsets = cell_offsets;
+            kernel.sampled = sampled;
+            kernel.time = time;
+            kernel.bounded = bounded;
+            kernel.axisymmetric = axisymmetric;
+            launch(kernel, n_cells);
+        };
+        const bool has_curved = curved_faces.extent(0) > 0;
+        if (implicit_shapes) {
+            sample(ShapeSampler<false, true>{});
+            if (has_curved) sample(ShapeSampler<true, true>{});
+        } else {
+            sample(ShapeSampler<false, false>{});
+            if (has_curved) sample(ShapeSampler<true, false>{});
         }
     }
     const Kokkos::View<double *> out = m_fractions;

@@ -151,6 +151,7 @@ class MovingFractions {
         uint32_t n_cells = 0;
         bool bounded = true;
         bool axisymmetric = false;
+        bool implicit_shapes = false;
         Kokkos::View<Node *> nodes;
         Kokkos::View<const double *> vertices;
         kexpr::ProgramTable<> programs, times;

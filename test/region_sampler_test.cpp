@@ -124,9 +124,9 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     EXPECT_GT(added, 5000);
     EXPECT_GT(refused, 1000);
 
-    // Ties: m half an ulp of r, rounded to even, alternately up and down
-    const double r0 = 1.0, half = std::ldexp(1.0, -53);
-    const double m[1] = {3.0 * half};
+    // Ties: m one and a half ulps of r, rounded to even, so alternately 2 ulps and 1
+    const double r0 = 1.0, half_ulp = std::ldexp(1.0, -53);
+    const double m[1] = {3.0 * half_ulp};
     const uint32_t n[1] = {4};
     double r = r0;
     EXPECT_FALSE(add_in_binade(r, m, n, 1));
