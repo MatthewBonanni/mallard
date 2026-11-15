@@ -361,25 +361,29 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     s_mean = Kokkos::View<double *>("spectra_sample_mean", acc_mean.size());
     s_shell = Kokkos::View<double *>("spectra_sample_shell", acc_shell.size());
     clock = Kokkos::View<Clock>("spectra_clock");
-    if (average) {
-        h_clock = pinned(clock);
-        h_spec = pinned(d_spec);
-        h_mean = pinned(d_mean);
-        h_shell = pinned(d_shell);
-    }
+    h_clock = pinned(clock);
+    h_spec = pinned(d_spec);
+    h_mean = pinned(d_mean);
+    h_shell = pinned(d_shell);
     push();
 }
 
 void Spectra::stage_output() {
-    if (!h_clock.data()) return;
+    if (average) copy_to_host();
+}
+
+void Spectra::finish_output() {
+    if (average) take_host_copies();
+}
+
+void Spectra::copy_to_host() const {
     copy_to_pinned(pinned, h_clock, clock);
     copy_to_pinned(pinned, h_spec, d_spec);
     copy_to_pinned(pinned, h_mean, d_mean);
     copy_to_pinned(pinned, h_shell, d_shell);
 }
 
-void Spectra::finish_output() {
-    if (!h_clock.data()) return;
+void Spectra::take_host_copies() const {
     const Clock k = h_clock();
     weight = k.weight;
     t_last = k.t_last;
@@ -391,15 +395,9 @@ void Spectra::finish_output() {
 
 void Spectra::pull() const {
     if (!clock.is_allocated() || holding_staged) return;
-    Clock k;
-    Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
-    weight = k.weight;
-    t_last = k.t_last;
-    n_samples = k.n_samples;
-    using Host = Kokkos::View<double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
-    Kokkos::deep_copy(Host(acc_spec.data(), acc_spec.size()), d_spec);
-    Kokkos::deep_copy(Host(acc_mean.data(), acc_mean.size()), d_mean);
-    Kokkos::deep_copy(Host(acc_shell.data(), acc_shell.size()), d_shell);
+    copy_to_host();
+    Kokkos::fence("spectra_pull");
+    take_host_copies();
 }
 
 void Spectra::push() {

@@ -1372,14 +1372,14 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
 void Probes::Samples::gather(std::vector<double> & out, const CellColumns & columns, const rtype * staged) const {
     const rtype * h = staged;
     if (!staged) {
-        using Space = Kokkos::View<rtype **, Kokkos::LayoutRight>::memory_space;
-        if (Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space>::accessible ||
-            host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
-            host_values = Kokkos::create_mirror_view(values);
+        if (host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
+            pinned = PinnedMirrors();
+            host_values = pinned(values);
         }
         // The first rows: the samples (a moving region's covered cells, of all its owned ones)
         const auto rows = Kokkos::make_pair(size_t(0), size_t(cells.extent(0)));
-        Kokkos::deep_copy(Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
+        copy_to_pinned(pinned, Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
+        Kokkos::fence("probe_values");
         for (const auto & [column, data] : columns) {
             for (size_t i = 0; i < host_cells.size(); i++) host_values(i, column) = (*data)[host_cells[i]];
         }
@@ -1873,6 +1873,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             motion->volumes = to_device(weights, "probe_motion_volumes");
             motion->covered = Kokkos::View<uint32_t *>("probe_motion_cells", mesh.n_owned());
             motion->weights = Kokkos::View<double *>("probe_motion_weights", mesh.n_owned());
+            motion->h_covered = motion->pinned(motion->covered);
+            motion->h_weights = motion->pinned(motion->weights);
             select_region(p, mesh, r, weights, n_evaluated);
             p.motion = std::move(motion);
             // Its own measures hold while it keeps its shape; the part in the domain is the measure of each write
@@ -3255,9 +3257,11 @@ void Probes::Probe::move(const double t) {
     const uint32_t n = covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights);
     const auto rows = Kokkos::make_pair(uint32_t(0), n);
     quadrature.cells = Kokkos::subview(motion->covered, rows);
-    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), quadrature.cells);
-    const auto h_weights =
-        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->weights, rows));
+    const auto h_cells = Kokkos::subview(motion->h_covered, rows);
+    const auto h_weights = Kokkos::subview(motion->h_weights, rows);
+    copy_to_pinned(motion->pinned, h_cells, quadrature.cells);
+    copy_to_pinned(motion->pinned, h_weights, Kokkos::subview(motion->weights, rows));
+    Kokkos::fence("probe_motion_cells");
     quadrature.host_cells.assign(h_cells.data(), h_cells.data() + n);
     std::vector<double> local;  // global cell, f V
     local.reserve(2 * size_t(n));

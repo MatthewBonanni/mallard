@@ -1,0 +1,1 @@
+- Probe files written by the host (moving region probes, and probes in runs that take one step at a time) and unaveraged spectra written at each sample copy their values from the GPU into pinned host memory, as snapshots and restart files do, instead of pageable memory. Files are the same bit for bit. (#373)

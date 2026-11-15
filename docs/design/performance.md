@@ -478,7 +478,9 @@ node on its writer's own flag at the device's `t` (after the cell states, for a 
 copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
 With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
 copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
-of builds without conditional nodes stop the device at their steps.
+of builds without conditional nodes stop the device at their steps. What the host copies from the device for an
+output it writes itself also goes through pinned mirrors: the same ones for snapshots and restarts, and their
+own for probe values, a moving region probe's cells and the spectra.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values

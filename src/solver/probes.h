@@ -31,6 +31,7 @@
 #include "gradient.h"
 #include "mesh.h"
 #include "physics.h"
+#include "pinned_mirrors.h"
 #include "boundary.h"
 #include "case_view.h"
 #include "cell_fields.h"
@@ -419,6 +420,7 @@ class Probes {
 
             private:
                 // Reused across writes: fresh pages for every write cost page faults
+                mutable PinnedMirrors pinned;
                 mutable Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type host_values;
                 /** @brief Rank 0's row of each global sample, from the samples' ids. */
                 void order(const Mesh & mesh);
@@ -512,6 +514,9 @@ class Probes {
                 Kokkos::View<double *> volumes;
                 Kokkos::View<uint32_t *> covered;
                 Kokkos::View<double *> weights;
+                PinnedMirrors pinned;
+                Kokkos::View<uint32_t *>::host_mirror_type h_covered;
+                Kokkos::View<double *>::host_mirror_type h_weights;
                 uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
                 std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
                 bool distributed = false;
