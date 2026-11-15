@@ -1143,6 +1143,59 @@ void expand_cell_rows(TENO & scheme) {
     own_cell_shapes(scheme);
 }
 
+/** @brief A cell's row of basis means and smoothness-indicator matrix (2D) or moments (3D), in double. */
+struct CellRow {
+    Kokkos::View<rtype **> basis_mean, si_matrix;
+    teno::Moments moments;
+    uint32_t nb;
+
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t c, const uint32_t i) const {
+        if (i < nb) return double(basis_mean(c, i));
+        if constexpr (N_DIM == 2) {
+            return double(si_matrix(c, i - nb));
+        } else {
+            return moments(c, i - nb);
+        }
+    }
+};
+
+/** @brief For each (cell, other cell, exponent), whether their rows are equal on the grid of that exponent. */
+std::vector<uint8_t> equal_cell_rows(const CellRow & row, const uint32_t width, const std::vector<std::array<int64_t, 3>> & pairs) {
+    const size_t m = pairs.size();
+    std::vector<uint8_t> out(m, 0);
+    if (m == 0) return out;
+    Kokkos::View<int64_t **, Kokkos::HostSpace> h_pairs("teno_cell_rows_pairs", m, 3);
+    for (size_t i = 0; i < m; i++) {
+        for (size_t k = 0; k < 3; k++) h_pairs(i, k) = pairs[i][k];
+    }
+    auto d_pairs = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace::memory_space(), h_pairs);
+    Kokkos::View<uint8_t *> equal("teno_cell_rows_equal", m);
+    Kokkos::parallel_for("teno_cell_rows_compare", Kokkos::RangePolicy<>(0, m), KOKKOS_LAMBDA(const size_t i) {
+        const uint32_t a = static_cast<uint32_t>(d_pairs(i, 0)), b = static_cast<uint32_t>(d_pairs(i, 1));
+        const int e = static_cast<int>(d_pairs(i, 2));
+        uint8_t eq = 1;
+        for (uint32_t k = 0; k < width && eq; k++) eq = teno::on_grid(row(a, k), e) == teno::on_grid(row(b, k), e);
+        equal(i) = eq;
+    });
+    auto h_equal = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), equal);
+    for (size_t i = 0; i < m; i++) out[i] = h_equal(i);
+    return out;
+}
+
+/** @brief Host copy of the rows of cells, one after another. */
+std::vector<double> cell_rows(const CellRow & row, const uint32_t width, const std::vector<uint32_t> & cells) {
+    std::vector<double> out(cells.size() * width);
+    if (cells.empty()) return out;
+    Kokkos::View<uint32_t *> d_cells(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_rows_cells"), cells.size());
+    Kokkos::deep_copy(d_cells, HostUnmanaged<const uint32_t>(cells.data(), cells.size()));
+    Kokkos::View<double *> rows(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_rows"), out.size());
+    Kokkos::parallel_for("teno_cell_rows_take", Kokkos::RangePolicy<>(0, cells.size()), KOKKOS_LAMBDA(const size_t i) {
+        for (uint32_t k = 0; k < width; k++) rows(i * width + k) = row(d_cells(i), k);
+    });
+    Kokkos::deep_copy(HostUnmanaged<double>(out.data(), out.size()), rows);
+    return out;
+}
+
 /**
  * @brief From rows of basis_mean and si_matrix or moments per cell, with
  *        share_tables, one row per cell shape: the cells whose rows are equal
@@ -1160,33 +1213,54 @@ void share_cell_rows(TENO & scheme) {
     const size_t ns = N_DIM == 2 ? scheme.si_matrix.extent(1) : scheme.moments.extent(1);
     const uint32_t width = static_cast<uint32_t>(nb + ns);
     const uint64_t * gid = scheme.global_cell_ids();
+    const CellRow row{scheme.basis_mean, scheme.si_matrix, scheme.moments, static_cast<uint32_t>(nb)};
     teno::TableStore<double> store(width);
     std::vector<uint32_t> shape_of;
     shape_of.reserve(n_cells);
+    std::vector<uint32_t> held;  // (shape): a cell of it
+    Kokkos::View<uint64_t *> hash(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_rows_hash"), CHUNK_CELLS);
+    Kokkos::View<int32_t *> exponent(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_rows_exponent"), CHUNK_CELLS);
     for (uint32_t c0 = 0; c0 < n_cells; c0 += CHUNK_CELLS) {
-        const uint32_t c1 = std::min(n_cells, c0 + CHUNK_CELLS), n = c1 - c0;
-        auto h_mean = download_rows(scheme.basis_mean, c0, c1);
-        Kokkos::View<rtype **>::host_mirror_type h_si;
-        teno::Moments::host_mirror_type h_moments;
-        if constexpr (N_DIM == 2) {
-            h_si = download_rows(scheme.si_matrix, c0, c1);
-        } else {
-            h_moments = download_rows(scheme.moments, c0, c1);
-        }
-        std::vector<double> rows(size_t(n) * width);
+        const uint32_t n = std::min(n_cells - c0, CHUNK_CELLS);
+        Kokkos::parallel_for("teno_cell_rows_canonical", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
+            const uint16_t one = 1;
+            uint16_t order = 0;
+            int e = 0;
+            hash(j) = teno::canonicalize([&](const uint32_t i) { return row(c0 + j, i); }, width, &one, 1,
+                                         [&](const uint32_t) -> uint16_t & { return order; }, e);
+            exponent(j) = e;
+        });
+        const std::pair<uint32_t, uint32_t> chunk(0, n);
+        auto h_hash = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(hash, chunk));
+        auto h_exponent = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(exponent, chunk));
         std::vector<teno::CanonicalTable> canonical(n);
         std::vector<uint64_t> ids(n);
-        Kokkos::parallel_for("teno_cell_rows", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
-                             [&](const uint32_t c) {
-            double * row = rows.data() + size_t(c) * width;
-            for (size_t l = 0; l < nb; l++) row[l] = double(h_mean(c, l));
-            for (size_t k = 0; k < ns; k++) row[nb + k] = N_DIM == 2 ? double(h_si(c, k)) : h_moments(c, k);
-            canonical[c] = teno::CanonicalTable(row, width, {1});
-            ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
-        });
-        const std::vector<uint32_t> shapes =
-            store.add(n, canonical.data(), [&](uint32_t c) { return rows.data() + size_t(c) * width; }, ids.data());
+        for (uint32_t j = 0; j < n; j++) {
+            canonical[j].order.resize(1);
+            canonical[j].segments = {1};
+            canonical[j].exponent = h_exponent(j);
+            canonical[j].hash = h_hash(j);
+            ids[j] = gid != nullptr ? gid[c0 + j] : uint64_t(c0 + j);
+        }
+        auto same = [&](const std::vector<teno::TableStore<double>::Match> & matches) {
+            std::vector<std::array<int64_t, 3>> pairs(matches.size());
+            for (size_t i = 0; i < matches.size(); i++) {
+                const auto & m = matches[i];
+                pairs[i] = {c0 + m.cell, m.held >= 0 ? c0 + m.held : int64_t(held[m.shape]), canonical[m.cell].exponent};
+            }
+            return equal_cell_rows(row, width, pairs);
+        };
+        std::vector<std::pair<uint32_t, uint32_t>> taken;
+        const std::vector<uint32_t> shapes = store.add(n, canonical.data(), ids.data(), same, taken);
         shape_of.insert(shape_of.end(), shapes.begin(), shapes.end());
+        std::vector<uint32_t> cells(taken.size());
+        for (size_t i = 0; i < taken.size(); i++) cells[i] = c0 + taken[i].second;
+        const std::vector<double> rows = cell_rows(row, width, cells);
+        held.resize(store.size());
+        for (size_t i = 0; i < taken.size(); i++) {
+            store.set_values(taken[i].first, rows.data() + i * width);
+            held[taken[i].first] = cells[i];
+        }
     }
     store.agree();
     const size_t n_shapes = store.size();
