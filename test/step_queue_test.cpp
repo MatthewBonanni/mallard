@@ -1022,7 +1022,9 @@ TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) 
     c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("averaged_reductions", c);
     EXPECT_EQ(o.step, 60u);
-    if (comm::is_root()) EXPECT_TRUE(o.files.count("restart_000020.restart"));
+    if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000020.restart"));
+    }
     Case at_step = c;
     at_step.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
     EXPECT_EQ(run_case("averaged_reductions", c, 3).queued, run_case("averaged_reductions_at_step", at_step, 3).queued);
