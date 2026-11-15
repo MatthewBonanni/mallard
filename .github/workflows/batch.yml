@@ -5,11 +5,20 @@ name: Batch
 # then sets the commit status `CI` that main requires on each head the batch contains, so
 # the pull requests can merge without a run each. Run from main:
 #   gh workflow run batch.yml --ref main -f run=<ci.yml run on the batch> -f shas="<sha> ..."
+# When those tools find the landing tree covered job by job by several runs on other trees
+# (each job's run on content that matches the landing tree's), they pass them all with the
+# landing commit, and the landing tree needs no run of its own:
+#   gh workflow run batch.yml --ref main -f run="<run> <run> ..." -f tip=<landing commit> -f shas="..."
+# That coverage is judged by those tools, not here: with several runs this workflow checks
+# that each is a passed ci.yml run with `CI` success on its head, and that the landing commit
+# contains each head.
 on:
   workflow_dispatch:
     inputs:
       run:
-        description: The passed ci.yml run on the batch branch
+        description: >-
+          The passed ci.yml run on the batch branch, or several space-separated passed ci.yml
+          runs that together cover the landing tree (tip is then the landing commit)
         type: string
         required: true
       shas:
@@ -18,8 +27,9 @@ on:
         required: true
       tip:
         description: >-
-          A commit with the same tree as the run's (its batch re-merged onto a newer main);
-          the heads may then be in its history instead
+          With one run, a commit with the same tree as the run's (its batch re-merged onto a
+          newer main), the heads may then be in its history instead; with several, the
+          commit that lands
         type: string
         default: ''
 
@@ -38,20 +48,45 @@ jobs:
           SHAS: ${{ inputs.shas }}
           TIP: ${{ inputs.tip }}
         run: |
-          read -r path event branch conclusion batch < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" \
-            --jq '"\(.path) \(.event) \(.head_branch) \(.conclusion) \(.head_sha)"')
-          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
-          echo "run $RUN: $path $event $branch $conclusion $batch"
-          [ "$path" = .github/workflows/ci.yml ] && [ "$event" = workflow_dispatch ] \
-            && [ "$conclusion" = success ] \
-            || { echo "::error::$url is not a passed, dispatched ci.yml run"; exit 1; }
-          ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$batch/status?per_page=100" \
-            --jq '.statuses[] | select(.context == "CI") | "\(.state)\t\(.description)"')
-          [ "${ci%%$'\t'*}" = success ] || { echo "::error::CI on the batch $batch is not success"; exit 1; }
+          read -ra runs <<< "$RUN"
+          [ ${#runs[@]} -gt 0 ] || { echo "::error::no run given"; exit 1; }
+          for r in "${runs[@]}"; do
+            [[ $r =~ ^[0-9]+$ ]] || { echo "::error::$r is not a run id"; exit 1; }
+          done
+          [ "$(printf '%s\n' "${runs[@]}" | sort -u | wc -l)" -eq ${#runs[@]} ] \
+            || { echo "::error::a run is given twice"; exit 1; }
+          [ ${#runs[@]} -eq 1 ] || [ -n "$TIP" ] || { echo "::error::several runs need tip, the landing commit"; exit 1; }
+          for r in "${runs[@]}"; do
+            read -r path event branch conclusion head < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$r" \
+              --jq '"\(.path) \(.event) \(.head_branch) \(.conclusion) \(.head_sha)"')
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$r"
+            echo "run $r: $path $event $branch $conclusion $head"
+            # A lone run stands for the landing tree, so it is one dispatched on it; several
+            # cover it job by job, as main's own runs can
+            eligible=$event
+            if [ ${#runs[@]} -gt 1 ] && [ "$branch" = main ] && [[ $event =~ ^(push|schedule)$ ]]; then
+              eligible=workflow_dispatch
+            fi
+            [ "$path" = .github/workflows/ci.yml ] && [ "$eligible" = workflow_dispatch ] \
+              && [ "$conclusion" = success ] \
+              || { echo "::error::$url is not a passed ci.yml run that can stamp CI"; exit 1; }
+            ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$head/status?per_page=100" \
+              --jq '.statuses[] | select(.context == "CI") | "\(.state)\t\(.description)"')
+            [ "${ci%%$'\t'*}" = success ] || { echo "::error::CI on $head (run $r) is not success"; exit 1; }
+          done
           tree() { gh api "repos/$GITHUB_REPOSITORY/commits/$1" --jq .commit.tree.sha; }
-          if [ -n "$TIP" ]; then
-            [ "$(tree "$TIP")" = "$(tree "$batch")" ] || { echo "::error::$TIP's tree differs from $batch's"; exit 1; }
+          if [ ${#runs[@]} -eq 1 ]; then
+            batch=$head
+            if [ -n "$TIP" ]; then
+              [ "$(tree "$TIP")" = "$(tree "$batch")" ] || { echo "::error::$TIP's tree differs from $batch's"; exit 1; }
+              batch=$TIP
+            fi
+            via="run ${runs[0]}"
+          else
+            tree "$TIP" > /dev/null || { echo "::error::$TIP is not on GitHub"; exit 1; }
             batch=$TIP
+            via="runs ${runs[*]}"
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
           for sha in $SHAS; do
             status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$batch" --jq .status)
@@ -59,8 +94,10 @@ jobs:
               *) echo "::error::$sha is not in the batch $batch ($status)"; exit 1 ;;
             esac
           done
+          desc="Passed in batch ${batch:0:8} ($via)"
+          [ ${#desc} -le 140 ] || desc="Passed in batch ${batch:0:8} (${#runs[@]} runs)"
           for sha in $SHAS; do
             gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context=CI \
-              -f description="Passed in batch ${batch:0:8} (run $RUN)" -f target_url="$url" > /dev/null
+              -f description="$desc" -f target_url="$url" > /dev/null
             echo "CI success on $sha"
           done

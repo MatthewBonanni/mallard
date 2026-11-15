@@ -219,7 +219,9 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - **Batches**: maintainers land several ready PRs on one run by merging their heads onto
   `main` in a `batch/*` branch and running the gate there; `batch.yml`, dispatched on
   `main` with that run and the heads, checks that the run passed and contains each head,
-  then sets `CI` on them.
+  then sets `CI` on them. When the tooling finds the landing tree covered job by job by
+  several earlier runs, `batch.yml` takes those runs and the landing commit instead, and
+  the batch needs no run of its own.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;
