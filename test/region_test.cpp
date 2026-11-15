@@ -23,7 +23,7 @@
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "region_input.h"
-#include "region_sampler.h"
+#include "region_clip.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -376,7 +376,7 @@ TEST(RegionTest, FractionsAreExactlyOneInsideAndZeroOutside) {
 
 TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
     // cell_fractions skips the straight cells outside the bounds of a region without a smooth edge;
-    // sampling every cell gives zero in each of them, and the same fractions elsewhere
+    // sampling (or clipping) every cell gives zero in each of them, and the same fractions elsewhere
     const auto mesh = coarse_unstructured_mesh();
     std::vector<std::string> tables;
     for (const Case & c : cases()) tables.push_back(c.table);
@@ -396,9 +396,11 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
         const region::RegionView<Kokkos::HostSpace> & view = r.host();
         const auto distance = [&view](const double * x) { return view.distance(x); };
         const region::sampler::Shape<decltype(distance)> shape{distance, view.edge, r.bounded()};
+        const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                             view.vertices.data()};
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
             double inside = 0.0, total = 0.0;
-            region::sampler::straight_cell(shape, false, mesh->h_n_nodes_of_cell(c), [&](const uint32_t k, double * x) {
+            region::sampler::clipped_cell(shape, planes, false, mesh->h_n_nodes_of_cell(c), [&](const uint32_t k, double * x) {
                 const uint32_t node = mesh->h_node_of_cell(c, k);
                 for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh->h_node_coords(node, i)) : 0.0;
             }, inside, total);
@@ -409,6 +411,55 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
         }
     }
     EXPECT_GT(skipped, 0);
+}
+
+TEST(RegionTest, RegionsOfPlanarFacesHaveExactFractions) {
+    // Cut along their faces, the fractions integrate to the volume to rounding; sampling is off by about 1e-5
+    struct Exact {
+        std::string table;
+        double volume;
+    };
+    std::vector<Exact> exact;
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.5, 0.5], size = [0.5, 0.3], rotate = 40, pivot = [0.5, 0.5]}"
+                                       : "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.5, 0.3, 0.2], "
+                                         "rotate = {axis = [1, 2, 3], angle = 40}, pivot = [0.5, 0.5, 0.5]}";
+    const double box_volume = N_DIM == 2 ? 0.15 : 0.03;
+    if constexpr (N_DIM == 2) {
+        exact = {{"{type = \"half_space\", point = [0.35, 0.35], normal = [1, 1]}", 0.245},
+                 {"{type = \"polygon\", vertices = [[0.1, 0.1], [0.9, 0.2], [0.5, 0.5], [0.6, 0.9]]}", 0.2},
+                 {"{type = \"union\", regions = [{type = \"rectangle\", center = [0.3, 0.3], size = [0.4, 0.4]}, "
+                  "{type = \"rectangle\", center = [0.55, 0.4], size = [0.5, 0.4]}]}",
+                  0.3},
+                 {"{type = \"difference\", a = {type = \"rectangle\", center = [0.5, 0.5], size = [0.6, 0.5]}, "
+                  "b = {type = \"rectangle\", center = [0.45, 0.55], size = [0.2, 0.1], rotate = 25, pivot = [0.45, 0.55]}}",
+                  0.28}};
+    } else {
+        exact = {{"{type = \"half_space\", point = [0.3, 0.3, 0.3], normal = [1, 1, 1]}", 0.1215},
+                 {"{type = \"union\", regions = [{type = \"box\", center = [0.3, 0.3, 0.3], size = [0.4, 0.4, 0.4]}, "
+                  "{type = \"box\", center = [0.55, 0.4, 0.45], size = [0.5, 0.4, 0.5]}]}",
+                  0.146},
+                 {"{type = \"difference\", a = {type = \"box\", center = [0.5, 0.5, 0.5], size = [0.6, 0.5, 0.4]}, "
+                  "b = {type = \"box\", center = [0.45, 0.55, 0.5], size = [0.2, 0.1, 0.1], "
+                  "rotate = {axis = [1, 1, 0], angle = 25}, pivot = [0.45, 0.55, 0.5]}}",
+                  0.118}};
+    }
+    exact.push_back({box, box_volume});
+    // Halved by any plane through its center
+    exact.push_back({"{type = \"intersection\", regions = [" + box + ", {type = \"half_space\", point = " +
+                         (N_DIM == 2 ? "[0.5, 0.5], normal = [1, -2]" : "[0.5, 0.5, 0.5], normal = [1, -2, 0.5]") + "}]}",
+                     0.5 * box_volume});
+    const auto mesh = coarse_unstructured_mesh();
+    for (const Exact & e : exact) {
+        const std::vector<double> f = region::cell_fractions(*mesh, make_region(e.table));
+        double volume = 0.0;
+        int cut = 0;
+        for (uint32_t i = 0; i < mesh->n_cells; i++) {
+            volume += f[i] * double(mesh->h_cell_volume(i));
+            cut += f[i] > 0.0 && f[i] < 1.0;
+        }
+        EXPECT_GT(cut, 0) << e.table;
+        EXPECT_NEAR(volume, e.volume, 1e-13) << e.table;
+    }
 }
 
 TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {

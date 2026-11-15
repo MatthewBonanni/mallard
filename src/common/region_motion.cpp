@@ -18,6 +18,7 @@
 
 #include "curved.h"
 #include "mesh.h"
+#include "region_clip.h"
 #include "region_sampler.h"
 #include "units.h"
 
@@ -621,7 +622,8 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                                 const uint32_t q = cell_nodes(first + k);
                                 for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                             };
-                            sampler::straight_cell(shape, axi, cell_offsets(c + 1) - first, node, inside, total);
+                            const sampler::Planes planes{n.data() + leaf.first, leaf.count, v.data()};
+                            sampler::clipped_cell(shape, planes, axi, cell_offsets(c + 1) - first, node, inside, total);
                         }
                         value = total > 0.0 ? inside / total : 0.0;
                     }

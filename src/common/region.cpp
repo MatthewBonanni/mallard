@@ -10,6 +10,7 @@
  */
 
 #include "region.h"
+#include "region_clip.h"
 #include "region_sampler.h"
 
 #include <algorithm>
@@ -351,6 +352,7 @@ Box filled_bounds(const Region & region, uint32_t i);
 std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view,
                                     const uint32_t i) {
     const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
+    const sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)), view.vertices.data()};
     // Programs that can run away are evaluated everywhere, so that a runaway is reported wherever it is
     Box box = view.edge > 0.0 || view.programs.loops ? EVERYWHERE : filled_bounds(region, i);
     // Padded well past the rounding of the bounds and of the samples
@@ -394,8 +396,8 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
         } else if (outside(i_cell)) {
             return;
         } else {
-            sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell}, inside,
-                                   total);
+            sampler::clipped_cell(shape, planes, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell},
+                                  inside, total);
         }
         fractions[i_cell] = total > 0.0 ? inside / total : 0.0;
     });
