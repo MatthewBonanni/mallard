@@ -154,11 +154,15 @@ The growth came from the stencils of the cells at r = 4 to 12, of aspect
 ratio about 2.4, just under the ranking metric's cut-off: by physical
 distance they split the near-ties of the graded mesh toward the cylinder,
 differently from cell to cell, and odd degrees amplified the waves that
-crossed them. 2D odd degrees now rank in the
+crossed them. 2D odd degrees, and degree 4 on quads, now rank in the
 [metric on every cell](../numerics/teno_e.md#candidates), which makes
 neighboring stencils more alike but leaves slow modes and depends on the
-stencil size (see there). With it, at the default stencil size, a pressure
-pulse at rest on this mesh decays at order 4 (largest Mach number 7e-6 at
+stencil size (see there). Order 5 grows on such meshes too: on a
+planar Mach 0.3 cylinder O-grid (radial growth 1.26 at 512 cells), the mean
+wall entropy error rose from 1.8e-2 at 512 cells to 6.2e-2 at 2048 by
+physical distance, and falls from 1.9e-3 to 7.2e-4 in the metric. In the
+metric, at the default stencil size, a pressure pulse at rest on the mesh of
+this section decays at order 4 (largest Mach number 7e-6 at
 t = 12, where it was 0.53) and at order 6 (6e-6, where it reached 0.37 by t = 2), and the
 cylinder to t = 60 at order 4 matches order 5 (a 16-CPU pod, 4 threads per
 run):

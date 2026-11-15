@@ -3117,8 +3117,8 @@ namespace {
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
 // starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236);
-// version 20 ranks the candidates of 2D odd-degree stencils in the mesh-spacing metric on every
-// cell (#975)
+// version 20 ranks the candidates of 2D odd-degree stencils, and of degree 4 on quads, in the mesh-spacing
+// metric on every cell (#975)
 constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-20";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
@@ -3278,7 +3278,8 @@ void TENO::allocate_scratch() {
 std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
-    return teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i, teno_setup::metric_on_every_cell(degree));
+    const bool every_cell = teno_setup::metric_on_every_cell(degree, mesh->h_cell_type(i));
+    return teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i, every_cell);
 }
 
 namespace {

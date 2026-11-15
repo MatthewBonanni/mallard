@@ -3471,7 +3471,8 @@ class Setup3D {
                                      0, n_metric),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, metric_on_every_cell(opt.degree));
+                const bool every_cell = metric_on_every_cell(opt.degree, mesh.h_cell_type(i));
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, every_cell);
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
@@ -4734,7 +4735,8 @@ class Setup2D {
                                      0, n_target),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, metric_on_every_cell(opt.degree));
+                const bool every_cell = metric_on_every_cell(opt.degree, mesh.h_cell_type(i));
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, every_cell);
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with r + 2 points per direction, exact to degree 2r + 2
@@ -5084,7 +5086,7 @@ void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
 // tilings of cubes measure 1 (hexahedra), 2.13 (Kuhn tetrahedra), 1.73
 // (prisms) and 1.57 (pyramids) from their cell shapes alone, and keep
 // physical distance; a 2:1 stretch of Kuhn tetrahedra measures 3.15. 2D
-// odd-degree fits take the metric on every cell (metric_on_every_cell)
+// odd-degree fits, and degree 4 on quads, take the metric on every cell (metric_on_every_cell)
 constexpr double SPACING_ANISOTROPY = 2.5;
 
 /**

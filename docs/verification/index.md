@@ -310,12 +310,12 @@ in the cells whose stencils reach a curved wall.
 | TENO4, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 3.42e-04 → 2.33e-05 | 4 | 3.88 | > 3.5 | pass |
 | TENO4, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.53e-02 → 7.50e-03 | 2 | 1.03 | < 2.3 | pass |
 | TENO4, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 8.35e-03 → 4.13e-03 | 2 | 1.02 | < 2.3 | pass |
-| TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
-| TENO5, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 3.47e-05 → 1.05e-06 | 5 | 5.05 | > 4.5 | pass |
-| TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 4 → 8 | 1.42e-03 → 7.52e-05 | 4 | 4.23 | 3.5 to 4.5 | pass |
-| TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
-| TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.16e-02 → 1.06e-02 | 2 | 1.03 | < 2.3 | pass |
-| TENO5, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.18e-02 → 5.76e-03 | 2 | 1.03 | < 2.3 | pass |
+| TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.06e-03 → 9.72e-06 | 5 | 6.76 | > 4.5 | pass |
+| TENO5, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.00e-04 → 3.34e-06 | 5 | 4.90 | > 4.5 | pass |
+| TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 4 → 8 | 2.07e-03 → 1.65e-04 | 4 | 3.65 | 3.5 to 4.5 | pass |
+| TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 4 → 8 | 1.06e-03 → 9.72e-06 | 5 | 6.76 | > 4.5 | pass |
+| TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.04e-02 → 9.97e-03 | 2 | 1.03 | < 2.3 | pass |
+| TENO5, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.01e-02 → 5.42e-03 | 2 | 0.89 | < 2.3 | pass |
 | TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.82e-03 → 2.92e-05 | 6 | 6.59 | > 5.5 | pass |
 | TENO6, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.70e-04 → 2.20e-06 | 6 | 6.27 | > 5.5 | pass |
 | TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.56e-02 → 7.72e-03 | 2 | 1.02 | < 2.3 | pass |

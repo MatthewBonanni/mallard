@@ -483,20 +483,24 @@ TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
     }
 }
 
-TEST(TENOTest, OddDegreesRankInTheSpacingMetricBelowItsCutOffAndEvenDegreesDoNot) {
-    // Cells of aspect ratio 1.67, below the cut-off of 2.5 (#975)
-    auto mesh = make_mesh("cartesian", 12, 8, 1.0_r, 0.4_r);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+TEST(TENOTest, OddDegreesAndDegreeFourOnQuadsRankInTheSpacingMetricBelowItsCutOff) {
+    // Cells of spacing ratio 1.67 (quads) and 1.73 (triangles), below the cut-off of 2.5 (#975)
     const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-    for (const int order : {3, 4, 5, 6}) {
-        auto teno = make_teno(mesh, bd, order);
-        uint32_t n_metric = 0;
-        for (uint32_t i = 0; i < mesh->n_cells; i++) n_metric += teno->stencil_metric(i) != identity;
-        EXPECT_EQ(n_metric, order % 2 == 0 ? mesh->n_cells : 0u) << "order " << order;
+    for (const bool triangles : {false, true}) {
+        auto mesh = make_mesh(triangles ? "cartesian_tri" : "cartesian", 12, 8, 1.0_r, 0.4_r);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        for (const int order : {3, 4, 5, 6}) {
+            auto teno = make_teno(mesh, bd, order);
+            uint32_t n_metric = 0;
+            for (uint32_t i = 0; i < mesh->n_cells; i++) n_metric += teno->stencil_metric(i) != identity;
+            const bool metric = order % 2 == 0 || (order == 5 && !triangles);
+            EXPECT_EQ(n_metric, metric ? mesh->n_cells : 0u)
+                << "order " << order << (triangles ? " triangles" : " quads");
+        }
     }
 }
 
-TEST(TENOTest, OddDegreesDoNotAmplifyWavesOnCellsGradedBelowTheMetricCutOff) {
+TEST(TENOTest, Order4DoesNotAmplifyWavesOnCellsGradedBelowTheMetricCutOff) {
     // Columns of cells stretched along x by up to 1.13 per cell, of aspect
     // ratio 0.4 to 5. Ranked by physical distance, the cells below the cut-off
     // of 2.5 took their finer neighbors first, differently from column to
