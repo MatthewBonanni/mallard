@@ -644,6 +644,10 @@ KOKKOS_INLINE_FUNCTION
 bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m, const int n, const double max_condition,
                     const bool reject_round_off = true) {
     double col_scale[teno::MAX_NK], beta[teno::MAX_NK], v_diag[teno::MAX_NK], d[teno::MAX_NK];
+    // Contiguous lanes on the host update whole rows, which vectorize; GPU threads, and interleaved lanes, take
+    // each sum over a column in a register. Both add the same terms in the same order.
+    bool rows = A.stride == 1 && X.stride == 1;
+    KOKKOS_IF_ON_DEVICE((rows = false;))
     for (int j = 0; j < n; j++) {
         double s = 0.0;
         for (int i = 0; i < m; i++) s += A[i * n + j] * A[i * n + j];
@@ -678,17 +682,33 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
         for (int i = k + 1; i < m; i++) vnorm2 += A[i * n + k] * A[i * n + k];
         if (vnorm2 == 0.0) continue;
         beta[k] = 2.0 / vnorm2;
-        for (int j = k; j < n; j++) d[j] = 0.0;
-        for (int i = k; i < m; i++) {
-            const double vi = (i == k) ? vk : A[i * n + k];
-            for (int j = k; j < n; j++) d[j] += vi * A[i * n + j];
+        if (rows) {
+            for (int j = k; j < n; j++) d[j] = 0.0;
+            for (int i = k; i < m; i++) {
+                const double vi = (i == k) ? vk : A[i * n + k];
+                for (int j = k; j < n; j++) d[j] += vi * A[i * n + j];
+            }
+            for (int j = k; j < n; j++) d[j] *= beta[k];
+        } else {
+            for (int j = k; j < n; j++) {
+                double s = 0.0;
+                s += vk * A[k * n + j];
+                for (int i = k + 1; i < m; i++) s += A[i * n + k] * A[i * n + j];
+                d[j] = s * beta[k];
+            }
         }
-        for (int j = k; j < n; j++) d[j] *= beta[k];
         A[k * n + k] -= d[k] * vk;
         for (int j = k + 1; j < n; j++) A[k * n + j] -= d[j] * vk;
-        for (int i = k + 1; i < m; i++) {
-            const double vi = A[i * n + k];
-            for (int j = k + 1; j < n; j++) A[i * n + j] -= d[j] * vi;
+        if (rows) {
+            for (int i = k + 1; i < m; i++) {
+                const double vi = A[i * n + k];
+                for (int j = k + 1; j < n; j++) A[i * n + j] -= d[j] * vi;
+            }
+        } else {
+            for (int j = k + 1; j < n; j++) {
+                const double dj = d[j];
+                for (int i = k + 1; i < m; i++) A[i * n + j] -= dj * A[i * n + k];
+            }
         }
         const double diag = Kokkos::fabs(A[k * n + k]);
         if (max_diag < diag) max_diag = diag;
@@ -701,23 +721,45 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
     }
     for (int k = n - 1; k >= 0; k--) {
         if (beta[k] == 0.0) continue;
-        for (int r = k; r < n; r++) d[r] = 0.0;
-        for (int i = k; i < m; i++) {
-            const double vi = (i == k) ? v_diag[k] : A[i * n + k];
-            for (int r = k; r < n; r++) d[r] += X[i * n + r] * vi;
-        }
-        for (int r = k; r < n; r++) d[r] *= beta[k];
-        for (int i = k; i < m; i++) {
-            const double vi = (i == k) ? v_diag[k] : A[i * n + k];
-            for (int r = k; r < n; r++) X[i * n + r] -= d[r] * vi;
+        if (rows) {
+            for (int r = k; r < n; r++) d[r] = 0.0;
+            for (int i = k; i < m; i++) {
+                const double vi = (i == k) ? v_diag[k] : A[i * n + k];
+                for (int r = k; r < n; r++) d[r] += X[i * n + r] * vi;
+            }
+            for (int r = k; r < n; r++) d[r] *= beta[k];
+            for (int i = k; i < m; i++) {
+                const double vi = (i == k) ? v_diag[k] : A[i * n + k];
+                for (int r = k; r < n; r++) X[i * n + r] -= d[r] * vi;
+            }
+        } else {
+            for (int r = k; r < n; r++) {
+                double s = 0.0;
+                s += X[k * n + r] * v_diag[k];
+                for (int i = k + 1; i < m; i++) s += X[i * n + r] * A[i * n + k];
+                d[r] = s * beta[k];
+            }
+            for (int r = k; r < n; r++) {
+                const double dr = d[r];
+                X[k * n + r] -= dr * v_diag[k];
+                for (int i = k + 1; i < m; i++) X[i * n + r] -= dr * A[i * n + k];
+            }
         }
     }
     for (int k = n - 1; k >= 0; k--) {
-        for (int l = k + 1; l < n; l++) {
-            const double a = A[k * n + l];
-            for (int j = 0; j < m; j++) X[j * n + k] -= a * X[j * n + l];
+        if (rows) {
+            for (int l = k + 1; l < n; l++) {
+                const double a = A[k * n + l];
+                for (int j = 0; j < m; j++) X[j * n + k] -= a * X[j * n + l];
+            }
+            for (int j = 0; j < m; j++) X[j * n + k] /= A[k * n + k];
+        } else {
+            for (int j = 0; j < m; j++) {
+                double x = X[j * n + k];
+                for (int l = k + 1; l < n; l++) x -= A[k * n + l] * X[j * n + l];
+                X[j * n + k] = x / A[k * n + k];
+            }
         }
-        for (int j = 0; j < m; j++) X[j * n + k] /= A[k * n + k];
     }
     for (int k = 0; k < n; k++) {
         for (int j = 0; j < m; j++) X[j * n + k] /= col_scale[k];
@@ -763,7 +805,20 @@ double lebesgue_constant(const Lane<double> & psi, const int n_rows, const int n
     if (psi.stride == 1 && X.stride == 1 && coef.stride == 1 && T.stride == 1) {
         return lebesgue_constant(psi.p, n_rows, n, X.p, m, coef.p, T.p);
     }
-    return lebesgue_constant<Lane<double>>(psi, n_rows, n, X, m, coef, T);
+    // Interleaved lanes (one cell per GPU thread): each c_qs summed in a register, the same terms in the same order
+    double lambda = 0.0;
+    for (int q = 0; q < n_rows; q++) {
+        double sum = 0.0, abs_sum = 0.0;
+        for (int s = 0; s < m; s++) {
+            double c = 0.0;
+            for (int l = 0; l < n; l++) c += psi[q * n + l] * X[s * n + l];
+            sum += c;
+            abs_sum += Kokkos::fabs(c);
+        }
+        const double value = Kokkos::fabs(1.0 - sum) + abs_sum;
+        if (lambda < value) lambda = value;
+    }
+    return lambda;
 }
 
 /** @brief Insert visit (c, lattice) into w's open-addressing set of cap slots; 1 if new, 0 if present, -1 if full. */
@@ -4246,51 +4301,78 @@ struct CellSetup2D {
      */
     KOKKOS_INLINE_FUNCTION
     void smoothness_matrix(const Lanes2D & w, const uint32_t i, const double x0, const double y0, const double h) const {
-        const int n_si = int(nk) * (int(nk) + 1) / 2;
-        for (int k = 0; k < n_si; k++) w.si[k] = 0.0;
+        switch (r) {
+            case 1: smoothness_rows<1>(w, i, x0, y0, h); break;
+            case 2: smoothness_rows<2>(w, i, x0, y0, h); break;
+            case 3: smoothness_rows<3>(w, i, x0, y0, h); break;
+            case 4: smoothness_rows<4>(w, i, x0, y0, h); break;
+            default: smoothness_rows<5>(w, i, x0, y0, h); break;
+        }
+    }
+
+    /**
+     * @brief smoothness_matrix() of degree R one row at a time, the row's sums
+     *        in registers: each entry adds the same terms in the same order.
+     *        Terms whose D^b phi_l vanishes are left out; each is a zero.
+     */
+    template <int R>
+    KOKKOS_INLINE_FUNCTION void smoothness_rows(const Lanes2D & w, const uint32_t i, const double x0, const double y0,
+                                                const double h) const {
+        constexpr int NK = teno::n_dof(R);
         auto falling = [](const int a, const int p) {
             double c = 1.0;
             for (int t = 0; t < p; t++) c *= (a - t);
             return c;
         };
-        // Exponents and falling factorials of every monomial, once per cell rather than per point
-        uint8_t ea[teno::MAX_NK], eb[teno::MAX_NK];
-        for (uint8_t l = 0; l < nk; l++) teno::exponents(l, ea[l], eb[l]);
-        double fall[teno::MAX_DEGREE + 1][teno::MAX_DEGREE + 1];
-        for (int a = 0; a <= r; a++) {
-            for (int p = 0; p <= r; p++) fall[a][p] = falling(a, p);
+        uint8_t ea[size_t(NK)], eb[size_t(NK)];
+        static_for<0, NK>([&](auto lc) {
+            constexpr int l = decltype(lc)::value;
+            teno::exponents(uint8_t(l), ea[l], eb[l]);
+        });
+        double fall[size_t(R + 1)][size_t(R + 1)];
+        for (int a = 0; a <= R; a++) {
+            for (int p = 0; p <= R; p++) fall[a][p] = falling(a, p);
         }
         const bool curved_cell = g.curved && g.rule_start(i + 1) > g.rule_start(i);
         auto identity = [](const double px, const double py, double & qx, double & qy) {
             qx = px;
             qy = py;
         };
-        integrate(i, x0, y0, h, identity, [&](const double x, const double y, const double wq) {
-            const double weight = curved_cell ? wq / (h * h) : wq;
-            // Powers by repeated multiplication, as teno::ipow forms them
-            double px[teno::MAX_DEGREE + 1], py[teno::MAX_DEGREE + 1];
-            px[0] = py[0] = 1.0;
-            for (int k = 1; k <= r; k++) {
-                px[k] = px[k - 1] * x;
-                py[k] = py[k - 1] * y;
-            }
-            double d[teno::MAX_NK];
-            for (int bp = 0; bp <= r; bp++) {
-                for (int bq = 0; bp + bq <= r; bq++) {
-                    if (bp + bq == 0) continue;
-                    for (uint8_t l = 0; l < nk; l++) {
-                        const int a = ea[l], b = eb[l];
-                        d[l] = (a >= bp && b >= bq) ? fall[a][bp] * fall[b][bq] * px[a - bp] * py[b - bq] : 0.0;
-                    }
-                    // The binomial weight makes each degree's sum the squared norm of the derivative tensor
-                    const double wb = weight * (falling(bp + bq, bp) / falling(bp, bp));
-                    int k = 0;
-                    for (uint8_t l = 0; l < nk; l++) {
-                        for (uint8_t m = l; m < nk; m++) w.si[k++] += wb * d[l] * d[m];
+        int k = 0;
+        for (int l = 0; l < NK; l++) {
+            const int al = ea[l], bl = eb[l];
+            double row[size_t(NK)];
+            static_for<0, NK>([&](auto mc) { row[decltype(mc)::value] = 0.0; });
+            integrate(i, x0, y0, h, identity, [&](const double x, const double y, const double wq) {
+                const double weight = curved_cell ? wq / (h * h) : wq;
+                // Powers by repeated multiplication, as teno::ipow forms them
+                double px[size_t(R + 1)], py[size_t(R + 1)];
+                px[0] = py[0] = 1.0;
+                for (int q = 1; q <= R; q++) {
+                    px[q] = px[q - 1] * x;
+                    py[q] = py[q - 1] * y;
+                }
+                for (int bp = 0; bp <= al; bp++) {
+                    for (int bq = 0; bq <= bl && bp + bq <= R; bq++) {
+                        if (bp + bq == 0) continue;
+                        // The binomial weight makes each degree's sum the squared norm of the derivative tensor
+                        const double wb = weight * (falling(bp + bq, bp) / falling(bp, bp));
+                        const double wd = wb * (fall[al][bp] * fall[bl][bq] * px[al - bp] * py[bl - bq]);
+                        static_for<0, NK>([&](auto mc) {
+                            constexpr int m = decltype(mc)::value;
+                            if (m < l) return;
+                            const int a = ea[m], b = eb[m];
+                            const double dm =
+                                (a >= bp && b >= bq) ? fall[a][bp] * fall[b][bq] * px[a - bp] * py[b - bq] : 0.0;
+                            row[m] += wd * dm;
+                        });
                     }
                 }
-            }
-        });
+            });
+            static_for<0, NK>([&](auto mc) {
+                if (decltype(mc)::value >= l) w.si[k++] = row[decltype(mc)::value];
+            });
+        }
     }
 
     // ---- one cell -------------------------------------------------------------------------------
@@ -4756,7 +4838,12 @@ class Setup2D {
 #endif
         }
 
+#if defined(KOKKOS_ENABLE_CUDA)
+        // Four blocks of 128 per SM (at most 128 registers per thread): the spills cost less than the threads gained
+        using CellRange = Kokkos::RangePolicy<Kokkos::LaunchBounds<128, 4>, Kokkos::Schedule<Kokkos::Dynamic>>;
+#else
         using CellRange = HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>;
+#endif
 
 #if defined(KOKKOS_ENABLE_CUDA)
         /** @brief Threads of the cell kernel resident on the device at once, with the blocks Kokkos launches it in. */
