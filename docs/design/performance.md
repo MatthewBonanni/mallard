@@ -474,8 +474,11 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host).
+Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
+so the probes they read are left to the host: the device stops at their writes, the host writes them and
+evaluates the triggers, and on resuming copies the values into the device's trigger variables (rank 0's, sent
+to every rank with one host `allgatherv` at the probe's interval). Between writes the device evaluates the
+conditions on those values, as the host would on the probes' latest values.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -519,11 +522,13 @@ entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra wri
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.
 
-Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
-evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
+as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
-array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
+from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
