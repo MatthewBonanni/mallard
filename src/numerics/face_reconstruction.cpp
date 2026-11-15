@@ -583,31 +583,47 @@ struct MUSCLFaceFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
 
+    /** @brief What side() reads of the cell. */
+    struct Cell {
+        rtype x[N_DIM];
+        rtype W[N_CONSERVATIVE];
+        rtype phi[N_CONSERVATIVE];
+        rtype grad[N_CONSERVATIVE][N_DIM];
+    };
+
+    KOKKOS_INLINE_FUNCTION
+    Cell cell(const uint32_t c) const {
+        Cell out;
+        FOR_I_DIM out.x[i] = cell_coords(c, i);
+        FOR_I_CONSERVATIVE {
+            out.W[i] = W(c, i);
+            out.phi[i] = limiters(c, i);
+            for (uint8_t d = 0; d < N_DIM; d++) out.grad[i][d] = gradients(c, i, d);
+        }
+        return out;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         for (uint8_t side = 0; side < 2; side++) {
-            if (cells_of_face(i_face, side) >= 0) this->side(i_face, side);
+            const int32_t c = cells_of_face(i_face, side);
+            if (c >= 0) this->side(i_face, side, cell(static_cast<uint32_t>(c)));
         }
     }
 
     KOKKOS_INLINE_FUNCTION
-    void side(const uint32_t i_face, const uint8_t side) const {
-        const int32_t c = cells_of_face(i_face, side);
+    void side(const uint32_t i_face, const uint8_t side, const Cell & c) const {
         // The face centroid is in cell 0's frame; side 1 is in cell 1's until
         // FaceReconstruction::rotate_periodic_faces
         const uint8_t s = side ? face_shift(i_face) : 0;
         rtype x_f[N_DIM], r[N_DIM];
         FOR_I_DIM x_f[i] = face_coords(i_face, i);
         periodic.backward(s, x_f, r);
-        FOR_I_DIM r[i] = r[i] - cell_coords(c, i);
+        FOR_I_DIM r[i] = r[i] - c.x[i];
         rtype W_f[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE {
-            rtype grad[N_DIM];
-            for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
-            W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
-        }
+        FOR_I_CONSERVATIVE W_f[i] = c.W[i] + c.phi[i] * dot<N_DIM>(c.grad[i], r);
         const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
-        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : c.W[i];
     }
 };
 
@@ -627,10 +643,11 @@ struct MUSCLCellFunctor {
         const uint32_t c = cells.extent(0) ? cells(k) : k;
         gradient(c);
         limiter(c);
+        const MUSCLFaceFunctor::Cell state = face.cell(c);
         const auto & mesh_faces = limiter.neighbors;
         for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
             const uint32_t f = mesh_faces.faces_of_cell(j);
-            face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
+            face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1, state);
         }
     }
 };
