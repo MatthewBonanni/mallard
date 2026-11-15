@@ -278,10 +278,10 @@ class Probes {
 
         size_t size() const { return probes.size(); }
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
-         *         fields only. */
-        bool can_stage(size_t k) const;
+         *         fields and statistics' device averages only. */
+        bool can_stage(size_t k, const Statistics & statistics) const;
         /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
-        void stage(size_t k, uint64_t n_records);
+        void stage(size_t k, uint64_t n_records, const Statistics & statistics);
         /** @brief When a staged probe is due, as the host decides it (time_interval 0: by step). */
         struct StagedClock {
             uint64_t interval = 0;
@@ -408,8 +408,11 @@ class Probes {
              */
             void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
             void allocate_staging(uint64_t n_records);
-            /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
-            void copy_to_staging(const uint64_t * seq) const;
+            /** @brief Copies values into record slot (*seq - 1) % n_records of staging, the columns' from their cell
+             *         fields. */
+            void copy_to_staging(const uint64_t * seq,
+                                 const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> &
+                                     columns) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
             /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
             std::vector<Location> locations(const Mesh & mesh) const;
@@ -475,6 +478,8 @@ class Probes {
             bool snapshot = false;   // of a [[write_data]] entry
             bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
+            // Staged: the device columns of cell_columns' fields
+            std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> device_columns;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
