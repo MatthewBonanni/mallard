@@ -1,0 +1,1 @@
+- `tools/dev/gpu_runtime_tests.sh` runs the step graph and stream ordering tests of a CUDA build under compute-sanitizer, and with `--full` every MPI test on ranks across nodes; a new test holds every stream back after each wait to check that the halo exchange, the early reconstruction and the face exchange are ordered (#433).

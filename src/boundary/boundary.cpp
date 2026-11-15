@@ -130,16 +130,16 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
     }
     // sigma / L, or a negative fallback if the key is absent
     auto rate = [&](const char * key, rtype fallback) {
-        if (!table.contains(key)) return fallback;
+        if (!contains_optional(table, key)) return fallback;
         const rtype sigma = find_real(table, key, dim::none);
         if (!(sigma >= 0.0_r)) fail(table, tw, key, "must be non-negative", "", anchor);
         return sigma / L;
     };
-    bc.relax[Relax::ACOUSTIC] = table.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
+    bc.relax[Relax::ACOUSTIC] = contains_optional(table, "sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
     // A turbulent inlet's incoming wave follows the target's own, which carries the target's
     // transverse terms: by default it leaves out the face's, which would count them twice
     bc.relax[Relax::BETA] = (inlet && InletProfile::turbulent(entry)) ? 0.0_r : -1.0_r;
-    if (table.contains("beta")) {
+    if (contains_optional(table, "beta")) {
         bc.relax[Relax::BETA] = find_real(table, "beta", dim::none);
         if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
             fail(table, tw, "beta", "must be in [0, 1]", "", anchor);
@@ -249,10 +249,10 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     fields.apply(bc, Point{}, 0.0, double(physics.R), Point{}, true);
     if (bc.has(AVERAGE)) {
         const BoundaryValue * p = fields.slot(BoundaryFields::SLOT_P);
-        for (uint16_t x = 0; x < 3 && p->compiled(); x++) {
-            if (p->compiled()->uses(x)) {
+        for (uint16_t x = 0; x < boundary_variable::COUNT && p->compiled(); x++) {
+            if (x != boundary_variable::T && p->compiled()->uses(x)) {
                 fail(input, where, "p", "with average = true is one area-averaged pressure: it may depend on t, not "
-                                        "on x, y or z",
+                                        "on x, y, z or the local coordinates",
                      "Remove average to impose p face by face", "average-area-averaged-pressure");
             }
         }

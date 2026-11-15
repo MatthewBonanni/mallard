@@ -1082,6 +1082,52 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+namespace {
+
+/** @brief A periodic channel between isothermal walls, driven by the mass flow forcing. */
+std::string channel_body(const std::string & initialize) {
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 6\nLx = 2.0\nLy = 1.0\n";
+    if (N_DIM == 3) body << "Nz = 3\nLz = 0.6\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n" << initialize
+         << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+         << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+         << "[source]\nmass_flow = " << point_of("0.5", "0.0", "0.0") << "\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+         << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+         << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.01\n"
+         << "Pr = 0.72\n";
+    return body.str();
+}
+
+} // namespace
+
+TEST(StepQueueTest, RestartedRunsCaptureTheStepGraphAgainAndContinueBitForBit) {
+    // The run restarted at step 12 takes its steps in a new step graph, the mass flow forcing's domain sums
+    // included, and reaches the straight run's state
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.4\n";
+    c.extra = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n";
+    c.body = channel_body("[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\nu = " +
+                          vector_of("0.4 * (1 - (2 * y - 1)^2) + 0.05 * sin(3.14159 * x)", "0.02 * sin(6.28318 * x)",
+                                    "0.01 * sin(6.28318 * x)") +
+                          "\n");
+    const Outcome straight = run_case("straight", c, 3);
+    expect_graphed(straight, "straight");
+    Case resumed = c;
+    resumed.body = channel_body("[initialize]\ntype = \"restart\"\nfile = \"" +
+                                (rank_scratch_dir() / "straight_3" / "restart_000012.restart").string() + "\"\n");
+    const Outcome restarted = run_case("restarted", resumed, 3);
+    expect_graphed(restarted, "restarted");
+    EXPECT_EQ(restarted.error, straight.error);
+    EXPECT_EQ(restarted.step, 24u);
+    EXPECT_EQ(restarted.t, straight.t);
+    ASSERT_EQ(restarted.U.size(), straight.U.size());
+    size_t differ = 0;
+    for (size_t k = 0; k < straight.U.size(); k++) differ += restarted.U[k] != straight.U[k];
+    EXPECT_EQ(differ, 0u);
+}
+
 TEST(StepQueueTest, OutputsDueBeforeTheLastOneIsWrittenStopTheDevice) {
     // A restart every 2 steps with 3 enqueued: the next is due while the host still writes the last one; the
     // restarts carry a characteristic outlet's faces
