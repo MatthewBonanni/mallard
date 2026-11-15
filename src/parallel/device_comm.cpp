@@ -23,14 +23,6 @@
 
 namespace comm {
 
-namespace {
-
-uint64_t n_nccl_calls = 0;
-
-} // namespace
-
-uint64_t nccl_calls() { return n_nccl_calls; }
-
 #ifdef Mallard_HAS_NCCL
 
 namespace {
@@ -40,7 +32,6 @@ ncclComm_t nccl_comm = nullptr;
 } // namespace
 
 ncclComm_t nccl() {
-    n_nccl_calls++;
     if (nccl_comm) return nccl_comm;
     ncclUniqueId id;
     if (rank() == 0 && ncclGetUniqueId(&id) != ncclSuccess) throw std::runtime_error("NCCL: ncclGetUniqueId failed");

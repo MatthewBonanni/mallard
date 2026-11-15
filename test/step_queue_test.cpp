@@ -186,7 +186,7 @@ struct Case {
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
     Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
-    bool gated_nccl = false;      // step graphs gate the bodies that enqueue NCCL operations
+    bool gated = false;           // step graphs gate their bodies
     std::string body;             // the mesh, state, boundaries, numerics and physics of another case than the box
 };
 
@@ -319,7 +319,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
         solver.set_capture_fault(c.capture_fault);
-        solver.set_gated_nccl_bodies(c.gated_nccl);
+        solver.set_gated_step_graphs(c.gated);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
@@ -1215,10 +1215,10 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     EXPECT_EQ(o.step, 24u);
 }
 
-TEST(MPITest, StepGraphsThatGateNcclBodiesRunAsConditionalNodesDo) {
-    // Where conditional nodes cannot hold NCCL operations, step graphs gate the bodies that enqueue them, with
-    // conditional nodes inside, and launch them also when not due: a line's reductions, reduced every 3 steps and read
-    // by a trigger that stops at step 19, give the run of conditional nodes bit for bit
+TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
+    // Where conditional nodes cannot hold NCCL operations (NCCL over a network), step graphs gate their bodies and
+    // launch them also when they are not due: a line's reductions, reduced every 3 steps and read by a trigger that
+    // stops at step 19, give the run of conditional nodes bit for bit
     if (comm::size() == 1) GTEST_SKIP() << "MPI runs on several ranks only";
     Case c;
     c.run = "n_steps = 30\ncfl = 0.5\n";
@@ -1233,15 +1233,16 @@ TEST(MPITest, StepGraphsThatGateNcclBodiesRunAsConditionalNodesDo) {
         "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
     c.extra = probes;
     c.distributed = true;
-    const Outcome reference = run_case("gated_nccl_reference", c, 0);
+    const Outcome reference = run_case("gated_reference", c, 0);
     const std::string when =
         written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
         " and step % 3 == 1";
     c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
-    const Outcome nodes = run_case("gated_nccl_nodes", c, 3);
-    c.gated_nccl = true;
-    const Outcome gated = run_case("gated_nccl_gated", c, 3);
-    expect_same(nodes, gated, "NCCL bodies gated");
+    // Names of one length: restarts carry their run's record, with its length, in binary
+    const Outcome nodes = run_case("nodes", c, 3);
+    c.gated = true;
+    const Outcome gated = run_case("gated", c, 3);
+    expect_same(nodes, gated, "gated step graphs");
     EXPECT_EQ(gated.step, 19u);
     EXPECT_EQ(gated.queued, nodes.queued);
 #ifdef KOKKOS_ENABLE_CUDA

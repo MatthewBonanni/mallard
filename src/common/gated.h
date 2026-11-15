@@ -9,8 +9,9 @@
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
- * A step graph's launches after the device stopped for the host run the parts of the step that hold NCCL
- * operations where a conditional node cannot (Solver::device_if), and each of their kernels exits at once. A
+ * Where a conditional node cannot hold NCCL operations, a step graph's launches run the parts of the step that
+ * conditional nodes would hold (Solver::device_if) also when not due or after the device stopped for the host,
+ * and each of their kernels exits at once. A
  * reduction that does nothing leaves its destination as it was: its final step copies the destination's value
  * into the result Kokkos then writes there.
  *

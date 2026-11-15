@@ -461,14 +461,11 @@ class Solver {
         /** @brief Enqueues one step, which does nothing once the device stopped for the host. */
         void launch_device_step();
         void step_prologue();
-        /** @brief Which device_if bodies a step graph's launches gate (gated.h) instead of a conditional node's. */
-        enum class StepGating {
-            NONE,
-            NCCL,  // those that enqueue NCCL operations (step_gating)
-            ALL,
-        };
-        /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
-        void captured_launch(StepGating mode);
+        /**
+         * @brief The launch a step graph captures, in the profiling section "step_graph_capture"; gated: every
+         *        device_if body gated (gated.h) instead of under a conditional node.
+         */
+        void captured_launch(bool gated);
         void device_step_body();
         /**
          * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
@@ -729,10 +726,10 @@ class Solver {
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
         /**
-         * @brief Step graphs gate the device_if bodies that enqueue NCCL operations, as where conditional nodes cannot
-         *        hold them (tests: NCCL over a network). Call before run().
+         * @brief Step graphs gate their device_if bodies, as where conditional nodes cannot hold NCCL operations
+         *        (tests: NCCL over a network). Call before run().
          */
-        void set_gated_nccl_bodies(bool on) { gated_nccl_bodies = on; }
+        void set_gated_step_graphs(bool on) { gated_step_graphs = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -964,7 +961,7 @@ class Solver {
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
         CaptureFault capture_fault = CaptureFault::NONE;
-        bool gated_nccl_bodies = false;
+        bool gated_step_graphs = false;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         void * capture_graph = nullptr;        // cudaGraph_t being captured
@@ -972,10 +969,8 @@ class Solver {
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
-        StepGating step_gating = StepGating::NONE;  // in step graphs: NCCL where conditional nodes cannot hold it
-        StepGating gating = StepGating::NONE;  // in a step graph's launch
-        size_t n_bodies = 0;                   // device_if calls in the launch so far
-        std::vector<bool> nccl_bodies;         // whether each device_if body enqueued NCCL operations, gating all
+        bool gate_steps = false;               // step graphs gate their bodies: conditional nodes cannot hold NCCL
+        bool gating = false;                   // in a gated launch
         uint32_t gate_depth = 0;               // gated device_if's nesting
         Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced

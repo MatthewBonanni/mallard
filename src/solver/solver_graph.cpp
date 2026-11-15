@@ -13,9 +13,9 @@
  * would (step_queue.h) and writes what the host needs into a pinned record.
  * The host keeps step_queue launches ahead and reads the records after the
  * steps ran. At a step the host must act on, the device stops: the launches
- * after it are no-ops (conditional nodes around the step's parts; parts with
- * NCCL operations that a conditional node cannot hold are gated instead,
- * gated.h), and the host acts on the device's state of that step, then
+ * after it are no-ops (conditional nodes around the step's parts, or gated
+ * parts, gated.h, where a conditional node cannot hold NCCL operations), and
+ * the host acts on the device's state of that step, then
  * resumes.
  *
  */
@@ -319,12 +319,9 @@ const rtype * Solver::step_wall_device() const { return step_reduce.data() + WAL
 
 template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
-    const size_t index = n_bodies++;
-    if (gating == StepGating::ALL || (gating == StepGating::NCCL && nccl_bodies.at(index))) {
+    if (gating) {
         // The body's kernels exit at once unless the flag and every enclosing one were set when it began
         if (gate_depth >= step_gates.extent(0)) throw std::logic_error("Solver::device_if: nested too deeply");
-        if (index == nccl_bodies.size()) nccl_bodies.push_back(false);
-        const uint64_t before = comm::nccl_calls();
         const uint32_t * const parent = gated::flag();
         uint32_t * const gate = step_gates.data() + gate_depth;
         set_gate(gate, parent, flag);
@@ -332,7 +329,6 @@ void Solver::device_if(const uint32_t * flag, F && body) {
         gate_depth++;
         body();
         gate_depth--;
-        if (gating == StepGating::ALL) nccl_bodies[index] = comm::nccl_calls() != before;
         return;
     }
 #ifdef MALLARD_CONDITIONAL_NODES
@@ -750,13 +746,12 @@ void Solver::unflush_chemistry_on_device() {
     halo_current = false;
 }
 
-void Solver::captured_launch(const StepGating mode) {
+void Solver::captured_launch(const bool gated) {
     // Kokkos Tools see what a capture records: fences, host copies and allocations there break it
     Kokkos::Profiling::ProfilingSection section("step_graph_capture");
     section.start();
-    gating = mode;
+    gating = gated;
     gate_depth = 0;
-    n_bodies = 0;
     try {
         step_prologue();
         device_if(&step_loop.data()->active, [&] {
@@ -772,11 +767,11 @@ void Solver::captured_launch(const StepGating mode) {
 #endif
         });
     } catch (...) {
-        gating = StepGating::NONE;
+        gating = false;
         section.stop();
         throw;
     }
-    gating = StepGating::NONE;
+    gating = false;
     section.stop();
 }
 
@@ -945,19 +940,10 @@ void Solver::capture_step_graph() {
     cudaGraph_t graph = nullptr;
     std::string failure;
     try {
-        if (step_gating == StepGating::NCCL) {
-            // Which bodies enqueue NCCL operations: a capture with every body gated, never launched
-            cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
-            begin_capture(graph, nullptr, 0);
-            captured_launch(StepGating::ALL);
-            end_capture(graph);
-            cudaGraphDestroy(graph);
-            graph = nullptr;
-        }
         cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
         capture_graph = graph;
         begin_capture(graph, nullptr, 0);
-        captured_launch(step_gating);
+        captured_launch(gate_steps);
         graph = static_cast<cudaGraph_t>(capture_graph);
         end_capture(graph);
         capture_graph = nullptr;
@@ -989,7 +975,7 @@ void Solver::capture_step_graph() {
 
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
-    if (gated_nccl_bodies) return false;
+    if (gated_step_graphs) return false;
     // A conditional node's body cannot hold NCCL operations where NCCL communicates over a network (it then adds
     // host nodes): try one first, on every rank
     bool works = true;
@@ -1122,7 +1108,7 @@ void Solver::begin_device_steps() {
 #else
     conditional_steps = false;
 #endif
-    step_gating = conditional_steps && !conditional_nodes_work() ? StepGating::NCCL : StepGating::NONE;
+    gate_steps = conditional_steps && !conditional_nodes_work();
     queue_depth = conditional_steps ? n_records : 1;
 #else
     conditional_steps = true;
@@ -1244,7 +1230,7 @@ void Solver::launch_device_step() {
 #else
     if (use_step_graph && n_launched > 0) {
         // Off CUDA, the launches a CUDA build would graph run the code a capture records, every body gated
-        captured_launch(StepGating::ALL);
+        captured_launch(true);
     } else {
         step_prologue();
         device_if(&step_loop.data()->active, [&] { device_step_body(); });
