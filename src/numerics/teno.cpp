@@ -1612,7 +1612,7 @@ struct TENOFunctor {
 
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
-    Kokkos::View<uint32_t *> cells;  // cells to reconstruct; empty for [0, n)
+    IndexSet cells;  // cells to reconstruct
     // GradientPass output; when allocated, the smooth passes also write their cells' gradients
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     // PRIM (gas mixtures): reconstruct W itself, see TENO::set_mixture
@@ -1904,7 +1904,7 @@ struct TENOFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(SmoothPass, const uint32_t idx) const {
-        const uint32_t i_cell = cells.extent(0) ? cells(idx) : idx;
+        const uint32_t i_cell = cells(idx);
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
@@ -2007,7 +2007,6 @@ struct TENOFunctor {
     static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : PARTS;
     static constexpr size_t SMOOTH_SCRATCH =
         TEAM_SCRATCH + sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS;
-    uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
     KOKKOS_INLINE_FUNCTION
@@ -2147,13 +2146,13 @@ struct TENOFunctor {
         const uint32_t lane = static_cast<uint32_t>(team.team_rank()) % TEAM_CELLS;
         const uint8_t part = static_cast<uint8_t>(static_cast<uint32_t>(team.team_rank()) / TEAM_CELLS);
         const uint32_t idx = static_cast<uint32_t>(team.league_rank()) * TEAM_CELLS + lane;
-        const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : n_smooth;
+        const uint32_t n = cells.size();
         rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS));
         int * smooth_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
         int * admissible_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
 
         const bool active = idx < n;
-        const uint32_t i_cell = active ? (cells.extent(0) ? cells(idx) : idx) : 0;
+        const uint32_t i_cell = active ? cells(idx) : 0;
         rtype U0[N_CONSERVATIVE];
         if (part == 0) {
             smooth_team[lane] = 0;
@@ -2834,7 +2833,7 @@ template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                 Kokkos::View<uint32_t *> cells, bool troubled_pass) {
+                                 const IndexSet & cells, bool troubled_pass) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -2856,14 +2855,13 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     const bool rounds = capacity < n_rows();
     if (!troubled_pass) {
         if (rounds) functor.coeffs = {};
-        const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : n_direct_rows;
+        const uint32_t n = cells.size();
         if constexpr (!Functor::USE_TEAM || Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible) {
             Kokkos::parallel_for("teno_smooth",
                                  Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic, HeavyBounds>(exec, 0, n),
                                  functor);
         } else {
             if (n == 0) return;
-            functor.n_smooth = n;
             using Policy = Kokkos::TeamPolicy<Space, typename Functor::SmoothTeamPass,
                                               Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
             const Policy policy = Policy(exec, static_cast<int>((n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS), Functor::TEAM_SIZE)
@@ -3062,7 +3060,7 @@ bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::
 
 void TENO::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+    calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, IndexSet{{}, 0, n_direct_rows});
     finish_cell_face_values(solution, face_solution);
 }
 
@@ -3094,13 +3092,13 @@ std::vector<uint32_t> TENO::cells_independent_of_halo(uint32_t n_owned) const {
 void TENO::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                  Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                 Kokkos::View<uint32_t *> cells) {
+                                 const IndexSet & cells) {
     dispatch(exec, solution, face_solution, cells, false);
 }
 
 void TENO::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    dispatch(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>(), true);
+    dispatch(Kokkos::DefaultExecutionSpace(), solution, face_solution, IndexSet(), true);
 }
 
 void TENO::discard_cell_face_values() {
@@ -3108,7 +3106,7 @@ void TENO::discard_cell_face_values() {
 }
 
 void TENO::dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
+                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, const IndexSet & cells,
                     bool troubled_pass) {
 #if N_DIM == 3
     if (single_tables) {

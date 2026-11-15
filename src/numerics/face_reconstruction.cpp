@@ -48,7 +48,7 @@ std::vector<uint32_t> FaceReconstruction::cells_independent_of_halo(uint32_t) co
 void FaceReconstruction::calc_cell_face_values(const Kokkos::DefaultExecutionSpace &,
                                                Kokkos::View<rtype *[N_CONSERVATIVE]>,
                                                Kokkos::View<rtype **[2][N_CONSERVATIVE]>,
-                                               Kokkos::View<uint32_t *>) {
+                                               const IndexSet &) {
     throw std::logic_error("Face reconstruction " + FACE_RECONSTRUCTION_NAMES.at(type) +
                            " cannot reconstruct a subset of the cells.");
 }
@@ -636,11 +636,11 @@ struct MUSCLCellFunctor {
     MUSCLGradientFunctor gradient;
     LimiterFunctor limiter;
     MUSCLFaceFunctor face;
-    Kokkos::View<uint32_t *> cells;  // empty: all cells
+    IndexSet cells;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t k) const {
-        const uint32_t c = cells.extent(0) ? cells(k) : k;
+        const uint32_t c = cells(k);
         gradient(c);
         limiter(c);
         const auto & mesh_faces = limiter.neighbors;
@@ -679,7 +679,7 @@ std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) c
 void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                   Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                  Kokkos::View<uint32_t *> cells) {
+                                  const IndexSet & cells) {
     LSQVertexGradientFunctor g = gradient;
     g.faces = make_gradient(*mesh, boundaries, solution, gradients);
     MUSCLCellFunctor functor{MUSCLGradientFunctor{g},
@@ -688,8 +688,7 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                               mesh->periodic_maps(), mesh->face_shift, solution, gradients, limiters,
                                               face_solution},
                              cells};
-    const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
-    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
+    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, cells.size()),
                          functor);
 }
 
@@ -698,7 +697,7 @@ void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokko
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
-        calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+        calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, IndexSet{{}, 0, mesh->n_cells});
         return;
     }
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
