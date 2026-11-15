@@ -297,8 +297,12 @@ class Probes {
         void sample_staged_average(size_t k, uint64_t step, rtype t, uint64_t slot);
         /** @brief As average_needs, of the staged probes. */
         std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
-        /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory. */
-        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
+        /**
+         * @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory; a moving
+         *        region where it is at the device's time.
+         */
+        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq,
+                             const Kokkos::View<const rtype> & time);
         /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
         void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
@@ -371,6 +375,7 @@ class Probes {
             std::vector<uint64_t> ids;              // global index of each local sample
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
+            Kokkos::View<const uint32_t> count;     // moving regions: the samples are the first count() of cells
             std::vector<uint32_t> host_cells;
             // Samples of surfaces (and 2D curves): their unit normals; samples
             // on boundary faces: the face and its normal distance from the
@@ -414,6 +419,8 @@ class Probes {
                                  const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> &
                                      columns) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
+            /** @brief The local samples: those of host_cells when counted on the device, else all of cells. */
+            size_t rows() const { return count.is_allocated() ? host_cells.size() : cells.extent(0); }
             /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
             std::vector<Location> locations(const Mesh & mesh) const;
 
@@ -504,7 +511,8 @@ class Probes {
             std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
             /**
              * @brief A moving filled region: its fractions, the measures of the owned cells, and at each move the
-             *        owned cells it covers (f V > 0, the first of covered) with their f V.
+             *        owned cells it covers (f V > 0, the first count() of covered) with their f V; staged, those
+             *        of each record slot.
              */
             struct Motion {
                 const Mesh * mesh = nullptr;
@@ -512,6 +520,10 @@ class Probes {
                 Kokkos::View<double *> volumes;
                 Kokkos::View<uint32_t *> covered;
                 Kokkos::View<double *> weights;
+                Kokkos::View<uint32_t> count;
+                Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_cells;
+                Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_weights;
+                Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged_count;
                 uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
                 std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
                 bool distributed = false;
@@ -535,6 +547,14 @@ class Probes {
              *        weights f V in global cell order (collective).
              */
             void move(double t);
+            /** @brief As move, from what the step graph staged in record slot `slot` (collective). */
+            void moved(uint64_t slot);
+            /** @brief Enqueues the moving region's fractions and covered cells at the device's time. */
+            void select_covered(const Kokkos::View<const rtype> & time) const;
+            /** @brief Copies the covered cells into record slot (*seq - 1) % n_records of the motion's staging. */
+            void stage_covered(const uint64_t * seq) const;
+            /** @brief The samples and (rank 0) weights of the n local covered cells, with their f V (collective). */
+            void order_covered(uint32_t n, const uint32_t * cells, const double * weights);
             /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
             void extract(double t);
             /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */

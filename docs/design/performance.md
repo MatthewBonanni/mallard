@@ -499,8 +499,12 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
-intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of regions that follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A moving region's fractions are updated at the
+device's `t`, and a scan selects the owned cells it covers into fixed-size arrays with their count on the device;
+the samples are evaluated over those arrays' capacity, each thread past the count returning at once, and the
+covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders them by
+global cell, as it orders those it selects itself, as it takes the record. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there

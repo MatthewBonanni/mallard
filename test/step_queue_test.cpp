@@ -686,6 +686,30 @@ TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("time_probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
+    // A disk (sphere) leaving the box: its reductions, and its time averages kept per cell, which the restart carries
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 4 * t", "0.5", "0.2") + ", radius = 0.3}";
+    const std::string restart = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 24\n";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + restart +
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\ninterval = 3\n"
+              "reductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n"
+              "[[probes]]\nname = \"mean_disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/mean_disk.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("moving_probes", c);
+    if (comm::is_root()) {
+        EXPECT_GT(std::count(o.files.at("disk.csv").begin(), o.files.at("disk.csv").end(), '\n'), 8);
+        EXPECT_GT(std::count(o.files.at("mean_disk.csv").begin(), o.files.at("mean_disk.csv").end(), '\n'), 4);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + restart + "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
     // A line of a mean, a covariance and a phase average, read from the device's averages at each write
     const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n"

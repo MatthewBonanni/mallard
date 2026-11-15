@@ -559,7 +559,8 @@ void Solver::device_step_body() {
         for (uint32_t k = 0; k < n_probes; k++) {
             device_if(&probe_due.data()[k], [&] {
                 ProbeFluxes fluxes;
-                probes.evaluate_staged(staged_probes[k], probe_fields(fluxes), &step_loop.data()->seq);
+                probes.evaluate_staged(staged_probes[k], probe_fields(fluxes), &step_loop.data()->seq,
+                                       Kokkos::View<const rtype>(step_time_device()));
             });
         }
         t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
