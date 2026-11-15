@@ -824,18 +824,20 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     EXPECT_FALSE(before == tables);
 }
 
-TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScaleAndWallFaces) {
-    // Two separate blocks of 10 x 10 squares with symmetry walls, the second three
-    // times as large: each cell of the second has the stencil shape of a cell of
-    // the first, whose fit it takes, with its own scale and its own wall faces for
-    // the mirror images (faces of its own block), and the face values of its own
-    // fit up to round-off
+namespace {
+
+/**
+ * @brief Two separate blocks of 10 x 10 squares with symmetry walls, the second
+ *        three times as large and at (x1, y1): the tables shared by stencil
+ *        shape against each cell's own fit, and how many cells were fitted.
+ */
+void expect_shared_tables_match_own_fits(const double x1, const double y1, const uint32_t most_fitted) {
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
-    for (const auto & [x0, h] : {std::pair{0.0, 0.125}, std::pair{2.0, 0.375}}) {
+    for (const auto & [x0, y0, h] : {std::tuple{0.0, 0.0, 0.125}, std::tuple{x1, y1, 0.375}}) {
         const uint32_t base = static_cast<uint32_t>(nodes.size());
         for (uint32_t j = 0; j <= 10; j++) {
-            for (uint32_t i = 0; i <= 10; i++) nodes.push_back({rtype(x0 + i * h), rtype(j * h)});
+            for (uint32_t i = 0; i <= 10; i++) nodes.push_back({rtype(x0 + i * h), rtype(y0 + j * h)});
         }
         for (uint32_t j = 0; j < 10; j++) {
             for (uint32_t i = 0; i < 10; i++) {
@@ -871,7 +873,7 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
             return std::vector<rtype>(h.data(), h.data() + h.span());
         };
         auto own = setup(false), shared = setup(true);
-        EXPECT_LE(shared->n_cells_fitted, 100u) << "order " << order;
+        EXPECT_LE(shared->n_cells_fitted, most_fitted) << "order " << order;
         uint32_t n_images = 0;
         const TENO::Stencils stencils = shared->large_stencils();
         for (uint32_t c = 100; c < m.n_cells; c++) {
@@ -892,6 +894,23 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
         }
         EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
     }
+}
+
+} // namespace
+
+TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScaleAndWallFaces) {
+    // Diagonally apart, no wall has the other block behind it: each cell of the
+    // second block has the stencil shape of a cell of the first, whose fit it
+    // takes, with its own scale and its own wall faces for the mirror images
+    // (faces of its own block), and the face values of its own fit up to round-off
+    expect_shared_tables_match_own_fits(2.0, 2.0, 100);
+}
+
+TEST(TENOTest, CellsFacingABoundaryBehindTheirWallsTakeTheirOwnFit) {
+    // Side by side, 0.75 apart: 6 small cells but 2 large ones, so the images
+    // that the other block's wall drops (past the far side of a thin body)
+    // differ between cells of one shape
+    expect_shared_tables_match_own_fits(2.0, 0.0, 200);
 }
 
 TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {

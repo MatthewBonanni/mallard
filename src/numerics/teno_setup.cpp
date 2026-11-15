@@ -4735,6 +4735,24 @@ void boundary_behind_faces(const Mesh & mesh, const std::vector<uint8_t> & bound
 
 }  // namespace
 
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries) {
+    auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
+    auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
+    std::vector<uint8_t> boundary(mesh.n_faces);
+    Geometry2D<HostMem>::R<uint8_t *> mirror("teno_setup_boundary_behind", mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        boundary[f] = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                      h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+        mirror(f) = boundary[f];
+    }
+    std::vector<uint32_t> start;
+    std::vector<std::array<double, 4>> pieces;
+    boundary_behind_faces(mesh, boundary, mirror, start, pieces);
+    std::vector<uint8_t> out(mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) out[f] = start[f + 1] > start[f];
+    return out;
+}
+
 /** @brief The 2D setup of one mesh. */
 class Setup2D {
     public:

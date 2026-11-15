@@ -615,7 +615,9 @@ key have geometries that agree to within $2^{-30} h$ in every coordinate the
 key reads, so the tables a cell takes differ from its own fit by what such a
 difference changes, besides round-off. The shared tables are those of the table
 comparison, except where the cells of one key fall on either side of its grid:
-they take one table instead of two.
+they take one table instead of two. In 2D, a cell whose search reads a wall
+with another boundary behind it (a thin body, whose far side can drop mirror
+images) has no key and is fitted on its own.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 22; one file per MPI rank). The file is used

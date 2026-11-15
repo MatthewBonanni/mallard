@@ -60,6 +60,7 @@ struct ShapeSearch {
     Kokkos::View<double *[3]> translations;
     Kokkos::View<double *> h;        // (cell): its size, as the setup scales it
     Kokkos::View<uint64_t *> shape;  // (cell): hash of its nodes and boundary faces in its own units (0: none)
+    Kokkos::View<uint8_t *> behind;  // (cell): has a face with boundary behind it (teno_setup::boundary_behind; 2D)
     uint32_t n_translations = 0, n_complete = 0, n_large = 0, n_small = 0;
     uint32_t cap = 0;  // visits per search
     teno_setup::SlotArray<uint32_t> cell, lattice, order;

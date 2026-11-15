@@ -394,6 +394,15 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
 
     s.shape = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_shape"), n_cells);
     compute_shapes(s, n_cells);
+#if N_DIM == 2
+    const std::vector<uint8_t> behind = teno_setup::boundary_behind(mesh, boundaries);
+    s.behind = Kokkos::View<uint8_t *>("teno_shape_behind", n_cells);
+    auto h_behind = Kokkos::create_mirror_view(s.behind);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        if (behind[f]) h_behind(uint32_t(mesh.h_cells_of_face(f, 0))) = 1;
+    }
+    Kokkos::deep_copy(s.behind, h_behind);
+#endif
 }
 
 std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
@@ -437,7 +446,10 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
         if (!shared(c)) return;
         uint32_t end[MAX_END];
         const ShapeSearch::Result r = g.search(c, w, end);
-        if (r.ok) {
+        // Images that a boundary behind a mirror face drops make a fit of its own
+        bool alone = false;
+        for (uint32_t p = 0; p < r.n && r.ok && g.behind.extent(0) > 0 && !alone; p++) alone = g.behind(w.cell[p]);
+        if (r.ok && !alone) {
             Hasher hs;
             hs.add(r.layers + 1);
             hs.add(r.n);
