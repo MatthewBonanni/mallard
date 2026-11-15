@@ -750,19 +750,39 @@ restart file (`--fields Q_CRITERION`):
 | base | 56.9 s | 33.5 / 12.1 / - s | 63.1 / 104.4 s | 2.43 GB | 59.6 / 95.1 s | 1.82 GB |
 | keyed | 34.1 s | 0.01 / 18.5 / 4.4 s | 42.4 / 62.2 s | 2.46 GB | 47.6 / 59.8 s | 1.85 GB |
 
-27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. The packing now
-dominates; it ranks every cell's table although the cells of a key share it (#1079). Results are bitwise
+27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. Results are bitwise
 those of the base except where cells of one key used to fall on either side of the table comparison's grid:
 of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixed, tetrahedra, prisms; orders
 3-6) only the periodic order-3 box differs (restart files after 3 steps, at most 6.7e-16 in density), and of
 2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
 ranks give the 1-rank result bit for bit.
 
-GPU builds fit every cell. On one A100 the host keys and records cost more than the device fit (#776) and
-packing (#1031) save: double Mach $2048 \times 512 \times 2$ at orders 3 / 4 / 5 / 6 takes 0.86 / 1.42 / 4.47 /
-19.3 s for the tables and 0.9-1.2 s for the packing when fitting every cell, against 22 s of keys and 27-31 s of
-records with 323 cells fitted; the $96^3$ Taylor-Green vortex of `teno5_3d` 5.3 + 1.0 s against 35 + 47 s
-(#1082).
+**Packing once per key** (#1079). The packing above ranked every cell's table although the cells of a key
+share it. Each batch now ranks, hashes and compares a key's table once, at its first cell, with the lowest global
+id of its cells, so the store sees the same tables in the same order; the cells taking a key's tables walk only
+the vertex-neighbor layers its stencils use. Same case and machine, under a load average of about 140, two
+alternating runs each, base = #986:
+
+| $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
+|---|---|---|---|---|
+| base | 104.7 / 97.1 s | 25.3 / 0.08 / 48.1 / 12.9 s, 23.9 / 0.08 / 44.8 / 11.4 s | 113.6 / 104.1 s | 2.02 / 2.43 GB |
+| once per key | 55.2 / 53.1 s | 23.0 / 0.02 / 2.6 / 10.9 s, 20.3 / 0.09 / 4.7 / 10.4 s | 64.5 / 62.5 s | 1.83 / 2.30 GB |
+
+The per-cell geometry (the moments) now dominates, then the keys.
+
+The keyed setup now runs in GPU builds too: the host keys and records feed the device packing, and the tables
+are bitwise those of fitting every cell on the device. One A100-SXM4-80GB, 16 host threads, base = #986 (fits
+every cell on GPUs), two alternating runs each:
+
+| one A100, TENO5 | cells fitted | tables | packing | keys | setup, wall | peak RSS |
+|---|---|---|---|---|---|---|
+| $96^3$ Taylor-Green, base | 884,736 | 5.3 s | 1.1-1.2 s | - | 24.8-25.2 s | 2.28 GB |
+| $96^3$ Taylor-Green, keyed | 873 | 0.08 s | 1.6 s | 2.0 s | 22.5-23.6 s | 2.28 GB |
+| 1,053,696 tetrahedra, base | 1,053,696 | 23.5 s | 1.7-4.3 s | - | 33.7-33.9 s | 1.91 GB |
+| 1,053,696 tetrahedra, keyed | 2,022 | 0.18 s | 4.2 s | 3.0-3.1 s | 15.9-17.6 s | 2.18 GB |
+
+The base's tetrahedral packing took 1.7-1.9 s in one session and 4.1-4.3 s in another on the same pod. Restart
+files after 2 steps are bitwise those of the base.
 
 ## Scaling (one node)
 
