@@ -1,4 +1,5 @@
 {
+ "default": "0.0",
  "dimension": "velocity (m s^-1)",
  "dims": [
   2

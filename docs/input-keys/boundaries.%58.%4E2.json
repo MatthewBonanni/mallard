@@ -10,7 +10,8 @@
   "examples/flame_vortex/input.toml",
   "examples/flame_vortex_quenching/input.toml",
   "examples/premixed_flame/ch4/input.toml",
-  "examples/premixed_flame/input.toml"
+  "examples/premixed_flame/input.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
  ],
  "type": "number"
 }

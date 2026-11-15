@@ -1,9 +1,11 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
  "required": true,
  "set_in": [
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/hot_gas_regions/input.toml",
   "examples/moving_heaters/input.toml",
   "examples/source_regions/input.toml"
