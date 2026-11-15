@@ -218,11 +218,11 @@ KOKKOS_INLINE_FUNCTION uint32_t node_state(const uint32_t * tree, const uint32_t
 /** @brief Node code of a level of the subdivision tree, placed from the root by child(node, j, next). */
 template <typename Node, typename Child>
 KOKKOS_INLINE_FUNCTION Node place(const Node & root, const Child & child, const int level, const uint32_t code) {
-    uint32_t place = 1;
-    for (int l = 1; l < level; l++) place *= CHILDREN;
+    uint32_t stride = 1;
+    for (int l = 1; l < level; l++) stride *= CHILDREN;
     Node node = root, next;
-    for (int l = 0; l < level; l++, place /= CHILDREN) {
-        child(node, static_cast<int>((code / place) % CHILDREN), next);
+    for (int l = 0; l < level; l++, stride /= CHILDREN) {
+        child(node, static_cast<int>((code / stride) % CHILDREN), next);
         node = next;
     }
     return node;
