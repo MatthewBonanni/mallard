@@ -272,7 +272,9 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged.
+it are zero, so the run-time kernels are unchanged. A stencil that the
+search grows past $n_0$ to such a cell is searched again at that degree
+(#1202).
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
