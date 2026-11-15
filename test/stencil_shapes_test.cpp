@@ -20,8 +20,10 @@
 #include <string>
 #include <vector>
 
+#include "comm.h"
 #include "face_reconstruction.h"
 #include "stencil_shapes.h"
+#include "teno_shapes.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -188,3 +190,30 @@ TEST(StencilShapes, CellsOfOneShapeHaveOneTENOTable) {
     EXPECT_LT(worst, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest);
 }
 #endif
+
+/**
+ * @brief The TENO setup's stencil shape keys are the same on every backend:
+ *        a digest of the keys of a box periodic in x, with walls, of sizes
+ *        that are not exact in binary, against the host builds' value.
+ */
+TEST(StencilShapes, TENOKeysAreTheSameOnEveryBackend) {
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    std::string text = "Lx = 0.7\nLy = 0.9\n";
+    if constexpr (N_DIM == 3) text += "Lz = 1.1\n";
+    const auto mesh = box(text + "[[periodic]]\nzones = [\"left\", \"right\"]\n", 12);
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, 1.4_r);
+    const teno::ShapeKeys shape_keys(*mesh, bd, 32, 4, 256);
+    const std::vector<teno::ShapeKey> keys = shape_keys.keys(mesh->n_reconstructed());
+    uint64_t digest = 14695981039346656037ULL;
+    for (const teno::ShapeKey & k : keys) {
+        for (const uint64_t v : {k.hash, k.check}) digest = (digest ^ v) * 1099511628211ULL;
+    }
+    EXPECT_GT(std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); }), 0);
+#ifdef Mallard_USE_DOUBLE
+    const uint64_t expected = N_DIM == 2 ? 10394126703101117812ULL : 2977545027036466055ULL;
+#else
+    if constexpr (N_DIM == 3) GTEST_SKIP() << "no reference digest for single precision in 3D";
+    const uint64_t expected = 11754670380066181648ULL;
+#endif
+    EXPECT_EQ(digest, expected);
+}
