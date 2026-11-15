@@ -397,6 +397,17 @@ class TENO : public FaceReconstruction {
         // This rank's cells whose tables the last full setup fitted; with shared tables the
         // others take those of their stencil shape's cell with the lowest global id
         uint32_t n_cells_fitted = 0;
+        // The cells of structured blocks with a block shape read their central stencils by offsets
+        // (teno::BlockStencils); false (tests only) reads every cell's slots
+        bool block_path = true;
+        teno::BlockStencils block_stencils;
+        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
+        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
+        /**
+         * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
+         *        (after the tables are set up or rebuilt; a no-op unless block_path).
+         */
+        void find_block_stencils();
         /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
         const uint64_t * global_cell_ids() const {
             return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();

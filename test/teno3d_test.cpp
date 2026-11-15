@@ -839,6 +839,52 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
     }
 }
 
+TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+    // A blast in a box with walls: smooth and troubled cells, cells with mirror images along the walls
+    auto mesh = make_mesh_3d("cartesian", 12, 12, 12);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.45, 2);
+        const bool inside = r2 < 0.06;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 5}) {
+        for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
+            auto results = [&](const bool block_path) {
+                auto teno = std::make_unique<TENO>();
+                teno->set_mesh(mesh);
+                teno->set_boundaries(bd);
+                teno->slice_shift = shift;
+                teno->block_path = block_path;
+                teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+                teno->smooth_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
+                Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+                teno->calc_face_values(W, face_W);
+                auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+                auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->smooth_gradients);
+                std::vector<rtype> out(h.data(), h.data() + h.span());
+                out.insert(out.end(), g.data(), g.data() + g.span());
+                return std::make_pair(out, teno->n_block_cells);
+            };
+            const auto [unstructured, none] = results(false);
+            const auto [block, n_block] = results(true);
+            const std::string at = "order " + std::to_string(order) + ", slices of " + std::to_string(1 << shift);
+            EXPECT_EQ(none, 0u) << at;
+            // Every cell whose stencil stays clear of the walls; those near them read mirror images
+            const uint32_t depth = order == 3 ? 1 : 2;
+            EXPECT_GE(n_block, uint64_t(std::pow(12 - 2 * depth, 3))) << at;
+            EXPECT_LT(n_block, uint64_t(mesh->n_cells)) << at;
+            EXPECT_TRUE(block == unstructured) << at;
+        }
+    }
+}
+
 TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
     // Two slots of width 2: two tables, bitwise different, under one key
     const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
