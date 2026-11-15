@@ -988,6 +988,7 @@ typename View::host_mirror_type download_shape_rows(const View & dev, const Kokk
 /** @brief An array with a row per cell shape as one with a row per cell. */
 template <typename View>
 void expand_shape_rows(View & dev, const Kokkos::View<uint32_t *> & shape, const std::string & label) {
+    if (dev.extent(1) == 0) return;
     View rows(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), shape.extent(0), dev.extent(1));
     const View from = dev;
     Kokkos::parallel_for("teno_expand_rows", Kokkos::RangePolicy<>(0, shape.extent(0)), KOKKOS_LAMBDA(const uint32_t c) {
@@ -1082,12 +1083,14 @@ void share_cell_rows(TENO & scheme) {
     }
     scheme.basis_mean = Kokkos::View<rtype **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_basis_mean"), n_shapes, nb);
     Kokkos::deep_copy(scheme.basis_mean, h_mean);
-    if constexpr (N_DIM == 2) {
-        scheme.si_matrix = Kokkos::View<rtype **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_si_matrix"), n_shapes, ns);
-        Kokkos::deep_copy(scheme.si_matrix, h_si);
-    } else {
-        scheme.moments = teno::Moments(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_shapes, ns);
-        Kokkos::deep_copy(scheme.moments, h_moments);
+    if (ns > 0) {
+        if constexpr (N_DIM == 2) {
+            scheme.si_matrix = Kokkos::View<rtype **>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_si_matrix"), n_shapes, ns);
+            Kokkos::deep_copy(scheme.si_matrix, h_si);
+        } else {
+            scheme.moments = teno::Moments(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_shapes, ns);
+            Kokkos::deep_copy(scheme.moments, h_moments);
+        }
     }
     scheme.cell_shape = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_cell_shape"), n_cells);
     Kokkos::deep_copy(scheme.cell_shape, HostUnmanaged<const uint32_t>(shape_of.data(), shape_of.size()));

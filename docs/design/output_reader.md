@@ -204,9 +204,14 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   stencils (`TENO::sector_stencils` off), which those read: no sector
   stencils, smoothness matrices or the moments they are formed from, no
   troubled-cell scratch, and no species reconstruction of mixtures, all of
-  which only face values read. The central tables are bitwise the run's
-  (`CentralStencilsAloneAreTheFullSetupsBitForBit`); they are never written to
-  `cache_file`, and a run's cache is read without its sector stencils.
+  which only face values read. The central stencils' tables, and so
+  gradients, are bitwise the run's
+  (`CentralStencilsAloneAreTheFullSetupsBitForBit`). With `share_tables`,
+  cells share basis means when the means alone agree on the sharing grid,
+  where the run also compares smoothness matrices or moments, so point
+  samples can differ from the run's below that grid. These tables are never
+  written to `cache_file`, and a run's cache is read without its sector
+  stencils.
 - **Steps.** Each snapshot's step and time are those the reader finds
   recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
   header), never the file name; only the snapshots of files written before
