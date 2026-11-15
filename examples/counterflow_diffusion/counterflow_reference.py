@@ -27,6 +27,13 @@ transport. Writes to OUT_DIR (default examples/counterflow_diffusion/reference):
                  overlays of the comparison (examples/counterflow_diffusion/plot_counterflow.py)
 
 z runs from the fuel nozzle (z = 0) to the oxidizer nozzle (z = L).
+
+Grid: refine criteria slope 0.006, curve 0.01 (1300-3100 points). Cantera's
+upwind convection converges at first order. T_max at the same K_ox differs
+by under 0.02% from that of criteria twice as coarse, and against the
+extrapolation of four grids (0.05 / 0.08 down to these) K_ox at the same U_o
+is low by about 0.1% above 344 1/s, 0.2% at 160 1/s, 0.8% at 50 1/s and 4%
+at the first row (14 1/s).
 """
 import argparse
 import os
@@ -69,7 +76,7 @@ def make_flame():
     f = ct.CounterflowDiffusionFlame(gas, width=GAP)
     f.fuel_inlet.X, f.fuel_inlet.T = FUEL, T_IN
     f.oxidizer_inlet.X, f.oxidizer_inlet.T = OXIDIZER, T_IN
-    f.set_refine_criteria(ratio=2.0, slope=0.05, curve=0.08, prune=0.02)
+    f.set_refine_criteria(ratio=2.0, slope=0.006, curve=0.01, prune=0.001)
     f.set_max_grid_points(f.flame, 5000)
     return f
 
