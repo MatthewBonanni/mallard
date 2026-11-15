@@ -378,7 +378,7 @@ struct Geometry {
     V<rtype *[N_DIM]> cell_coords;
     R<double *> cell_h;  // cube root of the volume
     V<uint32_t *> offsets_cells_of_cell, cells_of_cell;
-    V<uint8_t *> cells_of_cell_shift;
+    ShiftRowsOf<V<uint8_t *>> cells_of_cell_shift;
     R<int8_t *[3]> shift_lattice;
     R<double *[3]> translations;  // periodic translation of each lattice direction
     uint32_t n_translations = 0;
@@ -3406,7 +3406,7 @@ class Setup3D {
             h.cell_coords = mesh.h_cell_coords;
             h.offsets_cells_of_cell = mesh.h_offsets_cells_of_cell;
             h.cells_of_cell = mesh.h_cells_of_cell;
-            h.cells_of_cell_shift = mesh.h_cells_of_cell_shift;
+            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
             h.offsets_faces_of_cell = mesh.h_offsets_faces_of_cell;
             h.faces_of_cell = mesh.h_faces_of_cell;
             h.offsets_nodes_of_face = mesh.h_offsets_nodes_of_face;
@@ -3509,7 +3509,7 @@ class Setup3D {
             d.cell_coords = mesh.cell_coords;
             d.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
             d.cells_of_cell = mesh.cells_of_cell;
-            d.cells_of_cell_shift = mesh.cells_of_cell_shift;
+            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
             d.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
             d.faces_of_cell = mesh.faces_of_cell;
             d.offsets_nodes_of_face = mesh.offsets_nodes_of_face;
@@ -3851,7 +3851,8 @@ struct Geometry2D {
     V<rtype *> face_area;
     V<uint32_t *> offsets_cells_of_cell, cells_of_cell, offsets_faces_of_cell, faces_of_cell, offsets_nodes_of_face,
         nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
-    V<uint8_t *> cells_of_cell_shift, face_shift;
+    V<uint8_t *> face_shift;
+    ShiftRowsOf<V<uint8_t *>> cells_of_cell_shift;
     V<int32_t *[2]> cells_of_face;
     V<rtype ***> quad_points;  // (face, q, d): curved meshes
     R<int8_t *[3]> shift_lattice;
@@ -4691,7 +4692,7 @@ class Setup2D {
             h.nodes_of_face = mesh.h_nodes_of_face;
             h.offsets_nodes_of_cell = mesh.h_offsets_nodes_of_cell;
             h.nodes_of_cell = mesh.h_nodes_of_cell;
-            h.cells_of_cell_shift = mesh.h_cells_of_cell_shift;
+            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
             h.face_shift = mesh.h_face_shift;
             h.cells_of_face = mesh.h_cells_of_face;
             h.n_complete = mesh.n_complete();
@@ -4812,7 +4813,7 @@ class Setup2D {
             d.nodes_of_face = mesh.nodes_of_face;
             d.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
             d.nodes_of_cell = mesh.nodes_of_cell;
-            d.cells_of_cell_shift = mesh.cells_of_cell_shift;
+            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
             d.face_shift = mesh.face_shift;
             d.cells_of_face = mesh.cells_of_face;
             d.quad_points = quad_points;

@@ -113,7 +113,7 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
     if (restart_file == "latest") {
         // The files the run's restart writers write: those of the whole mesh, or the on-request default
         std::vector<std::string> prefixes;
-        if (input.contains("write_data")) {
+        if (contains_optional(input, "write_data")) {
             for (const Input & output : find_value<std::vector<Input>>(input, "write_data")) {
                 if (find_value_or<std::string>(output, "format", "") == "restart" && output.contains("prefix") &&
                     !output.contains("region") && !output.contains("regions")) {
@@ -399,7 +399,7 @@ MeshSetup describe_mesh(const Mesh & mesh) {
 } // namespace
 
 bool writes_variable(const Input & input, const std::string & name) {
-    if (!input.contains("write_data")) return false;
+    if (!contains_optional(input, "write_data")) return false;
     const auto outputs = find_value<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         if (!output.contains("fields")) continue;
@@ -824,7 +824,7 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
     const std::vector<Input> input_boundaries =
-        input.contains("boundaries") ? find_value<std::vector<Input>>(input, "boundaries")
+        contains_optional(input, "boundaries") ? find_value<std::vector<Input>>(input, "boundaries")
                                      : std::vector<Input>{};
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
@@ -897,7 +897,7 @@ void Solver::init_boundaries() {
         wall_model_specs.push_back(wall_model_spec);
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
-        if (bound.contains("where")) {
+        if (contains_optional(bound, "where")) {
             where = std::make_unique<Expression>(name + ".where", find_value<std::string>(bound, "where"));
         }
         DirichletBoundary dirichlet;
@@ -1205,7 +1205,7 @@ void Solver::init_sources(region::Regions & regions) {
         return;
     }
     const Input & source = input.at("source");
-    if (source.contains("gravity")) {
+    if (contains_optional(source, "gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
         if (g.size() != N_DIM) {
             throw InputError({.key = "source.gravity",
@@ -1221,7 +1221,7 @@ void Solver::init_sources(region::Regions & regions) {
         FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
                                           units::column("m/s^2"), "");
     }
-    if (source.contains("mass_flow")) {
+    if (contains_optional(source, "mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
         if (m.size() != N_DIM) {
             throw InputError({.key = "source.mass_flow",
@@ -1603,7 +1603,7 @@ void Solver::init_run_parameters() {
                           .message = "nothing stops the run: specify at least one of n_steps, t_stop and t_wall_stop",
                           .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)"});
     }
-    use_cfl = run.contains("cfl");
+    use_cfl = contains_optional(run, "cfl");
     if (use_cfl) {
         cfl = find_real(input, "run", "cfl", dim::none);
         if (!(cfl > 0.0_r)) {
@@ -1654,7 +1654,7 @@ void Solver::init_output(region::Regions & regions) {
                           .message = "must be positive",
                           .fix = "Use 1 (the default), or more to write several files at once"});
     }
-    if (input.contains("forces")) {
+    if (contains_optional(input, "forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
             monitor.zone = find_value<std::string>(entry, "zone");
@@ -1770,7 +1770,7 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
-    if (input.contains("write_data")) {
+    if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
             add_data_writers(output, regions, async_output, io_threads);
         }
