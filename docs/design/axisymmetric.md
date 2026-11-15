@@ -1,4 +1,4 @@
-# Design: axisymmetric (r-z) flows
+# Axisymmetric (r-z) flows
 
 Status: implemented (issue #157).
 

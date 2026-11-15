@@ -87,7 +87,7 @@ In NCCL builds every communication between ranks during the steps goes through N
 
 Sums that feed the solution are exact in fixed point, so NCCL, MPI and serial runs agree bit for bit. Setup, partitioning, output (probes, monitors, snapshots, restarts, progress and health reports) and run control between steps (triggers, control files) communicate with MPI.
 
-Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
+Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as wall forces, are reduced across ranks and can differ in the last digits.
 
 Each rank numbers its cells along a Hilbert curve when that reads fewer cache lines in the reconstruction ([cell numbering](performance.md#cell-numbering)); restart, HDF5 and VTU files list cells in global order whatever the rank count.
 
@@ -113,7 +113,7 @@ solut/r_000100_p0001.vtu
 solut/r_000100_p0002.vtu
 ```
 
-A volume region's VTU (`region = ...`) likewise holds each rank's own cells of it; boundary zones, cut planes and other regions of lower dimension are gathered and written by rank 0, as probes are. Force monitors are summed over the ranks and written by rank 0.
+A volume region's VTU (`region = ...`) likewise holds each rank's own cells of it; boundary zones, cut planes and other regions of lower dimension are gathered and written by rank 0, as probes are. Wall forces are summed over the ranks and written by rank 0.
 
 ### Restarts
 

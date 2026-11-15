@@ -339,7 +339,7 @@ Pitfalls:
 - **Memory.** 3D TENO5 needs about 40 KB per unstructured cell on the device
   (an A100-80GB holds about 2.1M); `single_precision_tables` stretches that to
   about 3.4M. Cells of one stencil shape share their tables, so a uniform box
-  of hexahedra needs about 8 KB per cell (about 10M on an A100-80GB).
+  of hexahedra needs about 7 KB per cell (about 11.6M on an A100-80GB).
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 

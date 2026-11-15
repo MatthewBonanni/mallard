@@ -1,4 +1,4 @@
-# Design: curved high-order boundaries
+# Curved high-order boundaries
 
 Status: implemented (#162), 2D and 3D, serial and distributed, CPU and GPU.
 
