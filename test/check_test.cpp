@@ -177,6 +177,22 @@ TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
     EXPECT_TRUE(r.ok());
 }
 
+TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
+    const Input input = parse_input_string("[t]\nn = 1\nx = 2.0\nchecked = 3\n");
+    const Input & t = input.at("t");
+    if (contains_optional(t, "n")) find_value<int>(t, "n");
+    if (contains_optional(t, "x")) find_real(input, "t", "x", dim::length);
+    if (!t.contains("checked")) throw missing_key(t, "t.checked");
+    find_value<int>(t, "checked");
+    const ResolvedInput resolved = resolve_input(input);
+    for (const auto & [path, required] :
+         {std::pair{"t.n", false}, std::pair{"t.x", false}, std::pair{"t.checked", true}}) {
+        const KeyRecord * record = resolved.find(path);
+        ASSERT_NE(record, nullptr) << path;
+        EXPECT_EQ(record->use.required, required) << path;
+    }
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");
