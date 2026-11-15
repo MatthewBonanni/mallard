@@ -68,6 +68,26 @@ def test_read_all_is_every_snapshot(run):
         f.read("RHO", 2)
 
 
+def test_series_of_a_directory_is_every_snapshot_in_time_order(run):
+    pairs = mallard.series(run, "snapshots_vtkhdf*")
+    assert [f.snapshots[i].step for f, i in pairs] == [0, 1]
+    files = mallard.series(run)
+    assert len(files) == len(SERIES) * 2 and [f.snapshots[i].t for f, i in files] == sorted(f.snapshots[i].t for f, i in files)
+    f, i = mallard.series(run / "snapshots_series.vtkhdf")[-1]
+    np.testing.assert_array_equal(f.read("RHO", i), mallard.open(run / "snapshots_vtkhdf_000001.vtkhdf")["RHO"])
+
+
+def test_triangles_cover_each_cell_once(run):
+    g = mallard.open(run / "snapshots_series.vtkhdf").geometry()
+    triangles, cell = g.triangles()
+    assert triangles.shape == (2 * g.n_cells, 3) and np.array_equal(np.bincount(cell), np.full(g.n_cells, 2))
+    p = g.points[triangles]
+    area = 0.5 * np.abs(np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])[:, 2])
+    cell_area = np.bincount(cell, weights=area)
+    corners = [g.points[g.connectivity[a:b]] for a, b in zip(g.offsets[:-1], g.offsets[1:])]
+    np.testing.assert_allclose(cell_area, [np.ptp(c[:, 0]) * np.ptp(c[:, 1]) for c in corners], rtol=1e-12)
+
+
 def test_restart_files(run):
     f = mallard.open(run / "snapshots_000001.restart")
     assert f.kind == "restart" and f.snapshots[0].step == 1

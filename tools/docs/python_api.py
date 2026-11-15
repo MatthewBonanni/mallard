@@ -19,8 +19,8 @@ BEGIN, END = "<!-- BEGIN GENERATED reference -->", "<!-- END GENERATED reference
 
 # (section, module, prefix, names), in the order of the page
 SECTIONS = [
-    ("Reading files", "reader", "mallard.", ["open", "File", "Field", "Snapshot", "Geometry", "run_files",
-                                              "run_record"]),
+    ("Reading files", "reader", "mallard.", ["open", "File", "Field", "Snapshot", "Geometry", "series",
+                                              "run_files", "run_record"]),
     ("Commands", "commands", "mallard.", ["info", "diff", "report", "pack", "command", "CommandError"]),
     ("`mallard.post`", "post", "mallard.post.", ["extract", "derive", "average", "convergence"]),
 ]

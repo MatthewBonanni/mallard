@@ -9,13 +9,13 @@ import mallard
 
 f = mallard.open("solut/flow.vtkhdf")   # mallard.File
 f.read("P"), f.read_all("P"), f.geometry()
-mallard.run_record("."), mallard.run_files(".")
+mallard.series("solut"), mallard.run_record("."), mallard.run_files(".")
 mallard.info(path), mallard.diff(a, b), mallard.post.extract(files, ...), mallard.post.convergence(runs, ...)
 ```
 
 `mallard.vtu`, `mallard.vtkhdf`, `mallard.h5` and `mallard.tables` are the
-readers the scripts in `tools/` use ([Tools](../../tools/README.md)); they need
-h5py for HDF5 files, and are not part of this reference.
+readers the example, documentation and setup scripts in `tools/` still use ([Tools](../../tools/README.md));
+they need h5py for HDF5 files, and are not part of this reference.
 
 <!-- BEGIN GENERATED reference -->
 
@@ -125,6 +125,20 @@ The number of cells.
 
 The average of each cell's points, `(n_cells, 3)`: the centroid of a triangle, tetrahedron or
 parallelogram, close to it for other cells; for plotting cell values at points.
+
+#### `geometry.triangles()`
+
+A triangle fan of each 2D cell, of its outline for quadratic cells (corners and edge points in turn):
+`(triangles, cell)`, the `(n_triangles, 3)` point indices and the cell of each triangle, for
+matplotlib's `tripcolor(points[:, 0], points[:, 1], triangles, facecolors=values[cell])`. Raises
+`ValueError` for 3D cells.
+
+### `mallard.series(path, pattern='*')`
+
+The snapshots of a series, as `(File, index)` pairs in time order (then step): of a series index or
+snapshot file, or of every series index and snapshot file in a directory (not its subdirectories) whose
+name matches `pattern`, as `run_files` lists them, but files still being written. `file.read(field, index)`
+reads one.
 
 ### `mallard.run_files(directory)`
 
