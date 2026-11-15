@@ -139,6 +139,7 @@ void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * fla
 
 std::string Solver::device_steps_unsupported() const {
     if (step_queue_depth == 0) return "off ([run] step_queue = 0)";
+    if (particles && particles->migrates()) return "particles migrate between ranks through the host";
     return "";
 }
 
@@ -272,6 +273,8 @@ void Solver::record_step() {
         }
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
     }
+    // After a rejected step the positions are those of its start, where they stay
+    if (particles) particles->relocate();
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
