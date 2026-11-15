@@ -553,6 +553,9 @@ which costs memory only. The tables of the shapes are packed like the cells'
 stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
 own through `pinv_index` (block and lane); on a mesh with a shape per cell this
 is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+The device setup ranks, hashes and compares the tables where it computes them;
+only the hashes, and the tables that the shapes keep, reach the host, which
+matches the hashes in cell order.
 A caller that knows its stencil shapes, such as a structured block's offset
 pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
 tables; such shapes are agreed over the ranks by their key in the same way.
