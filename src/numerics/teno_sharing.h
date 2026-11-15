@@ -102,6 +102,19 @@ KOKKOS_INLINE_FUNCTION uint64_t canonicalize(const Entry & v, const uint32_t wid
     return hash;
 }
 
+/** @brief Entries of a table in host memory, for canonicalize (a host lambda's call operator is host only). */
+template <typename T>
+struct HostEntries {
+    const T * p;
+    KOKKOS_INLINE_FUNCTION T operator()(const uint32_t i) const { return p[i]; }
+};
+
+/** @brief The slot order of a table in host memory, for canonicalize. */
+struct HostOrder {
+    uint16_t * p;
+    KOKKOS_INLINE_FUNCTION uint16_t & operator()(const uint32_t s) const { return p[s]; }
+};
+
 /**
  * @brief A stencil's pseudo-inverse (slot s, entry l at pinv[s width + l])
  *        on the grid, in an order of its slots that does not depend on the
@@ -123,8 +136,8 @@ struct CanonicalTable {
     template <typename T>
     CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes)
         : order(std::accumulate(segment_sizes.begin(), segment_sizes.end(), size_t(0))), segments(std::move(segment_sizes)) {
-        hash = canonicalize([&](const uint32_t i) { return pinv[i]; }, width, segments.data(), int(segments.size()),
-                            [&](const uint32_t s) -> uint16_t & { return order[s]; }, exponent);
+        hash = canonicalize(HostEntries<T>{pinv}, width, segments.data(), int(segments.size()), HostOrder{order.data()},
+                            exponent);
     }
 };
 
