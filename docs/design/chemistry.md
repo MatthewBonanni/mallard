@@ -1587,24 +1587,24 @@ of main); `S_c` and `S_d` are taken over the last flame time:
 
 | CH4/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
 |---|---|---|---|---|---|
-| Cantera `S_L` [m/s], mixture-averaged | 0.1135 | 0.2691 | 0.3733 | 0.3302 | 0.1380 |
-| Mallard `S_c` error, 10 cells per `delta_T` | -1.72% | -1.80% | -2.44% | -3.53% | -2.93% |
-| Mallard `S_c` error, 20 cells | -0.26% | -0.46% | -0.66% | -1.14% | -0.50% |
-| Mallard `S_c` error, 40 cells | +0.34% (2.2 flame times) | +0.01% (3.4 flame times) | -0.13% (4.0 flame times) | -0.32% (3.4 flame times) | +0.02% (2.2 flame times) |
-| Mallard `S_d` error, 20 cells | -0.41% | -0.77% | -0.97% | -1.40% | -0.77% |
-| Cantera `S_L` [m/s], unity Lewis | 0.1165 | 0.2442 | 0.2849 | 0.2120 | 0.1043 |
-| Mallard `S_c` error, 10 cells | -1.32% | -0.42% | -0.44% | -1.52% | -2.32% |
-| Mallard `S_c` error, 20 cells | +0.30% | +0.28% | +0.14% | -0.16% | -0.29% |
-| Mallard `S_c` error, 40 cells | +0.38% (4.1 flame times) | +0.33% | +0.26% | +0.21% | +0.20% (3.3 flame times) |
-| Mallard `S_d` error, 20 cells | +0.22% | -0.06% | -0.26% | -0.49% | -0.43% |
+| Cantera `S_L` [m/s], mixture-averaged | 0.1139 | 0.2692 | 0.3731 | 0.3302 | 0.1383 |
+| Mallard `S_c` error, 10 cells per `delta_T` | -1.99% | -1.83% | -2.39% | -3.51% | -3.17% |
+| Mallard `S_c` error, 20 cells | -0.54% | -0.49% | -0.61% | -1.13% | -0.74% |
+| Mallard `S_c` error, 40 cells | +0.07% (2.2 flame times) | -0.02% (3.4 flame times) | -0.08% (4.0 flame times) | -0.31% (3.4 flame times) | -0.23% (2.2 flame times) |
+| Mallard `S_d` error, 20 cells | -0.69% | -0.80% | -0.92% | -1.39% | -1.01% |
+| Cantera `S_L` [m/s], unity Lewis | 0.1170 | 0.2449 | 0.2855 | 0.2126 | 0.1046 |
+| Mallard `S_c` error, 10 cells | -1.70% | -0.68% | -0.65% | -1.77% | -2.61% |
+| Mallard `S_c` error, 20 cells | -0.09% | +0.01% | -0.06% | -0.42% | -0.59% |
+| Mallard `S_c` error, 40 cells | -0.01% (4.1 flame times) | +0.06% | +0.06% | -0.05% | -0.11% (3.3 flame times) |
+| Mallard `S_d` error, 20 cells | -0.17% | -0.33% | -0.47% | -0.75% | -0.73% |
 
 At 20 cells per `delta_T` every consumption speed is within the 2% criterion:
-mixture-averaged 0.3-1.1% slow, unity Lewis within 0.3%; 10 cells is not
-enough (0.4-3.5% slow). At 40 cells the mixture-averaged errors fall to
--0.3 to +0.3% (the runs marked with fewer than five flame times are still
-settling, slowly downward) and the unity-Lewis ones to +0.2 to +0.4%. These
+mixture-averaged 0.5-1.1% slow, unity Lewis within 0.6%; 10 cells is not
+enough (0.7-3.5% slow). At 40 cells the mixture-averaged errors fall to
+-0.3 to +0.1% (the runs marked with fewer than five flame times are still
+settling, slowly downward) and the unity-Lewis ones to -0.1 to +0.1%. These
 are the runs of the sweep, which started from Cantera's flames on the grid of
-`slope = curve = 0.02` (0.5-1.0% faster than the references above), against
+`slope = curve = 0.02` (0.2-0.7% faster than the references above), against
 the references above; the flame speed they settle to does not depend on the
 initial state. The displacement speeds are 0.1-0.4% below
 the consumption speeds (mixture-averaged $\phi = 1.2$: 1.4% slow). The flames
