@@ -1099,6 +1099,7 @@ TEST(ReactingTest, ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance) {
 TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
     // The burnt reactor at 4 tau is too stiff for an explicit step: with explicit_step, every call leaves
     // RODAS's state and proposal bitwise as without it, and CHEM_H negated, which skips the next attempts
+    // until the cell's sub-steps fall short of a call
     const double tau = 4.42e-5;
     const std::string dir = (scratch_dir() / "mallard_explicit_failures").string();
     std::filesystem::remove_all(dir);
@@ -1112,7 +1113,7 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
     const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/burnt_000200.restart\"\n";
     std::string box = reacting_box(205, tau / 50.0);
     const size_t init = box.find("[initialize]\n") + 13;
-    box.replace(init, box.find("[", init) - init, restart);
+    box.replace(init, box.find("\n[", init) + 1 - init, restart);
     Solver runs[2];
     for (int e = 0; e < 2; e++) {
         const std::string name = e ? "on" : "off";
@@ -1132,6 +1133,15 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
     for (size_t c = 0; c < h_off.size(); c++) {
         EXPECT_GT(h_off[c], rtype(0));
         EXPECT_EQ(h_on[c], -h_off[c]);
+    }
+    // Explicit steps fail late in the induction; the ignition's sub-steps, shorter than a call, clear that
+    Solver igniting;
+    igniting.init(parse_toml(reacting_box(40, tau / 50.0) + "explicit_step = true\n" + writer("igniting", 20)));
+    igniting.run();
+    for (rtype h : *read_restart(dir + "/igniting_000020.restart").find("CHEM_H")) EXPECT_LT(h, rtype(0));
+    for (rtype h : *read_restart(dir + "/igniting_000040.restart").find("CHEM_H")) {
+        EXPECT_GT(h, rtype(0));
+        EXPECT_LT(h, rtype(tau / 50.0));
     }
 }
 
