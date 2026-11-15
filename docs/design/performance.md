@@ -453,11 +453,17 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
-so the probes they read are left to the host: the device stops at their writes, the host writes them and
-evaluates the triggers, and on resuming copies the values into the device's trigger variables (rank 0's, sent
-to every rank with one host `allgatherv` at the probe's interval). Between writes the device evaluates the
-conditions on those values, as the host would on the probes' latest values.
+Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
+their writes, before the triggers (and before the statistics' samples, so that a step a trigger fires at is
+still the host's alone), the graph reduces them into the trigger variables with the host's arithmetic
+(`probe_reduction.h`): every sum's per-sample terms, each product rounded on its own, are summed exactly in
+fixed point (`ExactSums`, reduced over the ranks with `comm::allreduce_device`, on NCCL in the graph), the
+extrema are reduced with `MIN` and `MAX`, and a one-point probe's values go to every rank as bit patterns
+summed with zeros, so the values equal the host's `Probe::reduce` bit for bit on any number of ranks. The
+host still writes the files from the staged samples. Time-averaged probes (whose running means are rank 0's)
+and probes reading cell data or `[statistics]` outputs (sampled after the triggers) are left to the host:
+the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
+values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a

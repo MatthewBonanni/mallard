@@ -420,8 +420,8 @@ class Solver {
         void act_on_triggers();
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
-        /** @brief Whether the step graph's triggers read a value of probe k, which the host reduces: the probe is
-         *         left to the host, so the queue stops at its writes and the device holds its values in between. */
+        /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
+         *         or, if it cannot (Probes::can_reduce), the probe is left to the host and the queue stops there. */
         bool triggers_read_probe(size_t k) const;
         bool triggers_read_probes() const;
         /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
@@ -970,7 +970,8 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
-        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (then: any other, any reduced)
+        std::vector<uint32_t> probe_trigger_vars;  // of each staged probe the step graph reduces, its first trigger variable
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
