@@ -1,0 +1,1 @@
+- `[chemistry] explicit_step`: a cell whose explicit step fails skips it in the next calls until its RODAS sub-steps fall short of a call; `CHEM_H` holds that as its sign. Results are unchanged; the attempts of cells that stay stiff are no longer paid every call (#1089).
