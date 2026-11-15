@@ -461,6 +461,7 @@ std::vector<uint64_t> lookup(const std::vector<uint64_t> & keys, size_t words, O
 std::vector<uint64_t> sorted_unique(std::vector<uint64_t> values) {
     std::sort(values.begin(), values.end());
     values.erase(std::unique(values.begin(), values.end()), values.end());
+    values.shrink_to_fit();
     return values;
 }
 
@@ -798,26 +799,28 @@ MeshBlock read_gmsh_block(const std::string & filename) {
     // Cells and boundary faces to the ranks whose shares hold them
     MeshBlock block;
     {
-        std::vector<std::vector<uint64_t>> to_owner(P);
+        // Corners apart from (corner count, zone), so that the corners received are the block's
+        std::vector<std::vector<uint64_t>> corners_to(P), sizes_to(P);
         for (size_t c = 0; c < el.cells.size(); c++) {
-            auto & to = to_owner[owner(first_cell + c, n_cells, p)];
+            const size_t q = owner(first_cell + c, n_cells, p);
             const auto corners = el.cells[c];
-            to.push_back(corners.size());
-            to.insert(to.end(), corners.begin(), corners.end());
-            to.push_back(el.cell_physical[c] != 0 ? cell_zone.at(el.cell_physical[c]) : Mesh::NO_CELL_ZONE);
+            corners_to[q].insert(corners_to[q].end(), corners.begin(), corners.end());
+            sizes_to[q].insert(sizes_to[q].end(), {corners.size(), el.cell_physical[c] != 0
+                                                                      ? cell_zone.at(el.cell_physical[c])
+                                                                      : uint64_t(Mesh::NO_CELL_ZONE)});
         }
         el.cells = Lists();
-        const comm::Received<uint64_t> got = comm::exchange(std::move(to_owner));
+        const comm::Received<uint64_t> sizes = comm::exchange(std::move(sizes_to));
+        block.cell_nodes = comm::exchange(std::move(corners_to)).data;
         block.first_cell = block_begin(n_cells, me, p);
         const uint64_t end_cell = block_begin(n_cells, me + 1, p);
         block.cell_offsets.reserve(end_cell - block.first_cell + 1);
         if (!cell_zone_names.empty()) block.cell_zone.reserve(end_cell - block.first_cell);
-        for (size_t k = 0; k < got.data.size();) {
-            const size_t n = size_t(got.data[k]);
-            block.add_cell(std::span<const uint64_t>(got.data.data() + k + 1, n));
-            if (!cell_zone_names.empty()) block.cell_zone.push_back(uint32_t(got.data[k + 1 + n]));
-            k += n + 2;
+        for (size_t k = 0; k < sizes.data.size(); k += 2) {
+            block.cell_offsets.push_back(block.cell_offsets.back() + sizes.data[k]);
+            if (!cell_zone_names.empty()) block.cell_zone.push_back(uint32_t(sizes.data[k + 1]));
         }
+        if (block.cell_offsets.back() != block.cell_nodes.size()) throw std::logic_error("read_gmsh_block: cells");
         if (block.n_cells() != end_cell - block.first_cell) throw std::logic_error("read_gmsh_block: cell shares");
     }
     block.cell_zone_names = cell_zone_names;
