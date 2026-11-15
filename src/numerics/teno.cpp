@@ -348,7 +348,7 @@ class PackedRows {
         void add_batch(const uint32_t c0, const uint32_t n, const Kokkos::View<uint16_t *> & sizes,
                        const teno_setup::TableBatch::V<uint16_t **> & segment_sizes,
                        const teno_setup::SlotArray<int32_t> & batch_cells, const teno_setup::SlotArray<int32_t> & batch_faces,
-                       const teno_setup::SlotArray<rtype> & batch_pinv, const Kokkos::View<uint32_t *> & same = {}) {
+                       const teno_setup::SlotArray<rtype> & batch_pinv, const std::vector<uint32_t> & same = {}) {
             const uint32_t slice = 1u << shift;
             if (c0 % slice != 0 || c0 >> shift != slice_start.size() - 1) {
                 throw std::logic_error("TENO: stencil chunks must be packed in order.");
@@ -647,7 +647,7 @@ class PackedRows {
                                                                  const Kokkos::View<uint16_t *> & sizes,
                                                                  const teno_setup::TableBatch::V<uint16_t **> & segment_sizes,
                                                                  const teno_setup::SlotArray<rtype> & batch_pinv,
-                                                                 const Kokkos::View<uint32_t *> & same,
+                                                                 const std::vector<uint32_t> & same,
                                                                  Kokkos::View<uint32_t *> & row) {
             const uint32_t w = width;
             const bool sectors = by_face;
@@ -655,20 +655,19 @@ class PackedRows {
             // Rows: the slots that have their own table, in slot order
             std::vector<uint32_t> h_row(n), h_slot;
             std::vector<uint64_t> ids;
-            if (same.extent(0) > 0) {
-                auto h_same = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(same, std::make_pair(0u, n)));
+            if (!same.empty()) {
                 for (uint32_t t = 0; t < n; t++) {
                     const uint64_t id = gid != nullptr ? gid[c0 + t] : uint64_t(c0 + t);
-                    if (h_same(t) > t || h_same(h_same(t)) != h_same(t)) {
+                    if (same[t] > t || same[same[t]] != same[t]) {
                         throw std::logic_error("TENO: a slot shares the table of a later slot or of one without its own.");
                     }
-                    if (h_same(t) == t) {
+                    if (same[t] == t) {
                         h_row[t] = static_cast<uint32_t>(h_slot.size());
                         h_slot.push_back(t);
                         ids.push_back(id);
                         continue;
                     }
-                    h_row[t] = h_row[h_same(t)];
+                    h_row[t] = h_row[same[t]];
                     ids[h_row[t]] = std::min(ids[h_row[t]], id);
                 }
             } else {
@@ -1401,7 +1400,7 @@ class TableBuilder {
          *        the previous one, from a batch (same: see PackedRows::add_batch()).
          */
         void add_batch(const uint32_t c0, const Kokkos::View<uint32_t *> & cells, const teno_setup::TableBatch & batch,
-                       const uint32_t n, const Kokkos::View<uint32_t *> & same = {}) {
+                       const uint32_t n, const std::vector<uint32_t> & same = {}) {
             store_cell_rows(scheme, cells, batch, n);
             large.add_batch(c0, n, batch.large_size, {}, batch.large_cells, batch.large_faces, batch.large_pinv, same);
             small.add_batch(c0, n, batch.small_total, batch.small_size, batch.small_cells, batch.small_faces, batch.small_pinv,
@@ -1527,7 +1526,7 @@ class KeyedSetup {
          */
         uint32_t batch(const uint32_t c0, const uint32_t n, const std::vector<uint32_t> & fit,
                        const Kokkos::View<uint32_t *> & cells, teno_setup::TableBatch & out) {
-            same_slot = {};
+            same_slot.clear();
             if (fit.size() == n) return 0;
             const uint32_t n_fit = static_cast<uint32_t>(fit.size());
             std::vector<uint32_t> fit_slot(n_fit);
@@ -1535,9 +1534,9 @@ class KeyedSetup {
             teno_setup::TableBatch fitted;
             if (n_fit > 0) {
                 fitted = teno_setup::TableBatch(n_fit, out.nk, out.max_large, out.max_small, out.large_pinv.interleaved);
-                std::vector<uint32_t> same(n_fit);
-                std::iota(same.begin(), same.end(), 0u);
-                scatter_slots(out, same, fitted);
+                std::vector<uint32_t> slots(n_fit);
+                std::iota(slots.begin(), slots.end(), 0u);
+                scatter_slots(out, slots, fitted);
             }
             keys.decode(c0, n, group, table, out, bad);
             for (const uint32_t c : forced) {
@@ -1555,7 +1554,7 @@ class KeyedSetup {
                 auto h_bad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bad);
                 for (uint32_t t = 0; t < n; t++) refit[t] = h_bad(t);
             }
-            set_same(c0, refit);
+            same_slot = teno::ShapeGroups::first_slots(host_group.data() + c0, refit.data(), n);
             if (n_bad == 0) return 0;
             std::vector<uint32_t> redo, redo_slot;
             for (uint32_t t = 0; t < n; t++) {
@@ -1571,27 +1570,19 @@ class KeyedSetup {
         }
 
         /** @brief (slot): the first slot of the batch with its key's tables (see PackedRows::add_batch()). */
-        const Kokkos::View<uint32_t *> & same() const { return same_slot; }
+        const std::vector<uint32_t> & same() const { return same_slot; }
 
         double seconds = 0.0;  // keys and representatives
         uint32_t n_representatives = 0;
 
     private:
-        void set_same(const uint32_t c0, const std::vector<uint8_t> & refit) {
-            const uint32_t n = static_cast<uint32_t>(refit.size());
-            const std::vector<uint32_t> h_same = teno::ShapeGroups::first_slots(host_group.data() + c0, refit.data(), n);
-            if (same_buffer.extent(0) < n) same_buffer = Kokkos::View<uint32_t *>("teno_shape_same", bad.extent(0));
-            same_slot = Kokkos::subview(same_buffer, std::make_pair(0u, n));
-            Kokkos::deep_copy(same_slot, HostUnmanaged<const uint32_t>(h_same.data(), n));
-        }
-
         teno_setup::SetupHandle & setup;
         teno::ShapeKeys keys;
         std::vector<uint32_t> host_group;    // (cell): its group if it takes the group's record, else NONE
         Kokkos::View<uint32_t *> group;      // (cell): the same, on the device
         teno::ShapeKeys::Records table;
         Kokkos::View<uint8_t *> bad;         // (slot)
-        Kokkos::View<uint32_t *> same_buffer, same_slot;
+        std::vector<uint32_t> same_slot;  // (slot): see same()
         std::vector<uint32_t> forced;  // cells refitted although they match their records (tests)
 };
 
