@@ -52,7 +52,8 @@ struct CanonicalTable {
 
     CanonicalTable() = default;
 
-    CanonicalTable(const rtype * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes)
+    template <typename T>
+    CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes)
         : segments(std::move(segment_sizes)) {
         const uint32_t n = std::accumulate(segments.begin(), segments.end(), 0u);
         double magnitude = 0.0;
@@ -78,7 +79,8 @@ struct CanonicalTable {
     }
 
     /** @brief An entry on the grid of a table of this exponent. */
-    static int64_t on_grid(const rtype v, const int exp) { return std::llround(std::ldexp(double(v), SHARE_GRID_BITS - exp)); }
+    template <typename T>
+    static int64_t on_grid(const T v, const int exp) { return std::llround(std::ldexp(double(v), SHARE_GRID_BITS - exp)); }
 
     private:
         template <typename T>
@@ -96,8 +98,9 @@ struct CanonicalTable {
  *        of its cell with the lowest global id, in canonical order, agreed
  *        over the ranks, so that a cell's table does not depend on the
  *        partition, the batches or the thread count. Cells are added in
- *        order; each gets its shape's index.
+ *        order; each gets its shape's index. T: the type of the values.
  */
+template <typename T = rtype>
 class TableStore {
     public:
         explicit TableStore(const uint32_t values_per_slot) : width(values_per_slot) {}
@@ -153,7 +156,7 @@ class TableStore {
          *        table of the lowest global id, and agree() matches it over
          *        the ranks by its key.
          */
-        uint32_t add_keyed(const uint64_t key, const CanonicalTable & t, const rtype * v, const uint64_t gid) {
+        uint32_t add_keyed(const uint64_t key, const CanonicalTable & t, const T * v, const uint64_t gid) {
             uint32_t k = find_keyed(key);
             if (k == NONE) return create(t, v, gid, true, keyed_hash(key));
             Shape & s = shapes[k];
@@ -218,7 +221,7 @@ class TableStore {
             const auto requests = comm::alltoallv(request);
             std::unordered_multimap<uint64_t, size_t> by_hash;
             for (size_t i = 0; i < shapes.size(); i++) by_hash.emplace(shapes[i].hash, i);
-            std::vector<std::vector<rtype>> reply(static_cast<size_t>(p));
+            std::vector<std::vector<T>> reply(static_cast<size_t>(p));
             for (int r = 0; r < p; r++) {
                 const auto & from = requests[size_t(r)];
                 for (size_t k = 0; k < from.size(); k += 2) {
@@ -236,7 +239,7 @@ class TableStore {
                 size_t at = 0;
                 for (const size_t i : asked[size_t(r)]) {
                     Shape & s = shapes[i];
-                    const rtype * v = replies[size_t(r)].data() + at;
+                    const T * v = replies[size_t(r)].data() + at;
                     at += s.values.size();
                     // A hash shared by two shapes keeps this rank's table
                     if (!(s.keyed || same_shape(i, s.canonical, v))) continue;
@@ -248,7 +251,7 @@ class TableStore {
 
         /** @brief Slots of shape k's table, and its entries in canonical order. */
         uint16_t slots(const size_t k) const { return static_cast<uint16_t>(shapes[k].canonical.order.size()); }
-        const std::vector<rtype> & values(const size_t k) const { return shapes[k].values; }
+        const std::vector<T> & values(const size_t k) const { return shapes[k].values; }
         /** @brief Global id of the cell whose table shape k takes. */
         uint64_t owner(const size_t k) const { return shapes[k].gid; }
         size_t size() const { return shapes.size(); }
@@ -260,7 +263,7 @@ class TableStore {
             uint64_t hash;
             uint64_t gid;
             CanonicalTable canonical;  // order unused; segments and exponent compared
-            std::vector<rtype> values;
+            std::vector<T> values;
             bool keyed;                // by a caller's key, not by equality
         };
 
@@ -271,7 +274,7 @@ class TableStore {
             return h ^ (h >> 31);
         }
 
-        uint32_t create(const CanonicalTable & t, const rtype * v, const uint64_t gid, const bool keyed = false,
+        uint32_t create(const CanonicalTable & t, const T * v, const uint64_t gid, const bool keyed = false,
                         const uint64_t hash = 0) {
             const size_t n = t.order.size() * width;
             CanonicalTable kept;
@@ -281,7 +284,7 @@ class TableStore {
             kept.hash = t.hash;
             const uint64_t h = keyed ? hash : t.hash;
             kept.hash = h;
-            shapes.push_back(Shape{h, gid, std::move(kept), std::vector<rtype>(v, v + n), keyed});
+            shapes.push_back(Shape{h, gid, std::move(kept), std::vector<T>(v, v + n), keyed});
             const uint32_t k = uint32_t(shapes.size() - 1);
             if (keyed) {
                 keys.emplace(h, k);
@@ -291,7 +294,7 @@ class TableStore {
             return k;
         }
 
-        uint32_t find(const CanonicalTable & t, const rtype * v) const {
+        uint32_t find(const CanonicalTable & t, const T * v) const {
             const auto range = index.equal_range(t.hash);
             for (auto it = range.first; it != range.second; ++it) {
                 if (same_shape(it->second, t, v)) return uint32_t(it->second);
@@ -299,7 +302,7 @@ class TableStore {
             return NONE;
         }
 
-        bool same_shape(const size_t k, const CanonicalTable & t, const rtype * v) const {
+        bool same_shape(const size_t k, const CanonicalTable & t, const T * v) const {
             const Shape & s = shapes[k];
             if (s.canonical.exponent != t.exponent || s.canonical.segments != t.segments) return false;
             for (size_t i = 0; i < s.values.size(); i++) {
