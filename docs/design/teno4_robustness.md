@@ -56,7 +56,7 @@ The CPU ratio is order 4's time over order 5's.
 | `explosion_3d`, 16³ blocks of tetrahedra | 24,576 | 0.0024 / 0.0024 | 0.34 | 0.42 |
 | `explosion_3d`, 12³ blocks of pyramids | 10,368 | 0.0029 / 0.0031 | 0.34 | 0.49 |
 | `explosion_3d`, 16 × 16 × 16 blocks of prisms | 8,192 | 0.0029 / 0.0029 | 0.50 | 0.62 |
-| Premixed H2/air flame, 60 cells (speed error against Cantera's 9.7473 m/s) | 60 | −0.68% / −0.85% | 0.57 | 0.97 |
+| Premixed H2/air flame, 60 cells (speed error against Cantera's grid-converged 9.666 m/s) | 60 | +0.16% / −0.02% | 0.57 | 0.97 |
 | `taylor_green_3d`, 32³ hexahedra, t = 3 (kinetic energy) | 32,768 | 29.70 / 29.74 | 0.38 | 0.62 |
 
 The flame is the `PresetValidation` flame: 6 cells per thermal thickness, the
