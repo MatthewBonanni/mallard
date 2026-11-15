@@ -3478,7 +3478,7 @@ namespace {
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16 has
 // shared tables fitted once per stencil shape (#986), which differ from version 15's at round-off
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-17";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-18";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
