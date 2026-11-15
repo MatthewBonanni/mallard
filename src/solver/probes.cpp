@@ -2454,12 +2454,12 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
     }
 }
 
-bool Probes::can_stage(const size_t k, const Statistics & statistics, const bool conditional) const {
+bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const Probe & p = *probes[k];
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
         return statistics.device_average(c.second->name()).data() != nullptr;
     });
-    return !p.snapshot && !p.isosurface && !p.solution && (conditional || !p.motion) && device_columns &&
+    return !p.snapshot && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 

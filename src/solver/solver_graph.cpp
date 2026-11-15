@@ -1008,6 +1008,20 @@ void Solver::begin_device_steps() {
         monitor_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
             "step_monitor_staging", n_records, monitor_offsets.back());
     }
+    staged_probes.clear();
+    bool moving = false;
+    for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
+        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k) || triggers_read_probe(k)) continue;
+        probes.stage(k, n_records, statistics, static_cast<double>(t));
+        staged_probes.push_back(k);
+        moving = moving || probes.moves(k);
+    }
+    probe_overflow = moving ? Kokkos::View<int64_t *>("step_probe_overflow", staged_probes.size()) : Kokkos::View<int64_t *>();
+    if (!staged_probes.empty()) {
+        probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + 1);
+        probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
+    }
+    n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
     for (uint32_t i = 0; i < n_records; i++) {
         cudaEvent_t event;
@@ -1022,22 +1036,6 @@ void Solver::begin_device_steps() {
     conditional_steps = true;
     queue_depth = n_records;
 #endif
-    staged_probes.clear();
-    bool moving = false;
-    for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
-        if (!probes.can_stage(k, statistics, conditional_steps) || convergence_reads_probe(k) || triggers_read_probe(k)) {
-            continue;
-        }
-        probes.stage(k, n_records, statistics, static_cast<double>(t));
-        staged_probes.push_back(k);
-        moving = moving || probes.moves(k);
-    }
-    probe_overflow = moving ? Kokkos::View<int64_t *>("step_probe_overflow", staged_probes.size()) : Kokkos::View<int64_t *>();
-    if (!staged_probes.empty()) {
-        probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + 1);
-        probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
-    }
-    n_launched = n_taken = 0;
     // Graphs without conditional nodes run every IF body: outputs are then the host's
     staged_outputs = conditional_steps && outputs_stageable();
     staged_time_outputs = false;

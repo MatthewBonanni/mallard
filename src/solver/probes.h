@@ -278,9 +278,8 @@ class Probes {
 
         size_t size() const { return probes.size(); }
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
-         *         fields and statistics' device averages only; a moving region's only with conditional (a graph
-         *         that runs its IF bodies when due, not at every step). */
-        bool can_stage(size_t k, const Statistics & statistics, bool conditional) const;
+         *         fields and statistics' device averages only. */
+        bool can_stage(size_t k, const Statistics & statistics) const;
         /** @brief Probe k samples a moving region. */
         bool moves(size_t k) const;
         /** @brief Probe k is evaluated in a step graph into staging of n_records record slots (a moving region's

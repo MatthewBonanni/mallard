@@ -519,8 +519,7 @@ anew with each moving probe's staging at twice the cells it covers then (at leas
 Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
 returning at once, and
 the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
-them by global cell, as it does for the samples it selects itself, as it takes the record. A graph without
-conditional nodes runs every IF body at every step, so there moving regions are not staged. On one A100
+them by global cell, as it does for the samples it selects itself, as it takes the record. On one A100
 (`air_3d.toml`, a sphere of radius 0.03 written every 10 steps) the sampling of the cells its surface crosses
 (1.08 s per write) is all of the region's work; the selection, evaluation and copies take under 0.1 ms.
 
