@@ -477,7 +477,7 @@ uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_pt
     auto teno = make_teno(mesh_ptr, bd, order);
     const TENO::Stencils stencils = teno->large_stencils();
     using P = std::array<double, 2>;
-    auto node = [&](uint32_t f, int k) {
+    auto node = [&](uint32_t f, uint32_t k) {
         const uint32_t n = m.h_node_of_face(f, k);
         return P{double(m.h_node_coords(n, 0)), double(m.h_node_coords(n, 1))};
     };
@@ -488,7 +488,7 @@ uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_pt
     };
     auto hidden = [&](const P & a, const P & b) {
         for (uint32_t f : boundary) {
-            const P p = node(f, 0), q = node(f, 1);
+            const P p = node(f, 0u), q = node(f, 1u);
             if (side(a, b, p) * side(a, b, q) < 0 && side(p, q, a) * side(p, q, b) < 0) return true;
         }
         return false;
@@ -504,7 +504,7 @@ uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_pt
                 n_checked++;
                 continue;
             }
-            const P a = node(static_cast<uint32_t>(f), 0), b = node(static_cast<uint32_t>(f), 1);
+            const P a = node(static_cast<uint32_t>(f), 0u), b = node(static_cast<uint32_t>(f), 1u);
             const double tx = b[0] - a[0], ty = b[1] - a[1];
             const double t = ((y[0] - a[0]) * tx + (y[1] - a[1]) * ty) / (tx * tx + ty * ty);
             const P foot{a[0] + t * tx, a[1] + t * ty};
