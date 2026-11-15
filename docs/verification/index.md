@@ -60,15 +60,16 @@ smooth field: the operator alone, without time integration. In 2D, the
 maximum over interior face quadrature points; in 3D, over all faces, with the
 mirrored stencils of symmetry walls. Observed orders (TENO6 on mixed meshes
 is left out, at a minute per resolution; their cell types are covered one by
-one):
+one; TENO6 on pyramids starts from 8 blocks, since its stencils of about 209
+cells span most of a 6³ box and 6 → 12 observes 5.26):
 
 <!-- BEGIN GENERATED matrix-reconstruction -->
 | | Quadrilaterals | Triangles | Hexahedra | Tetrahedra | Prisms | Pyramids | Mixed |
 |---|---|---|---|---|---|---|---|
 | TENO3 (design 3) | 2.89 | 2.92 | 2.72 | 2.68 | 2.81 | 2.88 | 2.54 |
-| TENO4 (design 4) | 4.08 | 3.99 | 3.77 | 3.55 | 3.55 | 3.78 | 3.56 |
+| TENO4 (design 4) | 4.08 | 3.99 | 3.77 | 3.55 | 3.55 | 3.65 | 3.56 |
 | TENO5 (design 5) | 4.90 | 4.98 | 4.93 | 4.73 | 5.07 | 4.84 | 5.04 |
-| TENO6 (design 6) | 6.05 | 5.94 | 5.73 | 5.58 | 5.58 | 5.60 | – |
+| TENO6 (design 6) | 6.05 | 5.94 | 5.73 | 5.58 | 5.58 | 5.61 | – |
 <!-- END GENERATED matrix-reconstruction -->
 
 ![Reconstruction convergence by cell type](../images/verification/reconstruction-light.svg#gh-light-mode-only)
@@ -94,9 +95,9 @@ Dashed lines show the design slope of each study.
 | TENO5 | prisms | max face-value error | 6 → 12 | 5.91e-03 → 1.76e-04 | 5 | 5.07 | > 4.5 | pass |
 | TENO6 | prisms | max face-value error | 6 → 12 | 5.20e-03 → 1.09e-04 | 6 | 5.58 | > 5.5 | pass |
 | TENO3 | pyramids | max face-value error | 6 → 12 | 1.37e-02 → 1.86e-03 | 3 | 2.88 | > 2.5 | pass |
-| TENO4 | pyramids | max face-value error | 6 → 12 | 3.39e-03 → 2.46e-04 | 4 | 3.78 | > 3.5 | pass |
+| TENO4 | pyramids | max face-value error | 6 → 12 | 3.56e-03 → 2.85e-04 | 4 | 3.65 | > 3.5 | pass |
 | TENO5 | pyramids | max face-value error | 6 → 12 | 1.70e-03 → 5.93e-05 | 5 | 4.84 | > 4.5 | pass |
-| TENO6 | pyramids | max face-value error | 6 → 12 | 4.40e-04 → 9.03e-06 | 6 | 5.60 | > 5.5 | pass |
+| TENO6 | pyramids | max face-value error | 8 → 16 | 2.10e-04 → 4.30e-06 | 6 | 5.61 | > 5.5 | pass |
 | TENO3 | mixed | max face-value error | 6 → 12 | 2.29e-02 → 3.95e-03 | 3 | 2.54 | > 2.5 | pass |
 | TENO4 | mixed | max face-value error | 6 → 12 | 9.69e-03 → 8.22e-04 | 4 | 3.56 | > 3.5 | pass |
 | TENO5 | mixed | max face-value error | 6 → 12 | 1.19e-02 → 3.61e-04 | 5 | 5.04 | > 4.5 | pass |
@@ -131,7 +132,7 @@ resolution on the other cells. Observed orders:
 | FO (design 1) | 0.80 | 0.87 | 0.75 | 0.92 | 0.89 | 0.89 | 0.82 |
 | MUSCL (design 2) | 2.20 | 2.07 | 2.28 | 2.31 | 2.02 | 1.90 | 2.08 |
 | TENO3 (design 3) | 2.90 | 2.98 | 2.79 | 2.94 | 2.92 | 2.98 | 2.64 |
-| TENO4 (design 4) | 4.41 | 4.05 | 4.26 | 4.07 | 4.20 | 4.18 | 3.75 |
+| TENO4 (design 4) | 4.41 | 4.05 | 4.26 | 4.07 | 4.20 | 4.26 | 3.84 |
 | TENO5 (design 5) | 4.87 | 4.96 | 4.73 | – | – | – | – |
 | TENO6 (design 6) | 6.40 | 5.97 | 6.07 | – | – | – | – |
 <!-- END GENERATED matrix-advection -->
@@ -177,11 +178,11 @@ limits the observed order to 3.
 | FO | pyramids | max density error | 16 → 32 | 4.23e-02 → 2.28e-02 | 1 | 0.89 | > 0.5 | pass |
 | MUSCL | pyramids | max density error | 12 → 24 | 6.75e-03 → 1.80e-03 | 2 | 1.90 | > 1.5 | pass |
 | TENO3 | pyramids | max density error | 12 → 24 | 3.21e-03 → 4.07e-04 | 3 | 2.98 | > 2.5 | pass |
-| TENO4 | pyramids | max density error | 8 → 16 | 9.54e-04 → 5.26e-05 | 4 | 4.18 | > 3.5 | pass |
+| TENO4 | pyramids | max density error | 8 → 16 | 1.21e-03 → 6.34e-05 | 4 | 4.26 | > 3.5 | pass |
 | FO | mixed | max density error | 16 → 32 | 7.39e-02 → 4.20e-02 | 1 | 0.82 | > 0.5 | pass |
 | MUSCL | mixed | max density error | 12 → 24 | 1.44e-02 → 3.39e-03 | 2 | 2.08 | > 1.5 | pass |
 | TENO3 | mixed | max density error | 12 → 24 | 1.42e-02 → 2.28e-03 | 3 | 2.64 | > 2.5 | pass |
-| TENO4 | mixed | max density error | 8 → 16 | 9.82e-03 → 7.30e-04 | 4 | 3.75 | > 3.5 | pass |
+| TENO4 | mixed | max density error | 8 → 16 | 1.04e-02 → 7.23e-04 | 4 | 3.84 | > 3.5 | pass |
 <!-- END GENERATED table-advection -->
 
 ## Navier-Stokes equations: viscous operators

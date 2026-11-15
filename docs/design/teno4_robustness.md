@@ -8,7 +8,6 @@ fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 
 | Failure at order 4 | Issue |
 |---|---|
-| Growing modes on pyramid lattices, cubic and thin | [#236](https://github.com/MatthewBonanni/mallard/issues/236) |
 | An outgoing acoustic wave amplified on a stretched O-grid (cylinder); mitigated | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
 | Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
@@ -56,7 +55,7 @@ The CPU ratio is order 4's time over order 5's.
 | `explosion_3d`, 16³ blocks of tetrahedra | 24,576 | 0.0024 / 0.0024 | 0.34 | 0.42 |
 | `explosion_3d`, 12³ blocks of pyramids | 10,368 | 0.0029 / 0.0031 | 0.34 | 0.49 |
 | `explosion_3d`, 16 × 16 × 16 blocks of prisms | 8,192 | 0.0029 / 0.0029 | 0.50 | 0.62 |
-| Premixed H2/air flame, 60 cells (speed error against Cantera's 9.7473 m/s) | 60 | −0.68% / −0.85% | 0.57 | 0.97 |
+| Premixed H2/air flame, 60 cells (speed error against Cantera's grid-converged 9.666 m/s) | 60 | +0.16% / −0.02% | 0.57 | 0.97 |
 | `taylor_green_3d`, 32³ hexahedra, t = 3 (kinetic energy) | 32,768 | 29.70 / 29.74 | 0.38 | 0.62 |
 
 The flame is the `PresetValidation` flame: 6 cells per thermal thickness, the
@@ -106,10 +105,10 @@ speed over the box size. Negative or about zero is bounded.
 
 | Mesh | Boundaries | Order 3 | Order 4 | Order 5 |
 |---|---|---|---|---|
-| `cartesian_pyramid` 6³ | periodic | −0.005 | **+0.021** | −0.003 |
-| `cartesian_pyramid` 6³ | symmetry walls | −0.005 | **+0.011** | +0.0004 |
-| `cartesian_pyramid` 4³ | periodic | −0.0003 | **+0.009** | −0.0007 |
-| `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | side walls, periodic in z | −0.003 | **+0.033** | −0.005 |
+| `cartesian_pyramid` 6³ | periodic | −0.005 | +0.0013 | −0.003 |
+| `cartesian_pyramid` 6³ | symmetry walls | −0.005 | +0.0048 | +0.0004 |
+| `cartesian_pyramid` 4³ | periodic | −0.0003 | +0.0007 | −0.0007 |
+| `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | side walls, periodic in z | −0.003 | +0.0002 | −0.005 |
 | `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | walls | −0.006 | −0.001 | −0.003 |
 | `cartesian`, `cartesian_tet`, `cartesian_prism`, `cartesian_mixed` 6³ | periodic; walls | ≤ +0.0009 | ≤ +0.0024 | ≤ +0.0013 |
 | jittered Kuhn tetrahedra 6³ (0.15 h) | periodic; walls | ≤ +0.0006 | ≤ −0.0007 | ≤ +0.0008 |
@@ -122,10 +121,13 @@ triangles (32² squares, 0.25 h, periodic and walled), on triangles of aspect
 ratio 6 (periodic), and on quads and triangles with `stretching = [0, 2]`
 (walls, aspect ratio about 14 at the walls).
 
-Only pyramids grow, and only at order 4. The thin pyramid box with side walls
-grows fastest: 3.8 times its initial speed by t = 50. The cubic-lattice rates
-match the linearized operator in [#236](https://github.com/MatthewBonanni/mallard/issues/236)
-and [TENO-E: known limitations](../numerics/teno_e.md#known-limitations).
+Pyramids at order 4 start from larger stencils than other cells
+([TENO-E: pyramids at odd degrees](../numerics/teno_e.md#3d-stability)),
+without which these pyramid boxes grew at +0.009 to +0.033 (the thin box with
+side walls to 3.8 times its initial speed by t = 50). The slow rise of the
+largest Mach number in the walled 6³ pyramid box is not a linear mode: the
+linearized operator of that box has no eigenvalue with a real part above
+$10^{-8}$.
 
 ## Wall-bounded flows
 
@@ -215,11 +217,10 @@ tetrahedra and 0.0822 against 0.0857 on pyramids.
 
 ## What would change the default
 
-When [#236](https://github.com/MatthewBonanni/mallard/issues/236),
-[#975](https://github.com/MatthewBonanni/mallard/issues/975),
+When [#975](https://github.com/MatthewBonanni/mallard/issues/975),
 [#976](https://github.com/MatthewBonanni/mallard/issues/976) and
 [#977](https://github.com/MatthewBonanni/mallard/issues/977) are fixed and
 this page's cases pass at order 4, `high_order` can move to order 4. The
-cylinder and the pyramid boxes are the deciding checks. Until then, order 4
-is an explicit choice for smooth flow on meshes without pyramids:
+cylinder is the deciding check. Until then, order 4 is an explicit choice for
+smooth flow:
 `[numerics.face_reconstruction] order = 4` under `high_order`.

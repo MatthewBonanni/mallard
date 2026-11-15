@@ -85,8 +85,9 @@ operator (acoustics at rest, HLLC), with the bound of 10 and of 4:
 jitter, and 1.1 against $8\times 10^{-8}$ on 25:1 Kuhn tetrahedra at order 4.
 Bounds of 5 to 7 do not remove the growing modes. Lowering the bound kept
 the measured convergence rates of every cell type and order
-([3D stability](teno_e.md#3d-stability)). Known exception: pure pyramid
-lattices at order 4 are less stable with the bound of 4.
+([3D stability](teno_e.md#3d-stability)). Pyramids at orders 4 and 6
+also start from larger stencils, without which pyramid lattices grow at any
+bound.
 
 ### Ranking metric
 
