@@ -85,11 +85,11 @@ def diff(a, b, **options):
     return command("diff", a, b, verdicts=(1,), **options)
 
 
-def report(run_dir, **options):
+def report(run_dir):
     """`mallard info RUN_DIR --html`: writes the run report, `RUN_DIR/report.html`, from `RUN_DIR/mallard.jsonl`
     (for a run still going, killed, or of a Mallard before 0.10; a run writes its own). Returns
     `{"directory": ..., "report": path}`. Raises `CommandError` when the directory has no `mallard.jsonl`."""
-    return command("info", run_dir, html=True, **options)
+    return command("info", run_dir, html=True)
 
 
 def pack(path, verify=False, **options):

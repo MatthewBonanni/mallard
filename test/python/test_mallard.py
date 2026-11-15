@@ -166,9 +166,10 @@ def test_post_average(run, tmp_path):
     w = np.array([s["weight"] for s in report["snapshots"]])
     rho = np.array([mallard.open(run / f).read("RHO") for f in RESTARTS])
     np.testing.assert_allclose(averages.read("MEAN_RHO"), w @ rho / w.sum(), rtol=1e-12)
-    one = mallard.post.average([run / f for f in RESTARTS], fields=["RHO"], steps=[1], output=tmp_path / "one",
-                               threads=2, cwd=run)
+    one = mallard.post.average([run / f for f in RESTARTS], fields=["RHO"], steps=[1], t_start=0,
+                               output=tmp_path / "one", threads=2, cwd=run)
     assert [s["snapshot"]["step"] for s in one["snapshots"]] == [1]
+    assert one["window"]["start"] == 0 and one["snapshots"][0]["weight"] == pytest.approx(one["window"]["end"])
 
 
 def test_report(logged_run, tmp_path):

@@ -560,7 +560,8 @@ Options:
   --html                Run directories: write RUN_DIR/report.html, the run
                         report, from RUN_DIR/mallard.jsonl, the page the run
                         writes itself: for a run still going, killed, or of a
-                        Mallard before 0.10. Default: off.
+                        Mallard before 0.10; with --format json, prints its path
+                        as {"directory", "report"}. Default: off.
   --kokkos-*            Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                         rank) or --kokkos-device-id=1 (the GPU; by default each
                         rank gets its own).
@@ -1282,8 +1283,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard pack
 
 ```text
-Usage: mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]
-       mallard pack --verify FILE
+Usage: mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none] [--format text|json]
+       mallard pack --verify FILE [--format text|json]
 
 Packs the last run of a run directory into one tar archive, for a paper's
 supplement or a bug report: what it needs to run again and what it wrote. What
@@ -1313,6 +1314,11 @@ gzip-compressed in builds with zlib (Mallard_ENABLE_ZLIB), else plain tar; any
 tar reads both.
 
 Options:
+  --format text|json        text: sections and tables; json: the same as one
+                            JSON object, for scripts: the archive, the rerun
+                            command and each file with its role, size and
+                            SHA-256 (--verify: each problem, and the result).
+                            Default: text.
   -o, --output FILE         The archive: .tar.gz (gzip-compressed, in builds
                             with zlib) or .tar. Default: the run directory's
                             name with .tar.gz (.tar in builds without zlib), in

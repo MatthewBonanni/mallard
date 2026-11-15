@@ -154,7 +154,7 @@ and where they are; `remap=True` compares files on different meshes. Options: `f
 `snapshot`, `remap`, `mesh_a`, `mesh_b` (`mallard diff --help`). Differences beyond tolerance are a
 result, not an error: the report's `result` and `exit_status` give the verdict.
 
-### `mallard.report(run_dir, **options)`
+### `mallard.report(run_dir)`
 
 `mallard info RUN_DIR --html`: writes the run report, `RUN_DIR/report.html`, from `RUN_DIR/mallard.jsonl`
 (for a run still going, killed, or of a Mallard before 0.10; a run writes its own). Returns
