@@ -1141,11 +1141,16 @@ TEST(StepQueueTest, TriggersOfProbeValuesAreEvaluatedOnTheDevice) {
 
 TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
     // A line's reductions and a point's value, written every 3 steps, reduced on the device at its writes: the queue
-    // stops only at the step after the write whose every value the condition equals, as a stop at that step does
+    // stops only at the step after the write whose every value the condition equals, as a stop at that step does. A
+    // moving region's probe, written every 2 steps, has its own flags beside theirs
     Case c;
     c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 10 * t", "0.5", "0.2") + ", radius = 0.3}";
     const std::string probes =
         "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\"]\ninterval = 2\n"
+        "reductions = [\"integral\"]\nreductions_file = \"{dir}/disk.csv\"\n" +
         "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
         "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
         "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
