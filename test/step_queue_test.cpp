@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -24,6 +25,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "comm.h"
@@ -401,6 +403,50 @@ Outcome expect_queue_invariant(const std::string & name, const Case & c, const b
 }
 
 const std::string RESTARTS = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 1000\n";
+
+/**
+ * @brief A condition that holds while the probes' values are those reference wrote at step: the columns names of
+ *        line's reductions file, and point's value (its file's last column), each as an integer over a power of two,
+ *        which conditions read exactly (collective).
+ */
+std::string written_at(const Outcome & reference, const std::string & line, const std::vector<std::string> & names,
+                       const std::string & point, const std::string & point_variable, const uint64_t step) {
+    const std::string at = std::to_string(step);
+    std::vector<double> values;
+    if (comm::is_root()) {
+        std::istringstream in(reference.files.at(line + "_reductions.csv"));
+        std::vector<std::string> header;
+        for (std::string row; std::getline(in, row);) {
+            std::vector<std::string> fields;
+            std::istringstream cells(row);
+            for (std::string f; std::getline(cells, f, ',');) fields.push_back(f);
+            if (header.empty()) header = fields;
+            if (fields.empty() || fields[0] != at) continue;
+            for (const std::string & name : names) {
+                const auto column = std::find(header.begin(), header.end(), name);
+                EXPECT_NE(column, header.end()) << name;
+                if (column != header.end()) values.push_back(std::stod(fields[static_cast<size_t>(column - header.begin())]));
+            }
+        }
+        std::istringstream pt(reference.files.at(point + ".csv"));
+        for (std::string row; std::getline(pt, row);) {
+            if (row.rfind(at + ",", 0) != 0) continue;
+            const std::string p = row.substr(row.rfind(',') + 1);
+            values.push_back(std::is_same_v<rtype, float> ? static_cast<double>(std::stof(p)) : std::stod(p));
+        }
+    }
+    values = comm::allgatherv(values);
+    EXPECT_EQ(values.size(), names.size() + 1);
+    if (values.size() != names.size() + 1) return "false";
+    const auto exactly = [](const double x) {
+        int e = 0;
+        const double m = std::frexp(x, &e);
+        return "(" + std::to_string(static_cast<int64_t>(std::ldexp(m, 53))) + " / 2^" + std::to_string(53 - e) + ")";
+    };
+    std::string when;
+    for (size_t i = 0; i < names.size(); i++) when += line + "_" + names[i] + " == " + exactly(values[i]) + " and ";
+    return when + point + "_" + point_variable + " == " + exactly(values.back());
+}
 
 } // namespace
 
@@ -1033,6 +1079,68 @@ TEST(StepQueueTest, TriggersOfProbeValuesAreEvaluatedOnTheDevice) {
     c.extra = probe + trigger.str();
     const Outcome o = expect_queue_invariant("probe_triggers", c);
     EXPECT_EQ(o.step, 3 * k + 1);
+}
+
+TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
+    // A line's reductions and a point's value, written every 3 steps, reduced on the device at its writes: the queue
+    // stops only at the step after the write whose every value the condition equals, as a stop at that step does
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+        "reductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("probe_reductions_reference", c, 0);
+    const std::string when =
+        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        " and step % 3 == 1";
+    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
+    const Outcome o = expect_queue_invariant("probe_reductions", c);
+    EXPECT_EQ(o.step, 19u);
+    Case at_step = c;
+    at_step.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"step == 19\"\ndo = \"stop\"\n";
+    EXPECT_EQ(run_case("probe_reductions", c, 3).queued, run_case("probe_reductions_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) {
+    // A line's time averages and a point of a [statistics] mean, written every 3 steps and sampled every 2: the device
+    // keeps the means and samples the statistics before the triggers, so the queue stops only at a sampling step after
+    // the write whose every value the condition equals, as a checkpoint at that step does, and goes on from the
+    // host's means and the device's statistics
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n"
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\naverage = true\nfields = [\"P\", \"RHO\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+        "reductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"MEAN_P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("averaged_reductions_reference", c, 0);
+    const std::string when = written_at(reference, "line",
+                                        {"integral_MEAN_P", "mean_MEAN_P", "favre_MEAN_P", "rms_MEAN_P", "min_MEAN_P",
+                                         "max_MEAN_RHO"},
+                                        "pt", "MEAN_P", 18) +
+                             " and step % 3 == 2";
+    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    const Outcome o = expect_queue_invariant("averaged_reductions", c);
+    EXPECT_EQ(o.step, 60u);
+    if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000020.restart"));
+    }
+    Case at_step = c;
+    at_step.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
+    EXPECT_EQ(run_case("averaged_reductions", c, 3).queued, run_case("averaged_reductions_at_step", at_step, 3).queued);
 }
 
 TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {
