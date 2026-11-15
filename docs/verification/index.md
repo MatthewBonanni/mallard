@@ -60,7 +60,8 @@ smooth field: the operator alone, without time integration. In 2D, the
 maximum over interior face quadrature points; in 3D, over all faces, with the
 mirrored stencils of symmetry walls. Observed orders (TENO6 on mixed meshes
 is left out, at a minute per resolution; their cell types are covered one by
-one):
+one; TENO6 on pyramids starts from 8 blocks, since its stencils of about 209
+cells span most of a 6³ box and 6 → 12 observes 5.26):
 
 <!-- BEGIN GENERATED matrix-reconstruction -->
 | | Quadrilaterals | Triangles | Hexahedra | Tetrahedra | Prisms | Pyramids | Mixed |

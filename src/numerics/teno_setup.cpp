@@ -1582,10 +1582,11 @@ struct CellSetup {
         }
         const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images fit a lower degree
-        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
+        const bool pyramid = g.offsets_nodes_of_cell(i + 1) - g.offsets_nodes_of_cell(i) == 5;
+        const uint32_t n_full = pyramid ? pyramid_ns : ns;
+        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
         const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
         const int nf = fit.n;
-        const bool pyramid = g.offsets_nodes_of_cell(i + 1) - g.offsets_nodes_of_cell(i) == 5;
         const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
                                  : at_wall ? (pyramid ? pyramid_wall_ns : wall_ns)
                                            : (pyramid ? pyramid_ns : ns);
@@ -2750,15 +2751,16 @@ struct CellTeam {
             axes = spanned.axes();
         }, flat);
         // Stencils reaching a curved wall without mirror images fit a lower degree
+        const bool pyramid = c.g.offsets_nodes_of_cell(i + 1) - c.g.offsets_nodes_of_cell(i) == 5;
+        const uint32_t n_full = pyramid ? c.pyramid_ns : c.ns;
         bool at_wall = false;
         if (c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
             Kokkos::single(Kokkos::PerTeam(tm), [&](bool & reached) {
-                reached = c.reaches_wall(w, uint32_t(n_entries) < c.ns ? uint32_t(n_entries) : c.ns);
+                reached = c.reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
             }, at_wall);
         }
         const FitColumns fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
         const int nf = fit.n;
-        const bool pyramid = c.g.offsets_nodes_of_cell(i + 1) - c.g.offsets_nodes_of_cell(i) == 5;
         const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
                                  : at_wall ? (pyramid ? c.pyramid_wall_ns : c.wall_ns)
                                            : (pyramid ? c.pyramid_ns : c.ns);

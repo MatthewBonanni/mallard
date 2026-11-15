@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "test_fixtures.h"
@@ -29,6 +30,7 @@
 #include "physics.h"
 #include "solver.h"
 #include "teno_sharing.h"
+#include "curved.h"
 
 namespace {
 
@@ -178,7 +180,8 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
 
 // The rest of the verification manual's matrix: run by tools/docs/verification.py. TENO6 on
-// pyramids starts from 8 blocks: its stencils of about 209 cells span most of a 6^3 box
+// pyramids starts from 8 blocks: its stencils of about 209 cells span most of a 6^3 box, and 6 -> 12
+// observes 5.26
 INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENO3DOrder,
     ::testing::Values(OrderParam{"cartesian", 6, 6, SMOOTH}, OrderParam{"cartesian_tet", 6, 4, SMOOTH},
                       OrderParam{"cartesian_prism", 3, 6, SMOOTH}, OrderParam{"cartesian_prism", 4, 6, SMOOTH},
@@ -485,22 +488,24 @@ double largest_linear_growth(const std::string & type, uint32_t n, int order, do
 
 } // namespace
 
-class TENO3DPyramidLattice : public ::testing::TestWithParam<int> {};
+class TENO3DPyramidLattice : public ::testing::TestWithParam<std::pair<int, uint32_t>> {};
 
 TEST_P(TENO3DPyramidLattice, LinearizedSchemeHasNoGrowingMode) {
-    // Pyramids took odd-degree stencils of the sizes other cells take, within
-    // the Lebesgue bound, and this lattice had growing modes: largest real
-    // part 6e-3 (order 4) and 2e-3 (order 6) in sound speeds over the block
-    // size, a norm of e^30 and e^10 by t = 5000 (#236)
+    // Pyramids at odd degrees took the stencils other cells take, within the
+    // Lebesgue bound, and this lattice had growing modes (#236). Order 4 at
+    // 77 entries still grows, at 9e-4 sound speeds over the block size, which
+    // only boxes of 12^3 blocks resolve: a norm of 100 by t = 5000
     if (sizeof(rtype) == sizeof(float)) {
         GTEST_SKIP() << "finite differences of the right-hand side need double precision";
     }
-    const double growth = largest_linear_growth("cartesian_pyramid", 6, GetParam(), 5000.0);
-    std::cout << "order " << GetParam() << ": largest |exp(t J)| at t = 5000 h/c: " << growth << std::endl;
-    EXPECT_LT(growth, 100.0);
+    const auto [order, n] = GetParam();
+    const double growth = largest_linear_growth("cartesian_pyramid", n, order, 5000.0);
+    std::cout << "order " << order << ", " << n << "^3: largest |exp(t J)| at t = 5000 h/c: " << growth << std::endl;
+    EXPECT_LT(growth, 20.0);
 }
 
-INSTANTIATE_TEST_SUITE_P(EvenOrders, TENO3DPyramidLattice, ::testing::Values(4, 6));
+INSTANTIATE_TEST_SUITE_P(EvenOrders, TENO3DPyramidLattice,
+                         ::testing::Values(std::make_pair(4, 12u), std::make_pair(6, 6u)));
 
 TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnJitteredPrismsAtOrderSix) {
     // Without lattice ties the same near-degenerate stencils appear in the
@@ -664,16 +669,52 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
 TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
     // batches split the cells differently, and the host setup is the fallback
-    // for cells that do not fit the device's scratch. Order 4 takes the
+    // for cells that do not fit the device's scratch. Orders 4 and 6 take the
     // pyramids' larger odd-degree stencils
     auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    for (const int order : {4, 5}) {
+    for (const int order : {4, 5, 6}) {
         auto reference = make_teno(mesh, bd, order);
         auto batched = make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_batch_cells = 64; });
         auto host = make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_on_host = true; });
         expect_same_tables(*reference, *batched, "order " + std::to_string(order) + ", batches of 64 cells");
         expect_same_tables(*reference, *host, "order " + std::to_string(order) + ", host setup");
+    }
+}
+
+TEST(TENO3DSetup, PyramidsWhoseOddDegreeStencilsReachACurvedWallFitTheWallDegree) {
+    // Order 6: a pyramid's stencil starts from 208 entries, other cells' from
+    // 110, and a curved-wall cell anywhere among the first 208 makes it fit
+    // the wall degree 3, whose pseudo-inverse has no rows of degrees 4 and 5.
+    // Order 5 fits degree 4, and its pyramids start from the other cells' 68
+    auto mesh = make_mesh_3d("cartesian_pyramid", 6, 6, 6);
+    mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"left\"\ntype = \"box\"\n"
+                                                                  "filled = false\ncenter = [0.5, 0.5, 0.5]\nsize = [1.0, 1.0, 1.0]\n")));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    std::vector<uint8_t> at_wall(mesh->n_cells, 0);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) < 0 && mesh->curved_geometry->face_is_curved(f)) at_wall[uint32_t(mesh->h_cells_of_face(f, 0))] = 1;
+    }
+    const size_t wall_nk = teno::n_dof(3);
+    for (const auto & [order, n_start] : {std::make_pair(5, size_t(68)), std::make_pair(6, size_t(208))}) {
+        const size_t nk = teno::n_dof(uint8_t(order - 1));
+        uint32_t reaching = 0;
+        // Unshared, the central slots are the candidates in order of distance
+        auto teno = make_teno_with(mesh, bd, order, [](TENO & t) { t.share_tables = false; });
+        teno->for_each_stencil([&](const uint32_t c, const TENO::CellStencils & st) {
+            bool reaches = false, full = false;
+            for (size_t s = 0; s < std::min<size_t>(st.central, n_start); s++) {
+                reaches |= st.cells[s] >= 0 && at_wall[uint32_t(st.cells[s])] != 0;
+            }
+            for (size_t s = 0; s < st.central; s++) {
+                for (size_t l = wall_nk; l < nk; l++) full |= st.pinv[s * nk + l] != 0.0_r;
+            }
+            reaching += reaches;
+            EXPECT_FALSE(reaches && full) << "order " << order << ": cell " << c << " fits degree " << order - 1
+                                          << " with a curved-wall cell among its first " << n_start << " entries";
+        }, true);
+        EXPECT_GT(reaching, 0u) << "order " << order;
     }
 }
 

@@ -611,18 +611,19 @@ $\Lambda = 4.3$ to 5, hence the slack of 1.25 above. That leaves one slower
 mode, at order 6 on 25:1 Kuhn tetrahedra with side walls ($+0.022$; $+10^{-7}$
 with the best stencil).
 
-**Pyramids at odd degrees** (#236). An odd-degree fit leaves the even degree
-$r + 1$ as its leading error. Across a face whose two cells are point images
-of each other through the face's center, that error is the same on both
-sides and the face values agree to the next order; elsewhere they jump. Every
-face of the hexahedral and prism tilings is of the first kind, and so are the
-bases of the pyramid tiling, but not its side faces: the image of a
-pyramid's centroid through a side face lies $0.75\,h_i$ from the neighbor's.
-On such faces the stability of the odd degrees depends on the stencil size,
-and the Lebesgue constant does not predict it. On the infinite
-`cartesian_pyramid` lattice, the largest real part of the eigenvalues of the
-linearized operator (acoustics at rest, HLLC; sound speeds over the block
-size), by the size of the central stencil:
+**Pyramids at odd degrees** (#236). On the `cartesian_pyramid` lattice the
+odd degrees grow with every stencil within the Lebesgue bound below a size
+found empirically, about $2.5\,N_{r+1}$ entries. Cell symmetry says only where
+the leading error of an odd-degree fit, of the even degree $r + 1$, jumps
+across a face: not across faces whose two cells are point images of each
+other through the face's center, which every face of the hexahedral and prism
+tilings is, and so are the bases of the pyramid tiling, but across the
+pyramids' side faces, where the image of a centroid lies $0.75\,h_i$ from the
+neighbor's. It does not explain the threshold: the face-averaged jump grows
+with the stable sizes, and even degrees jump as much and are stable. On the
+infinite lattice, the largest real part of the eigenvalues of the linearized
+operator (acoustics at rest, HLLC; sound speeds over the block size), by the
+size of the central stencil:
 
 | Order 4: entries | 57 | 65 | 77 | 85 | 89 |
 |---|---|---|---|---|---|
@@ -637,8 +638,11 @@ size), by the size of the central stencil:
 (von Neumann analysis: the Jacobian of the right-hand side in the variables
 of one block's six cells, by finite differences on a periodic $10^3$ box,
 Fourier-transformed over the blocks at $12^3$ wavevectors.) The 85 entries of
-order 4 are 2.5 $N_4$, and order 6 turns stable between 2.0 and 2.5 $N_6$,
-hence the start from $2.5\,N_{r+1}$ ([central stencil](#central-stencil)).
+order 4 are 2.5 $N_4$, hence the start from $2.5\,N_{r+1}$
+([central stencil](#central-stencil)). At order 6 a start from $2.0\,N_6$ (166)
+leads the search to 185 entries, which leave slow modes: $2.0\times10^{-7}$ on
+the lattice and $6.8\times10^{-7}$ (sound speed over the box size) on the
+walled 4³ box, against $3\times10^{-9}$ from 209.
 The Lebesgue constants of the stable and the unstable stencils overlap: Kuhn
 tetrahedra are stable at order 4 from 58 entries with $\Lambda = 3.84$, and
 the hexahedral and prism lattices are stable at orders 4 and 6 with their
@@ -654,8 +658,12 @@ real part on whole boxes (sound speed over the box size):
 | mixed tilings (4³), walls, order 4 / 6 | 1.6e-3 / 4e-9 | 5e-9 / 3e-9 |
 | mixed tilings (4³), periodic, order 4 / 6 | 3e-9 / 3e-9 | 3e-9 / 3e-9 |
 
-A pyramid's stencils hold 85 entries instead of 57 at order 4 and 209
-instead of 145 at order 6.
+These units agree with the lattice's: 6.8e-3 per block on 6³ blocks is
+4.1e-2 per box. A pyramid's stencils hold 85 entries instead of 57 at order 4
+and 209 instead of 145 at order 6. A pyramid needs at least 85 or 208 cells
+and mirror images within reach of its search, against 38 and 110 for other
+cells; on smaller meshes setup stops with "could not build a full-rank large
+stencil (mesh too small for this order?)".
 
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
@@ -722,7 +730,7 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     6.25:1, since a ball holds the same density in every direction, so its
     radius would need to follow the spacing.
 
-- **Odd orders on other cells whose faces are not point-symmetric.** The
+- **Odd degrees on other cells whose faces are not point-symmetric.** The
     pyramid rule above is tied to the cell type. The infinite Kuhn
     tetrahedral lattice at order 4 keeps a slow growing mode with its default
     stencil (46 entries, $\Lambda = 3.87$: $+1.3\times 10^{-5}$ sound speeds
