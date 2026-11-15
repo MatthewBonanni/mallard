@@ -195,6 +195,23 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+**Shared tables** (#1031). With shared tables (#994, #972), the packing copied every batch's tables to
+the host, where each cell's pseudo-inverse was ranked, hashed and compared with its shape's, and the
+rows of basis means and moments were then downloaded and matched the same way. Now the device ranks the
+slots (an insertion sort per cell, stable like the host's), hashes each table and row, and compares the
+cells with their shapes' tables; the host only looks up the hashes in cell order and receives the
+tables that its shapes keep. One A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`), the same pod for
+both; restart files at step 2 are bitwise identical:
+
+| packing / numerics setup (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 25.7 / 29.4 | 36.7 / 49.6 | 70.2 / 87 | 108 / 168 |
+| double Mach, device | **0.87 / 2.64** | **0.91 / 3.25** | **1.10 / 6.54** | **1.22 / 21.7** |
+| box, 1024 x 1024 quadrilaterals (1M), host | 16.6 / 20.5 | 23.1 / 30.9 | 33.8 / 44.6 | 62.7 / 93 |
+| box, device | **0.45 / 3.05** | **0.53 / 3.53** | **PACKBOX5 / 8.83** | **0.65 / 20.6** |
+
+The numerics setup is now the tables phase plus about 1-2 s.
+
 ### 5. Reacting mixtures (#257)
 
 The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
