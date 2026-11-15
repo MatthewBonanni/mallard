@@ -265,7 +265,7 @@ rtype min_face_Y(const Mesh & mesh, const Eval & values, const uint8_t nq) {
     Kokkos::parallel_reduce(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c, rtype & lo) {
         const uint32_t n = values.offsets_faces_of_cell(c + 1) - values.offsets_faces_of_cell(c);
         for (uint32_t j = 0; j < TRACE_SPECIES; j++) {
-            FacePointValues S[teno::MAX_FACES];
+            FacePointValues S[teno::MAX_FACES] = {};
             values.cell_values(c, j, S);
             for (uint32_t k = 0; k < n; k++) {
                 for (uint8_t q = 0; q < nq; q++) lo = Kokkos::fmin(lo, S[k][q]);
@@ -282,7 +282,7 @@ rtype max_face_sum_error(const Mesh & mesh, const ScalarFaceValues & values) {
         const uint32_t n = values.offsets_faces_of_cell(c + 1) - values.offsets_faces_of_cell(c);
         rtype sum[teno::MAX_FACES] = {};
         for (uint32_t j = 0; j < TRACE_SPECIES; j++) {
-            FacePointValues S[teno::MAX_FACES];
+            FacePointValues S[teno::MAX_FACES] = {};
             values.cell_values(c, j, S);
             for (uint32_t k = 0; k < n; k++) sum[k] += S[k][0];
         }
@@ -296,7 +296,7 @@ template <typename Eval>
 Kokkos::View<rtype **[2]> face_gamma(const Mesh & mesh, const Eval & values, const uint8_t nq) {
     Kokkos::View<rtype **[2]> gamma("gamma", mesh.n_faces, nq);
     Kokkos::parallel_for(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c) {
-        FacePointValues G[teno::MAX_FACES];
+        FacePointValues G[teno::MAX_FACES] = {};
         values.cell_values(c, TRACE_SPECIES, G);
         for (uint8_t k = 0; k < values.n_faces(c); k++) {
             const uint32_t f = values.faces_of_cell(values.offsets_faces_of_cell(c) + k);
