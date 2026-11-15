@@ -34,6 +34,7 @@
   "examples/source_regions/input.toml",
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
+  "examples/tracer_vortex/input.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",

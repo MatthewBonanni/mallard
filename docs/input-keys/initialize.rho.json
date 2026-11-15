@@ -18,6 +18,7 @@
   "examples/shock_bubble_2d/input.toml",
   "examples/shu_osher/input.toml",
   "examples/sod/input.toml",
+  "examples/tracer_vortex/input.toml",
   "examples/viscous_shock_tube/input.toml"
  ]
 }

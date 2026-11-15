@@ -64,6 +64,7 @@
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
+  "examples/tracer_vortex/input.toml",
   "examples/triple_flame/input.toml",
   "examples/triple_flame/thick/input.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
