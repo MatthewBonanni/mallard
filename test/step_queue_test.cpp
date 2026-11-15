@@ -735,25 +735,83 @@ TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
-    // A line of a mean, a covariance and a phase average, read from the device's averages at each write
-    const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n"
+    // A line of a mean, a covariance, their confidence intervals and a phase average, read from the device's
+    // averages at each write
+    const std::string statistics = "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"RHO\", \"P\"]\n"
                                    "products = [\"RHO*P\"]\n"
                                    "[statistics.phase]\nfields = [\"P\"]\nbins = 2\nperiod = 0.02\n";
     Case c;
     c.run = "n_steps = 24\ncfl = 0.5\n";
     c.extra = "check_interval = 1000\n" + statistics +
               "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 5\n"
-              "fields = [\"P\", \"MEAN_P\", \"COV_RHO_P\", \"PHASE_1_P\"]\n"
+              "fields = [\"P\", \"MEAN_P\", \"COV_RHO_P\", \"CI_MEAN_P\", \"CI_COV_RHO_P\", \"PHASE_1_P\"]\n"
               "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") +
               "\nn_points = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("statistics_probes", c);
     if (comm::is_root()) {
-        EXPECT_GT(std::count(o.files.at("line.csv").begin(), o.files.at("line.csv").end(), '\n'), 20);
+        const std::string & line = o.files.at("line.csv");
+        EXPECT_GT(std::count(line.begin(), line.end(), '\n'), 20);
+        // The last write's intervals are of closed batches
+        EXPECT_EQ(line.find("nan", line.rfind("\n20,")), std::string::npos);
     }
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + statistics;
     EXPECT_EQ(run_case("statistics_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, IntervalsOfMoreBatchesThanTheDevicesQuantilesAreStaged) {
+    // A batch per sample: the closed batches outgrow the Student's t quantiles the device holds, which the host
+    // extends where the device could run out of them
+    Case c;
+    c.run = "n_steps = 1100\ncfl = 0.5\n";
+    c.extra = "check_interval = 2000\n"
+              "[statistics]\ninterval = 1\nbatch = 1e-9\nfields = [\"P\"]\n"
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 50\nfields = [\"CI_MEAN_P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    const Outcome o = expect_queue_invariant("many_batches", c);
+    if (comm::is_root()) {
+        // Every write after the first holds an interval
+        const std::string & pt = o.files.at("pt.csv");
+        EXPECT_NE(pt.find("\n1100,"), std::string::npos);
+        EXPECT_EQ(pt.find(",nan\n"), pt.rfind(",nan\n"));
+    }
+}
+
+/** @brief The box of box_input, periodic from left to right. */
+std::string periodic_box() {
+    std::ostringstream s;
+    s << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[initialize]\ntype = \"analytical\"\n"
+      << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
+      << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
+    if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    return s.str();
+}
+
+TEST(StepQueueTest, StagedSpectraOfAStopAfterTheDevicesSampleAreWrittenOnce) {
+    // A trigger stops the queue at a step whose statistics the device sampled: the host writes that sample's staged
+    // spectra and does not sample again, which would add a second sample to the means the restarts carry
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.body = periodic_box();
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"U_X\"]\n"
+              "[statistics.spectra]\nfields = [\"U_X\"]\naverage = false\nfile = \"{dir}/spectra.csv\"\n"
+              "[[triggers]]\nname = \"at\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("staged_spectra", c);
+    if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000020.restart"));
+        EXPECT_TRUE(o.files.count("spectra_000020.csv"));
+    }
 }
 
 TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {

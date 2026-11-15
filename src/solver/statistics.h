@@ -25,6 +25,7 @@
 #include <Kokkos_Core.hpp>
 #include "input.h"
 
+#include "batch_means.h"
 #include "common_typedef.h"
 #include "conditional_statistics.h"
 #include "data.h"
@@ -357,9 +358,34 @@ class Statistics {
         const auto & host_covariances() const { return h_cov; }
         /** @brief Host copy of the half widths: (cell, average), the means' then the covariances'. */
         const auto & host_intervals() const { return h_ci; }
-        /** @brief The device column of the output of that name, as register_data's host column; empty for the
-         *         intervals, which the host computes. */
-        Kokkos::View<const rtype *, Kokkos::LayoutStride> device_average(const std::string & name) const;
+        /**
+         * @brief A device column of an output, as register_data's host column: the average's own values, or for
+         *        an interval CI_<average> its half width from BATCH_M2_<average>, the closed batches and the
+         *        Student's t quantiles refresh_intervals keeps.
+         */
+        struct DeviceColumn {
+            Kokkos::View<const rtype *, Kokkos::LayoutStride> values;
+            Kokkos::View<const BatchClock> batches;  // intervals only
+            Kokkos::View<const double *> t;          // t(n - n0) for n closed batches, n0 = first
+            Kokkos::View<const uint64_t> first;
+
+            KOKKOS_INLINE_FUNCTION rtype operator()(uint32_t c) const {
+                if (!batches.data()) return values(c);
+                const uint64_t n = batches().n_closed;
+                return static_cast<rtype>(batch_means::half_width(static_cast<double>(values(c)), n, n >= 2 ? t(n - first()) : 0.0));
+            }
+            bool exists() const { return values.data() != nullptr; }
+            bool interval() const { return batches.data() != nullptr; }
+        };
+        /** @brief The device column of the output of that name; values empty if none. */
+        DeviceColumn device_column(const std::string & name) const;
+        /**
+         * @brief Before the device takes steps from step on with interval columns: their Student's t quantiles for
+         *        INTERVAL_WINDOW numbers of batches, refilled from the batches closed by then once these have gone
+         *        past half of them, and step_limit lowered to the step by which the means' samples could close
+         *        the last.
+         */
+        void refresh_intervals(uint64_t step, uint64_t & step_limit);
 
     private:
         std::vector<std::string> fields;
@@ -390,6 +416,13 @@ class Statistics {
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_ci;
         Kokkos::View<BatchClock> batch_clock;
         Kokkos::View<BatchClock>::host_mirror_type h_batch_clock;  // copied by stage_output
+        static constexpr uint64_t INTERVAL_WINDOW = 1024;
+        Kokkos::View<double *> interval_t;  // device columns' quantiles, INTERVAL_WINDOW of them from interval_first
+        Kokkos::View<uint64_t> interval_first;
+        uint64_t interval_t_first = std::numeric_limits<uint64_t>::max();  // host copy; max: not filled
+        mutable std::vector<double> t_quantiles;  // [n - 2]: for n batches
+        /** @brief Student's t at the confidence for n - 1 degrees of freedom (n >= 2). */
+        double t_quantile(uint64_t n) const;
 
         Spectra spectra;
         PhaseAverage phase;

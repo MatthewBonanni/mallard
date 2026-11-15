@@ -1432,8 +1432,7 @@ void Probes::Samples::allocate_staging(const uint64_t n_records) {
         "probe_staging", n_records, values.extent(0) * values.extent(1));
 }
 
-void Probes::Samples::fill_columns(
-    const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const {
+void Probes::Samples::fill_columns(const std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> & columns) const {
     const auto v = values;
     const auto c = cells;
     for (const auto & entry : columns) {
@@ -2470,10 +2469,15 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
 bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const Probe & p = *probes[k];
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
-        return statistics.device_average(c.second->name()).data() != nullptr;
+        return statistics.device_column(c.second->name()).exists();
     });
     return !p.snapshot && !p.motion && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
+}
+
+bool Probes::reads_intervals(const size_t k) const {
+    const auto & columns = probes[k]->device_columns;
+    return std::any_of(columns.begin(), columns.end(), [](const auto & c) { return c.second.interval(); });
 }
 
 void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const bool reduce,
@@ -2482,7 +2486,7 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     p.staged = true;
     p.device_columns.clear();
     for (const auto & [column, data] : p.cell_columns) {
-        p.device_columns.emplace_back(column, statistics.device_average(data->name()));
+        p.device_columns.emplace_back(column, statistics.device_column(data->name()));
     }
     if (p.samples_nodes()) p.nodes.allocate_staging(n_records);
     if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
