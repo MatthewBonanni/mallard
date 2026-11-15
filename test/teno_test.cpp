@@ -626,6 +626,7 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
         out.emplace_back(p, p + h.span() * sizeof(*h.data()));
     };
     add(teno.scale);
+    add(teno.cell_shape);
     add(teno.basis_mean);
     add(teno.si_matrix);
     add(teno.stencil_large_size);
