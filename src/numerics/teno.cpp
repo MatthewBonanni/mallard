@@ -123,7 +123,8 @@ using DeviceUnmanaged = Kokkos::View<T *, Kokkos::MemoryTraits<Kokkos::Unmanaged
 /** @brief Rows [c0, c0 + h.extent(0)) of a per-cell device array, from the host. */
 template <typename View>
 void upload_rows(const View & dev, const uint32_t c0, const typename View::host_mirror_type & h) {
-    if (h.extent(0) == 0) return;
+    // Rows of no columns: dev may be unallocated (no sector stencils)
+    if (h.size() == 0) return;
     auto tmp = Kokkos::create_mirror_view_and_copy(typename View::memory_space(), h);
     const std::pair<size_t, size_t> rows(c0, c0 + h.extent(0));
     if constexpr (View::rank() == 1) {
@@ -144,7 +145,7 @@ typename View::host_mirror_type download_rows(const View & dev, const uint32_t c
     } else {
         h = Host("teno_rows", c1 - c0, dev.extent(1));
     }
-    if (c1 == c0) return h;
+    if (h.size() == 0) return h;
     auto tmp = Kokkos::create_mirror_view(typename View::memory_space(), h);
     if constexpr (View::rank() == 1) {
         Kokkos::deep_copy(tmp, Kokkos::subview(dev, rows));
@@ -3122,8 +3123,9 @@ namespace {
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
-// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-15";
+// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
+// starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-16";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

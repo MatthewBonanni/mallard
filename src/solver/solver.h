@@ -420,8 +420,8 @@ class Solver {
         void act_on_triggers();
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
-        /** @brief Whether the step graph's triggers read a value of probe k, which the host reduces: the probe is
-         *         left to the host, so the queue stops at its writes and the device holds its values in between. */
+        /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
+         *         or, if it cannot stage it (Probes::can_stage), the probe is left to the host and the queue stops there. */
         bool triggers_read_probe(size_t k) const;
         bool triggers_read_probes() const;
         /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
@@ -522,8 +522,11 @@ class Solver {
         void write_staged_monitors(const step_queue::Record & record);
         /** @brief Writes the probes the record staged (collective). */
         void write_staged_probes(const step_queue::Record & record);
-        /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
-        void after_step(Kokkos::Timer & step_timer, bool on_device);
+        /**
+         * @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step):
+         *        the host's own, or a device step it stopped after (record), whose statistics the device sampled.
+         */
+        void after_step(Kokkos::Timer & step_timer, const step_queue::Record * record);
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -804,6 +807,8 @@ class Solver {
         std::vector<int> cell_owners() const;
         /** @brief The stencils of the owned cells, with the members of targets (stencils::build). */
         stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
+        /** @brief Whether the setup writes STENCIL_* fields or the stencil file of [output] write_stencils. */
+        bool writes_stencils() const;
         /**
          * @brief The mesh and stencil fields [[write_data]] asks for, once, and
          *        the stencil file of [output] write_stencils.
@@ -970,7 +975,8 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
-        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint32_t *> probe_due;      // of the current launch, per staged probe (see device_step_body)
+        std::vector<uint32_t> probe_trigger_vars;  // of each staged probe the step graph reduces, its first trigger variable
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;

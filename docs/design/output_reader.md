@@ -211,7 +211,10 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   where the run also compares smoothness matrices or moments, so point
   samples can differ from the run's below that grid. These tables are never
   written to `cache_file`, and a run's cache is read without its sector
-  stencils.
+  stencils. `STENCIL_*` fields summarize the sectors, so writing any keeps
+  the full setup and gives the run's fields bit for bit
+  (`StencilFieldsAreTheRunsBitForBit`); the rewrite drops `[output]
+  write_stencils`, the run's file.
 - **Steps.** Each snapshot's step and time are those the reader finds
   recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
   header), never the file name; only the snapshots of files written before
