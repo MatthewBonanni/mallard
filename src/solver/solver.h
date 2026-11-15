@@ -1037,8 +1037,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
         void start_reconstruction(StateView solution);
-        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
-        void exchange_halo(const State & state);
+        /**
+         * @brief On comm_space after the default instance's work so far: the halo exchange if asked, then W of the
+         *        halo cells and the reconstruction of the cells that read them. calc_rhs joins it.
+         */
+        void reconstruct_near_partition(const State & state, bool exchange);
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
