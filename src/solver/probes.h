@@ -278,10 +278,14 @@ class Probes {
 
         size_t size() const { return probes.size(); }
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
-         *         fields and statistics' device averages only. */
-        bool can_stage(size_t k, const Statistics & statistics) const;
-        /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
-        void stage(size_t k, uint64_t n_records, const Statistics & statistics);
+         *         fields and statistics' device averages only; a moving region's only with conditional (a graph
+         *         that runs its IF bodies when due, not at every step). */
+        bool can_stage(size_t k, const Statistics & statistics, bool conditional) const;
+        /** @brief Probe k samples a moving region. */
+        bool moves(size_t k) const;
+        /** @brief Probe k is evaluated in a step graph into staging of n_records record slots (a moving region's
+         *         sized by the cells it covers at t). */
+        void stage(size_t k, uint64_t n_records, const Statistics & statistics, double t);
         /** @brief When a staged probe is due, as the host decides it (time_interval 0: by step). */
         struct StagedClock {
             uint64_t interval = 0;
@@ -298,11 +302,13 @@ class Probes {
         /** @brief As average_needs, of the staged probes. */
         std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
         /**
-         * @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory; a moving
-         *        region where it is at the device's time.
+         * @brief Enqueues staged moving probe k's covered cells at the device's time, and sets *overflow (device
+         *        memory) to whether they are more than its staging holds.
          */
-        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq,
-                             const Kokkos::View<const rtype> & time);
+        void select_staged(size_t k, const Kokkos::View<const rtype> & time, int64_t * overflow) const;
+        /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory; a moving
+         *         region at its select_staged. */
+        void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
         /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
         void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
@@ -412,7 +418,7 @@ class Probes {
              *        values, or a record slot's staged values.
              */
             void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
-            void allocate_staging(uint64_t n_records);
+            void allocate_staging(uint64_t n_records, size_t n_rows);
             /** @brief Copies values into record slot (*seq - 1) % n_records of staging, the columns' from their cell
              *         fields. */
             void copy_to_staging(const uint64_t * seq,
@@ -511,8 +517,8 @@ class Probes {
             std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
             /**
              * @brief A moving filled region: its fractions, the measures of the owned cells, and at each move the
-             *        owned cells it covers (f V > 0, the first count() of covered) with their f V; staged, those
-             *        of each record slot.
+             *        owned cells it covers (f V > 0, the first count() of covered) with their f V; staged, the
+             *        first (at most capacity) of those of each record slot.
              */
             struct Motion {
                 const Mesh * mesh = nullptr;
@@ -524,6 +530,7 @@ class Probes {
                 Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_cells;
                 Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_weights;
                 Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged_count;
+                uint32_t capacity = 0;        // staged cells of each record slot
                 uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
                 std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
                 bool distributed = false;
@@ -547,6 +554,8 @@ class Probes {
              *        weights f V in global cell order (collective).
              */
             void move(double t);
+            /** @brief The number of owned cells a moving region covers at t, selected into the first of covered. */
+            uint32_t cover(double t) const;
             /** @brief As move, from what the step graph staged in record slot `slot` (collective). */
             void moved(uint64_t slot);
             /** @brief Enqueues the moving region's fractions and covered cells at the device's time. */

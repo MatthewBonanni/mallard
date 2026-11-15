@@ -508,6 +508,9 @@ class Solver {
         void write_outputs(bool force);
         /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
         void decide_outputs();
+        /** @brief In the step graph: which staged probes are due at the step, and a stop if a moving region's outgrows
+         *         its staging. */
+        void decide_probes();
         /** @brief Writes the outputs the record staged (collective), then frees the mirrors for the next. */
         void write_staged_outputs(const step_queue::Record & record);
         /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
@@ -969,6 +972,7 @@ class Solver {
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
         Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
+        Kokkos::View<int64_t *> probe_overflow;  // staged moving probe k outgrew its staging (unallocated: none moves)
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
         bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs

@@ -699,16 +699,44 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
               "reductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n"
               "[[probes]]\nname = \"mean_disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\naverage = true\n"
               "interval = 5\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/mean_disk.csv\"\n"
+              "[[probes]]\nname = \"disk_t\"\nregion = " + disk + "\nfields = [\"T\", \"U\"]\n"
+              "time_interval = 0.013\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/disk_t.csv\"\n"
               "[statistics]\ninterval = 2\nt_start = 0.01\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("moving_probes", c);
     if (comm::is_root()) {
         EXPECT_GT(std::count(o.files.at("disk.csv").begin(), o.files.at("disk.csv").end(), '\n'), 8);
         EXPECT_GT(std::count(o.files.at("mean_disk.csv").begin(), o.files.at("mean_disk.csv").end(), '\n'), 4);
+        EXPECT_GT(std::count(o.files.at("disk_t.csv").begin(), o.files.at("disk_t.csv").end(), '\n'), 8);
+        // The last writes find it outside the box: no cell covered on any rank
+        const std::string & rows = o.files.at("disk.csv");
+        const size_t last = rows.find_last_of('\n', rows.size() - 2) + 1;
+        std::istringstream row(rows.substr(last));
+        std::string step, t, measure;
+        std::getline(row, step, ',');
+        std::getline(row, t, ',');
+        std::getline(row, measure, ',');
+        EXPECT_EQ(std::stod(measure), 0.0) << rows.substr(last);
     }
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
+    // A growing disk (sphere) covers more cells than its staging holds: the host writes those steps and the
+    // device stages it anew
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.4", "0.5", "0.2") + ", radius = \"0.05 + 2 * t\"}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\ninterval = 2\n"
+              "reductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n";
+    expect_queue_invariant("growing_probe", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_LT(run_case("growing_probe", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
