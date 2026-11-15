@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <stdexcept>
 #include <vector>
 
 #include "gated.h"
@@ -65,6 +66,12 @@ void launch(const Views & v, const uint32_t on) {
     Kokkos::fence("gated_test");
 }
 
+void launch_with_level_one_scratch() {
+    using Policy = Kokkos::TeamPolicy<>;
+    gated::parallel_for("gated_scratch", Policy(1, 1).set_scratch_size(1, Kokkos::PerTeam(64)),
+                        KOKKOS_LAMBDA(const Policy::member_type &) {});
+}
+
 std::vector<double> host(const Kokkos::View<double *> & a) {
     const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), a);
     return std::vector<double>(h.data(), h.data() + h.extent(0));
@@ -93,4 +100,11 @@ TEST(GatedTest, KernelsDoNothingAndReductionsKeepTheirDestinationsWhileTheFlagIs
     EXPECT_EQ(host(v.total), (std::vector<double>{10.0, 15.0, 20.0}));
     const auto untouched = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v.scanned);
     for (int i = 0; i < 4; i++) EXPECT_EQ(untouched(i), -1);
+}
+
+TEST(GatedTest, KernelsWithLevelOneScratchAreRefusedUnderAScope) {
+    // A thread that does nothing exits, which would keep the level-1 scratch it holds
+    const Kokkos::View<uint32_t> on("on");
+    const gated::Scope scope(on.data());
+    EXPECT_THROW(launch_with_level_one_scratch(), std::logic_error);
 }

@@ -117,6 +117,11 @@ KOKKOS_FUNCTION void restore(V && v, const void * old, const size_t count) {
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 
+/**
+ * @brief A parallel_for's functor. On CUDA a thread that does nothing exits: a return would leave the rest of the
+ *        kernel in a divergent region, which slows kernels of many calls and barriers (TENO's) also where nothing
+ *        is gated.
+ */
 template <class F>
 struct For {
     F f;
@@ -124,7 +129,13 @@ struct For {
 
     template <class... A>
     KOKKOS_FUNCTION void operator()(A &&... a) const {
-        if (on && !*on) return;
+        if (on && !*on) {
+#ifdef __CUDA_ARCH__
+            asm volatile("exit;");
+#else
+            return;
+#endif
+        }
         f(static_cast<A &&>(a)...);
     }
 };
@@ -217,12 +228,29 @@ struct Reducer {
     KOKKOS_FUNCTION bool references_scalar() const { return r.references_scalar(); }
 };
 
-template <class F, class P>
+/** @brief A scan functor's value type: its own, else its operator()'s (index, value &, final), maybe after a tag. */
+template <class M>
+struct ScanArgs;
+template <class C, class I, class V>
+struct ScanArgs<void (C::*)(I, V &, bool) const> {
+    using type = V;
+};
+template <class C, class T, class I, class V>
+struct ScanArgs<void (C::*)(T, I, V &, bool) const> {
+    using type = V;
+};
+template <class F>
+struct ScanValue {
+    using type = typename ScanArgs<decltype(&F::operator())>::type;
+};
+template <DefinesValueType F>
+struct ScanValue<F> {
+    using type = typename F::value_type;
+};
+
+template <class F>
 struct Scan {
-    using value_type = typename Kokkos::Impl::FunctorAnalysis<Kokkos::Impl::FunctorPatternInterface::SCAN,
-                                                              std::conditional_t<std::is_integral_v<P>,
-                                                                                 Kokkos::RangePolicy<>, P>,
-                                                              F, void>::value_type;
+    using value_type = typename ScanValue<F>::type;
     F f;
     const uint32_t * on;
 
@@ -261,6 +289,10 @@ template <class P, class F>
 void for_(const std::string * label, const P & policy, const F & f) {
     check_policy<P>();
     if constexpr (gated_space<P>) {
+        if constexpr (requires { policy.scratch_size(1); }) {
+            // A thread that exits would keep the level-1 scratch it holds
+            if (policy.scratch_size(1) > 0) unsupported("a kernel with level-1 scratch");
+        }
         launch(GATED_PATTERN(parallel_for), label, policy, For<F>{f, flag()});
     } else {
         unsupported("a kernel on another execution space");
@@ -287,7 +319,7 @@ void reduce(const std::string * label, const P & policy, const F & f, R &&... re
         if constexpr (DefinesValueType<F>) {
             run(Reduce<F>(f, on, nullptr, 0), reducer);
         } else {
-            run(For<F>{f, on}, reducer);
+            run(Reduce<F>{f, on, nullptr, 0}, reducer);
         }
     } else if constexpr (Results<R...>::view) {
         using Result = typename Results<R...>::T;
@@ -303,7 +335,7 @@ void reduce(const std::string * label, const P & policy, const F & f, R &&... re
         if constexpr (DefinesValueType<F>) {
             run(Reduce<F>(f, on, nullptr, 0), static_cast<R &&>(results)...);
         } else {
-            run(For<F>{f, on}, static_cast<R &&>(results)...);
+            run(Reduce<F>{f, on, nullptr, 0}, static_cast<R &&>(results)...);
         }
     }
 }
@@ -316,7 +348,7 @@ void scan(const std::string * label, const P & policy, const F & f, T &&... tota
         launch(GATED_PATTERN(parallel_scan), label, policy, f, static_cast<T &&>(total)...);
     } else {
         if constexpr (sizeof...(T) > 0) unsupported("a scan's total");
-        launch(GATED_PATTERN(parallel_scan), label, policy, Scan<F, P>{f, flag()}, static_cast<T &&>(total)...);
+        launch(GATED_PATTERN(parallel_scan), label, policy, Scan<F>{f, flag()}, static_cast<T &&>(total)...);
     }
 }
 
