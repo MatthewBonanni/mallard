@@ -806,9 +806,10 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
     }
 }
 
-TEST(TENO3DSetup, APeriodicLatticeIsFittedOnceAndItsCellsTakeThatCellsTables) {
-    // One stencil shape: the setup fits one cell, and every cell's face values
-    // are those of its own tables up to round-off
+TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTables) {
+    // Cells differ only in which of their faces are periodic (low, high or neither
+    // along each axis): the setup fits 27 cells, and every cell's face values are
+    // those of its own tables up to round-off
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
                           "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
@@ -822,7 +823,7 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOnceAndItsCellsTakeThatCellsTables) {
     for (const int order : {3, 5}) {
         auto face_values = [&](const bool share) {
             auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.share_tables = share; });
-            EXPECT_EQ(teno->n_cells_fitted, share ? 1u : mesh->n_cells) << "order " << order;
+            EXPECT_EQ(teno->n_cells_fitted, share ? 27u : mesh->n_cells) << "order " << order;
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
             teno->calc_face_values(W, face_W);
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
