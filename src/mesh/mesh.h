@@ -522,7 +522,8 @@ class Mesh {
         uint32_t n_reconstructed_cells = 0;
         uint32_t n_reconstructed() const { return n_reconstructed_cells ? n_reconstructed_cells : n_cells; }
         // Faces [0, n_state_faces()) hold face states: the faces of cells [0, n_reconstructed()), which come
-        // first since faces are numbered in the order of the local cells, and the image faces they read
+        // first since faces are numbered in the order of the local cells, and the image faces they read, which
+        // Solver::init_boundaries adds once the boundary data has found them
         uint32_t n_state_faces_count = 0;
         uint32_t n_state_faces() const { return n_state_faces_count ? n_state_faces_count : n_faces; }
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer

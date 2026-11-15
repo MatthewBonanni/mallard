@@ -614,8 +614,10 @@ struct MUSCLFaceFunctor {
 
 /**
  * @brief Gradient, limiter and face states of each listed cell, on its own
- *        side of its faces, with the arithmetic of the per-cell gradient and
- *        limiter kernels and of MUSCLFaceFunctor.
+ *        side of its faces that hold face states (Mesh::n_state_faces), with
+ *        the arithmetic of the per-cell gradient and limiter kernels and of
+ *        MUSCLFaceFunctor. Halo cells past layer 1 fill the outer sides of
+ *        the faces of layer 1 and of image faces, but have faces beyond.
  */
 struct MUSCLCellFunctor {
     MUSCLGradientFunctor gradient;
@@ -631,18 +633,15 @@ struct MUSCLCellFunctor {
         const auto & mesh_faces = limiter.neighbors;
         for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
             const uint32_t f = mesh_faces.faces_of_cell(j);
+            if (f >= face.face_solution.extent(0)) continue;
             face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
         }
     }
 };
 
-// Measured on A100s: one fused kernel per cell is faster from about 2^17 cells,
-// separate kernels (more parallel, shorter chains) below
-constexpr uint32_t MUSCL_FUSED_CELLS = 1u << 17;
-
 std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) const {
     // Subsets run fused; smaller meshes exchange first and reconstruct in separate kernels
-    if (n_owned < MUSCL_FUSED_CELLS) return {};
+    if (n_owned < fused_cells) return {};
     // Gradients read the face or vertex neighbors, limiters the face neighbors
     std::vector<uint32_t> cells;
     for (uint32_t c = 0; c < n_owned; c++) {
@@ -682,7 +681,7 @@ void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokko
 
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
+    if (mesh->n_cells >= fused_cells) {
         calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
         return;
     }

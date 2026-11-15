@@ -228,6 +228,20 @@ TEST(MPITest, MUSCLMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
 }
 
+TEST(MPITest, FusedMUSCLMatchesSerial) {
+    // Large meshes reconstruct in one kernel per cell, over every local cell: the halo cells past layer 1 fill
+    // the outer sides of layer 1's faces but have faces without face states. Mixtures take that path every stage
+    struct Fused {
+        const uint32_t saved = MUSCL::fused_cells;
+        Fused() { MUSCL::fused_cells = 1; }
+        ~Fused() { MUSCL::fused_cells = saved; }
+    } fused;
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 10));
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "euler"));
+}
+
 TEST(MPITest, TENOOnQuadsMatchesSerial) {
     // Stencils reach several layers into neighboring ranks and mirror across
     // physical boundaries, never across partition faces

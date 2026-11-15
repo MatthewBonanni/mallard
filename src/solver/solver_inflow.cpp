@@ -33,7 +33,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
     auto h_target = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_target);
     bool profiled = false;
     for (const auto & [i_bc, all_faces] : inlets) {
-        // Faces beyond Mesh::n_state_faces have no face state, so no characteristic index
+        // Faces of cells beyond Mesh::n_reconstructed have no face state, so no characteristic index
         std::vector<uint32_t> faces;
         for (uint32_t f : all_faces) {
             if (h_face_char(f) >= 0) faces.push_back(f);
