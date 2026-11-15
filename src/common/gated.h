@@ -55,6 +55,12 @@ concept DefinesValueType = requires { typename F::value_type; };
 template <class F, class V>
 concept HasFinal = requires(const F f, V && v) { f.final(static_cast<V &&>(v)); };
 
+template <class F, class V>
+concept HasInit = requires(const F f, V && v) { f.init(static_cast<V &&>(v)); };
+
+template <class F, class D, class S>
+concept HasJoin = requires(const F f, D && d, S && s) { f.join(static_cast<D &&>(d), static_cast<S &&>(s)); };
+
 template <class P>
 void check_policy() {
     static_assert(Kokkos::is_execution_policy_v<P> || std::is_integral_v<P>,
@@ -141,7 +147,10 @@ struct Reduce {
     }
 };
 
-/** @brief A reduction's functor that defines its value type (and its init, join and final) itself. */
+/**
+ * @brief A reduction's functor that defines its value type (and its init, join and final) itself. While gated it
+ *        skips init and join too, which cost as much as the work for values of many entries.
+ */
 template <DefinesValueType F>
 struct Reduce<F> : F {
     const uint32_t * on;
@@ -154,6 +163,28 @@ struct Reduce<F> : F {
     KOKKOS_FUNCTION void operator()(A &&... a) const {
         if (on && !*on) return;
         static_cast<const F &>(*this)(static_cast<A &&>(a)...);
+    }
+    template <class V>
+    KOKKOS_FUNCTION void init(V && v) const {
+        if (on && !*on) return;
+        if constexpr (HasInit<F, V>) {
+            static_cast<const F &>(*this).init(static_cast<V &&>(v));
+        } else if constexpr (std::is_pointer_v<std::remove_reference_t<V>>) {
+            for (size_t i = 0; i < static_cast<size_t>(this->value_count); i++) v[i] = {};
+        } else {
+            v = {};
+        }
+    }
+    template <class D, class S>
+    KOKKOS_FUNCTION void join(D && dst, S && src) const {
+        if (on && !*on) return;
+        if constexpr (HasJoin<F, D, S>) {
+            static_cast<const F &>(*this).join(static_cast<D &&>(dst), static_cast<S &&>(src));
+        } else if constexpr (std::is_pointer_v<std::remove_reference_t<D>>) {
+            for (size_t i = 0; i < static_cast<size_t>(this->value_count); i++) dst[i] += src[i];
+        } else {
+            dst += src;
+        }
     }
     template <class V>
     KOKKOS_FUNCTION void final(V && v) const {
