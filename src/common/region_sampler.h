@@ -28,7 +28,7 @@ constexpr int MAX_LEVEL = N_DIM == 2 ? 8 : 5;
 /** @brief Children of a subdivision: 4 triangles, 8 tetrahedra, or 2^N_DIM boxes. */
 constexpr int CHILDREN = N_DIM == 2 ? 4 : 8;
 
-/** @brief Most pending simplices or boxes of a depth-first subdivision. */
+/** @brief Most pending boxes of a depth-first subdivision of a cone. */
 constexpr int STACK = MAX_LEVEL * (CHILDREN - 1) + 1;
 
 namespace detail {
@@ -50,93 +50,171 @@ struct Shape {
     bool bounded = true;
 };
 
+/** @brief A simplex's children, classified: each one's weight and distance, and which are uniform. */
+struct Children {
+    double w[CHILDREN] = {}, phi[CHILDREN] = {};
+    uint32_t uniform = 0, filled = 0;
+
+    /** @brief Takes the children o filled: joins the lanes' shares. */
+    KOKKOS_INLINE_FUNCTION Children & operator+=(const Children & o) {
+        for (int j = 0; j < CHILDREN; j++) {
+            if ((o.filled >> j) & 1u) {
+                w[j] = o.w[j];
+                phi[j] = o.phi[j];
+            }
+        }
+        uniform |= o.uniform;
+        filled |= o.filled;
+        return *this;
+    }
+};
+
+/** @brief One thread classifies a simplex's children, one after another. */
+struct SerialLanes {
+    template <typename F>
+    KOKKOS_INLINE_FUNCTION void classify(const F & f, Children & out) const {
+        out = Children{};
+        for (int j = 0; j < CHILDREN; j++) f(j, out);
+    }
+};
+
+/** @brief The vector lanes of a team member classify a simplex's children together. */
+template <typename Member>
+struct VectorLanes {
+    const Member & member;
+
+    template <typename F>
+    KOKKOS_INLINE_FUNCTION void classify(const F & f, Children & out) const {
+        Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(member, CHILDREN), f, out);
+    }
+};
+
+namespace detail {
+
+/**
+ * @brief Whether a simplex v of N_DIM + 1 vertices at subdivision level
+ *        level is uniform (left whole), its centroid c and the distance phi there.
+ */
+template <typename Distance>
+KOKKOS_INLINE_FUNCTION bool is_uniform(const Shape<Distance> & shape, const double v[4][3], const int level, double c[3],
+                                    double & phi) {
+    constexpr int n_vertices = N_DIM + 1;
+    const double half_edge = 0.5 * shape.edge;
+    c[0] = c[1] = c[2] = 0.0;
+    for (int k = 0; k < n_vertices; k++) {
+        for (int i = 0; i < 3; i++) c[i] += v[k][i] / double(n_vertices);
+    }
+    double radius = 0.0;
+    for (int k = 0; k < n_vertices; k++) {
+        double d[3];
+        for (int i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
+        radius = region::detail::max(radius, norm(d));
+    }
+    phi = shape.distance(c);
+    bool uniform = level >= MAX_LEVEL;
+    if (shape.bounded) {
+        if (Kokkos::fabs(phi) >= radius + half_edge) uniform = true;
+        if (half_edge > 0.0 && radius < 0.125 * shape.edge && Kokkos::fabs(phi) < half_edge - radius) uniform = true;
+    } else if (!uniform) {
+        // Implicit regions: subdivide unless f keeps its sign over the simplex by twice its slope there
+        double slope = 0.0;
+        for (int k = 0; k < n_vertices; k++) {
+            double d[3];
+            for (int i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
+            slope = region::detail::max(slope, Kokkos::fabs(shape.distance(v[k]) - phi) / norm(d));
+        }
+        uniform = Kokkos::fabs(phi) > 2.0 * slope * radius && half_edge == 0.0;
+    }
+    return uniform;
+}
+
+/**
+ * @brief Child j of simplex v by midpoint subdivision: 4 triangles, or 8
+ *        tetrahedra (4 corners and an octahedron split along a diagonal).
+ */
+KOKKOS_INLINE_FUNCTION void child(const double v[4][3], const int j, double out[4][3]) {
+    constexpr int TRIANGLES[4][3][2] = {{{0, 0}, {0, 1}, {0, 2}},
+                                        {{0, 1}, {1, 1}, {1, 2}},
+                                        {{0, 2}, {1, 2}, {2, 2}},
+                                        {{0, 1}, {1, 2}, {0, 2}}};
+    constexpr int TETRAHEDRA[8][4][2] = {{{0, 0}, {0, 1}, {0, 2}, {0, 3}}, {{0, 1}, {1, 1}, {1, 2}, {1, 3}},
+                                         {{0, 2}, {1, 2}, {2, 2}, {2, 3}}, {{0, 3}, {1, 3}, {2, 3}, {3, 3}},
+                                         {{0, 1}, {2, 3}, {0, 2}, {0, 3}}, {{0, 1}, {2, 3}, {0, 3}, {1, 3}},
+                                         {{0, 1}, {2, 3}, {1, 3}, {1, 2}}, {{0, 1}, {2, 3}, {1, 2}, {0, 2}}};
+    for (int k = 0; k < 4; k++) {
+        if (N_DIM == 2 && k == 3) {
+            for (int i = 0; i < 3; i++) out[k][i] = 0.0;
+            continue;
+        }
+        const int a = N_DIM == 2 ? TRIANGLES[j][k][0] : TETRAHEDRA[j][k][0];
+        const int b = N_DIM == 2 ? TRIANGLES[j][k][1] : TETRAHEDRA[j][k][1];
+        for (int i = 0; i < 3; i++) out[k][i] = a == b ? v[a][i] : 0.5 * (v[a][i] + v[b][i]);
+    }
+}
+
+} // namespace detail
+
 /**
  * @brief Adds the integral of the indicator (times r in axisymmetric runs) and
  *        of 1 over a simplex of N_DIM + 1 vertices v to inside and total,
  *        subdivided into CHILDREN children where the surface or edge may
- *        cross it, depth first in the children's order.
+ *        cross it, depth first in the children's order. The lanes classify
+ *        each subdivided simplex's children; the sums do not depend on them.
  */
-template <typename Distance>
+template <typename Distance, typename Lanes = SerialLanes>
 KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool axisymmetric, const double v0[4][3],
-                                    const double measure0, double & inside, double & total) {
-    struct Item {
+                                    const double measure0, double & inside, double & total, const Lanes & lanes = {}) {
+    double c[3], phi;
+    if (detail::is_uniform(shape, v0, 0, c, phi)) {
+        const double w = measure0 * (axisymmetric ? c[1] : 1.0);
+        inside += w * indicator(phi, shape.edge);
+        total += w;
+        return;
+    }
+    // The subdivided simplices from the root to the current one, with their children
+    struct Level {
         double v[4][3];
         double measure;
-        int level;
+        Children children;
+        int next;
     };
-    Item stack[STACK];
-    int top = 0;
+    Level path[MAX_LEVEL];
+    auto subdivide = [&](Level & p, const int level) {
+        const double measure = p.measure / double(CHILDREN);
+        lanes.classify([&](const int j, Children & out) {
+            double v[4][3], c_j[3], phi_j;
+            detail::child(p.v, j, v);
+            const bool uniform = detail::is_uniform(shape, v, level + 1, c_j, phi_j);
+            out.w[j] = measure * (axisymmetric ? c_j[1] : 1.0);
+            out.phi[j] = phi_j;
+            out.uniform |= uint32_t(uniform) << j;
+            out.filled |= 1u << j;
+        }, p.children);
+        p.next = 0;
+    };
     for (int k = 0; k < 4; k++) {
-        for (int i = 0; i < 3; i++) stack[0].v[k][i] = v0[k][i];
+        for (int i = 0; i < 3; i++) path[0].v[k][i] = v0[k][i];
     }
-    stack[0].measure = measure0;
-    stack[0].level = 0;
-    constexpr int n_vertices = N_DIM + 1;
-    const double half_edge = 0.5 * shape.edge;
-    while (top >= 0) {
-        const Item item = stack[top--];
-        const auto & v = item.v;
-        double c[3] = {0.0, 0.0, 0.0};
-        for (int k = 0; k < n_vertices; k++) {
-            for (int i = 0; i < 3; i++) c[i] += v[k][i] / double(n_vertices);
+    path[0].measure = measure0;
+    subdivide(path[0], 0);
+    int level = 0;
+    while (level >= 0) {
+        Level & p = path[level];
+        if (p.next == CHILDREN) {
+            level--;
+            continue;
         }
-        double radius = 0.0;
-        for (int k = 0; k < n_vertices; k++) {
-            double d[3];
-            for (int i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
-            radius = region::detail::max(radius, detail::norm(d));
-        }
-        const double phi = shape.distance(c);
-        bool uniform = item.level >= MAX_LEVEL;
-        if (shape.bounded) {
-            if (Kokkos::fabs(phi) >= radius + half_edge) uniform = true;
-            if (half_edge > 0.0 && radius < 0.125 * shape.edge && Kokkos::fabs(phi) < half_edge - radius) uniform = true;
-        } else if (!uniform) {
-            // Implicit regions: subdivide unless f keeps its sign over the simplex by twice its slope there
-            double slope = 0.0;
-            for (int k = 0; k < n_vertices; k++) {
-                double d[3];
-                for (int i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
-                slope = region::detail::max(slope, Kokkos::fabs(shape.distance(v[k]) - phi) / detail::norm(d));
-            }
-            uniform = Kokkos::fabs(phi) > 2.0 * slope * radius && half_edge == 0.0;
-        }
-        if (uniform) {
-            const double w = item.measure * (axisymmetric ? c[1] : 1.0);
-            inside += w * indicator(phi, shape.edge);
+        const int k = p.next++;
+        if ((p.children.uniform >> k) & 1u) {
+            const double w = p.children.w[k];
+            inside += w * indicator(p.children.phi[k], shape.edge);
             total += w;
             continue;
         }
-        // Midpoint subdivision: 4 triangles, or 8 tetrahedra (4 corners and an octahedron split along a diagonal)
-        double m[4][4][3];
-        for (int a = 0; a < n_vertices; a++) {
-            for (int b = 0; b < n_vertices; b++) {
-                for (int i = 0; i < 3; i++) m[a][b][i] = a == b ? v[a][i] : 0.5 * (v[a][i] + v[b][i]);
-            }
-        }
-        constexpr int TRIANGLES[4][3][2] = {{{0, 0}, {0, 1}, {0, 2}},
-                                            {{0, 1}, {1, 1}, {1, 2}},
-                                            {{0, 2}, {1, 2}, {2, 2}},
-                                            {{0, 1}, {1, 2}, {0, 2}}};
-        constexpr int TETRAHEDRA[8][4][2] = {{{0, 0}, {0, 1}, {0, 2}, {0, 3}}, {{0, 1}, {1, 1}, {1, 2}, {1, 3}},
-                                             {{0, 2}, {1, 2}, {2, 2}, {2, 3}}, {{0, 3}, {1, 3}, {2, 3}, {3, 3}},
-                                             {{0, 1}, {2, 3}, {0, 2}, {0, 3}}, {{0, 1}, {2, 3}, {0, 3}, {1, 3}},
-                                             {{0, 1}, {2, 3}, {1, 3}, {1, 2}}, {{0, 1}, {2, 3}, {1, 2}, {0, 2}}};
-        // Pushed last child first, so that they are summed in order
-        for (int child = CHILDREN - 1; child >= 0; child--) {
-            Item & next = stack[++top];
-            for (int k = 0; k < 4; k++) {
-                for (int i = 0; i < 3; i++) {
-                    if (N_DIM == 2) {
-                        next.v[k][i] = k < 3 ? m[TRIANGLES[child][k][0]][TRIANGLES[child][k][1]][i] : 0.0;
-                    } else {
-                        next.v[k][i] = m[TETRAHEDRA[child][k][0]][TETRAHEDRA[child][k][1]][i];
-                    }
-                }
-            }
-            next.measure = item.measure / double(CHILDREN);
-            next.level = item.level + 1;
-        }
+        Level & q = path[level + 1];
+        detail::child(p.v, k, q.v);
+        q.measure = p.measure / double(CHILDREN);
+        subdivide(q, ++level);
     }
 }
 
@@ -213,13 +291,13 @@ KOKKOS_INLINE_FUNCTION void straight_simplices(const uint32_t n, const Nodes & n
 /**
  * @brief Adds the integrals of the indicator and of 1 over a straight cell,
  *        whose nodes node(k, x) gives (n of them), over its simplices
- *        (straight_simplices).
+ *        (straight_simplices), the lanes classifying their children.
  */
-template <typename Distance, typename Nodes>
+template <typename Distance, typename Nodes, typename Lanes = SerialLanes>
 KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const bool axisymmetric, const uint32_t n,
-                                          const Nodes & node, double & inside, double & total) {
+                                          const Nodes & node, double & inside, double & total, const Lanes & lanes = {}) {
     straight_simplices(n, node, [&](const double s[4][3], const double measure) {
-        simplex(shape, axisymmetric, s, measure, inside, total);
+        simplex(shape, axisymmetric, s, measure, inside, total, lanes);
     });
 }
 
