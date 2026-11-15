@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -447,6 +448,60 @@ std::string written_at(const Outcome & reference, const std::string & line, cons
     return when + point + "_" + point_variable + " == " + exactly(values.back());
 }
 
+/**
+ * @brief The step of the n-th row of reference's convergence file after step `after` at a multiple of 3 steps where
+ *        every value is finite, and a condition that holds while the convergence values are that row's, each as an
+ *        integer over a power of two (collective). Step 0 if there is none.
+ */
+std::pair<uint64_t, std::string> convergence_row(const Outcome & reference, const int n, const uint64_t after = 0) {
+    std::vector<std::string> names;
+    std::vector<double> values;
+    if (comm::is_root()) {
+        std::istringstream in(reference.files.at("convergence.csv"));
+        std::vector<std::string> header;
+        int found = 0;
+        for (std::string row; std::getline(in, row);) {
+            std::vector<std::string> fields;
+            std::istringstream cells(row);
+            for (std::string f; std::getline(cells, f, ',');) fields.push_back(f);
+            if (header.empty()) {
+                header = fields;
+                continue;
+            }
+            if (fields.empty() || !std::isdigit(static_cast<unsigned char>(fields[0][0]))) continue;
+            std::vector<double> row_values;
+            for (size_t k = 2; k < fields.size(); k++) row_values.push_back(std::stod(fields[k]));
+            const bool finite = std::all_of(row_values.begin(), row_values.end(), [](double v) { return std::isfinite(v); });
+            const uint64_t at = std::stoull(fields[0]);
+            if (at <= after || at % 3 != 0 || !finite || ++found < n) continue;
+            values.push_back(static_cast<double>(std::stoull(fields[0])));
+            values.insert(values.end(), row_values.begin(), row_values.end());
+            names.assign(header.begin() + 2, header.end());
+            break;
+        }
+    }
+    values = comm::allgatherv(values);
+    if (values.empty()) return {0, "false"};
+    std::string joined;
+    for (const auto & name : names) joined += name + ",";
+    joined = comm::broadcast(joined);
+    names.clear();
+    std::istringstream list(joined);
+    for (std::string name; std::getline(list, name, ',');) names.push_back(name);
+    EXPECT_EQ(names.size() + 1, values.size());
+    const auto exactly = [](const double x) {
+        if (x == 0.0) return std::string("0");
+        int e = 0;
+        const double m = std::frexp(x, &e);
+        return "(" + std::to_string(static_cast<int64_t>(std::ldexp(m, 53))) + " / 2^" + std::to_string(53 - e) + ")";
+    };
+    std::string when;
+    for (size_t i = 0; i < names.size() && i + 1 < values.size(); i++) {
+        when += (i ? " and " : "") + ("convergence_" + names[i]) + " == " + exactly(values[i + 1]);
+    }
+    return {static_cast<uint64_t>(values[0]), when};
+}
+
 } // namespace
 
 TEST(StepQueueTest, OutputsByStep) {
@@ -837,22 +892,65 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
 }
 
 TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
-    // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
-    // evaluates a trigger on them between those rows, where the host updates them. MSER-5 finds both
-    // signals stationary at step 57 in 2D, at step 117 in 3D
+    // An integral's and a staged probe's convergence inside the [statistics] averaging window, updated on the device at
+    // their rows: the queue stops only at the row whose every convergence value the condition equals, as a checkpoint
+    // at that step does, and goes on from the host's histories
     Case c;
     c.run = "n_steps = 200\ncfl = 0.5\n";
-    c.extra = "check_interval = 1000\n" + RESTARTS +
-              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
-              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
-              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
-              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
-              "batches = 4\nfile = \"{dir}/convergence.csv\"\n"
-              "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
+    const std::string convergence =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+        "[statistics]\ninterval = 2\nt_start = 0.05\nfields = [\"P\"]\n"
+        "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+        "batches = 4\ntolerance = 0.5\nfile = \"{dir}/convergence.csv\"\n";
+    c.extra = convergence;
     c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("convergence_triggers_reference", c, 0);
+    const auto [at, when] = convergence_row(reference, 3);
+    ASSERT_GT(at, 0u);
+    c.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("convergence_triggers", c);
-    EXPECT_LT(o.step, 200u);
-    EXPECT_EQ(o.step % 3, 0u);
+    EXPECT_EQ(o.step, 200u);
+    if (comm::is_root()) {
+        char restart[64];
+        std::snprintf(restart, sizeof restart, "restart_%06llu.restart", static_cast<unsigned long long>(at));
+        EXPECT_TRUE(o.files.count(restart)) << restart;
+    }
+    Case at_step = c;
+    at_step.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"step == " + std::to_string(at) +
+                    "\"\ndo = \"checkpoint\"\n";
+    EXPECT_EQ(run_case("convergence_triggers", c, 3).queued, run_case("convergence_triggers_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueOnce) {
+    // An integral sampled every step fills its history's 4096 samples on the device: the device stops there once, and
+    // goes on from histories with room for four times as many, on which a condition equal to a later row's values
+    // stops the queue at that row, as a checkpoint at that step does
+    Case c;
+    c.run = "n_steps = 4200\ncfl = 0.5\n";
+    const std::string convergence = "check_interval = 100000\n" + RESTARTS +
+                                    "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
+                                    "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\"]\n"
+                                    "file = \"{dir}/convergence.csv\"\n";
+    c.extra = convergence;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("convergence_room_reference", c, 0);
+    const auto [at, when] = convergence_row(reference, 1, 4100);
+    ASSERT_GT(at, 0u);
+    c.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    const Outcome o = expect_queue_invariant("convergence_room", c);
+    EXPECT_EQ(o.step, 4200u);
+    if (comm::is_root()) {
+        char restart[64];
+        std::snprintf(restart, sizeof restart, "restart_%06llu.restart", static_cast<unsigned long long>(at));
+        EXPECT_TRUE(o.files.count(restart)) << restart;
+    }
+    Case at_step = c;
+    at_step.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"step == " + std::to_string(at) +
+                    "\"\ndo = \"checkpoint\"\n";
+    EXPECT_EQ(run_case("convergence_room", c, 3).queued + 1, run_case("convergence_room_at_step", at_step, 3).queued);
 }
 
 TEST(StepQueueTest, OutputsByTimeAndTStop) {

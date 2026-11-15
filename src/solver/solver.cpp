@@ -2505,7 +2505,7 @@ int Solver::run_loop() {
                 if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
                 write_staged_monitors(record);
                 write_staged_probes(record);
-                update_convergence();
+                update_convergence(&record);
                 write_staged_outputs(record);
                 t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();

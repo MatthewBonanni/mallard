@@ -1,0 +1,2 @@
+- Triggers that read `[statistics.convergence]` values no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at the rows of the convergence signals: the step graph updates the convergence estimate itself, from copies of the histories in device memory, and reduces the probes the signals read. Results are the same bit for bit (#1062).
+- `[statistics.convergence]` windows read the start of the `[statistics]` averages at each row's step, where steps enqueued ahead of the host could make it read a later step's (#1062).

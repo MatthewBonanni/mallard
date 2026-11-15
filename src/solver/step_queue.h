@@ -53,6 +53,7 @@ enum Reason : uint32_t {
     BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
     TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
     OUTPUT = 1024,     // an output is due while the one staged before is still being written on some rank
+    CONVERGENCE = 2048,  // a [statistics.convergence] history fills its device memory
 };
 
 /**
@@ -146,6 +147,7 @@ struct Record {
     uint32_t spectra;        // the unaveraged spectra staged their sample
     uint32_t statistics;     // the statistics took the step's samples
     uint64_t outputs;        // bit k: [[write_data]] writer k is due, its arrays staged in the host's mirrors
+    double window_start;     // the start of the [statistics] averages after the step (-inf before), with convergence
     ProgressLocals progress_locals;
 };
 

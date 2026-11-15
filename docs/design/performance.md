@@ -476,6 +476,22 @@ Probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
+`[statistics.convergence]` values that a trigger reads are updated on the device too, at the rows of their
+signals, between the probes and the triggers. The integrals' and forces' values are the trigger variables the
+monitors set; probe signals are reduced into theirs like the probes a trigger reads. Each signal's history (times,
+values and the prefix sums of its values less the first, and of their squares) lives in device memory, and one
+kernel, under an IF node on whether any signal has a sample, does `Convergence::add` and `update`: the MSER-5
+checks, the start of the stationary window, the integrated autocorrelation time and the batch means of the mean
+and the variance, in the host's order of operations and compiled without contracted multiply-adds, so its values
+are the host's bit for bit. Its team sums each of MSER's batch means and each lag's autocorrelation on one
+thread, as the host does, and Sokal's window closes over chunks of 256 lags. The host updates its own estimate as
+it takes each record, which writes the file and the restart histories; the device keeps the window's start, the
+`[statistics]` averages' start after the step's samples, in the record, since the host's copy of the statistics'
+clock may be steps ahead. On resuming, the host copies its histories' samples since the last copy and its state to
+the device. A history fills its device memory (at least 4096 samples, twice the longest history when staged)
+only by running that long without a stop; the device then stops at that row (`CONVERGENCE`) and resumes with
+twice the room, in a new graph.
+
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
 step the device goes on from and advances their clocks, and the step's target time (the next output time, as

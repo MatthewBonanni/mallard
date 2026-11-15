@@ -424,12 +424,18 @@ class Solver {
          *         or, if it cannot stage it (Probes::can_stage), the probe is left to the host and the queue stops there. */
         bool triggers_read_probe(size_t k) const;
         bool triggers_read_probes() const;
-        /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
+        /** @brief Whether the step graph's triggers read a convergence value: the step graph updates the convergence. */
         bool convergence_on_device() const;
-        /** @brief Where the queue stops for those rows: the monitors' steps, and whether probe k is left to the host. */
-        void convergence_due_limits(step_queue::Horizon & h) const;
+        /** @brief Whether a convergence value the step graph's triggers read is of probe k, which it then reduces. */
         bool convergence_reads_probe(size_t k) const;
-        /** @brief In the step graph: the triggers' variables and states at the step; stops the device before one fires. */
+        /** @brief In the step graph: the triggers' variables at the step, but the probes' and the convergence's. */
+        void load_trigger_values();
+        /**
+         * @brief In the step graph: the start of the [statistics] averages into the record, and update_convergence
+         *        on the device if convergence_on_device; stops the device if a history is out of room.
+         */
+        void sample_convergence();
+        /** @brief In the step graph: the triggers' states at the step; stops the device before one fires. */
         void evaluate_triggers();
         /** @brief The device's trigger states into the host's, after the queue drained. */
         void pull_trigger_states();
@@ -440,8 +446,19 @@ class Solver {
             uint32_t column;
             uint32_t rounded;
         };
-        /** @brief Adds the samples of the convergence signals written at this step; collective where a probe's is. */
-        void update_convergence();
+        /** @brief Variable of a convergence signal, written at the steps of its monitor (bit) or staged probe (probe_due
+         *         entry), NO_SOURCE for neither. */
+        struct ConvergenceSource {
+            uint32_t variable;
+            uint32_t monitor;
+            uint32_t probe;
+        };
+        static constexpr uint32_t NO_SOURCE = std::numeric_limits<uint32_t>::max();
+        /**
+         * @brief Adds the samples of the convergence signals written at this step; collective where a probe's is.
+         *        A device step's record carries the start of the [statistics] averages at the step.
+         */
+        void update_convergence(const step_queue::Record * record = nullptr);
         /** @brief Start of the [statistics] averages, -inf before they run. */
         double averages_start() const;
         void publish_status();
@@ -1375,6 +1392,8 @@ class Solver {
         kexpr::ProgramTable<> trigger_conditions;
         bool triggers_evaluated_by_host = true;  // since the device's states were last pushed or pulled
         Convergence convergence;
+        Kokkos::View<ConvergenceSource *> convergence_sources;  // of the signals, for the step graph
+        Kokkos::View<uint32_t> convergence_due;                 // the current launch adds samples
         RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;
 };
