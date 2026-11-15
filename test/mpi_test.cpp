@@ -223,15 +223,9 @@ TEST(MPITest, MixtureWallsMatchSerial) {
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
+    // Also MUSCL's rows: the outermost halo layer has none, since its missing faces would look like boundary
+    // faces and give it rows, equal on the grid to its owners' but not bitwise, that its owners' cells could share
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
-                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
-                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
-}
-
-TEST(MPITest, MUSCLTablesLeaveOutTheOutermostHaloLayer) {
-    // Its missing faces would look like boundary faces: a row from them, equal on the grid to its owner's
-    // but not bitwise, could be the one that the owner's cells share
-    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
 }
