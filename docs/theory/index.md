@@ -3,7 +3,7 @@
 The equations Mallard solves and the methods it solves them with, as
 implemented on `main`: every model and scheme of the solver, with the
 formulas, constants and defaults of the source code it cites. The
-[user guide](../guide/quick_start.md) explains how to use them;
+[user guide](../guide/input_files.md) explains how to use them;
 [Numerical methods](../numerics/overview.md) collects measured stability
 limits, accuracy studies and known limitations; the
 [verification manual](../verification/index.md) measures the order of
@@ -11,6 +11,8 @@ accuracy of every method, from the convergence tests; the sources are in
 [References](../references.md).
 
 ## Chapters
+
+### Part I: the continuous model
 
 1. [Governing equations](governing_equations.md): the compressible
     Navier-Stokes equations, the single-gas constitutive laws and the
@@ -27,15 +29,18 @@ accuracy of every method, from the convergence tests; the sources are in
 5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.
-6. [Finite-volume discretization and reconstruction](finite_volume.md):
+
+### Part II: the discretization, in the order a step assembles it
+
+1. [Finite-volume discretization and reconstruction](finite_volume.md):
     face quadrature, curved boundaries, MUSCL, TENO-E and the gradients of
     the viscous terms.
-7. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
+2. [Numerical fluxes](fluxes.md): the Riemann solvers, the hybrid
     central-upwind flux, species fluxes and viscous fluxes.
-8. [Time integration](time_integration.md): Runge-Kutta methods, the time
-    step and the order of operations within a step.
-9. [Boundary conditions and sources](boundaries_sources.md): exterior
+3. [Boundary conditions and sources](boundaries_sources.md): exterior
     states, characteristic boundaries, body forces and sponges.
+4. [Time integration](time_integration.md): Runge-Kutta methods, the time
+    step and the order of operations within a step.
 
 ## Notation
 
@@ -59,6 +64,6 @@ accuracy of every method, from the convergence tests; the sources are in
 
 Vectors and tensors are bold; $\delta_{ij}$ is the Kronecker delta and
 $S_{ij} = \tfrac12(\partial_j u_i + \partial_i u_j)$ the strain rate.
-Units are SI. Chapter 4 alone distinguishes filtered quantities
+Units are SI. The LES chapter alone distinguishes filtered quantities
 ($\overline{\phi}$, and Favre-filtered $\widetilde{\phi}$); elsewhere
 filter symbols are dropped. Equations are numbered within each chapter.

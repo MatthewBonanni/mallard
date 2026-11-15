@@ -43,7 +43,7 @@ Write them with `fields = ["MEAN_*", "COV_*"]`, sample them with
 [probes](probes.md#time-averages) (`fields = ["MEAN_P"]`), and average further over
 homogeneous directions with [`mallard post average --statistics`](#averages-of-saved-snapshots-mallard-post-average)
 (e.g. over x and z of a channel, giving profiles in y; its CSV also feeds
-[synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
+[synthetic turbulence](boundary_conditions.md#synthetic-turbulence-turbulence)).
 Each snapshot records what each of these fields averages, over which window
 ([Time-averaged fields](output.md#time-averaged-fields)).
 
@@ -153,7 +153,7 @@ averaged directions together,
 adding the dispersive part (the spatial variation of the time means); Favre
 columns are weighted by volume times `MEAN_RHO`. The CSV, `average/average.csv`,
 holds the kept coordinates, `n_cells`, then each column, and is the `profile`
-[synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)
+[synthetic turbulence](boundary_conditions.md#synthetic-turbulence-turbulence)
 reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
 `FAVRE_`) fields a snapshot of a run's `[statistics]` holds, pairing
 `COV_<a>_<b>` with `MEAN_<a>` and `MEAN_<b>` where both are there.

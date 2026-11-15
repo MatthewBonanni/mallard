@@ -401,8 +401,8 @@ eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
 species' diffusivity (mixtures: in the mixture-averaged form, so the
 diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
 eddy viscosity of each cell comes from its least-squares velocity gradient
-`g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
-(2D) of the cell; the time step includes it. Design, choices and validation:
+`g_ij = du_i/dx_j`, with the filter width `Delta` of the cell
+(`filter_width`); the time step includes it. Design, choices and validation:
 the [LES guide](guide/les.md) ([design notes](design/les.md)).
 
 | Key | Description |
@@ -840,7 +840,7 @@ double precision in every build.
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
-| `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
+| `max_steps` | Sub-steps allowed per cell and chemistry call (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
 | `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
@@ -1512,7 +1512,7 @@ graphs; domain averages add an exact global sum per stage, on the device).
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
 | `rhoY` | none | Mixtures: table of species partial-density sources, e.g. `{H2 = "1e-3"}`; the mass source `rho` is their sum (and `rho` itself is not allowed) |
 
-Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
+Expressions ([syntax](guide/expressions.md)) read the variables `x`, `y`, `z`, `t`,
 `rho`, `u_x`, `u_y` (3D: `u_z`), `p`, `T`, for mixtures `Y_<species>` and
 `X_<species>` (characters other than letters, digits and `_` in species names
 become `_`), and the domain averages (volume-weighted over the whole mesh)

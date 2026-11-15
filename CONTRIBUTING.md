@@ -161,10 +161,11 @@ that adds or changes behavior includes:
    `- ` bullet per change (see [changelog/README.md](changelog/README.md)). Changes
    that alter results go under `changed`. CI fails without one; maintainers add the
    `no-changelog` label to PRs that do not need one.
-6. **README and website:** if the feature belongs in the README's feature list, add
-   it there; the maintainer mirrors README changes on the
-   [website](https://matthewbonanni.github.io/mallard/), which builds its pages
-   from `docs/`.
+6. **README and website:** the [website](https://matthewbonanni.github.io/mallard/)
+   builds its documentation pages from `docs/`. If the feature belongs in the
+   README's feature list, add it there and to the same card of the website's home
+   page (`content/index.md` of `MatthewBonanni/mallard-website`), which lists the
+   same features.
 
 Small fixes need only what applies: a bug fix needs a test that failed before the
 fix and a `fixed` fragment; a documentation fix needs neither.
