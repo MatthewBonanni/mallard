@@ -779,15 +779,24 @@ base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
 cells of a key carry it bit for bit. Each batch now does that once per key, at its first cell there, with the
 lowest global id of its cells, so the store sees the same tables in the same order and gives the same shapes.
 The $64^3$ Taylor-Green vortex at TENO5 as above, under a load average of about 140, two alternating runs, base =
-the keyed setup above; the packing includes the decode of the records:
+the keyed setup above (#986); the packing includes the decode of the records:
 
 | $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
 |---|---|---|---|---|
 | base | 77.2 / 92.5 s | 21.9 / 0.07 / 28.0 / 9.2 s, 23.9 / 0.03 / 41.2 / 10.6 s | 86.1 / 100.2 s | 2.43 / 2.35 GB |
 | once per key | 70.0 / 60.1 s | 25.8 / 0.07 / 11.7 / 14.6 s, 18.3 / 0.04 / 11.6 / 12.8 s | 77.1 / 68.0 s | 2.32 / 2.43 GB |
 
-Restart files are bitwise those of the base. What remains: the decode's search of every layer (#1178), the
-per-cell geometry (#1166) and the keys (#1167).
+On one A100 (16 host threads, two alternating runs each) the packing, which ranks on the device, gains less:
+
+| one A100, packing | base | once per key |
+|---|---|---|
+| $96^3$ symmetry box, TENO3 / TENO5 | 1.49-1.53 / 1.93-2.05 s | 1.30-1.37 / 1.63-1.70 s |
+| 1,053,696 tetrahedra, TENO3 / TENO5 | 2.89-2.90 / 4.34-6.94 s | 2.61-2.66 / 3.57-3.65 s |
+
+The $96^3$ box at TENO3 on 8 OpenMP threads packs in 4.8 s instead of 11.4 s. Restart files are bitwise those of
+the base on the A100, on OpenMP (orders 3, 5 and 6; hexahedra, tetrahedra and prisms) and on 1, 2 and 3 ranks, and
+the tables in the caches the A100 and OpenMP write are the same bytes. What remains: the decode's search of
+every layer (#1178), the per-cell geometry (#1166) and the keys (#1167).
 
 ## Scaling (one node)
 
