@@ -12,22 +12,23 @@
 #include "teno_shapes.h"
 
 #include <algorithm>
-#include <array>
-#include <cmath>
+#include <bit>
 #include <unordered_map>
 
-#include <Kokkos_Core.hpp>
+#include <Kokkos_BitManipulation.hpp>
 
 #include "comm.h"
-#include "teno_setup.h"
 
 namespace teno {
 
 namespace {
 
-constexpr uint64_t SEED_HASH = 0x243f6a8885a308d3ULL, SEED_CHECK = 0x13198a2e03707344ULL;
+constexpr bool DEVICE_IS_HOST = Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+constexpr uint64_t EMPTY = ~uint64_t(0);
+constexpr uint32_t MAX_END = 66;     // the searches' layers: at most 64 central ones, and the cell itself
+constexpr int MAX_SHAPE_ITEMS = 40;  // nodes and boundary faces of a cell with a shape
 
-uint64_t mix(uint64_t h) {
+KOKKOS_INLINE_FUNCTION uint64_t mix(uint64_t h) {
     h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
     h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
     return h ^ (h >> 31);
@@ -35,152 +36,375 @@ uint64_t mix(uint64_t h) {
 
 /** @brief Two independent hashes of a sequence of words. */
 struct Hasher {
-    uint64_t a = SEED_HASH, b = SEED_CHECK;
-    void add(const uint64_t v) {
+    uint64_t a = 0x243f6a8885a308d3ULL, b = 0x13198a2e03707344ULL;
+    KOKKOS_INLINE_FUNCTION void add(const uint64_t v) {
         a = mix(a ^ (v + 0x9e3779b97f4a7c15ULL));
         b = mix(b + (v ^ 0xd1b54a32d192ed03ULL) * 0xff51afd7ed558ccdULL);
     }
-    void add_signed(const int64_t v) { add(static_cast<uint64_t>(v)); }
+    KOKKOS_INLINE_FUNCTION void add_signed(const int64_t v) { add(static_cast<uint64_t>(v)); }
 };
 
-int64_t on_grid(const double v) { return std::llround(std::ldexp(v, ShapeKeys::SHAPE_GRID_BITS)); }
-
-using Lattice = std::array<int16_t, 3>;
-
-} // namespace
-
-bool ShapeKeys::supported(const Mesh & mesh) { return !mesh.curved_geometry && !mesh.is_rotational(); }
-
-ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, const uint32_t n_large_in,
-                     const uint32_t n_small_in)
-    : mesh(mesh_in), n_large(n_large_in), n_small(n_small_in) {
-    auto bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
-    face_bc.assign(bc.data(), bc.data() + bc.extent(0));
-    const uint32_t n_cells = mesh.n_cells;
-    shape.assign(n_cells, 0);
-    h.assign(n_cells, 0.0);
-    Kokkos::parallel_for("teno_shape_cells", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
-                         [&](const uint32_t c) {
-        const double hc = teno_setup::cell_scale(mesh, c);
-        h[c] = hc;
-        double xc[N_DIM];
-        for (int d = 0; d < N_DIM; d++) xc[d] = double(mesh.h_cell_coords(c, d));
-        std::vector<std::array<int64_t, N_DIM + 1>> items;
-        for (uint32_t k = mesh.h_offsets_nodes_of_cell(c); k < mesh.h_offsets_nodes_of_cell(c + 1); k++) {
-            std::array<int64_t, N_DIM + 1> v{};
-            for (int d = 0; d < N_DIM; d++) v[size_t(d)] = on_grid((double(mesh.h_node_coords(mesh.h_nodes_of_cell(k), d)) - xc[d]) / hc);
-            v[N_DIM] = -1;
-            items.push_back(v);
-        }
-        for (uint32_t k = mesh.h_offsets_faces_of_cell(c); k < mesh.h_offsets_faces_of_cell(c + 1); k++) {
-            const uint32_t f = mesh.h_faces_of_cell(k);
-            if (mesh.h_cells_of_face(f, 1) >= 0) continue;
-            std::array<int64_t, N_DIM + 1> v{};
-            for (int d = 0; d < N_DIM; d++) v[size_t(d)] = on_grid((double(mesh.h_face_coords(f, d)) - xc[d]) / hc);
-            v[N_DIM] = face_bc[f];
-            items.push_back(v);
-        }
-        std::sort(items.begin(), items.end());
-        Hasher hs;
-        hs.add(mesh.h_offsets_faces_of_cell(c + 1) - mesh.h_offsets_faces_of_cell(c));
-        for (const auto & v : items) {
-            for (const int64_t x : v) hs.add_signed(x);
-        }
-        shape[c] = hs.a;
-    });
+KOKKOS_INLINE_FUNCTION int lattice_component(const uint32_t lattice, const int a) {
+    return int((lattice >> (10 * a)) & 1023u) - 512;
 }
 
-bool ShapeKeys::scan(const uint32_t c, Scan & s) const {
-    const uint32_t n_cells = mesh.n_cells;
-    if (s.stamp.size() != n_cells) {
-        s.stamp.assign(n_cells, 0);
-        s.index.assign(n_cells, 0);
-        s.generation = 0;
+constexpr uint32_t LATTICE_ZERO = 512u | (512u << 10) | (512u << 20);
+
+KOKKOS_INLINE_FUNCTION uint64_t hash_slot(const uint32_t c, const uint32_t mask) {
+    return ((uint64_t(c) * 0x9E3779B97F4A7C15ULL) >> 32) & mask;
+}
+
+template <int N>
+KOKKOS_INLINE_FUNCTION bool less(const int64_t * a, const int64_t * b) {
+    for (int d = 0; d < N; d++) {
+        if (a[d] != b[d]) return a[d] < b[d];
     }
-    if (++s.generation == 0) {
-        std::fill(s.stamp.begin(), s.stamp.end(), 0u);
-        s.generation = 1;
-    }
-    s.cell.assign(1, c);
-    s.lattice.assign(1, Lattice{0, 0, 0});
-    s.end.assign(1, 1);
-    s.stamp[c] = s.generation;
-    s.index[c] = 0;
-    const uint32_t n_complete = mesh.n_complete();
-    bool unique = true, exhausted = false;
-    // The search's vertex-neighbor layers (reach_layers in teno_setup.cpp)
-    auto grow = [&]() {
-        if (exhausted) return false;
-        const uint32_t begin = s.end.size() > 1 ? s.end[s.end.size() - 2] : 0;
-        const uint32_t last = s.end.back();
-        for (uint32_t k = begin; k < last; k++) {
-            const uint32_t v = s.cell[k];
-            const Lattice l = s.lattice[k];
-            for (uint32_t j = mesh.h_offsets_cells_of_cell(v); j < mesh.h_offsets_cells_of_cell(v + 1); j++) {
-                const uint32_t nb = mesh.h_cells_of_cell(j);
-                const auto & sl = mesh.shift_lattice[mesh.h_cells_of_cell_shift(j)];
-                const Lattice nl{int16_t(l[0] + sl[0]), int16_t(l[1] + sl[1]), int16_t(l[2] + sl[2])};
-                if (s.stamp[nb] == s.generation) {
-                    if (s.lattice[s.index[nb]] != nl) unique = false;
-                    continue;
-                }
-                s.stamp[nb] = s.generation;
-                s.index[nb] = static_cast<uint32_t>(s.cell.size());
-                s.cell.push_back(nb);
-                s.lattice.push_back(nl);
-            }
-        }
-        if (s.cell.size() == last) {
-            exhausted = true;
-            return false;
-        }
-        s.end.push_back(static_cast<uint32_t>(s.cell.size()));
-        return true;
-    };
-    auto reach = [&](const uint32_t n_min, const int max_layers) {
-        int depth = 0;
-        while (depth < max_layers && s.end[size_t(depth)] <= n_min) {
-            if (size_t(depth) + 1 == s.end.size() && !grow()) break;
-            depth++;
-        }
-        return depth;
-    };
-    reach(n_large, 64);
-    reach(8 * n_small, 6);
-    if (!unique) return false;
-    double x0[N_DIM];
-    for (int d = 0; d < N_DIM; d++) x0[d] = double(mesh.h_cell_coords(c, d));
-    const double h0 = h[c];
-    s.entries.resize(s.cell.size());
-    int32_t layer = 0;
-    for (size_t k = 0; k < s.cell.size(); k++) {
-        while (k >= s.end[size_t(layer)]) layer++;
-        const uint32_t v = s.cell[k];
-        if (v >= n_complete) return false;
-        Scan::Entry & e = s.entries[k];
-        e.layer = layer;
-        e.cell = v;
-        for (int d = 0; d < N_DIM; d++) {
-            double x = double(mesh.h_cell_coords(v, d));
-            for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
-                x += double(s.lattice[k][j]) * double(mesh.periodic_translations[j][size_t(d)]);
-            }
-            e.q[size_t(d)] = on_grid((x - x0[d]) / h0);
-        }
-    }
-    std::sort(s.entries.begin(), s.entries.end(), [](const Scan::Entry & a, const Scan::Entry & b) {
-        return a.layer != b.layer ? a.layer < b.layer : a.q < b.q;
-    });
-    for (size_t k = 1; k < s.entries.size(); k++) {
-        if (s.entries[k].layer == s.entries[k - 1].layer && s.entries[k].q == s.entries[k - 1].q) return false;
+    return false;
+}
+
+template <int N>
+KOKKOS_INLINE_FUNCTION bool equal(const int64_t * a, const int64_t * b) {
+    for (int d = 0; d < N; d++) {
+        if (a[d] != b[d]) return false;
     }
     return true;
 }
 
+} // namespace
+
+int64_t ShapeSearch::on_grid(const double v) {
+    constexpr double LIMIT = 4.0e18;
+    const double x = v * double(uint64_t(1) << ShapeKeys::SHAPE_GRID_BITS);
+    return static_cast<int64_t>(Kokkos::round(Kokkos::fmin(Kokkos::fmax(x, -LIMIT), LIMIT)));
+}
+
+int64_t ShapeSearch::position(const ShapeLanes & w, const uint32_t c) const {
+    const uint32_t mask = 2 * cap - 1;
+    for (uint64_t k = hash_slot(c, mask);; k = (k + 1) & mask) {
+        const uint64_t e = w.hash[k];
+        if (e == EMPTY) return -1;
+        if (uint32_t(e) == c) return int64_t(e >> 32);
+    }
+}
+
+void ShapeSearch::clear(const ShapeLanes & w, const uint32_t n) const {
+    // In reverse order of insertion, each entry's probe sequence is as it was when it was inserted
+    const uint32_t mask = 2 * cap - 1;
+    for (uint32_t v = n; v-- > 0;) {
+        const uint32_t c = w.cell[v];
+        for (uint64_t k = hash_slot(c, mask);; k = (k + 1) & mask) {
+            if (uint32_t(w.hash[k]) == c) {
+                w.hash[k] = EMPTY;
+                break;
+            }
+        }
+    }
+}
+
+ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, uint32_t * end) const {
+    Result r;
+    const uint32_t mask = 2 * cap - 1;
+    w.cell[0] = c;
+    w.lattice[0] = LATTICE_ZERO;
+    w.hash[hash_slot(c, mask)] = uint64_t(c);
+    r.n = 1;
+    uint32_t n_end = 1;
+    end[0] = 1;
+    bool unique = true, exhausted = false, full = false;
+    // The search's vertex-neighbor layers (reach_layers in teno_setup.cpp), each cell once
+    auto grow = [&]() {
+        if (exhausted || full) return false;
+        const uint32_t begin = n_end > 1 ? end[n_end - 2] : 0;
+        const uint32_t last = end[n_end - 1];
+        for (uint32_t k = begin; k < last; k++) {
+            const uint32_t v = w.cell[k];
+            const uint32_t l = w.lattice[k];
+            for (uint32_t j = offsets_cells_of_cell(v); j < offsets_cells_of_cell(v + 1); j++) {
+                const uint32_t nb = cells_of_cell(j);
+                const uint8_t sh = cells_of_cell_shift(j);
+                const uint32_t nl = uint32_t(lattice_component(l, 0) + shift_lattice(sh, 0) + 512) |
+                                    (uint32_t(lattice_component(l, 1) + shift_lattice(sh, 1) + 512) << 10) |
+                                    (uint32_t(lattice_component(l, 2) + shift_lattice(sh, 2) + 512) << 20);
+                uint64_t slot = hash_slot(nb, mask);
+                bool seen = false;
+                for (;; slot = (slot + 1) & mask) {
+                    const uint64_t e = w.hash[slot];
+                    if (e == EMPTY) break;
+                    if (uint32_t(e) == nb) {
+                        seen = true;
+                        if (w.lattice[e >> 32] != nl) unique = false;
+                        break;
+                    }
+                }
+                if (seen) continue;
+                if (r.n == cap) {
+                    full = true;
+                    return false;
+                }
+                w.hash[slot] = uint64_t(nb) | (uint64_t(r.n) << 32);
+                w.cell[r.n] = nb;
+                w.lattice[r.n] = nl;
+                r.n++;
+            }
+        }
+        if (r.n == last) {
+            exhausted = true;
+            return false;
+        }
+        end[n_end++] = r.n;
+        return true;
+    };
+    auto reach = [&](const uint32_t n_min, const uint32_t max_layers) {
+        uint32_t depth = 0;
+        while (depth < max_layers && end[depth] <= n_min) {
+            if (depth + 1 == n_end && !grow()) break;
+            depth++;
+        }
+    };
+    reach(n_large, 64);
+    reach(8 * n_small, 6);
+    r.layers = n_end - 1;
+    if (full || !unique) return r;
+    double x0[N_DIM];
+    for (int d = 0; d < N_DIM; d++) x0[d] = double(cell_coords(c, d));
+    const double h0 = h(c);
+    for (uint32_t k = 0; k < r.n; k++) {
+        const uint32_t v = w.cell[k];
+        if (v >= n_complete) return r;
+        for (int d = 0; d < N_DIM; d++) {
+            double x = double(cell_coords(v, d));
+            for (uint32_t j = 0; j < n_translations; j++) {
+                x += double(lattice_component(w.lattice[k], int(j))) * translations(j, d);
+            }
+            w.q[size_t(k) * N_DIM + size_t(d)] = on_grid((x - x0[d]) / h0);
+        }
+        w.order[k] = k;
+    }
+    // Each layer by position: a heap sort, whose order is total once ties are excluded
+    auto key = [&](const uint32_t k, int64_t * out) {
+        for (int d = 0; d < N_DIM; d++) out[d] = w.q[size_t(k) * N_DIM + size_t(d)];
+    };
+    auto before = [&](const uint32_t a, const uint32_t b) {
+        int64_t qa[N_DIM], qb[N_DIM];
+        key(a, qa);
+        key(b, qb);
+        return less<N_DIM>(qa, qb);
+    };
+    for (uint32_t layer = 1; layer < n_end; layer++) {
+        const uint32_t b0 = end[layer - 1], n = end[layer] - b0;
+        auto sift = [&](uint32_t root, const uint32_t size) {
+            const uint32_t item = w.order[b0 + root];
+            while (true) {
+                uint32_t child = 2 * root + 1;
+                if (child >= size) break;
+                if (child + 1 < size && before(w.order[b0 + child], w.order[b0 + child + 1])) child++;
+                if (!before(item, w.order[b0 + child])) break;
+                w.order[b0 + root] = w.order[b0 + child];
+                root = child;
+            }
+            w.order[b0 + root] = item;
+        };
+        for (uint32_t k = n / 2; k-- > 0;) sift(k, n);
+        for (uint32_t size = n; size > 1; size--) {
+            const uint32_t top = w.order[b0];
+            w.order[b0] = w.order[b0 + size - 1];
+            w.order[b0 + size - 1] = top;
+            sift(0, size - 1);
+        }
+        for (uint32_t k = b0 + 1; k < end[layer]; k++) {
+            int64_t qa[N_DIM], qb[N_DIM];
+            key(w.order[k - 1], qa);
+            key(w.order[k], qb);
+            if (equal<N_DIM>(qa, qb)) return r;
+        }
+    }
+    for (uint32_t p = 0; p < r.n; p++) {
+        const uint32_t v = w.cell[w.order[p]];
+        for (uint64_t k = hash_slot(v, mask);; k = (k + 1) & mask) {
+            if (uint32_t(w.hash[k]) == v) {
+                w.hash[k] = uint64_t(v) | (uint64_t(p) << 32);
+                break;
+            }
+        }
+    }
+    r.ok = true;
+    return r;
+}
+
+int ShapeSearch::boundary_rank(const uint32_t c, const uint32_t f) const {
+    int64_t qf[N_DIM];
+    for (int d = 0; d < N_DIM; d++) qf[d] = on_grid((double(face_coords(f, d)) - double(cell_coords(c, d))) / h(c));
+    int rank = 0;
+    bool found = false;
+    for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
+        const uint32_t g = faces_of_cell(k);
+        if (cells_of_face(g, 1) >= 0) continue;
+        if (g == f) {
+            found = true;
+            continue;
+        }
+        int64_t qg[N_DIM];
+        for (int d = 0; d < N_DIM; d++) qg[d] = on_grid((double(face_coords(g, d)) - double(cell_coords(c, d))) / h(c));
+        if (equal<N_DIM>(qg, qf)) return -1;
+        if (less<N_DIM>(qg, qf)) rank++;
+    }
+    return found ? rank : -1;
+}
+
+int64_t ShapeSearch::boundary_face(const uint32_t c, const int rank) const {
+    for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
+        const uint32_t g = faces_of_cell(k);
+        if (cells_of_face(g, 1) < 0 && boundary_rank(c, g) == rank) return int64_t(g);
+    }
+    return -1;
+}
+
+namespace {
+
+/** @brief Each cell's hash of its nodes and boundary faces with their conditions, sorted, in its own units. */
+void compute_shapes(const ShapeSearch & g, const uint32_t n_cells) {
+    Kokkos::parallel_for("teno_shape_shapes", Kokkos::RangePolicy<>(0, n_cells), KOKKOS_LAMBDA(const uint32_t c) {
+        int64_t items[MAX_SHAPE_ITEMS][N_DIM + 1];
+        const uint32_t n0 = g.offsets_nodes_of_cell(c), n1 = g.offsets_nodes_of_cell(c + 1);
+        const uint32_t f0 = g.offsets_faces_of_cell(c), f1 = g.offsets_faces_of_cell(c + 1);
+        double xc[N_DIM];
+        for (int d = 0; d < N_DIM; d++) xc[d] = double(g.cell_coords(c, d));
+        const double hc = g.h(c);
+        int n = 0;
+        bool fits = true;
+        for (uint32_t k = n0; k < n1 && fits; k++) {
+            fits = n < MAX_SHAPE_ITEMS;
+            if (!fits) break;
+            for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.node_coords(g.nodes_of_cell(k), d)) - xc[d]) / hc);
+            items[n++][N_DIM] = -1;
+        }
+        for (uint32_t k = f0; k < f1 && fits; k++) {
+            const uint32_t f = g.faces_of_cell(k);
+            if (g.cells_of_face(f, 1) >= 0) continue;
+            fits = n < MAX_SHAPE_ITEMS;
+            if (!fits) break;
+            for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.face_coords(f, d)) - xc[d]) / hc);
+            items[n++][N_DIM] = g.face_bc(f);
+        }
+        if (!fits) {
+            g.shape(c) = 0;
+            return;
+        }
+        for (int i = 1; i < n; i++) {
+            for (int j = i; j > 0 && less<N_DIM + 1>(items[j], items[j - 1]); j--) {
+                for (int d = 0; d <= N_DIM; d++) {
+                    const int64_t t = items[j][d];
+                    items[j][d] = items[j - 1][d];
+                    items[j - 1][d] = t;
+                }
+            }
+        }
+        Hasher hs;
+        hs.add(f1 - f0);
+        for (int i = 0; i < n; i++) {
+            for (int d = 0; d <= N_DIM; d++) hs.add_signed(items[i][d]);
+        }
+        g.shape(c) = hs.a == 0 ? 1 : hs.a;
+    });
+}
+
+/** @brief f(t, scratch) for t < n, slots searches at a time. */
+template <class F>
+void each_search(const ShapeSearch & g, const uint32_t slots, const uint32_t n, const F & f) {
+    if constexpr (DEVICE_IS_HOST) {
+        Kokkos::Experimental::UniqueToken<Kokkos::DefaultExecutionSpace, Kokkos::Experimental::UniqueTokenScope::Global>
+            token;
+        Kokkos::parallel_for("teno_shape_search",
+                             Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, n),
+                             [=](const uint32_t t) {
+            const int id = token.acquire();
+            f(t, g.lanes(size_t(id)));
+            token.release(id);
+        });
+    } else {
+        for (uint32_t t0 = 0; t0 < n; t0 += slots) {
+            Kokkos::parallel_for("teno_shape_search", Kokkos::RangePolicy<>(0, std::min(slots, n - t0)),
+                                 KOKKOS_LAMBDA(const uint32_t i) { f(t0 + i, g.lanes(i)); });
+        }
+    }
+}
+
+} // namespace
+
+bool ShapeKeys::supported(const Mesh & mesh) {
+    return !mesh.curved_geometry && !mesh.is_rotational() && !mesh.axisymmetric;
+}
+
+ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, const uint32_t n_large,
+                     const uint32_t n_small, const uint32_t batch)
+    : mesh(mesh_in) {
+    const uint32_t n_cells = mesh.n_cells;
+    s.cell_coords = mesh.cell_coords;
+    s.face_coords = mesh.face_coords;
+    s.node_coords = mesh.node_coords;
+    s.shifts = mesh.shifts;
+    s.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
+    s.cells_of_cell = mesh.cells_of_cell;
+    s.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
+    s.faces_of_cell = mesh.faces_of_cell;
+    s.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
+    s.nodes_of_cell = mesh.nodes_of_cell;
+    s.cells_of_cell_shift = mesh.cells_of_cell_shift;
+    s.face_shift = mesh.face_shift;
+    s.cells_of_face = mesh.cells_of_face;
+    s.face_bc = boundaries.face_bc;
+    s.n_complete = mesh.n_complete();
+    s.n_large = n_large;
+    s.n_small = n_small;
+    const size_t n_shifts = std::max<size_t>(mesh.shift_lattice.size(), 1);
+    s.shift_lattice = Kokkos::View<int8_t *[3]>("teno_shape_shift_lattice", n_shifts);
+    auto h_lattice = Kokkos::create_mirror_view(s.shift_lattice);
+    for (size_t k = 0; k < mesh.shift_lattice.size(); k++) {
+        for (size_t a = 0; a < 3; a++) h_lattice(k, a) = mesh.shift_lattice[k][a];
+    }
+    Kokkos::deep_copy(s.shift_lattice, h_lattice);
+    s.n_translations = static_cast<uint32_t>(mesh.periodic_translations.size());
+    s.translations = Kokkos::View<double *[3]>("teno_shape_translations", std::max<uint32_t>(s.n_translations, 1));
+    auto h_translations = Kokkos::create_mirror_view(s.translations);
+    for (uint32_t j = 0; j < s.n_translations; j++) {
+        for (int d = 0; d < N_DIM; d++) h_translations(j, d) = double(mesh.periodic_translations[j][size_t(d)]);
+    }
+    Kokkos::deep_copy(s.translations, h_translations);
+    s.h = Kokkos::View<double *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_h"), n_cells);
+    auto h_h = Kokkos::create_mirror_view(s.h);
+    Kokkos::parallel_for("teno_shape_scales", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
+                         [&](const uint32_t c) { h_h(c) = teno_setup::cell_scale(mesh, c); });
+    Kokkos::deep_copy(s.h, h_h);
+
+    // Room for about four times the cells the searches stop past
+    s.cap = std::bit_ceil(std::clamp<uint32_t>(4 * std::max(n_large, 8 * n_small), 256, 4096));
+    if constexpr (DEVICE_IS_HOST) {
+        slots = static_cast<uint32_t>(Kokkos::Experimental::UniqueToken<Kokkos::DefaultExecutionSpace, Kokkos::Experimental::UniqueTokenScope::Global>().size());
+    } else {
+        const size_t per_slot = size_t(s.cap) * (3 * sizeof(uint32_t) + N_DIM * sizeof(int64_t) + 2 * sizeof(uint64_t));
+        slots = static_cast<uint32_t>(std::clamp<size_t>((size_t(1) << 30) / per_slot, 1024, std::max(batch, 1024u)));
+    }
+    const bool interleaved = !DEVICE_IS_HOST;
+    s.cell = teno_setup::SlotArray<uint32_t>("teno_shape_cells", s.cap, slots, interleaved);
+    s.lattice = teno_setup::SlotArray<uint32_t>("teno_shape_lattice", s.cap, slots, interleaved);
+    s.order = teno_setup::SlotArray<uint32_t>("teno_shape_order", s.cap, slots, interleaved);
+    s.q = teno_setup::SlotArray<int64_t>("teno_shape_q", size_t(s.cap) * N_DIM, slots, interleaved);
+    s.hash = teno_setup::SlotArray<uint64_t>("teno_shape_hash", 2 * size_t(s.cap), slots, interleaved);
+    Kokkos::deep_copy(s.hash.data, EMPTY);
+
+    s.shape = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_shape"), n_cells);
+    compute_shapes(s, n_cells);
+}
+
 std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
-    // A cell whose own shape no other owned cell has is a shape of its own
+    // A cell whose own shape no other owned cell has, over the ranks, is a shape of its own
+    std::vector<uint64_t> shape(n);
+    Kokkos::deep_copy(Kokkos::View<uint64_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(shape.data(), n),
+                      Kokkos::subview(s.shape, std::make_pair(0u, n)));
     std::unordered_map<uint64_t, uint64_t> count;
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) count[shape[c]]++;
+    const uint32_t n_owned = std::min(n, mesh.n_owned());
+    for (uint32_t c = 0; c < n_owned; c++) count[shape[c]]++;
+    for (uint32_t c = n_owned; c < n; c++) count.try_emplace(shape[c], 0);
     const int p = comm::size();
     if (p > 1) {
         std::vector<std::vector<uint64_t>> report(static_cast<size_t>(p));
@@ -201,77 +425,217 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
             for (size_t k = 0; k < from.size(); k += 2) count[from[k]] = from[k + 1];
         }
     }
-    std::vector<ShapeKey> out(n);
-    Kokkos::Experimental::UniqueToken<Kokkos::DefaultHostExecutionSpace> token;
-    std::vector<Scan> scans(static_cast<size_t>(token.size()));
-    Kokkos::parallel_for("teno_shape_keys",
-                         Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, n),
-                         [&](const uint32_t c) {
-        const auto it = count.find(shape[c]);
-        if (it == count.end() || it->second < 2) return;
-        const int id = token.acquire();
-        Scan & s = scans[size_t(id)];
-        if (scan(c, s)) {
+    Kokkos::View<uint8_t *> shared("teno_shape_shared", n);
+    {
+        auto h_shared = Kokkos::create_mirror_view(shared);
+        for (uint32_t c = 0; c < n; c++) h_shared(c) = shape[c] != 0 && count.at(shape[c]) >= 2;
+        Kokkos::deep_copy(shared, h_shared);
+    }
+    Kokkos::View<uint64_t *[2]> out("teno_shape_keys", n);
+    const ShapeSearch g = s;
+    each_search(g, slots, n, KOKKOS_LAMBDA(const uint32_t c, const ShapeLanes & w) {
+        if (!shared(c)) return;
+        uint32_t end[MAX_END];
+        const ShapeSearch::Result r = g.search(c, w, end);
+        if (r.ok) {
             Hasher hs;
-            hs.add(s.end.size());
-            hs.add(s.entries.size());
+            hs.add(r.layers + 1);
+            hs.add(r.n);
             // The cell's faces in its own order, in its frame
             double x0[N_DIM];
-            for (int d = 0; d < N_DIM; d++) x0[d] = double(mesh.h_cell_coords(c, d));
-            for (uint32_t k = mesh.h_offsets_faces_of_cell(c); k < mesh.h_offsets_faces_of_cell(c + 1); k++) {
-                const uint32_t f = mesh.h_faces_of_cell(k);
-                const bool second = mesh.h_cells_of_face(f, 1) == int32_t(c);
+            for (int d = 0; d < N_DIM; d++) x0[d] = double(g.cell_coords(c, d));
+            const double hc = g.h(c);
+            for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
+                const uint32_t f = g.faces_of_cell(k);
+                const bool second = g.cells_of_face(f, 1) == int32_t(c);
                 hs.add(second);
                 for (int d = 0; d < N_DIM; d++) {
-                    const double shift = second ? double(mesh.h_shifts(mesh.h_face_shift(f), d)) : 0.0;
-                    hs.add_signed(on_grid((double(mesh.h_face_coords(f, d)) - shift - x0[d]) / h[c]));
+                    const double shift = second ? double(g.shifts(g.face_shift(f), d)) : 0.0;
+                    hs.add_signed(ShapeSearch::on_grid((double(g.face_coords(f, d)) - shift - x0[d]) / hc));
                 }
             }
-            for (const Scan::Entry & e : s.entries) {
-                hs.add_signed(e.layer);
-                for (const int64_t q : e.q) hs.add_signed(q);
-                hs.add(shape[e.cell]);
-                hs.add_signed(on_grid(h[e.cell] / h[c]));
+            uint32_t layer = 0;
+            for (uint32_t p = 0; p < r.n; p++) {
+                while (p >= end[layer]) layer++;
+                const uint32_t k = w.order[p];
+                const uint32_t v = w.cell[k];
+                hs.add(layer);
+                for (int d = 0; d < N_DIM; d++) hs.add_signed(w.q[size_t(k) * N_DIM + size_t(d)]);
+                hs.add(g.shape(v));
+                hs.add_signed(ShapeSearch::on_grid(g.h(v) / hc));
             }
-            out[c] = ShapeKey{hs.a == 0 ? 1 : hs.a, hs.b};
+            out(c, 0) = hs.a == 0 ? 1 : hs.a;
+            out(c, 1) = hs.b;
         }
-        token.release(id);
+        g.clear(w, r.n);
+    });
+    auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+    std::vector<ShapeKey> keys(n);
+    for (uint32_t c = 0; c < n; c++) keys[c] = ShapeKey{h_out(c, 0), h_out(c, 1)};
+    return keys;
+}
+
+void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n, const teno_setup::TableBatch & batch,
+                       const Kokkos::View<uint32_t *> & size) const {
+    const ShapeSearch g = s;
+    each_search(g, slots, n, KOKKOS_LAMBDA(const uint32_t j, const ShapeLanes & w) {
+        uint32_t end[MAX_END];
+        const uint32_t c = cells(j);
+        const ShapeSearch::Result r = g.search(c, w, end);
+        bool ok = r.ok && batch.status(j) == teno_setup::OK && batch.failed_large(j) == 0 &&
+                  batch.gather_depth(j) == r.layers;
+        auto stencil = [&](const teno_setup::Lane<int32_t> & entries, const teno_setup::Lane<int32_t> & faces,
+                           const uint32_t count) {
+            for (uint32_t k = 0; k < count && ok; k++) {
+                const int64_t p = g.position(w, uint32_t(entries[k]));
+                const int32_t f = faces[k];
+                int64_t code = -1;
+                if (f >= 0) {
+                    const uint32_t owner = uint32_t(g.cells_of_face(uint32_t(f), 0));
+                    const int64_t po = g.position(w, owner);
+                    const int rank = po < 0 ? -1 : g.boundary_rank(owner, uint32_t(f));
+                    ok = rank >= 0;
+                    code = po * 64 + rank;
+                }
+                ok = ok && p >= 0 && f >= -1;
+                entries[k] = int32_t(p);
+                faces[k] = int32_t(code);
+            }
+        };
+        if (ok) stencil(batch.large_cells.lane(j), batch.large_faces.lane(j), batch.large_size(j));
+        if (ok) stencil(batch.small_cells.lane(j), batch.small_faces.lane(j), batch.small_total(j));
+        size(j) = ok ? r.n : 0;
+        g.clear(w, r.n);
+    });
+}
+
+std::vector<std::vector<uint64_t>> ShapeKeys::records(const teno_setup::TableBatch & batch, const uint32_t n,
+                                                      const Kokkos::View<uint32_t *> & size) {
+    auto host = [](const auto & a) { return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), a.data); };
+    auto lane = [](const auto & h, const auto & a, const size_t slot, const size_t k) {
+        return a.interleaved ? h(slot + k * a.slots) : h(slot * a.cap + k);
+    };
+    auto h_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), size);
+    auto depth = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.gather_depth);
+    auto invalid = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.invalid_small);
+    auto large_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.large_size);
+    auto small_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.small_size);
+    auto small_total = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.small_total);
+    auto mean = host(batch.basis_mean), si = host(batch.si);
+    auto large_cells = host(batch.large_cells), large_faces = host(batch.large_faces);
+    auto large_pinv = host(batch.large_pinv);
+    auto small_cells = host(batch.small_cells), small_faces = host(batch.small_faces);
+    auto small_pinv = host(batch.small_pinv);
+    const size_t nk = batch.nk;
+    std::vector<std::vector<uint64_t>> out(n);
+    Kokkos::parallel_for("teno_shape_records", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n), [&](const uint32_t j) {
+        std::vector<uint64_t> & r = out[j];
+        if (h_size(j) == 0) {
+            r = {0};
+            return;
+        }
+        r = {1, h_size(j), depth(j), invalid(j), large_size(j)};
+        for (int k = 0; k < teno::MAX_FACES; k++) r.push_back(small_size(j, k));
+        auto values = [&](const auto & h, const auto & a, const size_t count) {
+            for (size_t k = 0; k < count; k++) r.push_back(std::bit_cast<uint64_t>(double(lane(h, a, j, k))));
+        };
+        auto stencil = [&](const auto & cells, const auto & a, const auto & faces, const auto & b, const size_t count) {
+            for (size_t k = 0; k < count; k++) {
+                r.push_back(uint64_t(lane(cells, a, j, k)));
+                r.push_back(uint64_t(int64_t(lane(faces, b, j, k))));
+            }
+        };
+        values(mean, batch.basis_mean, batch.basis_mean.cap);
+        values(si, batch.si, batch.si.cap);
+        stencil(large_cells, batch.large_cells, large_faces, batch.large_faces, large_size(j));
+        values(large_pinv, batch.large_pinv, large_size(j) * nk);
+        stencil(small_cells, batch.small_cells, small_faces, batch.small_faces, small_total(j));
+        values(small_pinv, batch.small_pinv, small_total(j) * size_t(teno::NK_SMALL));
     });
     return out;
 }
 
-bool ShapeKeys::neighborhood(const uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & s) const {
-    if (!scan(c, s)) return false;
-    layers = static_cast<uint32_t>(s.end.size() - 1);
-    cells.resize(s.entries.size());
-    for (size_t k = 0; k < cells.size(); k++) cells[k] = s.entries[k].cell;
-    return true;
-}
-
-std::vector<uint32_t> ShapeKeys::sorted_boundary_faces(const uint32_t c) const {
-    std::vector<std::pair<std::array<int64_t, N_DIM>, uint32_t>> faces;
-    for (uint32_t k = mesh.h_offsets_faces_of_cell(c); k < mesh.h_offsets_faces_of_cell(c + 1); k++) {
-        const uint32_t f = mesh.h_faces_of_cell(k);
-        if (mesh.h_cells_of_face(f, 1) >= 0) continue;
-        std::array<int64_t, N_DIM> q{};
-        for (int d = 0; d < N_DIM; d++) q[size_t(d)] = on_grid((double(mesh.h_face_coords(f, d)) - double(mesh.h_cell_coords(c, d))) / h[c]);
-        faces.emplace_back(q, f);
-    }
-    std::sort(faces.begin(), faces.end());
-    std::vector<uint32_t> out;
-    for (const auto & qf : faces) out.push_back(qf.second);
+ShapeKeys::Records ShapeKeys::upload(const std::vector<std::vector<uint64_t>> & records) {
+    Records out;
+    out.offset = Kokkos::View<uint64_t *>("teno_shape_record_offsets", records.size() + 1);
+    auto h_offset = Kokkos::create_mirror_view(out.offset);
+    h_offset(0) = 0;
+    for (size_t k = 0; k < records.size(); k++) h_offset(k + 1) = h_offset(k) + records[k].size();
+    out.data = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_records"),
+                                        h_offset(records.size()));
+    auto h_data = Kokkos::create_mirror_view(out.data);
+    for (size_t k = 0; k < records.size(); k++) std::copy(records[k].begin(), records[k].end(), h_data.data() + h_offset(k));
+    Kokkos::deep_copy(out.offset, h_offset);
+    Kokkos::deep_copy(out.data, h_data);
     return out;
 }
 
-int ShapeKeys::boundary_rank(const uint32_t c, const uint32_t f) const {
-    const std::vector<uint32_t> faces = sorted_boundary_faces(c);
-    const auto it = std::find(faces.begin(), faces.end(), f);
-    return it == faces.end() ? -1 : int(it - faces.begin());
-}
-
-int64_t ShapeKeys::boundary_face(const uint32_t c, const int rank) const {
-    const std::vector<uint32_t> faces = sorted_boundary_faces(c);
-    return rank >= 0 && size_t(rank) < faces.size() ? int64_t(faces[size_t(rank)]) : -1;
+void ShapeKeys::decode(const uint32_t c0, const uint32_t n, const Kokkos::View<uint32_t *> & group,
+                       const Records & records, const teno_setup::TableBatch & out,
+                       const Kokkos::View<uint8_t *> & bad) const {
+    const ShapeSearch g = s;
+    const auto offset = records.offset;
+    const auto data = records.data;
+    each_search(g, slots, n, KOKKOS_LAMBDA(const uint32_t t, const ShapeLanes & w) {
+        const uint32_t c = c0 + t;
+        bad(t) = 0;
+        if (group(c) == ShapeGroups::NONE) return;
+        uint32_t end[MAX_END];
+        const ShapeSearch::Result r = g.search(c, w, end);
+        const uint64_t * rec = data.data() + offset(group(c));
+        bool ok = r.ok && rec[0] == 1 && rec[1] == r.n;
+        size_t at = 2;
+        const uint8_t depth = static_cast<uint8_t>(rec[at++]);
+        const uint8_t invalid = static_cast<uint8_t>(rec[at++]);
+        const uint32_t n_large = static_cast<uint32_t>(rec[at++]);
+        uint32_t n_small = 0;
+        for (int k = 0; k < teno::MAX_FACES; k++) {
+            out.small_size(t, k) = static_cast<uint16_t>(rec[at + size_t(k)]);
+            n_small += static_cast<uint32_t>(rec[at + size_t(k)]);
+        }
+        at += teno::MAX_FACES;
+        ok = ok && n_large <= out.max_large && n_small <= out.max_small;
+        if (ok) {
+            auto values = [&](const teno_setup::Lane<rtype> & to, const size_t count) {
+                for (size_t k = 0; k < count; k++) to[k] = rtype(Kokkos::bit_cast<double>(rec[at++]));
+            };
+            auto stencil = [&](const teno_setup::Lane<int32_t> & entries, const teno_setup::Lane<int32_t> & faces,
+                               const uint32_t count) {
+                for (uint32_t k = 0; k < count; k++) {
+                    const uint64_t p = rec[at++];
+                    const int64_t code = int64_t(rec[at++]);
+                    ok = ok && p < r.n;
+                    if (!ok) return;
+                    entries[k] = int32_t(w.cell[w.order[p]]);
+                    if (code < 0) {
+                        faces[k] = -1;
+                        continue;
+                    }
+                    const uint64_t po = uint64_t(code) / 64;
+                    ok = po < r.n;
+                    if (!ok) return;
+                    const int64_t f = g.boundary_face(w.cell[w.order[po]], int(code % 64));
+                    ok = f >= 0;
+                    faces[k] = int32_t(f);
+                }
+            };
+            values(out.basis_mean.lane(t), out.basis_mean.cap);
+            values(out.si.lane(t), out.si.cap);
+            stencil(out.large_cells.lane(t), out.large_faces.lane(t), n_large);
+            if (ok) values(out.large_pinv.lane(t), size_t(n_large) * out.nk);
+            if (ok) stencil(out.small_cells.lane(t), out.small_faces.lane(t), n_small);
+            if (ok) values(out.small_pinv.lane(t), size_t(n_small) * teno::NK_SMALL);
+        }
+        out.status(t) = teno_setup::OK;
+        out.gather_depth(t) = depth;
+        out.failed_large(t) = 0;
+        out.invalid_small(t) = invalid;
+        out.large_size(t) = static_cast<uint16_t>(n_large);
+        out.small_total(t) = static_cast<uint16_t>(n_small);
+        out.scale.lane(t)[0] = rtype(g.h(c));
+        bad(t) = !ok;
+        g.clear(w, r.n);
+    });
 }
 
 ShapeGroups ShapeGroups::build(const std::vector<ShapeKey> & keys, const uint64_t * gid) {
