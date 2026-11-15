@@ -926,6 +926,39 @@ TEST(MixtureTest, DoubleFluxKeepsPressureAndVelocityUniformAtContacts) {
     EXPECT_GT(contact_errors("type = \"MUSCL\"\n", false)[0], 1e-3);
 }
 
+TEST(MixtureTest, InertContactKeepsTemperatureAndPressureUniformWhereMassFractionsAreBounded) {
+    // CO against N2 across a sharp contact, in O2 (the most abundant species)
+    // with inert CO2, at uniform p and T, MUSCL without a limiter: the slope
+    // of CO (or N2) is cut at the contact to keep it non-negative, and O2,
+    // not its complement, takes it. The face gamma, e0 and density must
+    // follow that composition, or T moves by tens of kelvin and p by percent;
+    // CO and N2 have nearly equal molar masses, so p and T then stay uniform
+    std::ostringstream input;
+    input << "[run]\nt_stop = 2.5e-3\ncfl = 0.25\n" << mesh_block("cartesian", 40, 1, 1.0, 1.0 / 40, "[\"x\"]")
+          << "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"300.0\"\nu = " << velocity("100.0")
+          << "\nX = { CO = \"abs(x - 0.5) < 0.25 ? 0.3 : 0\", N2 = \"abs(x - 0.5) < 0.25 ? 0 : 0.3\", "
+             "CO2 = \"0.1\" }\nbalance = \"O2\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+          << (N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                           "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                         : "")
+          << numerics("type = \"MUSCL\"\nlimiter = \"none\"\n", "HLLC")
+          << mixture(SOURCE_DIR + "/mechanisms/ch4_bfer.yaml");
+    Solver solver;
+    solver.init(parse_toml(input.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    std::array<double, 2> err = {0.0, 0.0};
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        err[0] = std::max(err[0], std::abs(double(solver.h_primitives(c, N_DIM + 1)) - 300.0));
+        err[1] = std::max(err[1], std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0));
+    }
+    err = comm::allreduce(err, comm::Op::MAX);
+    EXPECT_LT(err[0], tol(0.05, 0.5)) << "max |T - 300 K|";
+    EXPECT_LT(err[1], tol(1e-5, 1e-4)) << "max |p / 1e5 Pa - 1|";
+}
+
 TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
     // Double flux gives up energy conservation in proportion to the jumps of
     // gamma and e0; across the shock tube's waves (all still inside the

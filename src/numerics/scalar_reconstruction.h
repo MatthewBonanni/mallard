@@ -21,6 +21,7 @@
 #include "face_reconstruction.h"
 #include "mesh.h"
 #include "teno.h"
+#include "thermo.h"
 
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
 using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
@@ -106,8 +107,11 @@ struct ScalarFaceValues {
  *          minimum over all scalars of the flow block's limiter type; each
  *          mass fraction then scales its own slope to stay in [0, 1] at every
  *          face, the cell's most abundant species taking what the others give
- *          up (the slopes still sum to zero), and the limiter value is reduced
- *          further only to keep that species in [0, 1] and gamma above 1;
+ *          up (the slopes still sum to zero). The slopes of gamma and e0, and
+ *          the face density, change with that composition at the cell's p and
+ *          T, so the face state stays that of its composition. The limiter
+ *          value is reduced further only to keep that species in [0, 1] and
+ *          gamma above 1;
  *        - TENO: the flow block's linear weights (TENOScalarValues) with one
  *          bound-preserving factor theta per cell (Zhang & Shu 2010), the
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at
@@ -119,10 +123,10 @@ struct ScalarFaceValues {
 class ScalarReconstruction {
     public:
         /**
-         * @param n_species Number of species (the scalars are n_species + 2).
+         * @param thermo Species thermodynamics (the scalars are its n_species + 2).
          * @param flow Face reconstruction of the flow block, whose stencils TENO shares.
          */
-        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, uint32_t n_species,
+        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const chemistry::ThermoTable<> & thermo,
                   const FaceReconstruction & flow);
 
         /**
@@ -130,10 +134,12 @@ class ScalarReconstruction {
          *        beyond it (MUSCL gradients and limiters, TENO factors theta),
          *        and the face values of [gamma, e0] on both sides of every
          *        face, written to face_thermo(face, q, side, 0/1).
-         * @param W Cell states W = [rho, u, p], for the limiter thresholds.
+         * @param W Cell states W = [rho, u, p], for the limiter thresholds and the cell temperatures.
+         * @param face_W Face states of the flow block: MUSCL moves the face density with the
+         *        composition where a mass fraction's slope was bounded.
          */
         void calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
-                  Kokkos::View<rtype **[2][2]> face_thermo);
+                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W, Kokkos::View<rtype **[2][2]> face_thermo);
 
         /**
          * @brief Species fluxes per face side (SpeciesSlotFunctor) of every
@@ -160,11 +166,13 @@ class ScalarReconstruction {
         std::shared_ptr<Mesh> mesh;
         BoundaryData boundaries;
         const TENO * teno = nullptr;
+        chemistry::ThermoTable<> thermo;
         uint32_t n_species = 0;
         bool linear = false;
         LimiterType limiter_type = LimiterType::NONE;
         rtype venkat_K = 5.0;
         Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;
+        Kokkos::View<rtype *[N_DIM]> density_slope;  // change of the face density with the bounded composition
         Kokkos::View<rtype *> limiter;
         Kokkos::View<rtype *> theta;  // TENO
 };

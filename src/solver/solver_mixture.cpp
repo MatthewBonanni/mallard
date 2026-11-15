@@ -476,7 +476,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     face_reconstruction->rotate_periodic_faces(face_solution);
     face_reconstruction->image_point_values(W_cells, face_solution);
     // The characteristic faces read the reconstructed gamma of this stage
-    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
+    scalar_reconstruction.calc(cell_scalars, W_cells, face_solution, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
 
