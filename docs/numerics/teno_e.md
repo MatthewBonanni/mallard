@@ -566,8 +566,10 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
-**One fit per stencil shape.** The setup groups the cells before fitting any
-table (`teno_shapes.h`). A cell's search reads the geometry of the cells in its
+**One fit per stencil shape.** In builds that run on the host (Serial, Threads,
+OpenMP), the setup groups the cells before fitting any table (`teno_shapes.h`);
+GPU builds fit every cell, which the device does faster than the host builds
+the keys (#1082). A cell's search reads the geometry of the cells in its
 vertex-neighbor layers, as many as the layers' cell counts make it take, and
 its own faces; its key hashes exactly that, relative to the cell and in units of
 its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
