@@ -404,6 +404,12 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
     tables.push_back(ball + ", edge = 0.1}");
     tables.push_back("{type = \"intersection\", regions = [" + small + ", " + ball + "}]}");
     tables.push_back("{type = \"difference\", a = " + small + ", b = " + ball + "}}");
+    if constexpr (N_DIM == 2) {
+        // A centre off the plane: the cells at z = 0 are within its bounds in x and y
+        tables.push_back("{type = \"sphere\", center = [0.5, 0.5, 0.3], radius = 0.4}");
+        tables.push_back("{type = \"disk\", center = [0.5, 0.5, 0.3], radius = 0.4}");
+        tables.push_back("{type = \"rectangle\", center = [0.5, 0.5, 0.3], size = [0.4, 0.3]}");
+    }
     int skipped = 0;
     for (const std::string & table : tables) {
         const region::Region r = make_region(table);
