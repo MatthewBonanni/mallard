@@ -1151,9 +1151,15 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
         const std::vector<rtype> h_off = chem_h("off_" + step + ".restart");
         const std::vector<rtype> h_on = chem_h("on_" + step + ".restart");
         ASSERT_EQ(h_on.size(), h_off.size());
+        // In single precision the first call's mark, -h_initial rounded, seeds RODAS slightly differently
+        const bool exact = last > 1 || std::is_same_v<rtype, double>;
         for (size_t c = 0; c < h_off.size(); c++) {
             EXPECT_GT(h_off[c], rtype(0));
-            EXPECT_EQ(h_on[c], -h_off[c]);
+            if (exact) {
+                EXPECT_EQ(h_on[c], -h_off[c]);
+            } else {
+                EXPECT_NEAR(-double(h_on[c]), double(h_off[c]), 1e-5 * double(h_off[c]));
+            }
         }
     }
     // Explicit steps fail during the induction; the ignition's sub-steps, shorter than a call, clear the mark

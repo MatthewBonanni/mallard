@@ -1454,14 +1454,18 @@ burning out in hot gas); about half the cells that try the explicit step
 fail, most of them burnt gas whose fractional-order fuel consumption is
 stiff, and as each of them tries once rather than every call its chemistry
 stays within 1% of RODAS alone. Off by default (issue #1090: enabling it
-where it pays).
+where it pays). `flame_3d`'s difference does not shrink with the tolerances
+(0.96, 0.82 and 0.82 K at `rtol` 1e-6, 1e-7 and 1e-8 on CPUs), while 0D
+reactors of its mixture agree to 1e-11 with and without the option: it
+comes from the coupling with the flow (issue #1169).
 `ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
 bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
 of `T`, against RODAS's own 5e-5 from Cantera;
 `ReactingTest.CellsWhoseExplicitStepFailedStopTryingIt` checks that a
 failed step leaves RODAS's state and proposal bitwise as without the option,
-with `CHEM_H` negated, also in a cell's first call, and that an ignition's
-short sub-steps clear it.
+with `CHEM_H` negated, also in a cell's first call (there, in single
+precision, the proposal only to rounding), and that an ignition's short
+sub-steps clear it.
 
 ## 6. Transport
 

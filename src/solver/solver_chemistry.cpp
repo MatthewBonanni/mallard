@@ -305,7 +305,7 @@ double Solver::chemistry_explicit_marked() const {
         const Kokkos::View<rtype *> h = chem_h;
         Kokkos::parallel_reduce(
             "chemistry_explicit_marked", mesh->n_owned(),
-            KOKKOS_LAMBDA(const uint32_t c, uint64_t & m) { m += h(c) < 0.0_r ? 1 : 0; }, marked);
+            KOKKOS_LAMBDA(const uint32_t c, uint64_t & m) { if (h(c) < 0.0_r) m++; }, marked);
     }
     return comm::allreduce(double(marked), comm::Op::SUM);
 }
