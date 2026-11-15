@@ -297,7 +297,9 @@ TEST(PostExtractTest, StencilFieldsAreTheRunsBitForBit) {
         solver.run();
     }
     comm::barrier();
-    if (vtkhdf() && comm::is_root()) ASSERT_TRUE(fs::remove(run + "/stencils.h5"));
+    if (vtkhdf() && comm::is_root()) {
+        ASSERT_TRUE(fs::remove(run + "/stencils.h5"));
+    }
     comm::barrier();
     const std::string out = fresh_dir("stencils");
     ASSERT_EQ(extract({run + "/restart_000004.restart", "--snapshot", "vtu", "--fields", fields, "--name", "sten", "-o", out}), 0);
