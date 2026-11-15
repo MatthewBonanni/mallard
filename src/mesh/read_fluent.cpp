@@ -1,64 +1,151 @@
 /**
  * @file read_fluent.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief ANSYS Fluent mesh and case files, ASCII and binary.
- * @version 0.9
- * @date 2026-10-15
+ * @brief ANSYS Fluent mesh and case files, ASCII and binary, each rank
+ *        reading its own part of the nodes and faces.
+ * @version 0.10
+ * @date 2026-11-15
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
  */
 
 #include "mesh_file.h"
-#include "common_io.h"
+#include "read_parallel.h"
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
 
+#include "comm.h"
+#include "common_io.h"
+
 namespace {
 
-constexpr int INTERIOR = 2;  // Fluent's bc-type of interior face zones
+using parallel_read::collectively;
+using parallel_read::Fields;
+using parallel_read::FileCursor;
+using parallel_read::FileLines;
+using parallel_read::LineReader;
+using parallel_read::Records;
 
-class Reader {
-  public:
-    Reader(std::string text, std::string filename) : s(std::move(text)), name(std::move(filename)) {}
+constexpr int INTERIOR = 2;            // Fluent's bc-type of interior face zones
+constexpr uint64_t MARK_SPACING = 1024;  // binary faces of varying size: where every MARK_SPACING-th starts
 
-    [[noreturn]] void fail(const std::string & what) const {
-        throw std::runtime_error("Fluent file " + name + ": " + what);
+/** @brief A node or face section with data: ASCII (one item per line from line `start`) or binary (from byte `start`). */
+struct Section {
+    int kind = 0;  // 10: nodes, 13: faces
+    uint64_t zone = 0, first = 0, last = 0;
+    int nd = 0;                      // nodes: coordinates per node
+    int bc_type = 0, face_type = 0;  // faces; face_type 0 or 5: mixed, a node count per face
+    int value_size = 0;              // binary: bytes per value; 0: ASCII
+    uint64_t start = 0;
+    std::vector<uint64_t> marks;  // binary mixed faces: offset of faces first, first + MARK_SPACING, ...
+
+    uint64_t size() const { return last >= first ? last - first + 1 : 0; }
+    bool mixed() const { return face_type == 0 || face_type == 5; }
+};
+
+/** @brief What every rank knows of a Fluent file: everything but the nodes' and faces' data. */
+struct Layout {
+    int dim = 0;
+    uint64_t n_cells = 0, n_nodes = 0, n_faces = 0;
+    std::vector<Section> sections;
+    std::vector<std::array<uint64_t, 3>> cell_sections;  // zone, first and last cell id
+    std::map<uint64_t, std::string> zone_names;
+
+    std::string pack() const {
+        std::ostringstream s;
+        s << dim << " " << n_cells << " " << n_nodes << " " << n_faces << " " << sections.size() << "\n";
+        for (const Section & x : sections) {
+            s << x.kind << " " << x.zone << " " << x.first << " " << x.last << " " << x.nd << " " << x.bc_type << " "
+              << x.face_type << " " << x.value_size << " " << x.start << " " << x.marks.size();
+            for (uint64_t m : x.marks) s << " " << m;
+            s << "\n";
+        }
+        s << cell_sections.size();
+        for (const auto & c : cell_sections) s << " " << c[0] << " " << c[1] << " " << c[2];
+        s << "\n" << zone_names.size() << "\n";
+        for (const auto & [id, name] : zone_names) s << id << " " << name.size() << " " << name << "\n";
+        return s.str();
     }
+
+    void unpack(const std::string & text) {
+        std::istringstream s(text);
+        size_t n = 0;
+        s >> dim >> n_cells >> n_nodes >> n_faces >> n;
+        sections.resize(n);
+        for (Section & x : sections) {
+            size_t n_marks = 0;
+            s >> x.kind >> x.zone >> x.first >> x.last >> x.nd >> x.bc_type >> x.face_type >> x.value_size >> x.start >> n_marks;
+            x.marks.resize(n_marks);
+            for (uint64_t & m : x.marks) s >> m;
+        }
+        s >> n;
+        cell_sections.resize(n);
+        for (auto & c : cell_sections) s >> c[0] >> c[1] >> c[2];
+        s >> n;
+        for (size_t k = 0; k < n; k++) {
+            uint64_t id = 0;
+            size_t length = 0;
+            s >> id >> length;
+            s.get();
+            std::string name(length, ' ');
+            s.read(name.data(), static_cast<std::streamsize>(length));
+            zone_names[id] = name;
+        }
+    }
+
+    std::string zone_name(uint64_t zone) const {
+        const auto it = zone_names.find(zone);
+        return it != zone_names.end() ? it->second : "zone_" + std::to_string(zone);
+    }
+};
+
+/** @brief Walks a Fluent file's sections, skipping over their data. */
+class Walker {
+  public:
+    Walker(const std::string & filename, LineReader & line_reader) : cur(filename), lines(line_reader), name(filename) {}
+
+    [[noreturn]] void fail(const std::string & what) const { throw std::runtime_error("Fluent file " + name + ": " + what); }
+
+    uint64_t offset() const { return cur.offset(); }
     bool done() {
         skip_space();
-        return pos >= s.size();
+        return cur.peek() < 0;
     }
     void skip_space() {
-        while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) pos++;
+        while (cur.peek() >= 0 && std::isspace(cur.peek())) cur.get();
     }
     void expect(char c) {
         skip_space();
-        if (pos >= s.size() || s[pos] != c) fail(std::string("expected '") + c + "' at byte " + std::to_string(pos) + ".");
-        pos++;
+        if (cur.peek() != static_cast<unsigned char>(c)) {
+            fail(std::string("expected '") + c + "' at byte " + std::to_string(cur.offset()) + ".");
+        }
+        cur.get();
     }
     bool peek(char c) {
         skip_space();
-        return pos < s.size() && s[pos] == c;
+        return cur.peek() == static_cast<unsigned char>(c);
     }
     std::string token() {
         skip_space();
-        if (pos < s.size() && s[pos] == '"') {
-            const size_t end = s.find('"', pos + 1);
-            if (end == std::string::npos) fail("unterminated string.");
-            std::string t = s.substr(pos + 1, end - pos - 1);
-            pos = end + 1;
+        std::string t;
+        if (cur.peek() == '"') {
+            cur.get();
+            for (int c = cur.get(); c != '"'; c = cur.get()) {
+                if (c < 0) fail("unterminated string.");
+                t += char(c);
+            }
             return t;
         }
-        const size_t start = pos;
-        while (pos < s.size() && !std::isspace(static_cast<unsigned char>(s[pos])) && s[pos] != '(' && s[pos] != ')') pos++;
-        if (pos == start) fail("expected a value at byte " + std::to_string(pos) + ".");
-        return s.substr(start, pos - start);
+        for (int c = cur.peek(); c >= 0 && !std::isspace(c) && c != '(' && c != ')'; c = cur.peek()) t += char(cur.get());
+        if (t.empty()) fail("expected a value at byte " + std::to_string(cur.offset()) + ".");
+        return t;
     }
     uint64_t hex() {
         const std::string t = token();
@@ -74,13 +161,6 @@ class Reader {
         if (*end != '\0') fail("bad number " + t + ".");
         return v;
     }
-    double real() {
-        const std::string t = token();
-        char * end = nullptr;
-        const double v = std::strtod(t.c_str(), &end);
-        if (*end != '\0') fail("bad number " + t + ".");
-        return v;
-    }
     /** @brief The hexadecimal numbers of a header list "(a b c ...)". */
     std::vector<uint64_t> header() {
         expect('(');
@@ -92,62 +172,62 @@ class Reader {
     /** @brief Skip to the parenthesis closing the one just opened (strings respected). */
     void skip_to_close() {
         int depth = 1;
-        while (pos < s.size() && depth > 0) {
-            const char c = s[pos++];
+        while (depth > 0) {
+            const int c = cur.get();
+            if (c < 0) fail("unbalanced parentheses.");
             if (c == '"') {
-                const size_t end = s.find('"', pos);
-                pos = end == std::string::npos ? s.size() : end + 1;
+                for (int d = cur.get(); d != '"' && d >= 0; d = cur.get()) {}
             } else if (c == '(') {
                 depth++;
             } else if (c == ')') {
                 depth--;
             }
         }
-        if (depth > 0) fail("unbalanced parentheses.");
     }
     /** @brief Check the ids first..last of a section: from 1, and no more than the file can define. */
     void check_ids(uint64_t first, uint64_t last, const std::string & what) const {
-        if (first < 1 || last > s.size()) {
+        if (first < 1 || last > cur.size()) {
             fail(what + " ids " + std::to_string(first) + " to " + std::to_string(last) + " out of range.");
         }
     }
-    template <typename T>
-    T binary() {
-        if (pos + sizeof(T) > s.size()) fail("binary section ends early.");
-        T v;
-        std::memcpy(&v, s.data() + pos, sizeof(T));
-        pos += sizeof(T);
+    /** @brief Skip n bytes of binary data. */
+    void skip(uint64_t n) {
+        if (n > cur.size() - cur.offset()) fail("binary section ends early.");
+        cur.seek(cur.offset() + n);
+    }
+    int32_t int32() {
+        char bytes[4];
+        for (char & b : bytes) {
+            const int c = cur.get();
+            if (c < 0) fail("binary section ends early.");
+            b = char(c);
+        }
+        int32_t v;
+        std::memcpy(&v, bytes, 4);
         return v;
     }
+    /** @brief Skip the n lines of ASCII data that start on the next line; returns the first one's number. */
+    uint64_t skip_lines(uint64_t n) {
+        while (cur.peek() == ' ' || cur.peek() == '\t' || cur.peek() == '\r') cur.get();
+        if (cur.get() != '\n') fail(ONE_PER_LINE);
+        const uint64_t first = lines.line_at(cur.offset());
+        cur.seek(lines.offset(first + n));
+        if (!peek(')')) fail(ONE_PER_LINE);
+        return first;
+    }
 
-    std::string s;
+    static constexpr const char * ONE_PER_LINE =
+        "Mallard reads ASCII node and face sections with one node or face per line, as Fluent writes them.";
+
+  private:
+    FileCursor cur;
+    LineReader & lines;
     std::string name;
-    size_t pos = 0;
 };
 
-struct FluentZone {
-    int bc_type = 0;
-    std::vector<uint32_t> faces;
-};
-
-} // namespace
-
-MeshFileData read_fluent(const std::string & filename) {
-    std::ifstream in(filename, std::ios::binary);
-    if (!in.good()) throw cannot_read("the mesh file", filename);
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    Reader r(buffer.str(), filename);
-
-    int dim = 0;
-    std::vector<std::array<double, 3>> nodes;
-    std::vector<std::vector<uint32_t>> faces;
-    std::vector<std::array<int64_t, 2>> face_cells;
-    std::map<uint64_t, FluentZone> face_zones;
-    std::map<uint64_t, std::string> zone_names;
-    std::vector<std::array<uint64_t, 3>> cell_sections;  // zone, first and last cell id
-    uint64_t n_cells = 0;
-
+Layout read_layout(const std::string & filename, LineReader & lines) {
+    Walker r(filename, lines);
+    Layout layout;
     while (!r.done()) {
         r.expect('(');
         const std::string index_text = r.token();
@@ -157,85 +237,89 @@ MeshFileData read_fluent(const std::string & filename) {
         const bool binary = index >= 2000;
         const long kind = index % 1000;
         if (index == 2) {
-            dim = int(r.dec());
+            layout.dim = int(r.dec());
             r.expect(')');
         } else if (kind == 10 && (index == 10 || index == 2010 || index == 3010)) {
             const auto h = r.header();
             if (h.size() < 4) r.fail("short node section header.");
-            const uint64_t first = h[1], last = h[2];
-            const int nd = h.size() > 4 ? int(h[4]) : dim;
-            r.check_ids(std::max<uint64_t>(first, 1), last, "node");
-            if (last > nodes.size()) nodes.resize(last, {0.0, 0.0, 0.0});
-            if (h[0] == 0 || r.peek(')')) {
+            Section s;
+            s.kind = 10;
+            s.zone = h[0];
+            s.first = h[1];
+            s.last = h[2];
+            s.nd = h.size() > 4 ? int(h[4]) : layout.dim;
+            r.check_ids(std::max<uint64_t>(s.first, 1), s.last, "node");
+            layout.n_nodes = std::max(layout.n_nodes, s.last);
+            if (s.zone == 0 || r.peek(')')) {
                 r.expect(')');
                 continue;
             }
-            if (nd != 2 && nd != 3) r.fail("nodes of dimension " + std::to_string(nd) + ".");
-            r.check_ids(first, last, "node");
+            if (s.nd != 2 && s.nd != 3) r.fail("nodes of dimension " + std::to_string(s.nd) + ".");
+            r.check_ids(s.first, s.last, "node");
             r.expect('(');
-            for (uint64_t n = first; n <= last; n++) {
-                for (int d = 0; d < nd; d++) {
-                    nodes[n - 1][size_t(d)] = !binary ? r.real() : index == 3010 ? r.binary<double>() : double(r.binary<float>());
-                }
+            if (binary) {
+                s.value_size = index == 3010 ? 8 : 4;
+                s.start = r.offset();
+                r.skip(s.size() * uint64_t(s.nd) * uint64_t(s.value_size));
+            } else {
+                s.start = r.skip_lines(s.size());
             }
+            layout.sections.push_back(s);
             r.expect(')');
             r.skip_to_close();
         } else if (kind == 12 && (index == 12 || index == 2012 || index == 3012)) {
             const auto h = r.header();
             if (h.size() < 3) r.fail("short cell section header.");
             r.check_ids(std::max<uint64_t>(h[1], 1), h[2], "cell");
-            if (h[2] > n_cells) n_cells = h[2];
+            layout.n_cells = std::max(layout.n_cells, h[2]);
             if (h[0] != 0) {
                 if (h[1] < 1 || h[2] < h[1]) r.fail("cell zone " + std::to_string(h[0]) + " has an empty or reversed id range.");
-                cell_sections.push_back({h[0], h[1], h[2]});
+                layout.cell_sections.push_back({h[0], h[1], h[2]});
             }
             if (h.size() > 4 && h[0] != 0 && h[4] == 7) r.fail("polyhedral cell zone " + std::to_string(h[0]) + "; Mallard reads tetrahedra, pyramids, prisms and hexahedra (triangles and quadrilaterals in 2D).");
             r.skip_to_close();
         } else if (kind == 13 && (index == 13 || index == 2013 || index == 3013)) {
             const auto h = r.header();
             if (h.size() < 5) r.fail("short face section header.");
-            const uint64_t zone = h[0], first = h[1], last = h[2];
-            const int bc_type = int(h[3]), face_type = int(h[4]);
-            r.check_ids(std::max<uint64_t>(first, 1), last, "face");
-            if (zone == 0 || r.peek(')')) {
+            Section s;
+            s.kind = 13;
+            s.zone = h[0];
+            s.first = h[1];
+            s.last = h[2];
+            s.bc_type = int(h[3]);
+            s.face_type = int(h[4]);
+            r.check_ids(std::max<uint64_t>(s.first, 1), s.last, "face");
+            if (s.zone == 0 || r.peek(')')) {
                 r.expect(')');
                 continue;
             }
-            r.check_ids(first, last, "face");
-            if (last > faces.size()) {
-                faces.resize(last);
-                face_cells.resize(last, {-1, -1});
-            }
-            FluentZone & fz = face_zones[zone];
-            fz.bc_type = bc_type;
+            r.check_ids(s.first, s.last, "face");
+            layout.n_faces = std::max(layout.n_faces, s.last);
             r.expect('(');
-            auto value = [&]() -> uint64_t {
-                if (!binary) return r.hex();
-                const int32_t v = r.binary<int32_t>();
-                if (v < 0) r.fail("negative id in a binary face section.");
-                return uint64_t(v);
-            };
-            for (uint64_t f = first; f <= last; f++) {
-                const uint64_t n = (face_type == 0 || face_type == 5) ? value() : uint64_t(face_type);
-                if (n < 2 || n > 64) r.fail("face of " + std::to_string(n) + " nodes.");
-                std::vector<uint32_t> & face = faces[f - 1];
-                face.resize(n);
-                for (auto & v : face) {
-                    const uint64_t node = value();
-                    if (node < 1) r.fail("face node id 0.");
-                    v = uint32_t(node - 1);
+            if (binary) {
+                s.value_size = 4;
+                s.start = r.offset();
+                if (!s.mixed()) {
+                    r.skip(s.size() * uint64_t(s.face_type + 2) * 4);
+                } else {
+                    for (uint64_t f = 0; f < s.size(); f++) {
+                        if (f % MARK_SPACING == 0) s.marks.push_back(r.offset());
+                        const int32_t n = r.int32();
+                        if (n < 2 || n > 64) r.fail("face of " + std::to_string(n) + " nodes.");
+                        r.skip(uint64_t(n + 2) * 4);
+                    }
                 }
-                const uint64_t c0 = value(), c1 = value();
-                face_cells[f - 1] = {int64_t(c0) - 1, int64_t(c1) - 1};
-                fz.faces.push_back(uint32_t(f - 1));
+            } else {
+                s.start = r.skip_lines(s.size());
             }
+            layout.sections.push_back(s);
             r.expect(')');
             r.skip_to_close();
         } else if (index == 39 || index == 45) {
             r.expect('(');
             const uint64_t id = uint64_t(r.dec());
             r.token();  // zone type
-            zone_names[id] = r.token();
+            layout.zone_names[id] = r.token();
             r.skip_to_close();
             r.skip_to_close();
         } else if (index == 58 || index == 59 || index == 2058 || index == 2059 || index == 3058 || index == 3059) {
@@ -244,41 +328,249 @@ MeshFileData read_fluent(const std::string & filename) {
             r.skip_to_close();
         }
     }
-    if (dim != N_DIM) {
-        r.fail(dim == 0 ? "no dimension section." :
-               "has " + std::to_string(dim) + "D cells, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
+    if (layout.dim != N_DIM) {
+        r.fail(layout.dim == 0 ? "no dimension section." :
+               "has " + std::to_string(layout.dim) + "D cells, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
     }
-    if (n_cells == 0) r.fail("no cells.");
-    for (size_t f = 0; f < faces.size(); f++) {
-        if (faces[f].empty()) r.fail("face " + std::to_string(f + 1) + " is in no face section.");
-        for (uint32_t n : faces[f]) {
-            if (n >= nodes.size()) r.fail("face " + std::to_string(f + 1) + " refers to a missing node.");
+    if (layout.n_cells == 0) r.fail("no cells.");
+    return layout;
+}
+
+} // namespace
+
+MeshBlock read_fluent_block(const std::string & filename) {
+    const int p = comm::size(), r = comm::rank();
+    if (comm::allreduce(std::ifstream(filename).good() ? 0 : 1, comm::Op::MAX)) throw cannot_read("the mesh file", filename);
+    const std::string source = "Fluent file " + filename;
+    const uint64_t file_size = std::filesystem::file_size(filename);
+    const FileLines lines = parallel_read::index_lines(filename, file_size);
+    LineReader reader(filename, lines, source);
+    Layout layout;
+    std::string packed;
+    collectively([&] {
+        if (r == 0) packed = read_layout(filename, reader).pack();
+    });
+    layout.unpack(comm::broadcast(packed));
+    auto fail = [&](const std::string & what) { throw std::runtime_error(source + ": " + what); };
+    std::ifstream in(filename, std::ios::binary);
+    auto read_bytes = [&](uint64_t at, uint64_t n) {
+        std::vector<char> bytes(n);
+        in.clear();
+        in.seekg(static_cast<std::streamoff>(at));
+        in.read(bytes.data(), static_cast<std::streamsize>(n));
+        if (uint64_t(in.gcount()) != n) fail("binary section ends early.");
+        return bytes;
+    };
+
+    // This rank's share of the nodes, by id
+    const uint64_t first_node = block_begin(layout.n_nodes, r, p), end_node = block_begin(layout.n_nodes, r + 1, p);
+    std::vector<std::array<double, N_DIM>> xyz(end_node - first_node, std::array<double, N_DIM>{});
+    collectively([&] {
+        for (const Section & s : layout.sections) {
+            if (s.kind != 10) continue;
+            const uint64_t from = std::max(first_node, s.first - 1), to = std::min(end_node, s.last);
+            if (from >= to) continue;
+            const int nd = std::min(s.nd, N_DIM);
+            if (s.value_size == 0) {
+                reader.seek(s.start + from - (s.first - 1));
+                for (uint64_t n = from; n < to; n++) {
+                    Fields f = reader.next();
+                    for (int d = 0; d < s.nd; d++) {
+                        const double x = f.real();
+                        if (d < nd) xyz[n - first_node][size_t(d)] = x;
+                    }
+                    if (!f.done()) fail(Walker::ONE_PER_LINE);
+                }
+                continue;
+            }
+            const uint64_t node_bytes = uint64_t(s.nd) * uint64_t(s.value_size);
+            const std::vector<char> bytes = read_bytes(s.start + (from - (s.first - 1)) * node_bytes, (to - from) * node_bytes);
+            for (uint64_t n = from; n < to; n++) {
+                const char * at = bytes.data() + (n - from) * node_bytes;
+                for (int d = 0; d < nd; d++) {
+                    if (s.value_size == 8) {
+                        std::memcpy(&xyz[n - first_node][size_t(d)], at + 8 * d, 8);
+                    } else {
+                        float v;
+                        std::memcpy(&v, at + 4 * d, 4);
+                        xyz[n - first_node][size_t(d)] = double(v);
+                    }
+                }
+            }
+        }
+    });
+
+    // This rank's share of the faces, by id; a face is in the last section that lists it
+    const uint64_t first_face = block_begin(layout.n_faces, r, p), end_face = block_begin(layout.n_faces, r + 1, p);
+    std::vector<int> section_of(end_face - first_face, -1);
+    for (size_t k = 0; k < layout.sections.size(); k++) {
+        const Section & s = layout.sections[k];
+        if (s.kind != 13) continue;
+        for (uint64_t f = std::max(first_face, s.first - 1); f < std::min(end_face, s.last); f++) section_of[f - first_face] = int(k);
+    }
+    std::vector<uint64_t> face_ids;
+    std::vector<int> face_section;
+    std::vector<std::array<int64_t, 2>> face_cells;
+    Records faces;
+    collectively([&] {
+        uint64_t missing_node = parallel_read::NONE;
+        std::vector<uint64_t> nodes;
+        auto add = [&](uint64_t f, int k, std::span<const uint64_t> values) {
+            // values: the nodes, then the two cells, 1-based
+            if (section_of[f - first_face] != k) return;
+            const size_t n = values.size() - 2;
+            for (size_t i = 0; i < n; i++) {
+                if (values[i] < 1) fail("face node id 0.");
+                if (values[i] > layout.n_nodes) missing_node = std::min(missing_node, f);
+                faces.words.push_back(values[i] - 1);
+            }
+            faces.end_record();
+            face_ids.push_back(f);
+            face_section.push_back(k);
+            face_cells.push_back({int64_t(values[n]) - 1, int64_t(values[n + 1]) - 1});
+        };
+        for (size_t k = 0; k < layout.sections.size(); k++) {
+            const Section & s = layout.sections[k];
+            if (s.kind != 13) continue;
+            const uint64_t from = std::max(first_face, s.first - 1), to = std::min(end_face, s.last);
+            if (from >= to) continue;
+            auto check_size = [&](uint64_t n) {
+                if (n < 2 || n > 64) fail("face of " + std::to_string(n) + " nodes.");
+            };
+            if (s.value_size == 0) {
+                reader.seek(s.start + from - (s.first - 1));
+                for (uint64_t f = from; f < to; f++) {
+                    Fields line = reader.next();
+                    const uint64_t n = s.mixed() ? line.integer<uint64_t>(16) : uint64_t(s.face_type);
+                    check_size(n);
+                    nodes.resize(n + 2);
+                    for (uint64_t & v : nodes) v = line.integer<uint64_t>(16);
+                    if (!line.done()) fail(Walker::ONE_PER_LINE);
+                    add(f, int(k), nodes);
+                }
+                continue;
+            }
+            auto value = [&](const char * at) {
+                int32_t v;
+                std::memcpy(&v, at, 4);
+                if (v < 0) fail("negative id in a binary face section.");
+                return uint64_t(v);
+            };
+            if (!s.mixed()) {
+                const uint64_t n = uint64_t(s.face_type), face_bytes = (n + 2) * 4;
+                check_size(n);
+                const std::vector<char> bytes = read_bytes(s.start + (from - (s.first - 1)) * face_bytes, (to - from) * face_bytes);
+                nodes.resize(n + 2);
+                for (uint64_t f = from; f < to; f++) {
+                    for (uint64_t i = 0; i < n + 2; i++) nodes[i] = value(bytes.data() + (f - from) * face_bytes + 4 * i);
+                    add(f, int(k), nodes);
+                }
+                continue;
+            }
+            const uint64_t mark = (from - (s.first - 1)) / MARK_SPACING;
+            FileCursor cur(filename);
+            cur.seek(s.marks[mark]);
+            char word[4];
+            auto next = [&]() {
+                for (char & b : word) {
+                    const int c = cur.get();
+                    if (c < 0) fail("binary section ends early.");
+                    b = char(c);
+                }
+                return value(word);
+            };
+            for (uint64_t f = s.first - 1 + mark * MARK_SPACING; f < to; f++) {
+                const uint64_t n = next();
+                check_size(n);
+                nodes.resize(n + 2);
+                for (uint64_t & v : nodes) v = next();
+                if (f >= from) add(f, int(k), nodes);
+            }
+        }
+        for (uint64_t f = first_face; f < end_face; f++) {
+            if (section_of[f - first_face] < 0) fail("face " + std::to_string(f + 1) + " is in no face section.");
+            if (f == missing_node) fail("face " + std::to_string(f + 1) + " refers to a missing node.");
+        }
+    });
+
+    MeshBlock block;
+    parallel_read::cells_of_faces(layout.n_cells, face_ids, faces, face_cells, source, block);
+
+    // Boundary faces: by zone id, then section in file order, then face id
+    {
+        std::map<uint64_t, int> zone_bc;
+        for (const Section & s : layout.sections) {
+            if (s.kind == 13) zone_bc[s.zone] = s.bc_type;
+        }
+        const size_t n_sections = layout.sections.size();
+        std::vector<uint64_t> counts(n_sections, 0);
+        std::vector<uint8_t> boundary(face_ids.size(), 0);
+        for (size_t k = 0; k < face_ids.size(); k++) {
+            const Section & s = layout.sections[size_t(face_section[k])];
+            if (zone_bc[s.zone] == INTERIOR || (face_cells[k][0] >= 0 && face_cells[k][1] >= 0)) continue;
+            boundary[k] = 1;
+            counts[size_t(face_section[k])]++;
+        }
+        const std::vector<uint64_t> all = comm::allgatherv(counts);  // by rank, then section
+        std::vector<size_t> order;
+        for (size_t k = 0; k < n_sections; k++) {
+            if (layout.sections[k].kind == 13) order.push_back(k);
+        }
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return layout.sections[a].zone < layout.sections[b].zone; });
+        std::vector<uint64_t> next(n_sections, 0);
+        std::vector<std::string> zone_names;
+        std::map<uint64_t, uint32_t> zone_index;
+        uint64_t n_faces = 0;
+        for (size_t k : order) {
+            uint64_t total = 0;
+            for (int q = 0; q < p; q++) {
+                if (q == r) next[k] = n_faces + total;
+                total += all[size_t(q) * n_sections + k];
+            }
+            n_faces += total;
+            const uint64_t zone = layout.sections[k].zone;
+            if (total == 0 || zone_index.count(zone)) continue;
+            const std::string name = layout.zone_name(zone);
+            const auto it = std::find(zone_names.begin(), zone_names.end(), name);
+            zone_index[zone] = uint32_t(it - zone_names.begin());
+            if (it == zone_names.end()) zone_names.push_back(name);
+        }
+        std::vector<uint64_t> position;
+        Records records;
+        for (size_t k = 0; k < face_ids.size(); k++) {
+            if (!boundary[k]) continue;
+            const size_t s = size_t(face_section[k]);
+            position.push_back(next[s]++);
+            records.words.push_back(zone_index.at(layout.sections[s].zone));
+            records.words.push_back(faces.offsets[k + 1] - faces.offsets[k]);
+            records.words.insert(records.words.end(), faces.words.begin() + std::ptrdiff_t(faces.offsets[k]),
+                                 faces.words.begin() + std::ptrdiff_t(faces.offsets[k + 1]));
+            records.end_record();
+        }
+        release(faces.words);
+        release(faces.offsets);
+        block.zone_names = zone_names;
+        parallel_read::place_faces(position, records, n_faces, false, block);
+    }
+
+    // Cell zones: the last cell section that lists a cell
+    for (const auto & [zone, first, last] : layout.cell_sections) {
+        const std::string name = layout.zone_name(zone);
+        if (std::find(block.cell_zone_names.begin(), block.cell_zone_names.end(), name) == block.cell_zone_names.end()) {
+            block.cell_zone_names.push_back(name);
+        }
+    }
+    if (!block.cell_zone_names.empty()) {
+        block.cell_zone.assign(block.n_cells(), Mesh::NO_CELL_ZONE);
+        for (const auto & [zone, first, last] : layout.cell_sections) {
+            const uint32_t z = uint32_t(std::find(block.cell_zone_names.begin(), block.cell_zone_names.end(),
+                                                  layout.zone_name(zone)) - block.cell_zone_names.begin());
+            const uint64_t from = std::max(block.first_cell, first - 1), to = std::min(block.first_cell + block.n_cells(), last);
+            for (uint64_t c = from; c < to; c++) block.cell_zone[c - block.first_cell] = z;
         }
     }
 
-    MeshFileData data;
-    data.cells = cells_from_faces(uint32_t(n_cells), faces, face_cells, "Fluent file " + filename);
-    for (const auto & x : nodes) {
-        std::array<rtype, N_DIM> p;
-        for (size_t d = 0; d < N_DIM; d++) p[d] = static_cast<rtype>(x[d]);
-        data.nodes.push_back(p);
-    }
-    for (const auto & [zone, fz] : face_zones) {
-        if (fz.bc_type == INTERIOR) continue;
-        const auto it = zone_names.find(zone);
-        const std::string zone_name = it != zone_names.end() ? it->second : "zone_" + std::to_string(zone);
-        for (uint32_t f : fz.faces) {
-            if (face_cells[f][0] >= 0 && face_cells[f][1] >= 0) continue;  // internal walls, fans: interior here
-            data.boundary_faces.push_back({faces[f], zone_name});
-            data.boundary_high_order.emplace_back();
-        }
-    }
-    for (const auto & [zone, first, last] : cell_sections) {
-        const auto it = zone_names.find(zone);
-        for (uint64_t c = first; c <= last; c++) {
-            data.set_cell_zone(c - 1, it != zone_names.end() ? it->second : "zone_" + std::to_string(zone));
-        }
-    }
-    drop_unused_nodes(data);
-    return data;
+    parallel_read::place_used_nodes(layout.n_nodes, std::move(xyz), {&block.cell_nodes, &block.face_nodes}, block);
+    return block;
 }

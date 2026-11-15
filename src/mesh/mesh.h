@@ -482,7 +482,7 @@ class Mesh {
 
         /**
          * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5) or another mesh
-         *        file (see read_mesh_file), and map its nodes by transform.
+         *        file (see read_file_block), and map its nodes by transform.
          */
         void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {},
                        const MeshTransform & transform = MeshTransform());

@@ -2,7 +2,8 @@
  * @file mesh_block.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief A rank's contiguous block of a mesh, by global id, and the sources
- *        that produce one: HDF5 mesh files, Gmsh files and generated meshes.
+ *        that produce one: HDF5 mesh files, other mesh files and generated
+ *        meshes.
  * @version 0.4
  * @date 2026-10-02
  *
@@ -134,10 +135,8 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
 /**
  * @brief This rank's block of the mesh described by the [mesh] table
  *        (collective): an HDF5 mesh file (.h5), another mesh file (see
- *        read_mesh_file), or a generated mesh. Generated meshes number cells
- *        and nodes exactly as Mesh::init. Mesh files other than HDF5 and
- *        Gmsh are read whole by rank 0, so large ones should be converted to
- *        HDF5 first.
+ *        read_file_block), or a generated mesh. Generated meshes number cells
+ *        and nodes exactly as Mesh::init.
  */
 MeshBlock read_mesh_block(const Input & input);
 
@@ -149,10 +148,10 @@ MeshBlock read_mesh_block(const Input & input);
 std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric = false);
 
 /**
- * @brief This rank's block of a mesh file other than HDF5 (see
- *        read_mesh_file), collective: the ranks read a Gmsh file together
- *        (read_gmsh_block); rank 0 reads any other file and sends the other
- *        ranks their blocks.
+ * @brief This rank's block of a mesh file other than HDF5, read by the ranks
+ *        together (collective; see mesh_file.h) by its extension: Gmsh or
+ *        Fluent (.msh, told apart by their first character), Fluent case
+ *        (.cas), CGNS (.cgns), or a directory: OpenFOAM.
  */
 MeshBlock read_file_block(const std::string & filename);
 

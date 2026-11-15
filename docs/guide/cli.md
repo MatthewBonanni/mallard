@@ -838,8 +838,8 @@ Writes a mesh as a Mallard HDF5 mesh file, which large runs read in parallel.
 INPUT is a mesh file (Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns, OpenFOAM
 polyMesh directory), or an input file (.toml) whose [mesh] table describes the
 mesh (with its [mesh.transform]). Under MPI, the ranks write in parallel (needs
-parallel HDF5); each reads the whole mesh file but generates only its block.
-Needs a build with HDF5.
+parallel HDF5), and read a mesh file together or generate the input's mesh, each
+only its block. Needs a build with HDF5.
 
 Options:
   -h, --help  Show this page.
