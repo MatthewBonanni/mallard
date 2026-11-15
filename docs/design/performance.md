@@ -454,14 +454,21 @@ before 12.4, or a failed capture of NCCL operations under one, tried on every ra
 launch one step at a time with the IF bodies always run.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
-their writes, before the triggers (and before the statistics' samples, so that a step a trigger fires at is
-still the host's alone), the graph reduces them into the trigger variables with the host's arithmetic
-(`probe_reduction.h`): every sum's per-sample terms, each product rounded on its own, are summed exactly in
-fixed point (`ExactSums`, reduced over the ranks with `comm::allreduce_device`, on NCCL in the graph), the
-extrema are reduced with `MIN` and `MAX`, and a one-point probe's values go to every rank as bit patterns
-summed with zeros, so the values equal the host's `Probe::reduce` bit for bit on any number of ranks. The
-host still writes the files from the staged samples. Time-averaged probes (whose running means are rank 0's)
-and probes reading cell data or `[statistics]` outputs (sampled after the triggers) are left to the host:
+their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
+graph reduces them into the trigger variables with the host's arithmetic (`probe_reduction.h`): every sum's
+per-sample terms, each product rounded on its own, are summed exactly in fixed point (`ExactSums`, reduced
+over the ranks with `comm::allreduce_device`, on NCCL in the graph), the extrema are reduced with `MIN` and
+`MAX`, and a one-point probe's values go to every rank as bit patterns summed with zeros, so the values equal
+the host's `Probe::reduce` bit for bit on any number of ranks. The host still writes the files from the staged
+samples. A time-averaged probe's running means are kept on the device as well, per local sample: the clock
+kernel weighs each sample as `Probes::sample_average` does (`w = t - t_last`, `a = w / W`), and every mean takes
+`mean += a (x - mean)` with the product rounded on its own, as the host's means of the same staged samples do,
+so the reductions of the device's means are those of rank 0's. Whenever the host samples a probe itself (a step
+it stops at, a restart, averages started afresh), the device's means are copied from the host's on resuming.
+Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
+the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
+written), the record says so, and the host takes the step without sampling them again (writing the spectra's
+staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 

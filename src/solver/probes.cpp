@@ -1432,9 +1432,19 @@ void Probes::Samples::allocate_staging(const uint64_t n_records) {
         "probe_staging", n_records, values.extent(0) * values.extent(1));
 }
 
-void Probes::Samples::copy_to_staging(
-    const uint64_t * seq, const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns)
-    const {
+void Probes::Samples::fill_columns(
+    const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const {
+    const auto v = values;
+    const auto c = cells;
+    for (const auto & entry : columns) {
+        const uint32_t column = entry.first;
+        const auto field = entry.second;
+        Kokkos::parallel_for("probe_cell_field", c.extent(0),
+                             KOKKOS_LAMBDA(const size_t i) { v(i, column) = field(c(i)); });
+    }
+}
+
+void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
     const auto v = values;
     const auto st = staging;
     const uint64_t n_records = staging.extent(0);
@@ -1443,15 +1453,6 @@ void Probes::Samples::copy_to_staging(
         const uint64_t slot = (*seq - 1) % n_records;
         for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
     });
-    // gather's cell columns: each sample's cell's value
-    const auto c = cells;
-    for (const auto & entry : columns) {
-        const uint32_t column = entry.first;
-        const auto field = entry.second;
-        Kokkos::parallel_for("probe_staged_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) {
-            st((*seq - 1) % n_records, i * n_vars + column) = field(c(i));
-        });
-    }
 }
 
 namespace probe {
@@ -2475,11 +2476,6 @@ bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
-bool Probes::can_reduce(const size_t k) const {
-    const Probe & p = *probes[k];
-    return !p.average && p.cell_columns.empty();
-}
-
 void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const bool reduce,
                    const bool use_nccl) {
     Probe & p = *probes[k];
@@ -2541,6 +2537,12 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
         r->hi = Kokkos::View<double *>("probe_reduction_hi", p.variables.size());
     }
     if (p.point_value) r->point = Kokkos::View<int64_t *>("probe_reduction_point", p.variables.size());
+    if (p.average) {
+        using Means = Kokkos::View<double **, Kokkos::LayoutRight>;
+        const uint32_t n_cols = static_cast<uint32_t>(p.n_evaluated());
+        if (p.samples_nodes()) r->mean_nodes = Means("probe_mean_nodes", p.nodes.cells.extent(0), n_cols);
+        if (p.samples_quadrature()) r->mean_quadrature = Means("probe_mean_quadrature", p.quadrature.cells.extent(0), n_cols);
+    }
     p.device_reduction = r;
 }
 
@@ -2551,7 +2553,11 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
     const bool points = p.quadrature.n_global == 0;
     const Samples & S = points ? p.nodes : p.quadrature;
     const uint32_t n_local = static_cast<uint32_t>(S.cells.extent(0));
+    // The samples' values, or an averaging probe's means of them
     const auto q = S.values;
+    const auto mq = points ? r.mean_nodes : r.mean_quadrature;
+    const auto mn = r.mean_nodes;
+    const bool averaged = p.average;
     if (r.summed) {
         const auto terms = r.terms;
         const auto weights = r.weights;
@@ -2565,7 +2571,9 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
                 for (int d = 0; d < 3; d++) x[d] = positions(i, d);
             }
             const double w = weighted ? weights(i) : 1.0;
-            for (uint32_t t = 0; t < n_terms; t++) values(i, t) = probe_term(terms(t), w, &q(i, 0), x);
+            for (uint32_t t = 0; t < n_terms; t++) {
+                values(i, t) = averaged ? probe_term(terms(t), w, &mq(i, 0), x) : probe_term(terms(t), w, &q(i, 0), x);
+            }
         });
         r.sums.sum(values);
     }
@@ -2576,11 +2584,13 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         const uint32_t n_nodes = points || !p.samples_nodes() ? 0 : static_cast<uint32_t>(p.nodes.cells.extent(0));
         for (uint32_t v = 0; v < lo.extent(0); v++) {
             Kokkos::parallel_reduce("probe_reduction_min", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
-                const double x = static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
+                const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
+                                          : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x < m) m = x;
             }, Kokkos::Min<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(lo.data() + v)));
             Kokkos::parallel_reduce("probe_reduction_max", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
-                const double x = static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
+                const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
+                                          : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x > m) m = x;
             }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(hi.data() + v)));
         }
@@ -2595,7 +2605,7 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         const auto nodes = p.nodes.values;
         const bool held = p.nodes.cells.extent(0) == 1;
         Kokkos::parallel_for("probe_reduction_point", static_cast<uint32_t>(point.extent(0)), KOKKOS_LAMBDA(const uint32_t v) {
-            point(v) = held ? Kokkos::bit_cast<int64_t>(static_cast<double>(nodes(0, v))) : 0;
+            point(v) = held ? Kokkos::bit_cast<int64_t>(averaged ? mn(0, v) : static_cast<double>(nodes(0, v))) : 0;
         });
         if (p.nodes.distributed) comm::allreduce_device(point, comm::Op::SUM, r.use_nccl);
     }
@@ -2611,7 +2621,42 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
 
 Probes::StagedClock Probes::staged_clock(const size_t k) const {
     const Probe & p = *probes[k];
-    return {p.interval, p.time_interval, p.time_tol(), p.n_written, p.average ? 1u : 0u};
+    return {p.interval,       p.time_interval,    p.time_tol(), p.n_written, p.average ? 1u : 0u,
+            p.average_weight, p.average_t_last, 0.0,          p.average_samples};
+}
+
+void Probes::average_staged(const size_t k, const uint32_t * sampled, const double * a) {
+    const Probe & p = *probes[k];
+    const Probe::DeviceReduction & r = *p.device_reduction;
+    for (const auto & [S, mean] : {std::pair(&p.nodes, r.mean_nodes), std::pair(&p.quadrature, r.mean_quadrature)}) {
+        const auto q = S->values;
+        const auto m = mean;
+        const uint32_t n_cols = static_cast<uint32_t>(m.extent(1));
+        Kokkos::parallel_for("probe_mean", m.extent(0) * n_cols, KOKKOS_LAMBDA(const size_t j) {
+            if (*sampled == 0) return;
+            const size_t i = j / n_cols, v = j % n_cols;
+            m(i, v) += rounded_product(*a, static_cast<double>(q(i, v)) - m(i, v));
+        });
+    }
+}
+
+void Probes::resume_staged(const size_t k) {
+    Probe & p = *probes[k];
+    if (!p.average || !p.device_reduction || p.device_reduction->means_current) return;
+    Probe::DeviceReduction & r = *p.device_reduction;
+    using HostRows = Kokkos::View<const double **, Kokkos::LayoutRight, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+    const auto copy = [&](const Samples & S, const std::vector<double> & host,
+                          const Kokkos::View<double **, Kokkos::LayoutRight> & mean) {
+        // Rank 0's means in sample order (zero before the first sample), or each rank's undistributed
+        const size_t width = p.n_evaluated();
+        const bool holds = !S.distributed || comm::is_root();
+        const std::vector<double> local =
+            S.scatter(holds && host.empty() ? std::vector<double>(S.n_global * width, 0.0) : host, width);
+        Kokkos::deep_copy(mean, HostRows(local.data(), mean.extent(0), mean.extent(1)));
+    };
+    if (p.samples_nodes()) copy(p.nodes, p.mean_nodes, r.mean_nodes);
+    if (p.samples_quadrature()) copy(p.quadrature, p.mean_quadrature, r.mean_quadrature);
+    r.means_current = true;
 }
 
 void Probes::sample_staged_average(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
@@ -2634,11 +2679,13 @@ void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const u
     Probe & p = *probes[k];
     if (p.samples_nodes()) {
         p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
-        p.nodes.copy_to_staging(seq, p.device_columns);
+        p.nodes.fill_columns(p.device_columns);
+        p.nodes.copy_to_staging(seq);
     }
     if (p.samples_quadrature()) {
         p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-        p.quadrature.copy_to_staging(seq, p.device_columns);
+        p.quadrature.fill_columns(p.device_columns);
+        p.quadrature.copy_to_staging(seq);
     }
 }
 
@@ -2872,7 +2919,7 @@ const std::string AVERAGE_PREFIX = "PROBE_AVERAGE_";
 /** @brief West's running mean: mean += a (x - mean), from zero at the first sample. */
 void accumulate(std::vector<double> & mean, const std::vector<double> & x, double a) {
     if (mean.empty()) mean.assign(x.size(), 0.0);
-    for (size_t i = 0; i < x.size(); i++) mean[i] += a * (x[i] - mean[i]);
+    for (size_t i = 0; i < x.size(); i++) mean[i] += rounded_product(a, x[i] - mean[i]);
 }
 
 /**
@@ -2944,6 +2991,8 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
     if (p.isosurface) p.extract(static_cast<double>(t));
     if (p.solution) m_region_seconds += timer.seconds();
     p.sample(fields, nodes, quad, slot);
+    // The device means took the staged samples themselves
+    if (slot < 0 && p.device_reduction) p.device_reduction->means_current = false;
     p.average_weight += w;
     p.average_t_last = static_cast<double>(t);
     p.average_samples++;
@@ -2963,6 +3012,7 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
 void Probes::start_averages(rtype t) {
     for (auto & p : probes) {
         if (!p->average) continue;
+        if (p->device_reduction) p->device_reduction->means_current = false;
         p->average_weight = 0.0;
         p->average_t_last = static_cast<double>(std::max(t, average_start));
         p->average_samples = 0;
