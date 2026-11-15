@@ -763,9 +763,10 @@ void Solver::init_polynomial_exchange(const FacePlan & faces, const std::vector<
     allocate_polynomials(n);
     auto rows = [&](const std::vector<std::vector<uint32_t>> & face_lists,
                     const std::vector<std::vector<uint8_t>> & side_lists, std::vector<std::vector<uint32_t>> & row_lists,
-                    std::vector<std::vector<uint8_t>> & lane_lists) {
+                    std::vector<std::vector<uint8_t>> & lane_lists, std::vector<std::vector<uint64_t>> & global) {
         row_lists.assign(face_lists.size(), {});
         lane_lists.assign(face_lists.size(), {});
+        global.assign(face_lists.size(), {});
         // Both ends list a neighbor's cells in the same order, so each keeps the first of repeated cells
         for (size_t k = 0; k < face_lists.size(); k++) {
             std::unordered_set<uint32_t> seen;
@@ -774,13 +775,25 @@ void Solver::init_polynomial_exchange(const FacePlan & faces, const std::vector<
                 if (!seen.insert(c).second) continue;
                 row_lists[k].push_back(c >> 1);
                 lane_lists[k].push_back(static_cast<uint8_t>(c & 1u));
+                global[k].push_back(mesh->h_global_cell(c));
             }
         }
     };
     FacePlan plan;
     plan.neighbors = faces.neighbors;
-    rows(faces.send_faces, faces.send_sides, plan.send_faces, plan.send_sides);
-    rows(faces.recv_faces, faces.recv_sides, plan.recv_faces, plan.recv_sides);
+    std::vector<std::vector<uint64_t>> send_cells, recv_cells;
+    rows(faces.send_faces, faces.send_sides, plan.send_faces, plan.send_sides, send_cells);
+    rows(faces.recv_faces, faces.recv_sides, plan.recv_faces, plan.recv_sides, recv_cells);
+    // That order is the plan's: check once that each neighbor sends the cells, in the order, this rank expects
+    std::vector<std::vector<uint64_t>> to_rank(static_cast<size_t>(comm::size()));
+    for (size_t k = 0; k < plan.neighbors.size(); k++) to_rank[static_cast<size_t>(plan.neighbors[k])] = send_cells[k];
+    const auto from_rank = comm::alltoallv(to_rank);
+    for (size_t k = 0; k < plan.neighbors.size(); k++) {
+        if (from_rank[static_cast<size_t>(plan.neighbors[k])] != recv_cells[k]) {
+            throw std::logic_error("init_polynomial_exchange: rank " + std::to_string(plan.neighbors[k]) +
+                                   " sends other cells than rank " + std::to_string(comm::rank()) + " expects");
+        }
+    }
     const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
     polynomial_exchange = FaceExchange(plan, teno.n_dof_large, halo.uses_nccl(), 2);
 }
@@ -1549,7 +1562,7 @@ void Solver::init_numerics() {
         throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
-    init_viscous_gradients(teno != nullptr);
+    init_viscous_gradients(teno);
     if (hybrid_flux && simpler) {
         throw InputError({.key = "numerics.convective_flux",
                           .line = line_of(input.at("numerics"), "convective_flux"),
@@ -1586,7 +1599,7 @@ void Solver::init_numerics() {
     init_error_control();
 }
 
-void Solver::init_viscous_gradients(const bool teno) {
+void Solver::init_viscous_gradients(const TENO * teno) {
     const std::string gradients = find_value_or<std::string>(input, "numerics", "viscous_gradients", "least_squares");
     record_options("numerics.viscous_gradients", {"least_squares", "reconstruction"});
     if (gradients != "least_squares" && gradients != "reconstruction") {
@@ -1602,15 +1615,30 @@ void Solver::init_viscous_gradients(const bool teno) {
                            .fix = fix + ", or remove viscous_gradients",
                            .docs = "docs/guide/numerics.md#viscous-gradients"});
     };
+    if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
     if (!physics.is_viscous()) {
         throw unavailable("has no effect without viscosity", "Set type = \"navier_stokes\" in [physics]");
     }
-    if (!teno) {
+    if (teno == nullptr) {
         throw unavailable("needs the TENO reconstruction, whose polynomials it differentiates",
                           "Set type = \"TENO\" in [numerics.face_reconstruction]");
     }
-    if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
+    if (teno->degree < 3) {
+        throw unavailable("gains nothing with TENO of order 3, whose face gradients are second order as the "
+                          "least-squares ones",
+                          "Set order = 4 or more in [numerics.face_reconstruction]");
+    }
     if (axisymmetric) throw unavailable("is not available for axisymmetric runs yet", "Use a planar run");
+    if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
+    if (hybrid_flux) {
+        throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");
+    }
+    if (mesh->curved_geometry) {
+        throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
+    }
+    if (mesh->is_rotational()) {
+        throw unavailable("is not available with rotational periodicity yet", "Use translational periodicity");
+    }
 }
 
 void Solver::describe_block_path() {
@@ -3368,6 +3396,7 @@ struct TimeStepFunctor {
     BoundaryData boundaries;
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
+    rtype viscous_stiffness = 1.0_r;  // the viscous operator's spectral radius over the compact one's
 
     KOKKOS_INLINE_FUNCTION
     void cell_W(const int32_t i_cell, rtype * W) const {
@@ -3428,7 +3457,7 @@ struct TimeStepFunctor {
                 coeff = Kokkos::fmax(4.0_r / 3.0_r * (mu + mu_t), physics.gamma * (mu / physics.Pr + mu_t / Pr_t)) /
                         W[0];
             }
-            sum += 4.0_r * coeff * sum_area2 / cell_volume(i_cell);
+            sum += 4.0_r * viscous_stiffness * coeff * sum_area2 / cell_volume(i_cell);
             if (radius_coords.extent(0) > 0) {
                 // Decay of u_r by the hoop stress
                 const rtype r = radius_coords(i_cell, 1);
@@ -3459,6 +3488,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             boundary_data,
                             mesh->periodic_maps(),
                             mesh->face_shift};
+    // Reconstruction gradients: 1D symbol up to 8.2 / h^2 (central stencils fitted exactly; 5.5 by least squares)
+    // against the compact gradients' 4 / h^2, with the jump damping of 4/3
+    if (polynomial_viscous) functor.viscous_stiffness = 2.05_r;
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {

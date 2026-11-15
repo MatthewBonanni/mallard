@@ -796,8 +796,8 @@ class Solver {
         void add_radiation(StateView rhs, SpeciesView rhoY);
         void init_physics();
         void init_numerics();
-        /** @brief [numerics] viscous_gradients, checked against the reconstruction (teno: whether it is TENO). */
-        void init_viscous_gradients(bool teno);
+        /** @brief [numerics] viscous_gradients, checked against the reconstruction (teno: null unless TENO). */
+        void init_viscous_gradients(const TENO * teno);
         /** @brief The functor's polynomial face gradients (viscous_gradients = "reconstruction"). */
         void set_polynomial_flux(ViscousFluxFunctor & functor) const;
         /** @brief TENO::polynomials for cells [0, n_cells). */

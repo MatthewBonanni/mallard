@@ -364,7 +364,7 @@ for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO, single gas, planar runs) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
 
 On a decaying shear wave (periodic box, to $t = 0.1$), TENO4 with
 `reconstruction` converges at fourth order on triangles, quadrilaterals,
@@ -392,14 +392,23 @@ long on hexahedra and 1.6 times on tetrahedra on CPU (16 threads), and 2.2 and
 
 Pitfalls:
 
-- **TENO3** gains nothing: its quadratic polynomials give second-order face
-  gradients, with a larger error than least squares.
+- **TENO4 or higher.** TENO3's quadratic polynomials give second-order face
+  gradients, with a larger error than least squares, so Mallard rejects it.
+- **Smaller viscous time steps.** The polynomial gradients make the viscous
+  operator stiffer: in 1D its largest eigenvalue is up to 8.2/h² (5.5/h² for
+  least-squares central stencils) against 4/h² for least squares, so the
+  viscous part of the time-step limit is 2.05 times as strict with
+  `reconstruction`. Viscous-dominated runs (fine near-wall cells, low Reynolds
+  numbers) take up to half the time step; convection-dominated runs are
+  unaffected.
 - **Troubled cells and boundaries.** Faces next to a cell where TENO selects
-  stencils, and boundary faces (walls among them), keep the least-squares
+  stencils, or whose polynomial is negative in density or pressure at a face
+  point, and boundary faces (walls among them), keep the least-squares
   gradients. Near walls and shocks the flux is then second order, as before.
-- **Not yet available** for gas mixtures (species diffusion) and axisymmetric
-  runs, where Mallard reports an error. Probes of the diffusive fluxes on
-  faces (`[[probes]]` surfaces) still report the least-squares fluxes.
+- **Not yet available** for gas mixtures (species diffusion), axisymmetric
+  runs, LES, the hybrid convective flux, curved meshes and rotational
+  periodicity, where Mallard reports an error. Probes of the diffusive fluxes
+  on faces (`[[probes]]` surfaces) still report the least-squares fluxes.
 
 ## Riemann solvers
 
