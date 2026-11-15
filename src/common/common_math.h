@@ -20,6 +20,15 @@
 
 #include "common_typedef.h"
 
+/** @brief a * b rounded on its own, never contracted into a fused multiply-add. */
+KOKKOS_INLINE_FUNCTION double rounded_product(const double a, const double b) {
+#if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
+    KOKKOS_IF_ON_DEVICE((return __dmul_rn(a, b);))
+#endif
+    volatile double p = a * b;
+    return p;
+}
+
 /** @brief SplitMix64 finalizer: a well-mixed 64-bit hash of z, the same on every device and rank. */
 KOKKOS_INLINE_FUNCTION
 uint64_t mix64(uint64_t z) {
