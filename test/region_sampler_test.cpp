@@ -145,13 +145,13 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     // Up to the last value of a binade, and one addition past it
     const double ulp = std::ldexp(1.0, -53), below = 1.0 - 8.0 * ulp;
     const double one_ulp[1] = {ulp};
-    for (const uint32_t count : {7u, 8u}) {
-        const uint32_t times[1] = {count};
+    for (const uint32_t additions : {7u, 8u}) {
+        const uint32_t times[1] = {additions};
         double one_at_a_time = below;
-        for (uint32_t i = 0; i < count; i++) one_at_a_time += ulp;
+        for (uint32_t i = 0; i < additions; i++) one_at_a_time += ulp;
         r = below;
-        EXPECT_EQ(add_in_binade(r, one_ulp, times, 1), count == 7) << count;
-        EXPECT_EQ(r, count == 7 ? one_at_a_time : below) << count;
+        EXPECT_EQ(add_in_binade(r, one_ulp, times, 1), additions == 7) << additions;
+        EXPECT_EQ(r, additions == 7 ? one_at_a_time : below) << additions;
     }
 }
 
