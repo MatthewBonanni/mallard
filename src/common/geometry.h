@@ -199,7 +199,6 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
     for (int i = 0; i < 3; i++) {
         q[i] = n.m[3 * i] * x[0] + n.m[3 * i + 1] * x[1] + n.m[3 * i + 2] * x[2] + n.d[i];
     }
-    const double rho = length2(q[0], q[1]);
     double phi = 0.0;
     switch (n.kind) {
         case Kind::SPHERE:
@@ -213,13 +212,14 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
         }
         case Kind::CYLINDER: {
             // p: outer radius, inner radius, half length
+            const double rho = length2(q[0], q[1]);
             const double dr = n.p[1] > 0.0 ? max(rho - n.p[0], n.p[1] - rho) : rho - n.p[0];
             phi = rectangle(dr, Kokkos::fabs(q[2]) - n.p[2]);
             break;
         }
         case Kind::CONE:
             // p: half length, radius at -h, radius at +h
-            phi = cone(rho, q[2], n.p[0], n.p[1], n.p[2]);
+            phi = cone(length2(q[0], q[1]), q[2], n.p[0], n.p[1], n.p[2]);
             break;
         case Kind::BOX: {
             // p: half sizes
@@ -231,7 +231,7 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
         }
         case Kind::TORUS:
             // p: major and minor radii
-            phi = length2(rho - n.p[0], q[2]) - n.p[1];
+            phi = length2(length2(q[0], q[1]) - n.p[0], q[2]) - n.p[1];
             break;
         case Kind::HALF_SPACE:
             phi = q[2];

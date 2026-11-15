@@ -32,6 +32,9 @@ using Vec = std::array<double, 3>;
 constexpr double INF = std::numeric_limits<double>::infinity();
 constexpr double PI = 3.14159265358979323846;
 
+using Box = std::array<Vec, 2>;
+constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
+
 double dot(const Vec & a, const Vec & b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 [[maybe_unused]] Vec cross(const Vec & a, const Vec & b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
@@ -337,16 +340,49 @@ struct HostNodes {
     }
 };
 
-/** @brief The fractions of a filled region of shapes. */
-std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view) {
+Box filled_bounds(const Region & region, uint32_t i);
+
+/**
+ * @brief The fractions of filled region i, of shapes. Without a smooth edge, the
+ *        distance is not negative outside the region's bounds, so a straight cell
+ *        whose nodes lie outside them is 0 without sampling: its samples lie
+ *        within its nodes' box.
+ */
+std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view,
+                                    const uint32_t i) {
     const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
+    // Programs that can run away are evaluated everywhere, so that a runaway is reported wherever it is
+    Box box = view.edge > 0.0 || view.programs.loops ? EVERYWHERE : filled_bounds(region, i);
+    double scale = 1.0;
+    for (const Vec & corner : box) {
+        for (const double x : corner) scale = std::isfinite(x) ? std::max(scale, std::abs(x)) : scale;
+    }
+    for (size_t k = 0; k < 3; k++) {
+        box[0][k] -= 1e-6 * scale;
+        box[1][k] += 1e-6 * scale;
+    }
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     Kokkos::parallel_for("region_cell_fractions",
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
-        if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell)) {
+        const bool curved = mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell);
+        if (!curved) {
+            Vec lo = {INF, INF, INF}, hi = {-INF, -INF, -INF};
+            for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(i_cell); k++) {
+                double x[3];
+                HostNodes{mesh, i_cell}(k, x);
+                for (size_t d = 0; d < 3; d++) {
+                    lo[d] = std::min(lo[d], x[d]);
+                    hi[d] = std::max(hi[d], x[d]);
+                }
+            }
+            for (size_t d = 0; d < 3; d++) {
+                if (hi[d] < box[0][d] || lo[d] > box[1][d]) return;
+            }
+        }
+        if (curved) {
             const HostCone cone{mesh, i_cell};
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i_cell); k++) {
                 std::array<double, 2> lo, hi;
@@ -447,7 +483,7 @@ std::vector<double> fractions_of(const Mesh & mesh, const Region & region, const
         case Filled::Kind::SHAPES: {
             RegionView<Kokkos::HostSpace> view = region.host(f);
             if (i == region.root()) view.edge = region.edge();
-            return shape_fractions(mesh, region, view);
+            return shape_fractions(mesh, region, view, i);
         }
         case Filled::Kind::ALL:
             return std::vector<double>(mesh.n_cells, 1.0);
@@ -494,9 +530,6 @@ std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, con
 }
 
 namespace {
-
-using Box = std::array<Vec, 2>;
-constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
 
 /** @brief A box around a primitive: its local box, through its frame. */
 Box primitive_bounds(const Node & n, const std::vector<double> & vertices) {

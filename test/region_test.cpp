@@ -23,6 +23,7 @@
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "region_input.h"
+#include "region_sampler.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -371,6 +372,43 @@ TEST(RegionTest, FractionsAreExactlyOneInsideAndZeroOutside) {
     EXPECT_GT(n_one, 0);
     EXPECT_GT(n_zero, 0);
     EXPECT_GT(n_cut, 0);
+}
+
+TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
+    // cell_fractions skips the straight cells outside the bounds of a region without a smooth edge;
+    // sampling every cell gives zero in each of them, and the same fractions elsewhere
+    const auto mesh = coarse_unstructured_mesh();
+    std::vector<std::string> tables;
+    for (const Case & c : cases()) tables.push_back(c.table);
+    const std::string small = N_DIM == 2 ? "{type = \"rectangle\", center = [0.31, 0.62], size = [0.17, 0.11], rotate = 20}"
+                                         : "{type = \"box\", center = [0.31, 0.62, 0.4], size = [0.17, 0.11, 0.23], "
+                                           "rotate = {axis = [1, 2, 3], angle = 20}}";
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.35, 0.6], radius = 0.12"
+                                        : "{type = \"sphere\", center = [0.35, 0.6, 0.4], radius = 0.12";
+    tables.push_back(small);
+    tables.push_back(ball + ", edge = 0.1}");
+    tables.push_back("{type = \"intersection\", regions = [" + small + ", " + ball + "}]}");
+    tables.push_back("{type = \"difference\", a = " + small + ", b = " + ball + "}}");
+    int skipped = 0;
+    for (const std::string & table : tables) {
+        const region::Region r = make_region(table);
+        const std::vector<double> f = region::cell_fractions(*mesh, r);
+        const region::RegionView<Kokkos::HostSpace> & view = r.host();
+        const auto distance = [&view](const double * x) { return view.distance(x); };
+        const region::sampler::Shape<decltype(distance)> shape{distance, view.edge, r.bounded()};
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double inside = 0.0, total = 0.0;
+            region::sampler::straight_cell(shape, false, mesh->h_n_nodes_of_cell(c), [&](const uint32_t k, double * x) {
+                const uint32_t node = mesh->h_node_of_cell(c, k);
+                for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh->h_node_coords(node, i)) : 0.0;
+            }, inside, total);
+            const double sampled = inside / total;
+            EXPECT_EQ(f[c] == 0.0, sampled == 0.0) << table << " cell " << c << ": " << f[c] << " " << sampled;
+            EXPECT_NEAR(f[c], sampled, 1e-12) << table << " cell " << c;
+            skipped += sampled == 0.0;
+        }
+    }
+    EXPECT_GT(skipped, 0);
 }
 
 TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {

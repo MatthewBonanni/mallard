@@ -73,6 +73,11 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
     stack[0].level = 0;
     constexpr int n_vertices = N_DIM + 1;
     const double half_edge = 0.5 * shape.edge;
+    auto add = [&](const double c[3], const double phi, const double measure) {
+        const double w = measure * (axisymmetric ? c[1] : 1.0);
+        inside += w * indicator(phi, shape.edge);
+        total += w;
+    };
     while (top >= 0) {
         const Item item = stack[top--];
         const auto & v = item.v;
@@ -102,9 +107,7 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
             uniform = Kokkos::fabs(phi) > 2.0 * slope * radius && half_edge == 0.0;
         }
         if (uniform) {
-            const double w = item.measure * (axisymmetric ? c[1] : 1.0);
-            inside += w * indicator(phi, shape.edge);
-            total += w;
+            add(c, phi, item.measure);
             continue;
         }
         // Midpoint subdivision: 4 triangles, or 8 tetrahedra (4 corners and an octahedron split along a diagonal)
@@ -122,19 +125,29 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
                                              {{0, 2}, {1, 2}, {2, 2}, {2, 3}}, {{0, 3}, {1, 3}, {2, 3}, {3, 3}},
                                              {{0, 1}, {2, 3}, {0, 2}, {0, 3}}, {{0, 1}, {2, 3}, {0, 3}, {1, 3}},
                                              {{0, 1}, {2, 3}, {1, 3}, {1, 2}}, {{0, 1}, {2, 3}, {1, 2}, {0, 2}}};
+        auto vertex = [&](const int child, const int k, const int i) {
+            if (N_DIM == 2) return k < 3 ? m[TRIANGLES[child][k][0]][TRIANGLES[child][k][1]][i] : 0.0;
+            return m[TETRAHEDRA[child][k][0]][TETRAHEDRA[child][k][1]][i];
+        };
+        const double measure = item.measure / double(CHILDREN);
+        if (item.level + 1 >= MAX_LEVEL) {
+            // Leaves: summed here, in the order the stack would sum them, without passing through it
+            for (int child = 0; child < CHILDREN; child++) {
+                double cc[3] = {0.0, 0.0, 0.0};
+                for (int k = 0; k < n_vertices; k++) {
+                    for (int i = 0; i < 3; i++) cc[i] += vertex(child, k, i) / double(n_vertices);
+                }
+                add(cc, shape.distance(cc), measure);
+            }
+            continue;
+        }
         // Pushed last child first, so that they are summed in order
         for (int child = CHILDREN - 1; child >= 0; child--) {
             Item & next = stack[++top];
             for (int k = 0; k < 4; k++) {
-                for (int i = 0; i < 3; i++) {
-                    if (N_DIM == 2) {
-                        next.v[k][i] = k < 3 ? m[TRIANGLES[child][k][0]][TRIANGLES[child][k][1]][i] : 0.0;
-                    } else {
-                        next.v[k][i] = m[TETRAHEDRA[child][k][0]][TETRAHEDRA[child][k][1]][i];
-                    }
-                }
+                for (int i = 0; i < 3; i++) next.v[k][i] = vertex(child, k, i);
             }
-            next.measure = item.measure / double(CHILDREN);
+            next.measure = measure;
             next.level = item.level + 1;
         }
     }
