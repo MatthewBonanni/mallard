@@ -109,7 +109,10 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
 
 TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
     // Rows shared over the ranks, with boundary cells
-    expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"));
+    expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"), [](const Solver & s) {
+        const auto & muscl = dynamic_cast<const MUSCL &>(s.get_face_reconstruction());
+        EXPECT_EQ(muscl.n_table_cells, uint64_t(s.get_mesh()->n_reconstructed()));
+    });
 }
 
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {

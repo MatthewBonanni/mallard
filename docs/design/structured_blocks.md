@@ -415,11 +415,12 @@ its block cells.
 
 **MUSCL tables.** MUSCL's face-neighbor fit, limiter and face extrapolation
 read, per face slot, the gradient weights and the offset to the face centroid
-from a table row (`MUSCLTables`). Every cell of the face-neighbor fit (not a
-tetrahedron, no face on a characteristic boundary) without a rotational
-periodic face has a row, except in the outermost halo layer, whose missing
-faces would look like boundary faces; the states across its boundary faces
-still come from those faces. Rows equal on #994's grid (about $10^{-9}$ of
+from a table row (`MUSCLTables`). Every reconstructed cell (owned or in the
+first halo layer) of the face-neighbor fit (not a tetrahedron, no face on a
+characteristic boundary) without a rotational periodic face has a row, unless
+it lies in the outermost halo layer, whose missing faces would look like
+boundary faces; the states across its boundary faces still come from those
+faces. Rows equal on #994's grid (about $10^{-9}$ of
 their magnitude; $2^{-18}$ in single precision, above its round-off) are
 shared, each taking the row of its lowest global id, agreed over the ranks, so
 a cell's row depends on its own geometry alone and not on the partition. When

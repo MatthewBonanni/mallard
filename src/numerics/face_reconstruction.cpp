@@ -450,7 +450,7 @@ report::Summary MUSCL::summary() const {
     if (n_candidates_global > 0) {
         const bool used = n_rows_global * MIN_CELLS_PER_ROW <= n_candidates_global;
         s.quantity("MUSCL table rows", logging::count(n_rows_global),
-                   "rows", logging::format("for %llu cells; ", static_cast<unsigned long long>(n_candidates_global)) +
+                   "rows", "for " + logging::count(n_candidates_global, "cell") + "; " +
                                (used ? "used"
                                      : logging::format("not used: fewer than %llu cells per row, each step fits instead",
                                                        static_cast<unsigned long long>(MIN_CELLS_PER_ROW))));
@@ -792,10 +792,12 @@ void MUSCL::find_tables() {
     n_table_cells = 0;
     const auto & k_of = mesh->h_offsets_faces_of_cell;
     const LSQGradientFunctor g = make_gradient(*mesh, boundaries, {}, gradients);
-    // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face, and with all their
-    // faces: the outermost halo layer's missing faces would look like boundary faces
+    // The reconstructed cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face, and
+    // with all their faces: the outermost halo layer's missing faces would look like boundary faces. Deeper halo
+    // layers, which no kernel reads, take no part, so a row's lowest global id is always a cell that some rank owns
+    const uint32_t n_candidate_range = std::min(mesh->n_reconstructed(), mesh->n_complete());
     Kokkos::View<uint8_t *> d_has("muscl_table_has", mesh->n_cells);
-    Kokkos::parallel_for("muscl_table_candidates", mesh->n_complete(), KOKKOS_LAMBDA(const uint32_t c) {
+    Kokkos::parallel_for("muscl_table_candidates", n_candidate_range, KOKKOS_LAMBDA(const uint32_t c) {
         const uint32_t k0 = g.offsets_faces_of_cell(c), k1 = g.offsets_faces_of_cell(c + 1);
         bool has = !(N_DIM == 3 && k1 - k0 == 4);
         for (uint32_t k = k0; k < k1; k++) {
@@ -806,32 +808,34 @@ void MUSCL::find_tables() {
     });
     const auto h_has = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_has);
     std::vector<uint32_t> cells;
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; c < n_candidate_range; c++) {
         if (h_has(c)) cells.push_back(c);
     }
     const uint32_t m = static_cast<uint32_t>(cells.size());
-    const size_t n_slots = mesh->faces_of_cell.extent(0);
+    const size_t n_slots = m ? mesh->faces_of_cell.extent(0) : 0;
 
-    Kokkos::View<rtype *[N_DIM]> w("muscl_table_weights", n_slots), r("muscl_table_offsets", n_slots);
-    Kokkos::View<uint32_t *> d_cells("muscl_table_cells", m);
-    Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(cells.data(), m));
-    const LimiterFunctor l{g, mesh->cell_volume, limiters, limiter, venkat_K, {}};
-    Kokkos::parallel_for("muscl_tables", m, KOKKOS_LAMBDA(const uint32_t t) {
-        const uint32_t c = d_cells(t);
-        g.weights(c, w);
-        for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
-            rtype x[N_DIM];
-            l.face_offset(c, g.faces_of_cell(k), x);
-            FOR_I_DIM r(k, i) = x[i];
-        }
-    });
-    auto h_w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), w);
-    auto h_r = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), r);
     std::vector<rtype> wv(n_slots * N_DIM), rv(n_slots * N_DIM);
-    for (size_t k = 0; k < n_slots; k++) {
-        for (uint8_t d = 0; d < N_DIM; d++) {
-            wv[k * N_DIM + d] = h_w(k, d);
-            rv[k * N_DIM + d] = h_r(k, d);
+    if (m > 0) {
+        Kokkos::View<rtype *[N_DIM]> w("muscl_table_weights", n_slots), r("muscl_table_offsets", n_slots);
+        Kokkos::View<uint32_t *> d_cells("muscl_table_cells", m);
+        Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(cells.data(), m));
+        const LimiterFunctor l{g, mesh->cell_volume, limiters, limiter, venkat_K, {}};
+        Kokkos::parallel_for("muscl_tables", m, KOKKOS_LAMBDA(const uint32_t t) {
+            const uint32_t c = d_cells(t);
+            g.weights(c, w);
+            for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
+                rtype x[N_DIM];
+                l.face_offset(c, g.faces_of_cell(k), x);
+                FOR_I_DIM r(k, i) = x[i];
+            }
+        });
+        const auto h_w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), w);
+        const auto h_r = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), r);
+        for (size_t k = 0; k < n_slots; k++) {
+            for (uint8_t d = 0; d < N_DIM; d++) {
+                wv[k * N_DIM + d] = h_w(k, d);
+                rv[k * N_DIM + d] = h_r(k, d);
+            }
         }
     }
 

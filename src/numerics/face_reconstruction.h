@@ -306,8 +306,8 @@ static const std::unordered_map<LimiterType, std::string> LIMITER_NAMES = {
 };
 
 /**
- * @brief The geometry of MUSCL's face-neighbor stencils, for the cells that
- *        take the face-neighbor fit (not tetrahedra, no face of a
+ * @brief The geometry of MUSCL's face-neighbor stencils, for the reconstructed
+ *        cells that take the face-neighbor fit (not tetrahedra, no face of a
  *        characteristic boundary), have no rotational periodic face and have
  *        all their faces (not the outermost halo layer): per face slot (in
  *        faces_of_cell order), the gradient weights (LSQGradientFunctor::weights)

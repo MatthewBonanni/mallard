@@ -188,6 +188,28 @@ TEST(MUSCL3D, FusedKernelReadsTheRowsAndGivesTheSeparateKernelsFaceValuesBitwise
     }
 }
 
+TEST(MUSCL3D, NoRowsWhenFewerThanEightCellsShareEachRow) {
+    // Stretched along every axis, every cell's geometry is its own
+    Input input = parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nstretching = [1.8, 1.8, 1.8]\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) < 0) face_bc[f] = 0;
+    }
+    BoundaryCondition extrapolation;
+    extrapolation.type = BoundaryType::OUTLET_EXTRAPOLATION;
+    auto muscl = std::make_unique<MUSCL>();
+    muscl->set_mesh(mesh);
+    muscl->set_boundaries(make_boundary_data(*mesh, face_bc, {extrapolation}, 1.4_r));
+    muscl->init(parse_toml("type = \"MUSCL\"\n"));
+    EXPECT_EQ(muscl->n_candidates_global, uint64_t(mesh->n_cells));
+    EXPECT_GT(muscl->n_rows_global * MUSCL::MIN_CELLS_PER_ROW, muscl->n_candidates_global);
+    EXPECT_EQ(muscl->n_table_cells, 0u);
+    EXPECT_EQ(muscl->tables.row.extent(0), 0u);
+}
+
 TEST(MUSCL3D, TableGradientsMatchTheLeastSquaresSolveOnAStretchedBoxWithBoundaryCells) {
     // Image cells across extrapolation faces, ghosts at Dirichlet faces and mirrored ghosts at symmetry faces;
     // shared rows are each cell's own up to the sharing grid
