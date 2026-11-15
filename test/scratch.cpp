@@ -18,6 +18,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -97,7 +98,8 @@ std::string serial_name(const std::string & name) {
 
 bool install_scratch_directories() {
     const std::filesystem::path probe = from_root(comm::is_root() ? make_unique_directory("shared") : std::filesystem::path());
-    const bool seen = std::filesystem::is_directory(probe);
+    std::error_code error;
+    const bool seen = std::filesystem::is_directory(probe, error);
     if (!seen) {
         std::cerr << "[rank " << comm::rank() << "] " << probe.string()
                   << ", made by rank 0, is not here: the tests need a temporary directory every rank shares (set TMPDIR "
