@@ -1084,9 +1084,9 @@ class Solver {
 
         // Reconstructed cells independent of the halo (empty unless split), and the others
         IndexSet early_cells, late_cells;
-        // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
-        std::string stencil_shapes_setting;
-        void describe_stencil_shapes();
+        // Cells on the block path and their block shapes (empty if none)
+        std::string block_path_setting;
+        void describe_block_path();
         IndexSet rhs_faces;  // faces of owned cells, whose fluxes are used
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
