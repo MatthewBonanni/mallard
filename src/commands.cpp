@@ -139,7 +139,8 @@ constexpr Option INFO_OPTIONS[] = {
      "its size; reads every file once. Default: sizes only."},
     {"--html", "", "",
      "Run directories: write RUN_DIR/report.html, the run report, from RUN_DIR/mallard.jsonl, the page the run "
-     "writes itself: for a run still going, killed, or of a Mallard before 0.10. Default: off."},
+     "writes itself: for a run still going, killed, or of a Mallard before 0.10; with --format json, prints "
+     "its path as {\"directory\", \"report\"}. Default: off."},
     KOKKOS,
 };
 
@@ -350,6 +351,10 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
 };
 
 constexpr Option PACK_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts: the archive, the rerun "
+     "command and each file with its role, size and SHA-256 (--verify: each problem, and the result). Default: "
+     "text."},
     {"--output", "-o", "FILE",
      "The archive: .tar.gz (gzip-compressed, in builds with zlib) or .tar. Default: the run directory's name "
      "with .tar.gz (.tar in builds without zlib), in the current directory."},
@@ -1004,8 +1009,8 @@ constexpr Command COMMANDS[] = {
         .name = "pack",
         .group = "Share",
         .summary = "One archive that reproduces a run, with a manifest of hashes",
-        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]\n"
-                    "mallard pack --verify FILE",
+        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none] [--format text|json]\n"
+                    "mallard pack --verify FILE [--format text|json]",
         .description =
             "Packs the last run of a run directory into one tar archive, for a paper's supplement or a bug "
             "report: what it needs to run again and what it wrote. What goes in comes from its run record "

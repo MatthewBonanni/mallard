@@ -725,6 +725,11 @@ TEST(CliTest, PackReproducesARunBitForBit) {
     EXPECT_TRUE(has_row(tampered.out, {"case/run/points.txt", "differs from what the run read (its run block's SHA-256)"}))
         << tampered.out;
     EXPECT_TRUE(has_row(tampered.out, {"case/run/mallard.jsonl", "not in the manifest"})) << tampered.out;
+    const Result tampered_json = run({"pack", "--verify", "tampered.tar", "--format", "json"}, true);
+    EXPECT_EQ(tampered_json.status, 1);
+    const json::Value report = json::parse(tampered_json.out);
+    EXPECT_EQ(report["result"].string, "differs");
+    EXPECT_FALSE(report["problems"].array.empty()) << tampered_json.out;
     std::ofstream("study/run/points.txt", std::ios::app) << "\n";
     const Result changed = run({"pack", "study/run", "-o", "changed.tar"}, true);
     EXPECT_EQ(changed.status, 1);
