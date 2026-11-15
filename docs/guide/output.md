@@ -119,7 +119,7 @@ other fields.
 |  | `Y_<s>` | `1` | mass fraction of species s | a mixture | write_data, probes, statistics |
 |  | `X_<s>` | `1` | mole fraction of species s | a mixture | write_data |
 | chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry] | write_data |
-|  | `CHEM_H` | `s` | last chemistry sub-step | a mixture with [chemistry] | write_data |
+|  | `CHEM_H` | `s` | last chemistry sub-step, negated after a failed explicit step | a mixture with [chemistry] | write_data |
 |  | `CHEM_COST` | `1` | chemistry sub-steps in the last step | a mixture with [chemistry] | write_data |
 |  | `QRAD` | `kg m-1 s-3` | radiative heat source | [radiation] | write_data |
 |  | `OMEGA_<s>` | `kg m-3 s-1` | net production rate of species s | a mixture with [chemistry] | write_data |
