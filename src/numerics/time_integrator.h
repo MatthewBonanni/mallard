@@ -51,6 +51,13 @@ static const std::unordered_map<TimeIntegratorType, std::string> TIME_INTEGRATOR
 };
 
 /**
+ * @brief The largest cfl of the integrator that is safe for smooth flow on any cell type
+ *        (docs/guide/numerics.md#choosing-an-integrator), below the extent of its stability region on
+ *        the negative real axis halved (docs/numerics/overview.md#time-step).
+ */
+double cfl_limit(TimeIntegratorType type);
+
+/**
  * @brief t + c dt in one rounding, so that a stage time formed on the host and
  *        one formed on the device (captured steps) agree bit for bit whether
  *        or not the compiler contracts the multiply and add.
