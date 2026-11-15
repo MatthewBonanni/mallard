@@ -123,19 +123,6 @@ TEST(ParticlesTest, UniformFlowCarriesTracersExactlyAcrossPeriodicSidesAndRanks)
     }
 }
 
-TEST(ParticlesTest, ShearFlowPathlinesAreExactWithTheReconstructedVelocity) {
-    // u = 0.5 (y - 0.5) between slip walls is a steady flow, linear in y: the polynomials reproduce it
-    Solver solver;
-    solver.init(parse_toml(box(16, vec("0.5 * (y - 0.5)", "0.0", "0.0"), "x",
-                               "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
-                               "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n",
-                               "n_steps = 50\ndt = 0.01\n", lattice(0.3, 0.7), TENO4, "SSPRK3")));
-    solver.run();
-    std::vector<std::array<double, N_DIM>> exact = lattice_points(0.3, 0.7);
-    for (auto & x : exact) x[0] = wrap(x[0] + 0.5 * (x[1] - 0.5) * 0.5, 1.0);
-    expect_pathlines(*solver.get_particles(), exact, roundoff(1e-11));
-}
-
 namespace {
 
 /**

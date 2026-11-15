@@ -20,7 +20,8 @@ hi = [0.9, 0.9]
 n = [9, 9]
 ```
 
-*Used in:* no example yet.
+*Used in:*
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex).
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from

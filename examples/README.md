@@ -91,6 +91,12 @@ the references (kinetic energy +2%, temperature variance -5%) are of the size
 of the spread between random initial fields, whose realizations the
 references do not publish.
 
+## Particles
+
+| Case | What it shows | Cells | Run time |
+|---|---|---|---|
+| `tracer_vortex` | Tracer particles (`[particles]`) in a steady low-Mach array of Taylor-Green vortex cells: each tracer circles on a closed streamline, so the streamfunction `sin(2 pi x) sin(2 pi y)` at its final position in `tracers.csv` measures the pathline error | 4,096 quads | seconds on a few CPU threads |
+
 ## Large-eddy simulation
 
 | Case | What it shows | Cells | Run time |
