@@ -84,8 +84,8 @@ Why each, and what it passes (each check runs in the test suite,
   ([benchmark](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
   `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
   induction length within 5% (25% at 1.0). A stoichiometric H2/air flame at
-  700 K, 6 cells per thermal thickness, propagates within 0.7% of Cantera's
-  speed. Steady flames alone are insensitive to `cfl` (0.05% from 0.2 to
+  700 K, 6 cells per thermal thickness, propagates within 0.2% of Cantera's
+  grid-converged speed. Steady flames alone are insensitive to `cfl` (0.05% from 0.2 to
   2.0): set `cfl = 1.0` to run them three times faster, or use
   `[chemistry] coupling = "simpler"`.
 
