@@ -799,9 +799,10 @@ void MUSCL::find_tables() {
     const auto & k_of = mesh->h_offsets_faces_of_cell;
     const LSQGradientFunctor g = make_gradient(*mesh, boundaries,
                                                Kokkos::View<rtype *[N_CONSERVATIVE]>("muscl_table_W", mesh->n_cells), gradients);
-    // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face
+    // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face, and with all their
+    // faces: the outermost halo layer's missing faces would look like boundary faces
     Kokkos::View<uint8_t *> d_has("muscl_table_has", mesh->n_cells);
-    Kokkos::parallel_for("muscl_table_cells", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    Kokkos::parallel_for("muscl_table_cells", mesh->n_complete(), KOKKOS_LAMBDA(const uint32_t c) {
         const uint32_t k0 = g.offsets_faces_of_cell(c), k1 = g.offsets_faces_of_cell(c + 1);
         bool has = !(N_DIM == 3 && k1 - k0 == 4);
         for (uint32_t k = k0; k < k1; k++) {
