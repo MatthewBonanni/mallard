@@ -13,7 +13,10 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <memory>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "face_reconstruction.h"
@@ -222,3 +225,52 @@ TEST_P(MeshTypes, FirstOrderCopiesCellValuesAndSkipsGhostSide) {
 
 INSTANTIATE_TEST_SUITE_P(Reconstruction, MeshTypes,
                          ::testing::Values("cartesian", "cartesian_tri", "wedge"));
+
+TEST(MUSCL2D, BlockCellsReadTheirNeighborsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+    // A blast in a box with walls, and in one periodic in x: the walls' cells read their faces
+    for (const bool periodic : {false, true}) {
+        Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 10\n") +
+                                 (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n" : ""));
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const double x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+            const bool inside = (x - 0.45) * (x - 0.45) + (y - 0.4) * (y - 0.4) < 0.06;
+            h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+            h_W(c, 1) = static_cast<rtype>(0.1 * std::sin(3.0 * x));
+            h_W(c, 2) = static_cast<rtype>(0.1 * std::cos(2.0 * y));
+            h_W(c, 3) = inside ? 1.0_r : 0.1_r;
+        }
+        Kokkos::deep_copy(W, h_W);
+        auto results = [&](const bool block_path, const bool fused) {
+            auto muscl = std::make_unique<MUSCL>();
+            muscl->set_mesh(mesh);
+            muscl->set_boundaries(bd);
+            muscl->block_path = block_path;
+            muscl->init(parse_toml("type = \"MUSCL\"\n"));
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+            if (fused) {
+                muscl->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W, face_W, IndexSet{{}, 0, mesh->n_cells});
+            } else {
+                muscl->calc_face_values(W, face_W);
+            }
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            std::vector<rtype> out(h.data(), h.data() + h.span());
+            return std::make_tuple(out, muscl->n_block_cells, muscl->n_table_cells);
+        };
+        const uint64_t interior = periodic ? 12 * 8 : 10 * 8;
+        for (const bool fused : {false, true}) {
+            const auto [unstructured, none, n_table] = results(false, fused);
+            EXPECT_EQ(none, 0u) << "periodic " << periodic;
+            EXPECT_EQ(n_table, uint64_t(mesh->n_cells)) << "periodic " << periodic;
+            const auto [block, n_block, n_table_block] = results(true, fused);
+            EXPECT_EQ(n_block, interior) << "periodic " << periodic;
+            EXPECT_EQ(n_table_block, n_table) << "periodic " << periodic;
+            EXPECT_TRUE(block == unstructured) << "periodic " << periodic << ", fused " << fused;
+        }
+    }
+}

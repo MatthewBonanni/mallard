@@ -393,7 +393,12 @@ class MUSCL : public FaceReconstruction {
         // false (tests only) reads every cell's faces
         bool block_path = true;
         MUSCLTables tables;
-        uint64_t n_table_cells = 0;  // cells with a table (this rank)
+        // Cells that could have a row per distinct row, over the ranks, below which no cell gets one: the rows
+        // would cost more memory than the per-step fit
+        static constexpr uint64_t MIN_CELLS_PER_ROW = 8;
+        uint64_t n_table_cells = 0;           // cells with a row (this rank)
+        uint64_t n_candidates_global = 0;     // owned cells that could have a row, over the ranks
+        uint64_t n_rows_global = 0;           // distinct rows over the ranks (weights or offsets, the more)
         /** @brief The tables of the cells that have one (MUSCLTables), and the block shapes (collective). */
         void find_tables();
 };

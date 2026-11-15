@@ -186,13 +186,77 @@ TEST(MUSCL3D, BlockCellsReadTheirNeighborsByOffsetsAndGiveTheUnstructuredPathsFa
             return std::make_tuple(out, muscl->n_block_cells, muscl->n_table_cells);
         };
         const uint64_t interior = periodic ? 10 * 10 * 8 : 8 * 8 * 8;
-        const auto [unstructured, none, n_table] = results(false, false);
-        EXPECT_EQ(none, 0u) << "periodic " << periodic;
-        EXPECT_EQ(n_table, uint64_t(mesh->n_cells)) << "periodic " << periodic;
         for (const bool fused : {false, true}) {
+            const auto [unstructured, none, n_table] = results(false, fused);
+            EXPECT_EQ(none, 0u) << "periodic " << periodic;
+            EXPECT_EQ(n_table, uint64_t(mesh->n_cells)) << "periodic " << periodic;
             const auto [block, n_block, n_table_block] = results(true, fused);
             EXPECT_EQ(n_block, interior) << "periodic " << periodic;
+            EXPECT_EQ(n_table_block, n_table) << "periodic " << periodic;
             EXPECT_TRUE(block == unstructured) << "periodic " << periodic << ", fused " << fused;
+        }
+    }
+}
+
+TEST(MUSCL3D, TableGradientsMatchTheLeastSquaresSolveOnAStretchedBoxWithBoundaryCells) {
+    // Image cells across extrapolation faces, ghosts at Dirichlet faces and mirrored ghosts at symmetry faces;
+    // shared rows are each cell's own up to the sharing grid
+    Input input = parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nstretching = [0, 0, 1.8]\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0) continue;
+        int axis = 0;
+        for (int d = 1; d < 3; d++) {
+            if (std::abs(mesh->h_face_normals(f, d)) > std::abs(mesh->h_face_normals(f, axis))) axis = d;
+        }
+        face_bc[f] = axis;
+    }
+    BoundaryCondition extrapolation, dirichlet, symmetry;
+    extrapolation.type = BoundaryType::OUTLET_EXTRAPOLATION;
+    dirichlet.type = BoundaryType::DIRICHLET;
+    symmetry.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {extrapolation, dirichlet, symmetry}, 1.4_r);
+    auto field = [](const uint8_t i, const double x, const double y, const double z) {
+        return 1.0 + 0.1 * i + 0.3 * std::sin(2.0 * x + i) * std::cos(3.0 * y) + 0.2 * z * z;
+    };
+    auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
+    auto h_state = Kokkos::create_mirror_view(bd.face_state);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (h_index(f) < 0) continue;
+        FOR_I_CONSERVATIVE h_state(h_index(f), i) = static_cast<rtype>(
+            field(i, mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1), mesh->h_face_coords(f, 2)));
+    }
+    Kokkos::deep_copy(bd.face_state, h_state);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        FOR_I_CONSERVATIVE h_W(c, i) = static_cast<rtype>(
+            field(i, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1), mesh->h_cell_coords(c, 2)));
+    }
+    Kokkos::deep_copy(W, h_W);
+
+    auto muscl = std::make_unique<MUSCL>();
+    muscl->set_mesh(mesh);
+    muscl->set_boundaries(bd);
+    muscl->init(parse_toml("type = \"MUSCL\"\nlimiter = \"none\"\n"));
+    ASSERT_EQ(muscl->n_table_cells, uint64_t(mesh->n_cells));
+    ASSERT_LT(muscl->n_rows_global * MUSCL::MIN_CELLS_PER_ROW, muscl->n_candidates_global);
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+    muscl->calc_face_values(W, face_W);
+    const auto table = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), muscl->gradients);
+
+    LSQGradientFunctor solve = make_gradient(*mesh, bd, W, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("grad", mesh->n_cells));
+    Kokkos::parallel_for(mesh->n_cells, solve);
+    const auto direct = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solve.gradients);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        FOR_I_CONSERVATIVE {
+            for (int d = 0; d < 3; d++) {
+                ASSERT_NEAR(table(c, i, d), direct(c, i, d), roundoff(1e-7) * (1.0 + std::abs(double(direct(c, i, d)))))
+                    << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
+            }
         }
     }
 }

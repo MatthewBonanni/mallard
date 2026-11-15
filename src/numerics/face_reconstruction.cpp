@@ -18,8 +18,9 @@
 #include <array>
 #include <cmath>
 #include <limits>
-#include <unordered_map>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -448,6 +449,14 @@ report::Summary MUSCL::summary() const {
     report::Summary s;
     s.setting("Reconstruction", "MUSCL, limiter " + LIMITER_NAMES.at(limiter));
     if (limiter == LimiterType::VENKATAKRISHNAN) s.quantity("MUSCL venkatakrishnan_K", logging::real(double(venkat_K)), "-", "");
+    if (n_candidates_global > 0) {
+        const bool used = n_rows_global * MIN_CELLS_PER_ROW <= n_candidates_global;
+        s.quantity("MUSCL table rows", logging::count(n_rows_global),
+                   "rows", logging::format("for %llu cells; ", static_cast<unsigned long long>(n_candidates_global)) +
+                               (used ? "used"
+                                     : logging::format("not used: fewer than %llu cells per row, each step fits instead",
+                                                       static_cast<unsigned long long>(MIN_CELLS_PER_ROW))));
+    }
     return s;
 }
 
@@ -648,7 +657,10 @@ struct MUSCLFaceFunctor {
             if (tables.has(uint32_t(c))) {
                 const uint32_t k0 = tables.offsets_faces_of_cell(c);
                 for (uint32_t k = k0; k < tables.offsets_faces_of_cell(c + 1); k++) {
-                    if (tables.faces_of_cell(k) == i_face) slot = k - k0;
+                    if (tables.faces_of_cell(k) == i_face) {
+                        slot = k - k0;
+                        break;
+                    }
                 }
             }
             this->side(i_face, side, slot);
@@ -802,7 +814,7 @@ void MUSCL::find_tables() {
     // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face, and with all their
     // faces: the outermost halo layer's missing faces would look like boundary faces
     Kokkos::View<uint8_t *> d_has("muscl_table_has", mesh->n_cells);
-    Kokkos::parallel_for("muscl_table_cells", mesh->n_complete(), KOKKOS_LAMBDA(const uint32_t c) {
+    Kokkos::parallel_for("muscl_table_candidates", mesh->n_complete(), KOKKOS_LAMBDA(const uint32_t c) {
         const uint32_t k0 = g.offsets_faces_of_cell(c), k1 = g.offsets_faces_of_cell(c + 1);
         bool has = !(N_DIM == 3 && k1 - k0 == 4);
         for (uint32_t k = k0; k < k1; k++) {
@@ -859,7 +871,20 @@ void MUSCL::find_tables() {
                               gid.data());
     ws.agree();
     rs.agree();
-    if (m == 0) return;
+
+    // Each distinct row counts on the rank that owns the cell whose row it takes
+    std::unordered_set<uint64_t> owned;
+    for (uint32_t i = 0; i < m; i++) {
+        if (cells[i] < mesh->n_owned()) owned.insert(gid[i]);
+    }
+    const auto distinct = [&](const teno::TableStore<rtype> & store) {
+        uint64_t n = 0;
+        for (size_t k = 0; k < store.size(); k++) n += owned.count(store.owner(k));
+        return comm::allreduce(n, comm::Op::SUM);
+    };
+    n_candidates_global = comm::allreduce(uint64_t(owned.size()), comm::Op::SUM);
+    n_rows_global = std::max(distinct(ws), distinct(rs));
+    if (m == 0 || n_rows_global * MIN_CELLS_PER_ROW > n_candidates_global) return;
 
     uint32_t stride = 0;
     for (size_t k = 0; k < ws.size(); k++) stride = std::max<uint32_t>(stride, ws.slots(k));
