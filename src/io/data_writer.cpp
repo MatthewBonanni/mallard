@@ -309,13 +309,19 @@ void DataWriter::init(const Input & input,
         }
         subset = true;
         region_name = cell_subset->name;
-        subset_at = cell_subset->at;
+        subset_update = cell_subset->update;
         subset_solution = cell_subset->solution;
+        if (subset_update) {
+            subset_fractions = cell_subset->moving_fractions;
+            h_subset_fractions = subset_mirrors(Kokkos::View<double *>(
+                Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_fractions"), subset_fractions.extent(0)));
+            subset_time = Kokkos::View<rtype>("region_time");
+        }
         fraction_values = Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type(
-            "REGION_FRACTION", Kokkos::LayoutStride(subset_at ? mesh->n_cells : cell_subset->fractions.size(), 1));
+            "REGION_FRACTION", Kokkos::LayoutStride(subset_update ? mesh->n_cells : cell_subset->fractions.size(), 1));
         fraction = std::make_unique<Data>("REGION_FRACTION", fraction_values);
         fields.push_back(Field{"REGION_FRACTION", {fraction.get()}, field_units::describe("REGION_FRACTION")});
-        if (!subset_at) select_subset(cell_subset->cells, cell_subset->fractions);
+        if (!subset_update) select_subset(cell_subset->cells, cell_subset->fractions);
     }
 
     const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
@@ -354,6 +360,11 @@ void DataWriter::init(const Input & input,
     if (output_files_enabled()) create_parent_directories("the output", prefix);
 }
 
+void DataWriter::stage_subset(const Kokkos::View<const rtype> & time) {
+    subset_update(time);
+    copy_to_pinned(subset_mirrors, h_subset_fractions, subset_fractions);
+}
+
 void DataWriter::select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions) {
     subset_cells = cells;
     subset_ids.clear();
@@ -379,7 +390,7 @@ OutputSummary DataWriter::summary() const {
                                                                       : "_*.vtu");
     std::vector<std::string> parts;
     if (subset) {
-        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset, "cell")));
+        parts.push_back(region_name + ", " + (subset_update ? std::string("its cells at each write") : logging::count(n_subset, "cell")));
     }
     if (compression == Compression::ZLIB) {
         parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");
@@ -579,6 +590,7 @@ DataWriter::Values DataWriter::capture(uint32_t n_cells, bool in_subset, bool by
 
 void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttributes & attributes,
                        const RestartFaces & faces, const RestartArrays & arrays) {
+    const bool staged = std::exchange(subset_staged, false);
     if (!(due(step, t) || force) || step == step_last) {
         return;
     }
@@ -592,8 +604,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     const bool root = comm::is_root();
     const std::string stem = snapshot_stem(interval > 0 || format == DataFormat::RESTART ? step : n_snapshots);
     const Block block = snapshot_of(step, t, force);
-    if (subset_at) {
-        const std::vector<double> fractions = subset_at(double(t));
+    if (subset_update) {
+        if (!staged) {
+            Kokkos::deep_copy(subset_time, t);
+            stage_subset(subset_time);
+            Kokkos::fence("region_fractions");
+        }
+        const std::vector<double> fractions(h_subset_fractions.data(),
+                                            h_subset_fractions.data() + h_subset_fractions.extent(0));
         std::vector<uint32_t> cells;
         for (uint32_t c = 0; c < mesh->n_owned(); c++) {
             if (fractions[c] > 0.0) cells.push_back(c);
