@@ -262,8 +262,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   in three jobs (`CI / cuda-13.5-2d-1of3`, ...) and links them in `CI / cuda-13.5-2d`.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
-  on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
-  the [performance suite](benchmarks/README.md) against per-hardware baselines. It
+  on the GPU (including the CUDA-graph path), the MPI tests on 2 ranks with NCCL's and MPI's
+  halo exchanges, the step graph and stream ordering tests under compute-sanitizer
+  (`tools/dev/gpu_runtime_tests.sh`; `--full`, with every MPI test across nodes, when GPU
+  time allows), and the [performance suite](benchmarks/README.md) against per-hardware baselines. It
   posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
   its results show on the PR next to `CI`. A PR that changes device code merges only
   with both passing. You do not need a GPU to contribute: say in the PR template
