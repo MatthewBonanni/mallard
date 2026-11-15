@@ -47,6 +47,7 @@ set(MALLARD_TEST_SOURCES
     run_report_test.cpp
     run_page_test.cpp
     error_messages_test.cpp
+    boundary_coordinates_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
     health_test.cpp

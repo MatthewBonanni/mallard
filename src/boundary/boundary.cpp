@@ -249,10 +249,10 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     fields.apply(bc, Point{}, 0.0, double(physics.R), Point{}, true);
     if (bc.has(AVERAGE)) {
         const BoundaryValue * p = fields.slot(BoundaryFields::SLOT_P);
-        for (uint16_t x = 0; x < 3 && p->compiled(); x++) {
-            if (p->compiled()->uses(x)) {
+        for (uint16_t x = 0; x < boundary_variable::COUNT && p->compiled(); x++) {
+            if (x != boundary_variable::T && p->compiled()->uses(x)) {
                 fail(input, where, "p", "with average = true is one area-averaged pressure: it may depend on t, not "
-                                        "on x, y or z",
+                                        "on x, y, z or the local coordinates",
                      "Remove average to impose p face by face", "average-area-averaged-pressure");
             }
         }
