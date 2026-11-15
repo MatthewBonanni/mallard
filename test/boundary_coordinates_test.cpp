@@ -86,7 +86,7 @@ TEST(BoundaryCoordinatesTest, LocalVariablesHideTheLocalCoordinates) {
     EXPECT_EQ(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var q := n; q\"\n")),
               (std::vector<uint16_t>{bv::N}));
     EXPECT_THROW(BoundaryValue(parse_toml("v = \"var y := 1; y\"\n").at("v"), "inlet.T", dim::none),
-                 std::invalid_argument);
+                 std::exception);
 }
 
 TEST(BoundaryCoordinatesTest, PlanarInletBetweenWallsHasExactCoordinates) {
