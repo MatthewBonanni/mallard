@@ -18,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -1565,41 +1566,48 @@ class KeyedSetup {
         }
 
         /**
-         * @brief The batch of cells [c0, c0 + n), cell c0 + j in slot j: out
-         *        if every cell was fitted, otherwise the fitted ones (fit, in
-         *        slots 0.. of out) and the others' tables from their keys'
-         *        records.
+         * @brief Makes out the batch of cells [c0, c0 + n), cell c0 + j in
+         *        slot j: the fitted ones (fit, in slots 0.. of out) move to
+         *        their slots, and the others take their keys' records.
          */
-        const teno_setup::TableBatch & batch(const uint32_t c0, const uint32_t n, const std::vector<uint32_t> & fit,
-                                             const teno_setup::TableBatch & out) {
-            if (fit.size() == n) return out;
-            if (full.slots == 0) {
-                full = teno_setup::TableBatch(out.slots, out.nk, out.max_large, out.max_small, out.large_pinv.interleaved);
-            }
+        void batch(const uint32_t c0, const uint32_t n, const std::vector<uint32_t> & fit, teno_setup::TableBatch & out) {
+            if (fit.size() == n) return;
             std::vector<uint32_t> from, fit_slot(fit.size());
             for (uint32_t c = c0; c < c0 + n; c++) {
                 if (from_record(c)) from.push_back(c);
             }
             for (size_t j = 0; j < fit.size(); j++) fit_slot[j] = fit[j] - c0;
-            const uint32_t n_from = static_cast<uint32_t>(from.size());
-            std::vector<CellTables> tables(n_from);
-            std::vector<uint8_t> taken(n_from, 0), cut(n_from, 0);
+            for (auto & c : from) c -= c0;
+            const uint32_t n_fit = static_cast<uint32_t>(fit.size());
+            teno_setup::TableBatch fitted;
+            if (n_fit > 0) {
+                fitted = teno_setup::TableBatch(n_fit, out.nk, out.max_large, out.max_small, out.large_pinv.interleaved);
+                std::vector<uint32_t> same(n_fit);
+                std::iota(same.begin(), same.end(), 0u);
+                scatter_slots(out, same, fitted);
+            }
+            // In chunks, which bound the host copies of the tables
             Kokkos::Experimental::UniqueToken<Kokkos::DefaultHostExecutionSpace> token;
             std::vector<teno::ShapeKeys::Scan> scans(static_cast<size_t>(token.size()));
-            Kokkos::parallel_for("teno_shape_cells",
-                                 Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, n_from),
-                                 [&](const uint32_t i) {
-                const int id = token.acquire();
-                taken[i] = take(records[groups.group[from[i]]], from[i], tables[i], cut[i], scans[size_t(id)]);
-                token.release(id);
-            });
-            if (std::find(taken.begin(), taken.end(), uint8_t(0)) != taken.end()) {
-                throw std::logic_error("TENO: a cell does not match its stencil shape's record.");
+            for (size_t i0 = 0; i0 < from.size(); i0 += RECORD_CHUNK) {
+                const std::vector<uint32_t> slots(from.begin() + i0, from.begin() + std::min(from.size(), i0 + RECORD_CHUNK));
+                const uint32_t m = static_cast<uint32_t>(slots.size());
+                std::vector<CellTables> tables(m);
+                std::vector<uint8_t> taken(m, 0), cut(m, 0);
+                Kokkos::parallel_for("teno_shape_cells",
+                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
+                                     [&](const uint32_t i) {
+                    const uint32_t c = c0 + slots[i];
+                    const int id = token.acquire();
+                    taken[i] = take(records[groups.group[c]], c, tables[i], cut[i], scans[size_t(id)]);
+                    token.release(id);
+                });
+                if (std::find(taken.begin(), taken.end(), uint8_t(0)) != taken.end()) {
+                    throw std::logic_error("TENO: a cell does not match its stencil shape's record.");
+                }
+                scatter_slots(teno_setup::device_copy(batch_of(tables, cut, out)), slots, out);
             }
-            for (auto & c : from) c -= c0;
-            scatter_slots(out, fit_slot, full);
-            scatter_slots(teno_setup::device_copy(batch_of(tables, cut, out)), from, full);
-            return full;
+            scatter_slots(fitted, fit_slot, out);
         }
 
         double seconds = 0.0;  // keys and representatives
@@ -1610,6 +1618,8 @@ class KeyedSetup {
             const uint32_t k = groups.group[c];
             return k != teno::ShapeGroups::NONE && !groups.groups[k].single && !records[k].empty() && records[k][0] == 1;
         }
+
+        static constexpr size_t RECORD_CHUNK = 1024;
 
         static uint64_t bits(const double v) { return std::bit_cast<uint64_t>(v); }
         static double value(const uint64_t v) { return std::bit_cast<double>(v); }
@@ -1705,7 +1715,6 @@ class KeyedSetup {
         teno::ShapeKeys keys;
         teno::ShapeGroups groups;
         std::vector<std::vector<uint64_t>> records;  // (group): valid, then the representative's tables
-        teno_setup::TableBatch full;                 // a batch of fitted cells and cells from records
 };
 
 /** @brief Tables of the chunk of reconstructed cells starting at c0 from TENO's device arrays. */
@@ -1975,12 +1984,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             n_failed_large += failed;
             if (n_failed_large > 0) continue;
             Kokkos::Timer pack_timer;
-            const teno_setup::TableBatch & tables = keyed->batch(c0, n, fit, out);
-            batch_counts(tables, n, failed, invalid, batch_largest);
+            keyed->batch(c0, n, fit, out);
+            batch_counts(out, n, failed, invalid, batch_largest);
             n_invalid_small += invalid;
             largest = std::max(largest, batch_largest);
             fill_range(cells, c0, n);
-            builder->add_batch(c0, cells, tables, n);
+            builder->add_batch(c0, cells, out, n);
             t_pack += pack_timer.seconds();
             continue;
         }
