@@ -290,12 +290,17 @@ KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamS
                                               const Child & child, const Classify & classify) {
     uint32_t * tree = scratch.tree;
     const uint32_t root_state = classify(root, 0);
+    if (root_state != SUBDIVIDED) {
+        // Readers of a kept root look at its state alone
+        Kokkos::single(Kokkos::PerTeam(member), [&]() { tree[0] = root_state; });
+        member.team_barrier();
+        return root_state;
+    }
     constexpr uint32_t words = static_cast<uint32_t>(tree_bytes() / sizeof(uint32_t));
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, words), [&](const uint32_t i) {
         tree[i] = i == 0 ? root_state : 0u;
     });
     member.team_barrier();
-    if (root_state != SUBDIVIDED) return root_state;
     uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
     for (int level = 1; level <= MAX_LEVEL; level++) {
         const uint32_t parents = first, n_parents = width;
@@ -417,39 +422,15 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratc
     const uint32_t * tree = scratch.tree;
     Sums sums{inside, total};
     Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
-        double in = s.inside, all = s.total, measure = measure0 / double(CHILDREN);
-        int level = 1;
-        uint32_t code = 0, first_of_level = 1;
-        while (level > 0) {
-            const uint32_t state = detail::node_state(tree, first_of_level + code);
-            if (state == detail::SUBDIVIDED && level + 1 < MAX_LEVEL) {
-                level++;
-                code *= CHILDREN;
-                first_of_level = first_of_level * CHILDREN + 1;
-                measure /= double(CHILDREN);
-                continue;
-            }
-            if (state == detail::SUBDIVIDED) {
-                // Its children, all kept whole at the deepest level
-                const uint32_t first_child = (first_of_level * CHILDREN + 1) + code * CHILDREN;
-                const double w = measure / double(CHILDREN);
-                for (uint32_t k = 0; k < CHILDREN; k++) {
-                    in += w * (detail::node_state(tree, first_child + k) == detail::INSIDE ? 1.0 : 0.0);
-                    all += w;
-                }
-            } else {
-                in += measure * (state == detail::INSIDE ? 1.0 : 0.0);
-                all += measure;
-            }
-            // The next simplex depth first: the next sibling of the deepest simplex with one (measures scale
-            // exactly by powers of 2)
-            while (level > 0 && code % CHILDREN == CHILDREN - 1) {
-                code /= CHILDREN;
-                first_of_level = (first_of_level - 1) / CHILDREN;
-                measure *= double(CHILDREN);
-                level--;
-            }
-            code++;
+        double in = s.inside, all = s.total;
+        detail::Walk walk;
+        walk.down(tree);
+        while (!walk.done) {
+            double measure = measure0;
+            for (int l = 0; l < walk.level; l++) measure /= double(CHILDREN);
+            in += measure * (detail::node_state(tree, walk.first + walk.code) == detail::INSIDE ? 1.0 : 0.0);
+            all += measure;
+            walk.next(tree);
         }
         s.inside = in;
         s.total = all;
