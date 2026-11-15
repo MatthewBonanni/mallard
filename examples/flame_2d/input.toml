@@ -28,8 +28,11 @@
 # Validation, planar flames on the same mesh (1D runs of flame_restart.py with
 # --ref-delta 4.343e-4 --cfl 1.0, measured with mallard post flame): consumption
 # speeds 3.3446 m/s mixture-averaged and 3.1093 m/s unity Lewis, against
-# Cantera's grid-converged 3.346 and 3.129 m/s (-0.04% and -0.6%; -0.3% and
-# -1.0% with 24 um cells). Results in 2D: with mixture-averaged transport the
+# Cantera's grid-converged 3.3374 and 3.1160 m/s (+0.22% and -0.22%; -0.04%
+# and -0.59% with 24 um cells, so the unity-Lewis flame moves away from
+# Cantera's under refinement, #1036). Cantera's speeds are extrapolated from
+# its grid of refine criteria 0.01 bisected three and four times (first
+# order); the restart files' flames, at 0.02, run 0.8% and 0.7% fast. Results in 2D: with mixture-averaged transport the
 # burnt gas leaves the front between 0.958 and 1.017 times the adiabatic flame
 # temperature (superadiabatic behind the bulges, where hydrogen diffuses in
 # faster than heat out), against 0.996-1.000 with unity Lewis numbers; the

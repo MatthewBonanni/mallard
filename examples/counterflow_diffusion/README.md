@@ -56,26 +56,26 @@ are at its end, 5.4-6.3 / `K_ox`.
 
 | `U_o` [m/s] | cells per FWHM | `K_ox` [1/s] | `T_max` [K] | Cantera at `K_ox` | error | `V_T` [1/s] | Cantera at `V_T` | error |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 15 | 344 | 1495.1 | 1489.0 | +0.41% | 387 | 1488.6 | +0.43% |
-| 2 | 10 | 704 | 1431.5 | 1421.0 | +0.74% | 727 | 1420.1 | +0.80% |
-| 2 | 15 (this input) | 711 | 1426.9 | 1420.0 | +0.49% | 717 | 1421.9 | +0.36% |
-| 2 | 22 (to 3.3 / `K_ox`) | 713 | 1424.4 | 1419.6 | +0.34% | 719 | 1421.6 | +0.20% |
-| 2, jets 7.5 mm, sides 11.25 mm | 15 | 688 | 1433.9 | 1423.6 | +0.73% | 674 | 1429.3 | +0.32% |
-| 3 | 15 | 1064 | 1383.2 | 1370.3 | +0.94% | 1003 | 1376.7 | +0.48% |
-| 4 | 10 | 1418 | 1343.8 | 1323.4 | +1.54% | 1317 | 1329.6 | +1.07% |
-| 4 | 15 | 1418 | 1343.7 | 1323.4 | +1.53% | 1257 | 1339.0 | +0.35% |
-| 4, jets 7.5 mm, sides 11.25 mm | 15 (to 4 / `K_ox`, still rising) | 1325 | 1361.5 | 1336.1 | +1.90% | 1137 | 1356.8 | +0.35% |
-| 4.6 | 15 | 1640 | 1313.8 | 1288.5 | +1.96% | 1454 | 1306.1 | +0.59% |
-| 5.1 | 15 | 1818 | 1287.5 | 1239.7 (extinction, 1816 1/s) | +3.9% | 1593 | 1274.3 | +1.04% |
+| 1 | 15 | 344 | 1495.1 | 1489.8 | +0.35% | 387 | 1488.5 | +0.44% |
+| 2 | 10 | 704 | 1431.5 | 1421.8 | +0.68% | 727 | 1420.2 | +0.80% |
+| 2 | 15 (this input) | 711 | 1426.9 | 1420.8 | +0.43% | 717 | 1421.8 | +0.36% |
+| 2 | 22 (to 3.3 / `K_ox`) | 713 | 1424.4 | 1420.5 | +0.28% | 719 | 1421.5 | +0.20% |
+| 2, jets 7.5 mm, sides 11.25 mm | 15 | 688 | 1433.9 | 1424.2 | +0.68% | 674 | 1429.1 | +0.34% |
+| 3 | 15 | 1064 | 1383.2 | 1371.0 | +0.89% | 1003 | 1376.7 | +0.47% |
+| 4 | 10 | 1418 | 1343.8 | 1324.0 | +1.49% | 1317 | 1329.1 | +1.10% |
+| 4 | 15 | 1418 | 1343.7 | 1324.0 | +1.48% | 1257 | 1338.6 | +0.38% |
+| 4, jets 7.5 mm, sides 11.25 mm | 15 (to 4 / `K_ox`, still rising) | 1325 | 1361.5 | 1336.8 | +1.85% | 1137 | 1356.6 | +0.36% |
+| 4.6 | 15 | 1640 | 1313.8 | 1289.0 | +1.93% | 1454 | 1305.8 | +0.61% |
+| 5.1 | 15 | 1818 | 1287.5 | 1238.1 (extinction, 1811 1/s) | +4.0% | 1593 | 1274.6 | +1.02% |
 | 5.6 | 15 | 1890-1975 | goes out | extinct | | | | |
 
 ![Peak temperature against strain](../../docs/images/counterflow_strain.png)
 
 With the 5 mm jets, the peak temperature at matched `K_ox` is within 2% of
-Cantera's up to 1640 1/s, 90% of Cantera's extinction strain rate (1816
-1/s), but the excess grows with strain, from 0.4% at 344 1/s to 2.0% at 1640
+Cantera's up to 1640 1/s, 91% of Cantera's extinction strain rate (1811
+1/s), but the excess grows with strain, from 0.35% at 344 1/s to 1.9% at 1640
 1/s. Resolution accounts for little of it: at `U_o = 2 m/s` it falls from
-0.74% to 0.49% and 0.34% at 10, 15 and 22 cells per FWHM, and at 4 m/s it is
+0.68% to 0.43% and 0.28% at 10, 15 and 22 cells per FWHM, and at 4 m/s it is
 the same at 10 and 15. The flames see less strain than the similarity
 solution for the same `K_ox`: `V_T / K_ox` is 0.89 in Mallard at `U_o = 4
 m/s` against 0.95 in Cantera, presumably because finite jets with coflows
@@ -88,9 +88,9 @@ and a hotter flame at the same nozzle velocity, and at 4 m/s an excess of
 FWHM over the whole branch and for both jet widths, and within 1.0% at
 Cantera's extinction strain (`V_T` is the more resolution-sensitive measure:
 0.8-1.1% at 10 cells). At `U_o = 5.1 m/s` Mallard's flame still burns at
-`K_ox` = 1818 1/s, Cantera's extinction strain rate; at 5.6 m/s (`K_ox`
+`K_ox` = 1818 1/s, just above Cantera's extinction strain rate; at 5.6 m/s (`K_ox`
 1890-1975 1/s while it burns) the peak temperature on the axis falls from
-1271 to 390 K in 1.3 ms. Mallard's extinction strain rate is therefore 0-9%
+1271 to 390 K in 1.3 ms. Mallard's extinction strain rate is therefore 0.4-9%
 above Cantera's.
 
 Temperature, axial velocity and species on the stagnation line, against
