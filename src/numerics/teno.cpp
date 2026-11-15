@@ -110,6 +110,8 @@ struct CellTables {
     std::array<uint16_t, teno::MAX_FACES> small_size = {};
     std::vector<int32_t> small_cells, small_faces;  // the faces' sector stencils one after another
     std::vector<rtype> small_pinv;                  // (s, l)
+    // Cells of one key (KeyedSetup) have one table: after the first, they take its order and shape, values empty
+    uint32_t shape_key = ~0u;
 };
 
 using IndexRow = std::vector<int32_t> CellTables::*;
@@ -609,24 +611,60 @@ class PackedRows {
                 for (uint32_t c = a; c < std::min(n, a + slice); c++) largest = std::max(largest, (tables[c].*cells).size());
                 slice_start.push_back(slice_start.back() + largest);
             }
-            std::vector<teno::CanonicalTable> canonical(n);
-            std::vector<uint64_t> first_value(n + 1, 0);
-            for (uint32_t c = 0; c < n; c++) first_value[c + 1] = first_value[c] + (tables[c].*pinv).size();
-            std::vector<rtype> ordered(first_value[n]);
-            Kokkos::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
-                                 [&](const uint32_t c) {
-                const CellTables & t = tables[c];
-                canonical[c] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
-                for (size_t s = 0; s < canonical[c].order.size(); s++) {
-                    const size_t from = canonical[c].order[s];
-                    for (uint32_t l = 0; l < width; l++) ordered[first_value[c] + s * width + l] = (t.*pinv)[from * width + l];
+            // A cell of a key that an earlier cell brought (KEPT, or that cell in this chunk) takes its order and shape
+            constexpr int64_t KEPT = -2, OWN = -1;
+            std::vector<int64_t> first(n, OWN);
+            std::unordered_map<uint32_t, uint32_t> first_of_key;
+            std::vector<uint32_t> own;
+            for (uint32_t c = 0; c < n; c++) {
+                const uint32_t k = tables[c].shape_key;
+                if (k != ~0u) {
+                    if (keyed.count(k) != 0) {
+                        first[c] = KEPT;
+                        continue;
+                    }
+                    const auto [it, added] = first_of_key.try_emplace(k, c);
+                    if (!added) {
+                        first[c] = it->second;
+                        continue;
+                    }
+                }
+                own.push_back(c);
+            }
+            const uint32_t n_own = static_cast<uint32_t>(own.size());
+            std::vector<teno::CanonicalTable> canonical(n), own_canonical(n_own);
+            std::vector<uint64_t> first_value(n_own + 1, 0);
+            for (uint32_t j = 0; j < n_own; j++) first_value[j + 1] = first_value[j] + (tables[own[j]].*pinv).size();
+            std::vector<rtype> ordered(first_value[n_own]);
+            Kokkos::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_own),
+                                 [&](const uint32_t j) {
+                const CellTables & t = tables[own[j]];
+                own_canonical[j] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
+                for (size_t s = 0; s < own_canonical[j].order.size(); s++) {
+                    const size_t from = own_canonical[j].order[s];
+                    for (uint32_t l = 0; l < width; l++) ordered[first_value[j] + s * width + l] = (t.*pinv)[from * width + l];
                 }
             });
-            std::vector<uint64_t> ids(n);
-            for (uint32_t c = 0; c < n; c++) ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
-            const std::vector<uint32_t> shapes =
-                store.add(n, canonical.data(), [&](uint32_t c) { return ordered.data() + first_value[c]; }, ids.data());
+            auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c); };
+            std::vector<uint64_t> ids(n_own);
+            for (uint32_t j = 0; j < n_own; j++) ids[j] = id(own[j]);
+            const std::vector<uint32_t> own_shapes =
+                store.add(n_own, own_canonical.data(), [&](uint32_t j) { return ordered.data() + first_value[j]; }, ids.data());
             ordered = std::vector<rtype>();
+            std::vector<uint32_t> shapes(n);
+            for (uint32_t j = 0; j < n_own; j++) {
+                const uint32_t c = own[j];
+                shapes[c] = own_shapes[j];
+                canonical[c] = std::move(own_canonical[j]);
+                if (tables[c].shape_key != ~0u) keyed.emplace(tables[c].shape_key, std::make_pair(canonical[c].order, shapes[c]));
+            }
+            for (uint32_t c = 0; c < n; c++) {
+                if (first[c] == OWN) continue;
+                const auto & [order, shape] = keyed.at(tables[c].shape_key);
+                canonical[c].order = order;
+                shapes[c] = shape;
+                store.join(shape, id(c));
+            }
             cell_shape.insert(cell_shape.end(), shapes.begin(), shapes.end());
             std::vector<uint64_t> first_image(n + 1, images.size() / 2);
             for (uint32_t c = 0; c < n; c++) {
@@ -715,6 +753,7 @@ class PackedRows {
         uint32_t n_added = 0;
         teno::TableStore<> store;                 // shared: a table per stencil shape
         std::vector<uint32_t> cell_shape;         // shared: (cell)
+        std::unordered_map<uint32_t, std::pair<std::vector<uint16_t>, uint32_t>> keyed;  // shared: key: order, shape
         std::vector<int32_t> images;              // (2 image + {cell, face field})
         std::vector<Chunk> chunks;
         std::vector<std::shared_ptr<GrowingBuffer>> memory;  // streamed: cells, pinv
@@ -1256,6 +1295,7 @@ class KeyedSetup {
                 });
             }
             groups.exchange(records);
+            packed.assign(groups.groups.size(), 0);
             n_representatives = static_cast<uint32_t>(reps.size());
             seconds = timer.seconds();
         }
@@ -1276,14 +1316,19 @@ class KeyedSetup {
          *        largest central stencil to largest.
          */
         std::vector<CellTables> tables(const uint32_t c0, const uint32_t n, const std::vector<uint32_t> & fit,
-                                       const teno_setup::TableBatch & out, uint32_t & invalid, uint16_t & largest) const {
+                                       const teno_setup::TableBatch & out, uint32_t & invalid, uint16_t & largest) {
             std::vector<CellTables> tables(n);
             if (!fit.empty()) {
                 std::vector<uint8_t> f, v;
                 std::vector<CellTables> fitted = fitted_tables(out, uint32_t(fit.size()), f, v);
                 for (size_t j = 0; j < fit.size(); j++) tables[fit[j] - c0] = std::move(fitted[j]);
             }
-            std::vector<uint8_t> taken(n, 0), cut(n, 0);
+            std::vector<uint8_t> taken(n, 0), cut(n, 0), values(n, 0);
+            for (uint32_t j = 0; j < n; j++) {
+                if (!from_record(c0 + j)) continue;
+                values[j] = !packed[groups.group[c0 + j]];
+                packed[groups.group[c0 + j]] = 1;
+            }
             Kokkos::Experimental::UniqueToken<Kokkos::DefaultHostExecutionSpace> token;
             std::vector<teno::ShapeKeys::Scan> scans(static_cast<size_t>(token.size()));
             Kokkos::parallel_for("teno_shape_cells",
@@ -1292,7 +1337,8 @@ class KeyedSetup {
                 const uint32_t c = c0 + j;
                 if (!from_record(c)) return;
                 const int id = token.acquire();
-                taken[j] = take(records[groups.group[c]], c, tables[j], cut[j], scans[size_t(id)]);
+                taken[j] = take(records[groups.group[c]], c, values[j] != 0, tables[j], cut[j], scans[size_t(id)]);
+                tables[j].shape_key = groups.group[c];
                 token.release(id);
             });
             for (uint32_t j = 0; j < n; j++) {
@@ -1358,9 +1404,13 @@ class KeyedSetup {
             return r;
         }
 
-        /** @brief Cell c's tables from its key's record r; false if its neighborhood does not match it. */
-        bool take(const std::vector<uint64_t> & r, const uint32_t c, CellTables & t, uint8_t & invalid,
-                  teno::ShapeKeys::Scan & scan) const {
+        /**
+         * @brief Cell c's tables from its key's record r, without the
+         *        pseudo-inverses unless with_values; false if its neighborhood
+         *        does not match it.
+         */
+        bool take(const std::vector<uint64_t> & r, const uint32_t c, const bool with_values, CellTables & t,
+                  uint8_t & invalid, teno::ShapeKeys::Scan & scan) const {
             std::vector<uint32_t> cells;
             uint32_t layers = 0;
             if (!keys.neighborhood(c, cells, layers, scan) || cells.size() != r[1]) return false;
@@ -1374,9 +1424,11 @@ class KeyedSetup {
                 n_small += s;
             }
             t.scale = rtype(teno_setup::cell_scale(m, c));
-            auto values = [&](std::vector<rtype> & v) {
-                v.resize(r[at++]);
+            auto values = [&](std::vector<rtype> & v, const bool kept = true) {
+                const size_t count = r[at++];
+                v.resize(kept ? count : 0);
                 for (auto & x : v) x = rtype(value(r[at++]));
+                if (!kept) at += count;
             };
             bool ok = true;
             auto stencil = [&](const size_t count, std::vector<int32_t> & entries, std::vector<int32_t> & faces) {
@@ -1397,9 +1449,9 @@ class KeyedSetup {
             values(t.basis_mean);
             values(t.si);
             stencil(n_large, t.large_cells, t.large_faces);
-            values(t.large_pinv);
+            values(t.large_pinv, with_values);
             stencil(n_small, t.small_cells, t.small_faces);
-            values(t.small_pinv);
+            values(t.small_pinv, with_values);
             return ok;
         }
 
@@ -1407,6 +1459,7 @@ class KeyedSetup {
         teno::ShapeKeys keys;
         teno::ShapeGroups groups;
         std::vector<std::vector<uint64_t>> records;  // (group): valid, then the representative's tables
+        std::vector<uint8_t> packed;                 // (group): a cell of it was handed out with its values
 };
 
 /** @brief Tables of the chunk of reconstructed cells starting at c0 from TENO's device arrays. */

@@ -167,6 +167,9 @@ class TableStore {
             return k;
         }
 
+        /** @brief A cell of global id gid whose table is bitwise shape k's takes it. */
+        void join(const uint32_t k, const uint64_t gid) { shapes[k].gid = std::min(shapes[k].gid, gid); }
+
         /** @brief The shape registered under a caller's key, or NONE. */
         uint32_t find_keyed(const uint64_t key) const {
             const auto it = keys.find(keyed_hash(key));
