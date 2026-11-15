@@ -1313,3 +1313,72 @@ TEST(CliTest, CompletionOffersTheKeyAndFieldCatalogs) {
         for (const std::string & w : fields) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
     }
 }
+
+TEST(CliTest, CompletionOffersPostDeriveOnlyTheFieldsItWrites) {
+    SKIP_UNDER_MPI();
+    const Result listed = run({"list", "fields", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    std::vector<std::string> derived;
+    const json::Value catalog = json::parse(listed.out);
+    for (const json::Value & f : catalog["fields"].array) {
+        if (f.has("post_derive") && f["name"].string.find('<') == std::string::npos) derived.push_back(f["name"].string);
+    }
+    std::sort(derived.begin(), derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "MACH") != derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "RHO") == derived.end());
+    auto expected = [&](const std::string & head) {
+        std::string out = " ";
+        for (const std::string & w : derived) out += head + w + " ";
+        return out;
+    };
+
+    const fs::path dir = fs::absolute("completion_derive");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::vector<std::vector<std::string>> lines = {
+        {"post", "derive", "flow.vtkhdf", "--fields", ""},
+        {"post", "derive", "flow.vtkhdf", "--fields", "MACH,P0,"},
+        {"post", "derive", "flow.vtkhdf", "--fields", "=", "MACH,"},
+    };
+    std::vector<std::string> got;
+    const int status = bash_complete(dir, lines, got);
+    if (status != -1) {
+        ASSERT_EQ(status, 0);
+        EXPECT_EQ(got[0], expected(""));
+        EXPECT_EQ(got[1], expected("MACH,P0,"));
+        EXPECT_EQ(got[2], expected("MACH,"));
+    }
+
+    // zsh: the catalog the value of post derive --fields completes from, and its words
+    const Result zsh = run({"completion", "zsh"});
+    ASSERT_EQ(zsh.status, 0) << zsh.err;
+    std::ofstream(dir / "mallard.zsh") << zsh.out;
+    std::ofstream(dir / "driver.zsh") << "export LC_ALL=C\ncompdef() { :; }\nsource '" << (dir / "mallard.zsh").string() << "' || exit 1\n"
+                                      << "_mallard_value 'post derive' --fields || exit 1\n"
+                                      << "[[ $reply == @* ]] || exit 1\n_mallard_catalog ${reply#@}\n"
+                                      << "print -l -- ${(o)reply} | tr '\\n' ' '\n";
+    std::string zsh_out;
+    const int zsh_status = run_shell("zsh", "-f", dir / "driver.zsh", zsh_out);
+    if (zsh_status != -1) {
+        EXPECT_EQ(zsh_status, 0) << zsh_out;
+        EXPECT_EQ(" " + zsh_out, expected("")) << zsh_out;
+    }
+
+    // fish: the same, read from the script
+    const Result fish = run({"completion", "fish"});
+    ASSERT_EQ(fish.status, 0) << fish.err;
+    std::smatch option;
+    ASSERT_TRUE(std::regex_search(fish.out, option,
+                                  std::regex("__mallard_is \\\\'post derive\\\\'' -l fields "
+                                             "-a '\\(__mallard_list ([a-z_]+)\\)'")))
+        << fish.out;
+    std::smatch words;
+    ASSERT_TRUE(std::regex_search(fish.out, words,
+                                  std::regex("\n        case " + option[1].str() + "\n            printf '%s\\\\n' ([^\n]*)")))
+        << fish.out;
+    std::vector<std::string> fish_words;
+    std::istringstream in(words[1].str());
+    for (std::string w; in >> w;) fish_words.push_back(w.substr(1, w.size() - 2));
+    std::sort(fish_words.begin(), fish_words.end());
+    EXPECT_EQ(fish_words, derived);
+}
