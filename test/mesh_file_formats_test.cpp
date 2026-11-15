@@ -377,6 +377,30 @@ TEST(MeshFileFormatsTest, EachRankGetsItsPartOfAnOpenFoamMesh) {
     }
 }
 
+/** @brief The ranks split ASCII lists by line, so a list with two items on a line is an error, not a different mesh. */
+TEST(MeshFileFormatsTest, AsciiItemsSharingALineAreRejected) {
+    const TestMesh t = test_mesh();
+    auto join_second_line_after = [](std::string text, const std::string & marker) {
+        const size_t first = text.find('\n', text.find(marker) + marker.size());
+        text[text.find('\n', first + 1)] = ' ';
+        return text;
+    };
+    auto expect_rejected = [](const std::filesystem::path & path, const std::string & message) {
+        try {
+            read_file_block(path.string());
+            ADD_FAILURE() << "read " << path;
+        } catch (const std::runtime_error & e) {
+            EXPECT_NE(std::string(e.what()).find(message), std::string::npos) << e.what();
+        }
+    };
+    const std::string fluent = join_second_line_after(fluent_file(t, false), "(13 (2 ");
+    expect_rejected(write_shared("mallard_formats_fluent_wrapped", {{"mesh.msh", fluent}}) / "mesh.msh",
+                    "one node or face per line");
+    std::map<std::string, std::string> foam = foam_files(t, false);
+    foam["owner"] = join_second_line_after(foam["owner"], "\n(");
+    expect_rejected(write_shared("mallard_formats_foam_wrapped", foam), "one item per line");
+}
+
 #ifdef Mallard_HAS_CGNS
 /**
  * @brief The mesh as a CGNS file: the cells in two MIXED sections, the second
