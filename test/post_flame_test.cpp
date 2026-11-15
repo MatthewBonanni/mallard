@@ -51,6 +51,7 @@ struct Case {
     double interval = 0.1 * TAU;  // between restart files
     bool chemistry = true;
     bool snapshots = false;  // also VTKHDF snapshots of what post flame reads, OMEGA_* included
+    bool rich = false;       // twice the H2 (equivalence ratio 2), nearly all of it burnt, less than half the O2
 };
 
 std::string flame_input(const std::string & dir, const Case & c) {
@@ -65,7 +66,8 @@ std::string flame_input(const std::string & dir, const Case & c) {
     if (N_DIM == 3) in << "Nz = 1\nLz = " << 10 * h << "\n";
     in << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"" << T_U << " + " << T_B - T_U << " * " << s
        << "\"\nu = [\"0.0\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\nbalance = \"N2\"\n"
-       << "Y = { H2 = \"0.0285224 - 0.0263594 * " << s << "\", O2 = \"0.2263540 - 0.2132528 * " << s << "\", "
+       << "Y = { H2 = \"" << (c.rich ? "0.0570448 - 0.0565 * " : "0.0285224 - 0.0263594 * ") << s << "\", O2 = \""
+       << (c.rich ? "0.2263540 - 0.1 * " : "0.2263540 - 0.2132528 * ") << s << "\", "
        << "H2O = \"0.2276783 * " << s << "\", OH = \"0.0103755 * " << s << "\", O = \"0.0013623 * " << s << "\", "
        << "H = \"0.0002325 * " << s << "\" }\n";
     const std::string open = c.along_y ? "bottom" : "right";
@@ -147,9 +149,12 @@ TEST(PostFlameTest, ConsumptionSpeedBurnsTheFuelTheStripLoses) {
     std::vector<std::string> files = restart_files(dir);
     files.erase(files.begin(), files.begin() + 5);
     std::vector<std::string> words = files;
-    words.insert(words.end(), {"--species", "H2", "-o", dir + "/out"});
+    words.insert(words.end(), {"-o", dir + "/out"});
     const json::Value r = measure(words);
     EXPECT_EQ(r.find("fresh_end")->string, "low");
+    // Stoichiometric, where O2 is depleted slightly more than H2 relative to its fresh mass fraction: the fuel
+    EXPECT_EQ(r.find("species")->string, "H2");
+    EXPECT_NEAR(number(r, "equivalence_ratio"), 1.0, 1e-3);
     const std::vector<json::Value> & rows = r.find("snapshots")->array;
     ASSERT_EQ(rows.size(), files.size());
     const double h = LENGTH / 60;
@@ -207,7 +212,29 @@ TEST(PostFlameTest, PositionAndThicknessOfAResolvedTanhProfileAreItsCenterAndTwi
     EXPECT_NEAR(number(row, "x_f"), X_0, 1e-3 * W);
     // The largest slope between cell centers h apart underestimates the tangent's by about (h / W)^2 / 12
     EXPECT_NEAR(number(row, "delta_T"), 2 * W, 1e-2 * W);
+    EXPECT_NEAR(number(row, "dTdx_max"), (T_B - T_U) / (2 * W), 1e-2 * (T_B - T_U) / (2 * W));
     EXPECT_GT(number(row, "S_c"), 0.0);
+    // A burnt temperature given, as where the burnt gas has not reached equilibrium: the same slope, a thicker
+    // flame, and x_f where T crosses midway to it
+    const double T_given = T_B + 200.0;
+    const json::Value g = measure({dir + "/restart_000000.restart", "--burnt-temperature", std::to_string(T_given),
+                                   "-o", dir + "/given"});
+    const json::Value & given = g.find("snapshots")->array.front();
+    EXPECT_EQ(g.find("burnt_temperature")->string, "given");
+    EXPECT_DOUBLE_EQ(number(given, "T_b"), T_given);
+    EXPECT_DOUBLE_EQ(number(given, "dTdx_max"), number(row, "dTdx_max"));
+    EXPECT_NEAR(number(given, "delta_T"), (T_given - T_U) / number(row, "dTdx_max"), 1e-12 * W);
+    const double x_mid = X_0 + W * std::atanh(2.0 * (0.5 * (T_U + T_given) - T_U) / (T_B - T_U) - 1.0);
+    EXPECT_NEAR(number(given, "x_f"), x_mid, 1e-2 * W);
+}
+
+TEST(PostFlameTest, ARichFlameBurnsItsOxidizer) {
+    // Equivalence ratio 2, with the profile burning nearly all its H2 and under half its O2: the oxidizer
+    const std::string dir = fresh_dir("rich");
+    run(dir, {.cells = 120, .stop = "n_steps = 1", .rich = true});
+    const json::Value r = measure({dir + "/restart_000000.restart", "-o", dir + "/out"});
+    EXPECT_EQ(r.find("species")->string, "O2");
+    EXPECT_NEAR(number(r, "equivalence_ratio"), 2.0, 1e-3);
 }
 
 TEST(PostFlameTest, AMirroredFlameAlongAnotherDirectionMeasuresTheSame) {

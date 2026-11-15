@@ -264,21 +264,34 @@ fresh gas at its colder end, and reports:
 
 | Column | Meaning |
 |---|---|
-| `x_f` | Flame position: where T is midway between the fresh temperature T_u (at the colder end) and the peak temperature T_b |
+| `x_f` | Flame position: where T is midway between the fresh temperature T_u (at the colder end) and the burnt temperature T_b: the peak temperature, or `--burnt-temperature` |
 | `delta_T` | Thermal thickness (T_b − T_u) / max \|dT/dx\| |
+| `dTdx_max` | max \|dT/dx\|, between neighbouring rows |
 | `S_c` | Consumption speed −∫ ω_k dx / (ρ_u (Y_k,u − Y_k,b)) of the deficient reactant k: in a steady flame the flame speed, in any frame |
 | `S_d` | Displacement speed: the speed of `x_f` relative to the fresh gas |
 
 The production rates ω_k are the run's own: the `OMEGA_*` fields of snapshots
 that hold them with `T`, `RHO`, the velocity and `Y_*` (read on the mesh
 alone), else computed from each stored state by the case's `[chemistry]`
-(restart files, snapshots of the state). k is the species the flame depletes
-most relative to its fresh mass fraction (H2 of a lean H2/air flame, O2 of a
-rich one) unless `--species` names it. The summary averages `S_c` over the last
-third of the series and fits `x_f` over its last half for `S_d`; choose the
+(restart files, snapshots of the state). Unless `--species` names it, k
+follows from the equivalence ratio φ = (2 C + H/2) / O of the fresh gas's
+atoms: the fuel when φ ≤ 1.01 (H2 of a lean or stoichiometric H2/air flame),
+else the oxidizer (O2 of a rich one); of several, the one the flame depletes
+most relative to its fresh mass fraction. The summary averages `S_c`,
+`delta_T` and `dTdx_max` over the last third of the series and fits `x_f` over
+its last half for `S_d`; choose the
 snapshots of a settled flame with `--times`. The table, with a row per
 snapshot, goes to `flame/flame.csv` (`-o`, `--name`); `--format json` gives the
 report to scripts.
+
+`delta_T` depends on T_b. The burnt gas of a short domain is often still below
+its adiabatic equilibrium temperature, so with the peak as T_b the thickness
+falls short of a reference flame's while the slope agrees: in the premixed
+flame tutorial the burnt gas reaches 2231 K against Cantera's 2379 K, and
+`delta_T` is 6.8% below Cantera's thickness while max |dT/dx| is within 0.4%:
+the gap is the burnt gas's, not the flame's. Compare `dTdx_max`, or give the
+reference's T_b with `--burnt-temperature` (`2379.43` there brings `delta_T`
+within 0.4% of Cantera's).
 
 On a mesh whose cells do not line up in rows normal to `--direction`, each
 cell is a row of its own and the profile is not a flame's: the command is for

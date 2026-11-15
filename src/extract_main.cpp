@@ -25,6 +25,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "chemistry/mechanism.h"
 #include "cli.h"
 #include "commands.h"
 #include "derived_catalog.h"
@@ -1770,7 +1771,8 @@ struct FlameRow {
     int64_t step = 0;
     double t = 0.0;
     double x_f = 0.0;    // where T is midway between the fresh and burnt temperatures
-    double delta = 0.0;  // thermal thickness (T_b - T_u) / max |dT/dx|
+    double delta = 0.0;     // thermal thickness (T_b - T_u) / max |dT/dx|
+    double gradient = 0.0;  // max |dT/dx|
     double S_c = 0.0;    // consumption speed
     double S_d = std::numeric_limits<double>::quiet_NaN();  // displacement speed, from the motion of x_f
     double u_u = 0.0, T_u = 0.0, T_b = 0.0, rho_u = 0.0, Y_u = 0.0, Y_b = 0.0;
@@ -1789,30 +1791,79 @@ std::vector<size_t> fresh_to_burnt(const FlameProfile & p) {
     return order;
 }
 
-/** @brief The species --species names, else the reactant the flame depletes most, relative to its fresh mass fraction. */
-uint32_t deficient_species(const FlameProfile & p, const std::vector<std::string> & species) {
+/** @brief Per species, per unit mass [kmol/kg]: the O2 its C and H take to burn, and the O2 its O gives. */
+struct Oxygen {
+    std::vector<double> takes, gives;
+};
+
+Oxygen oxygen_of(const chemistry::Mechanism & mech, const std::vector<std::string> & species) {
+    Oxygen o;
+    for (const std::string & name : species) {
+        const int32_t k = mech.species_index(name);
+        if (k < 0) throw std::runtime_error("the case's mechanism has no species " + name + ": give the species with --species");
+        const chemistry::Species & sp = mech.species[static_cast<size_t>(k)];
+        double C = 0.0, H = 0.0, O = 0.0;
+        for (const auto & [element, n] : sp.composition) {
+            if (element == "C") C = n;
+            if (element == "H") H = n;
+            if (element == "O") O = n;
+        }
+        o.takes.push_back((C + 0.25 * H) / sp.molecular_weight);
+        o.gives.push_back(0.5 * O / sp.molecular_weight);
+    }
+    return o;
+}
+
+/** @brief Fresh mixtures within this of stoichiometric burn their fuel. */
+const double STOICHIOMETRIC_TOLERANCE = 0.01;
+
+struct Deficient {
+    uint32_t k = 0;
+    double phi = 0.0;  // the fresh gas's equivalence ratio
+};
+
+/**
+ * @brief The reactant the fresh gas runs out of: the fuel when its equivalence ratio is at most 1, else the
+ *        oxidizer; of several, the one the flame depletes most relative to its fresh mass fraction.
+ */
+Deficient deficient_species(const FlameProfile & p, const Oxygen & o) {
     const std::vector<size_t> order = fresh_to_burnt(p);
     const size_t u = order.front(), b = order.back();
-    uint32_t best = 0;
+    double takes = 0.0, gives = 0.0;
+    for (size_t k = 0; k < o.takes.size(); k++) {
+        takes += p.Y[k][u] * o.takes[k];
+        gives += p.Y[k][u] * o.gives[k];
+    }
+    if (!(takes > 0.0) || !(gives > 0.0)) {
+        throw std::runtime_error("the fresh gas holds no " + std::string(takes > 0.0 ? "oxygen" : "fuel (C or H)") +
+                                 ": give the species the flame consumes with --species");
+    }
+    Deficient d;
+    d.phi = takes / gives;
+    const bool fuel = d.phi <= 1.0 + STOICHIOMETRIC_TOLERANCE;
     double depletion = -1.0;
-    for (uint32_t k = 0; k < species.size(); k++) {
+    for (uint32_t k = 0; k < o.takes.size(); k++) {
         const double Y_u = p.Y[k][u];
-        if (!(Y_u > 1e-12)) continue;
-        const double d = (Y_u - p.Y[k][b]) / Y_u;
-        if (d > depletion) {
-            depletion = d;
-            best = k;
+        if (!(Y_u > 1e-12) || (fuel ? !(o.takes[k] > o.gives[k]) : !(o.gives[k] > o.takes[k]))) continue;
+        const double depleted = (Y_u - p.Y[k][b]) / Y_u;
+        if (depleted > depletion) {
+            depletion = depleted;
+            d.k = k;
         }
     }
     if (!(depletion > 0.0)) {
-        throw std::runtime_error("no species of the fresh gas is consumed between the fresh and the burnt end: is "
-                                 "there a premixed flame along the direction given?");
+        throw std::runtime_error(std::string("no ") + (fuel ? "fuel" : "oxidizer") + " of the fresh gas (equivalence "
+                                 "ratio " + format("%.3g", d.phi) + ") is consumed between the fresh and the burnt end: "
+                                 "is there a premixed flame along the direction given?");
     }
-    return best;
+    return d;
 }
 
-/** @brief Position, thermal thickness and consumption speed of the flame of a profile, burning species k. */
-FlameRow flame_of(const FlameProfile & p, uint32_t k) {
+/**
+ * @brief Position, thermal thickness and consumption speed of the flame of a profile, burning species k;
+ *        T_b the burnt temperature given, else (0) the profile's peak.
+ */
+FlameRow flame_of(const FlameProfile & p, uint32_t k, double T_b) {
     const size_t n = p.x.size();
     if (n < 3) throw std::runtime_error("the profile has " + count(n, "row") + ": a flame needs more along it");
     const std::vector<size_t> order = fresh_to_burnt(p);
@@ -1820,12 +1871,15 @@ FlameRow flame_of(const FlameProfile & p, uint32_t k) {
     FlameRow r;
     r.T_u = p.T[u];
     // The burnt gas cools behind the flame where heat is lost or pressure waves pass: its peak is the flame's
-    r.T_b = *std::max_element(p.T.begin(), p.T.end());
+    r.T_b = T_b > 0.0 ? T_b : *std::max_element(p.T.begin(), p.T.end());
     r.u_u = p.u[u];
     r.rho_u = p.rho[u];
     r.Y_u = p.Y[k][u];
     r.Y_b = p.Y[k][b];
-    if (!(r.T_b > r.T_u)) throw std::runtime_error("the temperature is the same at both ends: no flame");
+    if (!(r.T_b > r.T_u)) {
+        throw std::runtime_error(T_b > 0.0 ? "--burnt-temperature is not above the fresh gas's, " + format("%.6g", r.T_u) + " K"
+                                           : "the temperature is the same at both ends: no flame");
+    }
     if (!(r.Y_u > r.Y_b)) throw std::runtime_error("the burnt gas has as much of the species as the fresh gas");
     // Rows end midway between centers, the outer ones as far out as in
     double consumed = 0.0, gradient = 0.0;
@@ -1836,6 +1890,7 @@ FlameRow flame_of(const FlameProfile & p, uint32_t k) {
         if (i + 1 < n) gradient = std::max(gradient, std::abs((p.T[i + 1] - p.T[i]) / (p.x[i + 1] - p.x[i])));
     }
     r.S_c = consumed / (r.rho_u * (r.Y_u - r.Y_b));
+    r.gradient = gradient;
     r.delta = (r.T_b - r.T_u) / gradient;
     const double T_mid = 0.5 * (r.T_u + r.T_b);
     for (size_t j = 1; j < n; j++) {
@@ -1860,9 +1915,12 @@ double slope(const std::vector<double> & x, const std::vector<double> & y) {
     return (n * sxy - sx * sy) / (n * sxx - sx * sx);
 }
 
-/** @brief The speeds over the end of the series: S_c over its last third, S_d from x_f fitted over its last half. */
+/**
+ * @brief The speeds over the end of the series: S_c, and the thickness, over its last third, S_d from x_f
+ *        fitted over its last half.
+ */
 struct FlameSummary {
-    double S_c = 0.0, S_c_spread = 0.0, S_c_from = 0.0;
+    double S_c = 0.0, S_c_spread = 0.0, S_c_from = 0.0, delta = 0.0, gradient = 0.0;
     size_t S_c_samples = 0;
     double S_d = std::numeric_limits<double>::quiet_NaN(), drift = 0.0, S_d_from = 0.0;
     size_t S_d_samples = 0;
@@ -1876,11 +1934,15 @@ FlameSummary summarize(const std::vector<FlameRow> & rows, double sense) {
     for (const FlameRow & r : rows) {
         if (r.t < s.S_c_from) continue;
         sum += r.S_c;
+        s.delta += r.delta;
+        s.gradient += r.gradient;
         lo = std::min(lo, r.S_c);
         hi = std::max(hi, r.S_c);
         s.S_c_samples++;
     }
     s.S_c = sum / double(s.S_c_samples);
+    s.delta /= double(s.S_c_samples);
+    s.gradient /= double(s.S_c_samples);
     s.S_c_spread = hi - lo;
     s.S_d_from = t0 + 0.5 * (t1 - t0);
     std::vector<double> t, x;
@@ -1902,12 +1964,13 @@ FlameSummary summarize(const std::vector<FlameRow> & rows, double sense) {
 void write_flame_table(const std::vector<FlameRow> & rows, const std::string & species, const std::string & path) {
     fs::create_directories(fs::path(path).parent_path());
     std::ofstream out(path);
-    out << "step,t,x_f,delta_T,S_c,S_d,u_u,T_u,T_b,rho_u,Y_" << species << "_u,Y_" << species << "_b\n"
-        << field_units::csv_line({dim::none, dim::time, dim::length, dim::length, dim::velocity, dim::velocity,
+    out << "step,t,x_f,delta_T,dTdx_max,S_c,S_d,u_u,T_u,T_b,rho_u,Y_" << species << "_u,Y_" << species << "_b\n"
+        << field_units::csv_line({dim::none, dim::time, dim::length, dim::length, dim::of(0, -1, 0, 1), dim::velocity,
+                                  dim::velocity,
                                   dim::velocity, dim::temperature, dim::temperature, dim::density, dim::none, dim::none})
         << "\n" << provenance::csv_comment() << "\n" << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const FlameRow & r : rows) {
-        out << r.step << "," << r.t << "," << r.x_f << "," << r.delta << "," << r.S_c << ",";
+        out << r.step << "," << r.t << "," << r.x_f << "," << r.delta << "," << r.gradient << "," << r.S_c << ",";
         if (std::isfinite(r.S_d)) out << r.S_d;
         out << "," << r.u_u << "," << r.T_u << "," << r.T_b << "," << r.rho_u << "," << r.Y_u << "," << r.Y_b << "\n";
     }
@@ -1977,6 +2040,10 @@ int flame(const cli::Args & args) {
     const bool reference = args.has("--reference-speed");
     const double S_ref = reference ? parse_number(args.value_or("--reference-speed", ""), "--reference-speed") : 0.0;
     if (reference && !(S_ref > 0.0)) throw UsageError("--reference-speed takes a positive speed in m/s");
+    const bool burnt_given = args.has("--burnt-temperature");
+    const double T_b =
+        burnt_given ? parse_number(args.value_or("--burnt-temperature", ""), "--burnt-temperature") : 0.0;
+    if (burnt_given && !(T_b > 0.0)) throw UsageError("--burnt-temperature takes a temperature in K");
 
     const std::vector<output::Contents> files = open_files(args, "flame");
     size_t n_available = 0;
@@ -2064,6 +2131,13 @@ int flame(const cli::Args & args) {
         }
         chosen = static_cast<int32_t>(it - species.begin());
     }
+    Oxygen oxygen;
+    if (chosen < 0) {
+        const std::string mechanism = find_value<std::string>(input, "physics", "mechanism");
+        const std::string phase = find_value_or<std::string>(input, "physics", "phase", "");
+        oxygen = oxygen_of(chemistry::read_mechanism(mechanism, phase), species);
+    }
+    double phi = std::numeric_limits<double>::quiet_NaN();
 
     // Per owned cell: T, the velocity along the direction, RHO, then Y and OMEGA of every species
     const uint32_t n_owned = static_cast<uint32_t>(cells.centers.size());
@@ -2125,8 +2199,12 @@ int flame(const cli::Args & args) {
                 p.Y.push_back(column(3 + k));
                 p.omega.push_back(column(3 + n_species + k));
             }
-            if (chosen < 0) chosen = static_cast<int32_t>(deficient_species(p, species));
-            FlameRow r = flame_of(p, static_cast<uint32_t>(chosen));
+            if (chosen < 0) {
+                const Deficient d = deficient_species(p, oxygen);
+                chosen = static_cast<int32_t>(d.k);
+                phi = d.phi;
+            }
+            FlameRow r = flame_of(p, static_cast<uint32_t>(chosen), T_b);
             r.step = e.step;
             r.t = t;
             rows.push_back(r);
@@ -2158,13 +2236,15 @@ int flame(const cli::Args & args) {
         for (const auto & c : files) paths.push_back(c.path);
         o.raw("files", json_strings(paths)).add("input", case_from).add("direction", direction);
         o.add("fresh_end", std::string(sense < 0.0 ? "low" : "high")).add("species", burnt).add("rows", n_rows);
+        if (std::isfinite(phi)) o.add("equivalence_ratio", phi);
+        o.add("burnt_temperature", std::string(burnt_given ? "given" : "peak"));
         o.add("rates", std::string(stored ? "stored" : "computed"));
         std::string list = "[";
         for (size_t k = 0; k < rows.size(); k++) {
             const FlameRow & r = rows[k];
             json::Object row;
             row.raw("snapshot", snapshot_json(files[selected[k].file], selected[k]));
-            row.add("x_f", r.x_f).add("delta_T", r.delta).add("S_c", r.S_c);
+            row.add("x_f", r.x_f).add("delta_T", r.delta).add("dTdx_max", r.gradient).add("S_c", r.S_c);
             if (std::isfinite(r.S_d)) row.add("S_d", r.S_d);
             row.add("u_u", r.u_u).add("T_u", r.T_u).add("T_b", r.T_b).add("rho_u", r.rho_u).add("Y_u", r.Y_u).add("Y_b", r.Y_b);
             list += (list.size() > 1 ? "," : "") + row.str();
@@ -2172,6 +2252,7 @@ int flame(const cli::Args & args) {
         o.raw("snapshots", list + "]");
         json::Object summary;
         summary.add("S_c", s.S_c).add("S_c_spread", s.S_c_spread).add("S_c_from", s.S_c_from).add("S_c_samples", s.S_c_samples);
+        summary.add("delta_T", s.delta).add("dTdx_max", s.gradient);
         if (std::isfinite(s.S_d)) summary.add("S_d", s.S_d).add("drift", s.drift);
         summary.add("S_d_from", s.S_d_from).add("S_d_samples", s.S_d_samples);
         if (reference) {
@@ -2193,7 +2274,11 @@ int flame(const cli::Args & args) {
     item("Profile", count(n_rows, "row") + " along " + direction +
                         (averaged.empty() ? "" : ", each the mean over " + directions_text(averaged) + " weighted by "
                                                  "cell volume") + "; fresh gas at the " + fresh_end + " end");
-    item("Consumed", burnt + (args.has("--species") ? " (--species)" : " (depleted most, relative to the fresh gas)"));
+    const std::string role = phi <= 1.0 + STOICHIOMETRIC_TOLERANCE ? "fuel" : "oxidizer";
+    item("Consumed", burnt + (args.has("--species")
+                                  ? " (--species)"
+                                  : ", the " + role + ": the fresh gas's equivalence ratio is " + format("%.4g", phi)));
+    item("Burnt gas", burnt_given ? format("%.6g K (--burnt-temperature)", T_b) : "the peak temperature of each snapshot");
     item("Rates", stored ? "OMEGA_" + burnt + " as the snapshots hold it"
                          : "computed from each state by the case's chemistry");
     logging::section("Snapshots", count(rows.size()));
@@ -2201,10 +2286,11 @@ int flame(const cli::Args & args) {
     for (size_t k = 0; k < rows.size(); k++) {
         const FlameRow & r = rows[k];
         table.push_back({seconds(r.t), std::to_string(r.step) + (selected[k].step_recorded ? "" : " *"),
-                         format("%.6g", r.x_f), format("%.6g", r.delta), format("%.6g", r.S_c),
+                         format("%.6g", r.x_f), format("%.6g", r.delta), format("%.6g", r.gradient), format("%.6g", r.S_c),
                          std::isfinite(r.S_d) ? format("%.6g", r.S_d) : "-", format("%.6g", r.u_u)});
     }
-    logging::table({"t [s]", "step", "x_f [m]", "delta_T [m]", "S_c [m/s]", "S_d [m/s]", "u_u [m/s]"}, table);
+    logging::table({"t [s]", "step", "x_f [m]", "delta_T [m]", "max dT/dx [K/m]", "S_c [m/s]", "S_d [m/s]", "u_u [m/s]"},
+                   table);
     if (!selected.front().step_recorded) logging::line("  *: position in the files, which record no step.");
     logging::section("Speeds");
     item("Consumption", format("%.6g", s.S_c) + " m/s, the mean of " + count(s.S_c_samples, "snapshot") +
@@ -2218,7 +2304,8 @@ int flame(const cli::Args & args) {
     } else {
         item("Displacement", "needs two snapshots in the last half of the series");
     }
-    item("Thermal thickness", format("%.6g", rows.back().delta) + " m, at t = " + seconds(rows.back().t) + " s");
+    item("Thermal thickness", format("%.6g", s.delta) + " m, from max |dT/dx| = " + format("%.6g", s.gradient) +
+                                  " K/m: the means over the snapshots of S_c");
     item("Written", path);
     return 0;
 }

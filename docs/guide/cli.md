@@ -1205,25 +1205,26 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard post flame
 
 ```text
-Usage: mallard post flame FILE... [--direction x|y|z] [--species NAME] [--reference-speed S_L] [-o DIR]
+Usage: mallard post flame FILE... [--direction x|y|z] [--species NAME] [--burnt-temperature T] [--reference-speed S_L] [-o DIR]
 
 Sets up the case of a series of restart files or snapshots of a premixed flame,
 planar on average, and measures the flame in each: its profile along --direction
 (each row the mean over the other directions, weighted by cell volume), with the
 fresh gas at its colder end and the burnt gas at the other, gives its position
-x_f, where T is midway between the fresh temperature T_u and the peak T_b; its
-thermal thickness delta_T = (T_b - T_u) / max |dT/dx|; its consumption speed S_c
-= -int omega_k dx / (rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which
-in a steady flame is the flame speed, in any frame; and its displacement speed
-S_d, the speed of x_f relative to the fresh gas.
+x_f, where T is midway between the fresh temperature T_u and the burnt T_b (the
+peak, or --burnt-temperature); its thermal thickness delta_T = (T_b - T_u) / max
+|dT/dx|, and max |dT/dx| itself; its consumption speed S_c = -int omega_k dx /
+(rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which in a steady flame is
+the flame speed, in any frame; and its displacement speed S_d, the speed of x_f
+relative to the fresh gas.
 
 The production rates are the run's own: the OMEGA_* fields of snapshots that
 hold them with T, RHO, the velocity and Y_* (read on the mesh alone), else
 computed from each stored state by the case's chemistry (restart files,
-snapshots of the state). The report gives the consumption speed averaged over
-the last third of the series and the displacement speed from x_f fitted over its
-last half, which settle once the flame is steady, against --reference-speed if
-given; OUTPUT/NAME.csv has a row per snapshot.
+snapshots of the state). The report gives the consumption speed and the
+thickness averaged over the last third of the series and the displacement speed
+from x_f fitted over its last half, which settle once the flame is steady,
+against --reference-speed if given; OUTPUT/NAME.csv has a row per snapshot.
 
 FILE, the case and the choice of snapshots are as for mallard post extract: the
 case comes from -i, else from FILE's run block, and its mesh must be the file's;
@@ -1237,9 +1238,15 @@ Options:
                          directions, weighted by cell volume. Default: x.
   --species NAME         The species whose consumption gives the consumption
                          speed: the deficient reactant (H2 of a lean H2/air
-                         flame, O2 of a rich one). Default: the species the
-                         flame depletes most, relative to its mass fraction in
-                         the fresh gas, in the first snapshot.
+                         flame, O2 of a rich one). Default: from the equivalence
+                         ratio of the fresh gas in the first snapshot, the fuel
+                         when it is at most 1.01, else the oxidizer; of several,
+                         the one the flame depletes most, relative to its fresh
+                         mass fraction.
+  --burnt-temperature T  The burnt gas temperature T_b, in K, of x_f and
+                         delta_T: e.g. the adiabatic equilibrium temperature,
+                         where the burnt gas of a short domain has not reached
+                         it. Default: the peak temperature of each snapshot.
   --reference-speed S_L  A laminar flame speed to compare with, in m/s
                          (Cantera's): the report gives the errors of the
                          consumption and displacement speeds. Default: none.

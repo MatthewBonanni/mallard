@@ -108,6 +108,10 @@ prints it for every snapshot written so far, with the flame's position,
 thermal thickness and displacement speed (from the motion of the flame), and
 writes them to `flame/flame.csv`; see
 [mallard post flame](../guide/thermochemistry.md#flame-speed-and-thickness).
+The thickness comes out 7% below Cantera's because the strip's burnt gas,
+at 2231 K, has not reached the equilibrium 2379 K: the largest temperature
+gradient, which it also prints, agrees within 0.4%, and
+`--burnt-temperature 2379.43` measures the thickness against Cantera's T_b.
 `plot_flame.py` draws it:
 
 ```bash
