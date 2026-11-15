@@ -174,7 +174,7 @@ ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, 
         for (int d = 0; d < N_DIM; d++) {
             double x = double(cell_coords(v, d));
             for (uint32_t j = 0; j < n_translations; j++) {
-                x += double(lattice_component(w.lattice[k], int(j))) * translations(j, d);
+                x = Kokkos::fma(double(lattice_component(w.lattice[k], int(j))), translations(j, d), x);
             }
             w.q[size_t(k) * N_DIM + size_t(d)] = on_grid((x - x0[d]) / h0);
         }

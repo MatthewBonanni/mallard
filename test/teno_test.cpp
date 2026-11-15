@@ -19,11 +19,14 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "test_fixtures.h"
+#include "teno_shapes.h"
+#include "comm.h"
 #include "verification.h"
 #include "face_reconstruction.h"
 #include "physics.h"
@@ -802,4 +805,33 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
         }
         EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
     }
+}
+
+TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
+    // A digest of the keys of a box periodic in x, with walls, of sizes that are
+    // not exact in binary, against the host builds' value: GPU CI runs it on the device
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nLx = 0.7\nLy = 0.9\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    mesh->copy_host_to_device();
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 32, 4, 256).keys(mesh->n_reconstructed());
+    uint64_t digest = 14695981039346656037ULL;
+    std::set<std::pair<uint64_t, uint64_t>> distinct;
+    for (const teno::ShapeKey & k : keys) {
+        for (const uint64_t v : {k.hash, k.check}) digest = (digest ^ v) * 1099511628211ULL;
+        if (k) distinct.insert({k.hash, k.check});
+    }
+    const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
+    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
+#ifdef Mallard_USE_DOUBLE
+    EXPECT_EQ(n_keyed, 144);
+    EXPECT_EQ(distinct.size(), 27u);
+    EXPECT_EQ(digest, 10394126703101117812ULL);
+#else
+    EXPECT_EQ(n_keyed, 110);
+    EXPECT_EQ(distinct.size(), 110u);
+    EXPECT_EQ(digest, 11754670380066181648ULL);
+#endif
 }

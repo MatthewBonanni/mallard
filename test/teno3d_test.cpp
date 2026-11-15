@@ -17,10 +17,13 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <set>
 #include <string>
 #include <tuple>
 
 #include "test_fixtures.h"
+#include "teno_shapes.h"
+#include "comm.h"
 #include "verification.h"
 #include "gmsh_fixtures.h"
 #include "face_reconstruction.h"
@@ -812,7 +815,7 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
     // along each axis): the setup fits 27 cells, and every cell's face values are
     // those of its own tables up to round-off
     auto mesh = std::make_shared<Mesh>();
-    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 16\nNz = 16\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
                           "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
                           "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
                           "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"));
@@ -862,6 +865,52 @@ TEST(TENO3DSetup, ABatchRanksAKeysTableAtItsFirstSlotThatTookTheKeysRecord) {
     EXPECT_EQ(teno::ShapeGroups::first_slots(group.data(), refit.data(), 7), (std::vector<uint32_t>{0, 1, 2, 3, 1, 3, 6}));
 }
 
+TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+    // A blast in a box with walls: smooth and troubled cells, cells with mirror images along the walls
+    auto mesh = make_mesh_3d("cartesian", 12, 12, 12);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.45, 2);
+        const bool inside = r2 < 0.06;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 5}) {
+        for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
+            auto results = [&](const bool block_path) {
+                auto teno = std::make_unique<TENO>();
+                teno->set_mesh(mesh);
+                teno->set_boundaries(bd);
+                teno->slice_shift = shift;
+                teno->block_path = block_path;
+                teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+                teno->smooth_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
+                Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+                teno->calc_face_values(W, face_W);
+                auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+                auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->smooth_gradients);
+                std::vector<rtype> out(h.data(), h.data() + h.span());
+                out.insert(out.end(), g.data(), g.data() + g.span());
+                return std::make_pair(out, teno->n_block_cells);
+            };
+            const auto [unstructured, none] = results(false);
+            const auto [block, n_block] = results(true);
+            const std::string at = "order " + std::to_string(order) + ", slices of " + std::to_string(1 << shift);
+            EXPECT_EQ(none, 0u) << at;
+            // Every cell whose stencil stays clear of the walls; those near them read mirror images
+            const uint32_t depth = order == 3 ? 1 : 2;
+            EXPECT_GE(n_block, uint64_t(std::pow(12 - 2 * depth, 3))) << at;
+            EXPECT_LT(n_block, uint64_t(mesh->n_cells)) << at;
+            EXPECT_TRUE(block == unstructured) << at;
+        }
+    }
+}
+
 TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
     // Two slots of width 2: two tables, bitwise different, under one key
     const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
@@ -882,4 +931,33 @@ TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStays
     const auto shape = store.add(1, &ta, [&](uint32_t) { return values; }, &gid);
     EXPECT_EQ(store.size(), 3u);
     EXPECT_NE(shape[0], k);
+}
+
+TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
+    // A digest of the keys of a box periodic in x, with walls, of sizes that are
+    // not exact in binary, against the host builds' value: GPU CI runs it on the device
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 0.7\nLy = 0.9\nLz = 1.1\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    mesh->copy_host_to_device();
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 32, 4, 256).keys(mesh->n_reconstructed());
+    uint64_t digest = 14695981039346656037ULL;
+    std::set<std::pair<uint64_t, uint64_t>> distinct;
+    for (const teno::ShapeKey & k : keys) {
+        for (const uint64_t v : {k.hash, k.check}) digest = (digest ^ v) * 1099511628211ULL;
+        if (k) distinct.insert({k.hash, k.check});
+    }
+    const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
+    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
+#ifdef Mallard_USE_DOUBLE
+    EXPECT_EQ(n_keyed, 1728);
+    EXPECT_EQ(distinct.size(), 147u);
+    EXPECT_EQ(digest, 2977545027036466055ULL);
+#else
+    EXPECT_EQ(n_keyed, 1557);
+    EXPECT_EQ(distinct.size(), 1557u);
+    EXPECT_EQ(digest, 13203929841608398468ULL);
+#endif
 }

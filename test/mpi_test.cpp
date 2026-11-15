@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <random>
 #include <set>
 #include <sstream>
@@ -37,6 +38,7 @@
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "teno_shapes.h"
 #include "scratch.h"
 
 namespace {
@@ -312,6 +314,67 @@ TEST(MPITest, TENOStencilShapesAtWallsAndInHalosMatchSerial) {
     expect_matches_serial(on_file(mixture_input("", teno3, "", "euler"),
                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n",
                                   write_temp_shared("mallard_mpi_clustered_strip.msh", clustered_quads(24, 24, 0.3))));
+}
+
+TEST(MPITest, TENOStencilShapeKeysOfReconstructedHaloCellsAreTheirOwnersKeys) {
+    // A gas mixture reconstructs halo layer 1: each rank must give every cell it
+    // reconstructs its owner's key, or none where the owner has none, halo cells
+    // whose key the rank owns no cell of included
+    if (comm::size() == 1) GTEST_SKIP() << "needs several ranks";
+    const uint32_t nx = 24, ny = 24;
+    const double ly = 0.3;
+    std::string input = mixture_input("", "type = \"TENO\"\norder = 3\n", "", "euler");
+    const std::string grid = "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n";
+    input.replace(input.find(grid), grid.size(),
+                  "type = \"file\"\nfilename = \"" +
+                      write_temp_shared("mallard_mpi_clustered_keys.msh", clustered_quads(nx, ny, ly)) + "\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    const auto mesh = solver.get_mesh();
+    const uint32_t n = mesh->n_reconstructed(), n_owned = mesh->n_owned();
+    ASSERT_GT(n, n_owned);
+    // The solver releases the device's node views after the setup
+    auto restore = [](auto & device, const auto & host) {
+        device = std::remove_reference_t<decltype(device)>("restored", host.extent(0));
+        Kokkos::deep_copy(device, host);
+    };
+    restore(mesh->node_coords, mesh->h_node_coords);
+    restore(mesh->nodes_of_cell, mesh->h_nodes_of_cell);
+    restore(mesh->offsets_nodes_of_cell, mesh->h_offsets_nodes_of_cell);
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, 1.4_r);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 18, 10, 256).keys(n);
+    std::set<std::pair<uint64_t, uint64_t>> owned_keys;
+    for (uint32_t c = 0; c < n_owned; c++) owned_keys.insert({keys[c].hash, keys[c].check});
+    // (global id, owned, hash, check, column, row) of each reconstructed cell; the
+    // columns invert clustered_quads' clustering
+    std::vector<uint64_t> local;
+    uint64_t halo_only = 0;
+    for (uint32_t c = 0; c < n; c++) {
+        const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
+        const double i = 0.5 * nx * (std::atanh((2.0 * x - 1.0) * std::tanh(1.2)) / 1.2 + 1.0);
+        local.insert(local.end(), {mesh->h_global_cell(c), uint64_t(c < n_owned), keys[c].hash, keys[c].check,
+                                   uint64_t(std::floor(i)), uint64_t(std::floor(y / ly * ny))});
+        if (c >= n_owned && keys[c] && !owned_keys.count({keys[c].hash, keys[c].check})) halo_only++;
+    }
+    EXPECT_GT(comm::allreduce(halo_only, comm::Op::SUM), 0u) << "no halo cell has a key its rank owns no cell of";
+    const std::vector<uint64_t> all = comm::allgatherv(local);
+    std::map<uint64_t, std::pair<uint64_t, uint64_t>> owner_key;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        if (all[k + 1]) owner_key[all[k]] = {all[k + 2], all[k + 3]};
+    }
+    ASSERT_EQ(owner_key.size(), size_t(nx) * ny);
+    // Away from the walls, the cells of a column have one shape
+    std::map<uint64_t, std::set<std::pair<uint64_t, uint64_t>>> column_keys;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        EXPECT_EQ(std::make_pair(all[k + 2], all[k + 3]), owner_key.at(all[k]))
+            << "cell " << all[k] << (all[k + 1] ? ", owned" : ", in a halo");
+        if (all[k + 5] >= 8 && all[k + 5] < ny - 8) column_keys[all[k + 4]].insert({all[k + 2], all[k + 3]});
+    }
+    EXPECT_EQ(column_keys.size(), size_t(nx));
+    for (const auto & [column, set] : column_keys) {
+        EXPECT_EQ(set.size(), 1u) << "column " << column;
+        EXPECT_NE(set.begin()->first, 0u) << "column " << column;
+    }
 }
 
 namespace {

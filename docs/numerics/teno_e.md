@@ -590,12 +590,15 @@ are the cells of axisymmetric meshes, whose tables depend on the radius. Once
 the halo is as deep as the searches need, the layers of every reconstructed
 halo cell lie within the complete layers, and the cell counts that decide
 whether a cell has a key are taken over the ranks, halo cells' included, so
-each cell has the same key and the same tables on every rank. The shared tables are those of the table comparison,
-except where the cells of one key fall on either side of its grid: they take
-one table instead of two.
+each cell has the same key and the same tables on every rank. Cells of one
+key have geometries that agree to within $2^{-30} h$ in every coordinate the
+key reads, so the tables a cell takes differ from its own fit by what such a
+difference changes, besides round-off. The shared tables are those of the table
+comparison, except where the cells of one key fall on either side of its grid:
+they take one table instead of two.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 16; one file per MPI rank). The file is used
+on later runs (format version 18; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
