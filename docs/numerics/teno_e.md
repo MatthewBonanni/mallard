@@ -271,6 +271,15 @@ prism mesh span only about three cell layers per direction, so odd degrees
 Lebesgue constants of 20 to 150 and $O(1)$ errors at order 4. Why the 3D
 bound is 4 rather than 10: [3D stability](#3d-stability).
 
+**Pyramids at odd degrees.** At orders 4 and 6 ($r = 3$, 5), a pyramid
+starts from
+$n_0 = \max\left(\lceil f N_r\rceil, \lceil 2.5\,N_{r+1}\rceil\right)$
+entries (`PYRAMID_ODD_FACTOR`), 85 and 208 instead of 38 and 110, and so does
+a pyramid fitting the odd `curved_wall_degree` 3 at a curved wall. Smaller
+stencils within the bound give pyramid lattices growing modes
+([3D stability](#3d-stability)). Other cells, and pyramids at orders 3 and 5,
+start from $\lceil f N_r\rceil$.
+
 **Curved walls.** A stencil without mirror images at a curved wall is
 one-sided there, and one-sided fits of degree 4 and 5 grow in time whatever
 the bound or stencil depth. Cells whose first $n_0$ candidates include a
@@ -576,7 +585,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 15; one file per MPI rank). The file is used
+on later runs (format version 16; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -615,6 +624,60 @@ to 7 do not remove them. Order 6 on tetrahedra and pyramids reaches only
 $\Lambda = 4.3$ to 5, hence the slack of 1.25 above. That leaves one slower
 mode, at order 6 on 25:1 Kuhn tetrahedra with side walls ($+0.022$; $+10^{-7}$
 with the best stencil).
+
+**Pyramids at odd degrees** (#236). On the `cartesian_pyramid` lattice the
+odd degrees grow with every stencil within the Lebesgue bound below a size
+found empirically, about $2.5\,N_{r+1}$ entries. Cell symmetry says only where
+the leading error of an odd-degree fit, of the even degree $r + 1$, jumps
+across a face: not across faces whose two cells are point images of each
+other through the face's center, which every face of the hexahedral and prism
+tilings is, and so are the bases of the pyramid tiling, but across the
+pyramids' side faces, where the image of a centroid lies $0.75\,h_i$ from the
+neighbor's. It does not explain the threshold: the face-averaged jump grows
+with the stable sizes, and even degrees jump as much and are stable. On the
+infinite lattice, the largest real part of the eigenvalues of the linearized
+operator (acoustics at rest, HLLC; sound speeds over the block size), by the
+size of the central stencil:
+
+| Order 4: entries | 57 | 65 | 77 | 85 | 89 |
+|---|---|---|---|---|---|
+| $\Lambda$ | 3.95 | 3.96 | 3.69 | 3.52 | 3.54 |
+| largest real part | 6.8e-3 | 8.8e-3 | 9.2e-4 | < 1e-8 | < 1e-8 |
+
+| Order 6: entries | 145 | 165 | 205 | 209 |
+|---|---|---|---|---|
+| $\Lambda$ | 5.20 | 5.09 | 4.44 | 4.42 |
+| largest real part | 2.1e-3 | 1.1e-3 | < 1e-8 | < 1e-8 |
+
+(von Neumann analysis: the Jacobian of the right-hand side in the variables
+of one block's six cells, by finite differences on a periodic $10^3$ box,
+Fourier-transformed over the blocks at $12^3$ wavevectors.) The 85 entries of
+order 4 are 2.5 $N_4$, hence the start from $2.5\,N_{r+1}$
+([central stencil](#central-stencil)). At order 6 a start from $2.0\,N_6$ (166)
+leads the search to 185 entries, which leave slow modes: $2.0\times10^{-7}$ on
+the lattice and $6.8\times10^{-7}$ (sound speed over the box size) on the
+walled 4³ box, against $3\times10^{-9}$ from 209.
+The Lebesgue constants of the stable and the unstable stencils overlap: Kuhn
+tetrahedra are stable at order 4 from 58 entries with $\Lambda = 3.84$, and
+the hexahedral and prism lattices are stable at orders 4 and 6 with their
+default stencils. With the pyramids' start from $2.5\,N_{r+1}$, the largest
+real part on whole boxes (sound speed over the box size):
+
+| Case | From $\lceil f N_r\rceil$ | From $2.5\,N_{r+1}$ |
+|---|---|---|
+| pyramids, order 4, periodic, 4³ / 6³ | 1.6e-2 / 4.1e-2 | < 1e-8 |
+| pyramids, order 4, walls, 4³ / 6³ | 2.3e-2 / – | 5e-9 / 9e-9 |
+| pyramids, order 6, walls, 4³ | 1.7e-5 | 3e-9 |
+| pyramids, aspect ratio 6.25, 6 × 6 × 4, side walls, periodic in z, order 4 / 6 | 0.20 / 4e-8 | 4e-8 / 4e-8 |
+| mixed tilings (4³), walls, order 4 / 6 | 1.6e-3 / 4e-9 | 5e-9 / 3e-9 |
+| mixed tilings (4³), periodic, order 4 / 6 | 3e-9 / 3e-9 | 3e-9 / 3e-9 |
+
+These units agree with the lattice's: 6.8e-3 per block on 6³ blocks is
+4.1e-2 per box. A pyramid's stencils hold 85 entries instead of 57 at order 4
+and 209 instead of 145 at order 6. A pyramid needs at least 85 or 208 cells
+and mirror images within reach of its search, against 38 and 110 for other
+cells; on smaller meshes setup stops with "could not build a full-rank large
+stencil (mesh too small for this order?)".
 
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
@@ -681,22 +744,11 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     6.25:1, since a ball holds the same density in every direction, so its
     radius would need to follow the spacing.
 
-- **Pyramid lattices at orders 4 and 6.** The regular `cartesian_pyramid`
-    lattice is linearly unstable at order 4 on $6^3$ periodic boxes even with
-    the bound of 10 (largest real part $+2\times 10^{-3}$), and the bound of 4
-    makes pure pyramid lattices worse:
-
-    | Case | Bound 10 | Bound 4 |
-    |---|---|---|
-    | order 4, periodic, 4³ / 6³ | 7e-9 / 2e-3 | 8e-3 / 2e-2 |
-    | order 4, walls, 4³ | 3.3e-3 | 1.1e-2 |
-    | order 6, periodic, 4³ | 8e-9 | 1.6e-3 |
-    | order 6, walls, 4³ | 4.7e-3 | 8.5e-6 |
-
-    Order 4 on that lattice is stable only from 85 stencil entries
-    ($\Lambda \approx 3.5$; the bound of 4 takes 57). Thin pyramids grow
-    faster: a 6 × 6 × 4 box of aspect ratio 6.25, with side walls and periodic
-    in z, grows at $+0.033$ through the solver at order 4 and is bounded at
-    orders 3 and 5 ([order of `high_order`](../design/teno4_robustness.md#linear-stability)).
-    Mixed meshes with pyramids improve with the bound (table above). Pure
-    pyramid lattices are rare in practice; prefer orders 3 or 5 there.
+- **Odd degrees on other cells whose faces are not point-symmetric.** The
+    pyramid rule above is tied to the cell type. The infinite Kuhn
+    tetrahedral lattice at order 4 keeps a slow growing mode with its default
+    stencil (46 entries, $\Lambda = 3.87$: $+1.3\times 10^{-5}$ sound speeds
+    over the block size; 58 entries, $\Lambda = 3.84$, are stable), and a 2D
+    tiling of squares split into four triangles at their centers grows at
+    order 4 (#1136). A criterion computed from a stencil and its face
+    neighbors would cover every cell shape.
