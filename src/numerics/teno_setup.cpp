@@ -3573,7 +3573,7 @@ class Setup3D {
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 2048;
+            if constexpr (DEVICE_IS_HOST) return options.sector_stencils ? 8192 : 2048;
             // Batch outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -4856,7 +4856,7 @@ class Setup2D {
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 2048;
+            if constexpr (DEVICE_IS_HOST) return options.sector_stencils ? 8192 : 2048;
             // Scratch and outputs within about a quarter of the free device memory and what MAX_BATCH
             // cells take with twice the scratch: a thread per cell, so smaller scratch fills more of the device
             size_t free_bytes = size_t(8) << 30;

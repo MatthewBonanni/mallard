@@ -1471,8 +1471,10 @@ void Solver::init_numerics() {
 
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
-    // Output of states read from files reconstructs no faces
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get()); teno && state_reader) teno->sector_stencils = false;
+    // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get()); teno && state_reader && !writes_stencils()) {
+        teno->sector_stencils = false;
+    }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;

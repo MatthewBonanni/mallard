@@ -24,6 +24,7 @@
 #include "data_writer.h"
 #include "memory_tracker.h"
 #include "mesh_block.h"
+#include "output_reader.h"
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -275,6 +276,44 @@ TEST(PostExtractTest, TimeAveragedProbesAreSkippedOrRefused) {
     if (comm::is_root()) {
         EXPECT_NE(errors.find("averages in time"), std::string::npos) << errors;
     }
+}
+
+TEST(PostExtractTest, StencilFieldsAreTheRunsBitForBit) {
+    // TENO's sectors, which states read from files need only for these fields; the run's stencil file is not rewritten
+    const std::string run = fresh_dir("stencils_run");
+    std::string fields, quoted;
+    for (const char * f : stencils::FIELDS) {
+        fields += (fields.empty() ? "" : ",") + std::string(f);
+        quoted += (quoted.empty() ? "\"" : ", \"") + std::string(f) + "\"";
+    }
+    std::string input = case_input(run, 16);
+    input.replace(input.find("type = \"MUSCL\""), 14, "type = \"TENO\"");
+    input.replace(input.find("run_log = \"\"\n"), 13, "run_log = \"\"\n" +
+                  (vtkhdf() ? "write_stencils = \"" + run + "/stencils.h5\"\n" : std::string()));
+    input += "[[write_data]]\nprefix = \"" + run + "/sten\"\nformat = \"vtu\"\nfields = [" + quoted + "]\ninterval = 2\n";
+    {
+        Solver solver;
+        solver.init(parse_toml(input));
+        solver.run();
+    }
+    comm::barrier();
+    if (vtkhdf() && comm::is_root()) ASSERT_TRUE(fs::remove(run + "/stencils.h5"));
+    comm::barrier();
+    const std::string out = fresh_dir("stencils");
+    ASSERT_EQ(extract({run + "/restart_000004.restart", "--snapshot", "vtu", "--fields", fields, "--name", "sten", "-o", out}), 0);
+    EXPECT_FALSE(fs::exists(run + "/stencils.h5"));
+    const output::Contents written = output::open(run + "/sten.pvd"), extracted = output::open(out + "/sten.pvd");
+    ASSERT_EQ(written.snapshots.size(), 3u);
+    ASSERT_EQ(extracted.snapshots.size(), 1u);
+    for (const char * f : stencils::FIELDS) {
+        const std::vector<double> a = output::read(written, f, 2), b = output::read(extracted, f, 0);
+        ASSERT_EQ(a.size(), b.size()) << f;
+        size_t differ = 0;
+        for (size_t i = 0; i < a.size(); i++) differ += a[i] != b[i];
+        EXPECT_EQ(differ, 0u) << f;
+    }
+    const std::vector<double> sectors = output::read(extracted, "STENCIL_SECTORS", 0);
+    EXPECT_EQ(*std::min_element(sectors.begin(), sectors.end()), N_DIM == 3 ? 6.0 : 4.0);
 }
 
 TEST(PostExtractTest, OutputOfStatesHoldsNoTimeSteppingBuffers) {
