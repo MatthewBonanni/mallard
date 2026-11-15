@@ -1470,7 +1470,7 @@ class KeyedSetup {
         KeyedSetup(const TENO & scheme, const Mesh & mesh, const BoundaryData & boundaries,
                    teno_setup::SetupHandle & setup_in, const Kokkos::View<uint32_t *> & cells, teno_setup::TableBatch & out)
             : setup(setup_in), keys(mesh, boundaries, setup_in.max_large(), scheme.n_stencil_small, out.slots),
-              bad("teno_shape_bad", out.slots) {
+              bad("teno_shape_bad", out.slots), forced(scheme.setup_refit_cells) {
             Kokkos::Timer timer;
             const uint32_t n = mesh.n_reconstructed();
             const teno::ShapeGroups groups = teno::ShapeGroups::build(keys.keys(n), scheme.global_cell_ids());
@@ -1539,6 +1539,11 @@ class KeyedSetup {
                 scatter_slots(out, same, fitted);
             }
             keys.decode(c0, n, group, table, out, bad);
+            for (const uint32_t c : forced) {
+                if (c >= c0 && c < c0 + n && host_group[c] != teno::ShapeGroups::NONE) {
+                    Kokkos::deep_copy(Kokkos::subview(bad, c - c0), uint8_t(1));
+                }
+            }
             scatter_slots(fitted, fit_slot, out);
             uint32_t n_bad = 0;
             const auto flags = bad;
@@ -1571,17 +1576,9 @@ class KeyedSetup {
         uint32_t n_representatives = 0;
 
     private:
-        /** @brief same() of the batch from c0: cells taking the same key's record, not refitted, share the first's tables. */
         void set_same(const uint32_t c0, const std::vector<uint8_t> & refit) {
             const uint32_t n = static_cast<uint32_t>(refit.size());
-            std::vector<uint32_t> h_same(n);
-            std::unordered_map<uint32_t, uint32_t> first;
-            for (uint32_t t = 0; t < n; t++) {
-                const uint32_t k = host_group[c0 + t];
-                h_same[t] = t;
-                if (k == teno::ShapeGroups::NONE || refit[t] != 0) continue;
-                h_same[t] = first.emplace(k, t).first->second;
-            }
+            const std::vector<uint32_t> h_same = teno::ShapeGroups::first_slots(host_group.data() + c0, refit.data(), n);
             if (same_buffer.extent(0) < n) same_buffer = Kokkos::View<uint32_t *>("teno_shape_same", bad.extent(0));
             same_slot = Kokkos::subview(same_buffer, std::make_pair(0u, n));
             Kokkos::deep_copy(same_slot, HostUnmanaged<const uint32_t>(h_same.data(), n));
@@ -1594,6 +1591,7 @@ class KeyedSetup {
         teno::ShapeKeys::Records table;
         Kokkos::View<uint8_t *> bad;         // (slot)
         Kokkos::View<uint32_t *> same_buffer, same_slot;
+        std::vector<uint32_t> forced;  // cells refitted although they match their records (tests)
 };
 
 /** @brief Tables of the chunk of reconstructed cells starting at c0 from TENO's device arrays. */

@@ -638,6 +638,16 @@ void ShapeKeys::decode(const uint32_t c0, const uint32_t n, const Kokkos::View<u
     });
 }
 
+std::vector<uint32_t> ShapeGroups::first_slots(const uint32_t * slot_group, const uint8_t * refit, const uint32_t n) {
+    std::vector<uint32_t> first(n);
+    std::unordered_map<uint32_t, uint32_t> held;
+    for (uint32_t t = 0; t < n; t++) {
+        first[t] = t;
+        if (slot_group[t] != NONE && refit[t] == 0) first[t] = held.emplace(slot_group[t], t).first->second;
+    }
+    return first;
+}
+
 ShapeGroups ShapeGroups::build(const std::vector<ShapeKey> & keys, const uint64_t * gid) {
     auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c] : uint64_t(c); };
     ShapeGroups out;

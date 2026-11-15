@@ -27,6 +27,7 @@
 #include "physics.h"
 #include "solver.h"
 #include "teno_sharing.h"
+#include "teno_shapes.h"
 
 namespace {
 
@@ -839,7 +840,26 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
         // Each batch ranks a key's table once, at its first cell there: other batches give the same tables
         expect_same_tables(*make_teno(mesh, bd, order), *make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_batch_cells = 64; }),
                            "order " + std::to_string(order) + ", batches of 64 cells");
+        // A refitted cell has its own table and never lends it to its key's other cells: refitting
+        // the first cell of a batch gives the tables of refitting it in the middle of one
+        const std::vector<uint32_t> refit = {64, 65, 200};
+        auto refitted = [&](const uint32_t batch) {
+            return make_teno_with(mesh, bd, order, [&](TENO & t) {
+                t.setup_batch_cells = batch;
+                t.setup_refit_cells = refit;
+            });
+        };
+        const auto in_one = refitted(0), first_of_one = refitted(64);
+        EXPECT_EQ(first_of_one->n_cells_fitted, 27u + refit.size()) << "order " << order;
+        expect_same_tables(*in_one, *first_of_one, "order " + std::to_string(order) + ", refitted cells");
     }
+}
+
+TEST(TENO3DSetup, ABatchRanksAKeysTableAtItsFirstSlotThatTookTheKeysRecord) {
+    constexpr uint32_t NONE = teno::ShapeGroups::NONE;
+    const std::vector<uint32_t> group = {4, 4, NONE, 7, 4, 7, 4};
+    const std::vector<uint8_t> refit = {1, 0, 0, 0, 0, 0, 1};
+    EXPECT_EQ(teno::ShapeGroups::first_slots(group.data(), refit.data(), 7), (std::vector<uint32_t>{0, 1, 2, 3, 1, 3, 6}));
 }
 
 TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
