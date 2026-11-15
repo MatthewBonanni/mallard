@@ -9,8 +9,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
+#include <iterator>
+#include <map>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -283,6 +289,87 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("[[periodic]] angle must be nonzero.").what()),
               "[[periodic]] angle must be nonzero. See docs/input.md#periodic.");
     EXPECT_EQ(std::string(InputError("cannot read the file.").what()), "cannot read the file.");
+}
+
+TEST(ErrorMessages, DataFileErrorsLinkTheDocsOfTheKeyThatReadsThem) {
+    const std::filesystem::path previous = std::filesystem::current_path();
+    std::filesystem::current_path(scratch_dir());
+    std::ofstream("inflow.csv") << "r,T\n0,2\n1\n";
+    const std::string error = run_error(box() + "[[initialize.data]]\nname = \"flame\"\nfile = \"inflow.csv\"\n");
+    std::filesystem::current_path(previous);
+    EXPECT_EQ(error, "inflow.csv:3: 1 value for 2 columns. See docs/guide/initialization.md#tabulated-data-and-point-clouds.");
+}
+
+TEST(ErrorMessages, UnusedKeysOfMallardReactorLinkItsDocs) {
+    for (const std::string & section : {std::string("reactor"), std::string("benchmark")}) {
+        const Input input = parse_input_string("[" + section + "]\nT = 1000.0\nTT = 1.0\n");
+        find_value<double>(input, section, "T");
+        const std::vector<Diagnostic> unused = unused_keys(input);
+        ASSERT_EQ(unused.size(), 1u) << section;
+        EXPECT_EQ(unused[0].docs, "docs/input.md#mallard-reactor") << section;
+    }
+}
+
+namespace {
+
+/** @brief The anchors of a Markdown page: its headings as GitHub links them, and its <a id="...">. */
+std::set<std::string> anchors_of(const std::filesystem::path & page) {
+    std::ifstream file(page);
+    std::set<std::string> anchors;
+    std::map<std::string, int> seen;
+    const std::regex id("<a id=\"([^\"]+)\">");
+    bool fenced = false;
+    for (std::string line; std::getline(file, line);) {
+        for (std::sregex_iterator it(line.begin(), line.end(), id), end; it != end; ++it) anchors.insert((*it)[1]);
+        if (line.rfind("```", 0) == 0 || line.rfind("~~~", 0) == 0) fenced = !fenced;
+        if (fenced || line.empty() || line[0] != '#') continue;
+        const size_t text = line.find_first_not_of('#');
+        if (text == std::string::npos || line[text] != ' ') continue;
+        std::string slug;
+        for (const char c : line.substr(text + 1)) {
+            const auto u = static_cast<unsigned char>(c);
+            if (std::isalnum(u) || c == '_' || c == '-') slug += static_cast<char>(std::tolower(u));
+            else if (c == ' ') slug += '-';
+        }
+        const int n = seen[slug]++;
+        anchors.insert(n == 0 ? slug : slug + "-" + std::to_string(n));
+    }
+    return anchors;
+}
+
+} // namespace
+
+TEST(ErrorMessages, EveryDocsLinkTheCodeWritesExists) {
+    const std::filesystem::path root = source_dir();
+    if (!std::filesystem::exists(root / "src") || !std::filesystem::exists(root / "docs" / "input.md")) {
+        GTEST_SKIP() << "no sources or docs in an install tree";
+    }
+    std::map<std::string, std::set<std::string>> anchors;
+    const auto exists = [&](const std::string & link) {
+        const size_t hash = link.find('#');
+        const std::string page = link.substr(0, hash);
+        if (!std::filesystem::exists(root / page)) return false;
+        if (!anchors.count(page)) anchors[page] = anchors_of(root / page);
+        return hash == std::string::npos || anchors[page].count(link.substr(hash + 1)) > 0;
+    };
+    std::set<std::string> sections = {"reactor", "benchmark"};
+    for (const auto & entry : std::filesystem::directory_iterator(root / "docs" / "input-keys")) {
+        const std::string name = entry.path().filename().string();
+        sections.insert(name.substr(0, name.find_first_of(".")));
+    }
+    for (const auto & section : sections) {
+        EXPECT_TRUE(exists(docs_of(section + ".key"))) << docs_of(section + ".key") << " (docs_of(\"" << section << ".key\"))";
+    }
+    const std::regex link("docs/[A-Za-z0-9_./-]+\\.md#[A-Za-z0-9_-]+");
+    for (const auto & entry : std::filesystem::recursive_directory_iterator(root / "src")) {
+        const std::string path = entry.path().generic_string();
+        if (!entry.is_regular_file() || path.find("/src/external/") != std::string::npos) continue;
+        std::ifstream file(entry.path());
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        for (std::sregex_iterator it(text.begin(), text.end(), link), end; it != end; ++it) {
+            EXPECT_TRUE(exists(it->str())) << it->str() << " in " << std::filesystem::relative(entry.path(), root).string();
+        }
+    }
 }
 
 TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {

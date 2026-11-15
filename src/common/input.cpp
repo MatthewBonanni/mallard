@@ -267,7 +267,7 @@ void collect_unused(const Input & v, const std::string & path, const Lookups & l
                 d.message = "unknown, or unused with these settings";
                 d.suggestion = suggest(table, path, key, lookups);
                 const std::string section = d.key.substr(0, d.key.find_first_of(".["));
-                d.docs = "docs/input.md" + (section == d.key ? std::string() : "#" + lower(section));
+                d.docs = section == d.key ? "docs/input.md" : docs_of(d.key);
                 out.push_back(std::move(d));
             }
         }
