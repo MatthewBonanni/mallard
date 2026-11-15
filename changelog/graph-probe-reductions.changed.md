@@ -1,0 +1,2 @@
+- Probes whose values a trigger reads no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at their writes: the step graph reduces them itself, with NCCL across the ranks. Time-averaged probes and probes reading `[statistics]` outputs still stop the queue there. Results are the same bit for bit (#1012).
+- Probe reductions (`integral`, `mean`, `favre`, `rms`, `moment` and the measure) sum their terms exactly in fixed point, as the step graph does, so they differ from earlier versions' in the last digits; `min` and `max` of signed zeros are `+0` (#1012).

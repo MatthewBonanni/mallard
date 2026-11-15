@@ -40,6 +40,8 @@
 #include "probe_surface.h"
 #include "snapshot_block.h"
 #include "data.h"
+#include "exact_sums.h"
+#include "probe_reduction.h"
 #include "statistics.h"
 #include "wall_exchange.h"
 
@@ -280,8 +282,14 @@ class Probes {
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
          *         fields and statistics' device averages only. */
         bool can_stage(size_t k, const Statistics & statistics) const;
-        /** @brief Probe k is evaluated in a step graph into staging of n_records record slots. */
-        void stage(size_t k, uint64_t n_records, const Statistics & statistics);
+        /** @brief Whether a step graph can reduce staged probe k's values: not time-averaged, no host columns. */
+        bool can_reduce(size_t k) const;
+        /**
+         * @brief Probe k is evaluated in a step graph into staging of n_records record slots; with reduce, its
+         *        values are reduced there too (reduce_staged), over the ranks with NCCL if use_nccl (collective).
+         */
+        void stage(size_t k, uint64_t n_records, const Statistics & statistics, bool reduce = false,
+                   bool use_nccl = false);
         /** @brief When a staged probe is due, as the host decides it (time_interval 0: by step). */
         struct StagedClock {
             uint64_t interval = 0;
@@ -299,6 +307,11 @@ class Probes {
         std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
         /** @brief Evaluates staged probe k into record slot (*seq - 1) % n_records, *seq in device memory. */
         void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
+        /**
+         * @brief Reduces staged probe k's values just evaluated on the device into out (device memory), as values()
+         *        holds them after the probe's write, if *due (device memory) is nonzero (collective).
+         */
+        void reduce_staged(size_t k, const uint32_t * due, double * out) const;
         /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
         void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
@@ -414,6 +427,11 @@ class Probes {
                                  const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> &
                                      columns) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
+            /**
+             * @brief Rows of width values per local sample, from rank 0's rows in global sample order (or each
+             *        rank's, undistributed; collective).
+             */
+            std::vector<double> scatter(const std::vector<double> & global, size_t width) const;
             /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
             std::vector<Location> locations(const Mesh & mesh) const;
 
@@ -480,6 +498,20 @@ class Probes {
             CellColumns cell_columns;
             // Staged: the device columns of cell_columns' fields
             std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> device_columns;
+            /** @brief A staged probe's reductions on the device, of its local samples (see reduce_staged). */
+            struct DeviceReduction {
+                Kokkos::View<ProbeTerm *> terms;
+                Kokkos::View<ProbeOutput *> outputs;
+                Kokkos::View<double *> weights;                     // of the reduced samples; empty: 1
+                Kokkos::View<double *[3]> positions;                // moments: of the reduced samples, from the center
+                Kokkos::View<double **, Kokkos::LayoutRight> values;  // (sample, term)
+                ExactSums sums;
+                Kokkos::View<double *> lo, hi;                      // extrema of each variable
+                Kokkos::View<int64_t *> point;                      // one-point probes: its values' bits
+                bool summed = false;                                // some value is of the sums
+                bool use_nccl = false;
+            };
+            std::shared_ptr<DeviceReduction> device_reduction;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
@@ -585,8 +617,11 @@ class Probes {
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
+            /** @brief The terms its reductions sum (the weight first), and its reduced values as reduction_names(). */
+            void reduction_plan(std::vector<ProbeTerm> & terms, std::vector<ProbeOutput> & outputs) const;
             /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */
             void reduce(const std::vector<double> & nodes, const std::vector<double> & quad);
+            std::vector<double> reduction_terms;  // reused across writes
             /** @brief Names of the reduced values in last: <reduction>_<variable>, moment_<vector>_<axis>. */
             std::vector<std::string> reduction_names() const;
             /** @brief Writes a row of the reductions in last. */
