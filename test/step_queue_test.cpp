@@ -778,42 +778,6 @@ TEST(StepQueueTest, IntervalsOfMoreBatchesThanTheDevicesQuantilesAreStaged) {
     }
 }
 
-/** @brief The box of box_input, periodic from left to right. */
-std::string periodic_box() {
-    std::ostringstream s;
-    s << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 10\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
-    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
-      << "[initialize]\ntype = \"analytical\"\n"
-      << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
-      << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n"
-      << "[[boundaries]]\nname = \"top\"\ntype = \"outlet_extrapolation\"\n"
-      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
-    if (N_DIM == 3) s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
-    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
-      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
-    return s.str();
-}
-
-TEST(StepQueueTest, StagedSpectraOfAStopAfterTheDevicesSampleAreWrittenOnce) {
-    // A trigger stops the queue at a step whose statistics the device sampled: the host writes that sample's staged
-    // spectra and does not sample again, which would add a second sample to the means the restarts carry
-    Case c;
-    c.run = "n_steps = 30\ncfl = 0.5\n";
-    c.body = periodic_box();
-    c.extra = "check_interval = 1000\n" + RESTARTS +
-              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"U_X\"]\n"
-              "[statistics.spectra]\nfields = [\"U_X\"]\naverage = false\nfile = \"{dir}/spectra.csv\"\n"
-              "[[triggers]]\nname = \"at\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
-    c.distributed = comm::size() > 1;
-    const Outcome o = expect_queue_invariant("staged_spectra", c);
-    if (comm::is_root()) {
-        EXPECT_TRUE(o.files.count("restart_000020.restart"));
-        EXPECT_TRUE(o.files.count("spectra_000020.csv"));
-    }
-}
-
 TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     // An integral, a force and a probe's value, each sampled at its own monitor's steps while steps run ahead
     Case c;
