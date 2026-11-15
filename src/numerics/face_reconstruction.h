@@ -315,15 +315,16 @@ static const std::unordered_map<LimiterType, std::string> LIMITER_NAMES = {
  */
 /**
  * @brief The geometry of MUSCL's face-neighbor stencils, for the cells
- *        whose faces all have a neighbor (no boundary face, no rotational
- *        periodic face) and that are not tetrahedra: per face slot (in
+ *        that take the face-neighbor fit (not tetrahedra, no face of a
+ *        characteristic boundary) and have no rotational periodic face: per face slot (in
  *        faces_of_cell order), the gradient weights (LSQGradientFunctor::weights)
  *        and the offset from the cell centroid to the face centroid. The
  *        cells whose rows are equal on teno::TableStore's grid share the row
  *        of the lowest global id, agreed over the ranks, so that a cell's
- *        row does not depend on the partition. The cells of structured
- *        blocks with a block shape take their neighbors as the cell plus the
- *        shape's offsets.
+ *        row does not depend on the partition. Boundary faces' states still
+ *        come from LSQGradientFunctor::neighbor. The cells of structured
+ *        blocks whose faces all have a neighbor take their neighbors as the
+ *        cell plus their block shape's offsets.
  */
 struct MUSCLTables {
     static constexpr uint32_t NONE = ~0u;
@@ -346,13 +347,13 @@ struct MUSCLTables {
         return k == teno::BlockStencils::NONE ? nullptr : block.offsets_of(k);
     }
 
-    /** @brief The neighbor of cell c across its face slot k, by offsets o or by its face. */
+    /** @brief The neighbor of cell c across its face slot k, by offsets o or by its face; -1 across a boundary. */
     KOKKOS_INLINE_FUNCTION
-    uint32_t neighbor(const uint32_t c, const uint32_t k, const int32_t * o) const {
-        if (o) return uint32_t(int32_t(c) + o[k]);
+    int32_t neighbor(const uint32_t c, const uint32_t k, const int32_t * o) const {
+        if (o) return int32_t(c) + o[k];
         const uint32_t f = faces_of_cell(offsets_faces_of_cell(c) + k);
         const int32_t c0 = cells_of_face(f, 0);
-        return uint32_t(c0 == int32_t(c) ? cells_of_face(f, 1) : c0);
+        return c0 == int32_t(c) ? cells_of_face(f, 1) : c0;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -393,7 +394,7 @@ class MUSCL : public FaceReconstruction {
         bool block_path = true;
         MUSCLTables tables;
         uint64_t n_table_cells = 0;  // cells with a table (this rank)
-        /** @brief The tables of the cells whose faces are all interior, and the block shapes (collective). */
+        /** @brief The tables of the cells that have one (MUSCLTables), and the block shapes (collective). */
         void find_tables();
 };
 

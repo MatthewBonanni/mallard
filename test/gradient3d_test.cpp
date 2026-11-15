@@ -150,7 +150,7 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
 }
 
 TEST(MUSCL3D, BlockCellsReadTheirNeighborsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
-    // A blast in a box with walls, and in one periodic in x and y: the walls' cells have no table
+    // A blast in a box with walls, and in one periodic in x and y: the walls' cells read their faces
     for (const bool periodic : {false, true}) {
         Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 10\nNz = 10\n") +
                                  (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : ""));
@@ -188,7 +188,7 @@ TEST(MUSCL3D, BlockCellsReadTheirNeighborsByOffsetsAndGiveTheUnstructuredPathsFa
         const uint64_t interior = periodic ? 10 * 10 * 8 : 8 * 8 * 8;
         const auto [unstructured, none, n_table] = results(false, false);
         EXPECT_EQ(none, 0u) << "periodic " << periodic;
-        EXPECT_EQ(n_table, interior) << "periodic " << periodic;
+        EXPECT_EQ(n_table, uint64_t(mesh->n_cells)) << "periodic " << periodic;
         for (const bool fused : {false, true}) {
             const auto [block, n_block, n_table_block] = results(true, fused);
             EXPECT_EQ(n_block, interior) << "periodic " << periodic;

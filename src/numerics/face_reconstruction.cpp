@@ -496,11 +496,18 @@ struct MUSCLGradientFunctor {
         rtype W_i[N_CONSERVATIVE], g[N_CONSERVATIVE][N_DIM] = {};
         FOR_I_CONSERVATIVE W_i[i] = m.W(c, i);
         for (uint32_t k = 0; k < n; k++) {
-            const uint32_t j = tables.neighbor(c, k, o);
+            const int32_t j = tables.neighbor(c, k, o);
+            rtype W_j[N_CONSERVATIVE];
+            if (j >= 0) {
+                FOR_I_CONSERVATIVE W_j[i] = m.W(j, i);
+            } else {
+                rtype dx[N_DIM];
+                m.neighbor(c, m.faces_of_cell(m.offsets_faces_of_cell(c) + k), W_i, dx, W_j);
+            }
             rtype w[N_DIM];
             for (uint8_t d = 0; d < N_DIM; d++) w[d] = tables.weight(c, k, d);
             FOR_I_CONSERVATIVE {
-                const rtype dW = m.W(j, i) - W_i[i];
+                const rtype dW = W_j[i] - W_i[i];
                 for (uint8_t d = 0; d < N_DIM; d++) g[i][d] = Kokkos::fma(w[d], dW, g[i][d]);
             }
         }
@@ -562,8 +569,8 @@ struct LimiterFunctor {
         const int32_t * o = table ? tables.block_offsets(i_cell) : nullptr;
         for (uint32_t k = k_begin; k < k_end; k++) {
             rtype W_j[N_CONSERVATIVE];
-            if (table) {
-                const uint32_t j = tables.neighbor(i_cell, k - k_begin, o);
+            const int32_t j = table ? tables.neighbor(i_cell, k - k_begin, o) : -1;
+            if (j >= 0) {
                 FOR_I_CONSERVATIVE W_j[i] = neighbors.W(j, i);
             } else {
                 rtype dx[N_DIM];
@@ -790,16 +797,23 @@ void MUSCL::find_tables() {
     n_block_cells = 0;
     n_block_shapes = 0;
     const auto & k_of = mesh->h_offsets_faces_of_cell;
-    const bool rotated = mesh->periodic_maps().rotated();
+    const LSQGradientFunctor g = make_gradient(*mesh, boundaries,
+                                               Kokkos::View<rtype *[N_CONSERVATIVE]>("muscl_table_W", mesh->n_cells), gradients);
+    // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face
+    Kokkos::View<uint8_t *> d_has("muscl_table_has", mesh->n_cells);
+    Kokkos::parallel_for("muscl_table_cells", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        const uint32_t k0 = g.offsets_faces_of_cell(c), k1 = g.offsets_faces_of_cell(c + 1);
+        bool has = !(N_DIM == 3 && k1 - k0 == 4);
+        for (uint32_t k = k0; k < k1; k++) {
+            const uint32_t f = g.faces_of_cell(k);
+            has = has && !g.one_sided(f) && !(g.periodic.rotated() && g.cells_of_face(f, 1) >= 0 && g.face_shift(f) != 0);
+        }
+        d_has(c) = has;
+    });
+    const auto h_has = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_has);
     std::vector<uint32_t> cells;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
-        const uint32_t n = k_of(c + 1) - k_of(c);
-        bool interior = !(N_DIM == 3 && n == 4);
-        for (uint32_t k = k_of(c); k < k_of(c + 1) && interior; k++) {
-            const uint32_t f = mesh->h_faces_of_cell(k);
-            interior = mesh->h_cells_of_face(f, 1) >= 0 && !(rotated && mesh->h_face_shift(f) != 0);
-        }
-        if (interior) cells.push_back(c);
+        if (h_has(c)) cells.push_back(c);
     }
     const uint32_t m = static_cast<uint32_t>(cells.size());
     const size_t n_slots = mesh->faces_of_cell.extent(0);
@@ -807,8 +821,6 @@ void MUSCL::find_tables() {
     Kokkos::View<rtype *[N_DIM]> w("muscl_table_weights", n_slots), r("muscl_table_offsets", n_slots);
     Kokkos::View<uint32_t *> d_cells("muscl_table_cells", m);
     Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(cells.data(), m));
-    const LSQGradientFunctor g = make_gradient(*mesh, boundaries,
-                                               Kokkos::View<rtype *[N_CONSERVATIVE]>("muscl_table_W", mesh->n_cells), gradients);
     const LimiterFunctor l{g, mesh->cell_volume, limiters, limiter, venkat_K, {}};
     Kokkos::parallel_for("muscl_tables", m, KOKKOS_LAMBDA(const uint32_t t) {
         const uint32_t c = d_cells(t);
@@ -883,11 +895,14 @@ void MUSCL::find_tables() {
     for (const uint32_t c : cells) {
         if (c >= n_blocks) break;
         offsets.clear();
-        for (uint32_t k = k_of(c); k < k_of(c + 1); k++) {
+        bool interior = true;
+        for (uint32_t k = k_of(c); k < k_of(c + 1) && interior; k++) {
             const uint32_t f = mesh->h_faces_of_cell(k);
             const int32_t c0 = mesh->h_cells_of_face(f, 0);
+            interior = mesh->h_cells_of_face(f, 1) >= 0;
             offsets.push_back((c0 == int32_t(c) ? mesh->h_cells_of_face(f, 1) : c0) - int32_t(c));
         }
+        if (!interior) continue;
         const auto [it, fresh] = index.try_emplace(offsets, uint32_t(shapes.size()));
         if (fresh) shapes.push_back(offsets);
         shape[c] = it->second;
