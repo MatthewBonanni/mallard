@@ -3555,9 +3555,9 @@ namespace {
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
 // starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236);
-// version 21 keeps 2D mirror images no deeper than the body under their foot (#976); version 22 has
+// version 21 keeps 2D mirror images no deeper than the body under their foot (#976); version 23 has
 // shared tables fitted once per stencil shape (#986), which differ from version 21's at round-off
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-22";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-23";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
