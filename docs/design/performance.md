@@ -770,10 +770,11 @@ only in the producer's name. Seconds of the numerics setup:
 | TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
 | $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
 | 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+| TENO5 | 90.10 / 30.83 | 90.05 / 31.19 / 0.18 | 750,000 |
 
 The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
-tetrahedra, where every cell has a shape of its own and the keyed path drops the base's 676 MiB above main
-(11,955 to 11,279 MiB).
+tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
+base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
 
 ## Scaling (one node)
 
