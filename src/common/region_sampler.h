@@ -360,7 +360,7 @@ KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamS
 template <typename Member, typename Node, typename Child, typename Term>
 KOKKOS_INLINE_FUNCTION void team_fold(const Member & member, const TeamScratch & scratch, const Node & root,
                                       const Child & child, const int n_terms, const Term & term, double & inside,
-                                      double & total) {
+                                          double & total) {
     const int rank = member.team_rank(), size = member.team_size();
     double *w = scratch.terms, *indicated = scratch.terms + size;
     Walk walk;
@@ -420,8 +420,8 @@ KOKKOS_INLINE_FUNCTION bool add_in_binade(double & r, const double * m, const ui
         const double rest = q - static_cast<double>(k);
         if (rest == 0.5) return false;
         if (rest > 0.5) k++;
+        if (k > (END - 1 - sum) / n[l]) return false;  // sum + n[l] k would reach the next binade
         sum += n[l] * k;
-        if (sum >= END) return false;
     }
     r = static_cast<double>(sum) * ulp;
     return true;
@@ -442,6 +442,8 @@ KOKKOS_INLINE_FUNCTION uint32_t count_bits(const uint32_t * words, uint32_t firs
 }
 
 static_assert(COUNTED + 1 < MAX_LEVEL && tree_nodes(COUNTED + 1) - tree_nodes(COUNTED) == SUBTREES);
+static_assert(tree_nodes(MAX_LEVEL + 1) - tree_nodes(MAX_LEVEL) < 65536 * SUBTREES,
+              "a subtree's kept nodes of a level fit the 16 bits of team_count");
 
 /**
  * @brief The kept nodes, and those inside, of each level of each subtree
@@ -482,14 +484,16 @@ KOKKOS_INLINE_FUNCTION void team_count(const Member & member, const TeamScratch 
  *        measure0 is subdivided, to inside and total in the order of simplex:
  *        each subtree under a node of level COUNTED at once from its counts
  *        (team_count) where add_in_binade can, otherwise one simplex at a time.
+ *        Returns the number of subtrees added one simplex at a time.
  */
-KOKKOS_INLINE_FUNCTION void sharp_sum(const TeamScratch & scratch, const double measure0, double & inside,
-                                      double & total) {
+KOKKOS_INLINE_FUNCTION uint32_t sharp_sum(const TeamScratch & scratch, const double measure0, double & inside,
+                                          double & total) {
     constexpr int below = MAX_LEVEL - COUNTED;
     const uint32_t * tree = scratch.tree;
     double measure[MAX_LEVEL + 1];
     measure[0] = measure0;
     for (int l = 1; l <= MAX_LEVEL; l++) measure[l] = measure[l - 1] / double(CHILDREN);
+    uint32_t walked = 0;
     auto subtree = [&](const uint32_t code, const uint32_t first) {
         uint32_t kept[below], in[below];
         for (int l = 0; l < below; l++) {
@@ -500,6 +504,7 @@ KOKKOS_INLINE_FUNCTION void sharp_sum(const TeamScratch & scratch, const double 
         const bool all_added = add_in_binade(total, measure + COUNTED + 1, kept, below);
         const bool in_added = add_in_binade(inside, measure + COUNTED + 1, in, below);
         if (all_added && in_added) return;
+        walked++;
         Walk walk;
         walk.level = walk.top = COUNTED;
         walk.code = code;
@@ -537,6 +542,7 @@ KOKKOS_INLINE_FUNCTION void sharp_sum(const TeamScratch & scratch, const double 
         if (level == 0) break;
         code++;
     }
+    return walked;
 }
 
 /** @brief A simplex of a subdivision, and its measure. */

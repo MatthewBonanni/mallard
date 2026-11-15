@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -66,11 +67,11 @@ struct Sums {
 };
 
 /**
- * @brief f(member, scratch, inside, total) from sums start, by host teams of
+ * @brief f(member, scratch, inside, total) from zero sums, by host teams of
  *        the largest size up to 4, as rank 0 of each saw it.
  */
 template <typename F>
-Sums by_teams(const F & f, const Sums start = {}) {
+Sums by_teams(const F & f) {
     using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
     const int size = std::min(4, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
     Policy policy(2, size);
@@ -78,7 +79,7 @@ Sums by_teams(const F & f, const Sums start = {}) {
     Kokkos::View<double *[2], Kokkos::HostSpace> out("sampler_sums", 2 * size);
     Kokkos::parallel_for("region_sampler_test", policy, [=](const Policy::member_type & member) {
         const auto scratch = region::sampler::team_scratch(member);
-        double inside = start.inside, total = start.total;
+        double inside = 0.0, total = 0.0;
         f(member, scratch, inside, total);
         const int i = member.league_rank() * member.team_size() + member.team_rank();
         out(i, 0) = inside;
@@ -139,8 +140,11 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     r = 0.0;
     EXPECT_TRUE(add_in_binade(r, m, none, 1));
     EXPECT_FALSE(add_in_binade(r, m, n, 1));
-    r = -1.0;
-    EXPECT_FALSE(add_in_binade(r, m, n, 1));
+    for (const double not_normal : {-1.0, std::ldexp(1.0, -1000), 1e-310, std::numeric_limits<double>::infinity(),
+                                    std::numeric_limits<double>::quiet_NaN()}) {
+        r = not_normal;
+        EXPECT_FALSE(add_in_binade(r, m, n, 1)) << not_normal;
+    }
 
     // Up to the last value of a binade, and one addition past it
     const double ulp = std::ldexp(1.0, -53), below = 1.0 - 8.0 * ulp;
@@ -155,19 +159,59 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     }
 }
 
-TEST(RegionSamplerTest, TeamsSumWhatOneThreadSumsAcrossBinades) {
-    // Sums starting just below powers of two that the cell's simplices carry them past
+TEST(RegionSamplerTest, SharpSumsAcrossABinadeAreTheSumsOfOneThread) {
+    namespace sampler = region::sampler;
+    namespace detail = region::sampler::detail;
+    // A simplex the ball's surface crosses, and sums starting every 256th of its measure below a power of two
     const Shape<Ball> shape{{{0.43, 0.51, 0.47}, 0.17}, 0.0, true};
-    const Sums start{std::ldexp(1.0 - std::ldexp(1.0, -30), -7), std::ldexp(1.0 - std::ldexp(1.0, -30), -5)};
-    Sums cell = start;
-    region::sampler::straight_cell(shape, false, Cell::n, Cell{}, cell.inside, cell.total);
-    EXPECT_GT(cell.inside, 2.0 * std::ldexp(1.0, -7));
-    EXPECT_GT(cell.total, 2.0 * std::ldexp(1.0, -5));
-    const Sums team_cell = by_teams([=](const auto & member, const auto & scratch, double & inside, double & total) {
-        region::sampler::team_straight_cell(member, scratch, shape, false, Cell::n, Cell{}, inside, total);
-    }, start);
-    EXPECT_EQ(team_cell.inside, cell.inside);
-    EXPECT_EQ(team_cell.total, cell.total);
+    const double v0[4][3] = {{0.3, 0.35, 0.3}, {0.62, 0.4, 0.33}, {0.35, 0.7, 0.36}, {0.32, 0.42, 0.66}};
+    const double measure0 = 0.01, power = 0.015625;
+    constexpr int STARTS = 256;
+    auto start = [=](const int q) { return power - q * measure0 / STARTS; };
+    Kokkos::View<double *[2], Kokkos::HostSpace> sums("sharp_sums", STARTS);
+    Kokkos::View<uint32_t *, Kokkos::HostSpace> walked("sharp_walked", STARTS);
+    using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
+    const int size = std::min(4, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
+    Policy policy(STARTS, size);
+    policy.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(size)));
+    Kokkos::parallel_for("region_sampler_test", policy, [=](const Policy::member_type & member) {
+        const auto scratch = sampler::team_scratch(member);
+        detail::SimplexNode root;
+        for (int k = 0; k < 4; k++) {
+            for (int i = 0; i < 3; i++) root.v[k][i] = v0[k][i];
+        }
+        root.measure = measure0;
+        auto child = [](const detail::SimplexNode & s, const int j, detail::SimplexNode & out) {
+            detail::child(s.v, j, out.v);
+            out.measure = s.measure / double(sampler::CHILDREN);
+        };
+        auto classify = [&](const detail::SimplexNode & s, const int level) {
+            double c[3], phi;
+            return !detail::is_uniform(shape, s.v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
+                   : phi < 0.0                                    ? uint32_t(detail::INSIDE)
+                                                                  : uint32_t(detail::OUTSIDE);
+        };
+        if (detail::team_classify(member, scratch, root, child, classify) != detail::SUBDIVIDED) return;
+        detail::team_count(member, scratch);
+        if (member.team_rank() != 0) return;
+        const int q = member.league_rank();
+        double inside = start(q), total = start(q);
+        walked(q) = detail::sharp_sum(scratch, measure0, inside, total);
+        sums(q, 0) = inside;
+        sums(q, 1) = total;
+    });
+    Kokkos::fence();
+    int walking = 0;
+    for (int q = 0; q < STARTS; q++) {
+        double inside = start(q), total = start(q);
+        sampler::simplex(shape, false, v0, measure0, inside, total);
+        ASSERT_GT(total, power);
+        ASSERT_EQ(sums(q, 0), inside) << "start " << q;
+        ASSERT_EQ(sums(q, 1), total) << "start " << q;
+        walking += walked(q) > 0 ? 1 : 0;
+    }
+    // The power of two passed within a subtree, which is then added one simplex at a time
+    EXPECT_GT(walking, STARTS / 8);
 }
 
 TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
