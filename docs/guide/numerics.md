@@ -387,8 +387,8 @@ Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
 per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to
 partition faces receive theirs from their owners. Evaluating the gradients at
 the face points makes a TENO5 step of the 3D Taylor-Green vortex 1.85 times as
-long on hexahedra and 1.6 times on tetrahedra, on CPU (16 threads) as on an
-A100 (96^3 hexahedra: 108 to 240 ms per step).
+long on hexahedra and 1.6 times on tetrahedra on CPU (16 threads), and 2.2 and
+1.6 times on an A100.
 
 Pitfalls:
 
