@@ -285,6 +285,17 @@ $\lceil f N'\rceil$ entries for their number $N'$; the coefficients of the
 dropped monomials are zero, so the run-time kernels are unchanged. A strip
 not aligned with an axis is not detected and still fails as below.
 
+**Past the cap (3D).** Degree $r$ needs $r + 1$ cell layers along every
+axis, and physical distance reaches them along the coarsest axis only from
+about the square of the spacing ratio times as many candidates. Below the
+metric's cut-off that can exceed $n_\mathrm{max}$: order-6 prisms stretched
+1.2 to 1.6 : 1 along their axis, or graded along $x$ with `stretching` of 0.9
+and up, hold five layers along the axis in their nearest $n_\mathrm{max}$
+candidates and need 1.2 to 1.85 times as many (#1232). A cell with no
+full-rank size up to $n_\mathrm{max}$ searches on, the same way, up to
+$2n_\mathrm{max}$ (`WIDE_FACTOR`), on the host; cells with a full-rank size
+within $n_\mathrm{max}$ keep their stencils.
+
 If no size has full rank, the setup stops ("could not build a full-rank
 large stencil"), unless the search was cut off by the halo of an MPI
 partition, in which case the cell is redone once the halo is deep enough.
