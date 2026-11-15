@@ -62,6 +62,27 @@ struct Bent {
     }
 };
 
+/** @brief The children of team_simplex's subdivision, and their states for a sharp shape. */
+struct Child {
+    KOKKOS_INLINE_FUNCTION void operator()(const region::sampler::detail::SimplexNode & s, const int j,
+                                           region::sampler::detail::SimplexNode & out) const {
+        region::sampler::detail::child(s.v, j, out.v);
+        out.measure = s.measure / double(region::sampler::CHILDREN);
+    }
+};
+
+struct Classify {
+    Shape<Ball> shape;
+
+    KOKKOS_INLINE_FUNCTION uint32_t operator()(const region::sampler::detail::SimplexNode & s, const int level) const {
+        namespace detail = region::sampler::detail;
+        double c[3], phi;
+        return !detail::is_uniform(shape, s.v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
+               : phi < 0.0                                    ? uint32_t(detail::INSIDE)
+                                                              : uint32_t(detail::OUTSIDE);
+    }
+};
+
 struct Sums {
     double inside = 0.0, total = 0.0;
 };
@@ -181,17 +202,7 @@ TEST(RegionSamplerTest, SharpSumsAcrossABinadeAreTheSumsOfOneThread) {
             for (int i = 0; i < 3; i++) root.v[k][i] = v0[k][i];
         }
         root.measure = measure0;
-        auto child = [](const detail::SimplexNode & s, const int j, detail::SimplexNode & out) {
-            detail::child(s.v, j, out.v);
-            out.measure = s.measure / double(sampler::CHILDREN);
-        };
-        auto classify = [&](const detail::SimplexNode & s, const int level) {
-            double c[3], phi;
-            return !detail::is_uniform(shape, s.v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
-                   : phi < 0.0                                    ? uint32_t(detail::INSIDE)
-                                                                  : uint32_t(detail::OUTSIDE);
-        };
-        if (detail::team_classify(member, scratch, root, child, classify) != detail::SUBDIVIDED) return;
+        if (detail::team_classify(member, scratch, root, Child{}, Classify{shape}) != detail::SUBDIVIDED) return;
         detail::team_count(member, scratch);
         if (member.team_rank() != 0) return;
         const int q = member.league_rank();
