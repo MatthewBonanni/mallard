@@ -296,6 +296,11 @@ TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
     const CheckReport report = solver.check(parse_input_string(input), options);
     ASSERT_EQ(report.errors().size(), 1u);
     EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+    const std::string dirichlet =
+        replaced(box(), "name = \"left\"\ntype = \"symmetry\"\n",
+                 std::string("name = \"left\"\ntype = \"dirichlet\"\nrho = \"(1 + y\"\np = 1.0\nu = [1.0, 0.0") +
+                     (N_DIM == 3 ? ", 0.0" : "") + "]\n");
+    expect_parts(run_error(dirichlet), {line_prefix(dirichlet, "rho = \"") + "left.rho: \"(1 + y\": expected ')'"});
 }
 
 TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {
