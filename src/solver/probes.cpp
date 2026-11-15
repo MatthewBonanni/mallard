@@ -3272,6 +3272,24 @@ void covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<co
     });
 }
 
+using PinnedCells = Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>;
+using PinnedWeights = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>;
+
+/** @brief The first count() of cells and weights, and count(), into record slot (*seq - 1) % n_records. */
+void stage_cells(const Kokkos::View<const uint32_t *> & cells, const Kokkos::View<const double *> & weights,
+                 const Kokkos::View<const uint32_t> & count, const PinnedCells & st_cells,
+                 const PinnedWeights & st_weights, const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st_count,
+                 const uint64_t * seq) {
+    const uint64_t n_records = st_count.extent(0);
+    Kokkos::parallel_for("probe_staged_covered", cells.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
+        const uint64_t slot = (*seq - 1) % n_records;
+        if (i == 0) st_count(slot) = count();
+        if (i >= count()) return;
+        st_cells(slot, i) = cells(i);
+        st_weights(slot, i) = weights(i);
+    });
+}
+
 } // namespace
 
 void Probes::Probe::select_covered(const Kokkos::View<const rtype> & time) const {
@@ -3298,20 +3316,8 @@ void Probes::Probe::moved(const uint64_t slot) {
 }
 
 void Probes::Probe::stage_covered(const uint64_t * seq) const {
-    const auto cells = motion->covered;
-    const auto weights = motion->weights;
-    const auto count = motion->count;
-    const auto st_cells = motion->staged_cells;
-    const auto st_weights = motion->staged_weights;
-    const auto st_count = motion->staged_count;
-    const uint64_t n_records = st_count.extent(0);
-    Kokkos::parallel_for("probe_staged_covered", cells.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
-        const uint64_t slot = (*seq - 1) % n_records;
-        if (i == 0) st_count(slot) = count();
-        if (i >= count()) return;
-        st_cells(slot, i) = cells(i);
-        st_weights(slot, i) = weights(i);
-    });
+    const Motion & m = *motion;
+    stage_cells(m.covered, m.weights, m.count, m.staged_cells, m.staged_weights, m.staged_count, seq);
 }
 
 void Probes::Probe::order_covered(const uint32_t n, const uint32_t * cells, const double * weights) {
