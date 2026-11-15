@@ -1,6 +1,6 @@
 {
- "commit": "3765aa8",
- "date": "2026-11-13",
+ "commit": "e70d2ca7-dirty",
+ "date": "2026-11-15",
  "studies": [
   {
    "section": "time",
@@ -2366,13 +2366,13 @@
     8.0
    ],
    "errors": [
-    0.003272529,
-    0.000434309
+    0.002689028,
+    0.0003690495
    ],
    "design": 3.0,
    "min_order": 2.5,
    "max_order": null,
-   "order": 2.913612,
+   "order": 2.865198,
    "pass": true
   },
   {
@@ -2383,17 +2383,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.0005888833,
-    8.008716e-05
+    7.290898e-05,
+    9.14922e-06
    ],
    "design": 3.0,
    "min_order": 2.5,
    "max_order": null,
-   "order": 2.878339,
+   "order": 2.994376,
    "pass": true
   },
   {
@@ -2425,17 +2425,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/1",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.01167943,
-    0.005787429
+    0.005787429,
+    0.002882247
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.012976,
+   "order": 1.005728,
    "pass": true
   },
   {
@@ -2450,13 +2450,13 @@
     8.0
    ],
    "errors": [
-    0.001365178,
-    7.224297e-05
+    0.0008977482,
+    4.819742e-05
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 4.240089,
+   "order": 4.219283,
    "pass": true
   },
   {
@@ -2467,17 +2467,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.0002509141,
-    1.064263e-05
+    9.135212e-06,
+    5.655736e-07
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 4.559268,
+   "order": 4.013652,
    "pass": true
   },
   {
@@ -2509,17 +2509,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/3",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.008908883,
-    0.004244199
+    0.004244199,
+    0.002084866
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.069752,
+   "order": 1.025538,
    "pass": true
   },
   {
@@ -2534,13 +2534,13 @@
     8.0
    ],
    "errors": [
-    0.0007002312,
-    9.724377e-06
+    0.001671608,
+    9.391299e-06
    ],
    "design": 5.0,
    "min_order": 4.5,
    "max_order": null,
-   "order": 6.170082,
+   "order": 7.475696,
    "pass": true
   },
   {
@@ -2551,17 +2551,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    3.465932e-05,
-    1.046841e-06
+    8.155354e-07,
+    2.819357e-08
    ],
    "design": 5.0,
    "min_order": 4.5,
    "max_order": null,
-   "order": 5.049129,
+   "order": 4.85431,
    "pass": true
   },
   {
@@ -2572,17 +2572,17 @@
    "dim": 2,
    "test": "CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree",
    "n": [
-    4.0,
-    8.0
+    8.0,
+    16.0
    ],
    "errors": [
-    0.001415528,
-    7.517902e-05
+    8.978217e-05,
+    5.191665e-06
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": 4.5,
-   "order": 4.234867,
+   "order": 4.11216,
    "pass": true
   },
   {
@@ -2593,17 +2593,17 @@
    "dim": 2,
    "test": "CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree",
    "n": [
-    4.0,
-    8.0
+    8.0,
+    16.0
    ],
    "errors": [
-    0.0007002312,
-    9.724377e-06
+    9.391299e-06,
+    3.41172e-07
    ],
    "design": 5.0,
    "min_order": 4.5,
    "max_order": null,
-   "order": 6.170082,
+   "order": 4.782754,
    "pass": true
   },
   {
@@ -2635,17 +2635,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/5",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.01175602,
-    0.005763838
+    0.005763838,
+    0.002761757
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.028299,
+   "order": 1.061443,
    "pass": true
   },
   {
@@ -2660,13 +2660,13 @@
     8.0
    ],
    "errors": [
-    0.002127706,
-    1.432043e-05
+    0.002353845,
+    3.186695e-06
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 7.21508,
+   "order": 9.528743,
    "pass": true
   },
   {
@@ -2677,17 +2677,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    5.507084e-05,
-    8.210636e-07
+    3.549145e-07,
+    5.032348e-09
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 6.067651,
+   "order": 6.140096,
    "pass": true
   },
   {
@@ -2719,17 +2719,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/7",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.009997985,
-    0.004529054
+    0.004529054,
+    0.002257568
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.142428,
+   "order": 1.00444,
    "pass": true
   },
   {
@@ -2744,13 +2744,13 @@
     8.0
    ],
    "errors": [
-    0.002472733,
-    0.0003300297
+    0.001677113,
+    0.0002485957
    ],
    "design": 3.0,
    "min_order": 2.5,
    "max_order": null,
-   "order": 2.905439,
+   "order": 2.754107,
    "pass": true
   },
   {
@@ -2761,17 +2761,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/9",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.0003475847,
-    5.105839e-05
+    3.464041e-05,
+    4.373888e-06
    ],
    "design": 3.0,
    "min_order": 2.5,
    "max_order": null,
-   "order": 2.767145,
+   "order": 2.985468,
    "pass": true
   },
   {
@@ -2803,17 +2803,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/9",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.01026775,
-    0.005226749
+    0.005226749,
+    0.002624731
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 0.9741335,
+   "order": 0.9937443,
    "pass": true
   },
   {
@@ -2828,13 +2828,13 @@
     8.0
    ],
    "errors": [
-    0.0005678998,
-    4.265091e-05
+    0.0005359146,
+    3.40893e-05
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 3.734988,
+   "order": 3.974612,
    "pass": true
   },
   {
@@ -2845,17 +2845,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/11",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    9.560244e-05,
-    6.142606e-06
+    4.104769e-06,
+    2.490233e-07
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 3.960125,
+   "order": 4.042948,
    "pass": true
   },
   {
@@ -2887,17 +2887,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/11",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.01043429,
-    0.005508512
+    0.005508512,
+    0.002802792
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 0.9215981,
+   "order": 0.9747982,
    "pass": true
   },
   {
@@ -2912,13 +2912,13 @@
     8.0
    ],
    "errors": [
-    0.0001908024,
-    7.509521e-06
+    0.0001269652,
+    4.533788e-06
    ],
    "design": 5.0,
    "min_order": 4.5,
    "max_order": null,
-   "order": 4.667215,
+   "order": 4.807573,
    "pass": true
   },
   {
@@ -2929,17 +2929,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/13",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    1.598195e-05,
-    5.443669e-07
+    5.298055e-07,
+    1.784109e-08
    ],
    "design": 5.0,
    "min_order": 4.5,
    "max_order": null,
-   "order": 4.87572,
+   "order": 4.892187,
    "pass": true
   },
   {
@@ -2971,17 +2971,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/13",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.0104128,
-    0.005672206
+    0.005672206,
+    0.002797448
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 0.8763759,
+   "order": 1.019799,
    "pass": true
   },
   {
@@ -2996,13 +2996,13 @@
     8.0
    ],
    "errors": [
-    0.0002811234,
-    1.402736e-06
+    0.0001008485,
+    8.623409e-07
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 7.646816,
+   "order": 6.869715,
    "pass": true
   },
   {
@@ -3013,17 +3013,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/15",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    3.74363e-06,
-    5.557727e-08
+    7.64361e-08,
+    1.24283e-09
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 6.073799,
+   "order": 5.942554,
    "pass": true
   },
   {
@@ -3055,17 +3055,17 @@
    "dim": 2,
    "test": "Curved/CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder/15",
    "n": [
-    6.0,
-    12.0
+    12.0,
+    24.0
    ],
    "errors": [
-    0.009524491,
-    0.004758454
+    0.004758454,
+    0.002321974
    ],
    "design": 2.0,
    "min_order": null,
    "max_order": 2.3,
-   "order": 1.001149,
+   "order": 1.035141,
    "pass": true
   },
   {

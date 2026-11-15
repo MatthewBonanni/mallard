@@ -3471,7 +3471,7 @@ class Setup3D {
                                      0, n_metric),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, opt.curved_mirrors);
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
@@ -4734,7 +4734,7 @@ class Setup2D {
                                      0, n_target),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, opt.curved_mirrors);
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with r + 2 points per direction, exact to degree 2r + 2
@@ -5085,6 +5085,13 @@ void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
 // (prisms) and 1.57 (pyramids) from their cell shapes alone, and keep
 // physical distance; a 2:1 stretch of Kuhn tetrahedra measures 3.15
 constexpr double SPACING_ANISOTROPY = 2.5;
+// A cell with one-sided faces (one_sided_face) ranks its candidates with their
+// distances along the faces' mean normal scaled by this. Its nearest candidates
+// otherwise span too few layers for the fit's degree on wall-graded meshes
+// (degree 3: three), its wall-normal polynomial is set by the wall's curvature
+// alone, its Lebesgue constant grows as the wall radius over the spacing, and
+// the linearized scheme grows at the wall
+constexpr double ONE_SIDED_DEPTH = 0.5;
 
 /**
  * @brief Metric of unit determinant whose unit length is the mesh spacing in
@@ -5117,7 +5124,8 @@ std::array<double, 9> spacing_metric(const double m[9]) {
 }  // namespace
 
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
-                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i) {
+                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i,
+                                     const bool curved_mirrors) {
     using Point = std::array<double, 3>;
     double spread[9] = {};
     Point x0 = {0.0, 0.0, 0.0};
@@ -5171,7 +5179,36 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     }
     // 2D: a third spacing at the geometric mean of the other two changes neither their ratio nor the metric
     if constexpr (N_DIM == 2) spread[8] = std::sqrt(std::max(0.0, spread[0] * spread[4] - spread[1] * spread[3]));
-    return spacing_metric(spread);
+    std::array<double, 9> metric = spacing_metric(spread);
+    Point n = {0.0, 0.0, 0.0};
+    double area = 0.0;
+    for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i); k++) {
+        const uint32_t f = mesh.h_face_of_cell(i, k);
+        if (mesh.h_cells_of_face(f, 1) >= 0 || face_bc(f) < 0) continue;
+        if (!one_sided_face(mesh, bcs(face_bc(f)), f, curved_mirrors)) continue;
+        for (size_t a = 0; a < N_DIM; a++) n[a] += double(mesh.h_face_normals(f, a));
+        area += double(mesh.h_face_area(f));
+    }
+    const double norm = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (!(norm > GEOMETRY_TOL * area)) return metric;
+    // metric <- S metric S, S = I - (1 - ONE_SIDED_DEPTH) n n^T
+    double s[9], sm[9];
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) s[3 * a + b] = double(a == b) - (1.0 - ONE_SIDED_DEPTH) * n[a] * n[b] / (norm * norm);
+    }
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) {
+            sm[3 * a + b] = 0.0;
+            for (size_t c = 0; c < 3; c++) sm[3 * a + b] += s[3 * a + c] * metric[3 * c + b];
+        }
+    }
+    for (size_t a = 0; a < 3; a++) {
+        for (size_t b = 0; b < 3; b++) {
+            metric[3 * a + b] = 0.0;
+            for (size_t c = 0; c < 3; c++) metric[3 * a + b] += sm[3 * a + c] * s[3 * c + b];
+        }
+    }
+    return metric;
 }
 
 }  // namespace teno_setup

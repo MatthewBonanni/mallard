@@ -301,10 +301,12 @@ uint16_t n_moments(uint8_t degree);
  * @brief Metric (3 x 3, row-major) in which the stencil candidates of cell i
  *        are ranked by distance: the identity unless the spacing of its vertex
  *        neighbors (completed across its boundary faces by mirror images) is
- *        markedly anisotropic.
+ *        markedly anisotropic, with distances along the mean normal of its
+ *        one-sided faces (one_sided_face) shortened.
  */
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
-                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i);
+                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i,
+                                     bool curved_mirrors);
 
 }  // namespace teno_setup
 
