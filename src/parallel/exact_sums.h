@@ -30,6 +30,35 @@ inline double exact_sums_unit(const uint64_t n_global) {
     return std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0))));
 }
 
+/** @brief A term's magnitude for the largest of its column: a non-finite term makes the column's sum NaN. */
+KOKKOS_INLINE_FUNCTION double exact_sums_magnitude(const double term) {
+    return Kokkos::isfinite(term) ? Kokkos::fabs(term) : Kokkos::Experimental::infinity_v<double>;
+}
+
+/** @brief A term in fixed point, in units of largest / unit. */
+KOKKOS_INLINE_FUNCTION int64_t exact_sums_fixed(const double term, const double unit, const double largest) {
+    return largest > 0.0 && Kokkos::isfinite(largest) ? static_cast<int64_t>(Kokkos::round(term * (unit / largest))) : 0;
+}
+
+/** @brief The sum of a column's fixed-point terms. */
+KOKKOS_INLINE_FUNCTION double exact_sums_total(const int64_t fixed, const double unit, const double largest) {
+    if (!Kokkos::isfinite(largest)) return Kokkos::Experimental::quiet_NaN_v<double>;
+    return largest > 0.0 ? static_cast<double>(fixed) / (unit / largest) : 0.0;
+}
+
+/**
+ * @brief On the host, the sum of n_rows terms (a column of stride `stride`) as ExactSums sums a column of n_rows rows
+ *        over every rank, bit for bit.
+ */
+inline double exact_column_sum(const double * terms, const uint64_t n_rows, const uint64_t stride = 1) {
+    double largest = 0.0;
+    for (uint64_t i = 0; i < n_rows; i++) largest = Kokkos::fmax(largest, exact_sums_magnitude(terms[i * stride]));
+    const double unit = exact_sums_unit(n_rows);
+    int64_t fixed = 0;
+    for (uint64_t i = 0; i < n_rows; i++) fixed += exact_sums_fixed(terms[i * stride], unit, largest);
+    return exact_sums_total(fixed, unit, largest);
+}
+
 /**
  * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
  *        the largest, see exact_sums_unit), so independent of the rank count and order.
@@ -100,7 +129,7 @@ class ExactSums {
             const Kokkos::View<double *> m = largest;
             for (uint32_t k = 0; k < n_columns; k++) {
                 gated::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
-                    x = Kokkos::fmax(x, Kokkos::fabs(terms(c, k)));
+                    x = Kokkos::fmax(x, exact_sums_magnitude(terms(c, k)));
                 }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(m.data() + k)));
             }
             if (distributed) comm::allreduce_device(m, comm::Op::MAX, use_nccl);
@@ -108,13 +137,13 @@ class ExactSums {
             const double unit_ = unit;
             for (uint32_t k = 0; k < n_columns; k++) {
                 gated::parallel_reduce("exact_sums", n_rows, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
-                    if (m(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit_ / m(k))));
+                    sum += exact_sums_fixed(terms(c, k), unit_, m(k));
                 }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(f.data() + k)));
             }
             if (distributed) comm::allreduce_device(f, comm::Op::SUM, use_nccl);
             const Kokkos::View<double *> out = totals;
             gated::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
-                out(k) = m(k) > 0.0 ? static_cast<double>(f(k)) / (unit_ / m(k)) : 0.0;
+                out(k) = exact_sums_total(f(k), unit_, m(k));
             });
         }
 

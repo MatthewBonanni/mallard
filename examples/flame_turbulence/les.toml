@@ -91,8 +91,8 @@ model = "sigma"
 
 [les.combustion]
 model = "tfles"
-delta_L = 3.3013976e-4
-s_L = 2.3323744
+delta_L = 3.282e-4
+s_L = 2.3311
 T_unburnt = 300.0
 T_burnt = 2384.28
 

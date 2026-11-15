@@ -420,8 +420,8 @@ class Solver {
         void act_on_triggers();
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
-        /** @brief Whether the step graph's triggers read a value of probe k, which the host reduces: the probe is
-         *         left to the host, so the queue stops at its writes and the device holds its values in between. */
+        /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
+         *         or, if it cannot stage it (Probes::can_stage), the probe is left to the host and the queue stops there. */
         bool triggers_read_probe(size_t k) const;
         bool triggers_read_probes() const;
         /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
@@ -532,8 +532,11 @@ class Solver {
         void write_staged_monitors(const step_queue::Record & record);
         /** @brief Writes the probes the record staged (collective). */
         void write_staged_probes(const step_queue::Record & record);
-        /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
-        void after_step(Kokkos::Timer & step_timer, bool on_device);
+        /**
+         * @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step):
+         *        the host's own, or a device step it stopped after (record), whose statistics the device sampled.
+         */
+        void after_step(Kokkos::Timer & step_timer, const step_queue::Record * record);
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -986,7 +989,8 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
-        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint32_t *> probe_due;      // of the current launch, per staged probe (see device_step_body)
+        std::vector<uint32_t> probe_trigger_vars;  // of each staged probe the step graph reduces, its first trigger variable
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
@@ -1053,8 +1057,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
         void start_reconstruction(StateView solution);
-        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
-        void exchange_halo(const State & state);
+        /**
+         * @brief On comm_space after the default instance's work so far: the halo exchange if asked, then W of the
+         *        halo cells and the reconstruction of the cells that read them. calc_rhs joins it.
+         */
+        void reconstruct_near_partition(const State & state, bool exchange);
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
@@ -1097,9 +1104,9 @@ class Solver {
 
         // Reconstructed cells independent of the halo (empty unless split), and the others
         IndexSet early_cells, late_cells;
-        // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
-        std::string stencil_shapes_setting;
-        void describe_stencil_shapes();
+        // Cells on the block path and their block shapes (empty if none)
+        std::string block_path_setting;
+        void describe_block_path();
         IndexSet rhs_faces;  // faces of owned cells, whose fluxes are used
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)

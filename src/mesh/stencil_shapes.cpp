@@ -166,7 +166,6 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
         const uint64_t name = std::hash<std::string>{}(zone.get_name()) | 1;
         for (size_t k = 0; k < zone.h_faces.extent(0); k++) face_zone[zone.h_faces(k)] = name;
     }
-    const bool shifted = mesh.h_cells_of_cell_shift.extent(0) > 0;
     gated::parallel_for("stencil_shapes_near_faces", Kokkos::RangePolicy<Host>(0, n), [&](const uint32_t c) {
         if (has[c]) return;
         Reached at;
@@ -179,7 +178,7 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
                 if (d >= mesh.n_complete()) return;  // its vertex neighbors are not all on this rank
                 const std::array<double, N_DIM> t_d = at.shift[q];
                 for (uint32_t k = mesh.h_offsets_cells_of_cell(d); k < mesh.h_offsets_cells_of_cell(d + 1); k++) {
-                    const uint8_t row = shifted ? mesh.h_cells_of_cell_shift(k) : 0;
+                    const uint8_t row = mesh.h_cells_of_cell_shift(k);
                     if (mesh.h_rotated_row(row)) return;
                     std::array<double, N_DIM> t = t_d;
                     if (row != 0) FOR_I_DIM t[i] += double(mesh.h_shifts(uint32_t(row), i));

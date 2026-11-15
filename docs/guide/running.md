@@ -90,10 +90,12 @@ conditions of `t`, the step, `dt`, `wall` and the monitors at every step, and
 the steps queued ahead of the host (`[run] step_queue`) stop only at a step a
 trigger fires at; every rank holds the same values, so every rank acts after
 the same step. There `wall` is rank 0's as its host last posted it before the
-step. A probe's values are reduced on rank 0's host: the steps queued ahead
-stop at the writes of a probe a condition reads, and rank 0 sends its values
-to every rank, whose device evaluates the conditions on them until the next
-write.
+step. The device also reduces the probes a condition reads at their writes,
+time-averaged probes and probes of `[statistics]` outputs included, to the
+values the host writes, so they do not stop the queue either, except probes
+reading cell data or `[statistics]` confidence intervals: the steps queued
+ahead stop at their writes, where rank 0's host reduces them and sends their
+values to every rank.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
 final output and a restart are written, the exit status is 0 and the log
