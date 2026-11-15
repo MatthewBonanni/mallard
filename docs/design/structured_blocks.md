@@ -300,7 +300,7 @@ allocations; with CUDA the pseudo-inverses live outside Kokkos, change 2 in
 
 | | TENO5, today | TENO5, block cell | MUSCL, today and block cell |
 |---|---:|---:|---:|
-| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 0 |
+| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 8 B (row indices; 0.29 kB per distinct row) |
 | faces and gradients (face states 2.2 kB, troubled-pass scratch) | 4.20 kB | 4.20 kB | 0.65 kB |
 | mesh and geometry | 2.29 kB | 2.29 kB | 2.26 kB |
 | solution and stages, boundaries | 0.28 kB | 0.28 kB | 0.28 kB |
@@ -311,7 +311,9 @@ A 3D TENO5 hexahedron measured 40.7 kB on an A100 (`cudaMemGetInfo`,
 TENO5 box at about 1.8M cells on 80 GB; at 6.8 kB per block cell, about
 10M. What remains is the face states and the mesh: fusing reconstruction and
 fluxes on block faces, and dropping per-face geometry inside blocks, is
-filed as a follow-up (#965). MUSCL gains throughput, not memory.
+filed as a follow-up (#965). MUSCL's rows add 8 B per cell and 0.29 kB per
+distinct row (hexahedra); on meshes where fewer than 8 cells share each row
+(no lattice), MUSCL keeps no rows and fits every step as before.
 
 ## Documentation
 
@@ -415,10 +417,13 @@ its block cells.
 read, per face slot, the gradient weights and the offset to the face centroid
 from a table row (`MUSCLTables`). Every cell of the face-neighbor fit (not a
 tetrahedron, no face on a characteristic boundary) without a rotational
-periodic face has a row; the states across its boundary faces still come from
-those faces. Rows equal on #994's grid are shared, each taking the row of its
-lowest global id, agreed over the ranks, so a cell's row depends on its own
-geometry alone and not on the partition. The cells of a block whose faces all
+periodic face has a row, except in the outermost halo layer, whose missing
+faces would look like boundary faces; the states across its boundary faces
+still come from those faces. Rows equal on #994's grid (about $10^{-9}$ of
+their magnitude) are shared, each taking the row of its lowest global id,
+agreed over the ranks, so a cell's row depends on its own geometry alone and
+not on the partition. When fewer than 8 cells share each distinct row, over
+the ranks, no cell has a row: the rows would cost memory without sharing. The cells of a block whose faces all
 have a neighbor take them as the cell plus their block shape's offsets, every
 other cell reads its faces, and both read the same row, so the two are bitwise
 equal.
