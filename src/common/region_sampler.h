@@ -185,8 +185,14 @@ KOKKOS_INLINE_FUNCTION constexpr uint32_t tree_nodes(const int levels = MAX_LEVE
     return n;
 }
 
-/** @brief Bytes of the table of team_simplex and team_cone: 2 bits per node of the subdivision tree. */
-KOKKOS_INLINE_FUNCTION constexpr size_t tree_bytes() { return sizeof(uint32_t) * ((2 * tree_nodes() + 31) / 32); }
+/**
+ * @brief Bytes of the table of team_simplex and team_cone: 2 bits per node of
+ *        the subdivision tree above its deepest level, and 1 per node of the
+ *        deepest, whose nodes are all kept whole.
+ */
+KOKKOS_INLINE_FUNCTION constexpr size_t tree_bytes() {
+    return sizeof(uint32_t) * ((tree_nodes() + tree_nodes(MAX_LEVEL) + 31) / 32);
+}
 
 /** @brief Team scratch of team_simplex and team_cone, for a team of team_size threads. */
 KOKKOS_INLINE_FUNCTION constexpr size_t team_bytes(const int team_size) {
@@ -212,7 +218,21 @@ namespace detail {
 enum : uint32_t { ABSENT = 0, SUBDIVIDED = 1, OUTSIDE = 2, INSIDE = 3 };
 
 KOKKOS_INLINE_FUNCTION uint32_t node_state(const uint32_t * tree, const uint32_t node) {
-    return (tree[node / 16] >> (2 * (node % 16))) & 3u;
+    constexpr uint32_t above = tree_nodes(MAX_LEVEL);
+    if (node < above) return (tree[node / 16] >> (2 * (node % 16))) & 3u;
+    const uint32_t bit = above + node;
+    return (tree[bit / 32] >> (bit % 32)) & 1u ? uint32_t(INSIDE) : uint32_t(OUTSIDE);
+}
+
+/** @brief Sets the state of a node not reached before, with the other threads of a team. */
+KOKKOS_INLINE_FUNCTION void set_state(uint32_t * tree, const uint32_t node, const uint32_t state) {
+    constexpr uint32_t above = tree_nodes(MAX_LEVEL);
+    if (node < above) {
+        Kokkos::atomic_or(&tree[node / 16], state << (2 * (node % 16)));
+    } else if (state == INSIDE) {
+        const uint32_t bit = above + node;
+        Kokkos::atomic_or(&tree[bit / 32], 1u << (bit % 32));
+    }
 }
 
 /** @brief Node code of a level of the subdivision tree, placed from the root by child(node, j, next). */
@@ -288,7 +308,7 @@ KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamS
                 Node next;
                 child(parent, j, next);
                 const uint32_t node = first + p * CHILDREN + static_cast<uint32_t>(j);
-                Kokkos::atomic_or(&tree[node / 16], classify(next, level) << (2 * (node % 16)));
+                set_state(tree, node, classify(next, level));
             }
         });
         member.team_barrier();
