@@ -2034,7 +2034,7 @@ Species counts are taken from the files when they are added.
 | V8 | **Premixed laminar flame speed**, H2/air and CH4/air at `phi` = 0.6-1.4, 1 atm, mixture-averaged and unity Lewis | Cantera `FreeFlame` (same transport model) | Flame speed within 2% at 20+ cells per thermal thickness; difference between CFL 0.2 and 0.1 below 0.5% (splitting error); temperature and HRR profiles overlaid | 9 |
 | V9 | **2D cellular detonation**, 2H2-O2-7Ar at 6.67 kPa | [Oran et al. 1998](https://doi.org/10.1016/S0010-2180(97)00218-6), [Gamezo, Desbordes & Oran 1999](https://doi.org/10.1016/S0010-2180(98)00031-5), Deiterding's AMROC results; experimental cell widths | Regular cells; cell width within published numerical range at matched resolution; soot-foil (max `p`) image | 12 |
 | V10 | **Counterflow diffusion flame**, H2/N2 vs air, strain-rate sweep | Cantera `CounterflowDiffusionFlame` | Peak `T` vs strain within 2% near the axis, accepting that a 2D/3D opposed-jet run only approximates the similarity solution | 12 |
-| V11 | **Shock/H2-bubble interaction** with detailed transport, or a reacting mixing layer | [Billet, Giovangigli & de Gassowski 2008](https://doi.org/10.1080/13647830701545875) | Code-to-code: interface and shock positions; grid convergence | 12 |
+| V11 | **Laminar reacting mixing layer**, H2/N2 against hot air, igniting into a lifted flame | Steady boundary-layer equations with the same chemistry and transport (Cantera) | Lift-off length within 1% under refinement; peaks along the layer and profiles across it overlaid | 12 |
 
 V10 (`examples/counterflow_diffusion`, `examples/counterflow_diffusion/counterflow_reference.py`,
 `counterflow_setup.py`, `plot_counterflow.py`): H2/N2 (1:3) against air at
@@ -2066,6 +2066,31 @@ profiles overlay Cantera's at matched `K_ox`. Results, plots and the
 resolution and domain-size variants are in the example's README.
 
 ![Peak temperature against strain](../images/counterflow_strain.png)
+
+V11 (`examples/reacting_mixing_layer`, `mixing_layer_reference.py`,
+`mixing_layer_setup.py`, `plot_mixing_layer.py`): H2/N2 (1:1) at 300 K and
+50 m/s below air at 1150 K and 100 m/s, 1 atm, from the trailing edge of a
+splitter plate of zero thickness. The hot air autoignites the layer about
+15 mm downstream and a diffusion flame trails behind, held by autoignition.
+The reference is the steady planar boundary-layer problem with the same
+mechanism and mixture-averaged transport, marched in x in von Mises and
+similarity variables with Cantera; it has no streamwise diffusion and stays
+steady. With 201 to 801 points across the layer and tolerances of 1e-6 and
+1e-7 its lift-off length changes by less than 0.03 mm. Mallard's 2D runs
+(30 mm by 20 mm, inlet steps and pressure outlets, started from the
+reference) put the lift-off length, where the peak `Y_OH` reaches 2e-3,
+6.9%, 2.6% and 0.5% short of the reference's 15.26 mm on cells of 200 x 60,
+100 x 30 and 50 x 15 um (where the peak temperature exceeds the air's by 250
+K: 6.6%, 2.9%, 1.0%), close to second-order convergence, mostly from the
+resolution across the layer; so V11 passes. Downstream of the flame base the
+layer carries Kelvin-Helmholtz waves that grow under refinement and lower
+the time-averaged peak temperature at 25-30 mm by up to 2.4% against the
+steady reference
+([#1051](https://github.com/MatthewBonanni/mallard/issues/1051)). The
+example's README has the table and the profiles.
+
+![Peak temperature, Y_OH and heat release rate along the mixing layer](../images/guide/mixing_layer_peaks-light.svg#gh-light-mode-only)
+![Peak temperature, Y_OH and heat release rate along the mixing layer](../images/guide/mixing_layer_peaks-dark.svg#gh-dark-mode-only)
 
 Flame-wall interaction (`tools/dev/flame_wall.py`): head-on quenching of the
 stoichiometric H2/air flame (h2o2.yaml, mixture-averaged transport, 300 K,

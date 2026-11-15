@@ -453,8 +453,11 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host).
+Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
+so the probes they read are left to the host: the device stops at their writes, the host writes them and
+evaluates the triggers, and on resuming copies the values into the device's trigger variables (rank 0's, sent
+to every rank with one host `allgatherv` at the probe's interval). Between writes the device evaluates the
+conditions on those values, as the host would on the probes' latest values.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -467,10 +470,15 @@ mirrors are pinned (never the device's own arrays, also off GPUs), so the copies
 writes the files from them as it takes the record, after the step's probes and before its progress row, as
 `after_step` orders them. One set of mirrors serves every output: each rank posts the number of staged outputs
 it has written in the step's time-step reduction, whose minimum the device compares with the number it
-staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
-`[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
-spectra, phase averages (whose files and restart arrays read the device) stop the
-device at their steps, as do all outputs of builds without conditional nodes.
+staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. The staging also evaluates
+the `[sources]` at the device's `t` into a device array, and copies the averaged spectra, the phase averages and
+their clocks and bin weights, from which the host writes the spectra file and the restart attributes and
+arrays. A region that moves or follows the solution takes its cells from its fractions, computed under an IF
+node on its writer's own flag at the device's `t` (after the cell states, for a region of the solution) and
+copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
+With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
+copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
+of builds without conditional nodes stop the device at their steps.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -498,17 +506,19 @@ entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra wri
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.
 
-Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
-evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
+as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
-array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
+from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
-of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
+of the monitors, statistics, probes, outputs and progress row due at a step, a kernel sets a flag if the launch has not
 flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
 last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
 audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code
