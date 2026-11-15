@@ -1,1 +1,0 @@
-- In console tables, the units after decimal-aligned numbers start in one column again, as in `mallard check`'s memory table ("0 B" next to "70.0 kB").
