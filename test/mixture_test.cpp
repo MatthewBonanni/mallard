@@ -1141,8 +1141,11 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
     Solver igniting;
     igniting.init(parse_toml(reacting_box(40, tau / 50.0) + "explicit_step = true\n" + writer("igniting", 20)));
     igniting.run();
-    for (rtype h : *read_restart(dir + "/igniting_000020.restart").find("CHEM_H")) EXPECT_LT(h, rtype(0));
-    for (rtype h : *read_restart(dir + "/igniting_000040.restart").find("CHEM_H")) {
+    // Copies: a range-for over *read_restart(...).find(...) would read the restart data after it is destroyed
+    const std::vector<rtype> h_induction = *read_restart(dir + "/igniting_000020.restart").find("CHEM_H");
+    const std::vector<rtype> h_ignited = *read_restart(dir + "/igniting_000040.restart").find("CHEM_H");
+    for (rtype h : h_induction) EXPECT_LT(h, rtype(0));
+    for (rtype h : h_ignited) {
         EXPECT_GT(h, rtype(0));
         EXPECT_LT(h, rtype(tau / 50.0));
     }
