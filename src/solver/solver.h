@@ -1059,8 +1059,11 @@ class Solver {
         void update_upwind_sensor();
         /** @brief W of the owned cells, and the reconstruction of the cells independent of the halo on overlap_space. */
         void start_reconstruction(StateView solution);
-        /** @brief Halo exchange of state packed and unpacked on comm_space, ordered with the default instance. */
-        void exchange_halo(const State & state);
+        /**
+         * @brief On comm_space after the default instance's work so far: the halo exchange if asked, then W of the
+         *        halo cells and the reconstruction of the cells that read them. calc_rhs joins it.
+         */
+        void reconstruct_near_partition(const State & state, bool exchange);
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
@@ -1103,9 +1106,9 @@ class Solver {
 
         // Reconstructed cells independent of the halo (empty unless split), and the others
         IndexSet early_cells, late_cells;
-        // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
-        std::string stencil_shapes_setting;
-        void describe_stencil_shapes();
+        // Cells on the block path and their block shapes (empty if none)
+        std::string block_path_setting;
+        void describe_block_path();
         IndexSet rhs_faces;  // faces of owned cells, whose fluxes are used
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
