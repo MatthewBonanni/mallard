@@ -23,12 +23,25 @@ TEST(ViewEntriesTest, AllocationPastTheLimitThrows) {
                  diagnostic_code::Error);
 }
 
+namespace {
+
+uint64_t last_entry_offset(const Kokkos::View<uint8_t **> & v) {
+    const int rows = static_cast<int>(v.extent(0));
+    const int cols = static_cast<int>(v.extent(1));
+    uint64_t offset = 0;
+    Kokkos::parallel_reduce(
+        "last_entry_offset", 1,
+        KOKKOS_LAMBDA(int, uint64_t & o) { o = static_cast<uint64_t>(&v(rows - 1, cols - 1) - v.data()); }, offset);
+    return offset;
+}
+
+} // namespace
+
 TEST(ViewEntriesTest, IntIndicesReachPast2To31Entries) {
-    const int rows = 1 << 16;
-    const int cols = (1 << 15) + 1;
-    const Bytes2 v(Kokkos::view_alloc(Kokkos::WithoutInitializing, "past_int"), size_t(rows), size_t(cols));
-    const auto offset = static_cast<uint64_t>(&v(rows - 1, cols - 1) - v.data());
-    EXPECT_EQ(offset, uint64_t(rows) * uint64_t(cols) - 1);
+    const size_t rows = size_t(1) << 16;
+    const size_t cols = (size_t(1) << 15) + 1;
+    const Kokkos::View<uint8_t **> v(Kokkos::view_alloc(Kokkos::WithoutInitializing, "past_int"), rows, cols);
+    EXPECT_EQ(last_entry_offset(v), rows * cols - 1);
 }
 
 TEST(ViewEntriesTest, RankOneViewsAreNotLimited) {
