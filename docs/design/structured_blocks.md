@@ -413,10 +413,12 @@ its block cells.
 
 **MUSCL tables.** MUSCL's face-neighbor fit, limiter and face extrapolation
 read, per face slot, the gradient weights and the offset to the face centroid
-from a table row (`MUSCLTables`). Every cell whose faces all have a neighbor
-(no boundary face, no rotational periodic face) and that is not a tetrahedron
-has a row. Rows equal on #994's grid are shared, each taking the row of its
+from a table row (`MUSCLTables`). Every cell of the face-neighbor fit (not a
+tetrahedron, no face on a characteristic boundary) without a rotational
+periodic face has a row; the states across its boundary faces still come from
+those faces. Rows equal on #994's grid are shared, each taking the row of its
 lowest global id, agreed over the ranks, so a cell's row depends on its own
-geometry alone and not on the partition. The cells of a block take their
-neighbors as the cell plus their block shape's offsets, every other cell reads
-its faces, and both read the same row, so the two are bitwise equal.
+geometry alone and not on the partition. The cells of a block whose faces all
+have a neighbor take them as the cell plus their block shape's offsets, every
+other cell reads its faces, and both read the same row, so the two are bitwise
+equal.
