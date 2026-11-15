@@ -5,6 +5,7 @@
  ],
  "set_in": [
   "examples/flame_outflow/input.toml",
-  "examples/reactive_shock_tube/input.toml"
+  "examples/reactive_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
  ]
 }
