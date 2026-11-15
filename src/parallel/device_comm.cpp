@@ -190,7 +190,7 @@ void send_receive_device([[maybe_unused]] const std::vector<DeviceMessage> & sen
 
 namespace {
 
-uint64_t wait_delay = 0;
+[[maybe_unused]] uint64_t wait_delay = 0;
 
 } // namespace
 
