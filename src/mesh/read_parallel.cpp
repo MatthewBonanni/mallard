@@ -260,23 +260,21 @@ void place_used_nodes(uint64_t n_nodes, std::vector<std::array<double, N_DIM>> x
                       const std::vector<std::vector<uint64_t> *> & refs, MeshBlock & block) {
     const int p = comm::size(), r = comm::rank();
     const uint64_t first = block_begin(n_nodes, r, p);
-    std::vector<uint8_t> kept(xyz.size(), 0);
-    {
-        // A bit per node of the file, one pass over the refs
-        std::vector<uint64_t> used((n_nodes + 63) / 64, 0);
-        for (const std::vector<uint64_t> * list : refs) {
-            for (uint64_t n : *list) used[n / 64] |= uint64_t(1) << (n % 64);
-        }
-        std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
-        for (uint64_t w = 0; w < used.size(); w++) {
-            for (uint64_t bits = used[w]; bits != 0; bits &= bits - 1) {
-                const uint64_t n = 64 * w + uint64_t(std::countr_zero(bits));
-                send[size_t(part_of(n, n_nodes, p))].push_back(n);
-            }
-        }
-        release(used);
-        for (uint64_t n : comm::exchange(std::move(send)).data) kept[n - first] = 1;
+    // A bit per node of the file that this rank's refs name; their owners keep the nodes any rank names
+    std::vector<uint64_t> used((n_nodes + 63) / 64, 0);
+    for (const std::vector<uint64_t> * list : refs) {
+        for (uint64_t n : *list) used[n / 64] |= uint64_t(1) << (n % 64);
     }
+    std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
+    for (uint64_t w = 0; w < used.size(); w++) {
+        for (uint64_t bits = used[w]; bits != 0; bits &= bits - 1) {
+            const uint64_t n = 64 * w + uint64_t(std::countr_zero(bits));
+            send[size_t(part_of(n, n_nodes, p))].push_back(n);
+        }
+    }
+    comm::Received<uint64_t> asked = comm::exchange(std::move(send));
+    std::vector<uint8_t> kept(xyz.size(), 0);
+    for (uint64_t n : asked.data) kept[n - first] = 1;
     const std::vector<uint64_t> n_kept_by_rank =
         comm::allgatherv(std::vector<uint64_t>{uint64_t(std::count(kept.begin(), kept.end(), 1))});
     uint64_t n_kept = 0, first_kept = 0;
@@ -284,24 +282,37 @@ void place_used_nodes(uint64_t n_nodes, std::vector<std::array<double, N_DIM>> x
         if (q == r) first_kept = n_kept;
         n_kept += n_kept_by_rank[size_t(q)];
     }
+    // Each rank gets the new numbers of the nodes it named, in the order it named them: that of its bits
     {
         std::vector<uint64_t> renumbered(kept.size(), NONE);
         for (uint64_t i = 0, next = first_kept; i < kept.size(); i++) {
             if (kept[i]) renumbered[i] = next++;
         }
-        auto owner = [&](uint64_t n) { return part_of(n, n_nodes, p); };
-        auto answer = [&](uint64_t n, uint64_t * out) { *out = renumbered[n - first]; };
-        for (std::vector<uint64_t> * list : refs) *list = ask(*list, 1, owner, answer);
+        for (uint64_t & n : asked.data) n = renumbered[n - first];
     }
-    std::vector<std::vector<double>> send(static_cast<size_t>(p));
+    std::vector<std::vector<uint64_t>> reply(static_cast<size_t>(p));
+    for (size_t q = 0; q < size_t(p); q++) reply[q].assign(asked.from(q).begin(), asked.from(q).end());
+    release(asked.data);
+    const std::vector<uint64_t> numbers = comm::exchange(std::move(reply)).data;
+    std::vector<uint64_t> before(used.size() + 1, 0);
+    for (size_t w = 0; w < used.size(); w++) before[w + 1] = before[w] + uint64_t(std::popcount(used[w]));
+    for (std::vector<uint64_t> * list : refs) {
+        for (uint64_t & n : *list) {
+            const uint64_t w = n / 64, below = used[w] & ((uint64_t(1) << (n % 64)) - 1);
+            n = numbers[before[w] + uint64_t(std::popcount(below))];
+        }
+    }
+    release(used);
+    release(before);
+    std::vector<std::vector<double>> coords(static_cast<size_t>(p));
     for (uint64_t k = 0, next = first_kept; k < kept.size(); k++) {
         if (!kept[k]) continue;
-        std::vector<double> & to = send[size_t(part_of(next++, n_kept, p))];
+        std::vector<double> & to = coords[size_t(part_of(next++, n_kept, p))];
         FOR_I_DIM to.push_back(double(static_cast<rtype>(xyz[k][i])));
     }
     release(xyz);
     release(kept);
-    const std::vector<double> got = comm::exchange(std::move(send)).data;
+    const std::vector<double> got = comm::exchange(std::move(coords)).data;
     block.first_node = block_begin(n_kept, r, p);
     block.node_coords.resize(got.size() / N_DIM);
     if (!got.empty()) std::memcpy(block.node_coords.data(), got.data(), got.size() * sizeof(double));
@@ -329,17 +340,26 @@ void cells_of_faces(uint64_t n_cells, const std::vector<uint64_t> & face_ids, co
                     const std::vector<std::array<int64_t, 2>> & face_cells, const std::string & source,
                     MeshBlock & block) {
     const int p = comm::size(), r = comm::rank();
+    // Each face goes once to each rank that holds one of its cells: its two cells (NONE: none), id, size, corners
     std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
     collectively([&] {
         for (size_t k = 0; k < faces.size(); k++) {
-            for (int64_t c : face_cells[k]) {
+            uint64_t cells[2] = {NONE, NONE};
+            int owners[2] = {-1, -1};
+            for (size_t i = 0; i < 2; i++) {
+                const int64_t c = face_cells[k][i];
                 if (c < 0) continue;
                 if (uint64_t(c) >= n_cells) {
                     throw std::runtime_error(source + ": a face refers to cell " + std::to_string(c + 1) + " of " +
                                              std::to_string(n_cells) + ".");
                 }
-                std::vector<uint64_t> & to = send[size_t(part_of(uint64_t(c), n_cells, p))];
-                to.insert(to.end(), {uint64_t(c), face_ids[k], faces.offsets[k + 1] - faces.offsets[k]});
+                cells[i] = uint64_t(c);
+                owners[i] = part_of(cells[i], n_cells, p);
+            }
+            for (size_t i = 0; i < 2; i++) {
+                if (owners[i] < 0 || (i == 1 && owners[1] == owners[0])) continue;
+                std::vector<uint64_t> & to = send[size_t(owners[i])];
+                to.insert(to.end(), {cells[0], cells[1], face_ids[k], faces.offsets[k + 1] - faces.offsets[k]});
                 to.insert(to.end(), faces.words.begin() + std::ptrdiff_t(faces.offsets[k]),
                           faces.words.begin() + std::ptrdiff_t(faces.offsets[k + 1]));
             }
@@ -347,27 +367,33 @@ void cells_of_faces(uint64_t n_cells, const std::vector<uint64_t> & face_ids, co
     });
     const std::vector<uint64_t> got = comm::exchange(std::move(send)).data;
     block.first_cell = block_begin(n_cells, r, p);
-    const uint64_t end_cell = block_begin(n_cells, r + 1, p);
+    const uint64_t end_cell = block_begin(n_cells, r + 1, p), n_mine = end_cell - block.first_cell;
+    auto for_each_cell = [&](auto f) {
+        for (uint64_t k = 0; k < got.size(); k += 4 + got[k + 3]) {
+            for (size_t i = 0; i < 2; i++) {
+                if (got[k + i] - block.first_cell < n_mine) f(got[k + i] - block.first_cell, k);
+            }
+        }
+    };
     // The faces of each cell (counting sort), in file order
-    std::vector<uint64_t> start(end_cell - block.first_cell + 1, 0), at;
-    for (uint64_t k = 0; k < got.size(); k += 3 + got[k + 2]) start[got[k] - block.first_cell + 1]++;
+    std::vector<uint64_t> start(n_mine + 1, 0), at;
+    for_each_cell([&](uint64_t c, uint64_t) { start[c + 1]++; });
     for (size_t c = 1; c < start.size(); c++) start[c] += start[c - 1];
     at.resize(start.back());
     {
         std::vector<uint64_t> next(start.begin(), start.end() - 1);
-        for (uint64_t k = 0; k < got.size(); k += 3 + got[k + 2]) at[next[got[k] - block.first_cell]++] = k;
+        for_each_cell([&](uint64_t c, uint64_t k) { at[next[c]++] = k; });
     }
-    block.cell_offsets.reserve(end_cell - block.first_cell + 1);
-    block.cell_nodes.reserve(got.size() / 3);
+    block.cell_offsets.reserve(n_mine + 1);
+    block.cell_nodes.reserve(start.back() * 4 / 3);  // exact for hexahedra
     collectively([&] {
         std::vector<std::span<const uint64_t>> cell_faces;
-        for (uint64_t c = block.first_cell; c < end_cell; c++) {
-            const auto first = at.begin() + std::ptrdiff_t(start[c - block.first_cell]);
-            const auto last = at.begin() + std::ptrdiff_t(start[c - block.first_cell + 1]);
-            std::sort(first, last, [&](uint64_t a, uint64_t b) { return got[a + 1] < got[b + 1]; });
+        for (uint64_t c = 0; c < n_mine; c++) {
+            const auto first = at.begin() + std::ptrdiff_t(start[c]), last = at.begin() + std::ptrdiff_t(start[c + 1]);
+            std::sort(first, last, [&](uint64_t a, uint64_t b) { return got[a + 2] < got[b + 2]; });
             cell_faces.clear();
-            for (auto k = first; k != last; ++k) cell_faces.emplace_back(got.data() + *k + 3, got[*k + 2]);
-            block.add_cell(cell_corners(cell_faces, c, source));
+            for (auto k = first; k != last; ++k) cell_faces.emplace_back(got.data() + *k + 4, got[*k + 3]);
+            block.add_cell(cell_corners(cell_faces, block.first_cell + c, source));
         }
     });
 }

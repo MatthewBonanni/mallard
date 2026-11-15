@@ -199,7 +199,7 @@ class FoamFile {
         if (from >= to) return;
         if (!l.text.empty()) {
             const std::string source = "OpenFOAM file " + name;
-            Fields f(l.text, source, NONE);
+            Fields f(l.text, source, parallel_read::NONE);
             for (uint64_t k = 0; k < to; k++) parse(f, k >= from);
             return;
         }
