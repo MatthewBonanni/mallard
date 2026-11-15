@@ -72,9 +72,12 @@ MeshFileData read_gmsh(const std::string & filename);
  * @brief This rank's block of an ASCII Gmsh file (collective): each rank
  *        parses a near-equal share of the file's nodes and elements and sends
  *        them to the ranks whose blocks hold them, so that no rank holds the
- *        whole mesh. The blocks are those of read_gmsh's contents.
+ *        whole mesh. The blocks are those of read_gmsh's contents. Each rank
+ *        indexes the lines of its share of the bytes in reads of chunk_bytes,
+ *        keeping at least every index_spacing-th line; tests make both small.
  */
-MeshBlock read_gmsh_block(const std::string & filename);
+MeshBlock read_gmsh_block(const std::string & filename, uint64_t chunk_bytes = uint64_t(1) << 22,
+                          uint64_t index_spacing = 1024);
 
 /** @brief An unstructured CGNS file (needs a build with Mallard_ENABLE_CGNS). */
 MeshFileData read_cgns(const std::string & filename);

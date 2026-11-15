@@ -428,7 +428,9 @@ std::string block_gmsh(const MeshBlock & block, bool v41, bool sparse) {
  *        its part of the mesh written to the file, whatever the file's format
  *        and node tags: consecutive or sparse and shuffled tags, nodes and
  *        elements split into many Gmsh 4.1 blocks, cell zones that leave some
- *        cells out.
+ *        cells out, a section marker after spaces. Reading the file in chunks
+ *        of 64 bytes, with lines and markers across chunks, and indexing every
+ *        other line changes nothing.
  */
 TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshWrittenToAGmshFile) {
 #if N_DIM == 2
@@ -442,7 +444,20 @@ TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshWrittenToAGmshFile) {
         for (const bool sparse : {false, true}) {
             const std::string name = std::string("mallard_written_") + (v41 ? "41" : "22") + (sparse ? "_sparse" : "") + ".msh";
             SCOPED_TRACE(name);
-            const MeshBlock block = read_file_block(write_temp_shared(name, block_gmsh(mesh, v41, sparse)));
+            std::string text = block_gmsh(mesh, v41, sparse);
+            if (v41 && sparse) text.replace(text.find("\n$Elements\n"), 11, "\n  $Elements\n");
+            const std::string file = write_temp_shared(name, text);
+            const MeshBlock block = read_file_block(file), chunked = read_gmsh_block(file, 64, 2);
+            EXPECT_EQ(chunked.first_cell, block.first_cell);
+            EXPECT_EQ(chunked.cell_offsets, block.cell_offsets);
+            EXPECT_EQ(chunked.cell_nodes, block.cell_nodes);
+            EXPECT_EQ(chunked.cell_zone, block.cell_zone);
+            EXPECT_EQ(chunked.first_node, block.first_node);
+            EXPECT_EQ(chunked.node_coords, block.node_coords);
+            EXPECT_EQ(chunked.face_offsets, block.face_offsets);
+            EXPECT_EQ(chunked.face_nodes, block.face_nodes);
+            EXPECT_EQ(chunked.face_zone, block.face_zone);
+            EXPECT_EQ(chunked.zone_names, block.zone_names);
             ASSERT_EQ(block.first_cell, block_begin(mesh.n_cells(), r, p));
             ASSERT_EQ(block.n_cells(), block_begin(mesh.n_cells(), r + 1, p) - block.first_cell);
             for (uint64_t c = 0; c < block.n_cells(); c++) {
@@ -475,6 +490,66 @@ TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshWrittenToAGmshFile) {
                                                 mesh.face_nodes.begin() + std::ptrdiff_t(mesh.face_offsets[g + 1])));
             }
             EXPECT_TRUE(block.face_high_order_offsets.empty());
+        }
+    }
+}
+
+/**
+ * @brief An element whose node no other rank parses, in the last line of
+ *        $Elements, fails the read on every rank with the same message,
+ *        naming the node, whether node tags map to positions directly
+ *        (consecutive tags) or through other ranks (sparse tags).
+ */
+TEST(MeshBlockTest, AnUnlistedNodeFailsTheReadOnEveryRank) {
+#if N_DIM == 2
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_TRI, {4, 3}, {1.0, 0.8});
+#else
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_TET, {2, 2, 2}, {1.0, 0.8, 0.6});
+#endif
+    for (const bool sparse : {false, true}) {
+        std::string text = block_gmsh(mesh, false, sparse);
+        const size_t end = text.find("\n$EndElements"), last = text.rfind(' ', end);
+        text.replace(last + 1, end - last - 1, "999999");
+        const std::string file = write_temp_shared(sparse ? "mallard_unlisted_sparse.msh" : "mallard_unlisted.msh", text);
+        std::string error;
+        try {
+            read_file_block(file);
+        } catch (const std::runtime_error & e) {
+            error = e.what();
+        }
+        EXPECT_NE(error.find("node 999999, which $Nodes does not list"), std::string::npos) << error;
+        for (const std::string & other : comm::allgather(error)) EXPECT_EQ(other, error);
+    }
+}
+
+/**
+ * @brief Node tags anywhere in 0 ... 2^64 - 1 find their nodes, and a tag
+ *        listed twice is its last node, as when the nodes were read in order.
+ */
+TEST(MeshBlockTest, NodeTagsFindTheirNodesAcrossTheirWholeRange) {
+    constexpr uint64_t MAX = ~uint64_t(0);
+    struct Case {
+        std::vector<uint64_t> tags, corners, expected;
+    };
+#if N_DIM == 2
+    const int type = 2;
+    const std::vector<Case> cases = {{{MAX, 0, 7}, {0, 7, MAX}, {1, 2, 0}}, {{1, 2, 3, 1}, {1, 2, 3}, {3, 1, 2}}};
+#else
+    const int type = 4;
+    const std::vector<Case> cases = {{{MAX, 0, 7, 9}, {0, 7, MAX, 9}, {1, 2, 0, 3}},
+                                     {{1, 2, 3, 4, 1}, {1, 2, 3, 4}, {4, 1, 2, 3}}};
+#endif
+    for (size_t k = 0; k < cases.size(); k++) {
+        std::ostringstream s;
+        s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n" << cases[k].tags.size() << "\n";
+        for (size_t n = 0; n < cases[k].tags.size(); n++) s << cases[k].tags[n] << " " << n << " " << n * n << " " << (N_DIM == 3 ? n % 2 : 0) << "\n";
+        s << "$EndNodes\n$Elements\n1\n1 " << type << " 2 0 1";
+        for (uint64_t t : cases[k].corners) s << " " << t;
+        s << "\n$EndElements\n";
+        const MeshBlock block = read_file_block(write_temp_shared("mallard_tags_" + std::to_string(k) + ".msh", s.str()));
+        EXPECT_EQ(comm::allreduce(block.n_cells(), comm::Op::SUM), 1u);
+        if (block.n_cells() == 1) {
+            EXPECT_EQ(block.cell_nodes, cases[k].expected) << "case " << k;
         }
     }
 }

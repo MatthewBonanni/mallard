@@ -632,7 +632,8 @@ void Mesh::init_from_block(MeshBlock block, const std::vector<PeriodicPair> & pe
 }
 
 MeshBlock read_file_block(const std::string & filename) {
-    if (is_gmsh_file(filename)) return read_gmsh_block(filename);
+    // Rank 0 decides, so that every rank takes the same (collective) path
+    if (comm::broadcast(comm::is_root() && is_gmsh_file(filename) ? "gmsh" : "") == "gmsh") return read_gmsh_block(filename);
     const int p = comm::size(), me = comm::rank();
     if (p == 1) return file_block(read_mesh_file(filename), 0, 1);
     // Rank 0 reads the file and sends the other ranks their blocks, a group of ranks at a time

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <bit>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -77,8 +78,9 @@ GmshElementType gmsh_element_type(int type, const std::string & filename) {
     }
 }
 
-std::runtime_error malformed(const std::string & filename) {
-    return std::runtime_error("Gmsh file " + filename + " is malformed or ends early.");
+/** @brief The error of a file that is malformed at (1-based) line `line`, or that ends before it. */
+std::runtime_error malformed(const std::string & filename, uint64_t line) {
+    return std::runtime_error("Gmsh file " + filename + " is malformed or ends early (line " + std::to_string(line) + ").");
 }
 
 /** @brief Run f on every rank; if it throws on any, throw the lowest rank's error on every rank. */
@@ -101,15 +103,17 @@ int part_of(uint64_t i, uint64_t n, int p) { return static_cast<int>(((i + 1) * 
 /** @brief The whitespace-separated fields of a line. */
 class Fields {
   public:
-    Fields(const std::string & line, const std::string & filename)
-        : at(line.c_str()), end(line.c_str() + line.size()), file(filename) {}
+    /** @brief The fields of the text of line `number` (1-based). */
+    Fields(const std::string & text, const std::string & filename, uint64_t number)
+        : at(text.c_str()), end(text.c_str() + text.size()), file(filename), line(number) {}
 
     template <typename T>
     T integer() {
         skip();
+        if (at != end && *at == '+') at++;
         T value{};
         const auto [next, ec] = std::from_chars(at, end, value);
-        if (ec != std::errc()) throw malformed(file);
+        if (ec != std::errc()) throw malformed(file, line);
         at = next;
         return value;
     }
@@ -117,9 +121,10 @@ class Fields {
     /** @brief A count, which cannot exceed the file's size: every item it announces takes a byte. */
     uint64_t count(uint64_t file_size) {
         skip();
+        if (at != end && *at == '+') at++;
         int64_t n = 0;
         const auto [next, ec] = std::from_chars(at, end, n);
-        if (ec != std::errc()) throw malformed(file);
+        if (ec != std::errc()) throw malformed(file, line);
         at = next;
         if (n < 0 || uint64_t(n) > file_size) {
             throw std::runtime_error("Gmsh file " + file + ": bad count " + std::to_string(n) + ".");
@@ -131,7 +136,11 @@ class Fields {
         skip();
         char * next = nullptr;
         const double value = std::strtod(at, &next);
-        if (next == at) throw malformed(file);
+        if (next == at) throw malformed(file, line);
+        if (!std::isfinite(value)) {
+            throw std::runtime_error("Gmsh file " + file + ", line " + std::to_string(line) + ": " +
+                                     std::string(at, size_t(next - at)) + " is not a finite number.");
+        }
         at = next;
         return value;
     }
@@ -146,14 +155,15 @@ class Fields {
     const char * at;
     const char * end;
     const std::string & file;
+    uint64_t line;
 };
 
 /**
- * @brief Where a file's lines start: at least every SPACING-th line, and
- *        every line that starts with '$' (a section marker), by its first word.
+ * @brief Where a file's lines start: at least every spacing-th line (see
+ *        index_lines), and every line whose first word starts with '$' (a
+ *        section marker), by that word.
  */
 struct FileLines {
-    static constexpr uint64_t SPACING = 1024;
     std::vector<uint64_t> line, offset;  // sorted by line, line 0 first
     std::map<std::string, std::vector<uint64_t>> marks;
 
@@ -171,11 +181,16 @@ struct FileLines {
     }
 };
 
-/** @brief Index the lines of a file of the given size, each rank scanning its share of the bytes (collective). */
-FileLines index_lines(const std::string & filename, uint64_t size) {
+/**
+ * @brief Index the lines of a file of the given size, each rank scanning its
+ *        share of the bytes in reads of `chunk` bytes, and recording at least
+ *        every spacing-th line (collective).
+ */
+FileLines index_lines(const std::string & filename, uint64_t size, uint64_t chunk, uint64_t spacing) {
     const int p = comm::size(), r = comm::rank();
     const uint64_t begin = block_begin(size, r, p), end = block_begin(size, r + 1, p);
-    constexpr uint64_t CHUNK = uint64_t(1) << 22, WORD = 64;
+    const uint64_t CHUNK = std::max<uint64_t>(chunk, 1);
+    constexpr uint64_t WORD = 64;
     // Local lines are numbered by the newlines of this part before them, so that rank 0's first is line 0
     std::vector<uint64_t> local;
     std::string words;
@@ -184,7 +199,8 @@ FileLines index_lines(const std::string & filename, uint64_t size) {
         std::ifstream in(filename, std::ios::binary);
         std::vector<char> buffer(CHUNK + WORD);
         auto line_start = [&](const char * s, const char * stop, uint64_t offset) {
-            if (n_newlines % FileLines::SPACING == 0) local.insert(local.end(), {n_newlines, offset});
+            if (n_newlines % spacing == 0) local.insert(local.end(), {n_newlines, offset});
+            while (s != stop && (*s == ' ' || *s == '\t')) s++;
             if (s == stop || *s != '$') return;
             const char * w = s;
             while (w != stop && *w != ' ' && *w != '\t' && *w != '\r' && *w != '\n') w++;
@@ -250,14 +266,14 @@ class LineReader {
             at = lines.line[k];
         }
         for (; at < l; at++) in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        if (!in) throw malformed(file);
+        if (!in) throw malformed(file, l + 1);
     }
 
     /** @brief The fields of the next line. */
     Fields next() {
-        if (!std::getline(in, text)) throw malformed(file);
+        if (!std::getline(in, text)) throw malformed(file, at + 1);
         at++;
-        return Fields(text, file);
+        return Fields(text, file, at);
     }
 
   private:
@@ -376,7 +392,7 @@ std::vector<NodeBlock> node_blocks(LineReader & reader, const FileLines & lines,
                 line += 1 + 2 * n;
             }
         }
-        if (line != end) throw malformed(filename);
+        if (line != end) throw malformed(filename, line + 1);
     });
     if (header.version != 2.2) words = comm::allgatherv(words);
     std::vector<NodeBlock> blocks;
@@ -418,7 +434,7 @@ std::vector<ElementBlock> element_blocks(LineReader & reader, const FileLines & 
                 line += 1 + n;
             }
         }
-        if (line != end) throw malformed(filename);
+        if (line != end) throw malformed(filename, line + 1);
     });
     if (header.version != 2.2) words = comm::allgatherv(words);
     std::vector<ElementBlock> blocks;
@@ -430,16 +446,30 @@ std::vector<ElementBlock> element_blocks(LineReader & reader, const FileLines & 
 }
 
 /**
- * @brief Send each key to rank owner(key), which writes the width words of its
- *        answer with answer(key, out); the answers, in the order of the keys
- *        (collective).
+ * @brief Send each distinct key to rank owner(key), which writes the width
+ *        words of its answer with answer(key, out); put(k, words) receives the
+ *        answer to keys[k] (collective).
  */
-template <typename Owner, typename Answer>
-std::vector<uint64_t> ask(const std::vector<uint64_t> & keys, size_t width, Owner owner, Answer answer) {
+template <typename Owner, typename Answer, typename Put>
+void ask(const std::vector<uint64_t> & keys, size_t width, Owner owner, Answer answer, Put put) {
     const size_t p = size_t(comm::size());
-    std::vector<std::vector<uint64_t>> send(p);
-    for (uint64_t key : keys) send[size_t(owner(key))].push_back(key);
-    comm::Received<uint64_t> asked = comm::exchange(std::move(send));
+    std::vector<std::vector<uint64_t>> distinct(p);
+    std::vector<size_t> sorted(p, 0);
+    auto deduplicate = [&](size_t q) {
+        std::sort(distinct[q].begin(), distinct[q].end());
+        distinct[q].erase(std::unique(distinct[q].begin(), distinct[q].end()), distinct[q].end());
+        sorted[q] = distinct[q].size();
+    };
+    for (uint64_t key : keys) {
+        const size_t q = size_t(owner(key));
+        distinct[q].push_back(key);
+        if (distinct[q].size() > 2 * sorted[q] + 4096) deduplicate(q);
+    }
+    for (size_t q = 0; q < p; q++) {
+        deduplicate(q);
+        distinct[q].shrink_to_fit();
+    }
+    comm::Received<uint64_t> asked = comm::exchange(std::vector<std::vector<uint64_t>>(distinct));
     std::vector<std::vector<uint64_t>> reply(p);
     for (size_t q = 0; q < p; q++) {
         reply[q].resize(asked.from(q).size() * width);
@@ -451,13 +481,11 @@ std::vector<uint64_t> ask(const std::vector<uint64_t> & keys, size_t width, Owne
     }
     release(asked.data);
     const comm::Received<uint64_t> got = comm::exchange(std::move(reply));
-    std::vector<uint64_t> next(got.offsets.begin(), got.offsets.end() - 1), out(keys.size() * width);
     for (size_t k = 0; k < keys.size(); k++) {
-        uint64_t & at = next[size_t(owner(keys[k]))];
-        std::copy_n(got.data.begin() + std::ptrdiff_t(at), width, out.begin() + std::ptrdiff_t(k * width));
-        at += width;
+        const size_t q = size_t(owner(keys[k]));
+        const auto at = std::lower_bound(distinct[q].begin(), distinct[q].end(), keys[k]) - distinct[q].begin();
+        put(k, got.data.data() + got.offsets[q] + uint64_t(at) * width);
     }
-    return out;
 }
 
 /** @brief Node tag -> position of the node in the file, over every rank's nodes. */
@@ -485,7 +513,8 @@ class NodePositions {
             highest = std::max(highest, t);
         }
         min_tag = comm::allreduce(lowest, comm::Op::MIN);
-        chunk = (comm::allreduce(highest, comm::Op::MAX) - min_tag) / uint64_t(comm::size()) + 1;
+        const uint64_t width = (comm::allreduce(highest, comm::Op::MAX) - min_tag) / uint64_t(comm::size());
+        chunk = width == NONE ? width : width + 1;
         std::vector<std::vector<uint64_t>> send(static_cast<size_t>(comm::size()));
         for (size_t k = 0; k < tags.size(); k++) send[size_t(owner(tags[k]))].insert(send[size_t(owner(tags[k]))].end(), {tags[k], first + k});
         const comm::Received<uint64_t> got = comm::exchange(std::move(send));
@@ -498,26 +527,36 @@ class NodePositions {
 
     /** @brief Replace each tag by its node's position (collective); fails, naming it, on a tag that no node has. */
     void to_positions(std::vector<uint64_t> & tags, const std::string & filename) const {
-        std::vector<uint64_t> found;
-        if (!dense) {
-            found = ask(tags, 1, [this](uint64_t t) { return owner(t); }, [this](uint64_t t, uint64_t * out) {
-                auto it = std::lower_bound(entries.begin(), entries.end(), std::array<uint64_t, 2>{t, 0});
-                *out = it != entries.end() && (*it)[0] == t ? (*it)[1] : NONE;
-            });
-        }
-        collectively([&] {
-            for (size_t k = 0; k < tags.size(); k++) {
-                if (dense ? tags[k] - base >= n_nodes : found[k] == NONE) {
-                    throw std::runtime_error("Gmsh file " + filename + ": an element has node " +
-                                             std::to_string(tags[k]) + ", which $Nodes does not list.");
+        bool missing = false;
+        uint64_t unlisted = 0;
+        if (dense) {
+            for (uint64_t & t : tags) {
+                if (t - base < n_nodes) {
+                    t -= base;
+                } else if (!missing) {
+                    missing = true;
+                    unlisted = t;
                 }
             }
-        });
-        if (!dense) {
-            tags.swap(found);
-            return;
+        } else {
+            auto put = [&](size_t k, const uint64_t * position) {
+                if (*position == NONE && !missing) {
+                    missing = true;
+                    unlisted = tags[k];
+                }
+                tags[k] = *position;
+            };
+            ask(tags, 1, [this](uint64_t t) { return owner(t); }, [this](uint64_t t, uint64_t * out) {
+                auto it = std::lower_bound(entries.begin(), entries.end(), std::array<uint64_t, 2>{t, 0});
+                *out = it != entries.end() && (*it)[0] == t ? (*it)[1] : NONE;
+            }, put);
         }
-        for (uint64_t & t : tags) t -= base;
+        collectively([&] {
+            if (missing) {
+                throw std::runtime_error("Gmsh file " + filename + ": an element has node " + std::to_string(unlisted) +
+                                         ", which $Nodes does not list.");
+            }
+        });
     }
 
   private:
@@ -577,11 +616,11 @@ std::vector<std::string> zones_of(const Elements & elements, const std::map<int,
 
 } // namespace
 
-MeshBlock read_gmsh_block(const std::string & filename) {
+MeshBlock read_gmsh_block(const std::string & filename, uint64_t chunk_bytes, uint64_t index_spacing) {
     const int p = comm::size(), r = comm::rank();
     if (comm::allreduce(std::ifstream(filename).good() ? 0 : 1, comm::Op::MAX)) throw cannot_read("the mesh file", filename);
     const uint64_t file_size = std::filesystem::file_size(filename);
-    const FileLines lines = index_lines(filename, file_size);
+    const FileLines lines = index_lines(filename, file_size, chunk_bytes, std::max<uint64_t>(index_spacing, 1));
     LineReader reader(filename, lines);
     GmshHeader header;
     collectively([&] { header = read_header(reader, lines, filename, file_size); });
@@ -708,9 +747,11 @@ MeshBlock read_gmsh_block(const std::string & filename) {
         positions.to_positions(faces.corners, filename);
         positions.to_positions(face_ho_tags, filename);
     }
-    const std::vector<uint64_t> face_ho_xyz = ask(
+    std::vector<uint64_t> face_ho_xyz(face_ho_tags.size() * N_DIM);
+    ask(
         face_ho_tags, N_DIM, [&](uint64_t n) { return part_of(n, n_nodes, p); },
-        [&](uint64_t n, uint64_t * out) { FOR_I_DIM out[i] = std::bit_cast<uint64_t>(xyz[n - first_node][i]); });
+        [&](uint64_t n, uint64_t * out) { FOR_I_DIM out[i] = std::bit_cast<uint64_t>(xyz[n - first_node][i]); },
+        [&](size_t k, const uint64_t * x) { std::copy_n(x, N_DIM, face_ho_xyz.begin() + std::ptrdiff_t(k * N_DIM)); });
     release(face_ho_tags);
 
     // High-order files drop the nodes that are no cell's or boundary face's corner
@@ -739,8 +780,8 @@ MeshBlock read_gmsh_block(const std::string & filename) {
         }
         auto owner = [&](uint64_t n) { return part_of(n, n_nodes, p); };
         auto answer = [&](uint64_t n, uint64_t * out) { *out = renumbered[n - first_node]; };
-        cells.corners = ask(cells.corners, 1, owner, answer);
-        faces.corners = ask(faces.corners, 1, owner, answer);
+        ask(cells.corners, 1, owner, answer, [&](size_t k, const uint64_t * n) { cells.corners[k] = *n; });
+        ask(faces.corners, 1, owner, answer, [&](size_t k, const uint64_t * n) { faces.corners[k] = *n; });
     }
 
     MeshBlock block;
