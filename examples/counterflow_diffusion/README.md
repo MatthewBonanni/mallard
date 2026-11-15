@@ -73,6 +73,8 @@ are at its end, 5.4-6.3 / `K_ox`.
 
 ![Peak temperature against strain](../../docs/images/counterflow_strain.png)
 
+*The table's Mallard runs (#171) against the grid-converged `strain.csv`.*
+
 With the 5 mm jets, the peak temperature at matched `K_ox` is within 2% of
 Cantera's up to 1640 1/s, 91% of Cantera's extinction strain rate (1811
 1/s), but the excess grows with strain, from 0.35% at 344 1/s to 1.9% at 1640
