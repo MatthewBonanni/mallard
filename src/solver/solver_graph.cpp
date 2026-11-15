@@ -184,7 +184,12 @@ void Solver::record_step() {
     exchange_for_first_stage();
     update_boundary_states(t);
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
-    if (is_distributed()) comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl());
+    if (is_distributed()) {
+        // On comm_space, ahead of the reconstruction exchange_for_first_stage() started
+        comm::enqueue_wait(comm_space, exec);
+        comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl(), comm_space);
+        comm::enqueue_wait(exec, comm_space);
+    }
     const Kokkos::View<rtype *> r = step_reduce;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
