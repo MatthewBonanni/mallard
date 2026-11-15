@@ -579,10 +579,10 @@ the other cells of the key take its stencil, each entry mapped to the cell at
 the same position of their own sorted layers, its pseudo-inverses, basis means
 and smoothness-indicator matrix. Batches of fitted cells and cells taken from their
 keys then go through the table comparison above. The tables of a key are
-bitwise equal, so a batch carries them only at the key's first cell, which is
-ranked and compared once for the key: the store sees each table once, with the
-lowest global id of its cells, which gives the shapes of ranking every cell, and
-the key's other cells take its shape and canonical order. Cells whose key no other cell
+bitwise equal, so a batch ranks and compares them once, at the key's first cell
+there: the store sees each table once, with the lowest global id of its cells,
+which gives the shapes of ranking every cell, and the key's other cells take its
+shape and canonical order. Cells whose key no other cell
 has, whose layers reach the outermost halo layer or hold two periodic copies of
 a cell, and cells whose layers do not match their key's representative, are
 fitted on their own, so a mesh with a shape per cell is set up as before; so
