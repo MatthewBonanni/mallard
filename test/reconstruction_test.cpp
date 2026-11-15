@@ -275,6 +275,22 @@ rtype min_face_Y(const Mesh & mesh, const Eval & values, const uint8_t nq) {
     return result;
 }
 
+/** @brief Largest |sum_k Y_k - 1| at any face of any cell (one point per face). */
+rtype max_face_sum_error(const Mesh & mesh, const ScalarFaceValues & values) {
+    rtype result;
+    Kokkos::parallel_reduce(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c, rtype & hi) {
+        const uint32_t n = values.offsets_faces_of_cell(c + 1) - values.offsets_faces_of_cell(c);
+        rtype sum[teno::MAX_FACES] = {};
+        for (uint32_t j = 0; j < TRACE_SPECIES; j++) {
+            FacePointValues S[teno::MAX_FACES];
+            values.cell_values(c, j, S);
+            for (uint32_t k = 0; k < n; k++) sum[k] += S[k][0];
+        }
+        for (uint32_t k = 0; k < n; k++) hi = Kokkos::fmax(hi, Kokkos::fabs(sum[k] - 1.0_r));
+    }, Kokkos::Max<rtype>(result));
+    return result;
+}
+
 /** @brief gamma at every face point, (face, q, side). */
 template <typename Eval>
 Kokkos::View<rtype **[2]> face_gamma(const Mesh & mesh, const Eval & values, const uint8_t nq) {
@@ -315,6 +331,35 @@ TEST_P(ScalarLimiters, RoundOffTraceSpeciesKeepsTheOtherScalarsSecondOrder) {
             EXPECT_NEAR(h_thermo(f, 0, side, 0), trace_gamma(mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1)),
                         roundoff(1e-12)) << "face " << f << " side " << static_cast<int>(side);
         }
+    }
+}
+
+TEST(ScalarLimitersTest, TraceSpeciesAtItsBoundLimitsOnlyItself) {
+    // Y_1 = 1e-6 next to 0 needs its slope cut at the faces toward the zeros:
+    // gamma keeps its, and the face values sum to one and stay non-negative
+    constexpr uint32_t NX = 9, NY = 8;
+    auto mesh = make_mesh("cartesian", NX, NY);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
+    for (const char * limiter : {"none", "venkatakrishnan"}) {
+        auto muscl = make_muscl(mesh, bd, limiter);
+        ScalarReconstruction recon;
+        recon.init(mesh, bd, TRACE_SPECIES, *muscl);
+        auto S = trace_scalars(*mesh, NX, 1.0e-6_r);
+        Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, 1);
+        recon.calc(S, uniform_W(*mesh), face_thermo);
+        auto h_thermo = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_thermo);
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            for (uint8_t side = 0; side < 2; side++) {
+                const int32_t c = mesh->h_cells_of_face(f, side);
+                if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
+                EXPECT_NEAR(h_thermo(f, 0, side, 0),
+                            trace_gamma(mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1)), roundoff(1e-12))
+                    << limiter << " face " << f << " side " << static_cast<int>(side);
+            }
+        }
+        const auto values = recon.face_values(S);
+        EXPECT_GE(min_face_Y(*mesh, values, 1), 0.0_r) << limiter;
+        EXPECT_LE(max_face_sum_error(*mesh, values), roundoff(1e-15)) << limiter;
     }
 }
 

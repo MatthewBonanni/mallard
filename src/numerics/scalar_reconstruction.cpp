@@ -173,10 +173,38 @@ struct ScalarLimiterFunctor {
             }
         }
 
-        // Physical bounds at every face: 0 <= Y_k <= 1 and gamma above 1
+        // Physical bounds at every face, 0 <= Y_k <= 1: each mass fraction scales its own slope, and
+        // the most abundant species takes what they give up, so that the slopes still sum to zero
+        uint32_t major = 0;
+        for (uint32_t k = 1; k < n_species; k++) {
+            if (scalars(c, k) > scalars(c, major)) major = k;
+        }
+        rtype moved[N_DIM] = {};
+        for (uint32_t k = 0; k < n_species; k++) {
+            if (k == major || phi <= 0.0_r) continue;
+            const rtype S_c = scalars(c, k);
+            rtype g[N_DIM];
+            FOR_I_DIM g[i] = gradients(c, k, i);
+            rtype phi_k = phi;
+            for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+                if (m >= n_faces) continue;
+                const rtype d = dot<N_DIM>(g, r[m]);
+                if (d > 0.0_r) phi_k = Kokkos::fmin(phi_k, (1.0_r - S_c) / d);
+                if (d < 0.0_r) phi_k = Kokkos::fmin(phi_k, S_c / -d);
+            }
+            if (phi_k >= phi) continue;
+            const rtype s = Kokkos::fmax(phi_k, 0.0_r) / phi;
+            FOR_I_DIM {
+                moved[i] += (1.0_r - s) * g[i];
+                gradients(c, k, i) = s * g[i];
+            }
+        }
+        FOR_I_DIM gradients(c, major, i) += moved[i];
+        // The most abundant species and gamma - 1 (above half its cell value) limit them all
+        const uint32_t shared[2] = {major, n_species};
         for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
             if (m >= n_faces) continue;
-            for (uint32_t j = 0; j <= n_species; j++) {
+            for (const uint32_t j : shared) {
                 rtype d = 0.0_r;
                 FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
