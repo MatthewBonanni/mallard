@@ -29,8 +29,8 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 | OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py; the Python package's tests | every PR | `ci.yml/openmp` |
 | OpenMP, single precision, 2D, zlib | x86-64 CPU | Run | Full suite, two copies at once | every PR | `ci.yml/float` |
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
-| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 2 jobs | every PR | `ci.yml/mpi` |
-| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 4 jobs | every PR | `ci.yml/mpi-3d` |
+| Serial, MPI, 2D, dKaMinPar, HDF5, zlib, Kokkos bounds checking | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 3 jobs | every PR | `ci.yml/mpi` |
+| Serial, MPI, 3D, HDF5, Kokkos bounds checking | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 6 jobs | every PR | `ci.yml/mpi-3d` |
 | Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | main | `ci.yml/tutorials` |
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |

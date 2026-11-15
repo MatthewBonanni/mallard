@@ -226,7 +226,9 @@ jobs:
   # and serial builds on x86-64, and each backend variant also runs once on
   # arm64 with one of the compilers. macOS runs the 2D and 3D suites with Apple Clang and
   # the 2D suite with Homebrew's GCC. The GCC 16 jobs build with CMake 4.2.3, the oldest
-  # supported; the others with the runners' CMake. Branches run the jobs marked gate.
+  # supported; the others with the runners' CMake. The x86-64 MPI builds check the bounds of
+  # every Kokkos View access, which finds out-of-range indices that only multiple ranks reach.
+  # Branches run the jobs marked gate.
   matrix:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true'
@@ -248,8 +250,8 @@ jobs:
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "shards": 2, "gate": true},
-            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "shards": 4, "gate": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "shards": 3, "gate": true},
+            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "full": true, "shards": 6, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true, "gate": true},
@@ -486,8 +488,9 @@ jobs:
         timeout-minutes: 90
         env:
           FULL: ${{ matrix.backend.full }}
-          # A test that hangs (a collective some ranks never reach) aborts and names itself
-          MALLARD_TEST_TIMEOUT: 600
+          # A test that hangs (a collective some ranks never reach) aborts and names itself;
+          # bounds checking makes the longest 3D test take about 16 minutes on 3 ranks
+          MALLARD_TEST_TIMEOUT: ${{ contains(matrix.backend.flags, 'BOUNDS_CHECK=ON') && 1800 || 600 }}
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           # A filter of this step, restricted to GTEST_FILTER (the dispatch's selection, or the
