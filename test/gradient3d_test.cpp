@@ -149,6 +149,54 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     }
 }
 
+TEST(MUSCL3D, BlockCellsReadTheirNeighborsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+    // A blast in a box with walls, and in one periodic in x and y: the walls' cells have no table
+    for (const bool periodic : {false, true}) {
+        Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 10\nNz = 10\n") +
+                                 (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : ""));
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double r2 = 0.0;
+            for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.45, 2);
+            const bool inside = r2 < 0.06;
+            h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+            for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+            h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+        }
+        Kokkos::deep_copy(W, h_W);
+        auto results = [&](const bool block_path, const bool fused) {
+            auto muscl = std::make_unique<MUSCL>();
+            muscl->set_mesh(mesh);
+            muscl->set_boundaries(bd);
+            muscl->block_path = block_path;
+            muscl->init(parse_toml("type = \"MUSCL\"\n"));
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+            if (fused) {
+                muscl->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W, face_W, IndexSet{{}, 0, mesh->n_cells});
+            } else {
+                muscl->calc_face_values(W, face_W);
+            }
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            std::vector<rtype> out(h.data(), h.data() + h.span());
+            return std::make_tuple(out, muscl->n_block_cells, muscl->n_table_cells);
+        };
+        const uint64_t interior = periodic ? 10 * 10 * 8 : 8 * 8 * 8;
+        const auto [unstructured, none, n_table] = results(false, false);
+        EXPECT_EQ(none, 0u) << "periodic " << periodic;
+        EXPECT_EQ(n_table, interior) << "periodic " << periodic;
+        for (const bool fused : {false, true}) {
+            const auto [block, n_block, n_table_block] = results(true, fused);
+            EXPECT_EQ(n_block, interior) << "periodic " << periodic;
+            EXPECT_TRUE(block == unstructured) << "periodic " << periodic << ", fused " << fused;
+        }
+    }
+}
+
 TEST_P(ExtrapolationColumn3D, GradientsMatchThoseOfAPeriodicColumn) {
     // A field of z alone, in a column of 3 x 3 cells whose sides are either
     // extrapolation boundaries or periodic: the image neighbors continue every

@@ -378,17 +378,16 @@ Decided by the maintainer on this note (#967), recorded on #440:
 4. **Mirror images** at straight walls are in Stage 1.
 5. **Order.** The shared table store (canonical entry order, a table set per
    stencil shape, the cells' index) is #431's and lands first. #440 adds the
-   block numbering, the $(i, j, k)$ to shape map and the kernels.
+   block numbering, the block shapes and the kernels.
 
 ## Implementation
 
 One pull request per step, as a stack on #431:
 
 1. Detection and the block numbering.
-2. The $(i, j, k)$ to stencil shape map, on #431's table store.
-3. The TENO block kernel (below). The MUSCL block kernel, which needs a
-   least-squares table per stencil shape, is #1035; keyed tables and one fit
+2. Block shapes from each cell's own stencil (below); keyed tables and one fit
    per shape at setup are #986.
+3. The TENO and MUSCL block kernels (below).
 4. Mirror images at straight walls.
 5. `mallard check` reporting.
 6. The documentation of [Documentation](#documentation).
@@ -405,9 +404,19 @@ partition changes which cells take the block path, never what they compute.
 A periodic box that is one block on its rank keeps its cells along the seams on
 the block path too: their offsets wrap the index, and each position along the
 seam is one more block shape. The shapes are found from the packed stencils at
-setup and after `rebuild_cells`. They do not use the keys of step 2, which
-depend on the partition near partition faces (#986).
+setup and after `rebuild_cells`. Keys from the block indices would depend on
+the partition near partition faces (#986).
 
 On GPUs the team pass gives each thread its own cell's row, by offsets or
 packed, so a team that straddles the edge of the block path stays on it for
 its block cells.
+
+**MUSCL tables.** MUSCL's face-neighbor fit, limiter and face extrapolation
+read, per face slot, the gradient weights and the offset to the face centroid
+from a table row (`MUSCLTables`). Every cell whose faces all have a neighbor
+(no boundary face, no rotational periodic face) and that is not a tetrahedron
+has a row. Rows equal on #994's grid are shared, each taking the row of its
+lowest global id, agreed over the ranks, so a cell's row depends on its own
+geometry alone and not on the partition. The cells of a block take their
+neighbors as the cell plus their block shape's offsets, every other cell reads
+its faces, and both read the same row, so the two are bitwise equal.

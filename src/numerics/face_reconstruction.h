@@ -124,6 +124,10 @@ class FaceReconstruction {
          */
         virtual bool exchanges_partition_faces() const { return false; }
 
+        // The cells of structured blocks that read their neighbors by offsets, and their block shapes (this rank)
+        uint64_t n_block_cells = 0;
+        uint32_t n_block_shapes = 0;
+
         /**
          * @brief Reconstruct the listed cells' sides of their faces, on the
          *        given execution space instance, as far as each cell can on its
@@ -309,6 +313,59 @@ static const std::unordered_map<LimiterType, std::string> LIMITER_NAMES = {
  * @brief Second-order MUSCL reconstruction of W = [rho, u_x, u_y, p] using
  *        least-squares gradients and a slope limiter.
  */
+/**
+ * @brief The geometry of MUSCL's face-neighbor stencils, for the cells
+ *        whose faces all have a neighbor (no boundary face, no rotational
+ *        periodic face) and that are not tetrahedra: per face slot (in
+ *        faces_of_cell order), the gradient weights (LSQGradientFunctor::weights)
+ *        and the offset from the cell centroid to the face centroid. The
+ *        cells whose rows are equal on teno::TableStore's grid share the row
+ *        of the lowest global id, agreed over the ranks, so that a cell's
+ *        row does not depend on the partition. The cells of structured
+ *        blocks with a block shape take their neighbors as the cell plus the
+ *        shape's offsets.
+ */
+struct MUSCLTables {
+    static constexpr uint32_t NONE = ~0u;
+    Kokkos::View<uint32_t *[2]> row;  // (cell): its weights row and offsets row, or NONE; empty if no cell has one
+    Kokkos::View<rtype *> weights;    // ((row stride + slot) N_DIM + d)
+    Kokkos::View<rtype *> offsets;    // ((row stride + slot) N_DIM + d)
+    uint32_t stride = 0;
+    teno::BlockStencils block;
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+
+    KOKKOS_INLINE_FUNCTION
+    bool has(const uint32_t c) const { return row.extent(0) && row(c, 0) != NONE; }
+
+    /** @brief Cell c's block offsets, or null if it reads its faces. */
+    KOKKOS_INLINE_FUNCTION
+    const int32_t * block_offsets(const uint32_t c) const {
+        const uint32_t k = block.shape_of(c);
+        return k == teno::BlockStencils::NONE ? nullptr : block.offsets_of(k);
+    }
+
+    /** @brief The neighbor of cell c across its face slot k, by offsets o or by its face. */
+    KOKKOS_INLINE_FUNCTION
+    uint32_t neighbor(const uint32_t c, const uint32_t k, const int32_t * o) const {
+        if (o) return uint32_t(int32_t(c) + o[k]);
+        const uint32_t f = faces_of_cell(offsets_faces_of_cell(c) + k);
+        const int32_t c0 = cells_of_face(f, 0);
+        return uint32_t(c0 == int32_t(c) ? cells_of_face(f, 1) : c0);
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    rtype weight(const uint32_t c, const uint32_t k, const uint8_t d) const {
+        return weights((size_t(row(c, 0)) * stride + k) * N_DIM + d);
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    rtype offset(const uint32_t c, const uint32_t k, const uint8_t d) const {
+        return offsets((size_t(row(c, 1)) * stride + k) * N_DIM + d);
+    }
+};
+
 class MUSCL : public FaceReconstruction {
     public:
         MUSCL();
@@ -331,6 +388,13 @@ class MUSCL : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
         LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
+        // The cells of structured blocks read their neighbors by offsets (MUSCLTables::block);
+        // false (tests only) reads every cell's faces
+        bool block_path = true;
+        MUSCLTables tables;
+        uint64_t n_table_cells = 0;  // cells with a table (this rank)
+        /** @brief The tables of the cells whose faces are all interior, and the block shapes (collective). */
+        void find_tables();
 };
 
 /**
@@ -398,8 +462,6 @@ class TENO : public FaceReconstruction {
         // (teno::BlockStencils); false (tests only) reads every cell's slots
         bool block_path = true;
         teno::BlockStencils block_stencils;
-        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
-        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
         /**
          * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
          *        (after the tables are set up or rebuilt; a no-op unless block_path).
