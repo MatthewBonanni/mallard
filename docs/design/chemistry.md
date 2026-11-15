@@ -289,6 +289,12 @@ The design:
      (the physical bounds of item 3).
    Least-squares reconstruction reproduces constants, so with shared weights
    `sum_k Y_k = 1` at every face point to round-off.
+   A mass fraction within 16 machine epsilons of its cell value over the
+   whole stencil is reconstructed constant and left out of the limiter and
+   the bounds (MUSCL and TENO alike, issue #1169): otherwise a species absent
+   from a cell (`Y_k = 0`) next to round-off in a neighbor (`1e-34`) sets the
+   cell's shared limiter to zero, and every scalar of the cell goes first
+   order.
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and

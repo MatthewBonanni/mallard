@@ -110,6 +110,8 @@ struct ScalarFaceValues {
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at
  *          every face point, and in troubled cells every scalar within the
  *          range of the cell and its face neighbors.
+ *        A mass fraction within SPECIES_NOISE of its cell value over the whole
+ *        stencil is constant in the cell and takes no part in the limiter.
  */
 class ScalarReconstruction {
     public:

@@ -423,6 +423,12 @@ face point:
     $Y_k\in[0, 1]$, $\gamma - 1$ above half its cell value and, in troubled
     cells, every scalar within its neighbors' range.
 
+A mass fraction that differs from its cell value by at most 16 machine
+epsilons over the whole stencil (a species absent from the cell next to
+round-off, say $10^{-34}$) is reconstructed constant instead: it stays
+non-negative and no longer limits the other scalars of the cell, and the face
+values still sum to one to round-off.
+
 The face $(\gamma, e_0)$ pairs enter the Riemann solvers
 ([Numerical fluxes](fluxes.md#gas-mixtures)), and the face mass fractions the
 species fluxes ([Numerical fluxes](fluxes.md#species-fluxes)).
