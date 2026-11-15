@@ -200,7 +200,7 @@ the host, where each cell's pseudo-inverse was ranked, hashed and compared with 
 rows of basis means and moments were then downloaded and matched the same way. Now the device ranks the
 slots (an insertion sort per cell, stable like the host's), hashes each table and row, and compares the
 cells with their shapes' tables; the host only looks up the hashes in cell order and receives the
-tables that its shapes keep. One A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`), the same pod for
+tables that its shapes keep. One A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`), the same machine for
 both; restart files at step 2 are bitwise identical:
 
 | packing / numerics setup (s) | order 3 | order 4 | order 5 | order 6 |
@@ -208,9 +208,13 @@ both; restart files at step 2 are bitwise identical:
 | double Mach, 2048 x 512 x 2 triangles (2.1M), host | 25.7 / 29.4 | 36.7 / 49.6 | 70.2 / 87 | 108 / 168 |
 | double Mach, device | **0.87 / 2.64** | **0.91 / 3.25** | **1.10 / 6.54** | **1.22 / 21.7** |
 | box, 1024 x 1024 quadrilaterals (1M), host | 16.6 / 20.5 | 23.1 / 30.9 | 33.8 / 44.6 | 62.7 / 93 |
-| box, device | **0.45 / 3.05** | **0.53 / 3.53** | **PACKBOX5 / 8.83** | **0.65 / 20.6** |
+| box, device | **0.45 / 3.05** | **0.53 / 3.53** | **0.54 / 6.23** | **0.65 / 20.6** |
 
-The numerics setup is now the tables phase plus about 1-2 s.
+The numerics setup is now the tables phase plus 1-3 s; on the host it was the tables phase plus 25-150
+s. Per family (central and sector stencils) and per 2.1M cells, the device ranking takes 10-70 ms, the
+comparisons 25-100 ms and the host's matching 0.1-0.25 s; the rest of the packing is the cells' stencils,
+as without sharing. Packing times vary by up to 3 s from run to run with the host's load (one box run at
+order 5 took 3.2 s; the table gives the repeat).
 
 ### 5. Reacting mixtures (#257)
 
