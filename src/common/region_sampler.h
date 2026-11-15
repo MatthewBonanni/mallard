@@ -89,11 +89,9 @@ KOKKOS_INLINE_FUNCTION bool is_uniform(const Shape<Distance> & shape, const doub
     return uniform;
 }
 
-/**
- * @brief Child j of simplex v by midpoint subdivision: 4 triangles, or 8
- *        tetrahedra (4 corners and an octahedron split along a diagonal).
- */
-KOKKOS_INLINE_FUNCTION void child(const double v[4][3], const int j, double out[4][3]) {
+/** @brief Vertex k of child J of a simplex v by midpoint subdivision: the midpoint of two of its vertices. */
+template <int J>
+KOKKOS_INLINE_FUNCTION void child_vertices(const double v[4][3], double out[4][3]) {
     constexpr int TRIANGLES[4][3][2] = {{{0, 0}, {0, 1}, {0, 2}},
                                         {{0, 1}, {1, 1}, {1, 2}},
                                         {{0, 2}, {1, 2}, {2, 2}},
@@ -103,13 +101,38 @@ KOKKOS_INLINE_FUNCTION void child(const double v[4][3], const int j, double out[
                                          {{0, 1}, {2, 3}, {0, 2}, {0, 3}}, {{0, 1}, {2, 3}, {0, 3}, {1, 3}},
                                          {{0, 1}, {2, 3}, {1, 3}, {1, 2}}, {{0, 1}, {2, 3}, {1, 2}, {0, 2}}};
     for (int k = 0; k < 4; k++) {
-        if (N_DIM == 2 && k == 3) {
-            for (int i = 0; i < 3; i++) out[k][i] = 0.0;
-            continue;
+        int a = 0, b = 0;
+        if constexpr (N_DIM == 2) {
+            if (k == 3) {
+                for (int i = 0; i < 3; i++) out[k][i] = 0.0;
+                continue;
+            }
+            a = TRIANGLES[J][k][0];
+            b = TRIANGLES[J][k][1];
+        } else {
+            a = TETRAHEDRA[J][k][0];
+            b = TETRAHEDRA[J][k][1];
         }
-        const int a = N_DIM == 2 ? TRIANGLES[j][k][0] : TETRAHEDRA[j][k][0];
-        const int b = N_DIM == 2 ? TRIANGLES[j][k][1] : TETRAHEDRA[j][k][1];
         for (int i = 0; i < 3; i++) out[k][i] = a == b ? v[a][i] : 0.5 * (v[a][i] + v[b][i]);
+    }
+}
+
+/**
+ * @brief Child j of simplex v by midpoint subdivision: 4 triangles, or 8
+ *        tetrahedra (4 corners and an octahedron split along a diagonal).
+ */
+KOKKOS_INLINE_FUNCTION void child(const double v[4][3], const int j, double out[4][3]) {
+    switch (j) {
+        case 0: child_vertices<0>(v, out); break;
+        case 1: child_vertices<1>(v, out); break;
+        case 2: child_vertices<2>(v, out); break;
+        case 3: child_vertices<3>(v, out); break;
+#if N_DIM == 3
+        case 4: child_vertices<4>(v, out); break;
+        case 5: child_vertices<5>(v, out); break;
+        case 6: child_vertices<6>(v, out); break;
+        default: child_vertices<7>(v, out); break;
+#endif
     }
 }
 
@@ -204,81 +227,91 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, uint32_t * tree,
     member.team_barrier();
     uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
     for (int level = 1; level <= MAX_LEVEL; level++) {
-        const uint32_t parents = first;
+        const uint32_t parents = first, n_parents = width;
         first += width;
         width *= CHILDREN;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, width), [&](const uint32_t code) {
-            if (detail::node_state(tree, parents + code / CHILDREN) != detail::SUBDIVIDED) return;
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_parents), [&](const uint32_t p) {
+            if (detail::node_state(tree, parents + p) != detail::SUBDIVIDED) return;
             double v[4][3], u[4][3];
             for (int k = 0; k < 4; k++) {
                 for (int i = 0; i < 3; i++) v[k][i] = v0[k][i];
             }
-            for (uint32_t place = width / CHILDREN; place > 0; place /= CHILDREN) {
-                detail::child(v, static_cast<int>((code / place) % CHILDREN), u);
+            for (uint32_t place = n_parents / CHILDREN; place > 0; place /= CHILDREN) {
+                detail::child(v, static_cast<int>((p / place) % CHILDREN), u);
                 for (int k = 0; k < 4; k++) {
                     for (int i = 0; i < 3; i++) v[k][i] = u[k][i];
                 }
             }
-            double c[3], phi;
-            const uint32_t state = !detail::is_uniform(shape, v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
-                                   : phi < 0.0                                 ? uint32_t(detail::INSIDE)
-                                                                               : uint32_t(detail::OUTSIDE);
-            const uint32_t node = first + code;
-            Kokkos::atomic_or(&tree[node / 16], state << (2 * (node % 16)));
+            for (int j = 0; j < CHILDREN; j++) {
+                double c[3], phi;
+                detail::child(v, j, u);
+                const uint32_t state = !detail::is_uniform(shape, u, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
+                                       : phi < 0.0                                 ? uint32_t(detail::INSIDE)
+                                                                                   : uint32_t(detail::OUTSIDE);
+                const uint32_t node = first + p * CHILDREN + static_cast<uint32_t>(j);
+                Kokkos::atomic_or(&tree[node / 16], state << (2 * (node % 16)));
+            }
         });
         member.team_barrier();
     }
     struct Sums {
         double inside, total;
     };
-    // The kept simplices depth first, in the children's order, as simplex sums them
+    // The kept simplices depth first, in the children's order, as simplex sums them; their vertices only where
+    // their weights or indicators need them
     const bool sharp = !(shape.edge > 0.0), placed = axisymmetric || !sharp;
     Sums sums{inside, total};
     Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
-        struct Frame {
-            double v[4][3];
-            double measure;
-            uint32_t code;
-            int next;
-        };
-        Frame path[MAX_LEVEL];
-        for (int k = 0; k < 4; k++) {
-            for (int i = 0; i < 3; i++) path[0].v[k][i] = v0[k][i];
+        double vertices[MAX_LEVEL][4][3];
+        for (int k = 0; placed && k < 4; k++) {
+            for (int i = 0; i < 3; i++) vertices[0][k][i] = v0[k][i];
         }
-        path[0].measure = measure0;
-        path[0].code = 0;
-        path[0].next = 0;
-        int top = 0;
-        while (top >= 0) {
-            Frame & f = path[top];
-            if (f.next == CHILDREN) {
-                top--;
+        double in = s.inside, all = s.total, measure = measure0 / double(CHILDREN);
+        int level = 1;
+        uint32_t code = 0, first_of_level = 1;
+        while (level > 0) {
+            const uint32_t state = detail::node_state(tree, first_of_level + code);
+            const int j = static_cast<int>(code % CHILDREN);
+            if (state == detail::SUBDIVIDED && (placed || level + 1 < MAX_LEVEL)) {
+                if (placed) detail::child(vertices[level - 1], j, vertices[level]);
+                level++;
+                code *= CHILDREN;
+                first_of_level = first_of_level * CHILDREN + 1;
+                measure /= double(CHILDREN);
                 continue;
             }
-            const int j = f.next++;
-            const uint32_t code = f.code * CHILDREN + static_cast<uint32_t>(j);
-            const double measure = f.measure / double(CHILDREN);
-            const uint32_t state = detail::node_state(tree, tree_nodes(top + 1) + code);
             if (state == detail::SUBDIVIDED) {
-                Frame & g = path[top + 1];
-                detail::child(f.v, j, g.v);
-                g.measure = measure;
-                g.code = code;
-                g.next = 0;
-                top++;
-                continue;
+                // Its children, all kept whole at the deepest level
+                const uint32_t first_child = (first_of_level * CHILDREN + 1) + code * CHILDREN;
+                const double w = measure / double(CHILDREN);
+                for (uint32_t k = 0; k < CHILDREN; k++) {
+                    in += w * (detail::node_state(tree, first_child + k) == detail::INSIDE ? 1.0 : 0.0);
+                    all += w;
+                }
+            } else {
+                double w = measure, indicated = state == detail::INSIDE ? 1.0 : 0.0;
+                if (placed) {
+                    double v[4][3], c[3], phi;
+                    detail::child(vertices[level - 1], j, v);
+                    detail::is_uniform(shape, v, level, c, phi);
+                    w = measure * (axisymmetric ? c[1] : 1.0);
+                    if (!sharp) indicated = indicator(phi, shape.edge);
+                }
+                in += w * indicated;
+                all += w;
             }
-            double w = measure, indicated = state == detail::INSIDE ? 1.0 : 0.0;
-            if (placed) {
-                double v[4][3], c[3], phi;
-                detail::child(f.v, j, v);
-                detail::is_uniform(shape, v, top + 1, c, phi);
-                w = measure * (axisymmetric ? c[1] : 1.0);
-                if (!sharp) indicated = indicator(phi, shape.edge);
+            // The next simplex depth first: the next sibling of the deepest simplex with one (measures scale
+            // exactly by powers of 2)
+            while (level > 0 && code % CHILDREN == CHILDREN - 1) {
+                code /= CHILDREN;
+                first_of_level = (first_of_level - 1) / CHILDREN;
+                measure *= double(CHILDREN);
+                level--;
             }
-            s.inside += w * indicated;
-            s.total += w;
+            code++;
         }
+        s.inside = in;
+        s.total = all;
     }, sums);
     inside = sums.inside;
     total = sums.total;
