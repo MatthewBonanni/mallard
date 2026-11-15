@@ -145,6 +145,12 @@ std::string Solver::step_graph_unsupported() const {
     if (!uncaptured_step_graphs) return "not a CUDA build";
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
+#if defined(KOKKOS_ENABLE_CUDA) && !defined(MALLARD_CONDITIONAL_NODES)
+    constexpr bool conditional_nodes = false;
+#else
+    constexpr bool conditional_nodes = true;
+#endif
+    if (!conditional_nodes) return "no conditional nodes before CUDA 12.4";
 #ifdef KOKKOS_ENABLE_CUDA
     // MPI calls cannot be captured; uncaptured step graphs exist only off CUDA
     if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
