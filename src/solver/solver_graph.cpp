@@ -187,7 +187,12 @@ void Solver::record_step() {
     exchange_for_first_stage();
     update_boundary_states(t);
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
-    if (is_distributed()) comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl());
+    if (is_distributed()) {
+        // On comm_space, ahead of the reconstruction exchange_for_first_stage() started
+        comm::enqueue_wait(comm_space, exec);
+        comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl(), comm_space);
+        comm::enqueue_wait(exec, comm_space);
+    }
     const Kokkos::View<rtype *> r = step_reduce;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
@@ -891,7 +896,8 @@ void Solver::capture_step_graph() {
         end_capture(graph);
         capture_graph = nullptr;
         cudaGraphExec_t exec = nullptr;
-        cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
+        // Without the flag, every node runs at the launch stream's priority, also those captured from comm_space
+        cuda_check(cudaGraphInstantiate(&exec, graph, cudaGraphInstantiateFlagUseNodePriority), "cudaGraphInstantiate");
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
