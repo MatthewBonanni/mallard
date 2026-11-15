@@ -5,9 +5,8 @@
 
 Solves Cantera's FreeFlame of H2/air at equivalence ratio PHI, 300 K and
 1 atm with mixture-averaged transport (mechanisms/h2o2.yaml, as Mallard),
-on a grid refined to slope = curve = 0.00125, where its flame speed is
-converged to 0.07% (converge() of tools/setup/flame_reference.py), and
-writes to RUN_DIR:
+with its flame speed extrapolated to a converged grid (converge() of
+tools/setup/flame_reference.py), and writes to RUN_DIR:
 
   reference.csv  Cantera's flame: x (relative to the maximum of dT/dx), u, T,
                  heat release rate, H2, O2, H2O and OH mass fractions; first line: S_L, T_b and the thermal
@@ -55,11 +54,11 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.run_dir, exist_ok=True)
 
-    f = cantera_flame(args.phi)
+    f, s_l = cantera_flame(args.phi)
     x, T = f.grid, f.T
     dTdx = np.gradient(T, x)
     delta = (T[-1] - T[0]) / dTdx.max()
-    s_l, t_b = f.velocity[0], T[-1]
+    t_b = T[-1]
     i_max = np.argmax(dTdx)
     xs = np.linspace(x[i_max] - 4 * delta, x[i_max] + 8 * delta, 400)
     with open(os.path.join(args.run_dir, "reference.csv"), "w") as fh:

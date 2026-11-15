@@ -24,10 +24,11 @@ thicknesses δ upstream of the flame to 9 downstream, where
 
 [`flame_setup.py`](../../tutorials/premixed_flame/flame_setup.py) computes
 Cantera's flame and writes the run around it. Cantera discretizes convection
-with first-order upwind differences, so its flame speed depends on its grid:
-the script refines the grid in stages to `slope = curve = 0.00125`, where one
-more halving changes S_L by at most 0.02% (on Cantera's usual grid of
-`slope = curve = 0.02`, S_L at φ = 0.6 is 1.0% low).
+with first-order upwind differences, so its flame speed depends on its grid
+(on its usual grid of `slope = curve = 0.02`, S_L at φ = 0.6 is 1.3% low): the
+script solves the flame on a grid of `slope = curve = 0.01`, then on that grid
+doubled twice, and extrapolates S_L from the two doubled grids, where the
+error halves with each doubling.
 
 ```bash
 mkdir -p run/premixed_flame && cd run/premixed_flame
@@ -35,7 +36,7 @@ python3 $MALLARD/tutorials/premixed_flame/flame_setup.py 1.0 .
 ```
 
 ```text
-phi = 1: S_L = 2.33089 m/s, T_b = 2386.6 K, delta = 0.3284 mm; 300 cells over 4.9258 mm, t_stop = 0.5635 ms
+phi = 1: S_L = 2.33108 m/s, T_b = 2386.8 K, delta = 0.3283 mm; 300 cells over 4.9252 mm, t_stop = 0.5634 ms
 ```
 
 It writes `reference.csv` (Cantera's profiles of velocity, temperature, heat
@@ -52,7 +53,7 @@ zones `inlet`, `outlet` and `sides`. `mesh.sh` runs it with the length and
 cell count of this flame, 20 cells per δ:
 
 ```bash
-sh mesh.sh    # gmsh .../strip.geo -2 -setnumber L 4.925809e-03 -setnumber n 300 -o strip.msh
+sh mesh.sh    # gmsh .../strip.geo -2 -setnumber L 4.925194e-03 -setnumber n 300 -o strip.msh
 ```
 
 ![The strip of 300 cells with its boundary zones, and the initial temperature against Cantera's flame](../images/tutorials/premixed_flame_setup-light.svg#gh-light-mode-only)
@@ -105,7 +106,7 @@ frame. This **consumption speed** needs only one snapshot, so it can follow
 the run:
 
 ```bash
-python3 $MALLARD/tools/post/flame_speed.py . 2.33089
+python3 $MALLARD/tools/post/flame_speed.py . 2.33108
 ```
 
 prints it for every snapshot written so far (and the displacement speed, from
@@ -128,7 +129,7 @@ and plots the final profiles against Cantera's, aligned at the maximum of
 dT/dx:
 
 ```text
-phi = 1: consumption speed 2.3297 m/s over the last flame time, Cantera 2.3309 (-0.05%)
+phi = 1: consumption speed 2.3291 m/s over the last flame time, Cantera 2.3311 (-0.09%)
 ```
 
 ![Temperature, heat release, and the H2, O2, H2O and OH mass fractions across the flame against Cantera's](../images/tutorials/premixed_flame_profiles-light.svg#gh-light-mode-only)
@@ -158,16 +159,28 @@ With several runs, `plot_flame.py results` compares their flame speeds:
 
 | φ | Cantera S_L (m/s) | Mallard S_c (m/s) | Error |
 |---|---|---|---|
-| 0.6 | 0.8170 | 0.8176 | +0.08% |
-| 0.8 | 1.6596 | 1.6579 | −0.10% |
-| 1.0 | 2.3309 | 2.3297 | −0.05% |
-| 1.2 | 2.7777 | 2.7824 | +0.17% |
-| 1.4 | 3.0298 | 3.0314 | +0.05% |
+| 0.6 | 0.8198 | 0.8176 | −0.27% |
+| 0.8 | 1.6611 | 1.6579 | −0.19% |
+| 1.0 | 2.3311 | 2.3291 | −0.09% |
+| 1.2 | 2.7772 | 2.7820 | +0.17% |
+| 1.4 | 3.0287 | 3.0314 | +0.09% |
 
-The rich and stoichiometric flames settle within three flame times and the
-flame at φ = 0.8 within five. The flame at φ = 0.6 (397,000 steps, about 20
-minutes on one core) takes seven and then stays 1.1% faster than Cantera's;
-why is open ([#1036](https://github.com/MatthewBonanni/mallard/issues/1036)).
+The rich and stoichiometric flames settle within three flame times, the
+flame at φ = 0.8 within five and the flame at φ = 0.6 (392,000 steps, about
+20 minutes on one core) within nine. All are within 0.3% of Cantera's.
+
+How much of that is resolution shows at φ = 0.6 with `--cells-per-delta 10`
+and `40` (`--flame-times 20`; 10 cells, run to 40 flame times, settles from
+about nine like the others):
+
+| Cells per δ | 10 | 20 | 40 |
+|---|---|---|---|
+| S_c error, flame times 15-20 | −1.35% | −0.31% | −0.08% |
+
+The error falls by 4.5 times per doubling of the cells, as for a second-order
+scheme, toward about −0.01%: at 20 cells per δ the remaining 0.3% is the
+discretization. At 10 cells the flame keeps slowing very slightly, from
+−1.33% at 20 flame times to −1.40% at 40.
 
 ## 7. Things to try
 

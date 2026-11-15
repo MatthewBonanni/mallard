@@ -1,7 +1,7 @@
 # Freely propagating stoichiometric CH4/air flame at 300 K and 1 atm with
 # GRI-3.0 and mixture-averaged transport (V8 of docs/design/chemistry.md), in
 # the flame's frame: the fresh mixture enters on the left at Cantera's flame
-# speed, 0.3733 m/s, and leaves through a pressure outlet. 300 cells, 20 per
+# speed, 0.3731 m/s, and leaves through a pressure outlet. 300 cells, 20 per
 # thermal thickness (0.437 mm), from 6 thicknesses upstream of the flame to 9
 # downstream; five flame times. Make the initial state from Cantera's flame
 # first, from this directory (flame_reference.py computes all twenty V8
@@ -13,21 +13,21 @@
 #
 # then run (445,000 steps, about 2 hours on one A100) and measure the flame
 # speed with
-#   python ../../../tools/post/flame_speed.py . 0.373304
-# The consumption speed settles 0.7% below Cantera's after about two flame
+#   python ../../../tools/post/flame_speed.py . 0.373116
+# The consumption speed settles 0.6% below Cantera's after about two flame
 # times. examples/premixed_flame/flame_sweep.py runs and reports the whole sweep (phi 0.6-1.4,
 # both transport models, 10-40 cells per thickness, two CFL numbers).
 
 [run]
-t_stop = 0.0058527681970032448
+t_stop = 0.0058478157349725187
 cfl = 1.0
 
 [mesh]
 type = "cartesian"
 Nx = 300
 Ny = 1
-Lx = 0.0065545842817853091
-Ly = 0.00021848614272617698
+Lx = 0.0065528963396504283
+Ly = 0.00021842987798834763
 
 [initialize]
 type = "restart"
@@ -36,10 +36,10 @@ file = "flame.restart"
 [[boundaries]]
 name = "left"
 type = "inlet_state"
-u = [0.37330393989983585, 0.0]
+u = [0.37352387265221193, 0.0]
 p = 101325.0
 T = 300
-X = { "O2" = 0.19011406919519824, "CH4" = 0.095057034456951198, "N2" = 0.71482889634785052 }
+X = { "O2" = 0.19011406844106613, "CH4" = 0.095057034220532882, "N2" = 0.71482889733840105 }
 
 [[boundaries]]
 name = "right"
@@ -77,5 +77,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-time_interval = 0.0001170553639400649
+time_interval = 0.00011695631469945037
 fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

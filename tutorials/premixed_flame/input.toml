@@ -2,18 +2,18 @@
 # mixture-averaged transport, in the flame's frame, against Cantera's
 # FreeFlame. Tutorial: docs/tutorials/premixed_flame.md. Written by
 #   python flame_setup.py 1 RUN_DIR
-# Cantera: S_L = 2.3309 m/s, T_b = 2386.6 K, thermal thickness
-# delta = 0.3284 mm. Strip of 300 cells (20 per delta) from
+# Cantera: S_L = 2.3311 m/s, T_b = 2386.8 K, thermal thickness
+# delta = 0.3283 mm. Strip of 300 cells (20 per delta) from
 # 6 delta upstream of the flame to 9 delta downstream: fresh gas
 # enters on the left at S_L and leaves through a pressure outlet; the run
 # lasts 4 flame times delta / S_L = 4 x 0.1409 ms.
 #
 # Initial state: temperature and mole fractions blend from the fresh to the
 # burnt gas of Cantera's flame along c(x) = (1 + tanh(2 (x - x_f) / delta)) / 2
-# at x_f = 1.9703 mm, with the velocity of a steady flame of that density.
+# at x_f = 1.9701 mm, with the velocity of a steady flame of that density.
 
 [run]
-t_stop = 5.635399e-04
+t_stop = 5.634239e-04
 cfl = 1.0
 
 [mesh]
@@ -23,22 +23,22 @@ filename = "strip.msh"
 [initialize]
 type = "analytical"
 p = "101325.0"
-T = "300.0 + 2086.5927 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-u = ["2.330889 * (1 + 5.85154 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04)))", "0"]
+T = "300.0 + 2086.8427 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+u = ["2.331078 * (1 + 5.85238 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04)))", "0"]
 balance = "N2"
 
 [initialize.X]
-"H2" = "0.295858 - 0.281337 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-"H" = "0.00181791 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-"O" = "0.000614795 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-"O2" = "0.147929 - 0.142233 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-"OH" = "0.0073215 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
-"H2O" = "0.324199 * 0.5 * (1 + tanh((x - 1.970323e-03) / 1.641936e-04))"
+"H2" = "0.295858 - 0.281338 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+"H" = "0.00181363 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+"O" = "0.000612234 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+"O2" = "0.147929 - 0.142257 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+"OH" = "0.00730832 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
+"H2O" = "0.324262 * 0.5 * (1 + tanh((x - 1.970078e-03) / 1.641731e-04))"
 
 [[boundaries]]
 name = "inlet"
 type = "inlet_state"
-u = [2.330889, 0.0]
+u = [2.331078, 0.0]
 p = 101325.0
 T = 300.0
 X = { "H2" = 0.2958579882, "O2" = 0.1479289941, "N2" = 0.5562130178 }
@@ -76,5 +76,5 @@ check_interval = 5000
 
 [[write_data]]
 prefix = "./solut/flame"
-time_interval = 1.408850e-05
+time_interval = 1.408560e-05
 fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
