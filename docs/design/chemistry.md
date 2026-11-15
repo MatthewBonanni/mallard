@@ -39,6 +39,8 @@ existing C++20 / Kokkos / CMake / TOML stack.
   with an assessment of multicomponent transport.
 - Turbulence-chemistry interaction models (LES closures such as thickened
   flame, flamelet tables, PaSR). Mallard resolves the flame or detonation.
+  (Later designed in [les.md](les.md#6-turbulence-chemistry-interaction) and,
+  for tabulated chemistry, [flamelet.md](flamelet.md).)
 - Implicit time stepping of the flow. The flow stays explicit (SSPRK3); only
   the chemistry is implicit.
 - A Chemkin parser. Chemkin input is converted once with Cantera's `ck2yaml`.

@@ -11,7 +11,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Job scripts](../docs/guide/parallel.md#running-on-clusters): Slurm (one node, several nodes), PBS, Kubernetes, plain `mpirun` | `jobs/` |
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
-| [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
+| [References](#initial-states-and-references): exact and Cantera solutions, flamelet tables | `setup/flame_reference.py`, `setup/flamelet_table.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
 | [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
 | [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
@@ -239,6 +239,15 @@ python tools/setup/znd_restart.py znd.csv mechanisms/h2o2.yaml ohmech 400 0.08 0
 
 ![The ZND temperature and pressure behind the shock, and the 2D initial state with two pockets of unreacted gas](../docs/images/tools/znd_restart-light.svg#gh-light-mode-only)
 ![The ZND temperature and pressure behind the shock, and the 2D initial state with two pockets of unreacted gas](../docs/images/tools/znd_restart-dark.svg#gh-dark-mode-only)
+
+### `flamelet_table.py`: flamelet/progress-variable tables
+
+```sh
+python tools/setup/flamelet_table.py test/data/flamelet/h2_fpv.toml                 # writes h2_fpv.mtab next to the input
+python tools/setup/flamelet_table.py test/data/flamelet/h2_fpv.toml --reference 1.5 ref.csv   # one flamelet at U_ox = 1.5 m/s
+```
+
+Solves the S-curve of counterflow diffusion flamelets with Cantera (stable branch, extinction and unstable branch by two-point flame control), integrates them over a beta PDF of the mixture fraction, and writes a flamelet/progress-variable table in Mallard's table format (`.mtab`: axes `Z`, normalized variance `S` and normalized progress variable `c`; temperature, density, transport properties, the progress-variable source and the listed species), with the table input and the versions that made it in its header. The input is TOML: mechanism, streams, progress-variable weights, table resolution. `--reference` writes one flamelet of the same streams as CSV, for comparisons. The solver does not read these tables yet: [design notes](../docs/design/flamelet.md).
 
 ### `sedov.py`: exact Sedov-Taylor blast
 
