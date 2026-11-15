@@ -27,6 +27,14 @@ rho = "1.0"
 u = ["0.1 * sin(2 * pi * x) * cos(2 * pi * y)", "-0.1 * cos(2 * pi * x) * sin(2 * pi * y)"]
 p = "1 / 1.4 + 0.01 / 4 * (cos(4 * pi * x) + cos(4 * pi * y))"
 
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
 [physics]
 type = "euler"
 units = "nondimensional"

@@ -195,7 +195,7 @@ TEST(ParticlesTest, SeedsOutsideTheMeshAreErrors) {
     Solver solver;
     const std::string points = "points = [" + numbers(0.5, 0.5, 0.25) + ", " + numbers(1.5, 0.5, 0.25) + "]\n";
     try {
-        solver.init(parse_toml(box(4, vec("0.0", "0.0", "0.0"), "xy", "", "n_steps = 1\ndt = 0.01\n", points)));
+        solver.init(parse_toml(box(8, vec("0.0", "0.0", "0.0"), "xy", "", "n_steps = 1\ndt = 0.01\n", points)));
         FAIL() << "no error";
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("seed point 1"), std::string::npos) << e.what();
