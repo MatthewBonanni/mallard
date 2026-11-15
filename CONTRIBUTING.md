@@ -11,6 +11,7 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 - [Building and testing](#building-and-testing)
 - [Code style](#code-style)
 - [Adding a feature, end to end](#adding-a-feature-end-to-end)
+- [Reproducibility](#reproducibility)
 - [Pull requests and CI](#pull-requests-and-ci)
 
 ## Reporting bugs and asking questions
@@ -105,7 +106,7 @@ cmake --build build -j
     with 64 bits, as `teno::PackedStencils` does.
   - Results must not depend on the backend, thread count or rank count: reductions
     that feed the solution must be deterministic (the suite checks bitwise
-    reproducibility across ranks and restarts).
+    reproducibility across ranks and restarts; see [Reproducibility](#reproducibility)).
   - nvcc compiles every source, including host-only code, so a host-only change can
     still break the CUDA build; the CUDA compile jobs in CI catch this.
 
@@ -169,6 +170,29 @@ that adds or changes behavior includes:
 
 Small fixes need only what applies: a bug fix needs a test that failed before the
 fix and a `fixed` fragment; a documentation fix needs neither.
+
+## Reproducibility
+
+- **Always bitwise:** within one build and version, results do not depend on the
+  rank count, partition, thread count, `step_queue`, CUDA graphs or restarts. Sums
+  that feed the solution are exact (fixed point, as in `ExactSums`) or in an order
+  fixed by global ids, never floating-point atomics or reductions whose order depends
+  on the ranks or the schedule, and the TENO setup gives the same tables on
+  the host and the device (the stencil cache is portable). This is never traded
+  for speed: it costs under 0.5% per step and 4% of the TENO fits
+  ([measurements](docs/design/performance.md#16-cost-of-bitwise-reproducibility-429)),
+  and it is what lets `mallard diff` check restarts and partitions with no
+  tolerance.
+- **Bitwise against `main` by default:** a change that is not meant to change the
+  arithmetic (refactors, memory layout, scheduling, most performance work) shows
+  restart files bitwise identical to `main` on the cases of
+  [Verification](docs/design/performance.md#verification).
+- **Last bits may move with a measured reason:** a change that reorders arithmetic
+  for speed may change the last bits against `main` if the PR gives the speedup
+  (performance suite or a real case, before and after), `mallard diff --tol` on the
+  same cases showing round-off differences only, an unchanged verification manual
+  (every study within its bounds), and a `changed` changelog fragment. The
+  guarantees above still hold for the new code.
 
 ## Pull requests and CI
 
