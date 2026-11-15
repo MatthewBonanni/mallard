@@ -39,7 +39,12 @@ using parallel_read::LineReader;
 using parallel_read::part_of;
 using parallel_read::Records;
 
-constexpr const char * ONE_PER_LINE = "Mallard reads ASCII lists with one item per line, as OpenFOAM writes them.";
+/** @brief The error of an ASCII list that does not hold one item per line, at line `line` (1-based). */
+std::string not_one_per_line(uint64_t line) {
+    return "has more or less than one item on line " + std::to_string(line) +
+           " of a list. Mallard reads ASCII lists with one item per line, as OpenFOAM writes them; write the mesh "
+           "again with OpenFOAM (foamFormatConvert), or in binary (writeFormat binary in system/controlDict).";
+}
 
 /**
  * @brief A list in a polyMesh file: n items, binary (from byte `start`) or
@@ -175,7 +180,7 @@ class FoamFile {
         } else {
             while (cur->peek() == ' ' || cur->peek() == '\t' || cur->peek() == '\r') cur->get();
             if (cur->peek() != '\n') {
-                if (l.n > FoamList::MAX_SHORT) fail(ONE_PER_LINE);
+                if (l.n > FoamList::MAX_SHORT) fail(not_one_per_line(reader->line_at(cur->offset()) + 1));
                 for (int depth = 1, c = cur->peek(); depth > 1 || c != ')'; c = cur->peek()) {
                     if (c < 0) fail("ends early.");
                     depth += c == '(' ? 1 : c == ')' ? -1 : 0;
@@ -188,9 +193,31 @@ class FoamFile {
             l.start = reader->line_at(cur->offset());
             cur->seek(reader->offset(l.start + l.n));
             skip_space_and_comments();
-            if (cur->peek() != ')') fail(ONE_PER_LINE);
+            if (cur->peek() != ')') {
+                if (item_bytes == 0) fail_on_long_face(l.start);
+                fail(not_one_per_line(l.start + l.n + 1));
+            }
         }
         return l;
+    }
+
+    /**
+     * @brief Fail if a faceList from line `first` on has a face of more than
+     *        10 points, which OpenFOAM writes over lines.
+     */
+    void fail_on_long_face(uint64_t first) {
+        cur->seek(reader->offset(first));
+        for (uint64_t l = first + 1; cur->peek() >= 0; l++) {
+            std::string text;
+            for (int c = cur->get(); c >= 0 && c != '\n'; c = cur->get()) text += char(c);
+            const size_t b = text.find_first_not_of(" \t\r"), e = text.find_last_not_of(" \t\r");
+            if (b == std::string::npos || e + 1 - b > 18 || text.find_first_not_of("0123456789", b) <= e) continue;
+            const std::string n = text.substr(b, e + 1 - b);
+            if (std::stoull(n) <= 10) return;
+            fail("has a face of " + n + " points (line " + std::to_string(l) + "); " +
+                 (N_DIM == 3 ? "Mallard reads tetrahedra, pyramids, prisms and hexahedra, not polyhedra."
+                             : "Mallard reads 2D meshes of triangles and quadrilaterals."));
+        }
     }
 
     /** @brief Parse items [from, to) of an ASCII list, each with parse(fields). */
@@ -207,7 +234,7 @@ class FoamFile {
         for (uint64_t k = from; k < to; k++) {
             Fields f = reader->next();
             parse(f, true);
-            if (!f.done()) fail(ONE_PER_LINE);
+            if (!f.done()) fail(not_one_per_line(f.number()));
         }
     }
 

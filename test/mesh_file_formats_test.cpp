@@ -56,12 +56,12 @@ struct TestMesh {
     std::vector<uint64_t> faces;
 };
 
-TestMesh test_mesh() {
+TestMesh test_mesh(MeshType type = MeshType::CARTESIAN_MIXED) {
     TestMesh t;
 #if N_DIM == 2
-    t.mesh = jittered_box(MeshType::CARTESIAN_MIXED, {9, 7}, {1.0, 0.8});
+    t.mesh = jittered_box(type, {9, 7}, {1.0, 0.8});
 #else
-    t.mesh = jittered_box(MeshType::CARTESIAN_MIXED, {6, 5, 4}, {1.0, 0.8, 0.6});
+    t.mesh = jittered_box(type, {6, 5, 4}, {1.0, 0.8, 0.6});
 #endif
     t.faces.resize(t.mesh.n_faces());
     std::iota(t.faces.begin(), t.faces.end(), 0);
@@ -346,59 +346,127 @@ std::map<std::string, std::string> foam_files(const TestMesh & t, bool binary) {
     return files;
 }
 
+/** @brief The mesh types each test writes: the mixed mesh, and in 3D also tetrahedra (faces of three nodes only). */
+std::vector<MeshType> test_types() {
+    if constexpr (N_DIM == 3) return {MeshType::CARTESIAN_MIXED, MeshType::CARTESIAN_TET};
+    return {MeshType::CARTESIAN_MIXED};
+}
+
+/** @brief text with line k (0-based) after the first line that contains marker replaced by edit(line). */
+template <typename Edit>
+std::string edit_line(std::string text, const std::string & marker, size_t k, Edit edit) {
+    size_t begin = text.find('\n', text.find(marker) + marker.size()) + 1;
+    for (size_t i = 0; i < k; i++) begin = text.find('\n', begin) + 1;
+    const size_t end = text.find('\n', begin);
+    return text.substr(0, begin) + edit(text.substr(begin, end - begin)) + text.substr(end);
+}
+
+/** @brief text with lines k and k + 1 (0-based) after the first line that contains marker joined. */
+std::string join_lines(std::string text, const std::string & marker, size_t k) {
+    size_t at = text.find('\n', text.find(marker) + marker.size());
+    for (size_t i = 0; i <= k; i++) at = text.find('\n', at + 1);
+    text[at] = ' ';
+    return text;
+}
+
+/** @brief Every rank fails to read path, with an error that contains each of messages. */
+void expect_rejected(const std::filesystem::path & path, const std::vector<std::string> & messages) {
+    try {
+        read_file_block(path.string());
+        ADD_FAILURE() << "read " << path;
+    } catch (const std::runtime_error & e) {
+        for (const std::string & m : messages) EXPECT_NE(std::string(e.what()).find(m), std::string::npos) << e.what();
+    }
+}
+
 } // namespace
 
 TEST(MeshFileFormatsTest, EachRankGetsItsPartOfAFluentFile) {
-    const TestMesh t = test_mesh();
-    std::vector<uint32_t> cell_zone(t.mesh.n_cells());
-    for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < half(t) ? 0 : 1;
-    for (const bool binary : {false, true}) {
-        SCOPED_TRACE(binary ? "binary" : "ASCII");
-        TestMesh written = t;
-        if (binary) {
-            for (auto & x : written.mesh.node_coords) FOR_I_DIM x[i] = double(float(x[i]));
+    for (const MeshType type : test_types()) {
+        const TestMesh t = test_mesh(type);
+        std::vector<uint32_t> cell_zone(t.mesh.n_cells());
+        for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < half(t) ? 0 : 1;
+        for (const bool binary : {false, true}) {
+            SCOPED_TRACE(std::string(binary ? "binary" : "ASCII") + (type == MeshType::CARTESIAN_TET ? ", tetrahedra" : ""));
+            TestMesh written = t;
+            if (binary) {
+                for (auto & x : written.mesh.node_coords) FOR_I_DIM x[i] = double(float(x[i]));
+            }
+            const std::string name = std::string("mallard_formats_fluent") + (binary ? "_bin" : "");
+            const std::string file = (write_shared(name, {{"mesh.msh", fluent_file(t, binary)}}) / "mesh.msh").string();
+            expect_part(written, read_file_block(file), false, {"fluid", "solid"}, cell_zone);
+            // A mark every 3 faces of the binary sections of mixed faces (most do not start at a mark), and the
+            // file's structure read 7 bytes at a time
+            expect_part(written, read_fluent_block(file, 3, 7), false, {"fluid", "solid"}, cell_zone);
         }
-        const std::string name = std::string("mallard_formats_fluent") + (binary ? "_bin" : "");
-        const auto dir = write_shared(name, {{"mesh.msh", fluent_file(t, binary)}});
-        const MeshBlock block = read_file_block((dir / "mesh.msh").string());
-        expect_part(written, block, false, {"fluid", "solid"}, cell_zone);
     }
 }
 
 TEST(MeshFileFormatsTest, EachRankGetsItsPartOfAnOpenFoamMesh) {
-    const TestMesh t = test_mesh();
-    std::vector<uint32_t> cell_zone(t.mesh.n_cells(), Mesh::NO_CELL_ZONE);
-    for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < 5 ? 1 : c % 3 == 0 ? 0 : Mesh::NO_CELL_ZONE;
-    for (const bool binary : {false, true}) {
-        SCOPED_TRACE(binary ? "binary" : "ASCII");
-        const auto dir = write_shared(std::string("mallard_formats_foam") + (binary ? "_bin" : ""), foam_files(t, binary));
-        const MeshBlock block = read_file_block(dir.string());
-        expect_part(t, block, N_DIM == 2, {"third", "early"}, cell_zone);
+    for (const MeshType type : test_types()) {
+        const TestMesh t = test_mesh(type);
+        std::vector<uint32_t> cell_zone(t.mesh.n_cells(), Mesh::NO_CELL_ZONE);
+        for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < 5 ? 1 : c % 3 == 0 ? 0 : Mesh::NO_CELL_ZONE;
+        for (const bool binary : {false, true}) {
+            SCOPED_TRACE(std::string(binary ? "binary" : "ASCII") + (type == MeshType::CARTESIAN_TET ? ", tetrahedra" : ""));
+            const auto dir = write_shared(std::string("mallard_formats_foam") + (binary ? "_bin" : ""), foam_files(t, binary));
+            expect_part(t, read_file_block(dir.string()), N_DIM == 2, {"third", "early"}, cell_zone);
+        }
     }
 }
 
-/** @brief The ranks split ASCII lists by line, so a list with two items on a line is an error, not a different mesh. */
-TEST(MeshFileFormatsTest, AsciiItemsSharingALineAreRejected) {
+/**
+ * @brief The ranks split ASCII lists by line, so a list that is not one item
+ *        per line is an error naming the line, not a different mesh.
+ */
+TEST(MeshFileFormatsTest, AsciiListsNotOnePerLineAreRejected) {
     const TestMesh t = test_mesh();
-    auto join_second_line_after = [](std::string text, const std::string & marker) {
-        const size_t first = text.find('\n', text.find(marker) + marker.size());
-        text[text.find('\n', first + 1)] = ' ';
-        return text;
+    const std::string fluent = fluent_file(t, false), marker = "(13 (2 ";
+    auto fluent_with = [&](const std::string & name, const std::string & text) {
+        return write_shared("mallard_formats_fluent_" + name, {{"mesh.msh", text}}) / "mesh.msh";
     };
-    auto expect_rejected = [](const std::filesystem::path & path, const std::string & message) {
-        try {
-            read_file_block(path.string());
-            ADD_FAILURE() << "read " << path;
-        } catch (const std::runtime_error & e) {
-            EXPECT_NE(std::string(e.what()).find(message), std::string::npos) << e.what();
-        }
+    // Two faces on a line, and a face split over two lines: found where the section should end
+    expect_rejected(fluent_with("wrapped", join_lines(fluent, marker, 0)), {"of the face section of zone 2", "binary"});
+    expect_rejected(fluent_with("split", edit_line(fluent, marker, 0, [](const std::string & line) {
+                        const size_t space = line.find(' ');
+                        return line.substr(0, space) + "\n" + line.substr(space + 1);
+                    })),
+                    {"face section of zone 2", "one node or face per line"});
+    // A value too many on the last interior face: found by the rank that reads it
+    const Faces faces = faces_of(t);
+    const size_t n_interior = size_t(std::count(faces.zone.begin(), faces.zone.end(), -1));
+    expect_rejected(fluent_with("extra", edit_line(fluent, marker, n_interior - 1, [](const std::string & line) { return line + " 1"; })),
+                    {"face section of zone 2", "one node or face per line"});
+
+    const std::map<std::string, std::string> foam = foam_files(t, false);
+    const std::string & owner = foam.at("owner");
+    auto foam_with = [&](const std::string & name, const std::string & file, const std::string & text) {
+        std::map<std::string, std::string> files = foam;
+        files[file] = text;
+        return write_shared("mallard_formats_foam_" + name, files);
     };
-    const std::string fluent = join_second_line_after(fluent_file(t, false), "(13 (2 ");
-    expect_rejected(write_shared("mallard_formats_fluent_wrapped", {{"mesh.msh", fluent}}) / "mesh.msh",
-                    "one node or face per line");
-    std::map<std::string, std::string> foam = foam_files(t, false);
-    foam["owner"] = join_second_line_after(foam["owner"], "\n(");
-    expect_rejected(write_shared("mallard_formats_foam_wrapped", foam), "one item per line");
+    expect_rejected(foam_with("wrapped", "owner", join_lines(owner, "\n(", 0)), {"one item per line", "foamFormatConvert"});
+    // A value too many on the last owner: found by the last rank, which names its line
+    const size_t n_faces = faces.nodes.size() + (N_DIM == 2 ? 2 * t.mesh.n_cells() : 0);
+    const size_t lines_before = size_t(std::count(owner.begin(), owner.begin() + std::ptrdiff_t(owner.find("\n(") + 3), '\n'));
+    expect_rejected(foam_with("extra", "owner", edit_line(owner, "\n(", n_faces - 1, [](const std::string & line) { return line + " 0"; })),
+                    {"line " + std::to_string(lines_before + n_faces) + " ", "one item per line"});
+    // A face of 12 points, which OpenFOAM writes over lines
+    expect_rejected(foam_with("long_face", "faces", edit_line(foam.at("faces"), "\n(", 0, [](const std::string &) {
+                        std::string face = "12\n(\n";
+                        for (int k = 0; k < 12; k++) face += std::to_string(k) + "\n";
+                        return face + ")";
+                    })),
+                    {"face of 12 points"});
+}
+
+/** @brief An error that only the last rank meets (a coordinate of the last point that is not a number) is every rank's error. */
+TEST(MeshFileFormatsTest, AnErrorOnOneRankIsEveryRanks) {
+    std::map<std::string, std::string> foam = foam_files(test_mesh(), false);
+    std::string & points = foam["points"];
+    const size_t end = points.rfind("\n)"), begin = points.rfind('\n', end - 1) + 1;
+    points.replace(begin, end - begin, "(0 0 nan)");
+    expect_rejected(write_shared("mallard_formats_foam_bad_point", foam), {"nan is not a finite number"});
 }
 
 #ifdef Mallard_HAS_CGNS

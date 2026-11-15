@@ -176,7 +176,8 @@ uint64_t LineReader::line_at(uint64_t offset) {
     return line;
 }
 
-FileCursor::FileCursor(const std::string & filename) : in(filename, std::ios::binary) {
+FileCursor::FileCursor(const std::string & filename, uint64_t chunk)
+    : in(filename, std::ios::binary), chunk_bytes(std::max<uint64_t>(chunk, 1)) {
     if (!in) throw cannot_read("the mesh file", filename);
     in.seekg(0, std::ios::end);
     file_size = uint64_t(in.tellg());
@@ -194,10 +195,9 @@ void FileCursor::seek(uint64_t to) {
 
 int FileCursor::peek(size_t ahead) {
     if (pos + ahead >= buffer.size()) {
-        constexpr size_t CHUNK = size_t(1) << 16;
         base += pos;
         pos = 0;
-        const uint64_t n = std::min<uint64_t>(std::max(CHUNK, ahead + 1), file_size - std::min(base, file_size));
+        const uint64_t n = std::min<uint64_t>(std::max<uint64_t>(chunk_bytes, ahead + 1), file_size - std::min(base, file_size));
         buffer.resize(size_t(n));
         in.clear();
         in.seekg(static_cast<std::streamoff>(base));
@@ -260,15 +260,21 @@ void place_used_nodes(uint64_t n_nodes, std::vector<std::array<double, N_DIM>> x
                       const std::vector<std::vector<uint64_t> *> & refs, MeshBlock & block) {
     const int p = comm::size(), r = comm::rank();
     const uint64_t first = block_begin(n_nodes, r, p);
-    // A bit per node of the file that this rank's refs name; their owners keep the nodes any rank names
-    std::vector<uint64_t> used((n_nodes + 63) / 64, 0);
+    // A bit per node, from the lowest to the highest that this rank's refs name; their owners keep the nodes any
+    // rank names
+    uint64_t lo = n_nodes, hi = 0;
     for (const std::vector<uint64_t> * list : refs) {
-        for (uint64_t n : *list) used[n / 64] |= uint64_t(1) << (n % 64);
+        for (uint64_t n : *list) lo = std::min(lo, n), hi = std::max(hi, n + 1);
+    }
+    lo -= lo % 64;
+    std::vector<uint64_t> used(hi > lo ? (hi - lo + 63) / 64 : 0, 0);
+    for (const std::vector<uint64_t> * list : refs) {
+        for (uint64_t n : *list) used[(n - lo) / 64] |= uint64_t(1) << (n % 64);
     }
     std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
     for (uint64_t w = 0; w < used.size(); w++) {
         for (uint64_t bits = used[w]; bits != 0; bits &= bits - 1) {
-            const uint64_t n = 64 * w + uint64_t(std::countr_zero(bits));
+            const uint64_t n = lo + 64 * w + uint64_t(std::countr_zero(bits));
             send[size_t(part_of(n, n_nodes, p))].push_back(n);
         }
     }
@@ -294,16 +300,23 @@ void place_used_nodes(uint64_t n_nodes, std::vector<std::array<double, N_DIM>> x
     for (size_t q = 0; q < size_t(p); q++) reply[q].assign(asked.from(q).begin(), asked.from(q).end());
     release(asked.data);
     const std::vector<uint64_t> numbers = comm::exchange(std::move(reply)).data;
-    std::vector<uint64_t> before(used.size() + 1, 0);
-    for (size_t w = 0; w < used.size(); w++) before[w + 1] = before[w] + uint64_t(std::popcount(used[w]));
+    // The bits below every 8th word, so that a node's place among the bits takes at most 8 popcounts
+    std::vector<uint64_t> below_group(used.size() / 8 + 1, 0);
+    uint64_t count = 0;
+    for (size_t w = 0; w < used.size(); w++) {
+        if (w % 8 == 0) below_group[w / 8] = count;
+        count += uint64_t(std::popcount(used[w]));
+    }
     for (std::vector<uint64_t> * list : refs) {
         for (uint64_t & n : *list) {
-            const uint64_t w = n / 64, below = used[w] & ((uint64_t(1) << (n % 64)) - 1);
-            n = numbers[before[w] + uint64_t(std::popcount(below))];
+            const uint64_t w = (n - lo) / 64;
+            uint64_t k = below_group[w / 8] + uint64_t(std::popcount(used[w] & ((uint64_t(1) << (n % 64)) - 1)));
+            for (uint64_t v = w - w % 8; v < w; v++) k += uint64_t(std::popcount(used[v]));
+            n = numbers[k];
         }
     }
     release(used);
-    release(before);
+    release(below_group);
     std::vector<std::vector<double>> coords(static_cast<size_t>(p));
     for (uint64_t k = 0, next = first_kept; k < kept.size(); k++) {
         if (!kept[k]) continue;

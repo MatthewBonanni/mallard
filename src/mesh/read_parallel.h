@@ -87,6 +87,9 @@ class Fields {
 
     std::string rest() const { return std::string(at, end); }
 
+    /** @brief The number of the line (1-based; NONE if unknown). */
+    uint64_t number() const { return line; }
+
     std::runtime_error malformed() const { return parallel_read::malformed(what, line); }
 
   private:
@@ -146,10 +149,10 @@ class LineReader {
     uint64_t at = 0;
 };
 
-/** @brief Buffered reading of a file byte by byte, from any offset. */
+/** @brief Buffered reading of a file byte by byte, from any offset, in reads of at least `chunk` bytes. */
 class FileCursor {
   public:
-    explicit FileCursor(const std::string & filename);
+    explicit FileCursor(const std::string & filename, uint64_t chunk = uint64_t(1) << 16);
 
     uint64_t size() const { return file_size; }
     uint64_t offset() const { return base + pos; }
@@ -167,7 +170,7 @@ class FileCursor {
 
   private:
     std::ifstream in;
-    uint64_t file_size = 0, base = 0;
+    uint64_t file_size = 0, base = 0, chunk_bytes;
     std::vector<char> buffer;
     size_t pos = 0;
 };

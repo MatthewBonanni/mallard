@@ -34,7 +34,6 @@ using parallel_read::LineReader;
 using parallel_read::Records;
 
 constexpr int INTERIOR = 2;            // Fluent's bc-type of interior face zones
-constexpr uint64_t MARK_SPACING = 1024;  // binary faces of varying size: where every MARK_SPACING-th starts
 
 /** @brief A node or face section with data: ASCII (one item per line from line `start`) or binary (from byte `start`). */
 struct Section {
@@ -44,11 +43,22 @@ struct Section {
     int bc_type = 0, face_type = 0;  // faces; face_type 0 or 5: mixed, a node count per face
     int value_size = 0;              // binary: bytes per value; 0: ASCII
     uint64_t start = 0;
-    std::vector<uint64_t> marks;  // binary mixed faces: offset of faces first, first + MARK_SPACING, ...
+    std::vector<uint64_t> marks;  // binary mixed faces: offset of faces first, first + mark spacing, ...
 
     uint64_t size() const { return last >= first ? last - first + 1 : 0; }
     bool mixed() const { return face_type == 0 || face_type == 5; }
+    std::string what() const {
+        return std::string(kind == 10 ? "node" : "face") + " section of zone " + std::to_string(zone) + " (ids " +
+               std::to_string(first) + " to " + std::to_string(last) + ")";
+    }
 };
+
+/** @brief The error of an ASCII section that does not hold one node or face per line, at line `line` (1-based). */
+std::string not_one_per_line(const Section & s, uint64_t line) {
+    return "line " + std::to_string(line) + " of the " + s.what() +
+           " holds more or less than one item. Mallard reads ASCII node and face sections with one node or face per "
+           "line, as Fluent writes them; write the mesh again from Fluent, or as a binary file.";
+}
 
 /** @brief What every rank knows of a Fluent file: everything but the nodes' and faces' data. */
 struct Layout {
@@ -109,7 +119,8 @@ struct Layout {
 /** @brief Walks a Fluent file's sections, skipping over their data. */
 class Walker {
   public:
-    Walker(const std::string & filename, LineReader & line_reader) : cur(filename), lines(line_reader), name(filename) {}
+    Walker(const std::string & filename, LineReader & line_reader, uint64_t cursor_bytes)
+        : cur(filename, cursor_bytes), lines(line_reader), name(filename) {}
 
     [[noreturn]] void fail(const std::string & what) const { throw std::runtime_error("Fluent file " + name + ": " + what); }
 
@@ -206,18 +217,15 @@ class Walker {
         std::memcpy(&v, bytes, 4);
         return v;
     }
-    /** @brief Skip the n lines of ASCII data that start on the next line; returns the first one's number. */
-    uint64_t skip_lines(uint64_t n) {
+    /** @brief Skip the ASCII data of section s, which starts on the next line; returns its first line's number. */
+    uint64_t skip_lines(const Section & s) {
         while (cur.peek() == ' ' || cur.peek() == '\t' || cur.peek() == '\r') cur.get();
-        if (cur.get() != '\n') fail(ONE_PER_LINE);
+        if (cur.get() != '\n') fail(not_one_per_line(s, lines.line_at(cur.offset()) + 1));
         const uint64_t first = lines.line_at(cur.offset());
-        cur.seek(lines.offset(first + n));
-        if (!peek(')')) fail(ONE_PER_LINE);
+        cur.seek(lines.offset(first + s.size()));
+        if (!peek(')')) fail(not_one_per_line(s, first + s.size() + 1));
         return first;
     }
-
-    static constexpr const char * ONE_PER_LINE =
-        "Mallard reads ASCII node and face sections with one node or face per line, as Fluent writes them.";
 
   private:
     FileCursor cur;
@@ -225,8 +233,8 @@ class Walker {
     std::string name;
 };
 
-Layout read_layout(const std::string & filename, LineReader & lines) {
-    Walker r(filename, lines);
+Layout read_layout(const std::string & filename, LineReader & lines, uint64_t mark_spacing, uint64_t cursor_bytes) {
+    Walker r(filename, lines, cursor_bytes);
     Layout layout;
     while (!r.done()) {
         r.expect('(');
@@ -262,7 +270,7 @@ Layout read_layout(const std::string & filename, LineReader & lines) {
                 s.start = r.offset();
                 r.skip(s.size() * uint64_t(s.nd) * uint64_t(s.value_size));
             } else {
-                s.start = r.skip_lines(s.size());
+                s.start = r.skip_lines(s);
             }
             layout.sections.push_back(s);
             r.expect(')');
@@ -303,14 +311,14 @@ Layout read_layout(const std::string & filename, LineReader & lines) {
                     r.skip(s.size() * uint64_t(s.face_type + 2) * 4);
                 } else {
                     for (uint64_t f = 0; f < s.size(); f++) {
-                        if (f % MARK_SPACING == 0) s.marks.push_back(r.offset());
+                        if (f % mark_spacing == 0) s.marks.push_back(r.offset());
                         const int32_t n = r.int32();
                         if (n < 2 || n > 64) r.fail("face of " + std::to_string(n) + " nodes.");
                         r.skip(uint64_t(n + 2) * 4);
                     }
                 }
             } else {
-                s.start = r.skip_lines(s.size());
+                s.start = r.skip_lines(s);
             }
             layout.sections.push_back(s);
             r.expect(')');
@@ -338,7 +346,8 @@ Layout read_layout(const std::string & filename, LineReader & lines) {
 
 } // namespace
 
-MeshBlock read_fluent_block(const std::string & filename) {
+MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing, uint64_t cursor_bytes) {
+    mark_spacing = std::max<uint64_t>(mark_spacing, 1);
     const int p = comm::size(), r = comm::rank();
     if (comm::allreduce(std::ifstream(filename).good() ? 0 : 1, comm::Op::MAX)) throw cannot_read("the mesh file", filename);
     const std::string source = "Fluent file " + filename;
@@ -348,7 +357,7 @@ MeshBlock read_fluent_block(const std::string & filename) {
     Layout layout;
     std::string packed;
     collectively([&] {
-        if (r == 0) packed = read_layout(filename, reader).pack();
+        if (r == 0) packed = read_layout(filename, reader, mark_spacing, cursor_bytes).pack();
     });
     layout.unpack(comm::broadcast(packed));
     auto fail = [&](const std::string & what) { throw std::runtime_error(source + ": " + what); };
@@ -379,7 +388,7 @@ MeshBlock read_fluent_block(const std::string & filename) {
                         const double x = f.real();
                         if (d < nd) xyz[n - first_node][size_t(d)] = x;
                     }
-                    if (!f.done()) fail(Walker::ONE_PER_LINE);
+                    if (!f.done()) fail(not_one_per_line(s, f.number()));
                 }
                 continue;
             }
@@ -445,7 +454,7 @@ MeshBlock read_fluent_block(const std::string & filename) {
                     check_size(n);
                     nodes.resize(n + 2);
                     for (uint64_t & v : nodes) v = line.integer<uint64_t>(16);
-                    if (!line.done()) fail(Walker::ONE_PER_LINE);
+                    if (!line.done()) fail(not_one_per_line(s, line.number()));
                     add(f, int(k), nodes);
                 }
                 continue;
@@ -467,8 +476,8 @@ MeshBlock read_fluent_block(const std::string & filename) {
                 }
                 continue;
             }
-            const uint64_t mark = (from - (s.first - 1)) / MARK_SPACING;
-            FileCursor cur(filename);
+            const uint64_t mark = (from - (s.first - 1)) / mark_spacing;
+            FileCursor cur(filename, cursor_bytes);
             cur.seek(s.marks[mark]);
             char word[4];
             auto next = [&]() {
@@ -479,7 +488,7 @@ MeshBlock read_fluent_block(const std::string & filename) {
                 }
                 return value(word);
             };
-            for (uint64_t f = s.first - 1 + mark * MARK_SPACING; f < to; f++) {
+            for (uint64_t f = s.first - 1 + mark * mark_spacing; f < to; f++) {
                 const uint64_t n = next();
                 check_size(n);
                 nodes.resize(n + 2);

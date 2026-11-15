@@ -275,7 +275,9 @@ MeshBlock read_cgns_block(const std::string & filename) {
         }
     });
 
-    // This rank's share of the elements, in file order: cells, and boundary faces
+    // This rank's share of the elements, in file order: cells, and boundary faces. General reads, since
+    // cg_elements_partial_read reads and keeps a whole section stored as integers of another size than cgsize_t
+    const CGNS_ENUMT(DataType_t) SIZE_TYPE = sizeof(cgsize_t) == 8 ? CGNS_ENUMV(LongInteger) : CGNS_ENUMV(Integer);
     const uint64_t first_element = block_begin(n_elements, r, p), end_element = block_begin(n_elements, r + 1, p);
     Records cells, faces, face_all;  // corners (file-wide nodes); every node of curved faces
     std::vector<uint32_t> cell_zone_of, face_zone_of;  // the CGNS zone of each
@@ -303,13 +305,13 @@ MeshBlock read_cgns_block(const std::string & filename) {
                     check_count(size, "element data");
                     conn.resize(size_t(size));
                     offsets.resize(size_t(x.to - x.from + 2));
-                    file.check(cg_poly_elements_partial_read(fn, B, Z, S, x.from, x.to, conn.data(), offsets.data(), nullptr),
+                    file.check(cg_poly_elements_general_read(fn, B, Z, S, x.from, x.to, SIZE_TYPE, conn.data(), offsets.data()),
                                "reading elements");
                 } else {
                     int npe = 0;
                     if (cg_npe(x.type, &npe) != CG_OK || npe <= 0) npe = 0;
                     conn.resize(size_t(x.to - x.from + 1) * size_t(npe));
-                    file.check(cg_elements_partial_read(fn, B, Z, S, x.from, x.to, conn.data(), nullptr), "reading elements");
+                    file.check(cg_elements_general_read(fn, B, Z, S, x.from, x.to, SIZE_TYPE, conn.data()), "reading elements");
                 }
                 x.refs.resize(size_t(x.to - x.from + 1));
                 size_t pos = 0;
