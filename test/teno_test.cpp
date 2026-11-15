@@ -657,12 +657,22 @@ std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const Bou
 TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Triangles with mirror images at the walls: small batches split the cells
     // differently, and the host setup is the fallback for cells whose search
-    // outgrows the device's scratch
-    auto mesh = make_mesh("cartesian_tri", 12, 10);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+    // outgrows the device's scratch; order 6 on quadrilaterals too, the largest fits and smoothness matrix
+    struct Case {
+        const char * type;
+        uint32_t nx, ny;
+        int order;
+    };
+    for (const Case c : {Case{"cartesian_tri", 12, 10, 5}, Case{"cartesian_tri", 12, 10, 6}, Case{"cartesian", 14, 12, 6}}) {
+        auto mesh = make_mesh(c.type, c.nx, c.ny);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        const auto reference = teno_tables(*make_teno(mesh, bd, c.order));
+        const std::string label = std::string(c.type) + ", order " + std::to_string(c.order);
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_batch_cells = 64; }) == reference)
+            << label << ", batches of 64 cells";
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_on_host = true; }) == reference)
+            << label << ", host setup";
+    }
 }
 
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {

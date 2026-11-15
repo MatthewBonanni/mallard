@@ -4394,8 +4394,9 @@ struct CellSetup2D {
      */
     KOKKOS_INLINE_FUNCTION
     void smoothness_matrix(const Lanes2D & w, const uint32_t i, const double x0, const double y0, const double h) const {
+        // Orders 3-6
+        static_assert(teno::MAX_DEGREE == 5);
         switch (r) {
-            case 1: smoothness_rows<1>(w, i, x0, y0, h); break;
             case 2: smoothness_rows<2>(w, i, x0, y0, h); break;
             case 3: smoothness_rows<3>(w, i, x0, y0, h); break;
             case 4: smoothness_rows<4>(w, i, x0, y0, h); break;
@@ -4931,12 +4932,7 @@ class Setup2D {
 #endif
         }
 
-#if defined(KOKKOS_ENABLE_CUDA)
-        // Four blocks of 128 per SM (at most 128 registers per thread): the spills cost less than the threads gained
-        using CellRange = Kokkos::RangePolicy<Kokkos::LaunchBounds<128, 4>, Kokkos::Schedule<Kokkos::Dynamic>>;
-#else
-        using CellRange = HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>;
-#endif
+        using CellRange = Kokkos::RangePolicy<OccupancyBounds, Kokkos::Schedule<Kokkos::Dynamic>>;
 
 #if defined(KOKKOS_ENABLE_CUDA)
         /** @brief Threads of the cell kernel resident on the device at once, with the blocks Kokkos launches it in. */

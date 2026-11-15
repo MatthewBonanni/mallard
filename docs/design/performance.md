@@ -205,16 +205,17 @@ took 6.25 / 5.04 / 5.17 / **4.17** / 4.69 / 4.48 s and 19.7 / 19.3 / 15.6 / **12
 second wave lengthens every batch.
 
 At orders 5 and 6 a per-thread `clock64` profile of that kernel put 73-82% of the thread time in the
-smoothness-indicator matrix, which added every term to the cell's interleaved scratch in global memory
-(a load and a store per term, for each of up to 231 entries, quadrature point and derivative), and
-16-22% in the fits. Each thread now sums the matrix one row at a time in registers (`smoothness_rows<R>`,
-the terms whose derivative vanishes left out), and on the device the Householder sums, the
-back-substitution and the Lebesgue constant's coefficients likewise column by column; every entry adds
-the same terms in the same order, so the tables are bitwise the same. The kernel then takes 255 registers
-and 2.3 KB of local memory per thread, two blocks per SM; bounded to four blocks of 128 per SM (128
-registers, 2.8 KB) it holds 55,296 threads and is faster at every order. The fits are now about 70% of
-the thread time (#1185). The host backends run the same row sums; their pseudo-inverse keeps updating
-whole rows, which vectorize.
+smoothness-indicator matrix, which added every term to the cell's interleaved scratch in global memory (a
+load and a store per term, for each of up to 231 entries, quadrature point and derivative), and 16-22% in
+the fits. Each thread now sums the matrix one row at a time in registers (`smoothness_rows<R>`, the terms
+whose derivative vanishes left out), and on the device the Householder sums, the back-substitution and
+the Lebesgue constant's coefficients likewise column by column; every entry adds the same terms in the
+same order, so the tables are bitwise the same (in builds whose CUDA compiler is `nvcc_wrapper`, which
+compiles the TENO sources without contracting FMAs; not yet with the host compiler as
+`CMAKE_CXX_COMPILER`, #1184). The kernel then takes 255 registers and 2.3 KB of local memory per thread,
+two blocks per SM; bounded to four blocks of 128 per SM (128 registers, 2.8 KB) it holds 55,296 threads
+and is faster at every order. The fits are now about 70% of the thread time (#1185). The host backends
+run the same row sums; their pseudo-inverse keeps updating whole rows, which vectorize.
 
 "TENO setup" tables phase, one A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`); the host setup is
 the same code on the 16 host threads; restart files are bitwise identical:
@@ -231,10 +232,11 @@ the same code on the 16 host threads; restart files are bitwise identical:
 | box, device, one wave, again | 0.69 | 1.11 | 3.23 | 11.4 |
 | box, device, sums in registers, four blocks per SM | **0.51** | **0.75** | **1.32** | **3.42** |
 
-On the 28 threads of the Threads backend the 2D tables take 2-41% less (double Mach 2.56 / 4.19 / 10.8 /
-26.8 s before, 2.51 / 3.56 / 7.75 / 16.0 s after) and the 3D tables the same (Taylor-Green 96^3 at orders 3,
-5 and 6: 5.74 / 11.2 / 25.0 s). The tables' SHA-256 (the cache file after its header) is the same before and
-after, on the A100 and on the host, for every case above.
+On the 28 threads of the Threads backend the 2D tables take 2-43% less (box 1.63 / 3.30 / 9.34 / 25.6 s
+before, 1.59 / 2.66 / 5.47 / 14.6 s after; double Mach 2.56 / 4.19 / 10.8 / 26.8 s before, 2.51 / 3.56 /
+7.75 / 16.0 s after) and the 3D tables the same (Taylor-Green 96^3 at orders 3, 5 and 6: 5.74 / 11.2 /
+25.0 s). The tables' SHA-256 (the cache file after its header) is the same before and after, on the A100
+and on the host, for every case above.
 
 The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
 wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. The packing of the shared tables, on the host,
