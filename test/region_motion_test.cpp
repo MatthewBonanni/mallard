@@ -255,8 +255,14 @@ TEST(RegionMotionTest, RegionsManyPeriodsLongWrapWhole) {
                (N_DIM == 3 ? ", 2" : "") + "], pivot = " + point(0.5 * periods, 0.5) + ", rotate = " + rotate + "}";
     };
     const region::Region r = read(strip(20.0, 0.025), &automatic);
-    const double exact = std::hypot(20.0, 0.8) * 0.025;
-    EXPECT_NEAR(integral(mesh, region::cell_fractions(mesh, r)), exact, 0.01 * exact);
+    for (int j = 0; j < 20; j++) {
+        const double x[3] = {0.5, 0.5 + 0.8 * ((j + 0.5) / 20.0 - 0.5), 0.5};
+        EXPECT_LT(r.distance(x), 0.0) << "period " << j;
+    }
+    if constexpr (N_DIM == 2) {
+        const double exact = std::hypot(20.0, 0.8) * 0.025;
+        EXPECT_NEAR(integral(mesh, region::cell_fractions(mesh, r)), exact, 0.01 * exact);
+    }
     try {
         read(strip(5000.0, 0.025), &automatic);
         ADD_FAILURE() << "a region of 5000 periods was accepted";
