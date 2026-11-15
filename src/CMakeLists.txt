@@ -52,6 +52,7 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp

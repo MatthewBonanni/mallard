@@ -1,0 +1,27 @@
+# FPV table of the tests (python tools/setup/flamelet_table.py test/data/flamelet/h2_fpv.toml):
+# H2/N2 against air as examples/counterflow_diffusion, small enough for the repository.
+output = "h2_fpv.mtab"
+
+[mechanism]
+file = "../../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+
+[streams]
+pressure = 101325.0
+fuel = { T = 300.0, X = { H2 = 0.25, N2 = 0.75 } }
+oxidizer = { T = 300.0, X = { O2 = 0.21, N2 = 0.79 } }
+
+[flamelets]
+width = 0.01
+U_ox = 0.1
+temperature_step = 20.0
+T_min = 600.0
+
+[progress_variable]
+H2O = 1.0
+
+[table]
+Z_points = 41
+S_points = 5
+c_points = 21
+species = ["H2", "O2", "H2O", "OH"]

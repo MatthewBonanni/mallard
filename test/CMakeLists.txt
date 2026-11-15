@@ -24,6 +24,7 @@ set(MALLARD_TEST_SOURCES
     chemistry_reactor_test.cpp
     chemistry_benchmark_test.cpp
     chemistry_transport_test.cpp
+    flamelet_table_test.cpp
     mixture_test.cpp
     radiation_test.cpp
     mixture_transport_test.cpp
