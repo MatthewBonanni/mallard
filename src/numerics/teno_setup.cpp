@@ -1053,11 +1053,80 @@ struct CellSetup {
     }
 
     /**
+     * @brief Whether point p of plane face k's plane (unit normal n) lies on
+     *        that face, to GEOMETRY_TOL of the length of each of its edges.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool on_plane_face(const Lanes & w, const uint32_t k, const double * p, const double * n) const {
+        const uint32_t f = w.plane_face[k];
+        const uint32_t a0 = g.offsets_nodes_of_face(f);
+        const uint32_t nv = g.offsets_nodes_of_face(f + 1) - a0;
+        bool left = false, right = false;
+        for (uint32_t a = 0; a < nv; a++) {
+            double xa[3], xb[3], ya[3], yb[3];
+            for (uint32_t d = 0; d < 3; d++) {
+                xa[d] = double(g.node_coords(g.nodes_of_face(a0 + a), d));
+                xb[d] = double(g.node_coords(g.nodes_of_face(a0 + (a + 1) % nv), d));
+            }
+            g.to_copy(w.plane_face_lattice[k], xa, ya);
+            g.to_copy(w.plane_face_lattice[k], xb, yb);
+            const double e[3] = {yb[0] - ya[0], yb[1] - ya[1], yb[2] - ya[2]};
+            const double q[3] = {p[0] - ya[0], p[1] - ya[1], p[2] - ya[2]};
+            const double side = (e[1] * q[2] - e[2] * q[1]) * n[0] + (e[2] * q[0] - e[0] * q[2]) * n[1] +
+                                (e[0] * q[1] - e[1] * q[0]) * n[2];
+            const double tol = GEOMETRY_TOL * (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+            left = left || side > tol;
+            right = right || side < -tol;
+        }
+        return !(left && right);
+    }
+
+    /**
+     * @brief Whether visit v has an image across plane p (outward normal): a
+     *        reflection stands for the flow beyond the boundary only where it
+     *        crosses the plane's faces, from the side of the domain that the
+     *        target cell (centroid x0) is on. Across the extension of a facet
+     *        of a curved wall, or across the far side of a thin body, it lands
+     *        on another part of the flow.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool has_image(const Lanes & w, const uint32_t v, const uint32_t p, const uint32_t n_plane_faces,
+                   const double * x0) const {
+        const double * n = &w.planes[6 * p];
+        const double * m = n + 3;
+        double xc[3];
+        g.centroid(w.visit_cell[v], w.visit_lattice[v], xc);
+        double depth = 0.0, target = 0.0;
+        for (uint32_t d = 0; d < 3; d++) {
+            depth += n[d] * (xc[d] - m[d]);
+            target += n[d] * (x0[d] - m[d]);
+        }
+        if (!(depth < 0.0 && target < 0.0)) return false;
+        double foot[3];
+        for (uint32_t d = 0; d < 3; d++) foot[d] = xc[d] - depth * n[d];
+        for (uint32_t k = 0; k < n_plane_faces; k++) {
+            if (w.plane_face_plane[k] == p && on_plane_face(w, k, foot, n)) return true;
+        }
+        return false;
+    }
+
+    /** @brief Orient the unit normal n of a mirror face at x out of the visited cell with centroid xc. */
+    KOKKOS_INLINE_FUNCTION
+    static void orient_outward(double * n, const double * x, const double * xc) {
+        double out = 0.0;
+        for (uint32_t d = 0; d < 3; d++) out += n[d] * (x[d] - xc[d]);
+        if (out < 0.0) {
+            for (uint32_t d = 0; d < 3; d++) n[d] = -n[d];
+        }
+    }
+
+    /**
      * @brief Stencil candidates of the first n_visits visits, sorted by
      *        distance (see gather in teno.cpp): the cells, and their mirror
-     *        images across the planar boundaries the cells touch, except
-     *        images that land inside the domain. Returns their number, or
-     *        minus the Status that stopped it.
+     *        images across the planar boundaries the cells touch where
+     *        has_image() keeps them, except images that land inside the
+     *        domain. Returns their number, or minus the Status that stopped
+     *        it.
      */
     KOKKOS_INLINE_FUNCTION
     int gather(const Lanes & w, const uint32_t i, const uint32_t n_visits, const double * x0, const double h,
@@ -1071,11 +1140,13 @@ struct CellSetup {
             for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
                 const uint32_t f = g.faces_of_cell(k);
                 if (!g.mirror_face(f)) continue;
-                double n_f[3], x_f[3], n[3], x[3];
+                double n_f[3], x_f[3], n[3], x[3], xc[3];
                 g.unit_normal(f, n_f);
                 for (uint32_t d = 0; d < 3; d++) x_f[d] = double(g.face_coords(f, d));
                 g.copy_vector(w.visit_lattice[v], n_f, n);
                 g.to_copy(w.visit_lattice[v], x_f, x);
+                g.centroid(c, w.visit_lattice[v], xc);
+                orient_outward(n, x, xc);
                 int match = -1;
                 for (uint32_t p = 0; p < n_planes; p++) {
                     double off = 0.0, cos = 0.0;
@@ -1111,8 +1182,9 @@ struct CellSetup {
                 n_plane_faces++;
             }
         }
-        // Images inside the domain: a point that far beyond the plane can only
-        // lie in the cells whose boxes reach at least as far
+        // No image (bit set): none across the plane, or one inside the domain.
+        // A point that far beyond the plane can only lie in the cells whose
+        // boxes reach at least as far
         const uint32_t words = caps.flag_words();
         for (uint32_t v = 0; v < n_visits * words; v++) w.inside[v] = 0;
         for (uint32_t p = 0; p < n_planes; p++) {
@@ -1149,6 +1221,10 @@ struct CellSetup {
                 w.reach[v] = cell_reach;
             }
             for (uint32_t v = 0; v < n_visits; v++) {
+                if (!has_image(w, v, p, n_plane_faces, x0)) {
+                    w.inside[v * words + p / 32] |= 1u << (p % 32);
+                    continue;
+                }
                 double xc[3], x[3];
                 g.centroid(w.visit_cell[v], w.visit_lattice[v], xc);
                 mirror_point(n, m, xc, x);
@@ -1200,7 +1276,11 @@ struct CellSetup {
         if (plane == 0) return -1;
         double x[3], xc[3];
         entry_position(w, e, x, xc);
-        // The ghost state comes from the plane's face nearest to the image
+        double foot[3];
+        for (uint32_t d = 0; d < 3; d++) foot[d] = 0.5 * (x[d] + xc[d]);
+        // The ghost state comes from the plane's face under the image's foot,
+        // the nearest one if several hold it
+        bool under = false;
         double best = Kokkos::Experimental::finite_max_v<double>;
         for (uint32_t k = 0; k < n_plane_faces; k++) {
             if (w.plane_face_plane[k] != plane - 1) continue;
@@ -1210,10 +1290,12 @@ struct CellSetup {
             g.to_copy(w.plane_face_lattice[k], x_f, y);
             double d2 = 0.0;
             for (uint32_t d = 0; d < 3; d++) {
-                const double dx = y[d] - 0.5 * (x[d] + xc[d]);
+                const double dx = y[d] - foot[d];
                 d2 += dx * dx;
             }
-            if (d2 < best) {
+            const bool on = on_plane_face(w, k, foot, &w.planes[6 * (plane - 1)]);
+            if ((on && !under) || (on == under && d2 < best)) {
+                under = on;
                 best = d2;
                 plane_face = static_cast<int32_t>(k);
             }
@@ -2337,12 +2419,16 @@ struct CellTeam {
         if (n_pairs > caps.plane_faces) return -int(OUT_OF_SCRATCH);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_pairs), [&](const uint32_t p) {
             const uint32_t f = pair_face[p];
-            double t[3], n[3];
-            c.g.translation(w.visit_lattice[pair_visit[p]], t);
+            const uint32_t v = pair_visit[p];
+            double t[3], n[3], x[3], xc[3];
+            c.g.translation(w.visit_lattice[v], t);
             c.g.unit_normal(f, n);
+            for (uint32_t d = 0; d < 3; d++) x[d] = double(c.g.face_coords(f, d)) + t[d];
+            c.g.centroid(w.visit_cell[v], w.visit_lattice[v], xc);
+            CellSetup<ExecSpace>::orient_outward(n, x, xc);
             for (uint32_t d = 0; d < 3; d++) {
                 pair_geometry[6 * p + d] = n[d];
-                pair_geometry[6 * p + 3 + d] = double(c.g.face_coords(f, d)) + t[d];
+                pair_geometry[6 * p + 3 + d] = x[d];
             }
         });
         tm.team_barrier();
@@ -2428,6 +2514,10 @@ struct CellTeam {
             });
             tm.team_barrier();
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, n_visits), [&](const uint32_t v) {
+                if (!c.has_image(w, v, p, n_pairs, x0)) {
+                    w.inside[v * words + p / 32] |= 1u << (p % 32);
+                    return;
+                }
                 double xc[3], x[3];
                 c.g.centroid(w.visit_cell[v], w.visit_lattice[v], xc);
                 mirror_point(n, m, xc, x);
@@ -2575,16 +2665,19 @@ struct CellTeam {
         const double * sorted_x = reinterpret_cast<const double *>(base + layout.plane_x);
         double x[3], xc[3];
         c.entry_position(w, e, x, xc);
-        double mid[3];
-        for (uint32_t d = 0; d < 3; d++) mid[d] = 0.5 * (x[d] + xc[d]);
+        double foot[3];
+        for (uint32_t d = 0; d < 3; d++) foot[d] = 0.5 * (x[d] + xc[d]);
+        bool under = false;
         double best = Kokkos::Experimental::finite_max_v<double>;
         for (uint32_t k = start[plane - 1]; k < start[plane]; k++) {
             double d2 = 0.0;
             for (uint32_t d = 0; d < 3; d++) {
-                const double dx = sorted_x[3 * k + d] - mid[d];
+                const double dx = sorted_x[3 * k + d] - foot[d];
                 d2 += dx * dx;
             }
-            if (d2 < best) {
+            const bool on = c.on_plane_face(w, sorted[k], foot, &w.planes[6 * (plane - 1)]);
+            if ((on && !under) || (on == under && d2 < best)) {
+                under = on;
                 best = d2;
                 plane_face = static_cast<int32_t>(sorted[k]);
             }

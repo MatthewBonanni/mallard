@@ -1,4 +1,4 @@
-# Design: characteristic boundary conditions and sponge layers
+# Characteristic boundary conditions and sponge layers
 
 Status: implemented (`outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`, `[[sponges]]`).
 
