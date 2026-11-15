@@ -1096,6 +1096,45 @@ TEST(ReactingTest, ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance) {
     }
 }
 
+TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
+    // The burnt reactor at 4 tau is too stiff for an explicit step: with explicit_step, every call leaves
+    // RODAS's state and proposal bitwise as without it, and CHEM_H negated, which skips the next attempts
+    const double tau = 4.42e-5;
+    const std::string dir = (scratch_dir() / "mallard_explicit_failures").string();
+    std::filesystem::remove_all(dir);
+    const auto writer = [&](const std::string & prefix, uint32_t interval) {
+        return "[[write_data]]\nprefix = \"" + dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = " +
+               std::to_string(interval) + "\n";
+    };
+    Solver burnt;
+    burnt.init(parse_toml(reacting_box(200, tau / 50.0) + writer("burnt", 200)));
+    burnt.run();
+    const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/burnt_000200.restart\"\n";
+    std::string box = reacting_box(205, tau / 50.0);
+    const size_t init = box.find("[initialize]\n") + 13;
+    box.replace(init, box.find("[", init) - init, restart);
+    Solver runs[2];
+    for (int e = 0; e < 2; e++) {
+        const std::string name = e ? "on" : "off";
+        runs[e].init(parse_toml(box + (e ? "explicit_step = true\n" : "") + writer(name, 205)));
+        runs[e].run();
+        runs[e].copy_device_to_host();
+    }
+    for (uint32_t c = 0; c < runs[0].get_mesh()->n_cells; c++) {
+        FOR_I_CONSERVATIVE ASSERT_EQ(runs[1].h_conservatives(c, i), runs[0].h_conservatives(c, i));
+        for (uint32_t k = 0; k < runs[0].get_species_names().size(); k++) {
+            ASSERT_EQ(runs[1].h_species(c, k), runs[0].h_species(c, k));
+        }
+    }
+    const std::vector<rtype> h_off = *read_restart(dir + "/off_000205.restart").find("CHEM_H");
+    const std::vector<rtype> h_on = *read_restart(dir + "/on_000205.restart").find("CHEM_H");
+    ASSERT_EQ(h_on.size(), h_off.size());
+    for (size_t c = 0; c < h_off.size(); c++) {
+        EXPECT_GT(h_off[c], rtype(0));
+        EXPECT_EQ(h_on[c], -h_off[c]);
+    }
+}
+
 namespace {
 
 /**
