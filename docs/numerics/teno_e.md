@@ -553,6 +553,12 @@ is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
 A caller that knows its stencil shapes, such as a structured block's offset
 pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
 tables; such shapes are agreed over the ranks by their key in the same way.
+The basis means of a cell and its moments (3D) or smoothness-indicator matrix
+(2D) depend on its own geometry only, in its scaled frame, so they are equal
+for the cells of a lattice and for every cell of the same shape and
+orientation, whatever its size. They form one row per cell shape, in double precision, shared the same way
+(equal on the grid, the lowest global id's, agreed over the ranks); each cell
+reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 11; one file per MPI rank). The file is used

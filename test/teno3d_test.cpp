@@ -396,6 +396,7 @@ std::vector<std::pair<std::string, std::vector<char>>> teno_tables(const TENO & 
         out.emplace_back(name, std::vector<char>(p, p + h.span() * sizeof(*h.data())));
     };
     add("scale", teno.scale);
+    add("cell shapes", teno.cell_shape);
     add("basis_mean", teno.basis_mean);
     add("moments", teno.moments);
     add("large sizes", teno.stencil_large_size);
@@ -468,8 +469,10 @@ class TENO3DIncremental : public ::testing::TestWithParam<IncrementalParam> {};
 } // namespace
 
 TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
-    // An interior node, and a node of the x = 0 symmetry wall moved within the
-    // wall, which changes the mirror images of every stencil that reaches it
+    // An interior node, a node of the x = 0 symmetry wall moved within the
+    // wall, which changes the mirror images of every stencil that reaches it,
+    // and a node of the first cells, whose rows of basis means and moments
+    // their cell shapes hold
     const auto [type, order] = GetParam();
     auto mesh = make_mesh_3d(type, 9, 8, 6);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
@@ -478,7 +481,8 @@ TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTable
     const auto before = teno_tables(*incremental);
     const double h = 0.125;
     const std::vector<uint32_t> changed =
-        move_nodes(*mesh, {{0.22, 0.375, 0.5, 0.06 * h, -0.04 * h, 0.05 * h}, {0.0, 0.25, 0.33, 0.0, 0.05 * h, -0.04 * h}});
+        move_nodes(*mesh, {{0.22, 0.375, 0.5, 0.06 * h, -0.04 * h, 0.05 * h}, {0.0, 0.25, 0.33, 0.0, 0.05 * h, -0.04 * h},
+                           {1.0 / 9, 0.125, 1.0 / 6, 0.05 * h, 0.04 * h, -0.03 * h}});
     const std::vector<uint32_t> cells = incremental->cells_within_reach(changed);
     ASSERT_GT(cells.size(), changed.size());
     ASSERT_LT(cells.size(), mesh->n_cells);
@@ -488,6 +492,12 @@ TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTable
     // The move changed tables beyond the moved cells: rebuilding only those is not enough
     changed_only->rebuild_cells(changed);
     EXPECT_FALSE(teno_tables(*changed_only) == teno_tables(*full));
+    // but a cell's scale, basis means and moments depend on its own geometry only
+    const auto rows = [](const TENO & teno) {
+        const auto all = teno_tables(teno);
+        return std::vector<std::pair<std::string, std::vector<char>>>(all.begin(), all.begin() + 4);
+    };
+    EXPECT_TRUE(rows(*changed_only) == rows(*full));
     EXPECT_FALSE(before == teno_tables(*full));
 }
 
@@ -610,7 +620,8 @@ TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy)
 
 TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRoundOff) {
     // A blast on hexahedra with walls (mirror images, smooth and troubled cells):
-    // interior cells share their tables, cells along the walls keep their own
+    // interior cells share their pseudo-inverses, cells along the walls keep
+    // their own, and every cell shares one row of basis means and moments
     auto mesh = make_mesh_3d("cartesian", 8, 8, 8);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
@@ -635,12 +646,16 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
             teno->calc_face_values(W, face_W);
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
-            return std::make_pair(std::vector<rtype>(h.data(), h.data() + h.span()),
-                                  teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span());
+            return std::make_tuple(std::vector<rtype>(h.data(), h.data() + h.span()),
+                                   teno->stencil_large.pinv.span() + teno->stencil_small.pinv.span(),
+                                   teno->basis_mean.extent(0));
         };
-        const auto [own, own_entries] = face_values(false, teno::SLICE_SHIFT);
-        const auto [shared, shared_entries] = face_values(true, teno::SLICE_SHIFT);
+        const auto [own, own_entries, own_rows] = face_values(false, teno::SLICE_SHIFT);
+        const auto [shared, shared_entries, shared_rows] = face_values(true, teno::SLICE_SHIFT);
         EXPECT_LT(4 * shared_entries, own_entries) << "order " << order;
+        // Every cell of a lattice has the same basis means and moments
+        EXPECT_EQ(own_rows, mesh->n_cells) << "order " << order;
+        EXPECT_EQ(shared_rows, 1u) << "order " << order;
         double largest = 0.0, difference = 0.0;
         for (size_t k = 0; k < own.size(); k++) {
             largest = std::max(largest, std::abs(double(own[k])));
@@ -649,7 +664,7 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
         EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
         // A shape's table is its cell's with the lowest global id, however many cells a slice packs
         for (const uint8_t shift : {uint8_t(0), uint8_t(5)}) {
-            EXPECT_TRUE(face_values(true, shift).first == shared) << "order " << order << ", slices of " << (1 << shift);
+            EXPECT_TRUE(std::get<0>(face_values(true, shift)) == shared) << "order " << order << ", slices of " << (1 << shift);
         }
     }
 }
@@ -662,7 +677,7 @@ TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStays
     teno::TableStore store(2);
     const uint32_t k = store.add_keyed(7, ta, a.data(), 9);
     EXPECT_EQ(store.find_keyed(7), k);
-    EXPECT_EQ(store.find_keyed(8), teno::TableStore::NONE);
+    EXPECT_EQ(store.find_keyed(8), teno::TableStore<>::NONE);
     EXPECT_EQ(store.add_keyed(7, tb, b.data(), 3), k);
     EXPECT_TRUE(store.values(k) == b);
     EXPECT_EQ(store.owner(k), 3u);
