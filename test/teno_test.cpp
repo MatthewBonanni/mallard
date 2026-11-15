@@ -12,10 +12,13 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <limits>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -729,4 +732,73 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     changed_only->rebuild_cells(changed);
     EXPECT_FALSE(teno_tables(*changed_only) == tables);
     EXPECT_FALSE(before == tables);
+}
+
+TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScaleAndWallFaces) {
+    // Two separate blocks of 10 x 10 squares with symmetry walls, the second three
+    // times as large: each cell of the second has the stencil shape of a cell of
+    // the first, whose fit it takes, with its own scale and its own wall faces for
+    // the mirror images, and the face values of its own fit up to round-off
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    std::vector<std::vector<uint32_t>> cells;
+    for (const auto & [x0, h] : {std::pair{0.0, 0.1}, std::pair{2.0, 0.3}}) {
+        const uint32_t base = static_cast<uint32_t>(nodes.size());
+        for (uint32_t j = 0; j <= 10; j++) {
+            for (uint32_t i = 0; i <= 10; i++) nodes.push_back({rtype(x0 + i * h), rtype(j * h)});
+        }
+        for (uint32_t j = 0; j < 10; j++) {
+            for (uint32_t i = 0; i < 10; i++) {
+                const uint32_t a = base + j * 11 + i;
+                cells.push_back({a, a + 1, a + 12, a + 11});
+            }
+        }
+    }
+    auto mesh = mesh_from(nodes, cells);
+    const Mesh & m = *mesh;
+    BoundaryData bd = make_uniform_boundaries(m, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", m.n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        double U[N_CONSERVATIVE];
+        smooth_conservatives(double(m.h_cell_coords(c, 0)) / 5.0, double(m.h_cell_coords(c, 1)), U);
+        FOR_I_CONSERVATIVE h_W(c, i) = rtype(U[i]);
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 4}) {
+        auto setup = [&](const bool share) {
+            auto teno = std::make_unique<TENO>();
+            teno->set_mesh(mesh);
+            teno->set_boundaries(bd);
+            teno->share_tables = share;
+            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+            return teno;
+        };
+        auto face_values = [&](TENO & teno) {
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", m.n_faces, teno.n_face_quadrature_points());
+            teno.calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::vector<rtype>(h.data(), h.data() + h.span());
+        };
+        auto own = setup(false), shared = setup(true);
+        EXPECT_LE(shared->n_cells_fitted, 100u) << "order " << order;
+        uint32_t n_images = 0;
+        const TENO::Stencils stencils = shared->large_stencils();
+        for (uint32_t c = 100; c < m.n_cells; c++) {
+            for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+                const int32_t f = stencils.faces[s];
+                if (f < 0) continue;
+                n_images++;
+                EXPECT_LT(m.h_cells_of_face(uint32_t(f), 1), 0) << "cell " << c;
+                EXPECT_EQ(m.h_cells_of_face(uint32_t(f), 0), stencils.cells[s]) << "cell " << c;
+            }
+        }
+        EXPECT_GT(n_images, 0u) << "order " << order;
+        const auto a = face_values(*own), b = face_values(*shared);
+        double largest = 0.0, difference = 0.0;
+        for (size_t k = 0; k < a.size(); k++) {
+            largest = std::max(largest, std::abs(double(a[k])));
+            difference = std::max(difference, std::abs(double(b[k]) - double(a[k])));
+        }
+        EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+    }
 }

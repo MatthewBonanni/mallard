@@ -823,9 +823,7 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
     for (const int order : {3, 5}) {
         auto face_values = [&](const bool share) {
             auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.share_tables = share; });
-            // Builds that set up on GPUs fit every cell
-            constexpr bool keyed = Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
-            EXPECT_EQ(teno->n_cells_fitted, share && keyed ? 27u : mesh->n_cells) << "order " << order;
+            EXPECT_EQ(teno->n_cells_fitted, share ? 27u : mesh->n_cells) << "order " << order;
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
             teno->calc_face_values(W, face_W);
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);

@@ -242,6 +242,22 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
 }
 
+TEST(MPITest, TENOStencilShapesAtWallsMatchSerial) {
+    // Order 3 on squares: each cell takes the fit of its stencil shape's cell with
+    // the lowest global id, which differs from its own fit at round-off, so every
+    // rank must give a cell the same shape and fit, halo cells included (gas
+    // mixtures reconstruct halo layer 1 locally), also where a wall or corner
+    // shape is only in a rank's halo
+    const std::string teno3 = "type = \"TENO\"\norder = 3\n";
+    expect_matches_serial(box_input("cartesian", teno3, EULER,
+                                    bcs("type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
+    std::string mixture = mixture_input("", teno3, "", "euler");
+    const std::string tri = "cartesian_tri";
+    mixture.replace(mixture.find(tri), tri.size(), "cartesian");
+    expect_matches_serial(mixture);
+}
+
 namespace {
 
 /**
