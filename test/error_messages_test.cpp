@@ -286,8 +286,9 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
 }
 
 TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
-    const std::string input = replaced(box(), "T = 1.0", "T = \"1 + (x\"");
-    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"1 + (x\": expected ')'",
+    const std::string input =
+        replaced(replaced(box(), "[initialize]\n", "[initialize]\ntype = \"analytical\"\n"), "T = 1.0", "T = \"(1 + x\"");
+    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"(1 + x\": expected ')'",
                                     "at position 7", "See docs/guide/expressions.md."});
     CheckOptions options;
     options.input_file = "case.toml";
