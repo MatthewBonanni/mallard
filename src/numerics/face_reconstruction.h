@@ -21,6 +21,7 @@
 #include "input.h"
 
 #include "common_typedef.h"
+#include "index_set.h"
 #include "mesh.h"
 #include "quadrature.h"
 #include "boundary.h"
@@ -132,12 +133,12 @@ class FaceReconstruction {
          * @param exec Execution space instance to launch on.
          * @param solution Cell states W = [rho, u_x, u_y, p].
          * @param face_solution Face states W, as in calc_face_values.
-         * @param cells Local cells to reconstruct (not empty).
+         * @param cells Local cells to reconstruct.
          */
         virtual void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                            Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                           Kokkos::View<uint32_t *> cells);
+                                           const IndexSet & cells);
 
         /** @brief Complete the face values after calc_cell_face_values(). */
         virtual void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -321,7 +322,7 @@ class MUSCL : public FaceReconstruction {
         void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                   Kokkos::View<uint32_t *> cells) override;
+                                   const IndexSet & cells) override;
         void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
 
@@ -355,7 +356,7 @@ class TENO : public FaceReconstruction {
         void calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                   Kokkos::View<uint32_t *> cells) override;
+                                   const IndexSet & cells) override;
         void finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool exchanges_partition_faces() const override { return true; }
@@ -389,9 +390,21 @@ class TENO : public FaceReconstruction {
         // Pseudo-inverses stored in single precision (opt-in: halves the
         // largest tables, and changes results at single-precision round-off)
         bool single_tables = false;
-        // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore);
-        // false (tests only) keeps a table per cell
+        // The cells of a stencil shape share one table of pseudo-inverses, and the
+        // cells of a cell shape one row of basis_mean and si_matrix or moments
+        // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // The cells of structured blocks with a block shape read their central stencils by offsets
+        // (teno::BlockStencils); false (tests only) reads every cell's slots
+        bool block_path = true;
+        teno::BlockStencils block_stencils;
+        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
+        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
+        /**
+         * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
+         *        (after the tables are set up or rebuilt; a no-op unless block_path).
+         */
+        void find_block_stencils();
         /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
         const uint64_t * global_cell_ids() const {
             return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();
@@ -407,13 +420,16 @@ class TENO : public FaceReconstruction {
         // increasing order, by boundary ordinal (empty otherwise)
         Kokkos::View<rtype *[N_DIM][N_DIM]> entry_rotations;
         Kokkos::View<int32_t *> boundary_faces;
-        Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
+        // (cell): its cell shape, the row of basis_mean and si_matrix or moments it reads
+        Kokkos::View<uint32_t *> cell_shape;
+        std::vector<uint64_t> cell_shape_owner;            // (cell shape): global id of the cell whose row it is
+        Kokkos::View<rtype **> basis_mean;                 // (cell shape, l): mean of phi_l over the cell
         Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
         Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
         teno::PackedStencils stencil_small;                // the faces' stencils one after another; width NK_SMALL
-        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell, upper_index(l, m)): symmetric
-        teno::Moments moments;                             // 3D: (cell, k), from which the troubled passes form it
+        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell shape, upper_index(l, m)): symmetric
+        teno::Moments moments;                             // 3D: (cell shape, k), from which the troubled passes form it
         teno::SmoothnessTerms si_terms;                    // 3D
         Kokkos::View<rtype *> troubled;                    // (local cell): sigma, for diagnostics
         Kokkos::View<rtype ***> troubled_coeffs;           // (queue slot, l, var): scratch for the troubled passes
@@ -536,9 +552,9 @@ class TENO : public FaceReconstruction {
         void launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                    Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
-                                   Kokkos::View<uint32_t *> cells, bool troubled_pass);
+                                   const IndexSet & cells, bool troubled_pass);
         void dispatch(const Kokkos::DefaultExecutionSpace & exec, Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
-                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, Kokkos::View<uint32_t *> cells,
+                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, const IndexSet & cells,
                       bool troubled_pass);
 
         void read_options(const Input & input);
