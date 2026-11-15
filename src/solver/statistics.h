@@ -420,8 +420,8 @@ class Statistics {
         Kokkos::View<double *> interval_t;  // device columns' quantiles, INTERVAL_WINDOW of them from interval_first
         Kokkos::View<uint64_t> interval_first;
         uint64_t interval_t_first = std::numeric_limits<uint64_t>::max();  // host copy; max: not filled
-        mutable std::vector<double> t_quantiles;  // [n - 2]: for n batches
-        /** @brief Student's t at the confidence for n - 1 degrees of freedom (n >= 2). */
+        std::vector<double> h_interval_t;  // host copy of interval_t
+        /** @brief Student's t at the confidence for n - 1 degrees of freedom (n >= 2), from the window if it holds it. */
         double t_quantile(uint64_t n) const;
 
         Spectra spectra;

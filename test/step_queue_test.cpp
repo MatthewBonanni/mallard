@@ -829,7 +829,9 @@ TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
         const std::string & line = o.files.at("line.csv");
         EXPECT_GT(std::count(line.begin(), line.end(), '\n'), 20);
         // The last write's intervals are of closed batches
-        EXPECT_EQ(line.find("nan", line.rfind("\n20,")), std::string::npos);
+        const size_t last = line.rfind("\n20,");
+        ASSERT_NE(last, std::string::npos);
+        EXPECT_EQ(line.find("nan", last), std::string::npos);
     }
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + statistics;
@@ -1335,21 +1337,29 @@ TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
 }
 
 TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) {
-    // A line's time averages and a point of a [statistics] mean, written every 3 steps and sampled every 2: the device
-    // keeps the means and samples the statistics before the triggers, so the queue stops only at a sampling step after
-    // the write whose every value the condition equals, as a checkpoint at that step does, and goes on from the
-    // host's means and the device's statistics
+    // A line's time averages, a point of a [statistics] mean and a line of its confidence interval, written every 3
+    // steps and sampled every 2: the device keeps the means and samples the statistics before the triggers, so the
+    // queue stops only at a sampling step after the write whose every value the condition equals, as a checkpoint at
+    // that step does, and goes on from the host's means and the device's statistics. The interval's extrema before
+    // two batches close are of NaNs only, +-inf as the host's
     Case c;
     c.run = "n_steps = 60\ncfl = 0.5\n";
     const std::string probes =
         "check_interval = 1000\n" + RESTARTS +
-        "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n"
+        "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"P\"]\n"
         "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\naverage = true\nfields = [\"P\", \"RHO\"]\n"
         "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
         "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
         "reductions_file = \"{dir}/line_reductions.csv\"\n"
         "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"MEAN_P\"]\n"
-        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[[probes]]\nname = \"ci\"\nfile = \"{dir}/ci.csv\"\ninterval = 3\nfields = [\"CI_MEAN_P\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"min\", \"max\"]\nreductions_file = \"{dir}/ci_reductions.csv\"\n";
+    // Beyond +-DBL_MAX: the extrema of no interval
+    const std::string no_interval = "[[triggers]]\nname = \"no_interval\"\nwhen = \"ci_min_CI_MEAN_P > "
+                                    "1.7976931348623157e308 and ci_max_CI_MEAN_P < -1.7976931348623157e308 and "
+                                    "step == 3\"\ndo = \"checkpoint\"\n";
     c.extra = probes;
     c.distributed = comm::size() > 1;
     const Outcome reference = run_case("averaged_reductions_reference", c, 0);
@@ -1357,15 +1367,18 @@ TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) 
                                         {"integral_MEAN_P", "mean_MEAN_P", "favre_MEAN_P", "rms_MEAN_P", "min_MEAN_P",
                                          "max_MEAN_RHO"},
                                         "pt", "MEAN_P", 18) +
+                             " and " + written_at(reference, "ci", {"min_CI_MEAN_P"}, "pt", "MEAN_P", 18) +
                              " and step % 3 == 2";
-    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    c.extra = probes + no_interval + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("averaged_reductions", c);
     EXPECT_EQ(o.step, 60u);
     if (comm::is_root()) {
+        EXPECT_TRUE(o.files.count("restart_000003.restart"));
         EXPECT_TRUE(o.files.count("restart_000020.restart"));
     }
     Case at_step = c;
-    at_step.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
+    at_step.extra = probes + "[[triggers]]\nname = \"no_interval\"\nwhen = \"step == 3\"\ndo = \"checkpoint\"\n"
+                    "[[triggers]]\nname = \"values\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
     EXPECT_EQ(run_case("averaged_reductions", c, 3).queued, run_case("averaged_reductions_at_step", at_step, 3).queued);
 }
 

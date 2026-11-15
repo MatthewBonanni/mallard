@@ -459,23 +459,26 @@ Statistics::DeviceColumn Statistics::device_column(const std::string & name) con
 }
 
 double Statistics::t_quantile(const uint64_t n) const {
-    while (t_quantiles.size() + 2 <= n) {
-        t_quantiles.push_back(time_series::student_t(confidence, static_cast<uint32_t>(t_quantiles.size() + 1)));
-    }
-    return t_quantiles[n - 2];
+    if (n >= interval_t_first && n - interval_t_first < h_interval_t.size()) return h_interval_t[n - interval_t_first];
+    return time_series::student_t(confidence, static_cast<uint32_t>(n - 1));
 }
 
 void Statistics::refresh_intervals(const uint64_t step, uint64_t & step_limit) {
     const uint64_t n = std::max<uint64_t>(host_batch_clock().n_closed, 2);
     if (n < interval_t_first || n > interval_t_first + INTERVAL_WINDOW / 2) {
+        std::vector<double> window(INTERVAL_WINDOW);
+        for (uint64_t i = 0; i < INTERVAL_WINDOW; i++) window[i] = t_quantile(n + i);
+        h_interval_t = std::move(window);
         interval_t_first = n;
-        const auto h_t = Kokkos::create_mirror_view(interval_t);
-        for (uint64_t i = 0; i < INTERVAL_WINDOW; i++) h_t(i) = t_quantile(n + i);
-        Kokkos::deep_copy(interval_t, h_t);
+        Kokkos::deep_copy(interval_t, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
+                                          h_interval_t.data(), h_interval_t.size()));
         Kokkos::deep_copy(interval_first, n);
     }
     // At most one batch closes per sample
-    step_limit = std::min(step_limit, step + (interval_t_first + INTERVAL_WINDOW - 1 - n) * interval);
+    const uint64_t samples = interval_t_first + INTERVAL_WINDOW - 1 - n;
+    if (samples < (std::numeric_limits<uint64_t>::max() - step) / interval) {
+        step_limit = std::min(step_limit, step + samples * interval);
+    }
 }
 
 void Statistics::copy_device_to_host() {
