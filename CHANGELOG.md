@@ -14,6 +14,47 @@ Unreleased`); release notes start from `python3 tools/dev/changelog.py notes X.Y
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-15
+
+### Added
+
+- The Numerics section of the log reports the share of the cells in structured blocks that have a stencil shape, and the number of shapes. Cells with the same geometry within the reconstruction's reach (TENO's gather depth), boundary faces and their zones included, to 1e-9 of their size, share a shape (#440).
+
+### Changed
+
+- The image cells and faces of transmissive boundary faces are kept for those faces only, not for every face: about 120 bytes less device memory per hexahedron and 80 per tetrahedron in every run; results are bitwise unchanged (#552).
+- Numbers in the same column of the console output line up at the decimal point, whatever their magnitude or sign: the tables of the setup banner, the summary, the health section, `mallard check`, `mallard info`, `diff` and `convergence`, and the times of the setup phases. The progress table's `wall/step` has two decimals (it had three significant digits), and `mallard reactor`'s `[benchmark]` mode prints a table with a row per `dt`. Files Mallard writes (CSV, `mallard.jsonl`) are unchanged.
+- Triggers that read a probe's value are evaluated on the device: the steps enqueued ahead of the GPU (`[run] step_queue`) stop at that probe's writes instead of at every step. Results are the same bit for bit (#906).
+- Probes reading `[statistics]` means, covariances or phase averages no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at their writes: the step graph copies those averages at each sample's cell into the probe's staged values. Files are the same bit for bit. Probes reading confidence intervals (`CI_`) still stop the queue (#906).
+- **Distributed LES with `gradients = "reconstruction"` starts the first stage's interior reconstruction before the time-step exchange and reduction**, as other TENO runs do: the time step's eddy viscosity keeps its own polynomial gradients and the troubled-cell flags of the last stage. Results are bitwise unchanged (#912).
+- Building the mesh takes about half the host memory at its peak, and is no slower: on 1M generated hexahedra (2 threads) the serial build peaks at 712 B per cell instead of 1,532, and the distributed build (multi-rank runs, `mallard post average --region`) at 1,206 B instead of 2,114; on 1M tetrahedra, 690 B instead of 2,283 and 916 B instead of 2,539. Meshes are bitwise unchanged (#745).
+- Multi-rank runs (and `mallard post average --region`) build each rank's mesh with about a fifth less host memory at the peak: the distributed setup frees its copies of the cells and its node directory before building the local mesh, keeping only the mesh's block. On 3 ranks of 3M hexahedra the build peaks at 803 B per local cell instead of 999 (765 instead of 864 for tetrahedra); a halo rebuild repeats the cells' exchange. Meshes are bitwise unchanged (#745, #964).
+- Gas mixtures keep the species' face fluxes in the face states' memory, which they no longer need by then: 48 bytes less device memory per hexahedron and species (32 per tetrahedron), up to the face states' size; results are bitwise unchanged (#552).
+- **Distributed TENO runs on meshes with rotational periodicity reconstruct only the cells each rank owns**, as on other meshes: owners send the turned sides of seam faces cut by the partition. Results are bitwise unchanged (#911).
+- Conservative remaps (`[initialize] type = "remap"`, `mallard diff --remap`, `mallard post convergence` against the finest run) are faster: a source cell wholly inside one target cell contributes its average without fitting or integrating its polynomial, and the fits gather only the neighbor rings their stencils use. Against the finest run of nested 3D refinements, the remap in `post convergence` takes under a second instead of over a minute (#945).
+- Snapshots and restart files no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`): the step graph computes the fields they hold and copies them into pinned host memory, and the host writes them while the GPU goes on. Files are the same bit for bit. Runs with `[sources]`, regions that move or follow the solution, fused chemistry, averaged spectra or phase averages still stop at their outputs (#969). CPU builds keep a host copy of the output fields apart from the solver's arrays. (#906)
+- Snapshots and restart files of runs with `[sources]`, regions that move or follow the solution, fused chemistry (`[chemistry] fuse_half_steps`), averaged spectra or phase averages no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`): the step graph evaluates the sources, the regions' cells, the flushed and unflushed states, the spectra and the phase averages at the output's step and copies them into pinned host memory. Files are the same bit for bit. (#969)
+- Runs with fused chemistry half steps (`[chemistry] fuse_half_steps`, Strang's default) keep the step queue running at progress rows, force and integral monitors, probes, statistics and device-evaluated triggers: the pending half step is applied on the device, in the step graph, to a copy for what reads the state, bit for bit as the host's flush. A flush no longer counts in the chemistry's totals or changes the order of the next call's cells.
+- `[mesh] cell_order = "auto"` (the default) finds the structured blocks of quadrilaterals or hexahedra among each rank's owned cells and numbers their cells first, block by block, along the block's axes; the Mesh section of the log reports the blocks and their share of the cells. Generated `cartesian` boxes keep their numbering. Results, restart and output files do not depend on it (#440).
+- **2D TENO setup on GPUs**: each cell's search scratch is sized from the stencil sizes (about half of what it was at the default sizes), so a batch holds more cells in the same device memory, up to one wave of threads (on an A100, 27,648 cells at order 3 and 23,552 at order 5, from 16,384), and the setup fills more of the GPU. The tables are bitwise the same, and the setup's workspace stays within 1% of what it was and still does not grow with the mesh.
+- **3D TENO mirrors stencil cells only across the boundary facet beneath them (results change near faceted curved walls and thin bodies).** As in 2D, an image of a stencil cell across a wall or symmetry plane is kept only when the cell and the target cell are in front of the plane and the cell's foot on the plane lies on one of its gathered faces, and the image takes the ghost state of the face under that foot. Flat walls of equal faces are unchanged; TENO caches of earlier versions are recomputed (#443).
+- TENO6 in 3D on GPUs stages the smooth pass's stencil entries in team scratch, five at a time, as TENO5 does ten at a time: 28% more cells per second on a 96³ Taylor-Green vortex on an A100; results are bitwise unchanged (#1004).
+- TENO stores each stencil entry in one word instead of two (the mirror face only for mirror images): 2-5% less memory for the tables in 3D, results unchanged (#431).
+- **TENO basis means and moments shared by cell shape (results change at round-off).** The cells of one stencil shape now also share their basis means and central moments (2D: smoothness-indicator matrices), the row of the shape's cell with the lowest global id, agreed over the ranks: about half the table memory at order 5 on hexahedral and tetrahedral boxes, 14% more cells per A100-80GB at order 5 and 23-29% at order 6, and 1.4% (order 5) to 6.4% (order 6) more cells per second on an A100. Results change once at round-off against earlier versions and stay bitwise independent of the rank count and partition (#972).
+- **TENO tables shared by stencil shape (results change at round-off).** The cells of one stencil shape (lattices, extruded and uniformly graded meshes) share one table of pseudo-inverses, that of the shape's cell with the lowest global id, agreed over the ranks: about 18 times less table memory at order 5 on hexahedral and Kuhn-tetrahedral boxes, 5 times the cells per A100-80GB. Results change once at round-off against earlier versions (about 1e-16 of each field after a few steps of a blast) and stay bitwise independent of the rank count and partition. TENO caches of earlier versions still load (#431).
+- The 3D TENO smooth pass on GPUs at order 5 stages its stencil entries in team scratch (#931). TENO reconstruction now fuses multiplies and adds only where written explicitly, so its results are bitwise the same however a kernel is staged; they differ from earlier versions' in the last bits.
+- Viscous, hybrid-flux and MUSCL runs keep the vertex gradient's boundary-ghost weights for boundary faces only, about 140 bytes less device memory per hexahedron and 90 per tetrahedron; results are bitwise unchanged (#552).
+
+### Fixed
+
+- In console tables, the units after decimal-aligned numbers start in one column again, as in `mallard check`'s memory table ("0 B" next to "70.0 kB").
+- A solver that is not distributed over the ranks (a test's serial reference) communicates with its own rank alone, so a request that reaches one rank, such as a stop signal, no longer leaves the others waiting in a collective; it writes no run log or report unless its input asks for one (#948, #1007).
+- On GPU builds (CUDA, HIP, SYCL), mixture inlets whose temperature is an expression evaluated it at the wrong y (and z) coordinates of each face on meshes of 256 faces or more; they now use the face centers. CPU builds were not affected (#968).
+- The build rejects Kokkos View accesses whose indices are all narrower than `int`, which Kokkos 5 computes in a wrapping 8- or 16-bit offset (#968).
+- A rank holding so many cells that a multi-dimensional array would need more than 2^31 entries stops at setup with an error naming the array and the most cells that fit on a rank, instead of silently reading and writing the wrong entries once Kokkos's 32-bit offsets wrap (#984).
+- **Distributed TENO runs with ranks whose owned cells all read the halo keep their CUDA step graph**: the step capture no longer joins an overlap stream that it never forked, which used to drop such runs to kernel-by-kernel steps (W-CUDA-GRAPH).
+- Characteristic (`nscbc`) boundaries under `[numerics.error_control]`: a rejected step now restores the faces' incoming waves with the solution and its retry advances them with the retry's time step, so runs are bit for bit identical at any `[run] step_queue` (#963).
+
 ## [0.10.0] - 2026-11-13
 
 ### Added
@@ -515,7 +556,8 @@ HDF5 output and AMD GPUs.
 Versions 0.1.0–0.5.0 are described in their
 [GitHub releases](https://github.com/MatthewBonanni/mallard/releases).
 
-[Unreleased]: https://github.com/MatthewBonanni/mallard/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/MatthewBonanni/mallard/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/MatthewBonanni/mallard/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/MatthewBonanni/mallard/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/MatthewBonanni/mallard/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/MatthewBonanni/mallard/compare/v0.8.0...v0.9.0
