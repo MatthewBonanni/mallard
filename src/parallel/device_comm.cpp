@@ -68,14 +68,15 @@ void finalize_nccl() {
 #endif
 
 template <typename T>
-void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unused]] const bool use_nccl) {
+void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unused]] const bool use_nccl,
+                      [[maybe_unused]] const Kokkos::DefaultExecutionSpace & exec) {
 #ifdef Mallard_HAS_NCCL
     if (use_nccl) {
         const ncclDataType_t type =
             std::is_same_v<T, double> ? ncclDouble : (std::is_same_v<T, float> ? ncclFloat : ncclInt64);
         const ncclRedOp_t nccl_op = op == Op::SUM ? ncclSum : (op == Op::MIN ? ncclMin : ncclMax);
-        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, nccl_op, nccl(),
-                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, nccl_op, nccl(), exec.cuda_stream()) !=
+            ncclSuccess) {
             throw std::runtime_error("NCCL: reduction failed");
         }
         return;
@@ -87,9 +88,10 @@ void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unu
     Kokkos::deep_copy(values, host);
 }
 
-template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool);
-template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool);
-template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool);
+template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool, const Kokkos::DefaultExecutionSpace &);
+template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool, const Kokkos::DefaultExecutionSpace &);
+template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool,
+                                        const Kokkos::DefaultExecutionSpace &);
 
 template <typename T>
 void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all, [[maybe_unused]] const bool use_nccl) {
@@ -188,6 +190,14 @@ void send_receive_device([[maybe_unused]] const std::vector<DeviceMessage> & sen
 #endif
 }
 
+namespace {
+
+[[maybe_unused]] uint64_t wait_delay = 0;
+
+} // namespace
+
+void set_wait_delay(const uint64_t cycles) { wait_delay = cycles; }
+
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done) {
 #ifdef KOKKOS_ENABLE_CUDA
     // A stream waits for the event's state when cudaStreamWaitEvent is called,
@@ -199,6 +209,13 @@ void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::De
     }();
     cudaEventRecord(event, done.cuda_stream());
     cudaStreamWaitEvent(waiter.cuda_stream(), event, 0);
+    if (wait_delay > 0) {
+        const long long cycles = static_cast<long long>(wait_delay);
+        Kokkos::parallel_for("wait_delay", Kokkos::RangePolicy<>(waiter, 0, 1), KOKKOS_LAMBDA(const int) {
+            KOKKOS_IF_ON_DEVICE((for (const long long start = clock64(); clock64() - start < cycles;) {}))
+            KOKKOS_IF_ON_HOST(((void)cycles;))
+        });
+    }
 #else
     (void)waiter;
     const HostStaged staged;

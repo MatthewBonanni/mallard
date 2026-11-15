@@ -10,7 +10,6 @@
  */
 
 #include "solver.h"
-#include "stencil_shapes.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -114,7 +113,7 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
     if (restart_file == "latest") {
         // The files the run's restart writers write: those of the whole mesh, or the on-request default
         std::vector<std::string> prefixes;
-        if (input.contains("write_data")) {
+        if (contains_optional(input, "write_data")) {
             for (const Input & output : find_value<std::vector<Input>>(input, "write_data")) {
                 if (find_value_or<std::string>(output, "format", "") == "restart" && output.contains("prefix") &&
                     !output.contains("region") && !output.contains("regions")) {
@@ -400,7 +399,7 @@ MeshSetup describe_mesh(const Mesh & mesh) {
 } // namespace
 
 bool writes_variable(const Input & input, const std::string & name) {
-    if (!input.contains("write_data")) return false;
+    if (!contains_optional(input, "write_data")) return false;
     const auto outputs = find_value<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
         if (!output.contains("fields")) continue;
@@ -825,7 +824,7 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
     const std::vector<Input> input_boundaries =
-        input.contains("boundaries") ? find_value<std::vector<Input>>(input, "boundaries")
+        contains_optional(input, "boundaries") ? find_value<std::vector<Input>>(input, "boundaries")
                                      : std::vector<Input>{};
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
@@ -898,7 +897,7 @@ void Solver::init_boundaries() {
         wall_model_specs.push_back(wall_model_spec);
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
-        if (bound.contains("where")) {
+        if (contains_optional(bound, "where")) {
             where = std::make_unique<Expression>(name + ".where", find_value<std::string>(bound, "where"));
         }
         DirichletBoundary dirichlet;
@@ -1206,7 +1205,7 @@ void Solver::init_sources(region::Regions & regions) {
         return;
     }
     const Input & source = input.at("source");
-    if (source.contains("gravity")) {
+    if (contains_optional(source, "gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
         if (g.size() != N_DIM) {
             throw InputError({.key = "source.gravity",
@@ -1222,7 +1221,7 @@ void Solver::init_sources(region::Regions & regions) {
         FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
                                           units::column("m/s^2"), "");
     }
-    if (source.contains("mass_flow")) {
+    if (contains_optional(source, "mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
         if (m.size() != N_DIM) {
             throw InputError({.key = "source.mass_flow",
@@ -1473,7 +1472,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
-    describe_stencil_shapes();
+    describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
@@ -1547,26 +1546,16 @@ void Solver::init_numerics() {
     init_error_control();
 }
 
-void Solver::describe_stencil_shapes() {
-    // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
-    const FaceReconstructionType type = face_reconstruction->get_type();
-    if (type == FaceReconstructionType::FIRST_ORDER) return;
-    uint32_t reach = 1;
-    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
-        reach = 0;
-        for (const uint8_t depth : teno->gather_depth) reach = std::max<uint32_t>(reach, depth);
-        reach = comm::allreduce(reach, comm::Op::MAX);
-    }
-    const StencilShapes shapes = stencil_shapes(*mesh, reach);
-    const uint64_t interior = comm::allreduce(
-        uint64_t(std::count_if(shapes.shape.begin(), shapes.shape.end(), [](uint32_t s) { return s != StencilShapes::NONE; })),
-        comm::Op::SUM);
-    if (interior == 0) return;
-    const uint64_t most = comm::allreduce(uint64_t(shapes.first.size()), comm::Op::MAX);
-    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks with a stencil shape, ",
-                                             100.0 * double(interior) / double(n_cells_global)) +
-                             (is_distributed() ? "up to " + logging::count(most, "shape") + " per rank"
-                                               : logging::count(most, "shape"));
+void Solver::describe_block_path() {
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (teno == nullptr) return;
+    const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
+    if (cells == 0) return;
+    const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
+    block_path_setting = logging::format("%.1f%% of the cells on the block path, ",
+                                         100.0 * double(cells) / double(n_cells_global)) +
+                         (is_distributed() ? "up to " + logging::count(most, "block shape") + " per rank"
+                                           : logging::count(most, "block shape"));
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -1610,7 +1599,7 @@ void Solver::init_run_parameters() {
                           .message = "nothing stops the run: specify at least one of n_steps, t_stop and t_wall_stop",
                           .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)"});
     }
-    use_cfl = run.contains("cfl");
+    use_cfl = contains_optional(run, "cfl");
     if (use_cfl) {
         cfl = find_real(input, "run", "cfl", dim::none);
         if (!(cfl > 0.0_r)) {
@@ -1661,7 +1650,7 @@ void Solver::init_output(region::Regions & regions) {
                           .message = "must be positive",
                           .fix = "Use 1 (the default), or more to write several files at once"});
     }
-    if (input.contains("forces")) {
+    if (contains_optional(input, "forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
             monitor.zone = find_value<std::string>(entry, "zone");
@@ -1777,7 +1766,7 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
-    if (input.contains("write_data")) {
+    if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
             add_data_writers(output, regions, async_output, io_threads);
         }
@@ -2500,7 +2489,7 @@ int Solver::run_loop() {
                 if (record.reasons != 0) {
                     // The steps enqueued after this one do nothing
                     drain_device_steps();
-                    after_step(step_timer, true);
+                    after_step(step_timer, &record);
                     continue;
                 }
                 n_queued_steps++;
@@ -2529,7 +2518,7 @@ int Solver::run_loop() {
             Kokkos::Timer step_timer;
             calc_dt();
             take_step();
-            after_step(step_timer, false);
+            after_step(step_timer, nullptr);
         }
     } catch (const DivergedError &) {
         unflush_chemistry();
@@ -2570,13 +2559,17 @@ int Solver::run_loop() {
     return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
-void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
+void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * record) {
     act_on_requests();
     check_fields();
     // Steps on the device update p_max themselves
-    if (p_max.is_allocated() && !on_device) update_p_max();
+    if (p_max.is_allocated() && !record) update_p_max();
     if (state_needed()) flush_chemistry();
-    if (statistics.due(step, t)) sample_statistics();
+    if (record && record->statistics) {
+        if (record->spectra) statistics.write_staged_spectra(step, t, (record->seq - 1) % step_records.extent(0));
+    } else if (statistics.due(step, t)) {
+        sample_statistics();
+    }
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
     Kokkos::Timer output_timer;
@@ -2811,7 +2804,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
                                            .wall_stop = double(t_wall_stop)});
     if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
     numerics.add(face_reconstruction->summary());
-    if (!stencil_shapes_setting.empty()) numerical.emplace_back("Structured blocks", stencil_shapes_setting);
+    if (!block_path_setting.empty()) numerical.emplace_back("Structured blocks", block_path_setting);
     numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
         numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +

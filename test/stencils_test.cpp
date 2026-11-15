@@ -288,7 +288,7 @@ TEST(Stencils, CellsAndRegionsSelectTheStencilsWrittenAndViewed) {
         // The middle cell's central fit of u = x and u = y: the coefficients of the
         // monomials (x - x_c) / h and (y - y_c) / h are h, and the cross terms vanish
         double a[2][2] = {};
-        for (uint64_t m = offsets[t]; m < offsets[t + 1]; m++) {
+        for (size_t m = offsets[t]; m < offsets[t + 1]; m++) {
             if (stencil[m] != 0) continue;
             ASSERT_EQ(role[m] & stencils::MIRROR, 0) << "the middle cell's central stencil reaches no boundary";
             for (int l = 0; l < 2; l++) {
