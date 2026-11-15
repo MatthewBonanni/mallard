@@ -975,8 +975,8 @@ void Solver::begin_device_steps() {
             "step_monitor_staging", n_records, monitor_offsets.back());
     }
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
-        if (!probes.can_stage(k) || convergence_reads_probe(k)) continue;
-        probes.stage(k, n_records);
+        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k)) continue;
+        probes.stage(k, n_records, statistics);
         staged_probes.push_back(k);
     }
     if (!staged_probes.empty()) {
