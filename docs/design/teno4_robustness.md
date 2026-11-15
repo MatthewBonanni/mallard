@@ -154,7 +154,7 @@ split the near-ties of the graded mesh toward the cylinder, and odd degrees
 amplified the waves that crossed them. 2D odd degrees now rank in the
 [metric on every cell](../numerics/teno_e.md#candidates). With it, a pressure
 pulse at rest on this mesh decays at order 4 (largest Mach number 7e-6 at
-t = 12, where it was 0.53) and at order 6 (6e-6; 0.42 before), and the
+t = 12, where it was 0.53) and at order 6 (6e-6, where it reached 0.37 by t = 2), and the
 cylinder to t = 60 at order 4 matches order 5 (a 16-CPU pod, 4 threads per
 run):
 
