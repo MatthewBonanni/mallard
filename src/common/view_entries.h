@@ -37,6 +37,7 @@ inline constexpr uint64_t MAX = uint64_t(1) << 31;
  */
 template <int N, typename View, typename T>
 KOKKOS_INLINE_FUNCTION void load_row(const View & v, const uint32_t r, T * out) {
+    static_assert(View::rank() == 2);
     static_assert(N >= 3);
     const auto * p = &v(r, 0);
     const int32_t stride = static_cast<int32_t>(v.stride(1));

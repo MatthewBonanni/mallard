@@ -74,3 +74,25 @@ TEST(ViewEntriesTest, ErrorStatesTheCellsPerRank) {
     EXPECT_NE(message.find("at least 4 times as many ranks"), std::string::npos) << message;
     EXPECT_THROW(view_entries::check("x", view_entries::MAX + 1), diagnostic_code::Error);
 }
+
+namespace {
+
+template <typename Layout>
+void expect_load_row_reads_the_row() {
+    const Kokkos::View<double * [5], Layout, Kokkos::HostSpace> v("rows", 7);
+    for (uint32_t r = 0; r < 7; r++) {
+        for (uint32_t i = 0; i < 5; i++) v(r, i) = 10.0 * r + i;
+    }
+    for (uint32_t r = 0; r < 7; r++) {
+        double out[5];
+        view_entries::load_row<5>(v, r, out);
+        for (uint32_t i = 0; i < 5; i++) EXPECT_EQ(out[i], v(r, i)) << "row " << r << ", entry " << i;
+    }
+}
+
+} // namespace
+
+TEST(ViewEntriesTest, LoadRowReadsTheRowInEitherLayout) {
+    expect_load_row_reads_the_row<Kokkos::LayoutLeft>();
+    expect_load_row_reads_the_row<Kokkos::LayoutRight>();
+}
