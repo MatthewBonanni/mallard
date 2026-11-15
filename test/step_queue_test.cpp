@@ -181,6 +181,7 @@ struct Case {
     std::string numerics;         // [numerics] keys
     std::string integrator = "SSPRK3";
     std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
+    std::string cells = "Nx = 14\nNy = 10\n";  // the box's cells in x and y
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
     Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
@@ -193,7 +194,7 @@ std::string box_input(const Case & c, const std::string & dir, int depth) {
     if (!c.body.empty()) {
         s << c.body;
     } else {
-        s << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+        s << "[mesh]\ntype = \"cartesian\"\n" << c.cells << "Lx = 1.0\nLy = 1.0\n";
         if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
         s << "[initialize]\ntype = \"analytical\"\n"
           << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
@@ -740,19 +741,24 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
 }
 
 TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
-    // A growing disk (sphere) covers more cells than its staging holds: the host writes those steps and the
-    // device stages it anew
+    // A disk (sphere) growing from a corner covers more cells than its staging holds, at first on the ranks that
+    // own the corner alone: every rank's host writes those steps and the device stages it anew
     const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
-                             vector_of("0.4", "0.5", "0.2") + ", radius = \"0.05 + 2 * t\"}";
+                             vector_of("0.1", "0.1", "0.2") + ", radius = \"0.05 + 2 * t\"}";
     Case c;
     c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.cells = "Nx = 40\nNy = 30\n";
     c.extra = "check_interval = 1000\n"
               "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\ninterval = 2\n"
               "reductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n";
+    c.distributed = comm::size() > 1;
     expect_queue_invariant("growing_probe", c);
     Case bare = c;
     bare.extra = "check_interval = 1000\n";
-    EXPECT_LT(run_case("growing_probe", c, 3).queued, run_case("bare", bare, 3).queued);
+    const uint64_t queued = run_case("growing_probe", c, 3).queued, unstopped = run_case("bare", bare, 3).queued;
+    EXPECT_LT(queued, unstopped);
+    // Each stop regrows the staging to twice the cells covered then
+    EXPECT_GE(queued + 3, unstopped);
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {

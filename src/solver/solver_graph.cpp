@@ -696,6 +696,8 @@ void Solver::decide_outputs() {
     const Kokkos::View<OutputClock *> clocks = output_clocks;
     const Kokkos::View<uint32_t *> due = output_due;
     const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
+    const Kokkos::View<uint32_t *> probes_due = probe_due;
+    const uint32_t n_probe_flags = static_cast<uint32_t>(probe_due.extent(0));
     uint64_t solution_bits = 0;
     for (uint32_t k = 0; k < n_writers; k++) {
         if (data_writers[k]->follows_solution()) solution_bits |= uint64_t(1) << k;
@@ -716,6 +718,8 @@ void Solver::decide_outputs() {
             record.reasons |= step_queue::OUTPUT;
             L.active = 0;
             L.progress = 0;
+            // The host writes the step's probes
+            for (uint32_t k = 0; k < n_probe_flags; k++) probes_due(k) = 0;
             return;
         }
         for (uint32_t k = 0; k < n_writers; k++) {
@@ -741,11 +745,16 @@ void Solver::decide_probes() {
     const uint64_t average_interval = probes.get_average_interval();
     const rtype average_start = probes.get_average_start();
     const Kokkos::View<int64_t *> overflow = probe_overflow;
+    uint64_t moving = 0;
+    for (uint32_t k = 0; k < n_probes; k++) {
+        if (probes.moves(staged_probes[k])) moving |= uint64_t(1) << k;
+    }
     Kokkos::parallel_for("probes_due", 1, KOKKOS_LAMBDA(const int) {
         const step_queue::Loop & L = loop();
         step_queue::Record & record = records((L.seq - 1) % n_records);
         record.probes = record.probe_samples = 0;
         due(n_probes) = 0;
+        if (overflow.data()) due(n_probes + 1) = 0;
         const bool on = L.active && L.advanced;
         const rtype t_now = s(T);
         const bool averages = on && L.step % average_interval == 0 && t_now > average_start;
@@ -763,7 +772,10 @@ void Solver::decide_probes() {
             due(k) = c.average ? averages : written;
             if (c.average && averages) record.probe_samples |= uint64_t(1) << k;
             due(n_probes) |= due(k);
-            if (overflow.data()) overflow(k) = 0;
+            if (overflow.data()) {
+                overflow(k) = 0;
+                if (moving >> k & 1) due(n_probes + 1) |= due(k);
+            }
         }
     });
     if (!overflow.is_allocated()) return;
@@ -775,7 +787,7 @@ void Solver::decide_probes() {
             probes.select_staged(staged_probes[k], Kokkos::View<const rtype>(step_time_device()), overflow.data() + k);
         });
     }
-    device_if(&probe_due.data()[n_probes], [&] {
+    device_if(&probe_due.data()[n_probes + 1], [&] {
         if (is_distributed()) comm::allreduce_device(overflow, comm::Op::MAX, halo.uses_nccl());
         Kokkos::parallel_for("probes_overflow", 1, KOKKOS_LAMBDA(const int) {
             bool over = false;
@@ -784,7 +796,7 @@ void Solver::decide_probes() {
             step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
             record.reasons |= step_queue::PROBES;
-            for (uint32_t k = 0; k <= n_probes; k++) due(k) = 0;
+            for (uint32_t k = 0; k < n_probes + 2; k++) due(k) = 0;
             L.active = 0;
             L.progress = 0;
         });
@@ -1044,7 +1056,7 @@ void Solver::begin_device_steps() {
     }
     probe_overflow = moving ? Kokkos::View<int64_t *>("step_probe_overflow", staged_probes.size()) : Kokkos::View<int64_t *>();
     if (!staged_probes.empty()) {
-        probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + 1);
+        probe_due = Kokkos::View<uint32_t *>("step_probe_due", staged_probes.size() + (moving ? 2 : 1));
         probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
     }
     n_launched = n_taken = 0;

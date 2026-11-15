@@ -974,7 +974,7 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
-        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (n: any; n + 1: any moving)
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
         Kokkos::View<int64_t *> probe_overflow;  // staged moving probe k outgrew its staging (unallocated: none moves)
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs

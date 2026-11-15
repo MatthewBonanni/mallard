@@ -528,7 +528,7 @@ returning at once, and
 the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
 them by global cell, as it does for the samples it selects itself, as it takes the record. On one A100
 (`air_3d.toml`, a sphere of radius 0.03 written every 10 steps) the sampling of the cells its surface crosses
-(1.08 s per write) is all of the region's work; the selection, evaluation and copies take under 0.1 ms.
+is nearly all of the region's work; the selection, evaluation and copies take under 0.1 ms per write.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
