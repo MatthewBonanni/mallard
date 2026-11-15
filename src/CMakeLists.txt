@@ -152,9 +152,9 @@ target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 # Kokkos computes a View's offset in the common type of its indices: all-int indices
 # wrap it past 2^31 entries, and indices all narrower than int (uint8_t, uint16_t)
 # much sooner, aliasing entries. Mallard compiles against a copy of Kokkos_View.hpp
-# that computes it in that type made unsigned and at least 32 bits (the same offset
-# for valid indices, at the same width), so it reaches 2^32 entries
-# (common/view_entries.h), and that still rejects indices all narrower than int.
+# that computes a signed 32-bit offset as unsigned (the same offset for valid indices,
+# at the same width), so offsets reach 2^32 entries (common/view_entries.h), and that
+# rejects indices all narrower than int.
 set(view_offset_patched FALSE)
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
@@ -168,13 +168,16 @@ if(Mallard_KOKKOS_VIEW_HEADER)
                          "of them are narrower than int: make one index at least 32 bits (see src/CMakeLists.txt)\"")
     set(offset_anchor "    using idx_type = std::common_type_t<IndexOffsets...>;\n")
     string(CONCAT offset_patch
-        "    static_assert(sizeof(std::common_type_t<IndexOffsets...>) >= sizeof(int), ${narrow});\n"
-        "    using idx_type = std::make_unsigned_t<std::common_type_t<IndexOffsets..., unsigned>>;\n")
+        "    using common_idx_type = std::common_type_t<IndexOffsets...>;\n"
+        "    static_assert(sizeof(common_idx_type) >= sizeof(int), ${narrow});\n"
+        "    using idx_type = std::conditional_t<std::is_signed_v<common_idx_type> && sizeof(common_idx_type) == 4,\n"
+        "                                        uint32_t, common_idx_type>;\n")
     set(stride_anchor "      return index_offset * static_cast<IndexOffset>(m_map.stride(0));\n")
     string(CONCAT stride_patch
         "    {\n"
         "      static_assert(sizeof(IndexOffset) >= sizeof(int), ${narrow});\n"
-        "      using idx_type = std::make_unsigned_t<std::common_type_t<IndexOffset, unsigned>>;\n"
+        "      using idx_type = std::conditional_t<std::is_signed_v<IndexOffset> && sizeof(IndexOffset) == 4, uint32_t,\n"
+        "                                          IndexOffset>;\n"
         "      return static_cast<idx_type>(index_offset) * static_cast<idx_type>(m_map.stride(0));\n"
         "    }\n")
     string(FIND "${kokkos_view}" "${offset_anchor}" offset_found)
