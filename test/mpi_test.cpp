@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -242,20 +243,75 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
 }
 
-TEST(MPITest, TENOStencilShapesAtWallsMatchSerial) {
-    // Order 3 on squares: each cell takes the fit of its stencil shape's cell with
-    // the lowest global id, which differs from its own fit at round-off, so every
-    // rank must give a cell the same shape and fit, halo cells included (gas
-    // mixtures reconstruct halo layer 1 locally), also where a wall or corner
-    // shape is only in a rank's halo
+namespace {
+
+/**
+ * @brief Gmsh file of nx x ny quadrilaterals of [0, 1] x [0, ly], clustered
+ *        toward x = 0 and x = 1 alike, with zones left/right/bottom/top; the
+ *        interior nodes move by up to 1e-13 of a cell, far below the stencil
+ *        shapes' grid, so that cells of one shape have fits that differ at
+ *        round-off.
+ */
+std::string clustered_quads(const uint32_t nx, const uint32_t ny, const double ly) {
+    std::mt19937 rng(3);
+    std::uniform_real_distribution<double> jitter(-1e-13, 1e-13);
+    auto id = [&](uint32_t i, uint32_t j) { return std::to_string(j * (nx + 1) + i + 1); };
+    std::ostringstream s;
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n"
+      << "$Nodes\n" << (nx + 1) * (ny + 1) << "\n";
+    s.precision(17);
+    for (uint32_t j = 0; j <= ny; j++) {
+        for (uint32_t i = 0; i <= nx; i++) {
+            double x = 0.5 + 0.5 * std::tanh(1.2 * (2.0 * i / nx - 1.0)) / std::tanh(1.2), y = ly * j / ny;
+            if (i > 0 && i < nx && j > 0 && j < ny) {
+                x += jitter(rng) / nx;
+                y += jitter(rng) * ly / ny;
+            }
+            s << id(i, j) << " " << x << " " << y << " 0\n";
+        }
+    }
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < nx; i++) {
+        elements.push_back("1 2 1 1 " + id(i, 0) + " " + id(i + 1, 0));
+        elements.push_back("1 2 3 3 " + id(i + 1, ny) + " " + id(i, ny));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        elements.push_back("1 2 4 4 " + id(0, j + 1) + " " + id(0, j));
+        elements.push_back("1 2 2 2 " + id(nx, j) + " " + id(nx, j + 1));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        for (uint32_t i = 0; i < nx; i++) {
+            elements.push_back("3 2 0 1 " + id(i, j) + " " + id(i + 1, j) + " " + id(i + 1, j + 1) + " " + id(i, j + 1));
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(MPITest, TENOStencilShapesAtWallsAndInHalosMatchSerial) {
+    // Order 3: each cell takes the fit of its stencil shape's cell with the lowest
+    // global id, which differs from its own fit at round-off, so every rank must
+    // give a cell the same shape and tables, halo cells included (gas mixtures
+    // reconstruct halo layer 1 locally). Each column and its mirror image have a
+    // shape of their own: on 3 ranks the first rank's halo column has a shape
+    // that the rank owns no cell of
     const std::string teno3 = "type = \"TENO\"\norder = 3\n";
-    expect_matches_serial(box_input("cartesian", teno3, EULER,
-                                    bcs("type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n",
-                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
-    std::string mixture = mixture_input("", teno3, "", "euler");
-    const std::string tri = "cartesian_tri";
-    mixture.replace(mixture.find(tri), tri.size(), "cartesian");
-    expect_matches_serial(mixture);
+    auto on_file = [](std::string input, const std::string & mesh, const std::string & file) {
+        return input.replace(input.find(mesh), mesh.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    };
+    expect_matches_serial(on_file(box_input("cartesian", teno3, EULER,
+                                            bcs("type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n",
+                                                "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15),
+                                  "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n",
+                                  write_temp_shared("mallard_mpi_clustered.msh", clustered_quads(24, 18, 0.8))));
+    expect_matches_serial(on_file(mixture_input("", teno3, "", "euler"),
+                                  "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n",
+                                  write_temp_shared("mallard_mpi_clustered_strip.msh", clustered_quads(24, 24, 0.3))));
 }
 
 namespace {

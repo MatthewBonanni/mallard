@@ -566,10 +566,9 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
-**One fit per stencil shape.** In builds that run on the host (Serial, Threads,
-OpenMP), the setup groups the cells before fitting any table (`teno_shapes.h`);
-GPU builds fit every cell, which the device does faster than the host builds
-the keys (#1082). A cell's search reads the geometry of the cells in its
+**One fit per stencil shape.** With shared tables the setup groups the cells
+before fitting any table (`teno_shapes.h`), on the device, so that every backend
+groups them alike and gives the same tables. A cell's search reads the geometry of the cells in its
 vertex-neighbor layers, as many as the layers' cell counts make it take, and
 its own faces; its key hashes exactly that, relative to the cell and in units of
 its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
@@ -582,10 +581,13 @@ and smoothness-indicator matrix. Batches of fitted cells and cells taken from
 their keys then go through the table comparison above, where the cells of a key,
 whose tables are bitwise equal, take one shape. Cells whose key no other cell
 has, whose layers reach the outermost halo layer or hold two periodic copies of
-a cell are fitted on their own, so a mesh with a shape per cell is set up as
-before. Once the halo is as deep as the searches need, the layers of every
-reconstructed halo cell lie within the complete layers, so each cell has the
-same key on every rank. The shared tables are those of the table comparison,
+a cell, and cells whose layers do not match their key's representative, are
+fitted on their own, so a mesh with a shape per cell is set up as before; so
+are the cells of axisymmetric meshes, whose tables depend on the radius. Once
+the halo is as deep as the searches need, the layers of every reconstructed
+halo cell lie within the complete layers, and the cell counts that decide
+whether a cell has a key are taken over the ranks, halo cells' included, so
+each cell has the same key and the same tables on every rank. The shared tables are those of the table comparison,
 except where the cells of one key fall on either side of its grid: they take
 one table instead of two.
 

@@ -405,17 +405,17 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
     const uint32_t n_owned = std::min(n, mesh.n_owned());
     for (uint32_t c = 0; c < n_owned; c++) count[shape[c]]++;
     for (uint32_t c = n_owned; c < n; c++) count.try_emplace(shape[c], 0);
-    const int p = comm::size();
-    if (p > 1) {
-        std::vector<std::vector<uint64_t>> report(static_cast<size_t>(p));
-        for (const auto & [d, k] : count) report[d % uint64_t(p)].insert(report[d % uint64_t(p)].end(), {d, k});
+    const int n_ranks = comm::size();
+    if (n_ranks > 1) {
+        std::vector<std::vector<uint64_t>> report(static_cast<size_t>(n_ranks));
+        for (const auto & [d, k] : count) report[d % uint64_t(n_ranks)].insert(report[d % uint64_t(n_ranks)].end(), {d, k});
         const auto reports = comm::alltoallv(report);
         std::unordered_map<uint64_t, uint64_t> total;
         for (const auto & from : reports) {
             for (size_t k = 0; k < from.size(); k += 2) total[from[k]] += from[k + 1];
         }
-        std::vector<std::vector<uint64_t>> answer(static_cast<size_t>(p));
-        for (int r = 0; r < p; r++) {
+        std::vector<std::vector<uint64_t>> answer(static_cast<size_t>(n_ranks));
+        for (int r = 0; r < n_ranks; r++) {
             for (size_t k = 0; k < reports[size_t(r)].size(); k += 2) {
                 answer[size_t(r)].insert(answer[size_t(r)].end(), {reports[size_t(r)][k], total.at(reports[size_t(r)][k])});
             }

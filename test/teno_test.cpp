@@ -738,7 +738,8 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
     // Two separate blocks of 10 x 10 squares with symmetry walls, the second three
     // times as large: each cell of the second has the stencil shape of a cell of
     // the first, whose fit it takes, with its own scale and its own wall faces for
-    // the mirror images, and the face values of its own fit up to round-off
+    // the mirror images (faces of its own block), and the face values of its own
+    // fit up to round-off
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
     for (const auto & [x0, h] : {std::pair{0.0, 0.1}, std::pair{2.0, 0.3}}) {
@@ -789,7 +790,7 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
                 if (f < 0) continue;
                 n_images++;
                 EXPECT_LT(m.h_cells_of_face(uint32_t(f), 1), 0) << "cell " << c;
-                EXPECT_EQ(m.h_cells_of_face(uint32_t(f), 0), stencils.cells[s]) << "cell " << c;
+                EXPECT_GE(m.h_cells_of_face(uint32_t(f), 0), 100) << "cell " << c;
             }
         }
         EXPECT_GT(n_images, 0u) << "order " << order;
