@@ -18,12 +18,12 @@
 #
 # Here: fuel H2:N2 = 1:1 (by mole) against air, 300 K, 1 atm, detailed H2/O2
 # chemistry, mixture-averaged transport. The planar flame at Z_st = 0.304 has
-# S_L = 1.1945 m/s, thermal thickness delta_L = 0.383 mm, burnt gas 2008 K and
+# S_L = 1.1959 m/s, thermal thickness delta_L = 0.382 mm, burnt gas 2008 K and
 # rho_u / rho_b = 5.94 (sqrt: 2.44), on a grid-converged Cantera flame (the
 # inputs were built from its solution at refine criteria 0.02, S_L = 1.19142
 # m/s and delta_L = 0.3847 mm, so u_in, the mixing thicknesses and the cell
-# size are in those units; the ratios below are over the converged S_L); its Lewis numbers are 0.41 (H2) and 1.67
-# (O2). The fresh gas enters on the left (inlet_state with a composition that varies
+# size are in those units; the ratios below are over the converged S_L);
+# its Lewis numbers are 0.41 (H2) and 1.67 (O2). The fresh gas enters on the left (inlet_state with a composition that varies
 # across the inlet: a tanh mixture-fraction profile from air to fuel, Z_st on
 # the midline, mixing thickness 4 delta_L here and 12 delta_L in thick/), the
 # sides are symmetry planes 3 delta_M + 24 delta_L apart and the burnt gas
@@ -78,8 +78,8 @@
 # D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
 #
 # 1D checks (planar flame at Z_st, tools/setup/flame_restart.py and
-# tools/post/flame_speed.py): consumption speed against Cantera's -1.34%, -0.54%,
-# -0.43% and -0.08% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
+# tools/post/flame_speed.py): consumption speed against Cantera's -1.45%, -0.66%,
+# -0.55% and -0.20% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
 # 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
 # repeated on a finer mesh.
 #
