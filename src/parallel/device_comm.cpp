@@ -68,14 +68,15 @@ void finalize_nccl() {
 #endif
 
 template <typename T>
-void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unused]] const bool use_nccl) {
+void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unused]] const bool use_nccl,
+                      [[maybe_unused]] const Kokkos::DefaultExecutionSpace & exec) {
 #ifdef Mallard_HAS_NCCL
     if (use_nccl) {
         const ncclDataType_t type =
             std::is_same_v<T, double> ? ncclDouble : (std::is_same_v<T, float> ? ncclFloat : ncclInt64);
         const ncclRedOp_t nccl_op = op == Op::SUM ? ncclSum : (op == Op::MIN ? ncclMin : ncclMax);
-        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, nccl_op, nccl(),
-                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, nccl_op, nccl(), exec.cuda_stream()) !=
+            ncclSuccess) {
             throw std::runtime_error("NCCL: reduction failed");
         }
         return;
@@ -87,9 +88,10 @@ void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unu
     Kokkos::deep_copy(values, host);
 }
 
-template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool);
-template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool);
-template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool);
+template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool, const Kokkos::DefaultExecutionSpace &);
+template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool, const Kokkos::DefaultExecutionSpace &);
+template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool,
+                                        const Kokkos::DefaultExecutionSpace &);
 
 template <typename T>
 void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all, [[maybe_unused]] const bool use_nccl) {
