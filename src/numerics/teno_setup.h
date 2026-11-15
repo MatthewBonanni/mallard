@@ -270,11 +270,12 @@ class SetupHandle {
         const Timings & timings() const;
 
         /**
-         * @brief The central moments of cells [0, n_rows), from which the
-         *        troubled passes form the smoothness matrices: the setup's own
-         *        array if it has n_rows rows (3D; empty in 2D).
+         * @brief The central moments of cells [0, n_direct) followed by those of
+         *        the cells extra, from which the troubled passes form the
+         *        smoothness matrices: the setup's own array if that is all of
+         *        them (3D; empty in 2D).
          */
-        teno::Moments moments(uint32_t n_rows) const;
+        teno::Moments moments(uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const;
 
     private:
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;

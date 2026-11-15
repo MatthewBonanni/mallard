@@ -21,6 +21,7 @@
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
+#include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -74,6 +75,22 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     // interface; a halo that cuts the stencil search short must be deepened
     // rather than reported as a rank-deficient stencil
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
+}
+
+TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
+    // With owner-computes partition faces no halo cell is reconstructed, and every
+    // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
+    memory::Tracker tracker;
+    Solver solver;
+    solver.init(parse_toml(blast_input("cartesian", "type = \"TENO\"\norder = 3\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    constexpr bool device = !Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+    const auto live = tracker.live(device);
+    EXPECT_EQ(live.at("teno_scale"), sizeof(rtype) * mesh.n_owned());
+    EXPECT_EQ(live.at("teno_stencil_large_size"), sizeof(uint16_t) * mesh.n_owned());
+    if (comm::size() > 1) {
+        EXPECT_GT(mesh.n_reconstructed(), mesh.n_owned());
+    }
 }
 
 TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
