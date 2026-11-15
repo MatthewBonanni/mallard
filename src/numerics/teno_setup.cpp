@@ -3334,7 +3334,7 @@ class Setup3D {
             }
             h.cell_h = Geometry<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::cbrt(double(mesh.h_cell_volume(c))); });
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
@@ -4606,7 +4606,7 @@ class Setup2D {
             }
             h.cell_h = Geometry2D<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", HostRange(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::sqrt(double(mesh.h_cell_volume(c))); });
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);

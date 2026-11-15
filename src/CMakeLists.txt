@@ -62,6 +62,7 @@ add_library(MallardCore STATIC
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
     numerics/teno_setup.cpp
+    numerics/teno_shapes.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
@@ -223,7 +224,7 @@ endforeach()
 # only: contracting multiplies and adds into FMAs would round each differently
 # by where the compiler fuses, so neither file contracts and the hot loops
 # write their FMAs explicitly
-set(teno_sources numerics/teno_setup.cpp numerics/teno.cpp)
+set(teno_sources numerics/teno_setup.cpp numerics/teno_shapes.cpp numerics/teno.cpp)
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
     set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")

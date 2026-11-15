@@ -392,6 +392,9 @@ class TENO : public FaceReconstruction {
         // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore);
         // false (tests only) keeps a table per cell
         bool share_tables = true;
+        // This rank's cells whose tables the last full setup fitted; with shared tables the
+        // others take those of their stencil shape's cell with the lowest global id
+        uint32_t n_cells_fitted = 0;
         /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
         const uint64_t * global_cell_ids() const {
             return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();

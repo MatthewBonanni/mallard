@@ -654,6 +654,38 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
     }
 }
 
+TEST(TENO3DSetup, APeriodicLatticeIsFittedOnceAndItsCellsTakeThatCellsTables) {
+    // One stencil shape: the setup fits one cell, and every cell's face values
+    // are those of its own tables up to round-off
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, periodic_conservatives);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    Kokkos::deep_copy(W, avg);
+    for (const int order : {3, 5}) {
+        auto face_values = [&](const bool share) {
+            auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.share_tables = share; });
+            EXPECT_EQ(teno->n_cells_fitted, share ? 1u : mesh->n_cells) << "order " << order;
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::vector<rtype>(h.data(), h.data() + h.span());
+        };
+        const auto own = face_values(false), shared = face_values(true);
+        double largest = 0.0, difference = 0.0;
+        for (size_t k = 0; k < own.size(); k++) {
+            largest = std::max(largest, std::abs(double(own[k])));
+            difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
+        }
+        EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+    }
+}
+
 TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStaysApartFromEqualTables) {
     // Two slots of width 2: two tables, bitwise different, under one key
     const std::vector<rtype> a = {1.0_r, 0.5_r, 0.25_r, 0.125_r};
