@@ -233,6 +233,21 @@ if(USE_SYSTEM_KOKKOS)
 else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos SYSTEM)
 endif()
+# A CUDA build compiles Mallard through Kokkos' nvcc_wrapper, as the C++ compiler or behind
+# another one through the launch rule Kokkos then sets; nvcc's own options apply in both cases
+set(Mallard_NVCC OFF)
+if(Kokkos_ENABLE_CUDA)
+    get_property(launch_global GLOBAL PROPERTY RULE_LAUNCH_COMPILE)
+    get_property(launch_dir DIRECTORY PROPERTY RULE_LAUNCH_COMPILE)
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE cxx_version ERROR_QUIET)
+    if("${launch_global};${launch_dir}" MATCHES "nvcc_wrapper" OR cxx_version MATCHES "nvcc")
+        set(Mallard_NVCC ON)
+    elseif(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT Kokkos_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "Kokkos_ENABLE_CUDA compiles with Kokkos' nvcc_wrapper, but neither "
+                            "CMAKE_CXX_COMPILER (${CMAKE_CXX_COMPILER}) nor a Kokkos launch rule runs it: "
+                            "pass -DCMAKE_CXX_COMPILER=<kokkos>/bin/nvcc_wrapper.")
+    endif()
+endif()
 
 # Cantera YAML mechanism files
 option(USE_SYSTEM_YAML_CPP "Use system-installed yaml-cpp" OFF)

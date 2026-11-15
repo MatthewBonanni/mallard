@@ -224,7 +224,7 @@ endforeach()
 # by where the compiler fuses, so neither file contracts and the hot loops
 # write their FMAs explicitly
 set(teno_sources numerics/teno_setup.cpp numerics/teno.cpp)
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+if(Mallard_NVCC)
     set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
@@ -233,7 +233,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 # CPU SHA intrinsics, which nvcc's front end need not parse
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+if(Mallard_NVCC)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
 endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)

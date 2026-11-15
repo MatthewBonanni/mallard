@@ -111,7 +111,7 @@ add_executable(mallard-test ${MALLARD_TEST_SOURCES})
 set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_DIM}d)
 
 # The compiled expressions round every operation on its own, and so must their hand-written references
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+if(Mallard_NVCC)
     set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
