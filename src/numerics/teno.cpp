@@ -1832,10 +1832,10 @@ struct TENOFunctor {
     static constexpr uint8_t CHUNK = (NK + PARTS - 1) / PARTS;
     static constexpr size_t TEAM_SCRATCH = sizeof(rtype) * NK * N_CONSERVATIVE * TEAM_CELLS + 2 * sizeof(int) * TEAM_CELLS;
     // Stencil entries per round of staged_coefficients, a multiple of PARTS. At
-    // order 6 the staged entries leave room for one team per SM only: none
-    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : 0;
+    // order 6 rounds of 2 * PARTS would leave room for one team per SM only
+    static constexpr uint8_t STAGE = DEG <= 4 ? 2 * PARTS : PARTS;
     static constexpr size_t SMOOTH_SCRATCH =
-        TEAM_SCRATCH + (STAGE ? sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS : 0);
+        TEAM_SCRATCH + sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS + sizeof(int) * TEAM_CELLS;
     uint32_t n_smooth = 0;  // cells to reconstruct when cells is empty
 
     template <typename F>
@@ -1852,38 +1852,19 @@ struct TENOFunctor {
 
     /**
      * @brief Chunk C of the central coefficients of cell i_cell, into aK_team
-     *        (l, var). With QUEUE, chunk 0 also finds sigma, queues the cell if
-     *        troubled and leaves in smooth_team[lane] -1 if smooth, else its
-     *        place in the queue.
+     *        (l, var)
      */
-    template <uint8_t C, bool QUEUE = true>
+    template <uint8_t C>
     KOKKOS_INLINE_FUNCTION
-    void smooth_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_team, int * smooth_team,
-                             const uint32_t lane) const {
+    void smooth_coefficients(const uint32_t i_cell, const rtype * U0, rtype * aK_team, const uint32_t lane) const {
         constexpr uint8_t L0 = C * CHUNK;
         constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
         const uint16_t ns = stencil_large_size(i_cell);
         rtype aK[CHUNK][N_CONSERVATIVE] = {};
-        rtype g_mean = 0.0, g_m2 = 0.0;
-        rtype m_mean = 0.0, m_m2 = 0.0;
         const auto stencil = stencil_large.template row<TABLE>(i_cell);
         for (uint16_t s = 0; s < ns; s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
-            if constexpr (C == 0 && QUEUE) {
-                const rtype W0_rho = W(i_cell, 0);
-                const rtype g = Kokkos::fabs(U[0] - W0_rho) / W0_rho;
-                const rtype delta = g - g_mean;
-                g_mean += delta / (s + 1);
-                g_m2 = fmadd(delta, g - g_mean, g_m2);
-                if constexpr (PRIM) {
-                    const rtype M0 = cell_molar_mass(i_cell);
-                    const rtype m = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
-                    const rtype delta_m = m - m_mean;
-                    m_mean += delta_m / (s + 1);
-                    m_m2 = fmadd(delta_m, m - m_mean, m_m2);
-                }
-            }
             for (uint8_t l = L0; l < L1; l++) {
                 const rtype P = stencil.template pinv<NK>(s, l);
                 FOR_I_CONSERVATIVE aK[l - L0][i] = fmadd(P, U[i] - U0[i], aK[l - L0][i]);
@@ -1892,19 +1873,11 @@ struct TENOFunctor {
         for (uint8_t l = L0; l < L1; l++) {
             FOR_I_CONSERVATIVE aK_team[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane] = aK[l - L0][i];
         }
-        if constexpr (C == 0 && QUEUE) {
-            const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
-            sigma_out(i_cell) = sigma;
-            const bool smooth = sigma < sigma_threshold;
-            const uint32_t j = smooth ? 0 : Kokkos::atomic_fetch_add(&n_troubled(), 1u);
-            if (!smooth) troubled_cells(j) = i_cell;
-            smooth_team[lane] = smooth ? -1 : static_cast<int>(j);
-        }
     }
 
     /**
-     * @brief smooth_coefficients<C> for the whole team, with the stencil
-     *        entries' states staged in team scratch: in rounds of STAGE
+     * @brief Chunk C of the central coefficients of the team's cells, with
+     *        the stencil entries' states staged in team scratch: in rounds of STAGE
      *        entries, each of a cell's threads converts every PARTS-th entry,
      *        then every thread accumulates its chunk over the round's entries
      *        in order. Every thread of the team calls it.
@@ -2016,19 +1989,12 @@ struct TENOFunctor {
             admissible_team[lane] = 1;
         }
         team.team_barrier();
-        if constexpr (STAGE > 0) {
-            rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
-            int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
-            if (active) conservatives(i_cell, U0);
-            with_chunk(part, [&](auto C) {
-                staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, U_team, ns_team, smooth_team, lane);
-            });
-        } else if (active) {
-            conservatives(i_cell, U0);
-            with_chunk(part, [&](auto C) {
-                smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, smooth_team, lane);
-            });
-        }
+        rtype * U_team = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * STAGE * N_CONSERVATIVE * TEAM_CELLS));
+        int * ns_team = static_cast<int *>(team.team_scratch(0).get_shmem(sizeof(int) * TEAM_CELLS));
+        if (active) conservatives(i_cell, U0);
+        with_chunk(part, [&](auto C) {
+            staged_coefficients<decltype(C)::value>(team, active, i_cell, part, U0, aK, U_team, ns_team, smooth_team, lane);
+        });
         team.team_barrier();
         const int slot = smooth_team[lane];
         const bool smooth = slot < 0;
@@ -2404,7 +2370,7 @@ struct TENOFunctor {
                 rtype U0[N_CONSERVATIVE];
                 conservatives(i_cell, U0);
                 with_chunk(part, [&](auto C) {
-                    smooth_coefficients<decltype(C)::value, false>(i_cell, U0, aK, nullptr, lane);
+                    smooth_coefficients<decltype(C)::value>(i_cell, U0, aK, lane);
                 });
                 store_coefficients(part, idx, aK, lane);
             }
