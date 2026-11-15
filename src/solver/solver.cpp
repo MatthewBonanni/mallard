@@ -683,18 +683,13 @@ bool Solver::exchanges_partition_faces() const {
 }
 
 void Solver::init_rhs_split() {
-    auto to_device = [](const std::vector<uint32_t> & v, const char * label) {
-        Kokkos::View<uint32_t *> d(label, v.size());
-        Kokkos::deep_copy(d, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(v.data(), v.size()));
-        return d;
-    };
     const uint32_t n_owned = mesh->n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && c < static_cast<int32_t>(n_owned); };
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (owned(mesh->h_cells_of_face(f, 0)) || owned(mesh->h_cells_of_face(f, 1))) faces.push_back(f);
     }
-    rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
+    rhs_faces = IndexSet::of(faces, "rhs_faces");
 
     const bool own_faces = exchanges_partition_faces();
     if (own_faces) {
@@ -724,30 +719,31 @@ void Solver::init_rhs_split() {
             }
             (waits ? remote : local).push_back(f);
         }
-        local_faces = to_device(local, "local_faces");
-        partition_faces = to_device(remote, "partition_faces");
+        local_faces = IndexSet::of(local, "local_faces");
+        partition_faces = IndexSet::of(remote, "partition_faces");
         face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
                                      static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
     }
 
-    std::vector<uint32_t> cells;
-    if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
-    n_early_cells = static_cast<uint32_t>(cells.size());
-    if (n_early_cells == 0 && !(own_faces && halo.active())) return;
-    std::vector<bool> early(mesh->n_cells, false);
-    for (uint32_t c : cells) early[c] = true;
+    // Early: the cells independent of the halo among [0, n_interior()), where the numbering puts them
+    std::vector<uint32_t> early, late;
+    if (halo.active()) early = face_reconstruction->cells_independent_of_halo(n_owned);
+    early.erase(std::lower_bound(early.begin(), early.end(), mesh->n_interior()), early.end());
+    if (early.empty() && !(own_faces && halo.active())) return;
+    std::vector<bool> is_early(mesh->n_cells, false);
+    for (uint32_t c : early) is_early[c] = true;
     for (uint32_t c = 0; c < (own_faces ? n_owned : mesh->n_reconstructed()); c++) {
-        if (!early[c]) cells.push_back(c);
+        if (!is_early[c]) late.push_back(c);
     }
-    rhs_cells = to_device(cells, "rhs_cells");
+    early_cells = IndexSet::of(early, "rhs_cells");
+    late_cells = IndexSet::of(late, "rhs_cells");
     // Host backends run kernels to completion anyway; on devices the early cells get their own stream
     if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                               Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
         // Without early cells nothing forks overlap_space into a step graph's capture, and joining a stream
         // outside the capture invalidates it
-        overlap_space = n_early_cells > 0
-                            ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
-                            : Kokkos::DefaultExecutionSpace();
+        overlap_space = !early.empty() ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
+                                       : Kokkos::DefaultExecutionSpace();
         if (own_faces) comm_space = comm::high_priority_space();
     }
 }
