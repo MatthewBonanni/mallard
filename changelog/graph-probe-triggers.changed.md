@@ -1,1 +1,0 @@
-- Triggers that read a probe's value are evaluated on the device: the steps enqueued ahead of the GPU (`[run] step_queue`) stop at that probe's writes instead of at every step. Results are the same bit for bit (#906).
