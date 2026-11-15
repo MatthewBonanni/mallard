@@ -343,6 +343,63 @@ Pitfalls:
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 
+### Viscous gradients
+
+```toml
+[numerics]
+viscous_gradients = "reconstruction"   # default "least_squares"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+```
+
+By default the viscous stress and heat flux take second-order least-squares
+gradients, whatever the reconstruction, so viscous-dominated flows (boundary
+layers, diffusion, decaying turbulence at low Reynolds numbers) stay second
+order under TENO. With `viscous_gradients = "reconstruction"`, each face
+between two cells TENO finds smooth takes the gradients of the two cells'
+TENO polynomials at its quadrature points instead. That is order `order - 1`
+for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO, single gas, planar runs) |
+
+On a decaying shear wave (periodic box, to $t = 0.1$), TENO4 with
+`reconstruction` converges at fourth order on triangles, quadrilaterals,
+tetrahedra and hexahedra; on 64 × 64 × 2 triangles its momentum error is 460
+times smaller than with least squares (7.2e-9 against 3.3e-6), which stays
+second order. On a manufactured solution, the viscous residual of TENO5
+converges at third order or better on every cell shape, where least squares
+gives second order on quadrilaterals and hexahedra and does not converge on
+tetrahedra:
+
+| Cells | `least_squares` | `reconstruction` |
+|---|---|---|
+| quadrilaterals | 2.0 | 3.9 |
+| triangles | 1.0 | 3.0 |
+| hexahedra | 1.8 | 3.7 |
+| prisms | 0.8 | 3.0 |
+| tetrahedra | 0.0 | 3.0 |
+
+Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
+per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to
+partition faces receive theirs from their owners. Evaluating the gradients at
+the face points makes a TENO5 step of the 3D Taylor-Green vortex 1.85 times as
+long on hexahedra and 1.6 times on tetrahedra (CPU, 16 threads).
+
+Pitfalls:
+
+- **TENO3** gains nothing: its quadratic polynomials give second-order face
+  gradients, with a larger error than least squares.
+- **Troubled cells and boundaries.** Faces next to a cell where TENO selects
+  stencils, and boundary faces (walls among them), keep the least-squares
+  gradients. Near walls and shocks the flux is then second order, as before.
+- **Not yet available** for gas mixtures (species diffusion) and axisymmetric
+  runs, where Mallard reports an error. Probes of the diffusive fluxes on
+  faces (`[[probes]]` surfaces) still report the least-squares fluxes.
+
 ## Riemann solvers
 
 ```toml

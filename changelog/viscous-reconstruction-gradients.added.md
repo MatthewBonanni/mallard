@@ -1,0 +1,1 @@
+- `[numerics] viscous_gradients = "reconstruction"` (TENO, single gas, planar): viscous and heat fluxes from the gradients of the cells' TENO polynomials at the face quadrature points, with Nishikawa's jump damping, of order `order - 1` on faces between smooth cells instead of second order (#709).
