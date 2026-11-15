@@ -188,12 +188,14 @@ void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<
 }
 
 void Mesh::compute_geometry() {
+    // Neighbors first, so that their tables are freed before the geometry is allocated
+    compute_cell_neighbors();
+    allocate_geometry();
     if constexpr (N_DIM == 2) {
         compute_face_areas();
         compute_cell_volumes_and_centroids();
         compute_face_normals();
         compute_face_centroids();
-        compute_cell_neighbors();
         return;
     }
     auto coords = [&](uint32_t node) {
@@ -230,7 +232,6 @@ void Mesh::compute_geometry() {
         }
     }
     compute_cell_volumes_and_centroids();
-    compute_cell_neighbors();
 }
 
 void Mesh::compute_cell_volumes_and_centroids() {

@@ -222,7 +222,7 @@ void Source::fit(const std::vector<uint8_t> & need) const {
 
 void Source::fit(uint32_t c) const {
     const Mesh & m = *mesh;
-    const bool shifted = m.h_cells_of_cell_shift.extent(0) > 0;
+    const bool shifted = m.h_cells_of_cell_shift.rows.extent(0) > 0;
     // Rings of vertex neighbors, gathered as the stencils need them, each cell with its translation into c's frame
     std::unordered_map<uint32_t, Point> offset{{c, Point{}}};
     struct Member {
