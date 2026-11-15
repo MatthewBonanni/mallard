@@ -154,6 +154,10 @@ struct ScalarLimiterFunctor {
                 S_min = Kokkos::fmin(S_min, S_n);
                 S_max = Kokkos::fmax(S_max, S_n);
             }
+            if (j < n_species && S_max - S_c <= SPECIES_NOISE && S_c - S_min <= SPECIES_NOISE) {
+                FOR_I_DIM gradients(c, j, i) = 0.0_r;
+                continue;
+            }
             rtype g[N_DIM];
             gemv<N_DIM>(M_inv, b, g);
             FOR_I_DIM gradients(c, j, i) = g[i];

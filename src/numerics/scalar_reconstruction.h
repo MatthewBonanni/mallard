@@ -25,6 +25,14 @@
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
 using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
 
+/**
+ * @brief Largest spread of a mass fraction over a cell's reconstruction
+ *        stencil that is reconstructed as constant: such a species is
+ *        round-off (e.g. 1e-34 next to 0), so it neither limits the other
+ *        scalars nor moves away from its cell value, and stays non-negative.
+ */
+constexpr rtype SPECIES_NOISE = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
+
 /** @brief Per-face storage of scalar values at a face's quadrature points. */
 using FacePointValues = rtype[teno::MAX_FACE_QUAD];
 

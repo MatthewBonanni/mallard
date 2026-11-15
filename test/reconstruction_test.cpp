@@ -18,6 +18,8 @@
 #include "test_fixtures.h"
 #include "face_reconstruction.h"
 #include "gradient.h"
+#include "scalar_reconstruction.h"
+#include "teno_scalars.h"
 
 namespace {
 
@@ -218,6 +220,153 @@ TEST_P(MeshTypes, FirstOrderCopiesCellValuesAndSkipsGhostSide) {
             }
         }
     }
+}
+
+namespace {
+
+constexpr uint32_t TRACE_SPECIES = 3;
+
+rtype trace_gamma(rtype x, rtype y) { return 1.3_r + 0.05_r * x + 0.02_r * y; }
+
+/**
+ * @brief Cell scalars [Y_0 .. Y_2, gamma, e0] with a linear gamma and Y_1 a
+ *        trace in every third column of cells, zero elsewhere.
+ */
+ScalarView trace_scalars(const Mesh & mesh, uint32_t nx, rtype trace) {
+    ScalarView S("S", mesh.n_cells, TRACE_SPECIES + 2);
+    auto h_S = Kokkos::create_mirror_view(S);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        const rtype x = mesh.h_cell_coords(c, 0), y = mesh.h_cell_coords(c, 1);
+        const auto column = static_cast<uint32_t>(x * static_cast<rtype>(nx));
+        h_S(c, 0) = 0.25_r;
+        h_S(c, 1) = column % 3 == 0 ? trace : 0.0_r;
+        h_S(c, 2) = 0.75_r - h_S(c, 1);
+        h_S(c, TRACE_SPECIES) = trace_gamma(x, y);
+        h_S(c, TRACE_SPECIES + 1) = 0.0_r;
+    }
+    Kokkos::deep_copy(S, h_S);
+    return S;
+}
+
+Kokkos::View<rtype *[N_CONSERVATIVE]> uniform_W(const Mesh & mesh) {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh.n_cells);
+    Kokkos::parallel_for(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_CONSERVATIVE W(c, i) = 0.0_r;
+        W(c, 0) = 1.0_r;
+        W(c, N_DIM + 1) = 1.0_r;
+    });
+    return W;
+}
+
+/** @brief Smallest mass fraction at any face point of any cell. */
+template <typename Eval>
+rtype min_face_Y(const Mesh & mesh, const Eval & values, const uint8_t nq) {
+    rtype result;
+    Kokkos::parallel_reduce(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c, rtype & lo) {
+        const uint32_t n = values.offsets_faces_of_cell(c + 1) - values.offsets_faces_of_cell(c);
+        for (uint32_t j = 0; j < TRACE_SPECIES; j++) {
+            FacePointValues S[teno::MAX_FACES];
+            values.cell_values(c, j, S);
+            for (uint32_t k = 0; k < n; k++) {
+                for (uint8_t q = 0; q < nq; q++) lo = Kokkos::fmin(lo, S[k][q]);
+            }
+        }
+    }, Kokkos::Min<rtype>(result));
+    return result;
+}
+
+/** @brief gamma at every face point, (face, q, side). */
+template <typename Eval>
+Kokkos::View<rtype **[2]> face_gamma(const Mesh & mesh, const Eval & values, const uint8_t nq) {
+    Kokkos::View<rtype **[2]> gamma("gamma", mesh.n_faces, nq);
+    Kokkos::parallel_for(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        FacePointValues G[teno::MAX_FACES];
+        values.cell_values(c, TRACE_SPECIES, G);
+        for (uint8_t k = 0; k < values.n_faces(c); k++) {
+            const uint32_t f = values.faces_of_cell(values.offsets_faces_of_cell(c) + k);
+            const uint8_t side = values.cells_of_face(f, 0) == static_cast<int32_t>(c) ? 0 : 1;
+            for (uint8_t q = 0; q < nq; q++) gamma(f, q, side) = G[k][q];
+        }
+    });
+    return gamma;
+}
+
+class ScalarLimiters : public ::testing::TestWithParam<std::string> {};
+
+} // namespace
+
+TEST_P(ScalarLimiters, RoundOffTraceSpeciesKeepsTheOtherScalarsSecondOrder) {
+    // A species absent from a cell (0) next to round-off (1e-34) must not cut
+    // the cell's shared limiter: the linear gamma stays exact at its faces
+    constexpr uint32_t NX = 9, NY = 8;
+    auto mesh = make_mesh("cartesian", NX, NY);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
+    auto muscl = make_muscl(mesh, bd, GetParam());
+    ScalarReconstruction recon;
+    recon.init(mesh, bd, TRACE_SPECIES, *muscl);
+    auto S = trace_scalars(*mesh, NX, 1.0e-34_r);
+    Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, 1);
+    recon.calc(S, uniform_W(*mesh), face_thermo);
+    auto h_thermo = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_thermo);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint8_t side = 0; side < 2; side++) {
+            const int32_t c = mesh->h_cells_of_face(f, side);
+            if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
+            EXPECT_NEAR(h_thermo(f, 0, side, 0), trace_gamma(mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1)),
+                        roundoff(1e-12)) << "face " << f << " side " << static_cast<int>(side);
+        }
+    }
+}
+
+TEST_P(ScalarLimiters, MassFractionsStayNonNegativeAtFaces) {
+    constexpr uint32_t NX = 9, NY = 8;
+    auto mesh = make_mesh("cartesian", NX, NY);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
+    auto muscl = make_muscl(mesh, bd, GetParam());
+    ScalarReconstruction recon;
+    recon.init(mesh, bd, TRACE_SPECIES, *muscl);
+    Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, 1);
+    for (const rtype trace : {1.0e-34_r, 1.0e-6_r, 0.5_r}) {
+        auto S = trace_scalars(*mesh, NX, trace);
+        recon.calc(S, uniform_W(*mesh), face_thermo);
+        EXPECT_GE(min_face_Y(*mesh, recon.face_values(S), 1), 0.0_r) << "trace " << trace;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Reconstruction, ScalarLimiters,
+                         ::testing::Values("none", "venkatakrishnan", "barth_jespersen"));
+
+TEST(TENOScalarsTest, RoundOffTraceSpeciesKeepsThetaAtOneAndStaysNonNegative) {
+    constexpr uint32_t NX = 12, NY = 12;
+    auto mesh = make_mesh("cartesian", NX, NY);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    teno->init(parse_toml("type = \"TENO\"\norder = 5\n"));
+    const uint8_t nq = teno->n_face_quadrature_points();
+    auto W = uniform_W(*mesh);
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, nq);
+    teno->calc_face_values(W, face_W);
+    ScalarReconstruction recon;
+    recon.init(mesh, bd, TRACE_SPECIES, *teno);
+    auto S = trace_scalars(*mesh, NX, 1.0e-34_r);
+    Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, nq);
+    recon.calc(S, W, face_thermo);
+    // theta = 1: gamma at every face point is its unscaled reconstruction
+    const auto unscaled = make_teno_scalar_values<4>(*teno, *mesh, bd, S, Kokkos::View<rtype *>(), TRACE_SPECIES);
+    auto h_thermo = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_thermo);
+    auto h_gamma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_gamma(*mesh, unscaled, nq));
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint8_t side = 0; side < 2; side++) {
+            if (mesh->h_cells_of_face(f, side) < 0) continue;
+            for (uint8_t q = 0; q < nq; q++) {
+                EXPECT_NEAR(h_thermo(f, q, side, 0), h_gamma(f, q, side), roundoff(1e-14))
+                    << "face " << f << " point " << static_cast<int>(q);
+            }
+        }
+    }
+    EXPECT_GE(min_face_Y(*mesh, unscaled, nq), 0.0_r);
 }
 
 INSTANTIATE_TEST_SUITE_P(Reconstruction, MeshTypes,
