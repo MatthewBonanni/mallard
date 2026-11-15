@@ -28,7 +28,7 @@ constexpr int MAX_LEVEL = N_DIM == 2 ? 8 : 5;
 /** @brief Children of a subdivision: 4 triangles, 8 tetrahedra, or 2^N_DIM boxes. */
 constexpr int CHILDREN = N_DIM == 2 ? 4 : 8;
 
-/** @brief Most pending boxes of a depth-first subdivision of a cone. */
+/** @brief Most pending simplices or boxes of a depth-first subdivision. */
 constexpr int STACK = MAX_LEVEL * (CHILDREN - 1) + 1;
 
 namespace detail {
@@ -50,54 +50,15 @@ struct Shape {
     bool bounded = true;
 };
 
-/** @brief A simplex's children, classified: each one's weight and distance, and which are uniform. */
-struct Children {
-    double w[CHILDREN] = {}, phi[CHILDREN] = {};
-    uint32_t uniform = 0, filled = 0;
-
-    /** @brief Takes the children o filled: joins the lanes' shares. */
-    KOKKOS_INLINE_FUNCTION Children & operator+=(const Children & o) {
-        for (int j = 0; j < CHILDREN; j++) {
-            if ((o.filled >> j) & 1u) {
-                w[j] = o.w[j];
-                phi[j] = o.phi[j];
-            }
-        }
-        uniform |= o.uniform;
-        filled |= o.filled;
-        return *this;
-    }
-};
-
-/** @brief One thread classifies a simplex's children, one after another. */
-struct SerialLanes {
-    template <typename F>
-    KOKKOS_INLINE_FUNCTION void classify(const F & f, Children & out) const {
-        out = Children{};
-        for (int j = 0; j < CHILDREN; j++) f(j, out);
-    }
-};
-
-/** @brief The vector lanes of a team member classify a simplex's children together. */
-template <typename Member>
-struct VectorLanes {
-    const Member & member;
-
-    template <typename F>
-    KOKKOS_INLINE_FUNCTION void classify(const F & f, Children & out) const {
-        Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(member, CHILDREN), f, out);
-    }
-};
-
 namespace detail {
 
 /**
- * @brief Whether a simplex v of N_DIM + 1 vertices at subdivision level
- *        level is uniform (left whole), its centroid c and the distance phi there.
+ * @brief Whether a simplex v of N_DIM + 1 vertices at subdivision level level
+ *        is kept whole, with its centroid c and the distance phi there.
  */
 template <typename Distance>
 KOKKOS_INLINE_FUNCTION bool is_uniform(const Shape<Distance> & shape, const double v[4][3], const int level, double c[3],
-                                    double & phi) {
+                                       double & phi) {
     constexpr int n_vertices = N_DIM + 1;
     const double half_edge = 0.5 * shape.edge;
     c[0] = c[1] = c[2] = 0.0;
@@ -158,64 +119,170 @@ KOKKOS_INLINE_FUNCTION void child(const double v[4][3], const int j, double out[
  * @brief Adds the integral of the indicator (times r in axisymmetric runs) and
  *        of 1 over a simplex of N_DIM + 1 vertices v to inside and total,
  *        subdivided into CHILDREN children where the surface or edge may
- *        cross it, depth first in the children's order. The lanes classify
- *        each subdivided simplex's children; the sums do not depend on them.
+ *        cross it, depth first in the children's order.
  */
-template <typename Distance, typename Lanes = SerialLanes>
+template <typename Distance>
 KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool axisymmetric, const double v0[4][3],
-                                    const double measure0, double & inside, double & total, const Lanes & lanes = {}) {
-    double c[3], phi;
-    if (detail::is_uniform(shape, v0, 0, c, phi)) {
-        const double w = measure0 * (axisymmetric ? c[1] : 1.0);
-        inside += w * indicator(phi, shape.edge);
-        total += w;
-        return;
-    }
-    // The subdivided simplices from the root to the current one, with their children
-    struct Level {
+                                    const double measure0, double & inside, double & total) {
+    struct Item {
         double v[4][3];
         double measure;
-        Children children;
-        int next;
+        int level;
     };
-    Level path[MAX_LEVEL];
-    auto subdivide = [&](Level & p, const int level) {
-        const double measure = p.measure / double(CHILDREN);
-        lanes.classify([&](const int j, Children & out) {
-            double v[4][3], c_j[3], phi_j;
-            detail::child(p.v, j, v);
-            const bool uniform = detail::is_uniform(shape, v, level + 1, c_j, phi_j);
-            out.w[j] = measure * (axisymmetric ? c_j[1] : 1.0);
-            out.phi[j] = phi_j;
-            out.uniform |= uint32_t(uniform) << j;
-            out.filled |= 1u << j;
-        }, p.children);
-        p.next = 0;
-    };
+    Item stack[STACK];
+    int top = 0;
     for (int k = 0; k < 4; k++) {
-        for (int i = 0; i < 3; i++) path[0].v[k][i] = v0[k][i];
+        for (int i = 0; i < 3; i++) stack[0].v[k][i] = v0[k][i];
     }
-    path[0].measure = measure0;
-    subdivide(path[0], 0);
-    int level = 0;
-    while (level >= 0) {
-        Level & p = path[level];
-        if (p.next == CHILDREN) {
-            level--;
-            continue;
-        }
-        const int k = p.next++;
-        if ((p.children.uniform >> k) & 1u) {
-            const double w = p.children.w[k];
-            inside += w * indicator(p.children.phi[k], shape.edge);
+    stack[0].measure = measure0;
+    stack[0].level = 0;
+    while (top >= 0) {
+        const Item item = stack[top--];
+        double c[3], phi;
+        if (detail::is_uniform(shape, item.v, item.level, c, phi)) {
+            const double w = item.measure * (axisymmetric ? c[1] : 1.0);
+            inside += w * indicator(phi, shape.edge);
             total += w;
             continue;
         }
-        Level & q = path[level + 1];
-        detail::child(p.v, k, q.v);
-        q.measure = p.measure / double(CHILDREN);
-        subdivide(q, ++level);
+        // Pushed last child first, so that they are summed in order
+        for (int child = CHILDREN - 1; child >= 0; child--) {
+            Item & next = stack[++top];
+            detail::child(item.v, child, next.v);
+            next.measure = item.measure / double(CHILDREN);
+            next.level = item.level + 1;
+        }
     }
+}
+
+/** @brief Nodes of the first levels of the complete subdivision tree of a simplex (all of them by default). */
+KOKKOS_INLINE_FUNCTION constexpr uint32_t tree_nodes(const int levels = MAX_LEVEL + 1) {
+    uint32_t n = 0, width = 1;
+    for (int l = 0; l < levels; l++, width *= CHILDREN) n += width;
+    return n;
+}
+
+/** @brief Team scratch of team_simplex: 2 bits per node of the subdivision tree. */
+constexpr size_t TREE_BYTES = sizeof(uint32_t) * ((2 * tree_nodes() + 31) / 32);
+
+namespace detail {
+
+/** @brief A node of the subdivision tree: not reached, subdivided, or kept whole outside or inside (phi < 0). */
+enum : uint32_t { ABSENT = 0, SUBDIVIDED = 1, OUTSIDE = 2, INSIDE = 3 };
+
+KOKKOS_INLINE_FUNCTION uint32_t node_state(const uint32_t * tree, const uint32_t node) {
+    return (tree[node / 16] >> (2 * (node % 16))) & 3u;
+}
+
+} // namespace detail
+
+/**
+ * @brief simplex, with the threads of a team: they classify the simplices of
+ *        each level of the subdivision together, each one placed from the
+ *        root along its path, into a table of their states (tree, TREE_BYTES
+ *        of team scratch), and one thread then sums the kept ones depth first,
+ *        so that the sums are those of simplex. Every thread of the team
+ *        calls it, with the same arguments.
+ */
+template <typename Member, typename Distance>
+KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, uint32_t * tree, const Shape<Distance> & shape,
+                                         const bool axisymmetric, const double v0[4][3], const double measure0,
+                                         double & inside, double & total) {
+    {
+        double c[3], phi;
+        if (detail::is_uniform(shape, v0, 0, c, phi)) {
+            const double w = measure0 * (axisymmetric ? c[1] : 1.0);
+            inside += w * indicator(phi, shape.edge);
+            total += w;
+            return;
+        }
+    }
+    constexpr uint32_t words = static_cast<uint32_t>(TREE_BYTES / sizeof(uint32_t));
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(member, words), [&](const uint32_t i) {
+        tree[i] = i == 0 ? uint32_t(detail::SUBDIVIDED) : 0u;
+    });
+    member.team_barrier();
+    uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
+    for (int level = 1; level <= MAX_LEVEL; level++) {
+        const uint32_t parents = first;
+        first += width;
+        width *= CHILDREN;
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, width), [&](const uint32_t code) {
+            if (detail::node_state(tree, parents + code / CHILDREN) != detail::SUBDIVIDED) return;
+            double v[4][3], u[4][3];
+            for (int k = 0; k < 4; k++) {
+                for (int i = 0; i < 3; i++) v[k][i] = v0[k][i];
+            }
+            for (uint32_t place = width / CHILDREN; place > 0; place /= CHILDREN) {
+                detail::child(v, static_cast<int>((code / place) % CHILDREN), u);
+                for (int k = 0; k < 4; k++) {
+                    for (int i = 0; i < 3; i++) v[k][i] = u[k][i];
+                }
+            }
+            double c[3], phi;
+            const uint32_t state = !detail::is_uniform(shape, v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
+                                   : phi < 0.0                                 ? uint32_t(detail::INSIDE)
+                                                                               : uint32_t(detail::OUTSIDE);
+            const uint32_t node = first + code;
+            Kokkos::atomic_or(&tree[node / 16], state << (2 * (node % 16)));
+        });
+        member.team_barrier();
+    }
+    struct Sums {
+        double inside, total;
+    };
+    // The kept simplices depth first, in the children's order, as simplex sums them
+    const bool sharp = !(shape.edge > 0.0), placed = axisymmetric || !sharp;
+    Sums sums{inside, total};
+    Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
+        struct Frame {
+            double v[4][3];
+            double measure;
+            uint32_t code;
+            int next;
+        };
+        Frame path[MAX_LEVEL];
+        for (int k = 0; k < 4; k++) {
+            for (int i = 0; i < 3; i++) path[0].v[k][i] = v0[k][i];
+        }
+        path[0].measure = measure0;
+        path[0].code = 0;
+        path[0].next = 0;
+        int top = 0;
+        while (top >= 0) {
+            Frame & f = path[top];
+            if (f.next == CHILDREN) {
+                top--;
+                continue;
+            }
+            const int j = f.next++;
+            const uint32_t code = f.code * CHILDREN + static_cast<uint32_t>(j);
+            const double measure = f.measure / double(CHILDREN);
+            const uint32_t state = detail::node_state(tree, tree_nodes(top + 1) + code);
+            if (state == detail::SUBDIVIDED) {
+                Frame & g = path[top + 1];
+                detail::child(f.v, j, g.v);
+                g.measure = measure;
+                g.code = code;
+                g.next = 0;
+                top++;
+                continue;
+            }
+            double w = measure, indicated = state == detail::INSIDE ? 1.0 : 0.0;
+            if (placed) {
+                double v[4][3], c[3], phi;
+                detail::child(f.v, j, v);
+                detail::is_uniform(shape, v, top + 1, c, phi);
+                w = measure * (axisymmetric ? c[1] : 1.0);
+                if (!sharp) indicated = indicator(phi, shape.edge);
+            }
+            s.inside += w * indicated;
+            s.total += w;
+        }
+    }, sums);
+    inside = sums.inside;
+    total = sums.total;
+    member.team_barrier();
 }
 
 /**
@@ -291,13 +358,23 @@ KOKKOS_INLINE_FUNCTION void straight_simplices(const uint32_t n, const Nodes & n
 /**
  * @brief Adds the integrals of the indicator and of 1 over a straight cell,
  *        whose nodes node(k, x) gives (n of them), over its simplices
- *        (straight_simplices), the lanes classifying their children.
+ *        (straight_simplices).
  */
-template <typename Distance, typename Nodes, typename Lanes = SerialLanes>
+template <typename Distance, typename Nodes>
 KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const bool axisymmetric, const uint32_t n,
-                                          const Nodes & node, double & inside, double & total, const Lanes & lanes = {}) {
+                                          const Nodes & node, double & inside, double & total) {
     straight_simplices(n, node, [&](const double s[4][3], const double measure) {
-        simplex(shape, axisymmetric, s, measure, inside, total, lanes);
+        simplex(shape, axisymmetric, s, measure, inside, total);
+    });
+}
+
+/** @brief straight_cell, with the threads of a team (team_simplex). */
+template <typename Member, typename Distance, typename Nodes>
+KOKKOS_INLINE_FUNCTION void team_straight_cell(const Member & member, uint32_t * tree, const Shape<Distance> & shape,
+                                               const bool axisymmetric, const uint32_t n, const Nodes & node,
+                                               double & inside, double & total) {
+    straight_simplices(n, node, [&](const double s[4][3], const double measure) {
+        team_simplex(member, tree, shape, axisymmetric, s, measure, inside, total);
     });
 }
 

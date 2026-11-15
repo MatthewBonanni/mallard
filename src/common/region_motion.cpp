@@ -11,7 +11,6 @@
 
 #include "region_motion.h"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
@@ -29,6 +28,7 @@ namespace {
 constexpr int N_COEFFICIENTS = MovingFractions::DEGREE + 1;
 constexpr int FACE_COEFFICIENTS = N_DIM == 2 ? N_COEFFICIENTS : N_COEFFICIENTS * N_COEFFICIENTS;
 constexpr double PI_ = 3.14159265358979323846;
+constexpr int TEAM = 32;  // threads per cell of a moving region's fractions on GPUs
 
 template <typename T>
 Kokkos::View<const T *> upload(const std::vector<T> & v, const std::string & label) {
@@ -588,18 +588,14 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const auto cell_offsets = offsets_nodes_of_cell;
     const bool sharp_bounds = bounded, axi = axisymmetric;
     const Kokkos::View<double *> out = m_fractions;
-    // A cell per team member, whose vector lanes classify the children of the simplices it subdivides
+    // On GPUs, a team per cell: its threads classify the simplices it subdivides together
     using Policy = Kokkos::TeamPolicy<>;
     constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
-    const int lanes = gpu ? std::min(sampler::CHILDREN, Policy::vector_length_max()) : 1;
-    const int members = gpu ? 128 / lanes : 1;
-    const uint32_t cells = n_cells;
-    const Policy policy(static_cast<int>((cells + static_cast<uint32_t>(members) - 1) / static_cast<uint32_t>(members)),
-                        members, lanes);
+    Policy policy(static_cast<int>(n_cells), gpu ? TEAM : 1);
+    if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::TREE_BYTES));
     Kokkos::parallel_for("region_moving_fractions", policy, KOKKOS_LAMBDA(const Policy::member_type & member) {
-        const uint32_t c = static_cast<uint32_t>(member.league_rank() * member.team_size() + member.team_rank());
-        if (c >= cells) return;
-        const sampler::VectorLanes<Policy::member_type> vector{member};
+        const uint32_t c = static_cast<uint32_t>(member.league_rank());
+        uint32_t * tree = gpu ? static_cast<uint32_t *>(member.team_scratch(0).get_shmem(sampler::TREE_BYTES)) : nullptr;
         const double t = static_cast<double>(time());
         double stack[MAX_STACK];
         int top = -1;
@@ -633,8 +629,12 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                                 const uint32_t q = cell_nodes(first + k);
                                 for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                             };
-                            sampler::straight_cell(shape, axi, cell_offsets(c + 1) - first, node, inside, total,
-                                                   vector);
+                            if constexpr (gpu) {
+                                sampler::team_straight_cell(member, tree, shape, axi, cell_offsets(c + 1) - first, node,
+                                                            inside, total);
+                            } else {
+                                sampler::straight_cell(shape, axi, cell_offsets(c + 1) - first, node, inside, total);
+                            }
                         }
                         value = total > 0.0 ? inside / total : 0.0;
                     }
@@ -683,7 +683,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                     break;
             }
         }
-        Kokkos::single(Kokkos::PerThread(member), [&]() { out(c) = stack[0]; });
+        Kokkos::single(Kokkos::PerTeam(member), [&]() { out(c) = stack[0]; });
     });
 }
 
