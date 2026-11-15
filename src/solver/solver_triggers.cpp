@@ -110,13 +110,24 @@ std::vector<double> Solver::trigger_values() const {
 }
 
 bool Solver::triggers_on_device() const {
-    if (triggers.empty() || !triggers.fit_device() || triggers.size() > 64) return false;
-    // Probes' values are reduced by the host
+    return !triggers.empty() && triggers.fit_device() && triggers.size() <= 64;
+}
+
+bool Solver::triggers_read_probe(const size_t k) const {
+    if (!triggers_on_device()) return false;
+    const std::vector<size_t> from = probes.value_probes();
     const size_t end = triggers.variables().size() - (convergence.enabled() ? convergence.columns().size() : 0);
-    for (size_t v = end - probes.value_names().size(); v < end; v++) {
-        if (triggers.reads(static_cast<uint16_t>(v))) return false;
+    for (size_t j = 0; j < from.size(); j++) {
+        if (from[j] == k && triggers.reads(static_cast<uint16_t>(end - from.size() + j))) return true;
     }
-    return true;
+    return false;
+}
+
+bool Solver::triggers_read_probes() const {
+    for (size_t k = 0; k < probes.size(); k++) {
+        if (triggers_read_probe(k)) return true;
+    }
+    return false;
 }
 
 bool Solver::convergence_on_device() const {
