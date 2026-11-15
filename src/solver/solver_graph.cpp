@@ -702,6 +702,7 @@ void Solver::sample_convergence() {
         record.window_start = window_start;
         if (!on_device) return;
         any() = 0;
+        for (uint32_t i = 0; i < n_signals; i++) written(i) = 0;
         if (!(L.active && L.advanced)) return;
         // update_convergence's samples: the signals whose monitor or probe wrote at the step
         bool due = false, full = false;
@@ -716,6 +717,7 @@ void Solver::sample_convergence() {
             full = full || signals(i).n >= capacity;
         }
         if (full) {
+            for (uint32_t i = 0; i < n_signals; i++) written(i) = 0;
             record.reasons |= step_queue::CONVERGENCE;
             L.active = 0;
             L.progress = 0;

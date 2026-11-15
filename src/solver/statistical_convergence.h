@@ -127,7 +127,7 @@ class Convergence {
         /** @brief A signal's state between samples, besides its history. */
         struct SignalState {
             uint64_t next_check = 0;  // samples at the next MSER check
-            time_series::Truncation truncation;  // the latest accepted
+            time_series::Truncation truncation{0, false};  // the latest accepted
             uint64_t n_tau = 0;       // window samples at the last autocorrelation time
             double window_tau = 0.0;  // its window's start
             double tau = 0.0;
@@ -145,7 +145,10 @@ class Convergence {
         void stage();
         /** @brief Whether a history fills half its room on the device: stage again (the step graph is captured anew). */
         bool staged_room_low() const;
-        /** @brief The device's histories and state from the host's, whose samples since the last call it copies. */
+        /**
+         * @brief The device's histories and state from the host's, whose samples since the last call it copies (nothing
+         *        when the host added none).
+         */
         void resume_staged();
         /**
          * @brief In a step graph: add's update on the device, bit for bit, of the samples of the signals whose
@@ -190,6 +193,7 @@ class Convergence {
         // Staged: (signal, [t, x, s1, s2], sample), the signals, [stationary, t_stationary], MSER's batch means and
         // the autocorrelations of a chunk of lags
         uint64_t capacity = 0;
+        bool staged_current = false;  // the device's copy holds every sample and state
         Kokkos::View<double ***, Kokkos::LayoutRight> d_history;
         Kokkos::View<DeviceSignal *> d_signals;
         Kokkos::View<double *> d_global, d_batches, d_lags;

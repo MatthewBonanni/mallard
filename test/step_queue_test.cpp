@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -449,6 +450,26 @@ std::string written_at(const Outcome & reference, const std::string & line, cons
     return when + point + "_" + point_variable + " == " + exactly(values.back());
 }
 
+/** @brief The value of column in reference's file at the row of step (root), NaN if there is none. */
+double value_at(const Outcome & reference, const std::string & file, const std::string & column, const uint64_t step) {
+    std::istringstream in(reference.files.at(file));
+    std::vector<std::string> header;
+    for (std::string row; std::getline(in, row);) {
+        std::vector<std::string> fields;
+        std::istringstream cells(row);
+        for (std::string f; std::getline(cells, f, ',');) fields.push_back(f);
+        if (header.empty()) {
+            header = fields;
+            continue;
+        }
+        if (fields.empty() || !std::isdigit(static_cast<unsigned char>(fields[0][0])) || std::stoull(fields[0]) != step)
+            continue;
+        const auto k = std::find(header.begin(), header.end(), column) - header.begin();
+        if (static_cast<size_t>(k) < fields.size()) return std::stod(fields[static_cast<size_t>(k)]);
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
 /**
  * @brief The step of the n-th row of reference's convergence file after step `after` at a multiple of 3 steps where
  *        every value is finite, and a condition that holds while the convergence values are that row's, each as an
@@ -857,9 +878,10 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
 }
 
 TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
-    // An integral's and a staged probe's convergence inside the [statistics] averaging window, updated on the device at
-    // their rows: the queue stops only at the row whose every convergence value the condition equals, as a checkpoint
-    // at that step does, and goes on from the host's histories
+    // An integral's and a staged probe's convergence, updated on the device at their rows: the queue stops only at the
+    // row whose every convergence value the condition equals, as a checkpoint at that step does, and goes on from the
+    // host's histories. The signals are stationary before the [statistics] averages start, whose start then moves
+    // their windows at the step the record says, not at a step queued after it
     Case c;
     c.run = "n_steps = 200\ncfl = 0.5\n";
     const std::string convergence =
@@ -867,7 +889,7 @@ TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
         "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
         "point = " + point_of("0.6", "0.5", "0.2") + "\n"
         "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
-        "[statistics]\ninterval = 2\nt_start = 0.05\nfields = [\"P\"]\n"
+        "[statistics]\ninterval = 2\nt_start = 1.5\nfields = [\"P\"]\n"
         "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
         "batches = 4\ntolerance = 0.5\nfile = \"{dir}/convergence.csv\"\n";
     c.extra = convergence;
@@ -892,9 +914,24 @@ TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
 TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueOnce) {
     // An integral sampled every step fills its history's 4096 samples on the device: the device stops there once, and
     // goes on from histories with room for four times as many, on which a condition equal to a later row's values
-    // stops the queue at that row, as a checkpoint at that step does
+    // stops the queue at that row, as a checkpoint at that step does. The waves of a closed box keep the kinetic
+    // energy correlated over many lags.
     Case c;
     c.run = "n_steps = 4200\ncfl = 0.5\n";
+    std::ostringstream box;
+    box << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) box << "Nz = 4\nLz = 0.4\n";
+    box << "[initialize]\ntype = \"analytical\"\n"
+        << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
+        << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n";
+    for (const char * zone : {"left", "right", "top", "bottom"}) {
+        box << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"wall_adiabatic\"\n";
+    }
+    if (N_DIM == 3) box << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+    box << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+        << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    c.body = box.str();
     const std::string convergence = "check_interval = 100000\n" + RESTARTS +
                                     "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
                                     "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\"]\n"
@@ -904,6 +941,10 @@ TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueO
     const Outcome reference = run_case("convergence_room_reference", c, 0);
     const auto [at, when] = convergence_row(reference, 1, 4100);
     ASSERT_GT(at, 0u);
+    // Sokal's window (5 tau) spans more than one device chunk of 256 lags
+    if (comm::is_root()) {
+        EXPECT_GT(5.0 * value_at(reference, "convergence.csv", "integrals_kinetic_energy_tau", at), 256.0);
+    }
     c.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("convergence_room", c);
     EXPECT_EQ(o.step, 4200u);

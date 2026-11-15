@@ -1,0 +1,1 @@
+- `[statistics.convergence]` windows read the start of the `[statistics]` averages at each row's step, where steps enqueued ahead of the host (`[run] step_queue`) could make it read a later step's (#1062).

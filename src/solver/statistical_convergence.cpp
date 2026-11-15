@@ -292,6 +292,7 @@ void Convergence::Signal::push(double time, double value) {
 void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_t, double>> & samples,
                       double window_start) {
     if (samples.empty()) return;
+    staged_current = false;
     for (const auto & [i, value] : samples) signals[i].push(t, value);
     // A longer series can move the end of the transient later: each check's accepted start replaces the last
     bool checked = false, all = true;
@@ -431,7 +432,9 @@ void Convergence::restore(const RestartData & restart, const std::string & resta
     };
     stationary = get(PREFIX + "STATIONARY") != 0.0;
     t_stationary = get(PREFIX + "T_STATIONARY");
+    staged_current = false;
     for (auto & s : signals) {
+        s.n_staged = 0;
         const std::string p = PREFIX + s.name + "_";
         s.next_check = static_cast<uint64_t>(get(p + "NEXT_CHECK"));
         s.truncation = {static_cast<uint64_t>(get(p + "TRUNCATION")), get(p + "ACCEPTED") != 0.0};
@@ -495,6 +498,7 @@ void Convergence::stage() {
         d_history = Kokkos::View<double ***, Kokkos::LayoutRight>("convergence_history", n, 4, capacity + 1);
         d_batches = Kokkos::View<double *>("convergence_batches", capacity / time_series::MSER_BATCH + 1);
         for (auto & s : signals) s.n_staged = 0;
+        staged_current = false;
     }
     if (d_signals.extent(0) != n) {
         d_signals = Kokkos::View<DeviceSignal *>("convergence_signals", n);
@@ -510,6 +514,8 @@ bool Convergence::staged_room_low() const {
 }
 
 void Convergence::resume_staged() {
+    if (staged_current) return;
+    staged_current = true;
     const auto h_signals = Kokkos::create_mirror_view(d_signals);
     for (size_t i = 0; i < signals.size(); i++) {
         Signal & s = signals[i];
@@ -585,7 +591,7 @@ void Convergence::add_staged(double * result) {
                     team.team_barrier();
                 }
                 Kokkos::single(Kokkos::PerTeam(team), [&] {
-                    time_series::Truncation cut;
+                    time_series::Truncation cut{0, false};
                     if (enough) {
                         // Sums about the mean, against cancellation in signals with a large mean
                         double reference = 0.0;
