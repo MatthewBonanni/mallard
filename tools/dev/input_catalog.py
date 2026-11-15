@@ -4,8 +4,9 @@
     python tools/dev/input_catalog.py build --mallard-2d build/src/mallard --mallard-3d build-3d/src/mallard [--check]
     python tools/dev/input_catalog.py docs [--catalog docs/input-keys]
 
-build: runs `mallard check INPUT --catalog KEYS.json` on every input of examples/
-and tutorials/, in its directory on a temporary copy whose generated mesh is cut to
+build: runs `mallard check INPUT --catalog KEYS.json` on every input of examples/,
+tutorials/ and tools/dev/catalog_inputs/ (2d/, 3d/: inputs of the keys no example or
+tutorial sets up), in its directory on a temporary copy whose generated mesh is cut to
 a few cells per direction (each check takes seconds; inputs whose mesh file is not
 in the repository are skipped) and
 merges what setup recorded into docs/input-keys/, one file per key path: its type,
@@ -17,9 +18,9 @@ plus .json. With --check it compares with the committed files instead of writing
 them, and exits 1 if they differ.
 
 docs: checks docs/input.md against the catalog and exits 1 on any difference:
-every key of its key tables (those headed "| Key |") must be in the catalog,
-except those in UNEXERCISED, and the defaults it states ("default X",
-"Default: X", "X (default)" in a key's row) must be the catalog's. CI runs
+every key of its key tables (those headed "| Key |") must be in the catalog, and
+the defaults it states ("default X", "Default: X", "X (default)" in a key's row)
+must be the catalog's. CI runs
 build --check in the tutorials job, which has both builds, and docs in
 tools/dev/precheck.sh.
 """
@@ -41,7 +42,7 @@ TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_
 
 
 def inputs():
-    """(path, dimension) of every input of examples/ and tutorials/."""
+    """(path, dimension) of every input of examples/, tutorials/ and tools/dev/catalog_inputs/."""
     out = []
     for f in sorted((ROOT / "examples").rglob("*.toml")):
         if f.name == "card.toml" or "reference" in f.parts:
@@ -54,6 +55,8 @@ def inputs():
         f = ROOT / "tutorials" / name / "input.toml"
         if f.exists():
             out.append((f, dim))
+    for dim in (2, 3):
+        out += [(f, dim) for f in sorted((ROOT / "tools" / "dev" / "catalog_inputs" / f"{dim}d").glob("*.toml"))]
     return out
 
 
@@ -152,34 +155,6 @@ LITERAL = r"(?>`[^`<\s]+`|-?\d[\d.]*(?:[eE][-+]?\d+)?|true|false)"
 DEFAULT = re.compile(rf"[Dd]efault:?\s+({LITERAL})(?![\w<])(?!\s+in\s+[23]D)|({LITERAL})\s+\(default\)")
 
 
-# Documented keys that no example or tutorial sets up, so they are missing from the
-# catalog; a key leaves this list when an input exercises it (#877)
-UNEXERCISED = {
-    "mesh.filename", "mesh.scale", "mesh.rotate", "mesh.translate",
-    "periodic.center", "periodic.axis",
-    "physics.sutherland_S",
-    "initialize.turbulence.file",
-    "sponges.X", "sponges.Y", "sponges.balance",
-    "numerics.error_control.tolerance", "numerics.error_control.abs_tolerance",
-    "numerics.error_control.rel_tolerance", "numerics.error_control.beta",
-    "numerics.hybrid.sensor_threshold", "numerics.hybrid.upwind_floor", "numerics.hybrid.central",
-    "statistics.spectra.fields", "statistics.spectra.products", "statistics.spectra.directions",
-    "statistics.spectra.average", "statistics.spectra.file", "statistics.spectra.interval",
-    "statistics.spectra.t_start",
-    "statistics.phase.fields", "statistics.phase.bins", "statistics.phase.period",
-    "statistics.phase.t_reference", "statistics.phase.probe", "statistics.phase.variable",
-    "statistics.phase.level", "statistics.phase.interval", "statistics.phase.t_start",
-    "statistics.confidence",
-    "statistics.convergence.signals", "statistics.convergence.batches", "statistics.convergence.min_samples",
-    "statistics.convergence.confidence", "statistics.convergence.tolerance",
-    "statistics.convergence.variance_tolerance", "statistics.convergence.file",
-    "probes.moment_center",
-    "parallel.partitioner", "parallel.halo_exchange",
-    "output.hash_mesh",
-    "write_data.geometry",
-}
-
-
 def documented_rows():
     """(paths, whether they are alternatives, row text) of every row of the key tables of
     docs/input.md; a row may name several keys (`Nx`, `Ny`) or alternatives (`p` / `p0`,
@@ -243,24 +218,17 @@ def docs(args):
         if not same(entry["default"], text) and not any(same(d, text) for d in entry.get("defaults_by_dim", {}).values()):
             wrong.append(f"{path}: setup uses {entry['default']}, docs/input.md says {text}")
     keys = {path for paths, _, _ in documented_rows() for path in paths}
-    unread = sorted(keys - UNEXERCISED - catalog.keys())
-    exercised = sorted(UNEXERCISED & catalog.keys())
-    undocumented = sorted(UNEXERCISED - keys)
+    unread = sorted(keys - catalog.keys())
     checked = sum(1 for p in documented if p in catalog and "default" in catalog[p])
     errors = []
     if unread:
-        errors.append("keys in docs/input.md that setup never reads (or that no example or tutorial sets up):\n  "
+        errors.append("keys in docs/input.md that setup never reads (or that no input of the catalog sets up):\n  "
                       + "\n  ".join(unread))
-    if exercised:
-        errors.append("keys now in the catalog, to remove from UNEXERCISED:\n  " + "\n  ".join(exercised))
-    if undocumented:
-        errors.append("keys of UNEXERCISED that docs/input.md no longer documents:\n  " + "\n  ".join(undocumented))
     if wrong:
         errors.append("defaults in docs/input.md that setup does not use:\n  " + "\n  ".join(wrong))
     if errors:
         sys.exit("\n".join(errors))
-    print(f"{len(keys) - len(UNEXERCISED)} documented keys are in the catalog ({len(UNEXERCISED)} not exercised yet), "
-          f"{checked} documented defaults match it")
+    print(f"{len(keys)} documented keys are in the catalog, {checked} documented defaults match it")
 
 
 def main():

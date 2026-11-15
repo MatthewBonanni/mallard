@@ -11,6 +11,7 @@
   "examples/flame_vortex_quenching/input.toml",
   "examples/premixed_flame/ch4/input.toml",
   "examples/premixed_flame/input.toml",
-  "examples/reactive_shock_tube/input.toml"
+  "examples/reactive_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
  ]
 }

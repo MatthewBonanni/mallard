@@ -3,7 +3,6 @@
   2,
   3
  ],
- "required": true,
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/cbc_les/input.toml",
@@ -31,7 +30,10 @@
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
  ],
  "type": "array"
 }
