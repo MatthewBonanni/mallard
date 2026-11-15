@@ -463,8 +463,9 @@ top-level kernel launches through `src/common/gated.h` (a CMake check rejects Ko
 the innermost gate; a reduction that does nothing leaves its destination as it was, by copying it into the result
 in the reduction's final step. Copies and fills there are kernels too (the tests' `StepGraphGuard` reports
 others), and an IF node inside a gated body tests its gate as well. The NCCL operations always run, on the same
-buffers on every rank, since the flags come from values reduced over the ranks. A launch after a stop then costs
-the gated bodies' kernel launches and NCCL latency instead of nothing, `step_queue` - 1 times per stop. Off
+buffers on every rank, since the flags come from values reduced over the ranks. A gated body costs its kernel
+launches and its NCCL latency whether or not it is due: in every step for an output due only every few steps (a
+probe's reductions, say), and in each launch after a stop, `step_queue` - 1 times per stop, instead of nothing. Off
 CUDA, the tests' launches of the code a capture records gate every body.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at

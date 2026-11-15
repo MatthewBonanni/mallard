@@ -186,6 +186,7 @@ struct Case {
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
     Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
+    bool gated_nccl = false;      // step graphs gate the bodies that enqueue NCCL operations
     std::string body;             // the mesh, state, boundaries, numerics and physics of another case than the box
 };
 
@@ -318,6 +319,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
         solver.set_capture_fault(c.capture_fault);
+        solver.set_gated_nccl_bodies(c.gated_nccl);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
@@ -1165,6 +1167,40 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     c.distributed = true;
     const Outcome o = expect_queue_invariant("distributed", c);
     EXPECT_EQ(o.step, 24u);
+}
+
+TEST(MPITest, StepGraphsThatGateNcclBodiesRunAsConditionalNodesDo) {
+    // Where conditional nodes cannot hold NCCL operations, step graphs gate the bodies that enqueue them, with
+    // conditional nodes inside, and launch them also when not due: a line's reductions, reduced every 3 steps and read
+    // by a trigger that stops at step 19, give the run of conditional nodes bit for bit
+    if (comm::size() == 1) GTEST_SKIP() << "MPI runs on several ranks only";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+        "reductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
+    c.extra = probes;
+    c.distributed = true;
+    const Outcome reference = run_case("gated_nccl_reference", c, 0);
+    const std::string when =
+        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        " and step % 3 == 1";
+    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
+    const Outcome nodes = run_case("gated_nccl_nodes", c, 3);
+    c.gated_nccl = true;
+    const Outcome gated = run_case("gated_nccl_gated", c, 3);
+    expect_same(nodes, gated, "NCCL bodies gated");
+    EXPECT_EQ(gated.step, 19u);
+    EXPECT_EQ(gated.queued, nodes.queued);
+#ifdef KOKKOS_ENABLE_CUDA
+    EXPECT_GT(gated.graph_steps, 0u);
+#endif
 }
 
 TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {

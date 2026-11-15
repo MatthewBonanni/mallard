@@ -728,6 +728,11 @@ class Solver {
             LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
+        /**
+         * @brief Step graphs gate the device_if bodies that enqueue NCCL operations, as where conditional nodes cannot
+         *        hold them (tests: NCCL over a network). Call before run().
+         */
+        void set_gated_nccl_bodies(bool on) { gated_nccl_bodies = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -959,6 +964,7 @@ class Solver {
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
         CaptureFault capture_fault = CaptureFault::NONE;
+        bool gated_nccl_bodies = false;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         void * capture_graph = nullptr;        // cudaGraph_t being captured

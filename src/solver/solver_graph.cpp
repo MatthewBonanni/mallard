@@ -337,11 +337,6 @@ void Solver::device_if(const uint32_t * flag, F && body) {
     }
 #ifdef MALLARD_CONDITIONAL_NODES
     if (capture_graph) {
-        if (!conditional_steps) {
-            // One step per launch: the body (of pure reductions, or a step that is due) runs every time
-            body();
-            return;
-        }
         cudaGraph_t graph = static_cast<cudaGraph_t>(capture_graph);
         cudaGraphConditionalHandle handle;
         cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
@@ -948,6 +943,7 @@ void Solver::capture_step_graph() {
     Kokkos::fence("step_graph");
     lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
+    std::string failure;
     try {
         if (step_gating == StepGating::NCCL) {
             // Which bodies enqueue NCCL operations: a capture with every body gated, never launched
@@ -973,17 +969,27 @@ void Solver::capture_step_graph() {
     } catch (const std::exception & e) {
         if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
         capture_graph = nullptr;
+        failure = e.what();
+    }
+    // Every rank takes its steps alike: by the graph only where every rank captured it
+    if (is_distributed() && comm::allreduce(static_cast<int>(failure.empty()), comm::Op::MIN) == 0 && failure.empty()) {
+        failure = "another rank could not capture it";
+        cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(step_graph_exec));
+        step_graph_exec = nullptr;
+    }
+    if (!failure.empty()) {
         halo_current = false;
         recording_step = false;
         use_step_graph = false;
         queue_depth = 1;
-        logging::warning(diagnostic_code::CUDA_GRAPH, std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
+        logging::warning(diagnostic_code::CUDA_GRAPH, "no CUDA graph of the step (" + failure + "); steps run kernel by kernel");
     }
 #endif
 }
 
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
+    if (gated_nccl_bodies) return false;
     // A conditional node's body cannot hold NCCL operations where NCCL communicates over a network (it then adds
     // host nodes): try one first, on every rank
     bool works = true;
