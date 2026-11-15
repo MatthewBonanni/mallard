@@ -288,7 +288,7 @@ The design:
      own gradient so that it stays in, and the cell's most abundant species
      takes the gradient the others give up, so the gradients still sum to
      zero; a cut that changes `Y_k` at a face by more than `1e-4` goes to the
-     shared limiter value instead (blended linearly from 0). The gradients of
+     shared limiter value instead. The gradients of
      `gamma` and `e0`, and the face density, change with that composition by
      their derivatives with respect to `Y_k` at the cell's `p` and `T`, so the
      face state stays the state of the face composition. The limiter value
@@ -337,11 +337,14 @@ The design:
    at 2 mm cells drifted to -10% of `s_L` in consumption speed that way,
    where shared bounds give -4.3%, whichever species took the slope given up
    (the most abundant or all in proportion). Hence large cuts go to the
-   shared value, where every species gets the same diffusion: -4.4% with
+   shared value, where every species gets the same diffusion: -4.3% with
    the threshold at `1e-4`, while the temperature error of a 1D flame front
-   stays at 4.4 K (shared bounds 10.7 K, per-species bounds throughout
-   3.4 K). A threshold of `1e-3` keeps 3.5 K but leaves -4.9%; `1e-5` gives
-   -4.4% but 9.9 K.
+   at 2 mm stays at 3.3 K (shared bounds 10.7 K, per-species bounds
+   throughout 3.4 K), and 5.7 K in 2D (36.9 K, 5.6 K). Blending the two
+   over cuts from 0 to the threshold traded one for the other (`1e-3`:
+   -4.9% and 3.5 K; `1e-5`: -4.4% and 9.9 K) and, with the face density,
+   broke the uniform pressure of a double-flux contact with the rotated
+   Riemann solver in 3D.
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and

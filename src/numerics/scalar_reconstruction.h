@@ -37,9 +37,9 @@ constexpr rtype SPECIES_NOISE = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
 /**
  * @brief Change of a mass fraction at a face above which its cut to stay in
  *        [0, 1] goes to the shared limiter of all scalars instead of its own
- *        slope (blended linearly from 0): a cut of one species alone acts as
- *        numerical diffusion of that species only, harmless when it is small
- *        but a differential diffusion of order u dx when it is large.
+ *        slope: a cut of one species alone acts as numerical diffusion of
+ *        that species only, harmless when it is small but a differential
+ *        diffusion of order u dx when it is large.
  */
 constexpr rtype OWN_CUT_MAX = 1.0e-4_r;
 

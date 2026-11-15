@@ -439,11 +439,11 @@ TEST_P(ScalarLimiters, RoundOffTraceSpeciesKeepsTheOtherScalarsSecondOrder) {
 }
 
 TEST_F(AirScalars, TraceSpeciesAtItsBoundLimitsOnlyItself) {
-    // N2 = 1e-11 next to 0 needs its slope cut at the faces toward the zeros,
+    // N2 = 1e-6 next to 0 needs its slope cut at the faces toward the zeros,
     // and O2 takes it: HE keeps its slope, and the face state follows the
     // face composition
     for (const char * limiter : {"none", "venkatakrishnan"}) {
-        const FaceStates face = reconstruct(limiter, trace_composition(NX, 1.0e-11));
+        const FaceStates face = reconstruct(limiter, trace_composition(NX, 1.0e-6));
         expect_he_linear(*mesh, face.Y, limiter);
         expect_face_state_of_face_composition(*mesh, host, face, 1.0e-5, std::max(1.0e-6, roundoff(1.0e-12)), limiter);
     }
@@ -470,7 +470,7 @@ TEST_P(ScalarLimiters, MassFractionsStayInBoundsWithTheirThermodynamics) {
     for (const double trace : {1.0e-34, 1.0e-6, 0.5}) {
         const FaceStates face = reconstruct(GetParam(), trace_composition(NX, trace));
         // A large cut limits all scalars, which leaves the flow block's density alone
-        const double T_tol = trace < double(OWN_CUT_MAX) ? 0.02 : std::numeric_limits<double>::infinity();
+        const double T_tol = trace < double(OWN_CUT_MAX) ? 1.0e-3 : std::numeric_limits<double>::infinity();
         expect_face_state_of_face_composition(*mesh, host, face, 1.0e-3, face_T_tol(GetParam(), T_tol),
                                               GetParam() + " trace " + std::to_string(trace));
     }
@@ -481,6 +481,7 @@ TEST_P(ScalarLimiters, SlopeGivenToAMajorSpeciesBesidesTheComplementCarriesItsTh
     // cut HE gives its slope to O2, the most abundant species, and not to its
     // complement N2, so the face gamma, e0 and density must move from HE's
     // to O2's. Barth-Jespersen keeps HE between its neighbors, so it never cuts.
+    SKIP_IN_SINGLE_PRECISION("O2 = 0.7 moves by less than its round-off");
     constexpr double TRACE = 1.0e-6;
     const AirComposition composition = [](const double x, double) -> std::array<double, N_AIR> {
         std::array<double, N_AIR> Y;

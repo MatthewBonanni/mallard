@@ -219,10 +219,10 @@ struct ScalarLimiterFunctor {
             }
             if (phi_k >= phi) continue;
             const rtype s_k = Kokkos::fmax(phi_k, 0.0_r) / phi;
-            const rtype to_shared = Kokkos::fmin(1.0_r, (1.0_r - s_k) * phi * d_max / OWN_CUT_MAX);
-            const rtype sigma = 1.0_r - (1.0_r - s_k) * to_shared;
-            shared_cut = Kokkos::fmin(shared_cut, sigma);
-            if (to_shared >= 1.0_r) continue;
+            if ((1.0_r - s_k) * phi * d_max > OWN_CUT_MAX) {
+                shared_cut = Kokkos::fmin(shared_cut, s_k);
+                continue;
+            }
             if (!any_cut) {
                 any_cut = true;
                 double sum = 0.0;
@@ -234,14 +234,13 @@ struct ScalarLimiterFunctor {
             }
             double d_k[3];
             composition_derivatives(k, powers, R, cv, gamma_d, d_k);
-            const rtype s = s_k / sigma;
             FOR_I_DIM {
-                const double given = static_cast<double>((1.0_r - s) * g[i]);
+                const double given = static_cast<double>((1.0_r - s_k) * g[i]);
                 moved[i] += given;
                 given_d[0][i] -= d_k[0] * given;
                 given_d[1][i] -= d_k[1] * given;
                 given_d[2][i] -= d_k[2] * given;
-                gradients(c, k, i) = s * g[i];
+                gradients(c, k, i) = s_k * g[i];
             }
         }
         FOR_I_DIM density_slope(c, i) = 0.0_r;
