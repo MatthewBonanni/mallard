@@ -239,7 +239,7 @@ std::vector<std::string> catalog_keys() {
 std::vector<std::string> catalog_fields(bool derive = false) {
     std::vector<std::string> out;
     for (const CatalogField & f : field_units::catalog()) {
-        if (f.name.find('<') == std::string::npos && (f.post_derive || !derive)) out.push_back(f.name);
+        if (f.name.find('<') == std::string::npos && (!derive || field_units::post_derive(f.name))) out.push_back(f.name);
     }
     return out;
 }

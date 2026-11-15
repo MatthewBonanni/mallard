@@ -1321,7 +1321,10 @@ TEST(CliTest, CompletionOffersPostDeriveOnlyTheFieldsItWrites) {
     std::vector<std::string> derived;
     const json::Value catalog = json::parse(listed.out);
     for (const json::Value & f : catalog["fields"].array) {
-        if (f.has("post_derive") && f["name"].string.find('<') == std::string::npos) derived.push_back(f["name"].string);
+        const std::vector<json::Value> & where = f["available"].array;
+        const bool writes =
+            std::any_of(where.begin(), where.end(), [](const json::Value & w) { return w.string == "post derive"; });
+        if (writes && f["name"].string.find('<') == std::string::npos) derived.push_back(f["name"].string);
     }
     std::sort(derived.begin(), derived.end());
     ASSERT_TRUE(std::find(derived.begin(), derived.end(), "MACH") != derived.end());
