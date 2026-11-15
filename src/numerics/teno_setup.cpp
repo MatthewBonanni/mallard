@@ -900,6 +900,8 @@ struct CellSetup {
     uint16_t wall_ns = 0;
     // Central stencil size per fitted monomial, for fits that drop the monomials of flat axes
     double stencil_factor = 2.0;
+    // Central stencil sizes to start from on pyramids, at the full and the wall degree (PYRAMID_ODD_FACTOR)
+    uint16_t pyramid_ns = 0, pyramid_wall_ns = 0;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1583,7 +1585,10 @@ struct CellSetup {
         const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
         const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
         const int nf = fit.n;
-        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf)) : at_wall ? wall_ns : ns;
+        const bool pyramid = g.offsets_nodes_of_cell(i + 1) - g.offsets_nodes_of_cell(i) == 5;
+        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
+                                 : at_wall ? (pyramid ? pyramid_wall_ns : wall_ns)
+                                           : (pyramid ? pyramid_ns : ns);
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
@@ -2753,8 +2758,10 @@ struct CellTeam {
         }
         const FitColumns fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
         const int nf = fit.n;
-        const uint16_t n_first =
-            flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf)) : at_wall ? c.wall_ns : c.ns;
+        const bool pyramid = c.g.offsets_nodes_of_cell(i + 1) - c.g.offsets_nodes_of_cell(i) == 5;
+        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
+                                 : at_wall ? (pyramid ? c.pyramid_wall_ns : c.wall_ns)
+                                           : (pyramid ? c.pyramid_ns : c.ns);
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
             const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
@@ -3379,6 +3386,8 @@ class Setup3D {
             nss = opt.nss;
             ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
             nss_max = 2 * nss;
+            pyramid_ns = pyramid_start(opt.degree, ns);
+            pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);
             const uint32_t n_cells = mesh.n_cells;
 
             Geometry<HostMem> & h = host;
@@ -3663,7 +3672,7 @@ class Setup3D {
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                              double(options.stencil_factor)};
+                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3676,7 +3685,7 @@ class Setup3D {
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                    double(options.stencil_factor)},
+                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3747,7 +3756,7 @@ class Setup3D {
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                                  double(options.stencil_factor)};
+                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -3797,7 +3806,7 @@ class Setup3D {
         Tables tables;
         Kokkos::View<Tables, DefaultMem> d_tables;
         uint8_t wall_nk = 0;
-        uint16_t wall_ns = 0;
+        uint16_t wall_ns = 0, pyramid_ns = 0, pyramid_wall_ns = 0;
         uint8_t r = 0, nk = 0;
         uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
         Caps caps;

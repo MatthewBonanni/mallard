@@ -175,14 +175,13 @@ Read off the curves (interpolated between the measured meshes):
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
-  - it grows on pyramid lattices;
   - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
     (Mach 1 in a Mach 0.2 flow);
   - it keeps an odd-even wall-pressure mode at the NACA 0012 trailing edge;
   - it undershoots ahead of shocks on quads about 10 times as much as order 5.
 
   Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
-  For smooth flow on meshes without pyramids, setting `order = 4` under
+  For smooth flow, setting `order = 4` under
   `[numerics.face_reconstruction]` is the cheaper choice.
 
 The advantage is for **smooth flow**. At shocks and contacts TENO-E falls

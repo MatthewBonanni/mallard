@@ -44,6 +44,19 @@ constexpr double MAX_LEBESGUE_3D = 4.0;
 // smallest stencil within this factor of the best one found; the best alone is
 // often the largest stencil, and markedly less accurate
 constexpr double LEBESGUE_SLACK = 1.25;
+// Odd-degree fits leave the even degree r + 1 as their leading error, and its
+// jump across a face cancels only between cells that are point images of each
+// other through the face. The side faces of pyramids are far from that, and
+// their linearized scheme grows with any stencil within the Lebesgue bound
+// unless it holds about 2.5 times the monomials of degree r + 1 (#236).
+constexpr double PYRAMID_ODD_FACTOR = 2.5;
+
+/** @brief Central stencil size to start from on a pyramid, at degree r, given the size ns elsewhere. */
+inline uint16_t pyramid_start(const uint8_t r, const uint16_t ns) {
+    if (r % 2 == 0) return ns;
+    const auto n = static_cast<uint16_t>(std::ceil(PYRAMID_ODD_FACTOR * teno::n_dof(static_cast<uint8_t>(r + 1))));
+    return n > ns ? n : ns;
+}
 
 /**
  * @brief Coordinate axes along which a cell's neighbors all lie level with

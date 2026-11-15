@@ -15,10 +15,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "test_fixtures.h"
 #include "verification.h"
@@ -175,13 +177,14 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian", 5, 6, TROUBLED},
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
 
-// The rest of the verification manual's matrix: run by tools/docs/verification.py
+// The rest of the verification manual's matrix: run by tools/docs/verification.py. TENO6 on
+// pyramids starts from 8 blocks: its stencils of about 209 cells span most of a 6^3 box
 INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENO3DOrder,
     ::testing::Values(OrderParam{"cartesian", 6, 6, SMOOTH}, OrderParam{"cartesian_tet", 6, 4, SMOOTH},
                       OrderParam{"cartesian_prism", 3, 6, SMOOTH}, OrderParam{"cartesian_prism", 4, 6, SMOOTH},
                       OrderParam{"cartesian_prism", 5, 6, SMOOTH}, OrderParam{"cartesian_prism", 6, 6, SMOOTH},
                       OrderParam{"cartesian_pyramid", 3, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 4, 6, SMOOTH},
-                      OrderParam{"cartesian_pyramid", 5, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 6, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 5, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 8, SMOOTH},
                       OrderParam{"cartesian_mixed", 3, 6, SMOOTH}, OrderParam{"cartesian_mixed", 4, 6, SMOOTH},
                       OrderParam{"cartesian_mixed", 5, 6, SMOOTH}));
 
@@ -345,6 +348,156 @@ TEST_P(TENO3DSideWalls, PerturbationsAtRestStayBoundedNextToSideWallsOfMildlyStr
 }
 
 INSTANTIATE_TEST_SUITE_P(EvenOrders, TENO3DSideWalls, ::testing::Values(4, 6));
+
+namespace {
+
+using CMatrix = std::vector<std::complex<double>>;
+
+CMatrix multiply(const CMatrix & a, const CMatrix & b, size_t n) {
+    CMatrix c(n * n, 0.0);
+    for (size_t i = 0; i < n; i++) {
+        for (size_t k = 0; k < n; k++) {
+            const std::complex<double> aik = a[i * n + k];
+            for (size_t j = 0; j < n; j++) c[i * n + j] += aik * b[k * n + j];
+        }
+    }
+    return c;
+}
+
+double frobenius(const CMatrix & a) {
+    double sum = 0.0;
+    for (const auto & x : a) sum += std::norm(x);
+    return std::sqrt(sum);
+}
+
+/** @brief exp(A) by scaling and squaring of its Taylor series. */
+CMatrix exponential(CMatrix a, size_t n) {
+    int squarings = 0;
+    for (double norm = frobenius(a); norm > 0.5; norm /= 2.0) squarings++;
+    for (auto & x : a) x = std::complex<double>(std::ldexp(x.real(), -squarings), std::ldexp(x.imag(), -squarings));
+    CMatrix sum(n * n, 0.0), term(n * n, 0.0);
+    for (size_t i = 0; i < n; i++) sum[i * n + i] = term[i * n + i] = 1.0;
+    for (int k = 1; k <= 18; k++) {
+        term = multiply(term, a, n);
+        for (size_t e = 0; e < n * n; e++) {
+            term[e] /= double(k);
+            sum[e] += term[e];
+        }
+    }
+    for (int s = 0; s < squarings; s++) sum = multiply(sum, sum, n);
+    return sum;
+}
+
+/**
+ * @brief Largest norm of exp(t J) over the Fourier modes of the linearized
+ *        scheme J (acoustics at rest, HLLC) on a periodic box of n^3 blocks
+ *        of a 3D cartesian tiling: an eigenvalue of J with a positive real
+ *        part shows as exponential growth in t. J comes from finite
+ *        differences of the rhs in the variables of the cells of one block;
+ *        it is the same for every block of the lattice, so the box's Fourier
+ *        modes block-diagonalize it.
+ * @param t Time, in block sizes over the sound speed.
+ */
+double largest_linear_growth(const std::string & type, uint32_t n, int order, double t) {
+    std::ostringstream in;
+    in << "[run]\nn_steps = 1\ncfl = 0.2\n"
+       << "[mesh]\ntype = \"" << type << "\"\nNx = " << n << "\nNy = " << n << "\nNz = " << n << "\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+       << "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+       << "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+       << "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"
+       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
+       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n"
+       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+       << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(in.str()));
+    const auto mesh = solver.get_mesh();
+    const uint32_t n_cells = mesh->n_cells;
+    auto xc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->cell_coords);
+    const double h = 1.0 / double(n);
+    std::vector<std::array<int, 3>> block(n_cells);
+    std::vector<std::array<double, 3>> offset(n_cells);
+    std::vector<uint32_t> base;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (size_t d = 0; d < 3; d++) {
+            block[c][d] = static_cast<int>(std::floor(double(xc(c, d)) / h));
+            offset[c][d] = double(xc(c, d)) - block[c][d] * h;
+        }
+        if (block[c] == std::array<int, 3>{0, 0, 0}) base.push_back(c);
+    }
+    std::vector<size_t> type_of(n_cells, base.size());
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (size_t b = 0; b < base.size(); b++) {
+            double dist = 0.0;
+            for (size_t d = 0; d < 3; d++) dist = std::max(dist, std::abs(offset[c][d] - offset[base[b]][d]));
+            if (dist < 1e-9) type_of[c] = b;
+        }
+        if (type_of[c] == base.size()) {
+            ADD_FAILURE() << "cell " << c << " matches no cell of the first block";
+            return 0.0;
+        }
+    }
+    const size_t nv = N_CONSERVATIVE, m = base.size() * nv;
+    // columns[(b, v)][(c, w)]: d rhs(c, w) / d U(base[b], v)
+    std::vector<std::vector<double>> columns(m);
+    auto h_state = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.state().flow);
+    State perturbed("perturbed", n_cells, 0), plus("plus", n_cells, 0), minus("minus", n_cells, 0);
+    auto h_perturbed = Kokkos::create_mirror_view(perturbed.flow);
+    const double eps = 1e-6;
+    for (size_t j = 0; j < m; j++) {
+        for (const double sign : {1.0, -1.0}) {
+            Kokkos::deep_copy(h_perturbed, h_state);
+            h_perturbed(base[j / nv], j % nv) += rtype(sign * eps);
+            Kokkos::deep_copy(perturbed.flow, h_perturbed);
+            solver.calc_rhs(perturbed, sign > 0.0 ? plus : minus, 0.0_r);
+        }
+        auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), plus.flow);
+        auto q = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), minus.flow);
+        columns[j].resize(size_t(n_cells) * nv);
+        for (uint32_t c = 0; c < n_cells; c++) {
+            for (size_t w = 0; w < nv; w++) columns[j][c * nv + w] = (double(p(c, w)) - double(q(c, w))) / (2.0 * eps);
+        }
+    }
+    const double time = t * h / std::sqrt(1.4);
+    double growth = 0.0;
+    for (uint32_t kx = 0; kx < n; kx++) {
+        for (uint32_t ky = 0; ky < n; ky++) {
+            for (uint32_t kz = 0; kz < n; kz++) {
+                // The mode -k has the complex conjugate symbol, so the same growth
+                const uint32_t k = (kx * n + ky) * n + kz;
+                if (k > (((n - kx) % n) * n + (n - ky) % n) * n + (n - kz) % n) continue;
+                CMatrix symbol(m * m, 0.0);
+                for (uint32_t c = 0; c < n_cells; c++) {
+                    const int64_t k_dot_block = int64_t(kx) * block[c][0] + int64_t(ky) * block[c][1] + int64_t(kz) * block[c][2];
+                    const std::complex<double> e = std::polar(time, 2.0 * M_PI * double(k_dot_block) / double(n));
+                    for (size_t w = 0; w < nv; w++) {
+                        for (size_t j = 0; j < m; j++) symbol[(type_of[c] * nv + w) * m + j] += e * columns[j][c * nv + w];
+                    }
+                }
+                growth = std::max(growth, frobenius(exponential(symbol, m)));
+            }
+        }
+    }
+    return growth;
+}
+
+} // namespace
+
+class TENO3DPyramidLattice : public ::testing::TestWithParam<int> {};
+
+TEST_P(TENO3DPyramidLattice, LinearizedSchemeHasNoGrowingMode) {
+    // Pyramids took odd-degree stencils of the sizes other cells take, within
+    // the Lebesgue bound, and this lattice had growing modes: largest real
+    // part 6e-3 (order 4) and 2e-3 (order 6) in sound speeds over the block
+    // size, a norm of e^30 and e^10 by t = 5000 (#236)
+    const double growth = largest_linear_growth("cartesian_pyramid", 6, GetParam(), 5000.0);
+    std::cout << "order " << GetParam() << ": largest |exp(t J)| at t = 5000 h/c: " << growth << std::endl;
+    EXPECT_LT(growth, 100.0);
+}
+
+INSTANTIATE_TEST_SUITE_P(EvenOrders, TENO3DPyramidLattice, ::testing::Values(4, 6));
 
 TEST(TENO3DSolver, PerturbationsAtRestStayBoundedOnJitteredPrismsAtOrderSix) {
     // Without lattice ties the same near-degenerate stencils appear in the
