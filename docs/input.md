@@ -457,11 +457,16 @@ for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed 
 | Key | Description |
 |---|---|
 | `model` | `tfles` |
-| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
-| `s_L` | Laminar flame speed (m/s) |
-| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `sensor` | `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
+| `delta_L` | `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | `temperature` only: laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | `temperature` only: temperatures of the fresh and burnt gas (K) |
+| `flame_table` | `reaction` only, required: CSV file of premixed flames against the mixture fraction, columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption rate of `sensor_species`); other columns are ignored. Linear in `Z`. Built by `tools/setup/flame_table.py` |
+| `fuel`, `oxidizer` | `reaction` only, required: the streams of the mixture fraction, as in [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform composition; those the table was built with |
+| `sensor_species` | `reaction` only: the species of `omega_max` and of the flame index; default the fuel stream's most abundant species with C or H |
+| `efficiency_max` | Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `efficiency` | `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
 | `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
 | `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
 | `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |

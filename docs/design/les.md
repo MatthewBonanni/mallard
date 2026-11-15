@@ -1019,6 +1019,82 @@ chemistry stays bitwise independent of rank count and team width.
   domain of a few thickened thicknesses stays below the adiabatic one
   (2224 K against 2384 K at `F = 7.9`).
 
+### 6.7 Non-premixed and partially premixed flames (#754)
+
+The temperature sensor of section 6.3 needs one `T_unburnt`, `T_burnt`,
+`s_L` and `delta_L`: one premixed flame. Where fuel and oxidizer mix in the
+domain, each mixture fraction `Z` has its own flame (or none), and a
+temperature sensor also fires in hot products and mixing layers where
+nothing burns, thickening diffusion there for no reason (Légier et al. 2002).
+`sensor = "reaction"` replaces it:
+
+- **Flame table.** `tools/setup/flame_table.py` computes the freely
+  propagating Cantera flames of the two streams' mixtures from the
+  stoichiometric `Z` towards each side until a flame fails or burns slower
+  than `--min-speed`, and writes `Z`,
+  `s_L`, `delta_L` (thermal thickness) and `omega_max`, the largest
+  consumption rate of the sensor species in that flame. Its range is the
+  flammable range.
+- **Sensor.** Each cell's Bilger `Z` (from the solved species and the
+  `fuel`/`oxidizer` streams, the same function as the `Z` output) selects the
+  flame by linear interpolation. The raw sensor is the cell's consumption rate
+  of the sensor species over that flame's `omega_max`, ramped linearly from 0
+  at 1% to 1 at 5%; it is then averaged twice over each cell's vertex
+  neighbors (the test filter of the dynamic efficiency), multiplied by 2 and
+  clipped at 1. Outside the table's range `Omega = 0`.
+- **Premixed burning only.** Before filtering, the raw sensor is zeroed
+  where Takeno's flame index `grad Y_F . grad Y_O` (the sensor species and
+  the oxidizer stream's main species, least-squares cell gradients) is not
+  positive (Yamashita, Shimada & Takeno 1996).
+- **Local flame.** `F = 1 + (max(1, n_res Delta / delta_L(Z)) - 1) Omega`,
+  and the Charlette efficiency uses `s_L(Z)` and `delta_L(Z)`. The dynamic
+  efficiency is an error with this sensor: its exponent is fitted from a
+  premixed flame's resolved wrinkling, which a diffusion flame does not have.
+- **Efficiency cap.** `efficiency_max` bounds `E` for either sensor, the
+  usual guard against an efficiency that would move a lifted flame's base or
+  a diffusion flame's reaction zone upstream by more than the subgrid
+  wrinkling can justify.
+
+Why the sensor only has to cover the reaction zone: in an inert part of a
+steady flame, integrating the species and energy equations from the fresh
+side gives `m (Y_k - Y_k,u) = rho D_k F dY_k/dx` and `m cp (T - T_u) = lambda
+F dT/dx` (constant `cp` for the argument). Whatever `F` is there, the fluxes
+that reach the reaction zone depend only on the state, not on how thick the
+preheat zone is; `F` changes the preheat zone's thickness only. So `F` must be
+uniform where the reaction rate is not negligible and may fall to 1 in the
+preheat zone. A rate-based sensor is therefore enough, and does not fire in
+inert mixing layers, burnt gas or at mixtures outside the flammable range.
+The constants were chosen with a Python model of the sensor on the table's 26
+Cantera flames of H2/N2 against air (Z from 0.144 to 0.644), sampled at
+`n_res = 5` cells per thickened thickness for four cell alignments: at least
+91% of each flame's consumption is in thickened cells (weighted by `Omega`),
+and `Omega > 0` over at most 3.6 thickened thicknesses. Without the onset at
+1%, the slow tails of the consumption rate in burnt gas switch the sensor on
+there (`Omega > 0` over 140 thicknesses); without the gain only 82% of the
+consumption is thickened. One or three filter passes give the same coverage
+(91%); two keep the sensor smooth across a cell-scale reaction zone.
+
+Why diffusion flames are left alone: a diffusion flame has no thickness of
+its own; the flow's mixing sets it, and on an LES mesh that mixing is
+resolved by construction. Thickening it multiplies the diffusion that feeds
+it. In a planar counterflow flame of H2/N2 against air (strain 960 1/s,
+5 x 2.5 mm, HLLC, MUSCL), whose heat release spans the whole mixing layer (Z
+from 0.03 to 0.96, peak at Z = 0.1 to 0.15, a leaky hydrogen flame), the
+sensor without the flame index covered Z = 0.16 to 0.5 with `Omega = 1` at
+`F` = 2.0 (139 um cells) and 1.5 (104 um), and the integrated heat release
+rose by 18% and 9% over the same meshes unthickened (2716 and 2688 W/m,
+within 1% of each other): the thickened band is as wide as the mixing layer,
+so the gradients that feed the flame do not drop by `F` while the
+diffusivity rises by it. All of that heat release has opposed fuel and
+oxidizer gradients; the flame index removes the thickening there.
+
+Cost and determinism: one extra evaluation of the chemistry's production
+rates on owned cells per step (as the `HRR` output), the two mass fractions'
+gradients, and two halo exchanges (before each filter pass); no
+reductions, so the fields are independent of the partition. Restarts
+reproduce, as for the temperature sensor, since the sensor is computed from
+the state in `calc_dt`.
+
 ## 7. Tests (each must fail under a plausible bug)
 
 - **Model kernels** (exact values): Sigma, WALE, Vreman, Smagorinsky on
@@ -1413,6 +1489,75 @@ within 8% of the DNS at `Delta = 0.4-1.6 delta_L`. Colin
 (`efficiency = "charlette"`) and `C_u = 28` (`subgrid_velocity =
 "eddy_viscosity"`) remain available; the Volvo input and the `flame_3d`
 benchmark keep `charlette` with `eddy_viscosity`.
+
+#### Results: partially premixed laminar flames (reaction sensor, #754)
+
+H2:N2 = 1:1 against air at 300 K, 1 atm, h2o2.yaml, mixture-averaged
+transport, MUSCL, HLLC, SSPRK3, `efficiency = "none"`, the table of
+`tools/setup/flame_table.py` (51 flames, `Z` = 0.144 to 0.644, `Z_st` =
+0.304). Speeds from `tools/post/flame_speed.py` against the table's `s_L`.
+
+Planar premixed flames (`tools/setup/flame_restart.py`, strips 3 cells wide,
+square cells, 30 flame times), consumption speed error:
+
+| `Z` (phi) | reaction, 1 cell per `delta_L`, `n_res` = 5 (`F` = 5) | reaction, `n_res` = 10 | no model, same mesh |
+|---|---|---|---|
+| 0.184 (0.52) | -5.6% | -0.2% | -0.2% |
+| 0.244 (0.74) | -5.3% | +0.1% | -0.7% |
+| 0.304 (1.0) | -3.7% (temperature sensor -3.2%) | -0.4% (temperature -0.5%) | -18.7%, unsteady |
+| 0.404 (1.5) | -3.9% | -1.5% | -27%, unsteady |
+| 0.504 (2.3) | -4.9% | -2.1% | -37%, unsteady |
+| 0.584 (3.2) | -7.2% | -4.2% | -41%, unsteady |
+
+At half a cell per `delta_L` (`F` = 10) the errors at `Z` = 0.244, 0.304 and
+0.504 are -4.0%, -3.7% and -4.9%: they depend on `n_res`, not on `F`, and the
+two sensors agree, so the error is the discretization of the thickened flame
+over 5 cells. The flame index leaves these flames unchanged (-3.68% and
+-7.18% at 0.304 and 0.584 with it, -3.68% and -7.20% without). At 3 and 4
+cells per `delta_L` (`F` = 1.67, 1.25) the flame at `Z_st` burns 4.8% and
+4.7% slow, against 11.6% and 7.2% without the model.
+
+Counterflow diffusion flame: plug inlets 5 mm apart, momentum-balanced (air
+at 2 m/s, fuel at 2.78 m/s, strain 960 1/s), 2.5 mm high with a symmetry
+plane and a pressure outlet, steady after 3 ms (mean of 11 outputs to 4 ms):
+
+| Cells (size) | Model | Heat release (W/m) | `T_max` on the axis |
+|---|---|---|---|
+| 144 x 72 (34.7 um) | none (reference) | 2652 | 1713 K |
+| 48 x 24 (104 um) | none | 2688 (+1.3%) | 1728 K |
+| 48 x 24 | reaction sensor | 2688 (+1.3%), `Omega = 0` everywhere | 1728 K |
+| 48 x 24 | reaction sensor without the flame index | 2921 (+10.1%), `F` = 1.53 | 1709 K |
+| 36 x 18 (139 um) | none | 2716 (+2.4%) | 1743 K |
+| 36 x 18 | reaction sensor | 2716 (+2.4%), `Omega = 0` everywhere | 1743 K |
+| 36 x 18 | reaction sensor without the flame index | 3213 (+21.2%), `F` = 2.03 | 1682 K |
+
+`Omega` is zero wherever the heat release is below 1% of its peak in every
+run (no thickening in the mixing layers away from the flame or in the burnt
+gas); the rise without the flame index is section 6.7's.
+
+Triple flame (`examples/triple_flame/tfles`: the thick mixing layer, 12
+`delta_L`, of `examples/triple_flame/thick` at 3 cells per `delta_L`;
+`examples/triple_flame/triple_flame_analysis.py`, fitted over 5-10 flame
+times of the continuation at `u_in` = 2.5 `s_L`):
+
+| Cells per `delta_L` | Model | `U_F / s_L` | `S_tip / s_L` | `U_F / S_tip` |
+|---|---|---|---|---|
+| 3 | reaction sensor | 2.10 | 1.28 | 1.64 |
+| 3 | reaction sensor without the flame index | 2.09 | 1.28 | 1.64 |
+| 3 | none | 2.11 | 1.29 | 1.63 |
+| 4 | reaction sensor | 2.24 | 1.30 | 1.72 |
+| 4 | none | 2.25 | 1.31 | 1.72 |
+| 12 | none (`thick`, reference) | 2.45 | 1.30 | 1.90 |
+
+The tip burns at the resolved speed on the coarse meshes; the deficit in
+`U_F` is the streamlines' divergence ahead of the tip, the same with and
+without the model, and converges at second order in the cell size (14% at 3
+cells, 8% at 4). It is not the drift of a flame that is not held: at `u_in`
+= 2.1 `s_L` the tip stays within 0.15 `delta_L` and `U_F / s_L` = 2.09. At
+these `F` the model neither helps nor hurts the edge flame; a mesh coarse
+enough for large `F` would also thicken the flame against the mixing layer
+(`D_TF / F`), which lowers `U_F` (Ruetsch et al. 1995), so the triple flame
+is a test of the sensor's coverage, not of the closure at large `F`.
 
 #### Results: non-premixed flame in decaying turbulence (PaSR, experimental)
 
