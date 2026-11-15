@@ -78,6 +78,9 @@ void check_columns(const std::vector<std::vector<double>> & coordinates,
     }
     for (const auto & f : fields) {
         if (f.size() != n) throw InputError(where + ": the columns differ in length.");
+        for (const double v : f) {
+            if (!std::isfinite(v)) throw InputError(where + " has a value that is not a finite number.");
+        }
     }
 }
 
@@ -120,6 +123,10 @@ Csv read_csv(const std::string & file) {
             const double v = std::strtod(items[i].c_str(), &end);
             if (items[i].empty() || end != items[i].c_str() + items[i].size()) {
                 throw InputError(file + ":" + std::to_string(line_number) + ": \"" + items[i] + "\" is not a number.");
+            }
+            if (!std::isfinite(v)) {
+                throw InputError(file + ":" + std::to_string(line_number) + ": column " + csv.names[i] + " is \"" +
+                                 items[i] + "\", not a finite number.");
             }
             csv.columns[i].push_back(v);
         }

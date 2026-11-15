@@ -237,6 +237,34 @@ TEST(RegionMotionTest, RegionsAcrossPeriodicBoundariesWrapIntoTheDomain) {
     EXPECT_NEAR(integral(s_mesh, g), exact, 1e-2 * exact);
 }
 
+TEST(RegionMotionTest, RegionsManyPeriodsLongWrapWhole) {
+    // A thin strip rising across 20 periods in x: each period of it wraps to its own height in the domain
+    const std::string box = N_DIM == 2 ? "type = \"cartesian\"\nNx = 16\nNy = 16\n[[periodic]]\nzones = [\"left\", \"right\"]\n"
+                                       : "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\n[[periodic]]\nzones = [\"left\", \"right\"]\n";
+    std::vector<std::string> walls = {"bottom", "top"};
+    if (N_DIM == 3) walls.insert(walls.end(), {"back", "front"});
+    const auto periodic = solver_on(box, walls);
+    const Mesh & mesh = *periodic->get_mesh();
+    const region::MeshRegions automatic(mesh);
+    auto strip = [](const double periods, const double thickness) {
+        const double length = std::hypot(periods, 0.8);
+        const double angle = std::atan2(0.8, periods) * 180.0 / std::numbers::pi;
+        const std::string rotate = N_DIM == 2 ? std::to_string(angle) : "{axis = [0, 0, 1], angle = " + std::to_string(angle) + "}";
+        return std::string("{type = \"") + (N_DIM == 2 ? "rectangle" : "box") + "\", center = " +
+               point(0.5 * periods, 0.5) + ", size = [" + std::to_string(length) + ", " + std::to_string(thickness) +
+               (N_DIM == 3 ? ", 2" : "") + "], pivot = " + point(0.5 * periods, 0.5) + ", rotate = " + rotate + "}";
+    };
+    const region::Region r = read(strip(20.0, 0.025), &automatic);
+    const double exact = std::hypot(20.0, 0.8) * 0.025;
+    EXPECT_NEAR(integral(mesh, region::cell_fractions(mesh, r)), exact, 0.01 * exact);
+    try {
+        read(strip(5000.0, 0.025), &automatic);
+        ADD_FAILURE() << "a region of 5000 periods was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("at most 4096"), std::string::npos) << e.what();
+    }
+}
+
 TEST(RegionMotionTest, MovingFractionsAreTheFractionsOfTheRegionWhereItIs) {
     const auto mesh = unit_mesh();
     const std::string center = N_DIM == 2 ? "[\"0.3 + 0.2 * t\", 0.5]" : "[\"0.3 + 0.2 * t\", 0.5, \"0.5 - 0.1 * t\"]";

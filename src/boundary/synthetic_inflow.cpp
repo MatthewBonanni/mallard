@@ -256,7 +256,9 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
         use.push_back(col);
     }
     columns.assign(use.size(), {});
+    size_t line_number = 1;
     while (std::getline(in, line)) {
+        line_number++;
         if (trim(line).empty()) continue;
         std::vector<double> row;
         std::stringstream s(line);
@@ -266,6 +268,11 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
                 row.push_back(std::stod(item));
             } catch (const std::exception &) {
                 throw InputError(key + ": " + file + ": not a number: \"" + item + "\".");
+            }
+            if (!std::isfinite(row.back())) {
+                throw InputError(key + ": " + file + ":" + std::to_string(line_number) + ": column " +
+                                 (row.size() <= header.size() ? header[row.size() - 1] : std::to_string(row.size())) +
+                                 " is \"" + trim(item) + "\", not a finite number.");
             }
         }
         if (row.size() != header.size()) {
