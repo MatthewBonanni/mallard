@@ -63,18 +63,19 @@ class InputTable : public std::map<K, V> {
         struct Lookups {
             std::set<K> keys;
             std::map<K, KeyUse> uses;
+            std::set<K> checked;  // looked up before any use was recorded: a read that follows is guarded
             bool all = false;
         };
 
         using Base::Base;
         InputTable() = default;
 
-        auto find(const K & k) { note(k); return Base::find(k); }
-        auto find(const K & k) const { note(k); return Base::find(k); }
+        auto find(const K & k) { check(k); return Base::find(k); }
+        auto find(const K & k) const { check(k); return Base::find(k); }
         V & at(const K & k) { note(k); return Base::at(k); }
         const V & at(const K & k) const { note(k); return Base::at(k); }
-        std::size_t count(const K & k) const { note(k); return Base::count(k); }
-        bool contains(const K & k) const { note(k); return Base::contains(k); }
+        std::size_t count(const K & k) const { check(k); return Base::count(k); }
+        bool contains(const K & k) const { check(k); return Base::contains(k); }
         V & operator[](const K & k) { note(k); return Base::operator[](k); }
 
         auto begin() { lookups->all = true; return Base::begin(); }
@@ -87,12 +88,17 @@ class InputTable : public std::map<K, V> {
         const Lookups & lookups_made() const { return *lookups; }
         void record_use(const K & k, KeyUse use) const {
             note(k);
+            if (lookups->checked.contains(k)) use.required = false;
             lookups->uses[k] = std::move(use);
         }
         void forget_lookups() { lookups = std::make_shared<Lookups>(); }
 
     private:
         void note(const K & k) const { lookups->keys.insert(k); }
+        void check(const K & k) const {
+            note(k);
+            if (!lookups->uses.contains(k)) lookups->checked.insert(k);
+        }
 
         std::shared_ptr<Lookups> lookups = std::make_shared<Lookups>();
 };
