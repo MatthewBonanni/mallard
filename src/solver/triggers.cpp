@@ -56,7 +56,7 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
     triggers.clear();
     names = built_in();
     for (const auto & name : monitored) names.push_back(trigger_variable(name));
-    if (!input.contains("triggers")) return;
+    if (!contains_optional(input, "triggers")) return;
     const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
     for (size_t i = 0; i < entries.size(); i++) {
         const Input & entry = entries[i];
