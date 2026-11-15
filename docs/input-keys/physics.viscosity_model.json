@@ -7,7 +7,8 @@
  "set_in": [
   "examples/channel_wmles/tl_m1.7.toml",
   "examples/channel_wmles/tl_m3.0.toml",
-  "examples/isotropic_turbulence/input.toml"
+  "examples/isotropic_turbulence/input.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml"
  ],
  "type": "string",
  "values": [
