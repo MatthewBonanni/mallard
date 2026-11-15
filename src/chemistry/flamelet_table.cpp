@@ -95,7 +95,7 @@ const Contract * find_contract(const std::vector<const Contract *> & list, const
     return nullptr;
 }
 
-const Contract & supported(const std::vector<const Contract *> & list, const std::string & kind, const std::string & tag,
+const Contract * supported(const std::vector<const Contract *> & list, const std::string & kind, const std::string & tag,
                            const std::string & where) {
     const Contract * c = find_contract(list, tag);
     if (c == nullptr) {
@@ -104,7 +104,7 @@ const Contract & supported(const std::vector<const Contract *> & list, const std
         fail(where, "its " + kind + " \"" + tag + "\" is not supported by this version of Mallard (supported: " + names +
                         ")");
     }
-    return *c;
+    return c;
 }
 
 bool within(const double v, const Bound b) {
@@ -211,8 +211,8 @@ void Table::finish() {
 
 void Table::check_contract() const {
     const std::string & where = m_where;
-    const Contract & model = supported(model_contracts(), "model", m_model, where);
-    const Contract & thermo = supported(thermo_contracts(), "thermodynamics", m_thermodynamics, where);
+    const Contract & model = *supported(model_contracts(), "model", m_model, where);
+    const Contract & thermo = *supported(thermo_contracts(), "thermodynamics", m_thermodynamics, where);
     if (m_axes.size() != model.axes.size()) {
         fail(where, "a table of model \"" + m_model + "\" has " + std::to_string(model.axes.size()) + " axes");
     }
@@ -317,26 +317,26 @@ Table Table::read(const std::string & file) {
     }
     t.m_pressure = member(h, "pressure", T::NUMBER, file).number;
     if (!(t.m_pressure > 0.0)) fail(file, "the header has no valid \"pressure\"");
-    const json::Value & model_data = member(h, "model_data", T::OBJECT, file);
+    const json::Value model_data = member(h, "model_data", T::OBJECT, file);
     if (t.m_model == "fpv") {
         const double Z_st = member(model_data, "Z_st", T::NUMBER, file, "model_data.").number;
         if (!(Z_st > 0.0 && Z_st < 1.0)) fail(file, "the header has no valid \"model_data.Z_st\"");
         member(model_data, "progress_variable", T::OBJECT, file, "model_data.");
-        const json::Value & streams = member(model_data, "streams", T::OBJECT, file, "model_data.");
+        const json::Value streams = member(model_data, "streams", T::OBJECT, file, "model_data.");
         for (const char * s : {"fuel", "oxidizer"}) {
             const std::string path = "model_data.streams." + std::string(s) + ".";
-            const json::Value & stream = member(streams, s, T::OBJECT, file, "model_data.streams.");
+            const json::Value stream = member(streams, s, T::OBJECT, file, "model_data.streams.");
             member(stream, "T", T::NUMBER, file, path);
             member(stream, "Y", T::OBJECT, file, path);
         }
     }
-    const json::Value & provenance = member(h, "provenance", T::OBJECT, file);
-    const json::Value & generator = member(provenance, "generator", T::OBJECT, file, "provenance.");
+    const json::Value provenance = member(h, "provenance", T::OBJECT, file);
+    const json::Value generator = member(provenance, "generator", T::OBJECT, file, "provenance.");
     t.m_generator = member(generator, "name", T::STRING, file, "provenance.generator.").string + " " +
                     member(generator, "version", T::STRING, file, "provenance.generator.").string;
     member(provenance, "created", T::STRING, file, "provenance.");
     member(provenance, "input", T::STRING, file, "provenance.");
-    const json::Value & mechanism = member(provenance, "mechanism", T::OBJECT, file, "provenance.");
+    const json::Value mechanism = member(provenance, "mechanism", T::OBJECT, file, "provenance.");
     member(mechanism, "name", T::STRING, file, "provenance.mechanism.");
     if (!is_sha256(member(mechanism, "sha256", T::STRING, file, "provenance.mechanism.").string)) {
         fail(file, "the header has no valid \"provenance.mechanism.sha256\" (64 lowercase hexadecimal digits)");
