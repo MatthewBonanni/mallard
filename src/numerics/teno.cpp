@@ -1590,12 +1590,13 @@ class KeyedSetup {
             Kokkos::Experimental::UniqueToken<Kokkos::DefaultHostExecutionSpace> token;
             std::vector<teno::ShapeKeys::Scan> scans(static_cast<size_t>(token.size()));
             for (size_t i0 = 0; i0 < from.size(); i0 += RECORD_CHUNK) {
-                const std::vector<uint32_t> slots(from.begin() + i0, from.begin() + std::min(from.size(), i0 + RECORD_CHUNK));
-                const uint32_t m = static_cast<uint32_t>(slots.size());
-                std::vector<CellTables> tables(m);
-                std::vector<uint8_t> taken(m, 0), cut(m, 0);
+                const auto first = from.begin() + std::ptrdiff_t(i0);
+                const std::vector<uint32_t> slots(first, first + std::ptrdiff_t(std::min(RECORD_CHUNK, from.size() - i0)));
+                const uint32_t n_slots = static_cast<uint32_t>(slots.size());
+                std::vector<CellTables> tables(n_slots);
+                std::vector<uint8_t> taken(n_slots, 0), cut(n_slots, 0);
                 Kokkos::parallel_for("teno_shape_cells",
-                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
+                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, n_slots),
                                      [&](const uint32_t i) {
                     const uint32_t c = c0 + slots[i];
                     const int id = token.acquire();
