@@ -144,6 +144,7 @@ struct Record {
     uint64_t probes;         // bit k: staged probe k is written
     uint64_t probe_samples;  // bit k: staged averaging probe k staged a sample for its averages
     uint32_t spectra;        // the unaveraged spectra staged their sample
+    uint32_t statistics;     // the statistics took the step's samples
     uint32_t outputs;        // [[write_data]] writers are due, their arrays staged in the host's mirrors
     ProgressLocals progress_locals;
 };
