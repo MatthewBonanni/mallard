@@ -93,10 +93,9 @@ edges** plus a correction for the face interior:
   Lagrange element of that order.
 
 The curved boundary faces of the whole mesh form a small table (surface only)
-that every rank holds, keyed by sorted global node ids: Gmsh files are read
-whole by every rank anyway, and distributed runs allgather it from their
-blocks. Each rank evaluates its local faces from it, with the same
-operations, so the geometry does not depend on the partition.
+that every rank holds, keyed by sorted global node ids: distributed runs
+allgather it from their blocks. Each rank evaluates its local faces from it,
+with the same operations, so the geometry does not depend on the partition.
 
 ## Derived geometry
 

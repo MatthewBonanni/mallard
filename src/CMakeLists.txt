@@ -36,6 +36,7 @@ add_library(MallardCore STATIC
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
+    mesh/read_gmsh.cpp
     mesh/read_cgns.cpp
     mesh/read_fluent.cpp
     mesh/read_openfoam.cpp

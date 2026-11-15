@@ -36,9 +36,9 @@ Setup-time communication (partitioning, migration, I/O) always uses MPI.
 ### 2. Mesh input
 
 - **Format:** an HDF5 mesh file with global arrays, global ids being row indices: node coordinates, cell connectivity (CSR of node ids; the cell type follows from the node count), boundary faces (CSR) with zone ids, and zone names (layout in `docs/input.md`). Each rank reads a contiguous block of cells, of nodes and of boundary faces, with collective parallel HDF5 I/O (independent reads when HDF5 is not parallel). Node coordinates a rank needs but did not read are fetched later from the rank that read them (section 5).
-- **Converter:** `mallard mesh convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
+- **Converter:** `mallard mesh convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. Under MPI it reads a Gmsh file as runs do (below).
 - Generated meshes (`cartesian`, `wedge`, ...) are produced directly in blocks per rank, numbered as the serial generators number them.
-- A Gmsh file is read whole by every rank, which keeps only its block; meshes too large for that are converted first. Every source then goes through the same distributed path (`DistributedMesh`); only single-rank runs build the mesh directly.
+- A Gmsh file is read by every rank together: rank 0 finds where each rank's share of the nodes and elements lies in the file (reading it through without parsing), each rank parses its share, and the ranks exchange node tags, coordinates, cells and boundary faces into the blocks of the file split evenly. CGNS, Fluent and OpenFOAM files are read whole by rank 0, which sends each rank its block. Every source then goes through the same distributed path (`DistributedMesh`); only single-rank runs build the mesh directly.
 
 ### 3. Distributed dual graph
 

@@ -828,8 +828,8 @@ constexpr Command COMMANDS[] = {
             "Writes a mesh as a Mallard HDF5 mesh file, which large runs read in parallel. INPUT is a mesh file "
             "(Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns, OpenFOAM polyMesh directory), or an input file "
             "(.toml) whose [mesh] table describes the mesh (with its [mesh.transform]). Under MPI, the ranks "
-            "write in parallel (needs parallel HDF5); each reads the whole mesh file but generates only its "
-            "block. Needs a build with HDF5.",
+            "write in parallel (needs parallel HDF5); they read a Gmsh file together, each its share (rank 0 "
+            "reads other mesh files whole), or generate their blocks. Needs a build with HDF5.",
         .options = {},
         .arguments = CONVERT_ARGUMENTS,
         .examples = "$ mallard mesh convert wing.msh wing.h5\n"

@@ -14,7 +14,10 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <iomanip>
 #include <map>
+#include <random>
+#include <sstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -246,10 +249,213 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
     EXPECT_EQ(zones, (std::set<std::string>{"bottom", "top"}));
 }
 
+namespace {
+
+/** @brief The same mesh as a Gmsh 2.2 and a Gmsh 4.1 file, and the whole block both must read as. */
+struct GmshCase {
+    std::string v22, v41;
+    MeshBlock whole;
+};
+
 /**
- * @brief Every rank's block of a mesh file is its part of the file's
- *        contents, which rank 0 alone reads: cells, nodes, boundary faces
- *        and their zones, cell zones and high-order nodes.
+ * @brief A box of n^N_DIM quadrilaterals or hexahedra, its nodes in shuffled
+ *        order with shuffled, sparse tags (4.1: in three blocks) and an
+ *        unused node first. Elements, in order: a point; boundary faces
+ *        "low" (x = 0); cells of zone "b"; a curve (3D); faces at x = 1
+ *        without a physical group; cells without a zone; cells of zone "a";
+ *        faces "high" (y = 0). Points, curves (3D) and faces without a
+ *        physical group are not part of the mesh.
+ */
+GmshCase scrambled_gmsh(uint32_t n) {
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> jitter(-0.3, 0.3);
+    const uint32_t m = n + 1, n_grid = N_DIM == 2 ? m * m : m * m * m;
+    std::vector<uint32_t> order(n_grid);
+    for (uint32_t k = 0; k < n_grid; k++) order[k] = k;
+    std::shuffle(order.begin(), order.end(), rng);
+    std::vector<uint64_t> position(n_grid), tag(n_grid + 1);  // grid node -> file position; position -> tag
+    for (uint32_t k = 0; k < n_grid; k++) position[order[k]] = k + 1;
+    for (uint32_t k = 0; k <= n_grid; k++) tag[k] = 1000 + 7 * uint64_t(k);
+    std::shuffle(tag.begin(), tag.end(), rng);
+    std::vector<std::array<double, 3>> x(n_grid + 1, {0.5, 0.5, 0.5});
+    for (uint32_t g = 0; g < n_grid; g++) {
+        const uint32_t i = g % m, j = (g / m) % m, k = g / (m * m);
+        x[position[g]] = {(i + jitter(rng)) / n, (j + jitter(rng)) / n, N_DIM == 3 ? (k + jitter(rng)) / n : 0.0};
+    }
+    auto node = [&](uint32_t i, uint32_t j, uint32_t k) { return position[(k * m + j) * m + i]; };
+    struct Block {
+        int dim, entity, type, physical;
+        std::vector<std::vector<uint64_t>> elements;  // node positions
+    };
+    std::vector<Block> blocks;
+    blocks.push_back({0, 1, 15, 0, {{0}}});
+    auto faces = [&](int entity, int physical, auto corners) {
+        Block b{N_DIM - 1, entity, N_DIM == 2 ? 1 : 3, physical, {}};
+        for (uint32_t a = 0; a < n; a++) {
+            for (uint32_t c = 0; c < (N_DIM == 2 ? 1 : n); c++) b.elements.push_back(corners(a, c));
+        }
+        blocks.push_back(b);
+    };
+    auto cells = [&](int entity, int physical, uint32_t from, uint32_t to) {
+        Block b{N_DIM, entity, N_DIM == 2 ? 3 : 5, physical, {}};
+        for (uint32_t c = from; c < to; c++) {
+            const uint32_t i = c % n, j = (c / n) % n, k = c / (n * n);
+            if constexpr (N_DIM == 2) {
+                b.elements.push_back({node(i, j, 0), node(i + 1, j, 0), node(i + 1, j + 1, 0), node(i, j + 1, 0)});
+            } else {
+                b.elements.push_back({node(i, j, k), node(i + 1, j, k), node(i + 1, j + 1, k), node(i, j + 1, k),
+                                      node(i, j, k + 1), node(i + 1, j, k + 1), node(i + 1, j + 1, k + 1),
+                                      node(i, j + 1, k + 1)});
+            }
+        }
+        blocks.push_back(b);
+    };
+    const uint32_t n_cells = N_DIM == 2 ? n * n : n * n * n;
+    if constexpr (N_DIM == 2) {
+        faces(1, 2, [&](uint32_t a, uint32_t) { return std::vector<uint64_t>{node(0, a + 1, 0), node(0, a, 0)}; });
+        cells(1, 12, 0, n_cells / 3);
+        faces(2, 0, [&](uint32_t a, uint32_t) { return std::vector<uint64_t>{node(n, a, 0), node(n, a + 1, 0)}; });
+        cells(2, 0, n_cells / 3, n_cells / 2);
+        cells(3, 11, n_cells / 2, n_cells);
+        faces(3, 1, [&](uint32_t a, uint32_t) { return std::vector<uint64_t>{node(a, 0, 0), node(a + 1, 0, 0)}; });
+    } else {
+        faces(1, 2, [&](uint32_t a, uint32_t c) {
+            return std::vector<uint64_t>{node(0, a, c), node(0, a, c + 1), node(0, a + 1, c + 1), node(0, a + 1, c)};
+        });
+        cells(1, 12, 0, n_cells / 3);
+        blocks.push_back({1, 1, 1, 0, {{node(0, 0, 0), node(1, 0, 0)}}});
+        faces(2, 0, [&](uint32_t a, uint32_t c) {
+            return std::vector<uint64_t>{node(n, a, c), node(n, a + 1, c), node(n, a + 1, c + 1), node(n, a, c + 1)};
+        });
+        cells(2, 0, n_cells / 3, n_cells / 2);
+        cells(3, 11, n_cells / 2, n_cells);
+        faces(3, 1, [&](uint32_t a, uint32_t c) {
+            return std::vector<uint64_t>{node(a, 0, c), node(a + 1, 0, c), node(a + 1, 0, c + 1), node(a, 0, c + 1)};
+        });
+    }
+
+    GmshCase out;
+    MeshBlock & whole = out.whole;
+    whole.zone_names = {"low", "high"};
+    whole.cell_zone_names = {"b", "a"};
+    for (const auto & xyz : x) {
+        std::array<double, N_DIM> y;
+        FOR_I_DIM y[i] = double(static_cast<rtype>(xyz[i]));
+        whole.node_coords.push_back(y);
+    }
+    for (const Block & b : blocks) {
+        for (const auto & e : b.elements) {
+            if (b.dim == N_DIM) {
+                whole.add_cell(e);
+                whole.cell_zone.push_back(b.physical == 12 ? 0 : b.physical == 11 ? 1 : Mesh::NO_CELL_ZONE);
+            } else if (b.dim == N_DIM - 1 && b.physical != 0) {
+                whole.add_face(e, b.physical == 2 ? 0u : 1u);
+            }
+        }
+    }
+
+    const std::string bd = std::to_string(N_DIM - 1), cd = std::to_string(N_DIM);
+    const std::string names = "$PhysicalNames\n4\n" + bd + " 1 \"high\"\n" + bd + " 2 \"low\"\n" + cd + " 11 \"a\"\n" +
+                              cd + " 12 \"b\"\n$EndPhysicalNames\n";
+    size_t n_elements = 0;
+    for (const Block & b : blocks) n_elements += b.elements.size();
+    std::ostringstream v22, v41;
+    v22 << std::setprecision(17) << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n" << names << "$Nodes\n" << x.size() << "\n";
+    for (size_t k = 0; k < x.size(); k++) v22 << tag[k] << " " << x[k][0] << " " << x[k][1] << " " << x[k][2] << "\n";
+    v22 << "$EndNodes\n$Elements\n" << n_elements << "\n";
+    size_t id = 1;
+    for (const Block & b : blocks) {
+        for (const auto & e : b.elements) {
+            v22 << id++ << " " << b.type << " 2 " << b.physical << " " << b.entity;
+            for (const uint64_t k : e) v22 << " " << tag[k];
+            v22 << "\n";
+        }
+    }
+    v22 << "$EndElements\n";
+    out.v22 = v22.str();
+
+    // Entities: a point, and in each dimension 1 to N_DIM entities 1 to 3 with their blocks' physical groups
+    std::map<std::pair<int, int>, int> physical;
+    for (const Block & b : blocks) physical[{b.dim, b.entity}] = b.physical;
+    v41 << std::setprecision(17) << "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n" << names << "$Entities\n1";
+    for (int d = 1; d <= 3; d++) v41 << " " << (d <= N_DIM ? 3 : 0);
+    v41 << "\n1 0 0 0 0\n";
+    for (int d = 1; d <= N_DIM; d++) {
+        for (int e = 1; e <= 3; e++) {
+            const int ph = physical.count({d, e}) ? physical[{d, e}] : 0;
+            v41 << e << " 0 0 0 1 1 1 " << (ph ? "1 " + std::to_string(ph) : "0") << " 0\n";
+        }
+    }
+    const size_t cut[4] = {0, 1, 1 + x.size() / 3, x.size()};
+    v41 << "$EndEntities\n$Nodes\n3 " << x.size() << " 1000 " << 1000 + 7 * n_grid << "\n";
+    for (int b = 0; b < 3; b++) {
+        v41 << N_DIM << " " << b + 1 << " 0 " << cut[b + 1] - cut[b] << "\n";
+        for (size_t k = cut[b]; k < cut[b + 1]; k++) v41 << tag[k] << "\n";
+        for (size_t k = cut[b]; k < cut[b + 1]; k++) v41 << x[k][0] << " " << x[k][1] << " " << x[k][2] << "\n";
+    }
+    v41 << "$EndNodes\n$Elements\n" << blocks.size() << " " << n_elements << " 1 " << n_elements << "\n";
+    id = 1;
+    for (const Block & b : blocks) {
+        v41 << b.dim << " " << b.entity << " " << b.type << " " << b.elements.size() << "\n";
+        for (const auto & e : b.elements) {
+            v41 << id++;
+            for (const uint64_t k : e) v41 << " " << tag[k];
+            v41 << "\n";
+        }
+    }
+    v41 << "$EndElements\n";
+    out.v41 = v41.str();
+    return out;
+}
+
+/** @brief Expect block to be part r of p of whole (see MeshBlock). */
+void expect_part(const MeshBlock & whole, const MeshBlock & block, int r, int p) {
+    auto slice = [](const auto & values, uint64_t a, uint64_t b) {
+        return std::vector<typename std::decay_t<decltype(values)>::value_type>(values.begin() + std::ptrdiff_t(a),
+                                                                               values.begin() + std::ptrdiff_t(b));
+    };
+    const uint64_t c0 = block_begin(whole.n_cells(), r, p), c1 = block_begin(whole.n_cells(), r + 1, p);
+    ASSERT_EQ(block.first_cell, c0);
+    ASSERT_EQ(block.n_cells(), c1 - c0);
+    EXPECT_EQ(block.cell_nodes, slice(whole.cell_nodes, whole.cell_offsets[c0], whole.cell_offsets[c1]));
+    for (uint64_t c = 0; c <= block.n_cells(); c++) {
+        EXPECT_EQ(block.cell_offsets[c], whole.cell_offsets[c0 + c] - whole.cell_offsets[c0]);
+    }
+    EXPECT_EQ(block.cell_zone, slice(whole.cell_zone, c0, c1));
+    EXPECT_EQ(block.cell_zone_names, whole.cell_zone_names);
+    const uint64_t n0 = block_begin(whole.n_nodes(), r, p), n1 = block_begin(whole.n_nodes(), r + 1, p);
+    EXPECT_EQ(block.first_node, n0);
+    EXPECT_EQ(block.node_coords, slice(whole.node_coords, n0, n1));
+    const uint64_t f0 = block_begin(whole.n_faces(), r, p), f1 = block_begin(whole.n_faces(), r + 1, p);
+    ASSERT_EQ(block.n_faces(), f1 - f0);
+    EXPECT_EQ(block.face_nodes, slice(whole.face_nodes, whole.face_offsets[f0], whole.face_offsets[f1]));
+    EXPECT_EQ(block.face_zone, slice(whole.face_zone, f0, f1));
+    EXPECT_EQ(block.zone_names, whole.zone_names);
+    EXPECT_TRUE(block.face_high_order_offsets.empty());
+}
+
+} // namespace
+
+/**
+ * @brief Each rank's block of a Gmsh file, which the ranks read in parallel,
+ *        is its part of the mesh, whatever the order and tags of the nodes,
+ *        the entity blocks of format 4.1, and the elements that are not part
+ *        of the mesh between those that are.
+ */
+TEST(MeshBlockTest, EachRankReadsItsPartOfAGmshFile) {
+    const GmshCase mesh = scrambled_gmsh(N_DIM == 2 ? 7 : 4);
+    const int r = comm::rank(), p = comm::size();
+    for (const auto & [name, content] : {std::pair<std::string, std::string>{"mallard_scrambled_22.msh", mesh.v22},
+                                         std::pair<std::string, std::string>{"mallard_scrambled_41.msh", mesh.v41}}) {
+        SCOPED_TRACE(name);
+        expect_part(mesh.whole, read_file_block(write_temp_shared(name, content)), r, p);
+    }
+}
+
+/**
+ * @brief Every rank's block of a mesh file is its part of the whole file as
+ *        one rank reads it: cells, nodes, boundary faces and their zones,
+ *        cell zones and high-order nodes.
  */
 TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshFile) {
 #if N_DIM == 2

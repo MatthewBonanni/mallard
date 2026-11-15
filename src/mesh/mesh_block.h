@@ -135,8 +135,8 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
  * @brief This rank's block of the mesh described by the [mesh] table
  *        (collective): an HDF5 mesh file (.h5), another mesh file (see
  *        read_mesh_file), or a generated mesh. Generated meshes number cells
- *        and nodes exactly as Mesh::init. Other mesh files are read whole by
- *        every rank, so large meshes should be converted to HDF5 first.
+ *        and nodes exactly as Mesh::init. Other mesh files are read as
+ *        read_file_block reads them.
  */
 MeshBlock read_mesh_block(const Input & input);
 
@@ -149,10 +149,21 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axis
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see
- *        read_mesh_file): rank 0 reads the file and sends the other ranks
- *        their blocks (collective).
+ *        read_mesh_file), collective: each rank reads its part of a Gmsh
+ *        file (read_gmsh_block); of other files rank 0 reads the whole and
+ *        sends the other ranks their blocks.
  */
 MeshBlock read_file_block(const std::string & filename);
+
+/**
+ * @brief This rank's block of an ASCII Gmsh file (format 2.2 or 4.1),
+ *        collective: rank 0 finds where each rank's share of the nodes and
+ *        elements lies in the file, each rank parses its share, and the ranks
+ *        exchange nodes, cells and boundary faces into their blocks. The
+ *        blocks are those of the whole file split evenly, on any number of
+ *        ranks.
+ */
+MeshBlock read_gmsh_block(const std::string & filename);
 
 /**
  * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
