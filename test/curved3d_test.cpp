@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <random>
 #include <sstream>
@@ -429,6 +430,104 @@ TEST(Curved3DTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
     EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 3), 1e-11);
     EXPECT_GT(shell_polynomial_error(4, "curved", 5, true, 4), 1e-6);
     EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 4, "curved_wall_degree = 4\n"), 1e-11);
+}
+
+namespace {
+
+/**
+ * @brief Gmsh 2.2 file of an O-grid around the cylinder r = 0.5 (zone
+ *        "cylinder") extruded along z over n_z layers: n_r rings of n_t
+ *        hexahedra, the first of thickness dr0 = pi / n_t, each next one q
+ *        times thicker, layers dr0 thick, inside the polygonal outer boundary
+ *        (zone "outer"), between the planes "zlo" and "zhi".
+ */
+std::string graded_cylinder_gmsh(uint32_t n_t, uint32_t n_r, uint32_t n_z, double q) {
+    const double dr0 = M_PI / n_t;
+    std::ostringstream s;
+    s.precision(17);
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n5\n2 1 \"cylinder\"\n2 2 \"outer\"\n2 3 \"zlo\"\n"
+         "2 4 \"zhi\"\n3 5 \"fluid\"\n$EndPhysicalNames\n";
+    auto id = [&](uint32_t i, uint32_t j, uint32_t k) { return (k * (n_r + 1) + j) * n_t + (i % n_t) + 1; };
+    s << "$Nodes\n" << (n_z + 1) * (n_r + 1) * n_t << "\n";
+    for (uint32_t k = 0; k <= n_z; k++) {
+        double r = 0.5, dr = dr0;
+        for (uint32_t j = 0; j <= n_r; j++, r += dr, dr *= q) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                const double t = 2.0 * M_PI * i / n_t;
+                s << id(i, j, k) << " " << r * std::cos(t) << " " << r * std::sin(t) << " " << k * dr0 << "\n";
+            }
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << 2 * n_z * n_t + 2 * n_r * n_t + n_z * n_r * n_t << "\n";
+    uint32_t e = 1;
+    for (uint32_t k = 0; k < n_z; k++) {
+        for (uint32_t i = 0; i < n_t; i++) {
+            s << e++ << " 3 2 1 1 " << id(i, 0, k) << " " << id(i, 0, k + 1) << " " << id(i + 1, 0, k + 1) << " "
+              << id(i + 1, 0, k) << "\n";
+            s << e++ << " 3 2 2 2 " << id(i, n_r, k) << " " << id(i + 1, n_r, k) << " " << id(i + 1, n_r, k + 1) << " "
+              << id(i, n_r, k + 1) << "\n";
+        }
+    }
+    for (uint32_t j = 0; j < n_r; j++) {
+        for (uint32_t i = 0; i < n_t; i++) {
+            s << e++ << " 3 2 3 3 " << id(i, j, 0) << " " << id(i, j + 1, 0) << " " << id(i + 1, j + 1, 0) << " "
+              << id(i + 1, j, 0) << "\n";
+            s << e++ << " 3 2 4 4 " << id(i, j, n_z) << " " << id(i + 1, j, n_z) << " " << id(i + 1, j + 1, n_z) << " "
+              << id(i, j + 1, n_z) << "\n";
+        }
+    }
+    for (uint32_t k = 0; k < n_z; k++) {
+        for (uint32_t j = 0; j < n_r; j++) {
+            for (uint32_t i = 0; i < n_t; i++) {
+                s << e++ << " 5 2 0 5";
+                for (uint32_t l = k; l <= k + 1; l++) {
+                    s << " " << id(i, j, l) << " " << id(i + 1, j, l) << " " << id(i + 1, j + 1, l) << " " << id(i, j + 1, l);
+                }
+                s << "\n";
+            }
+        }
+    }
+    s << "$EndElements\n";
+    return s.str();
+}
+
+}  // namespace
+
+TEST(Curved3DTENO, WallStencilsAreStableOnRadiallyGradedMeshes) {
+    // 128 x 6 x 4 hexahedra around a cylinder, cubic wall cells, rings growing
+    // by 1.3: the nearest candidates of a wall cell's one-sided cubic fit span
+    // too few rings, and its wall-normal cubic is set by the wall's curvature
+    // alone; the fit passes the Lebesgue bound yet grows in time. Ranked deeper
+    // along the wall normal, a pressure pulse of 1e-3 at rest stays acoustic
+    const std::string file = write_temp("curved_graded3d.msh", graded_cylinder_gmsh(128, 6, 4, 1.3));
+    std::string input =
+        "[run]\nt_stop = 0.3\ncfl = 0.4\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"cylinder\"\ntype = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\n"
+        "radius = 0.5\nfilled = false\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.4\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\n"
+        "p = \"1.0 + 1.0e-3 * exp(-((x + 0.55)^2 + (y - 0.2)^2) / 0.005)\"\n";
+    for (const char * zone : {"cylinder", "outer", "zlo", "zhi"}) {
+        input += "[[boundaries]]\nname = \"" + std::string(zone) + "\"\ntype = \"symmetry\"\n";
+    }
+    input +=
+        "[numerics]\nriemann_solver = \"HLL\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 0.7142857142857143\nrho_ref = 1.4\n"
+        "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    double u_max = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0));
+        for (int d = 1; d <= 3; d++) {
+            const double u = std::abs(double(solver.h_conservatives(c, d)) / rho);
+            if (!(u <= u_max)) u_max = std::isnan(u) ? std::numeric_limits<double>::infinity() : u;
+        }
+    }
+    // Acoustic velocities of the pulse are ~1e-3 / (rho c) = 6e-4
+    EXPECT_LT(comm::allreduce(u_max, comm::Op::MAX), 1e-3);
 }
 
 TEST(Curved3DTENO, WallValuesConvergeAtDesignOrderOnSpheresAndEllipsoids) {

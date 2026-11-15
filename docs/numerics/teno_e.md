@@ -274,6 +274,17 @@ most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged.
 
+A cell that has a one-sided face itself ranks its candidates with their
+distances along the faces' mean normal halved (`ONE_SIDED_DEPTH` = 0.5).
+On meshes graded away from the wall, its nearest candidates otherwise lie in
+only three layers (6, 7 and 5 of 18 at degree 3), so the wall-normal cubic is
+resolved only through the wall's curvature: the Lebesgue constant grows as the
+wall radius over the spacing, passes the 2D bound of 10 over an ordinary range
+of wall resolutions, and the linearized scheme grows at the wall (2D: Re
+$\lambda \Delta r_0$ up to 1.8 at orders 4 to 6; 3D hexahedra alike, inside
+their bound of 4). Halved, the stencil spans five layers (4, 5, 5, 3, 1) with
+Lebesgue constants of 3.1 to 3.9 ([Curved boundaries](../design/curved_boundaries.md#teno-at-curved-walls)).
+
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
 or a 3D slab or pencil one cell thick, has no data across that axis: its

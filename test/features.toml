@@ -27,12 +27,14 @@
 "CurvedGeometry.StraightWallsAreSecondOrderAndHighOrderLinesConverge" = ["curved"]
 "CurvedTENOOrder.ReconstructionAtCurvedWallsConvergesAtDesignOrder" = [["curved", "teno3"], ["curved", "teno4"], ["curved", "teno5"], ["curved", "teno6"]]
 "CurvedTENO.CellsReachingCurvedWallsFitAtMostTheWallDegree" = ["curved", "teno5"]
+"CurvedTENO.WallStencilsAreStableOnRadiallyGradedMeshes" = ["curved", "euler", "teno4", "hll", "ssprk3"]
 "CurvedSolver.GasAtRestStaysExactlyAtRest" = ["curved", "euler", "muscl", "teno4", "hllc", "ssprk3"]
 "CurvedSolver.RestartedRunMatchesUninterruptedRunExactly" = ["curved", "euler", "teno4", "hllc", "ssprk3", "restart"]
 
 [curved3d_test]
 "Curved3DGeometry.QuadraticWallsConvergeAtFourthOrder" = ["curved"]
 "Curved3DSolver.GasAtRestStaysExactlyAtRest" = ["curved", "euler", "teno3", "hllc", "ssprk3"]
+"Curved3DTENO.WallStencilsAreStableOnRadiallyGradedMeshes" = ["curved", "euler", "teno4", "hll", "ssprk3"]
 
 [io_test]
 "IOTest.AsynchronousOutputWritesTheSameFiles" = [

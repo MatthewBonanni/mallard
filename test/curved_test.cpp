@@ -17,6 +17,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -518,8 +519,9 @@ TEST_P(CurvedTENOOrder, ReconstructionAtCurvedWallsConvergesAtDesignOrder) {
     const std::string method = "TENO" + std::to_string(order);
     const std::string cells = triangles ? "triangles" : "quadrilaterals";
     const std::string kind = ellipses ? " (ellipses)" : "";
-    // On the ellipses, 4 rings are not yet asymptotic for TENO4 (rate 2.9 from 4 to 8, 5.0 from 8 to 16)
-    const uint32_t n1 = ellipses ? 6 : 4, n2 = 2 * n1;
+    // On the ellipses, 4 rings are not yet asymptotic for TENO4 (rate 2.9 from 4 to 8, 5.0 from 8 to 16),
+    // nor 6 for TENO6 on triangles (5.1 from 6 to 12, 5.9 from 12 to 24)
+    const uint32_t n1 = ellipses ? 12 : 4, n2 = 2 * n1;
     const double e1 = curved_reconstruction_error(n1, "curved", order, triangles, "", walls);
     const double e2 = curved_reconstruction_error(n2, "curved", order, triangles, "", walls);
     verification::expect_order({"curved", method + ", curved walls" + kind, cells, "max wall-value error",
@@ -752,17 +754,90 @@ TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
     // By default orders 5 and 6 fit degree 3 in cells whose stencils reach a
     // curved wall (one-sided fits of higher degree grow in time there): the
     // wall values then converge at fourth order, and at fifth with
-    // curved_wall_degree = 4
+    // curved_wall_degree = 4 (from 8 rings: 3.4 from 4 to 8 at wall degree 3)
     SKIP_IN_SINGLE_PRECISION("errors reach single-precision round-off");
-    const double c1 = curved_reconstruction_error(4, "curved", 5, false, "\n");
-    const double c2 = curved_reconstruction_error(8, "curved", 5, false, "\n");
-    const double f1 = curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 4\n");
-    const double f2 = curved_reconstruction_error(8, "curved", 5, false, "curved_wall_degree = 4\n");
+    const double c1 = curved_reconstruction_error(8, "curved", 5, false, "\n");
+    const double c2 = curved_reconstruction_error(16, "curved", 5, false, "\n");
+    const double f1 = curved_reconstruction_error(8, "curved", 5, false, "curved_wall_degree = 4\n");
+    const double f2 = curved_reconstruction_error(16, "curved", 5, false, "curved_wall_degree = 4\n");
     verification::expect_order({"curved", "TENO5, curved walls, wall degree 3", "quadrilaterals",
-                                "max wall-value error", {4, 8}, {c1, c2}, 4.0, 3.5, 4.5});
+                                "max wall-value error", {8, 16}, {c1, c2}, 4.0, 3.5, 4.5});
     verification::expect_order({"curved", "TENO5, curved walls, wall degree 4", "quadrilaterals",
-                                "max wall-value error", {4, 8}, {f1, f2}, 5.0, 4.5});
+                                "max wall-value error", {8, 16}, {f1, f2}, 5.0, 4.5});
     EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
+}
+
+namespace {
+
+/**
+ * @brief Gmsh 2.2 file of an O-grid around the circle r = 0.5 (zone
+ *        "cylinder"): n_r rings of n_t quadrilaterals, the first of
+ *        thickness dr0, each next one q times thicker, inside the polygonal
+ *        outer boundary (zone "outer").
+ */
+std::string graded_cylinder_gmsh(uint32_t n_t, uint32_t n_r, double dr0, double q) {
+    std::ostringstream s;
+    s.precision(17);
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n2\n1 1 \"cylinder\"\n1 2 \"outer\"\n$EndPhysicalNames\n";
+    s << "$Nodes\n" << (n_r + 1) * n_t << "\n";
+    double r = 0.5, dr = dr0;
+    for (uint32_t j = 0; j <= n_r; j++, r += dr, dr *= q) {
+        for (uint32_t i = 0; i < n_t; i++) {
+            const double t = 2.0 * M_PI * i / n_t;
+            s << j * n_t + i + 1 << " " << r * std::cos(t) << " " << r * std::sin(t) << " 0\n";
+        }
+    }
+    auto id = [&](uint32_t i, uint32_t j) { return j * n_t + (i % n_t) + 1; };
+    s << "$EndNodes\n$Elements\n" << n_t * (n_r + 2) << "\n";
+    uint32_t e = 1;
+    for (uint32_t i = 0; i < n_t; i++) s << e++ << " 1 2 1 1 " << id(i, 0) << " " << id(i + 1, 0) << "\n";
+    for (uint32_t i = 0; i < n_t; i++) s << e++ << " 1 2 2 2 " << id(i, n_r) << " " << id(i + 1, n_r) << "\n";
+    for (uint32_t j = 0; j < n_r; j++) {
+        for (uint32_t i = 0; i < n_t; i++) {
+            s << e++ << " 3 2 0 1 " << id(i, j) << " " << id(i + 1, j) << " " << id(i + 1, j + 1) << " " << id(i, j + 1)
+              << "\n";
+        }
+    }
+    s << "$EndElements\n";
+    return s.str();
+}
+
+}  // namespace
+
+TEST(CurvedTENO, WallStencilsAreStableOnRadiallyGradedMeshes) {
+    // 128 x 12 cells around a cylinder, square wall cells, rings growing by
+    // 1.12: the 18 nearest candidates of a wall cell's one-sided cubic fit
+    // span only three rings, its wall-normal cubic is set by the wall's
+    // curvature alone, and the fit passes the Lebesgue bound yet grows in time
+    // (Re lambda dr0 ~ 1.8). Ranked deeper along the wall normal, it spans
+    // five rings, and a pressure pulse of 1e-3 at rest stays acoustic
+    const uint32_t n_t = 128;
+    const std::string file = write_temp("curved_graded.msh", graded_cylinder_gmsh(n_t, 12, M_PI / n_t, 1.12));
+    const std::string input =
+        "[run]\nt_stop = 0.3\ncfl = 0.4\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"cylinder\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 0.5\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.4\"\nu = [\"0.0\", \"0.0\"]\n"
+        "p = \"1.0 + 1.0e-3 * exp(-((x + 0.55)^2 + (y - 0.2)^2) / 0.005)\"\n"
+        "[[boundaries]]\nname = \"cylinder\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+        "[numerics]\nriemann_solver = \"HLL\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 0.7142857142857143\nrho_ref = 1.4\n"
+        "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    double u_max = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0));
+        for (int d = 1; d <= 2; d++) {
+            const double u = std::abs(double(solver.h_conservatives(c, d)) / rho);
+            if (!(u <= u_max)) u_max = std::isnan(u) ? std::numeric_limits<double>::infinity() : u;
+        }
+    }
+    // Acoustic velocities of the pulse are ~1e-3 / (rho c) = 6e-4
+    EXPECT_LT(comm::allreduce(u_max, comm::Op::MAX), 1e-3);
 }
 
 #ifdef Mallard_HAS_HDF5

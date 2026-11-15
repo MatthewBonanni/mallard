@@ -141,6 +141,23 @@ operations, so the geometry does not depend on the partition.
   then fourth order at the walls and of their order elsewhere. Design order
   at the walls needs a boundary-constrained reconstruction (the wall
   condition imposed at the wall's quadrature points), left for later.
+- **Deeper one-sided stencils.** A cell with a one-sided curved face ranks
+  its candidates with distances along the face normal halved
+  (`ONE_SIDED_DEPTH`). On O-grids graded away from the wall its 18 nearest
+  candidates otherwise lie in three rings (6, 7 and 5), the wall-normal cubic
+  is set by the wall's curvature, the Lebesgue constant grows as R/h (3.3 to
+  8.5 for 48 to 128 square wall cells around a cylinder, ring growth 1.12),
+  and the linearized scheme at rest grows at the wall (Re lambda dr0 0.8 and
+  1.8 at 96 and 128 cells, orders 4 to 6; 3D hexahedra alike at ring growth
+  1.3). Halved, the stencil spans five rings (4, 5, 5, 3, 1), with Lebesgue
+  constants 3.1 to 3.9, and those wall modes vanish. Cells further from the
+  wall still rank by physical distance: wall cells of aspect 2 or ring growth
+  1.3 stay unstable through them until the spacing metric covers every cell
+  (#1219), with which all 30 wall shapes and resolutions are stable. Cost,
+  vortex above at t = 12: L1 up to 4.5x larger at order 4 (n_r = 8) and 22x
+  at order 6 (n_r = 16), 1.1 to 2.4x at n_r = 64; at n_r = 16 and t = 24 the
+  order-4 error grows to 3.6e-4 (6.2e-6 before), from the inner (convex)
+  wall.
 
 ## Validation
 
@@ -151,24 +168,27 @@ the annulus `1 <= r <= 1.384` (`M` at the inner wall), an exact steady Euler
 solution, with slip walls (`symmetry`) on both circles and no other boundary.
 Quadrilateral O-grids of `n_r x 16 n_r` cells (triangles: each split in two),
 HLLC, SSPRK3, CFL 0.4, from the exact cell averages to `t = 12`. Density
-error against the exact averages at `t = 12`, A100.
+error against the exact averages at `t = 12` (the curved rows with deeper
+one-sided stencils, CPU; the others A100).
 
 Subsonic (`M = 0.5`), quadrilaterals:
 
 | Order | Walls | L1, n_r = 8 / 16 / 32 / 64 | L1 rate (last) | Linf, n_r = 64 | Linf rate |
 |---|---|---|---|---|---|
 | 3 | straight | 1.8e-2 / 9.0e-3 / 4.4e-3 / 2.5e-5 | erratic | 5.9e-4 | - |
-| 3 | curved | 3.9e-5 / 3.5e-6 / 3.4e-7 / 4.2e-8 | 3.03 | 3.6e-7 | 2.86 |
+| 3 | curved | 3.8e-5 / 3.5e-6 / 3.4e-7 / 4.2e-8 | 3.03 | 3.7e-7 | 2.84 |
 | 4 | straight | 1.0e-1 / 6.9e-2 / 7.9e-2 / 7.8e-2 | 0.0 | 6.2e-1 | - |
-| 4 | curved | 1.3e-5 / 1.1e-6 / 1.0e-8 / 3.5e-10 | 4.89 | 8.2e-9 | 3.99 |
+| 4 | curved | 5.9e-5 / 3.4e-6 / 1.1e-8 / 3.9e-10 | 4.86 | 8.9e-9 | 4.02 |
 | 5 | straight | 6.6e-2 / 7.2e-2 / 6.7e-2 / 4.8e-2 | 0.5 | 5.2e-1 | - |
-| 5 | curved | 1.3e-5 / 2.8e-7 / 9.5e-9 / 3.2e-10 | 4.90 | 7.4e-9 | 3.95 |
+| 5 | curved | 1.6e-5 / 4.5e-7 / 1.1e-8 / 3.8e-10 | 4.91 | 8.1e-9 | 3.92 |
 | 6 | straight | 1.1e-1 / 7.3e-2 / 4.3e-2 / 2.0e-2 | 1.1 | 3.8e-1 | - |
-| 6 | curved | 1.3e-5 / 1.6e-6 / 1.2e-8 / 3.8e-10 | 4.92 | 7.3e-9 | 3.65 |
+| 6 | curved | 1.6e-5 / 3.5e-5 / 7.7e-8 / 9.2e-10 | 6.38 | 8.0e-9 | 5.10 |
 
 Triangles, curved walls (straight walls do not converge, L1 2e-2 to 6e-2 at
 `n_r = 64`): L1 rates 3.45, 4.38, 4.91, 4.91 for orders 3-6 (Linf 2.95,
 3.94, 3.94, 3.96), L1 at `n_r = 64` 9.4e-9, 1.8e-10, 1.0e-10, 9.9e-11.
+These triangle figures predate the deeper one-sided stencils, which leave L1
+within 0.9 to 1.3 times its earlier value at `n_r` = 8 and 16.
 
 Supersonic (`M = 2.25`, quadrilaterals): straight walls shed waves at every
 node and do not converge (L1 0.05 to 0.26). Curved: L1 rates 3.64, 4.86, 5.00,
