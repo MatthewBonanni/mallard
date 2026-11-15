@@ -193,7 +193,7 @@ BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc
             break;
         case BoundaryType::INLET_MASS_FLOW:
             read("T", dim::temperature, T, has_T, T_key);
-            if (input.contains("mass_flux") && input.at("mass_flux").is_array()) {
+            if (contains_optional(input, "mass_flux") && input.at("mass_flux").is_array()) {
                 read_vector("mass_flux", dim::mass_flux);
             } else {
                 read("mass_flux", dim::mass_flux, flux, has_flux, flux_key);
