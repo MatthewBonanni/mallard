@@ -65,9 +65,12 @@ struct Sums {
     double inside = 0.0, total = 0.0;
 };
 
-/** @brief f(member, scratch, inside, total) by host teams of the largest size up to 4, as rank 0 of each saw it. */
+/**
+ * @brief f(member, scratch, inside, total) from sums start, by host teams of
+ *        the largest size up to 4, as rank 0 of each saw it.
+ */
 template <typename F>
-Sums by_teams(const F & f) {
+Sums by_teams(const F & f, const Sums start = {}) {
     using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
     const int size = std::min(4, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
     Policy policy(2, size);
@@ -75,7 +78,7 @@ Sums by_teams(const F & f) {
     Kokkos::View<double *[2], Kokkos::HostSpace> out("sampler_sums", 2 * size);
     Kokkos::parallel_for("region_sampler_test", policy, [=](const Policy::member_type & member) {
         const auto scratch = region::sampler::team_scratch(member);
-        double inside = 0.0, total = 0.0;
+        double inside = start.inside, total = start.total;
         f(member, scratch, inside, total);
         const int i = member.league_rank() * member.team_size() + member.team_rank();
         out(i, 0) = inside;
@@ -138,6 +141,33 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     EXPECT_FALSE(add_in_binade(r, m, n, 1));
     r = -1.0;
     EXPECT_FALSE(add_in_binade(r, m, n, 1));
+
+    // Up to the last value of a binade, and one addition past it
+    const double ulp = std::ldexp(1.0, -53), below = 1.0 - 8.0 * ulp;
+    const double one_ulp[1] = {ulp};
+    for (const uint32_t count : {7u, 8u}) {
+        const uint32_t times[1] = {count};
+        double one_at_a_time = below;
+        for (uint32_t i = 0; i < count; i++) one_at_a_time += ulp;
+        r = below;
+        EXPECT_EQ(add_in_binade(r, one_ulp, times, 1), count == 7) << count;
+        EXPECT_EQ(r, count == 7 ? one_at_a_time : below) << count;
+    }
+}
+
+TEST(RegionSamplerTest, TeamsSumWhatOneThreadSumsAcrossBinades) {
+    // Sums starting just below powers of two that the cell's simplices carry them past
+    const Shape<Ball> shape{{{0.43, 0.51, 0.47}, 0.17}, 0.0, true};
+    const Sums start{std::ldexp(1.0 - std::ldexp(1.0, -30), -7), std::ldexp(1.0 - std::ldexp(1.0, -30), -5)};
+    Sums cell = start;
+    region::sampler::straight_cell(shape, false, Cell::n, Cell{}, cell.inside, cell.total);
+    EXPECT_GT(cell.inside, 2.0 * std::ldexp(1.0, -7));
+    EXPECT_GT(cell.total, 2.0 * std::ldexp(1.0, -5));
+    const Sums team_cell = by_teams([=](const auto & member, const auto & scratch, double & inside, double & total) {
+        region::sampler::team_straight_cell(member, scratch, shape, false, Cell::n, Cell{}, inside, total);
+    }, start);
+    EXPECT_EQ(team_cell.inside, cell.inside);
+    EXPECT_EQ(team_cell.total, cell.total);
 }
 
 TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
