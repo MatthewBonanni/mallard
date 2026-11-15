@@ -159,6 +159,20 @@ touches, except:
     across the other side land next to the cells on the first. Both gave an
     odd-even mode in the wall pressure of the NACA 0012 tutorial mesh at
     order 3;
+- in 2D, images deeper behind the line than the body under their foot: the
+    path from the foot to the image crosses another boundary face, so the
+    image lands past the far side of the body, among the flow there (#976).
+    Near a closed trailing edge the body is thinner than the stencils, and
+    the cells on one side mirrored across their own side land beyond the
+    other side, where cells of the other side and of the wake are also in
+    the stencil. On the NACA 0012 tutorial mesh this gave an odd-even mode
+    in the wall pressure at order 4 from x = 0.9 to the trailing edge,
+    largest at x = 0.975 (6% of the dynamic pressure at t = 20, against 1%
+    for order 5 anywhere on the wall). The setup finds, for each mirror face,
+    the parts of the other boundary faces in the strip behind it
+    (`boundary_behind_faces`), whose least depth over the foot bounds the
+    body; it searches every boundary face of the rank's mesh, so the far side
+    must lie within its halo;
 - boundaries between MPI ranks (`PARTITION` faces), which are not boundaries
     of the domain;
 - curved wall and symmetry faces, which take no images unless
@@ -604,10 +618,12 @@ key have geometries that agree to within $2^{-30} h$ in every coordinate the
 key reads, so the tables a cell takes differ from its own fit by what such a
 difference changes, besides round-off. The shared tables are those of the table
 comparison, except where the cells of one key fall on either side of its grid:
-they take one table instead of two.
+they take one table instead of two. In 2D, a cell whose search reads a wall
+with another boundary behind it (a thin body, whose far side can drop mirror
+images) has no key and is fitted on its own.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 18; one file per MPI rank). The file is used
+on later runs (format version 22; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,

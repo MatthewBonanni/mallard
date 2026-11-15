@@ -218,6 +218,16 @@ inline double cell_scale(const Mesh & mesh, const uint32_t c) {
     return N_DIM == 3 ? std::cbrt(double(mesh.h_cell_volume(c))) : std::sqrt(double(mesh.h_cell_volume(c)));
 }
 
+#if N_DIM == 2
+/**
+ * @brief (face): whether it is a boundary face with other boundary faces of the
+ *        domain in the strip behind it, which can drop its mirror images past
+ *        the far side of a thin body: the fit then depends on more than the
+ *        cells and faces around it.
+ */
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries);
+#endif
+
 /** @brief Whether batches interleave their cells (GPUs). */
 bool batch_interleaved();
 
