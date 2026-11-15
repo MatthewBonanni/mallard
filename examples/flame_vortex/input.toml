@@ -1,6 +1,6 @@
-# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 1.7599 mm, u' = 45.8137 m/s), pair at x = 2.1999 mm.
-# Planar flame: h2_phi4.0_T300_mix_full.csv, 12 cells per
-# thermal thickness (0.4400 mm), Cantera S_L = 1.527125 m/s
+# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 1.7520 mm, u' = 45.6404 m/s), pair at x = 2.1900 mm.
+# Planar flame: h2_phi4_T300_mix_full.csv, 12 cells per
+# thermal thickness (0.4380 mm), Cantera S_L = 1.521346 m/s
 #
 # Premixed flame-vortex interactions on the spectral diagram of Poinsot,
 # Veynante & Candel (1991), J. Fluid Mech. 228:561, doi 10.1017/S0022112091002823
@@ -19,11 +19,11 @@
 # is pushed into burnt gas that the losses have cooled. This case has none (see
 # examples/flame_vortex_quenching for a radiating flame that quenches) and uses
 # a mixture whose flame stretch alone weakens: rich H2/air, phi = 4, 300 K, 1 atm, mixture-averaged
-# transport (S_L = 1.527 m/s, thermal thickness delta_L = 0.440 mm, burnt gas
+# transport (S_L = 1.521 m/s, thermal thickness delta_L = 0.438 mm, burnt gas
 # 1556 K, rho_u / rho_b = 4.78), where the deficient reactant is O2, with a
 # Lewis number of 2.2 (H2: 0.42). Lengths are in delta_L, the thermal
 # thickness (T_b - T_u) / max dT/dx; Poinsot et al.'s l_F is 3.7 nu_u / S_L of
-# their flame, whereas here delta_L = 19.3 nu_u / S_L, so placing these runs
+# their flame, whereas here delta_L = 19.1 nu_u / S_L, so placing these runs
 # by nu_u / S_L instead would move them 5 times further right.
 #
 # Setup (examples/flame_vortex/flame_vortex.py): the planar Cantera flame in its frame (fresh
@@ -44,7 +44,7 @@
 # Poinsot et al.'s quenching example), from this directory, and run it:
 #
 #   python ../../tools/setup/flame_reference.py --single h2 4.0 300 .
-#   python flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
+#   python flame_vortex.py h2_phi4_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
 #       --r 4 --u 30 --cfl 0.8
 #
 # For the sweep, the same with --r R --u U into run directories (and --cells 24
@@ -102,15 +102,15 @@
 # 24 cells (300 x 192) about 1.5 hours for 210,000-265,000 steps.
 
 [run]
-t_stop = 0.00097957056200000006
+t_stop = 0.0009788862263
 cfl = 0.8
 
 [mesh]
 type = "cartesian"
 Nx = 276
 Ny = 96
-Lx = 0.010119500858045426
-Ly = 0.0035198263854071049
+Lx = 0.010074168999885008
+Ly = 0.0035040587825686986
 
 [initialize]
 type = "restart"
@@ -119,10 +119,10 @@ file = "flame.restart"
 [[boundaries]]
 name = "left"
 type = "inlet_state"
-u = [1.5271245092529449, 0.0]
+u = [1.5213463450975324, 0.0]
 p = 101325.0
 T = 300
-X = { "H2" = 0.626959247648878, "O2" = 0.078369905956099162, "N2" = 0.29467084639502295 }
+X = { "H2" = 0.62695924764912625, "O2" = 0.078369905956330463, "N2" = 0.29467084639454327 }
 
 [[boundaries]]
 name = "right"
@@ -161,5 +161,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-time_interval = 9.7957056200000014e-06
+time_interval = 9.7888622629999996e-06
 fields = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_O2"]

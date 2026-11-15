@@ -1,4 +1,4 @@
-# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 11.9977 mm, u' = 0.8067 m/s), pair at x = 14.9971 mm.
+# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 11.9539 mm, u' = 0.7998 m/s), pair at x = 14.9423 mm.
 # Flame-vortex quenching with radiative heat losses: r / delta_L = 4, u' / S_L = 30
 #
 # The spectral diagram of Poinsot, Veynante & Candel (1991), J. Fluid Mech.
@@ -19,11 +19,11 @@
 # ([radiation]: H2O, CO2, CO and CH4, background 300 K), which matters only
 # for slow flames: CH4/air at phi = 0.42, 300 K, 1 atm with the two-step
 # mechanism 2S-CH4-BFER (mechanisms/ch4_bfer.yaml) and mixture-averaged
-# transport. Cantera, with radiation (H2O and CO2): S_L = 2.689 cm/s,
-# thermal thickness delta_L = (T_max - T_u) / max dT/dx = 3.00 mm, T_max
-# 1266 K; adiabatic 3.50 cm/s and 1322 K; no steady flame at phi = 0.405
+# transport. Cantera, with radiation (H2O and CO2): S_L = 2.666 cm/s,
+# thermal thickness delta_L = (T_max - T_u) / max dT/dx = 2.99 mm, T_max
+# 1266 K; adiabatic 3.47 cm/s and 1322 K; no steady flame at phi = 0.405
 # (the radiative limit: Mallard's 1D flame at phi = 0.40 dies out, at 0.41 it
-# burns at -1.3% of Cantera's speed). delta_L S_L / nu_u = 5.1 (Poinsot et
+# burns at -1.3% of Cantera's speed). delta_L S_L / nu_u = 5.0 (Poinsot et
 # al.'s l_F = 3.7 nu / S_L), so r / delta_L is about r / l_F / 1.4.
 #
 # Setup (examples/flame_vortex/flame_vortex.py, as examples/flame_vortex): the planar Cantera
@@ -88,8 +88,8 @@
 # found ("the final results are most sensitive" to the loss parameter): the
 # same pair at phi = 0.44 (radiating, 15% below the adiabatic flame speed
 # instead of 23%) cuts off a pocket that burns out (q_min 0.35, nothing
-# escapes), and at phi = 0.42 without radiation (S_L = 3.50 cm/s, delta_L =
-# 2.40 mm, the same r / delta_L and u' / S_L) the pocket burns out too (q_min
+# escapes), and at phi = 0.42 without radiation (S_L = 3.47 cm/s, delta_L =
+# 2.39 mm, the same r / delta_L and u' / S_L) the pocket burns out too (q_min
 # 0.45). The small-scale cut-off is also there: r = 1 at u' = 30 S_L and r = 4
 # at u' = 3 S_L change the heat release by less than 5%.
 #
@@ -104,7 +104,7 @@
 #   mixture-averaged transport gives the deficient CH4 a Lewis number near 1,
 #   so the thermodiffusive stabilization of small curved fronts that they
 #   describe for Le = 1.2 is weaker here.
-# - Their l_F = 3.7 nu_u / S_L against delta_L = 5.1 nu_u / S_L here: on their
+# - Their l_F = 3.7 nu_u / S_L against delta_L = 5.0 nu_u / S_L here: on their
 #   axis the runs sit at r / l_F = 1.4 r / delta_L.
 # - Pockets that quench reach the outlet (outlet_pressure) before they are gone; the
 #   classification relies on q_min along the front while the pocket is inside
@@ -123,15 +123,15 @@
 # cells (300 x 192) about 4.5 hours.
 
 [run]
-t_stop = 0.37922772490000001
+t_stop = 0.38111742119999997
 cfl = 1.2
 
 [mesh]
 type = "cartesian"
 Nx = 276
 Ny = 96
-Lx = 0.068986841674888638
-Ly = 0.023995423191265613
+Lx = 0.068734679426392414
+Ly = 0.023907714583093011
 
 [initialize]
 type = "restart"
@@ -140,10 +140,10 @@ file = "flame.restart"
 [[boundaries]]
 name = "left"
 type = "inlet_state"
-u = [0.026891638416794341, 0.0]
+u = [0.026660493935447862, 0.0]
 p = 101325.0
 T = 300
-X = { "CH4" = 0.04225351977940104, "O2" = 0.20120724335659781, "N2" = 0.75653923686400126 }
+X = { "CH4" = 0.042253520423731608, "O2" = 0.20120724344960847, "N2" = 0.75653923612665996 }
 
 [[boundaries]]
 name = "right"
@@ -184,5 +184,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-time_interval = 0.003792277249
+time_interval = 0.0038111742119999997
 fields = ["RHO", "U", "P", "T", "HRR", "Y_CH4", "Y_O2", "QRAD"]

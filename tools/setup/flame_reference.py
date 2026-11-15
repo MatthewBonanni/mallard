@@ -35,6 +35,15 @@ for comparison with multicomponent transport with and without it ("multi_soret",
 the mixture-averaged flames with Soret, with species mass fractions
 (<case>.csv, e.g. h2_phi0.5_mix_soret.csv), and with FULL_DIR the full
 solutions of the mixture-averaged flames.
+
+    python tools/setup/flame_reference.py --convergence
+
+prints S_L of every flame above on each refinement stage of converge() and on
+one more (slope = curve = 0.000625).
+
+Every flame is solved on a grid refined in stages to slope = curve = 0.00125
+(converge()): Cantera's convection is first-order upwind, so S_L depends on
+the grid, and one more halving changes it by at most 0.07% (--convergence).
 """
 import os
 import sys
@@ -48,6 +57,7 @@ FUELS = {
     "ch4": ("mechanisms/gri30.yaml", "gri30", "CH4", 0.05),
     "ch4_bfer": ("mechanisms/ch4_bfer.yaml", "gas", "CH4", 0.05),
 }
+V8_FUELS = ["h2", "ch4"]
 PHIS = [0.6, 0.8, 1.0, 1.2, 1.4]
 MODELS = {"mix": "mixture-averaged", "unity": "unity-Lewis-number"}
 SORET_PHIS = [0.4, 0.5, 0.6, 1.0]
@@ -68,10 +78,50 @@ def solve(fuel, phi, model, T_u=T_U, width=None, soret=False, radiation=False):
     gas.TP = T_u, P
     flame = ct.FreeFlame(gas, width=width or FUELS[fuel][3])
     flame.soret_enabled = soret
-    flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
     flame.radiation_enabled = radiation
-    flame.solve(loglevel=0, auto=True)
+    return converge(flame)
+
+
+CRITERIA = [0.02, 0.01, 0.005, 0.0025, 0.00125]  # slope = curve of the refinement stages
+
+
+def refinements(flame, criteria=CRITERIA):
+    """Solve a FreeFlame on grids refined in stages, slope = curve = each of criteria; yields after each."""
+    flame.set_max_grid_points(flame.flame, 100000)
+    for i, c in enumerate(criteria):
+        flame.set_refine_criteria(ratio=2.0, slope=c, curve=c, prune=c / 10 if i == 0 else 0.0)
+        flame.solve(loglevel=0, auto=i == 0, refine_grid=True)
+        yield c
+
+
+def converge(flame):
+    """Solve a FreeFlame on the grid of slope = curve = 0.00125.
+
+    Cantera's convection is first-order upwind: S_L on the grid of 0.02 is
+    up to 2.4% off (lean H2/air); one more halving than 0.00125 changes it
+    by at most 0.07% (--convergence).
+    """
+    for _ in refinements(flame):
+        pass
     return flame
+
+
+def convergence():
+    """S_L of every flame on each refinement stage and on one more (slope = curve = 0.000625)."""
+    cases = [(fuel, phi, model, False, FUELS[fuel][3]) for fuel in V8_FUELS for model in MODELS for phi in PHIS]
+    cases += [("h2", phi, "mix", soret, 0.03) for phi in SORET_PHIS for soret in (False, True)]
+    for fuel, phi, model, soret, width in cases:
+        mech, phase, species, _ = FUELS[fuel]
+        gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model=MODELS[model])
+        gas.set_equivalence_ratio(phi, species, "O2:1.0, N2:3.76")
+        gas.TP = T_U, P
+        flame = ct.FreeFlame(gas, width=width)
+        flame.soret_enabled = soret
+        s = [(c, flame.velocity[0], flame.grid.size) for c in refinements(flame, CRITERIA + [CRITERIA[-1] / 2])]
+        print(f"{case_name(fuel, phi, model)}{'_soret' if soret else ''}: "
+              + ", ".join(f"{c:g}: {v:.6f} ({n})" for c, v, n in s)
+              + f"; 0.02 vs {CRITERIA[-1]:g}: {100 * (s[0][1] / s[-2][1] - 1):+.3f}%, "
+              f"{CRITERIA[-1]:g} vs {CRITERIA[-1] / 2:g}: {100 * (s[-1][1] / s[-2][1] - 1):+.3f}%", flush=True)
 
 
 def write_full(f, path):
@@ -132,6 +182,9 @@ def soret_flames(out, full):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--convergence":
+        convergence()
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "--soret":
         out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "examples", "premixed_flame", "reference")
         soret_flames(out, sys.argv[3] if len(sys.argv) > 3 else None)
@@ -146,7 +199,7 @@ def main():
     if full:
         os.makedirs(full, exist_ok=True)
     rows = []
-    for fuel in FUELS:
+    for fuel in V8_FUELS:
         for model in MODELS:
             for phi in PHIS:
                 f = solve(fuel, phi, model)

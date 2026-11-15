@@ -1,0 +1,1 @@
+- The Cantera flame references of V8 and of the premixed-flame tutorial (`tools/setup/flame_reference.py`, `tutorials/premixed_flame/flame_setup.py`) are solved on grids refined to `slope = curve = 0.00125`, where `S_L` is converged to 0.07%; on Cantera's usual grid of 0.02 it was up to 2.4% off for lean H2/air, which made the tutorial's flame at φ = 0.6 look 1.1% fast (#1036).
