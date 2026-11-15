@@ -453,8 +453,11 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host).
+Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
+so the probes they read are left to the host: the device stops at their writes, the host writes them and
+evaluates the triggers, and on resuming copies the values into the device's trigger variables (rank 0's, sent
+to every rank with one host `allgatherv` at the probe's interval). Between writes the device evaluates the
+conditions on those values, as the host would on the probes' latest values.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -498,11 +501,13 @@ entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra wri
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.
 
-Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
-evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
+as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
-array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
+from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
@@ -571,6 +576,10 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
   the change.
 
 Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
+
+With that rounding explicit, the smooth pass stages its entries with the conversion in the loading thread, bitwise
+equal to the unstaged loop: TENO5 in rounds of 10 entries, TENO6 in rounds of 5, which keep two teams per SM
+(#1004: 4.61M cells/s against 3.60M unstaged for the order-6 Taylor-Green vortex on $96^3$ hexahedra).
 
 ### 13. TENO setup on CPUs (#916)
 
@@ -646,6 +655,29 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
   mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
   count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+- **Shared basis means and moments (#972).** Next to its entries' cells, a shared-table cell kept its basis
+  means and its central moments (2D: smoothness-indicator matrix), the same for every cell of a shape up to
+  round-off. They are now one row per cell shape, found the same way as the shared tables (on a grid of 2^-30 of
+  each row's magnitude, the lowest global id's row, agreed over the ranks) and reached through a per-cell index;
+  the scale stays per cell, as a shape index would cost as much. Bytes per cell of the tables after the setup and
+  cells per A100-80GB (`mallard check --memory a100-80` on the A100, $16^3$ hexahedra and $10^3 \times 6$
+  tetrahedra, periodic):
+
+  | case | tables, before | tables | cells per A100-80GB, before / after |
+  |---|---|---|---|
+  | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
+  | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
+  | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
+  | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
+  | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
+  | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
+  | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
+  | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
+
+  The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
+  8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
+  against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
+  most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
 
 ### 15. Working set beyond the TENO tables (#552)
 
