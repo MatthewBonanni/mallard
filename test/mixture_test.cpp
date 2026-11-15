@@ -817,8 +817,11 @@ TEST(MixtureTest, FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts) {
     const uint32_t oh = static_cast<uint32_t>(std::find(names.begin(), names.end(), "OH") - names.begin());
     const std::vector<double> rhoY_OH = output::read(end, "RHOY_OH", 0);
     ending.copy_device_to_host();
-    ASSERT_EQ(rhoY_OH.size(), ending.get_mesh()->n_owned());
-    for (uint32_t c = 0; c < ending.get_mesh()->n_owned(); c++) ASSERT_EQ(double(ending.h_species(c, oh)), rhoY_OH[c]);
+    // A piece holds its rank's owned cells in the order of their global ids
+    std::vector<uint32_t> by_id = ending.get_mesh()->cells_by_global_id();
+    std::erase_if(by_id, [&](uint32_t c) { return c >= ending.get_mesh()->n_owned(); });
+    ASSERT_EQ(rhoY_OH.size(), by_id.size());
+    for (size_t k = 0; k < by_id.size(); k++) ASSERT_EQ(double(ending.h_species(by_id[k], oh)), rhoY_OH[k]);
     // The chemistry moves only the species at constant volume and energy
     EXPECT_LT(max_relative_difference(unfused, fused), tol(1e-5, 1e-3));
     double rho = 0.0, species = 0.0;

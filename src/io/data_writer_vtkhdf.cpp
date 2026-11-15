@@ -377,7 +377,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     const uint64_t k = one_file ? vtkhdf_steps : 0;
     const uint64_t n_block = m.order.size();
     // A region that changes between snapshots: each step's mesh follows the previous ones' in the series
-    const bool changing = one_file && subset_at;
+    const bool changing = one_file && subset_update;
 
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
