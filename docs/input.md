@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `frame.origin`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -611,7 +611,7 @@ without `direction` (a wall moving along its normal).
 
 Every number of a condition may be a number, a quantity with a unit
 (`"300 K"`, a quantity, not an expression) or an expression of `x`, `y`,
-`z` and `t` in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
+`z`, `t` and the [local coordinates](#local-coordinates) in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
 and `T0`, `mass_flux` and `T` of `inlet_mass_flow`, the wall velocity, `T`
 of `wall_isothermal`, `q` of `wall_heat_flux`, `p` of `outlet_pressure`, and
 for mixtures the inflow composition. They are evaluated at each face center,
@@ -635,6 +635,25 @@ speed needs its `direction`, and `farfield` takes a vector only. `direction`
 (also the flow direction of `inlet_stagnation` and `inlet_mass_flow`) is
 `N_DIM` numbers or expressions of `x`, `y`, `z`, `t`, normalized at each
 face; at inlets it must point into the domain at every face and time.
+
+### Local coordinates
+
+Expressions of an entry also read its faces' local coordinates: `n`, the
+distance to the nearest wall face; `xi`, the coordinate along the tangent of
+the entry's frame from its origin; in 3D `eta` (along the second tangent),
+`r` and `theta` (polar about the origin in the boundary's plane); in 2D `s`,
+the arc length along the boundary from its end with the lowest `xi`.
+They are computed once at setup from all of the entry's faces, the same on
+every rank count. `where`, `mdot` and an `average` outlet `p` do not read
+them. Guide:
+[local coordinates](guide/boundary_conditions.md#local-coordinates).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `frame.origin` | the area-weighted center of the entry's faces | Origin of `xi`, `eta`, `r`, `theta` [m] |
+| `frame.normal` | the area-weighted mean inward normal of the entry's faces | Normal of the frame (normalized) |
+| `frame.tangent` | the coordinate axis after the normal's dominant one (x to y, y to x in 2D; x to y, y to z, z to x in 3D) | Direction of `xi`, made perpendicular to the normal; in 3D the span (`eta`) is perpendicular to both, its largest component positive |
+| `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` measures the distance from, of any type |
 
 ### Characteristic boundaries (`nscbc`)
 
