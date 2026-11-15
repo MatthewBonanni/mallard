@@ -28,8 +28,7 @@ namespace {
 
 std::filesystem::path current;
 
-std::filesystem::path make_unique_directory(const testing::TestInfo & test) {
-    std::string name = std::string(test.test_suite_name()) + "." + test.name();
+std::filesystem::path make_unique_directory(std::string name) {
     auto other = [](char ch) { return !std::isalnum(static_cast<unsigned char>(ch)) && ch != '.'; };
     std::replace_if(name.begin(), name.end(), other, '_');
     const std::string pattern = (std::filesystem::temp_directory_path() / ("mallard-" + name + "-XXXXXX")).string();
@@ -56,7 +55,7 @@ std::filesystem::path from_root(const std::filesystem::path & path) {
 class ScratchDirectories : public testing::EmptyTestEventListener {
     public:
         void OnTestStart(const testing::TestInfo & test) override {
-            current = from_root(comm::is_root() ? make_unique_directory(test) : std::filesystem::path());
+            current = from_root(comm::is_root() ? make_unique_directory(std::string(test.test_suite_name()) + "." + test.name()) : std::filesystem::path());
             previous = std::filesystem::current_path();
             std::filesystem::current_path(current);
         }
@@ -96,6 +95,16 @@ std::string serial_name(const std::string & name) {
     return comm::is_root() ? name : name + std::to_string(comm::rank());
 }
 
-void install_scratch_directories() {
-    testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
+bool install_scratch_directories() {
+    const std::filesystem::path probe = from_root(comm::is_root() ? make_unique_directory("shared") : std::filesystem::path());
+    const bool seen = std::filesystem::is_directory(probe);
+    if (!seen) {
+        std::cerr << "[rank " << comm::rank() << "] " << probe.string()
+                  << ", made by rank 0, is not here: the tests need a temporary directory every rank shares (set TMPDIR "
+                     "to one)\n";
+    }
+    const bool shared = comm::allreduce(int32_t(seen), comm::Op::MIN) == 1;
+    if (comm::is_root()) std::filesystem::remove(probe);
+    if (shared) testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
+    return shared;
 }

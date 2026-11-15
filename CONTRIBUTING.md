@@ -61,6 +61,9 @@ cmake --build build -j
   solver communicates with its own rank alone, so every rank writes its files:
   give them `rank_scratch_dir()` or `serial_name()`. `MALLARD_TEST_TIMEOUT=<seconds>`
   aborts a test that runs longer, naming it, as CI does for the MPI runs.
+  Ranks on several machines need `TMPDIR` on a filesystem they all share: the
+  tests' files live there, and the suite stops at once, saying so, when a rank
+  cannot see rank 0's temporary directory.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
