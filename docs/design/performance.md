@@ -732,6 +732,33 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
+### 16. TENO setup: one fit per stencil shape (#986)
+
+With shared tables, the host backends key each cell's stencil geometry before the fit and fit one cell per key
+(`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table packing of
+#1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
+restart file (`--fields Q_CRITERION`):
+
+| $64^3$ TENO5, Threads | numerics setup | of it: tables / packing / keys | run, wall / CPU | run, peak RSS | post derive, wall / CPU | post derive, peak RSS |
+|---|---|---|---|---|---|---|
+| base | 56.9 s | 33.5 / 12.1 / - s | 63.1 / 104.4 s | 2.43 GB | 59.6 / 95.1 s | 1.82 GB |
+| keyed | 34.1 s | 0.01 / 18.5 / 4.4 s | 42.4 / 62.2 s | 2.46 GB | 47.6 / 59.8 s | 1.85 GB |
+
+27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. The packing now
+dominates; it ranks every cell's table although the cells of a key share it (#1079). Results are bitwise
+those of the base except where cells of one key used to fall on either side of the table comparison's grid:
+of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixed, tetrahedra, prisms; orders
+3-6) only the periodic order-3 box differs (restart files after 3 steps, at most 6.7e-16 in density), and of
+2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
+ranks give the 1-rank result bit for bit.
+
+GPU builds fit every cell. On one A100 the host keys and records cost more than the device fit (#776) and
+packing (#1031) save: double Mach $2048 \times 512 \times 2$ at orders 3 / 4 / 5 / 6 takes 0.86 / 1.42 / 4.47 /
+19.3 s for the tables and 0.9-1.2 s for the packing when fitting every cell, against 22 s of keys and 27-31 s of
+records with 323 cells fitted; the $96^3$ Taylor-Green vortex of `teno5_3d` 5.3 + 1.0 s against 35 + 47 s
+(#1082).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
