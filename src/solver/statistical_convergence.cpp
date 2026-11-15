@@ -222,7 +222,7 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                           .docs = DOCS});
     }
     tolerance = table.contains("tolerance") ? find_value<double>(table, "tolerance") : 0.0;
-    variance_tolerance = table.contains("variance_tolerance") ? find_value<double>(table, "variance_tolerance") : 0.0;
+    variance_tolerance = find_value_or<double>(table, "variance_tolerance", 0.0);
     for (const auto & [name, value] : {std::pair{"tolerance", tolerance}, {"variance_tolerance", variance_tolerance}}) {
         if (table.contains(name) && !(value > 0.0)) {
             throw InputError({.key = key + "." + name,

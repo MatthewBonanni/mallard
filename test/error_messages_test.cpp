@@ -255,7 +255,7 @@ TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
     expect_parts(error("type = \"wall_adiabatic\"\nu = 1.0\n"),
                  {".u: is a speed, so the wall needs a direction", "Add direction = [...], or give u as a vector"});
     expect_parts(error("type = \"outlet_pressure\"\np = \"1 + 0.1 * y\"\naverage = true\n"),
-                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
+                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y, z or the local coordinates"});
     expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
                  {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
 }
