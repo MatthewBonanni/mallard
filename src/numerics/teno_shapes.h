@@ -109,7 +109,8 @@ struct ShapeSearch {
  *        position so that the key does not depend on the numbering, and the
  *        cell's faces in its own order (sector stencils follow it). The
  *        number of layers is that of the search, a function of the layers'
- *        cell counts. Cells of one key have the same tables up to round-off.
+ *        cell counts. Cells of one key agree to within 2^-SHAPE_GRID_BITS of
+ *        their size in every coordinate the key reads.
  *        Everything runs on the device, so that every backend has the same
  *        keys.
  */

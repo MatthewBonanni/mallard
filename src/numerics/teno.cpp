@@ -3493,8 +3493,8 @@ namespace {
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
-// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16 has
-// shared tables fitted once per stencil shape (#986), which differ from version 15's at round-off
+// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 18 has
+// shared tables fitted once per stencil shape (#986), which differ from version 17's at round-off
 constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-18";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
@@ -3509,6 +3509,15 @@ struct Fnv1a {
     }
     template <typename T>
     void add(const T & value) { add(&value, sizeof(T)); }
+    // Element by element in index order, which the backend's layout does not change
+    template <typename V>
+    void add_view(const V & v) {
+        for (size_t i = 0; i < v.extent(0); i++) {
+            for (size_t j = 0; j < v.extent(1); j++) {
+                for (size_t k = 0; k < v.extent(2); k++) add(v.access(i, j, k));
+            }
+        }
+    }
 };
 
 struct CacheHeader {
@@ -3911,7 +3920,7 @@ uint64_t TENO::cache_key() const {
     hash.add(mesh->n_faces);
     hash.add(mesh->n_reconstructed());
     hash.add(mesh->n_complete());
-    hash.add(mesh->h_node_coords.data(), mesh->h_node_coords.span() * sizeof(rtype));
+    hash.add_view(mesh->h_node_coords);
     hash.add(mesh->h_offsets_nodes_of_cell.data(), mesh->h_offsets_nodes_of_cell.span() * sizeof(uint32_t));
     hash.add(mesh->h_nodes_of_cell.data(), mesh->h_nodes_of_cell.span() * sizeof(uint32_t));
     hash.add(mesh->h_faces_of_cell.data(), mesh->h_faces_of_cell.span() * sizeof(uint32_t));
@@ -3928,15 +3937,15 @@ uint64_t TENO::cache_key() const {
         hash.add(uint8_t(2));
         hash.add(curved_mirrors);
         hash.add(curved_wall_degree);
-        hash.add(mesh->h_cell_coords.data(), mesh->h_cell_coords.span() * sizeof(rtype));
+        hash.add_view(mesh->h_cell_coords);
         hash.add(mesh->h_cell_volume.data(), mesh->h_cell_volume.span() * sizeof(rtype));
         auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
-        hash.add(h_points.data(), h_points.span() * sizeof(rtype));
+        hash.add_view(h_points);
     }
     if (mesh->is_periodic()) {
-        hash.add(mesh->h_shifts.data(), mesh->h_shifts.span() * sizeof(rtype));
+        hash.add_view(mesh->h_shifts);
         hash.add(mesh->h_face_shift.data(), mesh->h_face_shift.span() * sizeof(uint8_t));
-        if (mesh->is_rotational()) hash.add(mesh->h_shift_rotations.data(), mesh->h_shift_rotations.span() * sizeof(rtype));
+        if (mesh->is_rotational()) hash.add_view(mesh->h_shift_rotations);
     }
     return hash.h;
 }
