@@ -2050,14 +2050,14 @@ void Solver::allocate_time_stepping() {
     face_storage = Kokkos::View<rtype *>("face_solution", std::max(n_states, n_slots));
     face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>(face_storage.data(), mesh->n_faces, n_quad);
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
-    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
+    const size_t n_particle_values = particles ? particles->n_values() : 0;
+    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species, n_particle_values);
     if (is_mixture()) {
         face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
         face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), mesh->n_faces, 2, n_species);
         if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
     }
-    const size_t n_particle_values = particles ? particles->n_values() : 0;
     solution_vec.clear();
     rhs_vec.clear();
     solution_vec.push_back(state());

@@ -194,7 +194,8 @@ class Particles {
          * @brief dx/dt of a stage: the gas velocity at the stage positions x,
          *        from the reconstruction polynomial of the cell holding each
          *        (FaceReconstruction::point_values) where the scheme has one,
-         *        else from the cell's least-squares gradient.
+         *        else from the cell's least-squares gradient; in a halo cell,
+         *        the cell's average.
          * @param W Cell states W = [rho, u, p] of the stage, halo included.
          * @param reconstruction The face reconstruction of the stage.
          * @param gradient Least-squares gradients of W, written to gradients(c).

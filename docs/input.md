@@ -1463,6 +1463,27 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
+## `[particles]`
+
+Lagrangian particles; this release has massless tracers
+([Particles](guide/particles.md)).
+
+| Key | Description |
+|---|---|
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position. Required |
+| `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
+| `file` | CSV file of the positions at the end of the run (`id`, `x`, `y`, `z`, by id), default none |
+| `capacity` | Particles each rank can hold, default the number seeded |
+
+### `[particles.lattice]`
+
+Seeds on a lattice, after the `points` in id order (`x` varying fastest).
+
+| Key | Description |
+|---|---|
+| `lo`, `hi` | Opposite corners. Required |
+| `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every

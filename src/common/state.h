@@ -73,19 +73,19 @@ struct State {
     uint32_t n_species() const { return static_cast<uint32_t>(species.extent(1)); }
 };
 
-/** @brief Copy both blocks of src into dst. */
+/** @brief Copy the flow and species blocks of src into dst, and the particle block where both have one. */
 inline void deep_copy(const State & dst, const State & src) {
     Kokkos::deep_copy(dst.flow, src.flow);
     if (src.species.span() > 0) Kokkos::deep_copy(dst.species, src.species);
-    if (src.particles.span() > 0) Kokkos::deep_copy(dst.particles, src.particles);
+    if (src.particles.span() > 0 && dst.particles.span() > 0) Kokkos::deep_copy(dst.particles, src.particles);
 }
 
-/** @brief Copy both blocks of src into dst, ordered on exec without a fence. */
+/** @brief deep_copy(dst, src), ordered on exec without a fence. */
 template <typename ExecSpace>
 inline void deep_copy(const ExecSpace & exec, const State & dst, const State & src) {
     Kokkos::deep_copy(exec, dst.flow, src.flow);
     if (src.species.span() > 0) Kokkos::deep_copy(exec, dst.species, src.species);
-    if (src.particles.span() > 0) Kokkos::deep_copy(exec, dst.particles, src.particles);
+    if (src.particles.span() > 0 && dst.particles.span() > 0) Kokkos::deep_copy(exec, dst.particles, src.particles);
 }
 
 #endif // STATE_H
