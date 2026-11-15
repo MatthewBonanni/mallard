@@ -13,8 +13,10 @@
  * would (step_queue.h) and writes what the host needs into a pinned record.
  * The host keeps step_queue launches ahead and reads the records after the
  * steps ran. At a step the host must act on, the device stops: the launches
- * after it do nothing (every kernel of the step exits at once, gated.h), and
- * the host acts on the device's state of that step, then resumes.
+ * after it are no-ops (conditional nodes around the step's parts; parts with
+ * NCCL operations that a conditional node cannot hold are gated instead,
+ * gated.h), and the host acts on the device's state of that step, then
+ * resumes.
  *
  */
 
@@ -36,6 +38,10 @@
 #include "probe_fluxes.h"
 #include "run_control.h"
 
+#if defined(KOKKOS_ENABLE_CUDA) && CUDART_VERSION >= 12040
+#define MALLARD_CONDITIONAL_NODES 1
+#endif
+
 namespace {
 
 // step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests,
@@ -52,25 +58,86 @@ void cuda_check(const cudaError_t err, const char * what) {
 
 cudaStream_t step_stream() { return Kokkos::DefaultExecutionSpace().cuda_stream(); }
 
-cudaGraph_t end_capture() {
-    cudaGraph_t graph = nullptr;
-    cuda_check(cudaStreamEndCapture(step_stream(), &graph), "cudaStreamEndCapture");
-    return graph;
+void begin_capture(cudaGraph_t graph, const cudaGraphNode_t * after, const size_t n_after) {
+    cuda_check(cudaStreamBeginCaptureToGraph(step_stream(), graph, after, nullptr, n_after, cudaStreamCaptureModeRelaxed),
+               "cudaStreamBeginCaptureToGraph");
 }
 
-/** @brief Ends a capture that failed, if the stream still captures, and destroys what it captured. */
-void abandon_capture() {
+/** @brief A capture that cudaStreamEndCapture reports invalidated: it has ended, and the driver destroyed its graph. */
+struct CaptureInvalidated : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+void end_capture(cudaGraph_t graph) {
+    const cudaError_t err = cudaStreamEndCapture(step_stream(), &graph);
+    if (err == cudaErrorStreamCaptureInvalidated) {
+        throw CaptureInvalidated(std::string("cudaStreamEndCapture: ") + cudaGetErrorString(err));
+    }
+    cuda_check(err, "cudaStreamEndCapture");
+}
+
+/**
+ * @brief Ends a capture that failed with error, if the stream still captures.
+ * @return Whether the capture was invalidated, while the stream still captured or as cudaStreamEndCapture reported
+ *         it. The driver then destroys the graph it captured into: the step graph, or a conditional node's body,
+ *         which leaves the step graph holding a destroyed body. Destroying the step graph or that node then crashes
+ *         in the driver, so the step graph is left to the process (once per run).
+ */
+bool abandon_capture(const std::exception & error) {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaStreamIsCapturing(step_stream(), &status);
     if (status != cudaStreamCaptureStatusNone) {
         cudaGraph_t graph = nullptr;
-        if (cudaStreamEndCapture(step_stream(), &graph) == cudaSuccess && graph) cudaGraphDestroy(graph);
+        cudaStreamEndCapture(step_stream(), &graph);
     }
     cudaGetLastError();
+    return status == cudaStreamCaptureStatusInvalidated || dynamic_cast<const CaptureInvalidated *>(&error);
 }
 #endif
 
-/** @brief Sets gate to whether flag and the enclosing gate parent (null: none) are set, whatever gate is open. */
+#ifdef MALLARD_CONDITIONAL_NODES
+/** @brief The nodes the stream's next captured work would depend on. */
+std::vector<cudaGraphNode_t> capture_frontier() {
+    cudaStreamCaptureStatus status;
+    const cudaGraphNode_t * nodes = nullptr;
+    size_t n = 0;
+#if CUDART_VERSION >= 13000
+    cuda_check(cudaStreamGetCaptureInfo(step_stream(), &status, nullptr, nullptr, &nodes, nullptr, &n),
+               "cudaStreamGetCaptureInfo");
+#else
+    cuda_check(cudaStreamGetCaptureInfo(step_stream(), &status, nullptr, nullptr, &nodes, &n), "cudaStreamGetCaptureInfo");
+#endif
+    return std::vector<cudaGraphNode_t>(nodes, nodes + n);
+}
+
+/** @brief Adds an IF node after the given nodes; returns it and its body. */
+std::pair<cudaGraphNode_t, cudaGraph_t> add_if_node(cudaGraph_t graph, const std::vector<cudaGraphNode_t> & after,
+                                                    const cudaGraphConditionalHandle handle) {
+    cudaGraphNodeParams params = {};
+    params.type = cudaGraphNodeTypeConditional;
+    params.conditional.handle = handle;
+    params.conditional.type = cudaGraphCondTypeIf;
+    params.conditional.size = 1;
+    cudaGraphNode_t node = nullptr;
+#if CUDART_VERSION >= 13000
+    cuda_check(cudaGraphAddNode(&node, graph, after.data(), nullptr, after.size(), &params), "cudaGraphAddNode");
+#else
+    cuda_check(cudaGraphAddNode(&node, graph, after.data(), after.size(), &params), "cudaGraphAddNode");
+#endif
+    return {node, params.conditional.phGraph_out[0]};
+}
+
+/** @brief Sets the condition to whether flag and the enclosing gate parent (null: none) are set. */
+void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * parent, const uint32_t * flag) {
+    const gated::Scope always(nullptr);
+    gated::parallel_for("step_condition", 1, KOKKOS_LAMBDA(const int) {
+        KOKKOS_IF_ON_DEVICE((cudaGraphSetConditional(handle, (!parent || *parent) && *flag ? 1u : 0u);))
+        KOKKOS_IF_ON_HOST(((void)handle; (void)parent; (void)flag;))
+    });
+}
+#endif
+
+/** @brief Sets gate to whether flag and the enclosing gate parent (null: none) are set. */
 void set_gate(uint32_t * gate, const uint32_t * parent, const uint32_t * flag) {
     const gated::Scope always(nullptr);
     gated::parallel_for("step_gate", 1, KOKKOS_LAMBDA(const int) { *gate = (!parent || *parent) && *flag; });
@@ -96,8 +163,7 @@ std::string Solver::step_graph_unsupported() const {
 }
 
 void Solver::flag_timed_boundaries() {
-    const Kokkos::View<double *> any_failed = boundary_failed;
-    gated::parallel_for("step_boundary_reset", 1, KOKKOS_LAMBDA(const int) { any_failed(0) = 0.0; });
+    gated::fill(boundary_failed, 0.0);
     timed_fields.flag_error(boundary_failed);
     dirichlet_states.flag_error(boundary_failed);
     timed_inlets.flag_error(boundary_failed);
@@ -117,19 +183,14 @@ void Solver::flag_timed_boundaries() {
 }
 
 void Solver::record_step() {
+    const Kokkos::DefaultExecutionSpace exec;
     // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES), and no target
     // or wave the host advanced before stands for one of the graph's
     recording_step = true;
     t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
     // The run-control requests ride along the time-step reduction
-    {
-        const Kokkos::View<rtype *> requests = step_requests, reduce = step_reduce;
-        const Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> posted = requests_posted;
-        gated::parallel_for("step_requests", N_POSTED, KOKKOS_LAMBDA(const int i) {
-            requests(i) = posted(i);
-            reduce(1 + i) = posted(i);
-        });
-    }
+    gated::copy(exec, step_requests, requests_posted);
+    gated::copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)), step_requests);
     // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     exchange_for_first_stage();
     update_boundary_states(t);
@@ -162,8 +223,7 @@ void Solver::record_step() {
     // take_step
     if (reacting) {
         cell_chemistry.begin_step();
-        const Kokkos::View<rtype *> cost = chem_cost;
-        gated::parallel_for("chemistry_cost_reset", cost.extent(0), KOKKOS_LAMBDA(const size_t i) { cost(i) = 0.0_r; });
+        gated::fill(exec, chem_cost, 0.0_r);
     }
     const Kokkos::View<double> chem = chem_dt;
     const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
@@ -251,9 +311,12 @@ const rtype * Solver::step_wall_device() const { return step_reduce.data() + WAL
 
 template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
-    if (gating) {
+    const size_t index = n_bodies++;
+    if (gating == StepGating::ALL || (gating == StepGating::NCCL && nccl_bodies.at(index))) {
         // The body's kernels exit at once unless the flag and every enclosing one were set when it began
         if (gate_depth >= step_gates.extent(0)) throw std::logic_error("Solver::device_if: nested too deeply");
+        if (index == nccl_bodies.size()) nccl_bodies.push_back(false);
+        const uint64_t before = comm::nccl_calls();
         const uint32_t * const parent = gated::flag();
         uint32_t * const gate = step_gates.data() + gate_depth;
         set_gate(gate, parent, flag);
@@ -261,11 +324,39 @@ void Solver::device_if(const uint32_t * flag, F && body) {
         gate_depth++;
         body();
         gate_depth--;
+        if (gating == StepGating::ALL) nccl_bodies[index] = comm::nccl_calls() != before;
         return;
     }
+#ifdef MALLARD_CONDITIONAL_NODES
+    if (capture_graph) {
+        if (!conditional_steps) {
+            // One step per launch: the body (of pure reductions, or a step that is due) runs every time
+            body();
+            return;
+        }
+        cudaGraph_t graph = static_cast<cudaGraph_t>(capture_graph);
+        cudaGraphConditionalHandle handle;
+        cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
+                   "cudaGraphConditionalHandleCreate");
+        set_condition(handle, gated::flag(), flag);
+        const std::vector<cudaGraphNode_t> after = capture_frontier();
+        end_capture(graph);
+        const auto [node, branch] = add_if_node(graph, after, handle);
+        capture_graph = branch;
+        begin_capture(branch, nullptr, 0);
+        {
+            const gated::Scope ungated(nullptr);
+            body();
+        }
+        end_capture(branch);
+        capture_graph = graph;
+        begin_capture(graph, &node, 1);
+        return;
+    }
+#endif
     uint32_t on = 0;
     {
-        // The gate's decision, read by the host
+        // A conditional node's decision, read by the host
         const comm::HostStaged staged;
         Kokkos::deep_copy(on, Kokkos::View<const uint32_t, DeviceMemory>(flag));
     }
@@ -608,12 +699,13 @@ void Solver::unflush_chemistry_on_device() {
     halo_current = false;
 }
 
-void Solver::captured_launch() {
+void Solver::captured_launch(const StepGating mode) {
     // Kokkos Tools see what a capture records: fences, host copies and allocations there break it
     Kokkos::Profiling::ProfilingSection section("step_graph_capture");
     section.start();
-    gating = true;
+    gating = mode;
     gate_depth = 0;
+    n_bodies = 0;
     try {
         step_prologue();
         device_if(&step_loop.data()->active, [&] {
@@ -629,11 +721,11 @@ void Solver::captured_launch() {
 #endif
         });
     } catch (...) {
-        gating = false;
+        gating = StepGating::NONE;
         section.stop();
         throw;
     }
-    gating = false;
+    gating = StepGating::NONE;
     section.stop();
 }
 
@@ -791,22 +883,74 @@ void Solver::capture_step_graph() {
     lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
     try {
-        cuda_check(cudaStreamBeginCapture(step_stream(), cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture");
-        captured_launch();
-        graph = end_capture();
+        if (step_gating == StepGating::NCCL) {
+            // Which bodies enqueue NCCL operations: a capture with every body gated, never launched
+            cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
+            begin_capture(graph, nullptr, 0);
+            captured_launch(StepGating::ALL);
+            end_capture(graph);
+            cudaGraphDestroy(graph);
+            graph = nullptr;
+        }
+        cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
+        capture_graph = graph;
+        begin_capture(graph, nullptr, 0);
+        captured_launch(step_gating);
+        graph = static_cast<cudaGraph_t>(capture_graph);
+        end_capture(graph);
+        capture_graph = nullptr;
         cudaGraphExec_t exec = nullptr;
         cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
-        abandon_capture();
-        if (graph) cudaGraphDestroy(graph);
+        if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
+        capture_graph = nullptr;
         halo_current = false;
         recording_step = false;
         use_step_graph = false;
         queue_depth = 1;
         logging::warning(diagnostic_code::CUDA_GRAPH, std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
     }
+#endif
+}
+
+bool Solver::conditional_nodes_work() {
+#ifdef MALLARD_CONDITIONAL_NODES
+    // A conditional node's body cannot hold NCCL operations where NCCL communicates over a network (it then adds
+    // host nodes): try one first, on every rank
+    bool works = true;
+    if (is_distributed() && halo.uses_nccl()) {
+        Kokkos::fence("conditional_nodes");
+        lock_arrays::copy_all();
+        const Kokkos::View<uint32_t> on("conditional_probe_flag");
+        Kokkos::deep_copy(on, 1u);
+        const Kokkos::View<double *> x("conditional_probe", 1);
+        cudaGraph_t graph = nullptr;
+        cudaGraphExec_t exec = nullptr;
+        try {
+            cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
+            capture_graph = graph;
+            begin_capture(graph, nullptr, 0);
+            device_if(on.data(), [&] { comm::allreduce_device(x, comm::Op::SUM, true); });
+            end_capture(graph);
+            cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
+        } catch (const std::exception & e) {
+            if (abandon_capture(e)) graph = nullptr;
+            works = false;
+        }
+        capture_graph = nullptr;
+        works = comm::allreduce(static_cast<int>(works), comm::Op::MIN) > 0;
+        if (works) {
+            cuda_check(cudaGraphLaunch(exec, step_stream()), "cudaGraphLaunch");
+            Kokkos::fence("conditional_nodes");
+        }
+        if (exec) cudaGraphExecDestroy(exec);
+        if (graph) cudaGraphDestroy(graph);
+    }
+    return works;
+#else
+    return false;
 #endif
 }
 
@@ -890,12 +1034,19 @@ void Solver::begin_device_steps() {
         step_events.push_back(event);
     }
     // Launches that are not graphs read the device's decision on the host: one at a time
-    const bool queued = use_step_graph;
+#ifdef MALLARD_CONDITIONAL_NODES
+    conditional_steps = use_step_graph;
 #else
-    const bool queued = true;
+    conditional_steps = false;
 #endif
-    queue_depth = queued ? n_records : 1;
-    staged_outputs = queued && outputs_stageable();
+    step_gating = conditional_steps && !conditional_nodes_work() ? StepGating::NCCL : StepGating::NONE;
+    queue_depth = conditional_steps ? n_records : 1;
+#else
+    conditional_steps = true;
+    queue_depth = n_records;
+#endif
+    // Graphs without conditional nodes run every IF body: outputs are then the host's
+    staged_outputs = conditional_steps && outputs_stageable();
     staged_time_outputs = false;
     requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);
     if (staged_outputs) {
@@ -1004,8 +1155,8 @@ void Solver::launch_device_step() {
     cuda_check(cudaEventRecord(static_cast<cudaEvent_t>(step_events[slot]), step_stream()), "cudaEventRecord");
 #else
     if (use_step_graph && n_launched > 0) {
-        // Off CUDA, the launches a CUDA build would graph run the code a capture records
-        captured_launch();
+        // Off CUDA, the launches a CUDA build would graph run the code a capture records, every body gated
+        captured_launch(StepGating::ALL);
     } else {
         step_prologue();
         device_if(&step_loop.data()->active, [&] { device_step_body(); });
@@ -1113,7 +1264,7 @@ void Solver::destroy_step_graph() {
 void Solver::mark_chemistry_time(const bool start) {
     if (!recording_step) return;
 #ifdef KOKKOS_ENABLE_CUDA
-    // A kernel reading the device's clock, which a launch after a stop skips as it does the step's other kernels
+    // A kernel reading the device's clock: event nodes cannot sit under the step's conditional node
     const Kokkos::View<step_queue::Loop> loop = step_loop;
     gated::parallel_for("chemistry_clock", 1, KOKKOS_LAMBDA(const int) {
         // Captures used in the same order by nvcc's host and device passes, or the kernel's names differ between them

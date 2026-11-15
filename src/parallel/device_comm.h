@@ -44,6 +44,9 @@ ncclComm_t nccl();
 void finalize_nccl();
 #endif
 
+/** @brief Calls of nccl() so far: every NCCL operation enqueued gets its communicator there (0 without NCCL). */
+uint64_t nccl_calls();
+
 /**
  * @brief Reduce values over the ranks in place, after the work enqueued so far
  *        on the default execution space: with NCCL on its stream, without

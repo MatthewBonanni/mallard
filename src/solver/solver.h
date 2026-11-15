@@ -457,20 +457,28 @@ class Solver {
         /** @brief Enqueues one step, which does nothing once the device stopped for the host. */
         void launch_device_step();
         void step_prologue();
+        /** @brief Which device_if bodies a step graph's launches gate (gated.h) instead of a conditional node's. */
+        enum class StepGating {
+            NONE,
+            NCCL,  // those that enqueue NCCL operations (step_gating)
+            ALL,
+        };
         /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
-        void captured_launch();
+        void captured_launch(StepGating mode);
         void device_step_body();
         /**
-         * @brief Fused chemistry: applies the pending half step (device_if) if any of the n device
+         * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
          *        flags is set and the launch has not yet flushed, for the parts of the step's end that read the state.
          */
         void flush_chemistry_if(const uint32_t * flags, uint32_t n);
         /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
         void unflush_chemistry_on_device();
         void capture_step_graph();
+        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
+        bool conditional_nodes_work();
         /**
-         * @brief Runs body if the device flag is set: in a step graph's launch, gated (gated.h) by the flag and
-         *        every enclosing one as they were when it began; else as the host reads the flag.
+         * @brief Runs body if the device flag is set: in a step graph's capture, under a conditional node, or gated
+         *        by the flag and every enclosing one as they were when it began (gating); else as the host reads it.
          */
         template <typename F>
         void device_if(const uint32_t * flag, F && body);
@@ -703,7 +711,7 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
-        /** @brief What breaks a step graph's capture inside the step's body (tests). */
+        /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
             FENCE,         // fails while the stream captures
@@ -943,11 +951,16 @@ class Solver {
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        void * capture_graph = nullptr;        // cudaGraph_t being captured
         uint64_t graph_steps = 0;
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
-        bool gating = false;                   // in a step graph's launch: device_if gates its body
-        uint32_t gate_depth = 0;               // device_if's nesting
+        bool conditional_steps = false;        // launches after a stop do nothing
+        StepGating step_gating = StepGating::NONE;  // in step graphs: NCCL where conditional nodes cannot hold it
+        StepGating gating = StepGating::NONE;  // in a step graph's launch
+        size_t n_bodies = 0;                   // device_if calls in the launch so far
+        std::vector<bool> nccl_bodies;         // whether each device_if body enqueued NCCL operations, gating all
+        uint32_t gate_depth = 0;               // gated device_if's nesting
         Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]

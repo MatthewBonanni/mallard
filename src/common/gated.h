@@ -2,16 +2,17 @@
  * @file gated.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Kokkos's parallel_for, parallel_reduce and parallel_scan, whose kernels do nothing while the device
- *        flag of the innermost gated::Scope is 0, and copies and fills as such kernels. Every top-level kernel in
- *        src/ launches through them.
+ *        flag of the innermost gated::Scope is 0, and copies and fills that are such kernels under a Scope. Every
+ *        top-level kernel in src/ launches through them.
  * @version 0.1
  * @date 2026-11-14
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
- * A step graph's launches after the device stopped for the host run every kernel of the step, and each exits at
- * once (Solver::device_if). A reduction that does nothing leaves its destination as it was: its final step
- * copies the destination's value into the result Kokkos then writes there.
+ * A step graph's launches after the device stopped for the host run the parts of the step that hold NCCL
+ * operations where a conditional node cannot (Solver::device_if), and each of their kernels exits at once. A
+ * reduction that does nothing leaves its destination as it was: its final step copies the destination's value
+ * into the result Kokkos then writes there.
  *
  */
 
@@ -356,7 +357,7 @@ void parallel_scan(const std::string & label, const P & policy, const F & f, T &
     detail::scan(&label, policy, f, static_cast<T &&>(total)...);
 }
 
-/** @brief Kokkos::deep_copy(exec, dst, src) of contiguous Views of one layout and span, as a kernel on exec. */
+/** @brief Kokkos::deep_copy(exec, dst, src) of contiguous Views of one layout and span; a kernel on exec under a Scope. */
 template <class E, class D, class S>
 void copy(const E & exec, const D & dst, const S & src) {
     static_assert(D::rank <= 1 || std::is_same_v<typename D::array_layout, typename S::array_layout>,
@@ -364,6 +365,10 @@ void copy(const E & exec, const D & dst, const S & src) {
     if (dst.span() != src.span() || !dst.span_is_contiguous() || !src.span_is_contiguous()) {
         throw std::logic_error("gated::copy: \"" + src.label() + "\" to \"" + dst.label() +
                                "\" are not contiguous Views of one span");
+    }
+    if (!flag()) {
+        Kokkos::deep_copy(exec, dst, src);
+        return;
     }
     const auto d = dst.data();
     const auto s = src.data();
@@ -376,10 +381,14 @@ void copy(const D & dst, const S & src) {
     copy(Kokkos::DefaultExecutionSpace(), dst, src);
 }
 
-/** @brief Kokkos::deep_copy(exec, dst, value) of a contiguous View, as a kernel on exec. */
+/** @brief Kokkos::deep_copy(exec, dst, value) of a contiguous View; a kernel on exec under a Scope. */
 template <class E, class D>
 void fill(const E & exec, const D & dst, const typename D::non_const_value_type value) {
     if (!dst.span_is_contiguous()) throw std::logic_error("gated::fill: \"" + dst.label() + "\" is not contiguous");
+    if (!flag()) {
+        Kokkos::deep_copy(exec, dst, value);
+        return;
+    }
     const auto d = dst.data();
     gated::parallel_for("gated_fill", Kokkos::RangePolicy<E>(exec, 0, dst.span()),
                         KOKKOS_LAMBDA(const size_t i) { d[i] = value; });
