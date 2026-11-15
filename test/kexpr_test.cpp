@@ -484,6 +484,10 @@ TEST(KexprTest, RejectsInvalidExpressions) {
         {"shl(x, 2)", "'shl' is exprtk's, not kexpr's"},
         {"sin(x, y)", "wrong number of arguments"},
         {"(x + 1", "expected ')'"},
+        {"(x + 1]", "expected ')' to match the '(' at position 1 at position 7"},
+        {"{x + 1)", "expected '}' to match the '{' at position 1"},
+        {"x * [y + (z - 1])", "expected ')' to match the '(' at position 10"},
+        {"sin[x}", "expected ']' after the arguments of sin to match the '[' at position 4"},
         {"x y", "expected ';'"},
         {"x ? 1", "':' of the ternary operator"},
         {"'abc' == 'abc'", "strings are not supported"},
@@ -513,6 +517,19 @@ TEST(KexprTest, RejectsInvalidExpressions) {
         } catch (const std::invalid_argument & e) {
             EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << text << ": " << e.what();
         }
+    }
+}
+
+TEST(KexprTest, BracketsMatchAndNestBoundedly) {
+    const double vars[] = {0.5, 2.0, 0.0, 0.0};
+    EXPECT_EQ(kexpr::Program("test", "[x + 1] * {y - 3} + max[x, {y}]", VARIABLES)(vars), 0.5);
+    const auto nested = [](const size_t n) { return std::string(n, '(') + "x" + std::string(n, ')'); };
+    EXPECT_EQ(kexpr::Program("test", nested(200), VARIABLES)(vars), 0.5);
+    try {
+        const kexpr::Program program("test", nested(100000), VARIABLES);
+        ADD_FAILURE() << "100000 nested parentheses compiled";
+    } catch (const std::invalid_argument & e) {
+        EXPECT_NE(std::string(e.what()).find("nested more than 256 levels deep"), std::string::npos) << e.what();
     }
 }
 
