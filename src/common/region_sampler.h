@@ -178,15 +178,33 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
     }
 }
 
-/** @brief Nodes of the first levels of the complete subdivision tree of a simplex (all of them by default). */
+/** @brief Nodes of the first levels of the complete subdivision tree of a simplex or box (all of them by default). */
 KOKKOS_INLINE_FUNCTION constexpr uint32_t tree_nodes(const int levels = MAX_LEVEL + 1) {
     uint32_t n = 0, width = 1;
     for (int l = 0; l < levels; l++, width *= CHILDREN) n += width;
     return n;
 }
 
-/** @brief Team scratch of team_simplex: 2 bits per node of the subdivision tree. */
+/** @brief Bytes of the table of team_simplex and team_cone: 2 bits per node of the subdivision tree. */
 KOKKOS_INLINE_FUNCTION constexpr size_t tree_bytes() { return sizeof(uint32_t) * ((2 * tree_nodes() + 31) / 32); }
+
+/** @brief Team scratch of team_simplex and team_cone, for a team of team_size threads. */
+KOKKOS_INLINE_FUNCTION constexpr size_t team_bytes(const int team_size) {
+    return 2 * static_cast<size_t>(team_size) * sizeof(double) + tree_bytes();
+}
+
+/** @brief Team scratch of team_simplex and team_cone: the table of states, and a weight and indicator per thread. */
+struct TeamScratch {
+    uint32_t * tree = nullptr;
+    double * terms = nullptr;
+};
+
+/** @brief The TeamScratch in team_bytes(member.team_size()) of level 0 team scratch. */
+template <typename Member>
+KOKKOS_INLINE_FUNCTION TeamScratch team_scratch(const Member & member) {
+    auto * terms = static_cast<double *>(member.team_scratch(0).get_shmem(team_bytes(member.team_size())));
+    return {reinterpret_cast<uint32_t *>(terms + 2 * member.team_size()), terms};
+}
 
 namespace detail {
 
@@ -197,83 +215,194 @@ KOKKOS_INLINE_FUNCTION uint32_t node_state(const uint32_t * tree, const uint32_t
     return (tree[node / 16] >> (2 * (node % 16))) & 3u;
 }
 
-} // namespace detail
+/** @brief Node code of a level of the subdivision tree, placed from the root by child(node, j, next). */
+template <typename Node, typename Child>
+KOKKOS_INLINE_FUNCTION Node place(const Node & root, const Child & child, const int level, const uint32_t code) {
+    uint32_t place = 1;
+    for (int l = 1; l < level; l++) place *= CHILDREN;
+    Node node = root, next;
+    for (int l = 0; l < level; l++, place /= CHILDREN) {
+        child(node, static_cast<int>((code / place) % CHILDREN), next);
+        node = next;
+    }
+    return node;
+}
 
-/**
- * @brief simplex, with the threads of a team: they classify the simplices of
- *        each level of the subdivision together, each one placed from the
- *        root along its path, into a table of their states (tree, tree_bytes()
- *        of team scratch), and one thread then sums the kept ones depth first,
- *        so that the sums are those of simplex. Every thread of the team
- *        calls it, with the same arguments.
- */
-template <typename Member, typename Distance>
-KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, uint32_t * tree, const Shape<Distance> & shape,
-                                         const bool axisymmetric, const double v0[4][3], const double measure0,
-                                         double & inside, double & total) {
-    {
-        double c[3], phi;
-        if (detail::is_uniform(shape, v0, 0, c, phi)) {
-            const double w = measure0 * (axisymmetric ? c[1] : 1.0);
-            inside += w * indicator(phi, shape.edge);
-            total += w;
-            return;
+/** @brief The kept nodes of a table of states, depth first in the children's order. */
+struct Walk {
+    int level = 0;
+    uint32_t code = 0, first = 0;  // the node: first + code, first the first node of its level
+    bool done = false;
+
+    /** @brief Descends to the first kept node under the current one. */
+    KOKKOS_INLINE_FUNCTION void down(const uint32_t * tree) {
+        while (node_state(tree, first + code) == SUBDIVIDED) {
+            level++;
+            code *= CHILDREN;
+            first = first * CHILDREN + 1;
         }
     }
+
+    /** @brief Moves to the next kept node: under the next sibling of the deepest node with one. */
+    KOKKOS_INLINE_FUNCTION void next(const uint32_t * tree) {
+        while (level > 0 && code % CHILDREN == CHILDREN - 1) {
+            code /= CHILDREN;
+            first = (first - 1) / CHILDREN;
+            level--;
+        }
+        if (level == 0) {
+            done = true;
+            return;
+        }
+        code++;
+        down(tree);
+    }
+};
+
+/**
+ * @brief The states of the nodes of a subdivision tree, classify(node, level)
+ *        each, into scratch.tree: the threads of a team classify each level
+ *        together, the children of each subdivided parent placed from root.
+ *        Returns the state of the root.
+ */
+template <typename Member, typename Node, typename Child, typename Classify>
+KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamScratch & scratch, const Node & root,
+                                              const Child & child, const Classify & classify) {
+    uint32_t * tree = scratch.tree;
+    const uint32_t root_state = classify(root, 0);
     constexpr uint32_t words = static_cast<uint32_t>(tree_bytes() / sizeof(uint32_t));
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, words), [&](const uint32_t i) {
-        tree[i] = i == 0 ? uint32_t(detail::SUBDIVIDED) : 0u;
+        tree[i] = i == 0 ? root_state : 0u;
     });
     member.team_barrier();
+    if (root_state != SUBDIVIDED) return root_state;
     uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
     for (int level = 1; level <= MAX_LEVEL; level++) {
         const uint32_t parents = first, n_parents = width;
         first += width;
         width *= CHILDREN;
         Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_parents), [&](const uint32_t p) {
-            if (detail::node_state(tree, parents + p) != detail::SUBDIVIDED) return;
-            double v[4][3], u[4][3];
-            for (int k = 0; k < 4; k++) {
-                for (int i = 0; i < 3; i++) v[k][i] = v0[k][i];
-            }
-            for (uint32_t place = n_parents / CHILDREN; place > 0; place /= CHILDREN) {
-                detail::child(v, static_cast<int>((p / place) % CHILDREN), u);
-                for (int k = 0; k < 4; k++) {
-                    for (int i = 0; i < 3; i++) v[k][i] = u[k][i];
-                }
-            }
+            if (node_state(tree, parents + p) != SUBDIVIDED) return;
+            const Node parent = place(root, child, level - 1, p);
             for (int j = 0; j < CHILDREN; j++) {
-                double c[3], phi;
-                detail::child(v, j, u);
-                const uint32_t state = !detail::is_uniform(shape, u, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
-                                       : phi < 0.0                                 ? uint32_t(detail::INSIDE)
-                                                                                   : uint32_t(detail::OUTSIDE);
+                Node next;
+                child(parent, j, next);
                 const uint32_t node = first + p * CHILDREN + static_cast<uint32_t>(j);
-                Kokkos::atomic_or(&tree[node / 16], state << (2 * (node % 16)));
+                Kokkos::atomic_or(&tree[node / 16], classify(next, level) << (2 * (node % 16)));
             }
         });
         member.team_barrier();
     }
+    return root_state;
+}
+
+/**
+ * @brief Adds the terms of the kept nodes of scratch.tree to inside and
+ *        total, depth first, n_terms per node, term(node, level, q, w,
+ *        indicated) giving term q's weight w and indicator: the threads of a
+ *        team compute a term each, and each thread then sums them in order,
+ *        so that the sums are those of one thread summing every term.
+ */
+template <typename Member, typename Node, typename Child, typename Term>
+KOKKOS_INLINE_FUNCTION void team_fold(const Member & member, const TeamScratch & scratch, const Node & root,
+                                      const Child & child, const int n_terms, const Term & term, double & inside,
+                                      double & total) {
+    const int rank = member.team_rank(), size = member.team_size();
+    double *w = scratch.terms, *indicated = scratch.terms + size;
+    Walk walk;
+    walk.down(scratch.tree);
+    int q = 0;
+    double in = inside, all = total;
+    while (!walk.done) {
+        int n = 0, mine = -1, level = 0;
+        uint32_t code = 0;
+        for (; !walk.done && n < size; n++) {
+            if (n == rank) {
+                mine = q;
+                level = walk.level;
+                code = walk.code;
+            }
+            if (++q == n_terms) {
+                q = 0;
+                walk.next(scratch.tree);
+            }
+        }
+        if (mine >= 0) term(place(root, child, level, code), level, mine, w[rank], indicated[rank]);
+        member.team_barrier();
+        for (int k = 0; k < n; k++) {
+            in += w[k] * indicated[k];
+            all += w[k];
+        }
+        member.team_barrier();
+    }
+    inside = in;
+    total = all;
+}
+
+/** @brief A simplex of a subdivision, and its measure. */
+struct SimplexNode {
+    double v[4][3];
+    double measure;
+};
+
+} // namespace detail
+
+/**
+ * @brief simplex, with the threads of a team: they classify the simplices of
+ *        each level of the subdivision together (detail::team_classify), then
+ *        sum the kept ones depth first, so that the sums are those of simplex:
+ *        one thread from their states alone with a sharp edge in Cartesian
+ *        runs, otherwise each thread placing one (detail::team_fold). Every
+ *        thread of the team calls it, with the same arguments.
+ */
+template <typename Member, typename Distance>
+KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratch & scratch,
+                                         const Shape<Distance> & shape, const bool axisymmetric, const double v0[4][3],
+                                         const double measure0, double & inside, double & total) {
+    detail::SimplexNode root;
+    for (int k = 0; k < 4; k++) {
+        for (int i = 0; i < 3; i++) root.v[k][i] = v0[k][i];
+    }
+    root.measure = measure0;
+    auto child = [](const detail::SimplexNode & s, const int j, detail::SimplexNode & out) {
+        detail::child(s.v, j, out.v);
+        out.measure = s.measure / double(CHILDREN);
+    };
+    auto classify = [&](const detail::SimplexNode & s, const int level) {
+        double c[3], phi;
+        return !detail::is_uniform(shape, s.v, level, c, phi) ? uint32_t(detail::SUBDIVIDED)
+               : phi < 0.0                                    ? uint32_t(detail::INSIDE)
+                                                              : uint32_t(detail::OUTSIDE);
+    };
+    const uint32_t root_state = detail::team_classify(member, scratch, root, child, classify);
+    if (axisymmetric || shape.edge > 0.0) {
+        auto term = [&](const detail::SimplexNode & s, const int level, int, double & w, double & indicated) {
+            double c[3], phi;
+            detail::is_uniform(shape, s.v, level, c, phi);
+            w = s.measure * (axisymmetric ? c[1] : 1.0);
+            indicated = indicator(phi, shape.edge);
+        };
+        detail::team_fold(member, scratch, root, child, 1, term, inside, total);
+        return;
+    }
+    if (root_state != detail::SUBDIVIDED) {
+        inside += measure0 * (root_state == detail::INSIDE ? 1.0 : 0.0);
+        total += measure0;
+        return;
+    }
+    // The kept simplices from their states alone
     struct Sums {
         double inside, total;
     };
-    // The kept simplices depth first, in the children's order, as simplex sums them; their vertices only where
-    // their weights or indicators need them
-    const bool sharp = !(shape.edge > 0.0), placed = axisymmetric || !sharp;
+    const uint32_t * tree = scratch.tree;
     Sums sums{inside, total};
     Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
-        double vertices[MAX_LEVEL][4][3];
-        for (int k = 0; placed && k < 4; k++) {
-            for (int i = 0; i < 3; i++) vertices[0][k][i] = v0[k][i];
-        }
         double in = s.inside, all = s.total, measure = measure0 / double(CHILDREN);
         int level = 1;
         uint32_t code = 0, first_of_level = 1;
         while (level > 0) {
             const uint32_t state = detail::node_state(tree, first_of_level + code);
-            const int j = static_cast<int>(code % CHILDREN);
-            if (state == detail::SUBDIVIDED && (placed || level + 1 < MAX_LEVEL)) {
-                if (placed) detail::child(vertices[level - 1], j, vertices[level]);
+            if (state == detail::SUBDIVIDED && level + 1 < MAX_LEVEL) {
                 level++;
                 code *= CHILDREN;
                 first_of_level = first_of_level * CHILDREN + 1;
@@ -289,16 +418,8 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, uint32_t * tree,
                     all += w;
                 }
             } else {
-                double w = measure, indicated = state == detail::INSIDE ? 1.0 : 0.0;
-                if (placed) {
-                    double v[4][3], c[3], phi;
-                    detail::child(vertices[level - 1], j, v);
-                    detail::is_uniform(shape, v, level, c, phi);
-                    w = measure * (axisymmetric ? c[1] : 1.0);
-                    if (!sharp) indicated = indicator(phi, shape.edge);
-                }
-                in += w * indicated;
-                all += w;
+                in += measure * (state == detail::INSIDE ? 1.0 : 0.0);
+                all += measure;
             }
             // The next simplex depth first: the next sibling of the deepest simplex with one (measures scale
             // exactly by powers of 2)
@@ -403,11 +524,11 @@ KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const b
 
 /** @brief straight_cell, with the threads of a team (team_simplex). */
 template <typename Member, typename Distance, typename Nodes>
-KOKKOS_INLINE_FUNCTION void team_straight_cell(const Member & member, uint32_t * tree, const Shape<Distance> & shape,
-                                               const bool axisymmetric, const uint32_t n, const Nodes & node,
-                                               double & inside, double & total) {
+KOKKOS_INLINE_FUNCTION void team_straight_cell(const Member & member, const TeamScratch & scratch,
+                                               const Shape<Distance> & shape, const bool axisymmetric, const uint32_t n,
+                                               const Nodes & node, double & inside, double & total) {
     straight_simplices(n, node, [&](const double s[4][3], const double measure) {
-        team_simplex(member, tree, shape, axisymmetric, s, measure, inside, total);
+        team_simplex(member, scratch, shape, axisymmetric, s, measure, inside, total);
     });
 }
 
@@ -505,6 +626,89 @@ KOKKOS_INLINE_FUNCTION void linear_simplex(const double v[4][3], const double g[
     }
 }
 
+namespace detail {
+
+/** @brief Gauss points of a kept box of cone: 3 per direction, exact for the cones' radial factor and smooth faces. */
+constexpr int GAUSS_POINTS = N_DIM == 2 ? 9 : 27;
+
+/** @brief A box of the subdivision of a cone, in box coordinates. */
+struct Box {
+    double lo[3], hi[3];
+};
+
+/** @brief Child j of box b: its halves along each direction, the upper one where bit i of j is set. */
+KOKKOS_INLINE_FUNCTION void box_child(const Box & b, const int j, Box & out) {
+    for (int i = 0; i < 3; i++) {
+        out.lo[i] = b.lo[i];
+        out.hi[i] = b.hi[i];
+    }
+    for (int i = 0; i < N_DIM; i++) {
+        const double mid = 0.5 * (b.lo[i] + b.hi[i]);
+        if ((j >> i) & 1) {
+            out.lo[i] = mid;
+        } else {
+            out.hi[i] = mid;
+        }
+    }
+}
+
+/** @brief Whether box b of cone k at subdivision level level is kept whole. */
+template <typename Distance, typename Cone>
+KOKKOS_INLINE_FUNCTION bool box_is_uniform(const Shape<Distance> & shape, const Cone & at, const uint32_t k,
+                                           const Box & b, const int level) {
+    double mid[3], x_mid[3];
+    for (int i = 0; i < 3; i++) mid[i] = 0.5 * (b.lo[i] + b.hi[i]);
+    at(k, mid, x_mid);
+    double radius = 0.0;
+    for (int corner = 0; corner < (1 << N_DIM); corner++) {
+        double p[3] = {mid[0], mid[1], mid[2]}, x[3], d[3];
+        for (int i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? b.hi[i] : b.lo[i];
+        at(k, p, x);
+        for (int i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
+        radius = region::detail::max(radius, norm(d));
+    }
+    radius *= 1.25;  // the box's image is curved
+    const double phi = shape.distance(x_mid), half_edge = 0.5 * shape.edge;
+    bool uniform = level >= MAX_LEVEL;
+    if (shape.bounded) {
+        if (Kokkos::fabs(phi) >= radius + half_edge) uniform = true;
+    } else if (!uniform) {
+        double slope = 0.0;
+        for (int corner = 0; corner < (1 << N_DIM); corner++) {
+            double p[3] = {mid[0], mid[1], mid[2]}, x[3], d[3];
+            for (int i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? b.hi[i] : b.lo[i];
+            at(k, p, x);
+            for (int i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
+            if (norm(d) > 0.0) slope = region::detail::max(slope, Kokkos::fabs(shape.distance(x) - phi) / norm(d));
+        }
+        uniform = Kokkos::fabs(phi) > 2.0 * slope * radius && half_edge == 0.0;
+    }
+    return uniform;
+}
+
+/** @brief The weight w and indicator of Gauss point q of a kept box b of cone k. */
+template <typename Distance, typename Cone>
+KOKKOS_INLINE_FUNCTION void gauss_point(const Shape<Distance> & shape, const bool axisymmetric, const Cone & at,
+                                        const uint32_t k, const Box & b, const int q, double & w, double & indicated) {
+    constexpr double G[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
+    constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
+    double mid[3];
+    for (int i = 0; i < 3; i++) mid[i] = 0.5 * (b.lo[i] + b.hi[i]);
+    double p[3] = {mid[0], mid[1], mid[2]}, x[3] = {0.0, 0.0, 0.0};
+    w = 1.0;
+    int rest = q;
+    for (int i = 0; i < N_DIM; i++) {
+        const int g = rest % 3;
+        rest /= 3;
+        p[i] = mid[i] + 0.5 * (b.hi[i] - b.lo[i]) * G[g];
+        w *= 0.5 * (b.hi[i] - b.lo[i]) * W[g];
+    }
+    w *= at(k, p, x) * (axisymmetric ? x[1] : 1.0);
+    indicated = indicator(shape.distance(x), shape.edge);
+}
+
+} // namespace detail
+
 /**
  * @brief Adds the integrals of the indicator and of 1 over cone k of a curved
  *        cell, at(k, p, x) giving its point x at box coordinates p (face
@@ -517,85 +721,59 @@ KOKKOS_INLINE_FUNCTION void cone(const Shape<Distance> & shape, const bool axisy
                                  const uint32_t k, const double lo0[3], const double hi0[3], double & inside,
                                  double & total) {
     struct Item {
-        double lo[3], hi[3];
+        detail::Box box;
         int level;
     };
     Item stack[STACK];
     int top = 0;
     for (int i = 0; i < 3; i++) {
-        stack[0].lo[i] = lo0[i];
-        stack[0].hi[i] = hi0[i];
+        stack[0].box.lo[i] = lo0[i];
+        stack[0].box.hi[i] = hi0[i];
     }
     stack[0].level = 0;
-    const double half_edge = 0.5 * shape.edge;
     while (top >= 0) {
         const Item item = stack[top--];
-        double mid[3], x_mid[3];
-        for (int i = 0; i < 3; i++) mid[i] = 0.5 * (item.lo[i] + item.hi[i]);
-        at(k, mid, x_mid);
-        double radius = 0.0;
-        for (int corner = 0; corner < (1 << N_DIM); corner++) {
-            double p[3] = {mid[0], mid[1], mid[2]}, x[3], d[3];
-            for (int i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? item.hi[i] : item.lo[i];
-            at(k, p, x);
-            for (int i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
-            radius = region::detail::max(radius, detail::norm(d));
-        }
-        radius *= 1.25;  // the box's image is curved
-        const double phi = shape.distance(x_mid);
-        bool uniform = item.level >= MAX_LEVEL;
-        if (shape.bounded) {
-            if (Kokkos::fabs(phi) >= radius + half_edge) uniform = true;
-        } else if (!uniform) {
-            double slope = 0.0;
-            for (int corner = 0; corner < (1 << N_DIM); corner++) {
-                double p[3] = {mid[0], mid[1], mid[2]}, x[3], d[3];
-                for (int i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? item.hi[i] : item.lo[i];
-                at(k, p, x);
-                for (int i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
-                if (detail::norm(d) > 0.0) {
-                    slope = region::detail::max(slope, Kokkos::fabs(shape.distance(x) - phi) / detail::norm(d));
-                }
-            }
-            uniform = Kokkos::fabs(phi) > 2.0 * slope * radius && half_edge == 0.0;
-        }
-        if (uniform) {
-            // Gauss points: 3 per direction, exact for the cones' radial factor and smooth faces
-            constexpr double G[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
-            constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
-            constexpr int n = N_DIM == 2 ? 9 : 27;
-            for (int q = 0; q < n; q++) {
-                double p[3] = {mid[0], mid[1], mid[2]}, x[3] = {0.0, 0.0, 0.0};
-                double w = 1.0;
-                int rest = q;
-                for (int i = 0; i < N_DIM; i++) {
-                    const int g = rest % 3;
-                    rest /= 3;
-                    p[i] = mid[i] + 0.5 * (item.hi[i] - item.lo[i]) * G[g];
-                    w *= 0.5 * (item.hi[i] - item.lo[i]) * W[g];
-                }
-                w *= at(k, p, x) * (axisymmetric ? x[1] : 1.0);
-                inside += w * indicator(shape.distance(x), shape.edge);
+        if (detail::box_is_uniform(shape, at, k, item.box, item.level)) {
+            for (int q = 0; q < detail::GAUSS_POINTS; q++) {
+                double w, indicated;
+                detail::gauss_point(shape, axisymmetric, at, k, item.box, q, w, indicated);
+                inside += w * indicated;
                 total += w;
             }
             continue;
         }
         for (int child = (1 << N_DIM) - 1; child >= 0; child--) {
             Item & next = stack[++top];
-            for (int i = 0; i < 3; i++) {
-                next.lo[i] = item.lo[i];
-                next.hi[i] = item.hi[i];
-            }
-            for (int i = 0; i < N_DIM; i++) {
-                if ((child >> i) & 1) {
-                    next.lo[i] = mid[i];
-                } else {
-                    next.hi[i] = mid[i];
-                }
-            }
+            detail::box_child(item.box, child, next.box);
             next.level = item.level + 1;
         }
     }
+}
+
+/**
+ * @brief cone, with the threads of a team: they classify the boxes of each
+ *        level of the subdivision together, and compute a Gauss point each of
+ *        the kept boxes, summed in the order of cone (detail::team_classify,
+ *        detail::team_fold). Every thread of the team calls it, with the same
+ *        arguments.
+ */
+template <typename Member, typename Distance, typename Cone>
+KOKKOS_INLINE_FUNCTION void team_cone(const Member & member, const TeamScratch & scratch, const Shape<Distance> & shape,
+                                      const bool axisymmetric, const Cone & at, const uint32_t k, const double lo0[3],
+                                      const double hi0[3], double & inside, double & total) {
+    detail::Box root;
+    for (int i = 0; i < 3; i++) {
+        root.lo[i] = lo0[i];
+        root.hi[i] = hi0[i];
+    }
+    auto child = [](const detail::Box & b, const int j, detail::Box & out) { detail::box_child(b, j, out); };
+    detail::team_classify(member, scratch, root, child, [&](const detail::Box & b, const int level) {
+        return detail::box_is_uniform(shape, at, k, b, level) ? uint32_t(detail::OUTSIDE) : uint32_t(detail::SUBDIVIDED);
+    });
+    auto term = [&](const detail::Box & b, int, const int q, double & w, double & indicated) {
+        detail::gauss_point(shape, axisymmetric, at, k, b, q, w, indicated);
+    };
+    detail::team_fold(member, scratch, root, child, detail::GAUSS_POINTS, term, inside, total);
 }
 
 } // namespace region::sampler

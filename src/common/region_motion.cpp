@@ -590,14 +590,14 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const bool sharp_bounds = bounded, axi = axisymmetric;
     const auto sampled = shapes;
     if (l.extent(0) > 0) {
-        // On GPUs a team per cell, whose threads classify the simplices it subdivides together
+        // On GPUs a team per cell, whose threads classify the simplices or cone boxes it subdivides together
         using Policy = Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>>;
         constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
         Policy policy(static_cast<int>(n_cells), gpu ? TEAM : 1);
-        if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::tree_bytes()));
+        if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
         Kokkos::parallel_for("region_moving_shapes", policy, KOKKOS_LAMBDA(const Policy::member_type & member) {
             const uint32_t c = static_cast<uint32_t>(member.league_rank());
-            auto * tree = gpu ? static_cast<uint32_t *>(member.team_scratch(0).get_shmem(sampler::tree_bytes())) : nullptr;
+            const sampler::TeamScratch scratch = gpu ? sampler::team_scratch(member) : sampler::TeamScratch{};
             const double t = static_cast<double>(time());
             for (uint32_t i = 0; i < l.extent(0); i++) {
                 const Leaf leaf = l(i);
@@ -618,7 +618,11 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                             const CurvedFace & f = faces(a + k);
                             const double lo[3] = {f.lo[0], N_DIM == 2 ? 0.0 : f.lo[1], 0.0};
                             const double hi[3] = {f.hi[0], N_DIM == 2 ? 1.0 : f.hi[1], 1.0};
-                            sampler::cone(shape, axi, cones, k, lo, hi, inside, total);
+                            if constexpr (gpu) {
+                                sampler::team_cone(member, scratch, shape, axi, cones, k, lo, hi, inside, total);
+                            } else {
+                                sampler::cone(shape, axi, cones, k, lo, hi, inside, total);
+                            }
                         }
                     } else {
                         const uint32_t first = cell_offsets(c);
@@ -627,7 +631,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                             for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                         };
                         if constexpr (gpu) {
-                            sampler::team_straight_cell(member, tree, shape, axi, cell_offsets(c + 1) - first, node,
+                            sampler::team_straight_cell(member, scratch, shape, axi, cell_offsets(c + 1) - first, node,
                                                         inside, total);
                         } else {
                             sampler::straight_cell(shape, axi, cell_offsets(c + 1) - first, node, inside, total);

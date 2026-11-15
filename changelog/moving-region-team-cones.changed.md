@@ -1,0 +1,1 @@
+- Moving regions also sample curved cells, and shapes with a smooth edge or in axisymmetric runs, with a team of threads per cell on GPUs, with unchanged results.
