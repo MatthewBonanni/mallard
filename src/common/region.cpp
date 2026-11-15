@@ -372,7 +372,8 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                 hi[d] = std::max(hi[d], x[d]);
             }
         }
-        for (size_t d = 0; d < 3; d++) {
+        // 2D: x and y only, as every user of the bounds reads them: the cells lie at z = 0 whatever a centre's z
+        for (size_t d = 0; d < N_DIM; d++) {
             if (hi[d] < box[0][d] || lo[d] > box[1][d]) return true;
         }
         return false;
