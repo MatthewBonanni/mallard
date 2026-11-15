@@ -2530,7 +2530,7 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     r->summed = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
         return o.kind != ProbeOutput::MIN && o.kind != ProbeOutput::MAX;
     });
-    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & t) { return t.kind == ProbeTerm::MOMENT; });
+    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & term) { return term.kind == ProbeTerm::MOMENT; });
     int weighted = r->summed && holds && (!points || !p.geometry.node_weights.empty()) ? 1 : 0;
     if (S.distributed) weighted = comm::allreduce(weighted, comm::Op::MAX);
     if (weighted) {
