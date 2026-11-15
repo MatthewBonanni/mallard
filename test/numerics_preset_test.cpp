@@ -219,6 +219,8 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"premixed_flame/input.toml", "reacting", 2, "", {}, ""},
     {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}, ""},
     {"reactive_shock_tube/input.toml", "reacting", 2, "", {}, ""},
+    {"reacting_mixing_layer/input.toml", "reacting", 2, "",
+     {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "top"}, {"cylinder", "bottom"}}, ""},
     {"riemann_2d/input.toml", "high_order", 2, "", {}, ""},
     {"riemann_2d_quads/coarse.toml", "high_order", 2, "", {}, ""},
     {"riemann_2d_quads/input.toml", "high_order", 2, "", {}, ""},

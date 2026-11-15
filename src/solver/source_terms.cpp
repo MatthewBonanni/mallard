@@ -420,19 +420,16 @@ void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::V
                                               AddToRhs{rhs.flow, rhs.species, mesh->cell_measure}});
 }
 
-Kokkos::View<rtype **, Kokkos::LayoutRight> SourceTerms::evaluate(const State & solution, const rtype t) {
-    Kokkos::View<rtype **, Kokkos::LayoutRight> out("source_values", mesh->n_cells, N_CONSERVATIVE + n_species);
-    if (m_empty) return out;
+void SourceTerms::evaluate(const State & solution, const Kokkos::View<rtype> & time,
+                           const Kokkos::View<rtype **, Kokkos::LayoutRight> & out) {
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), out, 0.0_r);
+    if (m_empty) return;
     if (m_means) update_means(solution);
-    Kokkos::View<rtype> time("source_time");
-    Kokkos::deep_copy(time, t);
     if (!moving.empty()) move(time);
     Kokkos::parallel_for("source_values", mesh->n_owned(),
                          TermKernel<Accumulate>{static_field, dynamic_terms, table, weights, fields, means, time,
                                                 integral_sums.sums(), n_species,
                                                 Accumulate{out}});
-    check_loops();
-    return out;
 }
 
 void SourceTerms::check_loops() const {
