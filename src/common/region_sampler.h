@@ -16,6 +16,7 @@
 
 #include <cstdint>
 
+#include <Kokkos_BitManipulation.hpp>
 #include <Kokkos_Core.hpp>
 #include "common_typedef.h"
 #include "geometry.h"
@@ -65,18 +66,21 @@ KOKKOS_INLINE_FUNCTION bool is_uniform(const Shape<Distance> & shape, const doub
     for (int k = 0; k < n_vertices; k++) {
         for (int i = 0; i < 3; i++) c[i] += v[k][i] / double(n_vertices);
     }
-    double radius = 0.0;
+    phi = shape.distance(c);
+    bool uniform = level >= MAX_LEVEL;
+    if (uniform) return true;
+    // sqrt is monotone, so this is the largest distance to a vertex with one square root
+    double radius2 = 0.0;
     for (int k = 0; k < n_vertices; k++) {
         double d[3];
         for (int i = 0; i < 3; i++) d[i] = v[k][i] - c[i];
-        radius = region::detail::max(radius, norm(d));
+        radius2 = region::detail::max(radius2, dot(d, d));
     }
-    phi = shape.distance(c);
-    bool uniform = level >= MAX_LEVEL;
+    const double radius = Kokkos::sqrt(radius2);
     if (shape.bounded) {
         if (Kokkos::fabs(phi) >= radius + half_edge) uniform = true;
         if (half_edge > 0.0 && radius < 0.125 * shape.edge && Kokkos::fabs(phi) < half_edge - radius) uniform = true;
-    } else if (!uniform) {
+    } else {
         // Implicit regions: subdivide unless f keeps its sign over the simplex by twice its slope there
         double slope = 0.0;
         for (int k = 0; k < n_vertices; k++) {
@@ -168,11 +172,24 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
             total += w;
             continue;
         }
+        const double measure = item.measure / double(CHILDREN);
+        if (item.level + 1 == MAX_LEVEL) {
+            // The deepest children are kept whole: summed in order without the stack
+            for (int child = 0; child < CHILDREN; child++) {
+                double v[4][3];
+                detail::child(item.v, child, v);
+                detail::is_uniform(shape, v, MAX_LEVEL, c, phi);
+                const double w = measure * (axisymmetric ? c[1] : 1.0);
+                inside += w * indicator(phi, shape.edge);
+                total += w;
+            }
+            continue;
+        }
         // Pushed last child first, so that they are summed in order
         for (int child = CHILDREN - 1; child >= 0; child--) {
             Item & next = stack[++top];
             detail::child(item.v, child, next.v);
-            next.measure = item.measure / double(CHILDREN);
+            next.measure = measure;
             next.level = item.level + 1;
         }
     }
@@ -194,22 +211,34 @@ KOKKOS_INLINE_FUNCTION constexpr size_t tree_bytes() {
     return sizeof(uint32_t) * ((tree_nodes() + tree_nodes(MAX_LEVEL) + 31) / 32);
 }
 
+/** @brief Level of the subtrees whose kept nodes a sharp edge's sum counts: there are 64 of them. */
+constexpr int COUNTED = N_DIM == 2 ? 3 : 2;
+constexpr uint32_t SUBTREES = 64;
+
+/** @brief Words of the counts of team_simplex: kept nodes and kept inside per level below COUNTED, per subtree. */
+constexpr size_t COUNT_WORDS = SUBTREES * (MAX_LEVEL - COUNTED);
+
 /** @brief Team scratch of team_simplex and team_cone, for a team of team_size threads. */
 KOKKOS_INLINE_FUNCTION constexpr size_t team_bytes(const int team_size) {
-    return 2 * static_cast<size_t>(team_size) * sizeof(double) + tree_bytes();
+    return 2 * static_cast<size_t>(team_size) * sizeof(double) + tree_bytes() + COUNT_WORDS * sizeof(uint32_t);
 }
 
-/** @brief Team scratch of team_simplex and team_cone: the table of states, and a weight and indicator per thread. */
+/**
+ * @brief Team scratch of team_simplex and team_cone: the table of states, a
+ *        weight and indicator per thread, and the counts of kept nodes.
+ */
 struct TeamScratch {
     uint32_t * tree = nullptr;
     double * terms = nullptr;
+    uint32_t * counts = nullptr;
 };
 
 /** @brief The TeamScratch in team_bytes(member.team_size()) of level 0 team scratch. */
 template <typename Member>
 KOKKOS_INLINE_FUNCTION TeamScratch team_scratch(const Member & member) {
     auto * terms = static_cast<double *>(member.team_scratch(0).get_shmem(team_bytes(member.team_size())));
-    return {reinterpret_cast<uint32_t *>(terms + 2 * member.team_size()), terms};
+    auto * tree = reinterpret_cast<uint32_t *>(terms + 2 * member.team_size());
+    return {tree, terms, tree + tree_bytes() / sizeof(uint32_t)};
 }
 
 namespace detail {
@@ -248,9 +277,9 @@ KOKKOS_INLINE_FUNCTION Node place(const Node & root, const Child & child, const 
     return node;
 }
 
-/** @brief The kept nodes of a table of states, depth first in the children's order. */
+/** @brief The kept nodes of a table of states under a node of level top, depth first in the children's order. */
 struct Walk {
-    int level = 0;
+    int level = 0, top = 0;
     uint32_t code = 0, first = 0;  // the node: first + code, first the first node of its level
     bool done = false;
 
@@ -265,12 +294,12 @@ struct Walk {
 
     /** @brief Moves to the next kept node: under the next sibling of the deepest node with one. */
     KOKKOS_INLINE_FUNCTION void next(const uint32_t * tree) {
-        while (level > 0 && code % CHILDREN == CHILDREN - 1) {
+        while (level > top && code % CHILDREN == CHILDREN - 1) {
             code /= CHILDREN;
             first = (first - 1) / CHILDREN;
             level--;
         }
-        if (level == 0) {
+        if (level == top) {
             done = true;
             return;
         }
@@ -364,6 +393,152 @@ KOKKOS_INLINE_FUNCTION void team_fold(const Member & member, const TeamScratch &
     total = all;
 }
 
+/**
+ * @brief Adds m[l] to r n[l] times for each l < levels, one rounded addition
+ *        at a time in any order, at once: while every partial sum stays in
+ *        r's binade, each addition of m[l] adds the same k[l] ulps of r,
+ *        m[l] / ulp(r) rounded to the nearest. Returns false, r unchanged,
+ *        where that does not hold: r not positive and normal, a partial sum
+ *        reaching the next binade, or m[l] / ulp(r) halfway between integers.
+ */
+KOKKOS_INLINE_FUNCTION bool add_in_binade(double & r, const double * m, const uint32_t * n, const int levels) {
+    constexpr uint64_t ONE = uint64_t(1) << 52, END = uint64_t(1) << 53;
+    bool any = false;
+    for (int l = 0; l < levels; l++) any = any || n[l] > 0;
+    if (!any) return true;
+    const uint64_t bits = Kokkos::bit_cast<uint64_t>(r);
+    const uint64_t exponent = bits >> 52;  // a negative r's sign bit makes it too large
+    if (exponent < 53 || exponent > 2046) return false;
+    const double ulp = Kokkos::bit_cast<double>((exponent - 52) << 52);
+    const double per_ulp = Kokkos::bit_cast<double>((2098 - exponent) << 52);
+    uint64_t sum = (bits & (ONE - 1)) | ONE;  // r in ulps
+    for (int l = 0; l < levels; l++) {
+        if (n[l] == 0) continue;
+        const double q = m[l] * per_ulp;
+        if (!(q >= 0.0 && q < static_cast<double>(END))) return false;
+        uint64_t k = static_cast<uint64_t>(q);
+        const double rest = q - static_cast<double>(k);
+        if (rest == 0.5) return false;
+        if (rest > 0.5) k++;
+        sum += n[l] * k;
+        if (sum >= END) return false;
+    }
+    r = static_cast<double>(sum) * ulp;
+    return true;
+}
+
+/** @brief The set bits of words in [first, first + n). */
+KOKKOS_INLINE_FUNCTION uint32_t count_bits(const uint32_t * words, uint32_t first, uint32_t n) {
+    uint32_t count = 0;
+    while (n > 0) {
+        const uint32_t shift = first % 32, take = 32 - shift < n ? 32 - shift : n;
+        uint32_t word = words[first / 32] >> shift;
+        if (take < 32) word &= (1u << take) - 1u;
+        count += static_cast<uint32_t>(Kokkos::popcount(word));
+        first += take;
+        n -= take;
+    }
+    return count;
+}
+
+static_assert(COUNTED + 1 < MAX_LEVEL && tree_nodes(COUNTED + 1) - tree_nodes(COUNTED) == SUBTREES);
+
+/**
+ * @brief The kept nodes, and those inside, of each level of each subtree
+ *        under a node of level COUNTED of scratch.tree, into scratch.counts
+ *        (16 bits each, inside high), with the other threads of a team.
+ */
+template <typename Member>
+KOKKOS_INLINE_FUNCTION void team_count(const Member & member, const TeamScratch & scratch) {
+    const uint32_t * tree = scratch.tree;
+    uint32_t * counts = scratch.counts;
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(member, SUBTREES), [&](const uint32_t s) {
+        uint32_t width = 1, subdivided = 0;
+        for (int level = COUNTED + 1; level <= MAX_LEVEL; level++) {
+            width *= CHILDREN;
+            const uint32_t begin = tree_nodes(level) + s * width;
+            uint32_t kept = 0, inside = 0;
+            if (level < MAX_LEVEL) {
+                subdivided = 0;
+                for (uint32_t i = 0; i < width; i++) {
+                    const uint32_t state = node_state(tree, begin + i);
+                    subdivided += state == SUBDIVIDED ? 1u : 0u;
+                    kept += state >= OUTSIDE ? 1u : 0u;
+                    inside += state == INSIDE ? 1u : 0u;
+                }
+            } else {
+                // The deepest level's nodes are all kept: the children of the subdivided nodes above
+                kept = CHILDREN * subdivided;
+                inside = count_bits(tree, tree_nodes(MAX_LEVEL) + begin, width);
+            }
+            counts[s * (MAX_LEVEL - COUNTED) + static_cast<uint32_t>(level - COUNTED - 1)] = kept | inside << 16;
+        }
+    });
+    member.team_barrier();
+}
+
+/**
+ * @brief Adds the kept simplices of scratch.tree, whose root of measure
+ *        measure0 is subdivided, to inside and total in the order of simplex:
+ *        each subtree under a node of level COUNTED at once from its counts
+ *        (team_count) where add_in_binade can, otherwise one simplex at a time.
+ */
+KOKKOS_INLINE_FUNCTION void sharp_sum(const TeamScratch & scratch, const double measure0, double & inside,
+                                      double & total) {
+    constexpr int below = MAX_LEVEL - COUNTED;
+    const uint32_t * tree = scratch.tree;
+    double measure[MAX_LEVEL + 1];
+    measure[0] = measure0;
+    for (int l = 1; l <= MAX_LEVEL; l++) measure[l] = measure[l - 1] / double(CHILDREN);
+    auto subtree = [&](const uint32_t code, const uint32_t first) {
+        uint32_t kept[below], in[below];
+        for (int l = 0; l < below; l++) {
+            const uint32_t word = scratch.counts[code * below + static_cast<uint32_t>(l)];
+            kept[l] = word & 0xffffu;
+            in[l] = word >> 16;
+        }
+        const bool all_added = add_in_binade(total, measure + COUNTED + 1, kept, below);
+        const bool in_added = add_in_binade(inside, measure + COUNTED + 1, in, below);
+        if (all_added && in_added) return;
+        Walk walk;
+        walk.level = walk.top = COUNTED;
+        walk.code = code;
+        walk.first = first;
+        walk.down(tree);
+        while (!walk.done) {
+            const double m = measure[walk.level];
+            if (!in_added) inside += m * (node_state(tree, walk.first + walk.code) == INSIDE ? 1.0 : 0.0);
+            if (!all_added) total += m;
+            walk.next(tree);
+        }
+    };
+    // The kept nodes down to level COUNTED, depth first
+    int level = 0;
+    uint32_t code = 0, first = 0;
+    while (true) {
+        uint32_t state = node_state(tree, first + code);
+        while (state == SUBDIVIDED && level < COUNTED) {
+            level++;
+            code *= CHILDREN;
+            first = first * CHILDREN + 1;
+            state = node_state(tree, first + code);
+        }
+        if (state == SUBDIVIDED) {
+            subtree(code, first);
+        } else {
+            inside += measure[level] * (state == INSIDE ? 1.0 : 0.0);
+            total += measure[level];
+        }
+        while (level > 0 && code % CHILDREN == CHILDREN - 1) {
+            code /= CHILDREN;
+            first = (first - 1) / CHILDREN;
+            level--;
+        }
+        if (level == 0) break;
+        code++;
+    }
+}
+
 /** @brief A simplex of a subdivision, and its measure. */
 struct SimplexNode {
     double v[4][3];
@@ -376,8 +551,9 @@ struct SimplexNode {
  * @brief simplex, with the threads of a team: they classify the simplices of
  *        each level of the subdivision together (detail::team_classify), then
  *        sum the kept ones depth first, so that the sums are those of simplex:
- *        one thread from their states alone with a sharp edge in Cartesian
- *        runs, otherwise each thread placing one (detail::team_fold). Every
+ *        one thread from their states and counts alone with a sharp edge in
+ *        Cartesian runs (detail::sharp_sum), otherwise each thread placing
+ *        one (detail::team_fold). Every
  *        thread of the team calls it, with the same arguments.
  */
 template <typename Member, typename Distance>
@@ -419,19 +595,11 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratc
     struct Sums {
         double inside, total;
     };
-    const uint32_t * tree = scratch.tree;
+    detail::team_count(member, scratch);
     Sums sums{inside, total};
     Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
         double in = s.inside, all = s.total;
-        detail::Walk walk;
-        walk.down(tree);
-        while (!walk.done) {
-            double measure = measure0;
-            for (int l = 0; l < walk.level; l++) measure /= double(CHILDREN);
-            in += measure * (detail::node_state(tree, walk.first + walk.code) == detail::INSIDE ? 1.0 : 0.0);
-            all += measure;
-            walk.next(tree);
-        }
+        detail::sharp_sum(scratch, measure0, in, all);
         s.inside = in;
         s.total = all;
     }, sums);

@@ -14,6 +14,9 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -87,6 +90,55 @@ Sums by_teams(const F & f) {
 }
 
 } // namespace
+
+TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
+    using region::sampler::detail::add_in_binade;
+    std::mt19937_64 rng(1101);
+    std::uniform_real_distribution<double> unit(1.0, 2.0);
+    std::uniform_int_distribution<uint32_t> count(0, 600);
+    int added = 0, refused = 0;
+    for (int trial = 0; trial < 20000; trial++) {
+        // A running sum and the measures of 3 levels of simplices, as a sharp sum adds them
+        const double measure0 = unit(rng) * std::ldexp(1.0, -30), r0 = unit(rng) * std::ldexp(1.0, -20 - trial % 8);
+        const double m[3] = {measure0 / 8.0, measure0 / 64.0, measure0 / 512.0};
+        uint32_t n[3] = {count(rng), count(rng), count(rng)};
+        if (trial % 7 == 0) n[trial % 3] = 0;
+        double r = r0;
+        const bool at_once = add_in_binade(r, m, n, 3);
+        (at_once ? added : refused)++;
+        if (!at_once) {
+            EXPECT_EQ(r, r0);
+            continue;
+        }
+        // Interleaved: the order makes no difference within a binade
+        double one_at_a_time = r0;
+        uint32_t left[3] = {n[0], n[1], n[2]};
+        for (uint64_t i = 0; left[0] + left[1] + left[2] > 0; i++) {
+            const int l = static_cast<int>((i * 2654435761u) % 3);
+            if (left[l] == 0) continue;
+            one_at_a_time += m[l];
+            left[l]--;
+        }
+        ASSERT_EQ(r, one_at_a_time) << "trial " << trial;
+    }
+    EXPECT_GT(added, 5000);
+    EXPECT_GT(refused, 1000);
+
+    // Ties: m half an ulp of r, rounded to even, alternately up and down
+    const double r0 = 1.0, half = std::ldexp(1.0, -53);
+    const double m[1] = {3.0 * half};
+    const uint32_t n[1] = {4};
+    double r = r0;
+    EXPECT_FALSE(add_in_binade(r, m, n, 1));
+    EXPECT_EQ(r, r0);
+    // Nothing to add, and sums that are not positive and normal
+    const uint32_t none[1] = {0};
+    r = 0.0;
+    EXPECT_TRUE(add_in_binade(r, m, none, 1));
+    EXPECT_FALSE(add_in_binade(r, m, n, 1));
+    r = -1.0;
+    EXPECT_FALSE(add_in_binade(r, m, n, 1));
+}
 
 TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
     const Ball ball{{0.43, 0.51, 0.47}, 0.17};

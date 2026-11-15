@@ -107,6 +107,96 @@ struct Cones {
     }
 };
 
+/** @brief Whether sampling runs on a GPU: there, a team per cell, whose threads classify its subdivisions together. */
+constexpr bool GPU_SAMPLING = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+
+/**
+ * @brief The fractions of the shapes of the curved cells (CURVED) or of the
+ *        straight ones, a team per cell: two kernels, so that the straight
+ *        cells' does not carry the registers and stack of the cones.
+ */
+template <bool CURVED>
+struct ShapeSampler {
+    Kokkos::View<Node *> nodes;
+    Kokkos::View<const double *> vertices;
+    kexpr::ProgramTable<> implicit;
+    Kokkos::View<const MovingFractions::Leaf *> leaves;
+    Kokkos::View<const double *[4]> spheres;
+    Kokkos::View<const int32_t *> curved;
+    Kokkos::View<const uint32_t *> curved_offsets;
+    Kokkos::View<const MovingFractions::CurvedFace *> faces;
+    Kokkos::View<const double *[3]> coefficients;
+    Kokkos::View<const rtype *[N_DIM]> coords;
+    Kokkos::View<const uint32_t *> cell_nodes, cell_offsets;
+    Kokkos::View<double **, Kokkos::LayoutLeft> sampled;
+    Kokkos::View<const rtype> time;
+    bool bounded = true, axisymmetric = false;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const Kokkos::TeamPolicy<>::member_type & member) const {
+        const uint32_t c = static_cast<uint32_t>(member.league_rank());
+        if ((curved(c) >= 0) != CURVED) return;
+        const sampler::TeamScratch scratch = GPU_SAMPLING ? sampler::team_scratch(member) : sampler::TeamScratch{};
+        const double t = static_cast<double>(time());
+        for (uint32_t i = 0; i < leaves.extent(0); i++) {
+            const MovingFractions::Leaf leaf = leaves(i);
+            const sampler::Shape<Distance> shape{Distance{nodes.data() + leaf.first, leaf.count, vertices.data(),
+                                                          implicit, t},
+                                                 leaf.edge, bounded};
+            const double center[3] = {spheres(c, 0), spheres(c, 1), spheres(c, 2)};
+            const double phi = shape.distance(center);
+            double value = 0.0;
+            if (bounded && Kokkos::fabs(phi) >= spheres(c, 3) + 0.5 * leaf.edge) {
+                value = indicator(phi, leaf.edge);
+            } else {
+                double inside = 0.0, total = 0.0;
+                if constexpr (CURVED) {
+                    const uint32_t a = curved_offsets(static_cast<uint32_t>(curved(c)));
+                    const uint32_t b = curved_offsets(static_cast<uint32_t>(curved(c)) + 1);
+                    const Cones cones{faces.data() + a, coefficients};
+                    for (uint32_t k = 0; k < b - a; k++) {
+                        const MovingFractions::CurvedFace & f = faces(a + k);
+                        const double lo[3] = {f.lo[0], N_DIM == 2 ? 0.0 : f.lo[1], 0.0};
+                        const double hi[3] = {f.hi[0], N_DIM == 2 ? 1.0 : f.hi[1], 1.0};
+                        if constexpr (GPU_SAMPLING) {
+                            sampler::team_cone(member, scratch, shape, axisymmetric, cones, k, lo, hi, inside, total);
+                        } else {
+                            sampler::cone(shape, axisymmetric, cones, k, lo, hi, inside, total);
+                        }
+                    }
+                } else {
+                    const uint32_t first = cell_offsets(c), n = cell_offsets(c + 1) - first;
+                    auto node = [&](const uint32_t k, double * x) {
+                        const uint32_t q = cell_nodes(first + k);
+                        for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
+                    };
+                    if constexpr (GPU_SAMPLING) {
+                        sampler::team_straight_cell(member, scratch, shape, axisymmetric, n, node, inside, total);
+                    } else {
+                        sampler::straight_cell(shape, axisymmetric, n, node, inside, total);
+                    }
+                }
+                value = total > 0.0 ? inside / total : 0.0;
+            }
+            Kokkos::single(Kokkos::PerTeam(member), [&]() { sampled(c, i) = value; });
+        }
+    }
+};
+
+/** @brief Launches a ShapeSampler: 8 teams per SM where its shared memory holds them, otherwise as many as it does. */
+template <bool CURVED>
+void launch(const ShapeSampler<CURVED> & sample, const uint32_t n_cells) {
+    const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
+    Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
+    if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
+    if (!GPU_SAMPLING || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
+        Kokkos::parallel_for(name, tuned, sample);
+    } else {
+        Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM>> fitted(static_cast<int>(n_cells), TEAM);
+        fitted.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
+        Kokkos::parallel_for(name, fitted, sample);
+    }
+}
+
 } // namespace
 
 namespace {
@@ -574,80 +664,23 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
             move(m(k), s.data(), value, n(m(k).node));
         });
     }
-    const Kokkos::View<const double *> v = vertices;
-    const kexpr::ProgramTable<> implicit = programs;
-    const Kokkos::View<const Leaf *> l = leaves;
     const Kokkos::View<const Op *> o = ops;
     const auto columns = fixed;
-    const auto sphere = spheres;
-    const auto is_curved = curved;
-    const auto offsets = curved_offsets;
-    const auto faces = curved_faces;
-    const auto c_coefficients = coefficients;
     const auto coords = node_coords;
     const auto cell_nodes = nodes_of_cell;
     const auto cell_offsets = offsets_nodes_of_cell;
-    const bool sharp_bounds = bounded, axi = axisymmetric;
     const auto sampled = shapes;
-    if (l.extent(0) > 0) {
-        // On GPUs a team per cell, whose threads classify the simplices or cone boxes it subdivides together
-        constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
-        const auto sample = KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type & member) {
-            const uint32_t c = static_cast<uint32_t>(member.league_rank());
-            const sampler::TeamScratch scratch = gpu ? sampler::team_scratch(member) : sampler::TeamScratch{};
-            const double t = static_cast<double>(time());
-            for (uint32_t i = 0; i < l.extent(0); i++) {
-                const Leaf leaf = l(i);
-                const sampler::Shape<Distance> shape{Distance{n.data() + leaf.first, leaf.count, v.data(), implicit, t},
-                                                     leaf.edge, sharp_bounds};
-                const double center[3] = {sphere(c, 0), sphere(c, 1), sphere(c, 2)};
-                const double phi = shape.distance(center);
-                double value = 0.0;
-                if (sharp_bounds && Kokkos::fabs(phi) >= sphere(c, 3) + 0.5 * leaf.edge) {
-                    value = indicator(phi, leaf.edge);
-                } else {
-                    double inside = 0.0, total = 0.0;
-                    if (is_curved(c) >= 0) {
-                        const uint32_t a = offsets(static_cast<uint32_t>(is_curved(c)));
-                        const uint32_t b = offsets(static_cast<uint32_t>(is_curved(c)) + 1);
-                        const Cones cones{faces.data() + a, c_coefficients};
-                        for (uint32_t k = 0; k < b - a; k++) {
-                            const CurvedFace & f = faces(a + k);
-                            const double lo[3] = {f.lo[0], N_DIM == 2 ? 0.0 : f.lo[1], 0.0};
-                            const double hi[3] = {f.hi[0], N_DIM == 2 ? 1.0 : f.hi[1], 1.0};
-                            if (gpu) {
-                                sampler::team_cone(member, scratch, shape, axi, cones, k, lo, hi, inside, total);
-                            } else {
-                                sampler::cone(shape, axi, cones, k, lo, hi, inside, total);
-                            }
-                        }
-                    } else {
-                        const uint32_t first = cell_offsets(c);
-                        auto node = [&](const uint32_t k, double * x) {
-                            const uint32_t q = cell_nodes(first + k);
-                            for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
-                        };
-                        if (gpu) {
-                            sampler::team_straight_cell(member, scratch, shape, axi, cell_offsets(c + 1) - first, node,
-                                                        inside, total);
-                        } else {
-                            sampler::straight_cell(shape, axi, cell_offsets(c + 1) - first, node, inside, total);
-                        }
-                    }
-                    value = total > 0.0 ? inside / total : 0.0;
-                }
-                Kokkos::single(Kokkos::PerTeam(member), [&]() { sampled(c, i) = value; });
-            }
-        };
-        // 8 teams per SM where its shared memory holds them, otherwise as many as it does
-        Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), gpu ? TEAM : 1);
-        if (gpu) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-        if (!gpu || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
-            Kokkos::parallel_for("region_moving_shapes", tuned, sample);
-        } else {
-            Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM>> fitted(static_cast<int>(n_cells), TEAM);
-            fitted.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-            Kokkos::parallel_for("region_moving_shapes", fitted, sample);
+    const bool axi = axisymmetric;
+    if (leaves.extent(0) > 0) {
+        const ShapeSampler<false> straight{n, vertices, programs, leaves, spheres, curved, curved_offsets,
+                                           curved_faces, coefficients, coords, cell_nodes, cell_offsets,
+                                           sampled, time, bounded, axisymmetric};
+        launch(straight, n_cells);
+        if (curved_faces.extent(0) > 0) {
+            const ShapeSampler<true> curved_cells{n, vertices, programs, leaves, spheres, curved, curved_offsets,
+                                                  curved_faces, coefficients, coords, cell_nodes, cell_offsets,
+                                                  sampled, time, bounded, axisymmetric};
+            launch(curved_cells, n_cells);
         }
     }
     const Kokkos::View<double *> out = m_fractions;
