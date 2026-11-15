@@ -353,6 +353,7 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
     const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
     // Programs that can run away are evaluated everywhere, so that a runaway is reported wherever it is
     Box box = view.edge > 0.0 || view.programs.loops ? EVERYWHERE : filled_bounds(region, i);
+    // Padded well past the rounding of the bounds and of the samples
     double scale = 1.0;
     for (const Vec & corner : box) {
         for (const double x : corner) scale = std::isfinite(x) ? std::max(scale, std::abs(x)) : scale;
@@ -361,28 +362,28 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
         box[0][k] -= 1e-6 * scale;
         box[1][k] += 1e-6 * scale;
     }
+    auto outside = [&](const uint32_t c) {
+        Vec lo = {INF, INF, INF}, hi = {-INF, -INF, -INF};
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+            double x[3];
+            HostNodes{mesh, c}(k, x);
+            for (size_t d = 0; d < 3; d++) {
+                lo[d] = std::min(lo[d], x[d]);
+                hi[d] = std::max(hi[d], x[d]);
+            }
+        }
+        for (size_t d = 0; d < 3; d++) {
+            if (hi[d] < box[0][d] || lo[d] > box[1][d]) return true;
+        }
+        return false;
+    };
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     Kokkos::parallel_for("region_cell_fractions",
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
-        const bool curved = mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell);
-        if (!curved) {
-            Vec lo = {INF, INF, INF}, hi = {-INF, -INF, -INF};
-            for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(i_cell); k++) {
-                double x[3];
-                HostNodes{mesh, i_cell}(k, x);
-                for (size_t d = 0; d < 3; d++) {
-                    lo[d] = std::min(lo[d], x[d]);
-                    hi[d] = std::max(hi[d], x[d]);
-                }
-            }
-            for (size_t d = 0; d < 3; d++) {
-                if (hi[d] < box[0][d] || lo[d] > box[1][d]) return;
-            }
-        }
-        if (curved) {
+        if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell)) {
             const HostCone cone{mesh, i_cell};
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(i_cell); k++) {
                 std::array<double, 2> lo, hi;
@@ -390,6 +391,8 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                 const double a[3] = {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, b[3] = {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0};
                 sampler::cone(shape, mesh.axisymmetric, cone, k, a, b, inside, total);
             }
+        } else if (outside(i_cell)) {
+            return;
         } else {
             sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell}, inside,
                                    total);
