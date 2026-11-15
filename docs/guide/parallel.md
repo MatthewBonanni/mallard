@@ -232,7 +232,7 @@ With 128³ cells per GPU, 4 GPUs take 346 ms per step and one takes 344 ms (99.4
 
 - **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures also reconstruct the first halo layer.
 - **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own.
-- **What is left at 8–16 GPUs** (busiest rank, about 1.7 ms per step): the halo-dependent cells and the faces are taken from index lists rather than contiguous ranges (TENO and flux kernels 2–8% slower per item), the gradients of halo-layer-1 cells that the viscous fluxes read, and packing face states. Numbering each rank's cells and faces as [interior | near the partition] (#277) would turn the lists into ranges.
+- **What is left** (2 GPUs of one node, NCCL and CUDA graphs, 33.8 ms per step against 33.1 ms on one GPU, 98.0%): the GPU idles about 0.4 ms per step, and is busy 0.6 ms longer, mostly from the halo-dependent cells' TENO launch and NCCL's kernels sharing the device with the interior cells. Each rank numbers its cells and faces as [interior | near the partition], so the cells reconstructed before and after the halo arrives and the faces that wait for the partition faces are contiguous ranges.
 
 ### 2D, Mallard 0.3.0 {#scaling-2d}
 
