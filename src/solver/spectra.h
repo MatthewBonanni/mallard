@@ -157,6 +157,8 @@ class Spectra {
         void push();
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
         void write_file(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
+        /** @brief write_file from the host's copies as they are, which pull then leaves. */
+        void write_held(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
         /** @brief The file of the unaveraged sample at step: <file stem>_<step>.csv. */
         std::string sample_file(uint64_t step) const;
         bool homogeneous(size_t axis) const;

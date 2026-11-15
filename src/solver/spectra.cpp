@@ -641,7 +641,7 @@ void Spectra::sample(const uint64_t step, const rtype t, const rtype * const t_d
     sample_device(t_device, sampler);
     if (average) return;
     pull();
-    if (comm::is_root()) write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
+    if (comm::is_root()) write_held(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
 }
 
 std::string Spectra::sample_file(const uint64_t step) const {
@@ -681,14 +681,7 @@ void Spectra::write_staged(const uint64_t step, const rtype t, const uint64_t sl
     std::copy(row, row + acc_mean.size(), acc_mean.begin());
     row += acc_mean.size();
     std::copy(row, row + acc_shell.size(), acc_shell.begin());
-    holding_staged = true;
-    try {
-        write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
-    } catch (...) {
-        holding_staged = false;
-        throw;
-    }
-    holding_staged = false;
+    write_held(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
 }
 
 void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) {
@@ -845,9 +838,13 @@ RestartArrays Spectra::arrays() const {
 
 void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!enabled() || !average || !comm::is_root()) return;
+    write_held(file, step, t, reason);
+}
+
+void Spectra::write_held(const std::string & name, uint64_t step, rtype t, const std::string & reason) const {
     holding_staged = true;
     try {
-        write_file(file, step, t, reason);
+        write_file(name, step, t, reason);
     } catch (...) {
         holding_staged = false;
         throw;
