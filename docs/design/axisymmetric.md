@@ -258,25 +258,26 @@ Examples:
 - `sphere_axisymmetric`: Re = 100 and 150, Cd within 1.2% of Clift, Grace &
   Weber at Mach 0.2, separation angle within 0.2 degrees, wake length 0.885 and
   1.21 D (Johnson & Patel: 0.88, about 1.2).
-- Sphere with curved walls (`tools/dev/axisymmetric_sphere.py`, Euler, HLL,
-  TENO3, 32 L x 16 L quadrilaterals, P2 sphere). At Mach 0.3, from the
-  potential flow, the wall entropy error (mean over the revolved wall) is
-  7.1e-3, 1.9e-3, 4.6e-4 at L = 1, 2, 4 (straight walls 3.2e-3, 9.4e-4,
-  2.7e-4). It is set at the stagnation point, where it does not convect
-  away and so follows the truncation error, second order for TENO3, then
-  carried along the wall: the error at 1 degree is the same for both walls
-  (1.9e-4 at L = 4), and the planar cylinder on the same meshes shows the
-  same rates with the same ordering (curved 3.0e-3, 7.7e-4; straight 1.3e-3,
-  4.1e-4 at L = 2, 4), so neither comes from the revolved geometry. TENO4
-  on these O-grids builds up entropy errors of 5-50% with straight or
-  curved walls, planar or axisymmetric. At Mach 3 (t = 6) the standoff is
-  0.2305 R at L = 4 for both walls (Billig 0.205, an experimental fit); the
-  wall entropy stays 0.5-1.5% above the normal shock's with curved walls,
-  where straight walls dip 0.6% below it, which inviscid flow cannot do.
-  The stagnation pressure is 2.7% below Rayleigh's at L = 4 for both: the
-  shock-captured axis cells leave 1.4-1.8% more entropy on the stagnation
-  streamline (`p_0` scales as entropy to the power -2.5), which does not
-  converge with the mesh.
+- Sphere with curved walls (`tools/dev/axisymmetric_sphere.py`, Euler,
+  TENO3, 32 L x 16 L quadrilaterals, P2 sphere). At Mach 0.3 (HLLC, from the
+  potential flow), the wall entropy error (mean over the revolved wall)
+  converges at third order with curved walls, 3.8e-3, 6.4e-4, 9.2e-5 at
+  L = 1, 2, 4 (rates 2.6 and 2.8), and at first order with straight ones,
+  2.8e-3, 1.1e-3, 4.4e-4 (1.4 and 1.3). With HLL, which has no contact wave
+  and so diffuses entropy at every face, both stall near second order
+  (7.1e-3, 1.9e-3, 4.6e-4 curved). TENO4 on these O-grids builds up entropy
+  errors of 5-50% with straight or curved walls, planar or axisymmetric,
+  with HLL or HLLC. At Mach 3 (HLL, t = 6; HLLC grows a carbuncle on the
+  axis) the standoff is 0.2305 R at L = 4 for both walls (Billig 0.205, an
+  experimental fit); the wall entropy stays 0.5-1.5% above the normal
+  shock's with curved walls, where straight walls dip 0.6% below it, which
+  inviscid flow cannot do. The stagnation pressure is 2.7% below Rayleigh's
+  at L = 4 for both walls, an error of the axisymmetric runs only (the
+  planar cylinder on the same mesh: 0.24% below), made where the captured
+  shock crosses the axis row: there the cells behind it hold 2.7% more
+  entropy than the normal shock's (L = 2), relaxing to 1.5% at the wall
+  (`p_0` scales as entropy to the power -2.5), where the planar cylinder's
+  stay within 1% of it.
 - Counterflow diffusion flame (H2/N2 against air, 1 atm, 10 mm gap, the
   finite-jet setup of the 3D counterflow validation on the meridian plane, 20
   cells per flame width, MUSCL, mixture-averaged transport, started from

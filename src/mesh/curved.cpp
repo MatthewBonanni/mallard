@@ -911,7 +911,7 @@ double Geometry::revolved_area(uint32_t f) const {
     return out;
 }
 
-void Geometry::face_rule(uint32_t f,const std::vector<std::array<double, 2>> & ref, const std::vector<double> & ref_w,
+void Geometry::face_rule(uint32_t f, const std::vector<std::array<double, 2>> & ref, const std::vector<double> & ref_w,
                          std::vector<Vec3> & x, std::vector<Vec3> & n, std::vector<double> & w) const {
     const size_t nq = ref.size();
     x.resize(nq);

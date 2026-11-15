@@ -430,8 +430,8 @@ std::string shell_file(uint32_t n, int order = 1, bool triangles = false) {
 
 TEST(AxisymmetricCurved, RevolvedMeasuresOfCurvedCellsAndFacesAreExact) {
     // Projected arcs make the mesh the exact spherical shell: its volume, its
-    // first moments and its spheres' areas, per radian. The straight polygons
-    // miss each by O(h^2)
+    // first and second moments and its spheres' areas, per radian. The
+    // straight polygons miss each by O(h^2)
     for (const bool triangles : {false, true}) {
         Solver solver;
         solver.set_distributed(false);
@@ -440,17 +440,24 @@ TEST(AxisymmetricCurved, RevolvedMeasuresOfCurvedCellsAndFacesAreExact) {
                                            "type = \"symmetry\"")));
         const Mesh & mesh = *solver.get_mesh();
         ASSERT_TRUE(mesh.curved_geometry);
-        double volume = 0.0, moment_x = 0.0, moment_r = 0.0;
+        double volume = 0.0, moment_x = 0.0, moment_r = 0.0, second[3] = {0.0, 0.0, 0.0};
         for (uint32_t c = 0; c < mesh.n_cells; c++) {
             const double m = double(mesh.h_cell_measure(c));
+            const double xc = double(mesh.h_cell_coords(c, 0)), rc = double(mesh.h_cell_coords(c, 1));
             volume += m;
-            moment_x += m * double(mesh.h_cell_coords(c, 0));
-            moment_r += m * double(mesh.h_cell_coords(c, 1));
+            moment_x += m * xc;
+            moment_r += m * rc;
+            second[0] += m * (double(mesh.h_cell_covariance(c, 0)) + xc * xc);
+            second[1] += m * (double(mesh.h_cell_covariance(c, 1)) + xc * rc);
+            second[2] += m * (double(mesh.h_cell_covariance(c, 2)) + rc * rc);
         }
-        const double a = SHELL_IN, b = SHELL_OUT;
+        const double a = SHELL_IN, b = SHELL_OUT, fifth = (std::pow(b, 5) - std::pow(a, 5)) / 5.0;
         EXPECT_NEAR(volume, 2.0 / 3.0 * (b * b * b - a * a * a), roundoff(1e-13)) << triangles;
         EXPECT_NEAR(moment_x, 0.0, roundoff(1e-13)) << triangles;
         EXPECT_NEAR(moment_r, PI / 8.0 * (b * b * b * b - a * a * a * a), roundoff(1e-13)) << triangles;
+        EXPECT_NEAR(second[0], 2.0 / 3.0 * fifth, roundoff(1e-12)) << triangles;
+        EXPECT_NEAR(second[1], 0.0, roundoff(1e-12)) << triangles;
+        EXPECT_NEAR(second[2], 4.0 / 3.0 * fifth, roundoff(1e-12)) << triangles;
         double sphere[2] = {0.0, 0.0};
         for (uint32_t f = 0; f < mesh.n_faces; f++) {
             if (mesh.h_cells_of_face(f, 1) >= 0 || !mesh.curved_geometry->face_is_curved(f)) continue;

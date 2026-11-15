@@ -161,6 +161,10 @@
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "curved"],
 ]
 "MPITest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3", "curved"]
+"MPITest.AxisymmetricCurvedWallsMatchSerial" = [
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "teno4", "hllc", "ssprk3"],
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "muscl", "hllc", "ssprk3"],
+]
 "MPITest.RemapDoesNotDependOnTheRankCount" = [
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"],
     ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "remap", "restart"],

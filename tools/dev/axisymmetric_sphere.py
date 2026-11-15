@@ -6,7 +6,8 @@
 
 The meridian half-plane of a sphere of diameter 1 (make_cylinder_mesh.py
 --half, 32 L x 16 L quadrilaterals at level L, the sphere and the far field
-P2 lines), free stream rho = 1.4, p = 1 (sound speed 1), HLL fluxes.
+P2 lines), free stream rho = 1.4, p = 1 (sound speed 1), HLLC fluxes (HLL
+at Mach 3, where HLLC grows a carbuncle on the axis).
 
 Subsonic (--mach < 1, far field at r = 8, from the incompressible potential
 flow with isentropic pressure): the flow is smooth and isentropic, so the
@@ -63,7 +64,7 @@ name = "axis"
 type = "symmetry"
 
 [numerics]
-riemann_solver = "HLL"
+riemann_solver = "{riemann}"
 time_integrator = "SSPRK3"
 check_nan = true
 
@@ -158,7 +159,7 @@ def run_case(case_dir, args, scheme, level, geometry):
         f.write(INPUT.format(t_stop=args.t_stop, t_half=args.t_stop / 2, mach=args.mach,
                              curved="false" if geometry == "straight" else "true", scheme=recon,
                              init=subsonic_init(args.mach) if subsonic else SUPERSONIC_INIT,
-                             sampling="point" if subsonic else "cell",
+                             sampling="point" if subsonic else "cell", riemann="HLLC" if subsonic else "HLL",
                              axis="" if subsonic else AXIS_PROBE.format(t_half=args.t_stop / 2)))
     with open(os.path.join(case_dir, "log.txt"), "w") as log:
         rc = subprocess.run([args.mallard, "-i", "input.toml", f"--kokkos-num-threads={args.threads}"], cwd=case_dir,
