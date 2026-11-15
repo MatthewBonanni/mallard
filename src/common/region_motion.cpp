@@ -618,7 +618,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                             const CurvedFace & f = faces(a + k);
                             const double lo[3] = {f.lo[0], N_DIM == 2 ? 0.0 : f.lo[1], 0.0};
                             const double hi[3] = {f.hi[0], N_DIM == 2 ? 1.0 : f.hi[1], 1.0};
-                            if constexpr (gpu) {
+                            if (gpu) {
                                 sampler::team_cone(member, scratch, shape, axi, cones, k, lo, hi, inside, total);
                             } else {
                                 sampler::cone(shape, axi, cones, k, lo, hi, inside, total);
@@ -630,7 +630,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                             const uint32_t q = cell_nodes(first + k);
                             for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                         };
-                        if constexpr (gpu) {
+                        if (gpu) {
                             sampler::team_straight_cell(member, scratch, shape, axi, cell_offsets(c + 1) - first, node,
                                                         inside, total);
                         } else {
