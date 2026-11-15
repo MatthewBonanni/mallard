@@ -803,6 +803,7 @@ std::vector<std::string> PhaseAverage::variables() const {
 }
 
 std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
+    if (!enabled()) return {};
     const std::vector<std::string> names = variables();
     const Clock k = h_clock();
     double total = 0.0;
