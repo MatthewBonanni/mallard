@@ -4311,13 +4311,12 @@ struct CellSetup2D {
         const uint8_t n = teno::n_dof(deg);
         for (uint8_t l = 0; l < n; l++) means[l] = 0.0;
         double area = 0.0;
-        const bool curved_cell = g.curved && g.rule_start(c + 1) > g.rule_start(c);
         integrate(c, x0, y0, h, image, [&](const double x, const double y, double wq) {
             double phi[teno::MAX_NK];
             teno::monomials(deg, x, y, phi);
             // Axisymmetric cell averages weight by the radius; |r| makes the
             // mirror image of a cell across the axis carry its mirrored average
-            if (g.axisymmetric && !curved_cell) wq *= Kokkos::fabs(y0 + h * y);
+            if (g.axisymmetric) wq *= Kokkos::fabs(y0 + h * y);
             for (uint8_t l = 0; l < n; l++) means[l] += wq * phi[l];
             area += wq;
         });

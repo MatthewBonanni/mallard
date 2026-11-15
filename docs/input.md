@@ -244,7 +244,8 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)), also in
+[axisymmetric runs](#axisymmetric-flows).
 
 | Key | Description |
 |---|---|
@@ -389,8 +390,10 @@ averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
 and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
-mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
+mixture model, chemistry and MPI work as in planar runs, and so do
+[curved boundaries](#curved-boundaries), revolved with the cells next to
+them; meshes cannot be periodic in y. Guide:
+[axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 

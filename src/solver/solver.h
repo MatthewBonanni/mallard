@@ -1030,6 +1030,8 @@ class Solver {
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
+        void revolve_curved_flux_points(const Kokkos::View<rtype **>::host_mirror_type & h_weights);
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
@@ -1187,6 +1189,9 @@ class Solver {
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
         Kokkos::View<rtype **> flux_weights;
+        // Unit normals of the convective flux points, (face, q, dim): curved meshes, else empty.
+        // The face reconstruction's, but r-weighted on curved faces of axisymmetric runs
+        Kokkos::View<rtype ***> flux_normals;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;

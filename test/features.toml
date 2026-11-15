@@ -19,6 +19,8 @@
 ]
 "AxisymmetricTest.PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis" = ["axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
 "AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder" = [["axisymmetric", "euler", "teno3"], ["axisymmetric", "euler", "teno4"], ["axisymmetric", "euler", "teno5"]]
+"AxisymmetricCurvedUniform.UniformFlowAndGasAtRestStayExactlyUniform" = ["axisymmetric", "curved", "euler", "fo", "muscl", "teno3", "teno5", "hllc", "ssprk3"]
+"AxisymmetricCurvedOrder.ResidualBetweenCurvedSpheresConvergesAtDesignOrder" = [["axisymmetric", "curved", "euler", "teno3"], ["axisymmetric", "curved", "euler", "teno4"]]
 
 [chemistry_reactor_test]
 "ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution" = ["chemistry"]

@@ -375,6 +375,9 @@ facets. Curved faces get quadrature points on the curve with their own normals,
 and the cells next to them their exact volumes and centroids, so TENO-E keeps
 orders 3 to 6 at curved walls
 ([convergence](https://matthewbonanni.github.io/mallard/validation/#curved-boundaries)).
+In [axisymmetric runs](physics.md#axisymmetric-flows) the curved geometry is
+revolved too: a sphere or a nozzle contour in the meridian plane gets its
+volumes, `r`-weighted centroids and face areas per radian from the curve.
 
 ![Straight faces of a coarse mesh around a circle, and the curved faces on the circle with their quadrature points and normals](../images/guide/curved_faces-light.svg#gh-light-mode-only)
 ![Straight faces of a coarse mesh around a circle, and the curved faces on the circle with their quadrature points and normals](../images/guide/curved_faces-dark.svg#gh-dark-mode-only)

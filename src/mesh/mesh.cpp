@@ -438,7 +438,41 @@ void Mesh::make_axisymmetric() {
         for (uint32_t f = 0; f < n_faces; f++) {
             h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
         }
+        if (curved_geometry) revolve_curved();
         axisymmetric = true;
+    }
+}
+
+void Mesh::revolve_curved() {
+    const curved::Geometry & geometry = *curved_geometry;
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        if (!geometry.cell_is_curved(c)) continue;
+        // Second moments times r: cubic integrands
+        geometry.cell_rule(c, 3, x, w);
+        double I_y = 0.0, m[2] = {0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1];
+            I_y += wr;
+            m[0] += wr * x[q][0];
+            m[1] += wr * x[q][1];
+        }
+        const double xc = m[0] / I_y, yc = m[1] / I_y;
+        double C[3] = {0.0, 0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1], dx = x[q][0] - xc, dy = x[q][1] - yc;
+            C[0] += wr * dx * dx;
+            C[1] += wr * dx * dy;
+            C[2] += wr * dy * dy;
+        }
+        h_cell_measure(c) = rtype(I_y);
+        h_cell_coords(c, 0) = rtype(xc);
+        h_cell_coords(c, 1) = rtype(yc);
+        for (int k = 0; k < 3; k++) h_cell_covariance(c, k) = rtype(C[k] / I_y);
+    }
+    for (uint32_t f = 0; f < n_faces; f++) {
+        if (geometry.face_is_curved(f)) h_face_measure(f) = rtype(geometry.revolved_area(f));
     }
 }
 
