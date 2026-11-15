@@ -21,6 +21,7 @@
 
 #include "curved.h"
 #include "mesh.h"
+#include "mesh_block.h"
 
 /**
  * @brief A whole mesh read from a file: cells by their corners (Gmsh/VTK
@@ -66,6 +67,14 @@ MeshFileData read_mesh_file(const std::string & filename);
 
 /** @brief An ASCII Gmsh file, format 2.2 or 4.1. */
 MeshFileData read_gmsh(const std::string & filename);
+
+/**
+ * @brief This rank's block of an ASCII Gmsh file (collective): each rank
+ *        parses a near-equal share of the file's nodes and elements and sends
+ *        them to the ranks whose blocks hold them, so that no rank holds the
+ *        whole mesh. The blocks are those of read_gmsh's contents.
+ */
+MeshBlock read_gmsh_block(const std::string & filename);
 
 /** @brief An unstructured CGNS file (needs a build with Mallard_ENABLE_CGNS). */
 MeshFileData read_cgns(const std::string & filename);

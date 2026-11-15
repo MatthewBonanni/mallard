@@ -210,8 +210,9 @@ build reads a mesh one cell thick in z between `empty` patches (as for 2D
 OpenFOAM runs): each cell is its face at the lowest z, the other patches give
 the boundary edges, and the empty patches disappear.
 
-In a distributed run rank 0 reads a Gmsh, CGNS, Fluent or OpenFOAM mesh whole and sends each
-rank its share, so large meshes should be converted to Mallard's HDF5 mesh format
+In a distributed run the ranks read a Gmsh mesh together, each parsing its share, while rank 0
+reads a CGNS, Fluent or OpenFOAM mesh whole and sends each rank its share, so large meshes in
+those formats should be converted to Mallard's HDF5 mesh format
 (builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
 share; generated meshes are also produced per rank:
 
