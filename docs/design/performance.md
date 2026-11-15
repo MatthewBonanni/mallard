@@ -498,11 +498,13 @@ entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra wri
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.
 
-Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
-evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
+as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
-array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
+from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
