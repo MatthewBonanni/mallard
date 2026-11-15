@@ -435,42 +435,63 @@ TEST_P(ScalarLimiters, RoundOffTraceSpeciesKeepsTheOtherScalarsSecondOrder) {
     // the cell's shared limiter: the linear HE stays exact at its faces
     const FaceStates face = reconstruct(GetParam(), trace_composition(NX, 1.0e-34));
     expect_he_linear(*mesh, face.Y, GetParam());
-    expect_face_state_of_face_composition(*mesh, host, face, 1.0e-5, 1.0e-6, GetParam());
+    expect_face_state_of_face_composition(*mesh, host, face, 1.0e-5, std::max(1.0e-6, roundoff(1.0e-12)), GetParam());
 }
 
 TEST_F(AirScalars, TraceSpeciesAtItsBoundLimitsOnlyItself) {
-    // N2 = 1e-6 next to 0 needs its slope cut at the faces toward the zeros,
+    // N2 = 1e-11 next to 0 needs its slope cut at the faces toward the zeros,
     // and O2 takes it: HE keeps its slope, and the face state follows the
     // face composition
     for (const char * limiter : {"none", "venkatakrishnan"}) {
-        const FaceStates face = reconstruct(limiter, trace_composition(NX, 1.0e-6));
+        const FaceStates face = reconstruct(limiter, trace_composition(NX, 1.0e-11));
         expect_he_linear(*mesh, face.Y, limiter);
-        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-5, 1.0e-6, limiter);
+        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-5, std::max(1.0e-6, roundoff(1.0e-12)), limiter);
     }
+}
+
+TEST_F(AirScalars, LargeCutLimitsEveryScalar) {
+    // N2 = 0.5 next to 0 vanishes over a cell: cutting its slope alone would
+    // diffuse it alone, so the cut limits every scalar, HE included
+    const FaceStates face = reconstruct("none", trace_composition(NX, 0.5));
+    double HE_off = 0.0;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint8_t side = 0; side < 2; side++) {
+            const int32_t c = mesh->h_cells_of_face(f, side);
+            if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
+            HE_off = std::max(HE_off, std::abs(double(face.Y(f, side, HE)) -
+                                               he_linear(double(mesh->h_face_coords(f, 0)),
+                                                         double(mesh->h_face_coords(f, 1)))));
+        }
+    }
+    EXPECT_GT(HE_off, 1.0e-3);
 }
 
 TEST_P(ScalarLimiters, MassFractionsStayInBoundsWithTheirThermodynamics) {
     for (const double trace : {1.0e-34, 1.0e-6, 0.5}) {
         const FaceStates face = reconstruct(GetParam(), trace_composition(NX, trace));
-        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-3, face_T_tol(GetParam(), 0.1),
+        // A large cut limits all scalars, which leaves the flow block's density alone
+        const double T_tol = trace < double(OWN_CUT_MAX) ? 0.02 : std::numeric_limits<double>::infinity();
+        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-3, face_T_tol(GetParam(), T_tol),
                                               GetParam() + " trace " + std::to_string(trace));
     }
 }
 
 TEST_P(ScalarLimiters, SlopeGivenToAMajorSpeciesBesidesTheComplementCarriesItsThermodynamics) {
-    // HE = 0.05 in every third column against N2 = 0.3 - HE, in O2 = 0.7: a
+    // HE = 1e-6 in every third column against N2 = 0.3 - HE, in O2 = 0.7: a
     // cut HE gives its slope to O2, the most abundant species, and not to its
     // complement N2, so the face gamma, e0 and density must move from HE's
     // to O2's. Barth-Jespersen keeps HE between its neighbors, so it never cuts.
+    constexpr double TRACE = 1.0e-6;
     const AirComposition composition = [](const double x, double) -> std::array<double, N_AIR> {
         std::array<double, N_AIR> Y;
-        Y[HE] = static_cast<uint32_t>(x * NX) % 3 == 0 ? 0.05 : 0.0;
+        Y[HE] = static_cast<uint32_t>(x * NX) % 3 == 0 ? TRACE : 0.0;
         Y[N2] = 0.3 - Y[HE];
         Y[O2] = 0.7;
         return Y;
     };
     const FaceStates face = reconstruct(GetParam(), composition);
-    expect_face_state_of_face_composition(*mesh, host, face, 5.0e-3, face_T_tol(GetParam(), 0.5), GetParam());
+    expect_face_state_of_face_composition(*mesh, host, face, std::max(1.0e-8, roundoff(1.0e-14)),
+                                          face_T_tol(GetParam(), std::max(1.0e-5, roundoff(1.0e-12))), GetParam());
     double O2_moved = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t side = 0; side < 2; side++) {
@@ -481,7 +502,7 @@ TEST_P(ScalarLimiters, SlopeGivenToAMajorSpeciesBesidesTheComplementCarriesItsTh
     if (GetParam() == "barth_jespersen") {
         EXPECT_LT(O2_moved, roundoff(1e-15));
     } else {
-        EXPECT_GT(O2_moved, 1.0e-3);
+        EXPECT_GT(O2_moved, 0.1 * TRACE);
     }
 }
 

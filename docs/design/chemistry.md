@@ -284,12 +284,18 @@ The design:
      the flow block's neighbors and ghost placement. The gradients are
      stored (`N_DIM` words per scalar and cell; recomputing them in the
      species-flux kernel instead is a milestone-10 memory option). Each
-     `Y_k` then scales its own gradient so that it stays in `[0, 1]` at
-     every face, and the cell's most abundant species takes the gradient the
-     others give up, so the gradients still sum to zero; the limiter value is
-     reduced further only so that this species stays in `[0, 1]` and
+     `Y_k` that leaves `[0, 1]` at a face by a small amount then scales its
+     own gradient so that it stays in, and the cell's most abundant species
+     takes the gradient the others give up, so the gradients still sum to
+     zero; a cut that changes `Y_k` at a face by more than `1e-4` goes to the
+     shared limiter value instead (blended linearly from 0). The gradients of
+     `gamma` and `e0`, and the face density, change with that composition by
+     their derivatives with respect to `Y_k` at the cell's `p` and `T`, so the
+     face state stays the state of the face composition. The limiter value
+     is reduced further only so that this species stays in `[0, 1]` and
      `gamma - 1` keeps at least half its cell value at every face (the
-     physical bounds of item 3).
+     physical bounds of item 3). Barth-Jespersen keeps each `Y_k` within its
+     neighbors' range, so with it no gradient is ever cut.
    Least-squares reconstruction reproduces constants, so with shared weights
    `sum_k Y_k = 1` at every face point to round-off.
    A mass fraction within 16 machine epsilons of its cell value over the
@@ -314,6 +320,28 @@ The design:
    TENO keeps one `theta` per cell with the round-off exclusion; per-species
    factors would need the most abundant species' face values to depend on
    every other species' polynomial.
+
+   A cut slope moves the face composition between species of different
+   formation energy, heat capacity and molar mass, so the face state follows
+   it. Without that, an inert contact of `O2` against `H2O` in `N2` with `Ar`,
+   at uniform 300 K and 1e5 Pa (MUSCL without limiter), drifted to 274-324 K
+   and 0.97e5 Pa; `e0` carried nearly all of it, through the formation energy
+   of `H2O`, and the density the rest where the cut species and the one
+   taking its slope differ in molar mass (`CO` against `N2` in `O2`: within
+   300 +- 1 K with `gamma` and `e0` alone, 5 mK with the density too).
+
+   Cutting one species alone is numerical diffusion of that species only:
+   for a round-off trace it is negligible, but where a species vanishes over
+   a cell, as the fuel at a flame's burnout, it is a differential diffusion
+   of order `u dx` that no other species sees. A 1D thickened propane flame
+   at 2 mm cells drifted to -10% of `s_L` in consumption speed that way,
+   where shared bounds give -4.3%, whichever species took the slope given up
+   (the most abundant or all in proportion). Hence large cuts go to the
+   shared value, where every species gets the same diffusion: -4.4% with
+   the threshold at `1e-4`, while the temperature error of a 1D flame front
+   stays at 4.4 K (shared bounds 10.7 K, per-species bounds throughout
+   3.4 K). A threshold of `1e-3` keeps 3.5 K but leaves -4.9%; `1e-5` gives
+   -4.4% but 9.9 K.
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and

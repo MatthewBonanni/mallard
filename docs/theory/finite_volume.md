@@ -415,13 +415,29 @@ face point:
 - MUSCL and first order: eq. $\eqref{eq:muscl-2}$ and one limiter value per cell for all
     scalars, the smallest of eq. $\eqref{eq:muscl-3}$ over them (thresholds scaled by 1 for
     $Y_k$, by $\gamma$, and by $\lvert e_0\rvert + p/(\rho(\gamma - 1))$ for
-    $e_0$). Each $Y_k$ then scales its own gradient so that its face values
-    stay in $[0, 1]$, and the cell's most abundant species takes the gradient
-    the others give up, so that the gradients still sum to zero; the shared
-    value is reduced further only to keep that species in $[0, 1]$ and
-    $\gamma - 1$ above half its cell value. Shared, the bounds put every
-    scalar of a cell at first order wherever one species is about to vanish,
-    e.g. a trace of $10^{-14}$ next to a cell without it;
+    $e_0$). Each $Y_k$ whose face values would leave $[0, 1]$ by little
+    then scales its own gradient so that they stay in, and the cell's most
+    abundant species takes the gradient the others give up, so that the
+    gradients still sum to zero. A cut that changes $Y_k$ at a face by more
+    than $10^{-4}$ instead goes to the shared value (blended linearly from
+    0): a cut of one species alone is numerical diffusion of that species
+    only, a differential diffusion of order $u\,\Delta x$ when the cut is
+    large, which slowed a thickened flame by 6% of $s_L$. The
+    gradients of $\gamma$ and $e_0$, and the face density, change with that
+    composition at the cell's $p$ and $T$:
+    $\Delta\nabla\gamma = \sum_k \partial_{Y_k}\gamma\,\Delta\nabla Y_k$
+    with $\partial_{Y_k}\gamma = (c_{p,k} - \gamma c_{v,k})/c_v$,
+    $\partial_{Y_k} e_0 = e_k - c_{v,k} T$ (exact, as $e_0$ is linear in
+    $Y$ at fixed $T$) and $\partial_{Y_k}\rho = -\rho R_k/R$, so that the
+    face state stays the state of the face composition; otherwise a species
+    cut against a major species with another formation energy or molar mass
+    moves $T$ and $p$ at a contact of uniform $T$ and $p$. The shared value
+    is reduced further only to keep that species in $[0, 1]$ and
+    $\gamma - 1$ above half its cell value. Barth-Jespersen keeps every
+    $Y_k$ within its neighbors' range, inside $[0, 1]$, so with it no slope
+    is ever cut. Shared, the bounds put every scalar of a cell at first order
+    wherever one species is about to vanish, e.g. a trace of $10^{-14}$ next
+    to a cell without it;
 - TENO-E: the central-stencil weights in smooth cells, and in troubled
     cells, on each face, the stencils selected for the entropy (contact)
     characteristic field; a factor $\theta$ per cell then keeps

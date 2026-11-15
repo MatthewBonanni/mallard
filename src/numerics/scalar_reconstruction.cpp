@@ -189,16 +189,18 @@ struct ScalarLimiterFunctor {
             }
         }
 
-        // Physical bounds at every face, 0 <= Y_k <= 1: each mass fraction scales its own slope, and
-        // the most abundant species takes what they give up, so that the slopes still sum to zero.
-        // gamma, e0 and the face density follow that change of composition at the cell's p and T, so
-        // that the face state stays the state of the face composition
+        // Physical bounds at every face, 0 <= Y_k <= 1: a mass fraction whose cut is small scales its
+        // own slope, and the most abundant species takes what they give up, so that the slopes still
+        // sum to zero; a larger cut (see OWN_CUT_MAX) limits all scalars. gamma, e0 and the face density
+        // follow the change of composition at the cell's p and T, so that the face state stays the
+        // state of the face composition
         uint32_t major = 0;
         for (uint32_t k = 1; k < n_species; k++) {
             if (scalars(c, k) > scalars(c, major)) major = k;
         }
         double moved[N_DIM] = {}, given_d[3][N_DIM] = {};
         bool any_cut = false;
+        rtype shared_cut = 1.0_r;
         chemistry::ThermoTable<>::Powers powers{};
         double R = 0.0, cv = 0.0;
         const double gamma_d = static_cast<double>(gamma_c);
@@ -207,14 +209,20 @@ struct ScalarLimiterFunctor {
             const rtype S_c = scalars(c, k);
             rtype g[N_DIM];
             FOR_I_DIM g[i] = gradients(c, k, i);
-            rtype phi_k = phi;
+            rtype phi_k = phi, d_max = 0.0_r;
             for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
                 if (m >= n_faces) continue;
                 const rtype d = dot<N_DIM>(g, r[m]);
                 if (d > 0.0_r) phi_k = Kokkos::fmin(phi_k, (1.0_r - S_c) / d);
                 if (d < 0.0_r) phi_k = Kokkos::fmin(phi_k, S_c / -d);
+                d_max = Kokkos::fmax(d_max, Kokkos::fabs(d));
             }
             if (phi_k >= phi) continue;
+            const rtype s_k = Kokkos::fmax(phi_k, 0.0_r) / phi;
+            const rtype to_shared = Kokkos::fmin(1.0_r, (1.0_r - s_k) * phi * d_max / OWN_CUT_MAX);
+            const rtype sigma = 1.0_r - (1.0_r - s_k) * to_shared;
+            shared_cut = Kokkos::fmin(shared_cut, sigma);
+            if (to_shared >= 1.0_r) continue;
             if (!any_cut) {
                 any_cut = true;
                 double sum = 0.0;
@@ -226,7 +234,7 @@ struct ScalarLimiterFunctor {
             }
             double d_k[3];
             composition_derivatives(k, powers, R, cv, gamma_d, d_k);
-            const rtype s = Kokkos::fmax(phi_k, 0.0_r) / phi;
+            const rtype s = s_k / sigma;
             FOR_I_DIM {
                 const double given = static_cast<double>((1.0_r - s) * g[i]);
                 moved[i] += given;
@@ -249,6 +257,7 @@ struct ScalarLimiterFunctor {
                                                          (d_major[2] * moved[i] + given_d[2][i]));
             }
         }
+        phi *= shared_cut;
         // The most abundant species and gamma - 1 (above half its cell value) limit them all
         const uint32_t shared[2] = {major, n_species};
         for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
