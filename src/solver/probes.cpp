@@ -1563,7 +1563,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (other->name == p.name && other->snapshot == p.snapshot) throw InputError(key + ": name is used twice.");
     }
 
-    const bool steps = entry.contains("interval"), times = entry.contains("time_interval");
+    const bool steps = entry.contains("interval"), times = contains_optional(entry, "time_interval");
     if (steps && times) throw InputError(key + ": give interval or time_interval, not both.");
     if (snapshot && !steps && !times) throw InputError(key + ": give interval or time_interval.");
     if (times) {
