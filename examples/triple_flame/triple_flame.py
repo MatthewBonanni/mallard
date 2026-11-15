@@ -16,8 +16,8 @@ midline, with the mixing thickness delta_M = 1 / (dZ/dy at Z_st) =
 D0 delta_L (Ruetsch, Vervisch & Linan 1995, whose overall change of Z is
 also 1). S_L, delta_L (the thermal thickness (T_b - T_u) / max dT/dx) and
 rho_u / rho_b are those of the planar Cantera flame at Z_st, computed here
-with refine criteria slope = curve = 0.0025, where S_L is within 0.02% of a
-grid refined twice as far (0.25% low at 0.02, 0.05% at 0.005), or read from
+with refine criteria slope = curve = 0.0025, where S_L is 0.04% below its
+value at 0.00125 (0.30% at 0.02, 0.10% at 0.005), or read from
 --planar (a full solution as tools/setup/flame_reference.py writes,
 which this tool also writes as RUN_DIR/planar_full.csv for 1D runs of
 tools/setup/flame_restart.py). The sides are symmetry planes --width delta_L apart
