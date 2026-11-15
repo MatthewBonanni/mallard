@@ -1,6 +1,6 @@
 """Laminar reacting mixing layer (V11) from the boundary-layer equations, with Cantera.
 
-    python tools/mixing_layer_reference.py OUT_DIR [--t-air 1150 --u-air 100 --u-fuel 50 ...]
+    python examples/reacting_mixing_layer/mixing_layer_reference.py OUT_DIR [--t-air 1150 --u-air 100 --u-fuel 50 ...]
 
 Two parallel streams meet at x = 0 behind a splitter plate of zero
 thickness: fuel (H2/N2, 300 K) below, hot air above, both at 1 atm. Hot air
@@ -33,11 +33,12 @@ boundary-layer equations leave the layer's lateral position open).
 Writes to OUT_DIR:
   ignition.csv   along x: peak T, peak Y_OH, peak heat release rate and the
                  layer-integrated heat release, with their positions
-  profiles.csv   profiles at the stations (--stations): y, eta, u, T,
-                 Bilger's mixture fraction Z, Y_k, heat release
+  profiles.csv   profiles at the stations (--stations), within 3 mm of the
+                 dividing streamline: y, eta, u, T, rho, Bilger's mixture
+                 fraction Z, heat release, Y_k
   field.npz      with --field: the whole solution at the points of
                  ignition.csv (x, y, u, T, Y), the initial state of
-                 Mallard's runs (tools/mixing_layer_setup.py)
+                 Mallard's runs (mixing_layer_setup.py)
 """
 import argparse
 import os
@@ -48,9 +49,10 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.sparse import kron, diags, csr_matrix
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MECH, PHASE = os.path.join(ROOT, "mechanisms", "h2o2.yaml"), "ohmech"
 AIR = "O2:0.21,N2:0.79"
+PROFILE_HALF_WIDTH = 3e-3
 
 
 def bilger(gas, Y, Y_fuel, Y_air):
@@ -167,7 +169,7 @@ def main():
     ap.add_argument("--t-air", type=float, default=1150.0)
     ap.add_argument("--u-air", type=float, default=100.0)
     ap.add_argument("--p", type=float, default=ct.one_atm)
-    ap.add_argument("--n", type=int, default=801, help="points across the layer")
+    ap.add_argument("--n", type=int, default=401, help="points across the layer")
     ap.add_argument("--eta-width", type=float, default=10.0,
                     help="half-widths of the eta grid, in each free stream's diffusion width")
     ap.add_argument("--x-max", type=float, default=0.03)
@@ -215,8 +217,9 @@ def main():
     for xs in a.stations:
         k = int(np.argmin(np.abs(np.exp(sol.t) - xs)))
         f = ml.fields(xs, sol.y[:, k])
+        near = np.abs(f["y"]) < PROFILE_HALF_WIDTH
         prof.append(np.column_stack((np.full(ml.n, xs), f["y"], f["eta"], f["u"], f["T"], f["rho"], f["Z"],
-                                     f["HRR"], f["Y"])))
+                                     f["HRR"], f["Y"]))[near])
     names = ",".join("Y_" + s for s in gas.species_names)
     np.savetxt(os.path.join(a.out_dir, "profiles.csv"), np.vstack(prof), delimiter=",",
                header=header + "x,y,eta,u,T,rho,Z,HRR," + names, comments="# ", fmt="%.8g")

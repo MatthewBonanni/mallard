@@ -1,14 +1,13 @@
 """A laminar reacting mixing layer run for Mallard (V11, 2D build).
 
-    python tools/mixing_layer_setup.py FIELD.npz RUN_DIR [--dy 15e-6] [--dx 50e-6]
+    python examples/reacting_mixing_layer/mixing_layer_setup.py FIELD.npz RUN_DIR [--dx 100e-6] [--dy 30e-6]
         [--length 0.03] [--y-min -8e-3] [--y-max 12e-3] [--growth 1.08]
-        [--flow-throughs 1] [--outputs 20] [--cfl 0.8]
+        [--flow-throughs 2] [--outputs 24] [--cfl 0.8]
 
-FIELD.npz is the boundary-layer solution from
-tools/mixing_layer_reference.py --field, which also gives the streams. Fuel
-enters through the inlet (x = 0) below y = 0, hot air above it (two upt
-conditions, a step at the trailing edge of a splitter plate of zero
-thickness); the outlet (x = --length) and the sides (y = --y-min, --y-max)
+FIELD.npz is the boundary-layer solution from mixing_layer_reference.py
+--field, which also gives the streams. Fuel enters through the inlet (x = 0)
+below y = 0, hot air above it (two inlet_state conditions, a step at the
+trailing edge of a splitter plate of zero thickness); the outlet (x = --length) and the sides (y = --y-min, --y-max)
 are pressure outlets at the streams' pressure, through which the free streams
 also entrain.
 
@@ -20,14 +19,17 @@ from the boundary-layer solution at its center (v = 0). The run lasts
 --flow-throughs times length / (slower stream's velocity). Writes
 RUN_DIR/mixing_layer.msh, RUN_DIR/mixing_layer.restart and RUN_DIR/input.toml;
 the run writes the whole field (solut/field.pvd) every t_stop / --outputs for
-tools/plot_mixing_layer.py, and restart files at the same times.
+plot_mixing_layer.py, and restart files at the same times.
 """
 import argparse
 import os
-import struct
+import sys
 
 import cantera as ct
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard import restart  # noqa: E402
 
 
 def graded(y0, y1, h, growth, h_max):
@@ -92,16 +94,16 @@ def main():
     ap.add_argument("field")
     ap.add_argument("run_dir")
     ap.add_argument("--mechanism", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                                                        "mechanisms", "h2o2.yaml"))
+                                                        "..", "mechanisms", "h2o2.yaml"))
     ap.add_argument("--phase", default="ohmech")
-    ap.add_argument("--dx", type=float, default=50e-6)
-    ap.add_argument("--dy", type=float, default=15e-6)
+    ap.add_argument("--dx", type=float, default=100e-6)
+    ap.add_argument("--dy", type=float, default=30e-6)
     ap.add_argument("--length", type=float, default=0.03)
     ap.add_argument("--y-min", type=float, default=-8e-3)
     ap.add_argument("--y-max", type=float, default=12e-3)
     ap.add_argument("--growth", type=float, default=1.08)
-    ap.add_argument("--flow-throughs", type=float, default=1.0)
-    ap.add_argument("--outputs", type=int, default=20)
+    ap.add_argument("--flow-throughs", type=float, default=2.0)
+    ap.add_argument("--outputs", type=int, default=24)
     ap.add_argument("--cfl", type=float, default=0.8)
     a = ap.parse_args()
 
@@ -149,13 +151,7 @@ def main():
     names = ["RHO", "RHOU_X", "RHOU_Y", "RHOE"] + ["RHOY_" + s for s in species] + ["T_SEED"]
     fields = [rho, rhou, np.zeros(n), rhoE] + [rho * Yc.reshape(n, -1)[:, k] for k in range(len(species))] + \
              [Tc.ravel()]
-    with open(os.path.join(a.run_dir, "mixing_layer.restart"), "wb") as f:
-        f.write(b"MALLARD-RESTART\0")
-        f.write(struct.pack("<IIQQQd", 2, 8, n, len(names), 0, 0.0))
-        for name in names:
-            f.write(struct.pack("<I", len(name)) + name.encode())
-        for q in fields:
-            f.write(np.asarray(q, dtype="<f8").tobytes())
+    restart.write(os.path.join(a.run_dir, "mixing_layer.restart"), dict(zip(names, fields)))
 
     t_stop = a.flow_throughs * a.length / min(u_f, u_a)
     mech_path = os.path.relpath(os.path.abspath(a.mechanism), os.path.abspath(a.run_dir))
@@ -182,7 +178,7 @@ file = "mixing_layer.restart"
 [[boundaries]]
 name = "inlet"
 where = "y < 0"
-type = "upt"
+type = "inlet_state"
 u = [{u_f:.10g}, 0.0]
 p = {p:.10g}
 T = {t_f:.10g}
@@ -191,7 +187,7 @@ X = {{ {X(fuel)} }}
 [[boundaries]]
 name = "inlet"
 where = "y >= 0"
-type = "upt"
+type = "inlet_state"
 u = [{u_a:.10g}, 0.0]
 p = {p:.10g}
 T = {t_a:.10g}
@@ -199,17 +195,17 @@ X = {{ "O2" = 0.21, "N2" = 0.79 }}
 
 [[boundaries]]
 name = "outlet"
-type = "p_out"
+type = "outlet_pressure"
 p = {p:.10g}
 
 [[boundaries]]
 name = "bottom"
-type = "p_out"
+type = "outlet_pressure"
 p = {p:.10g}
 
 [[boundaries]]
 name = "top"
-type = "p_out"
+type = "outlet_pressure"
 p = {p:.10g}
 
 [numerics]
@@ -237,7 +233,7 @@ check_interval = 2000
 prefix = "./solut/field"
 format = "vtu"
 time_interval = {t_stop / a.outputs:.10g}
-variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
+fields = ["RHO", "U", "P", "T", "HRR", "Y_*"]
 
 [[write_data]]
 prefix = "./restart/mixing_layer"
