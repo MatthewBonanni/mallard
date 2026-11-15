@@ -13,11 +13,11 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -483,6 +483,19 @@ TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
     }
 }
 
+TEST(TENOTest, OddDegreesRankInTheSpacingMetricBelowItsCutOffAndEvenDegreesDoNot) {
+    // Cells of aspect ratio 1.67, below the cut-off of 2.5 (#975)
+    auto mesh = make_mesh("cartesian", 12, 8, 1.0_r, 0.4_r);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    for (const int order : {3, 4, 5, 6}) {
+        auto teno = make_teno(mesh, bd, order);
+        uint32_t n_metric = 0;
+        for (uint32_t i = 0; i < mesh->n_cells; i++) n_metric += teno->stencil_metric(i) != identity;
+        EXPECT_EQ(n_metric, order % 2 == 0 ? mesh->n_cells : 0u) << "order " << order;
+    }
+}
+
 TEST(TENOTest, OddDegreesDoNotAmplifyWavesOnCellsGradedBelowTheMetricCutOff) {
     // Columns of cells stretched along x by up to 1.13 per cell, of aspect
     // ratio 0.4 to 5. Ranked by physical distance, the cells below the cut-off
@@ -509,7 +522,6 @@ TEST(TENOTest, OddDegreesDoNotAmplifyWavesOnCellsGradedBelowTheMetricCutOff) {
         const double rho = double(solver.h_conservatives(i, 0));
         speed = std::max(speed, std::hypot(double(solver.h_conservatives(i, 1)), double(solver.h_conservatives(i, 2))) / rho);
     }
-    std::cout << "largest speed at t = 3: " << speed << std::endl;
     EXPECT_LT(speed, 1e-3);
 }
 

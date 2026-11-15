@@ -9,7 +9,7 @@ fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 | Failure at order 4 | Issue |
 |---|---|
 | Growing modes on pyramid lattices, cubic and thin | [#236](https://github.com/MatthewBonanni/mallard/issues/236) |
-| An outgoing acoustic wave amplified on a stretched O-grid (cylinder); fixed | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
+| An outgoing acoustic wave amplified on a stretched O-grid (cylinder); mitigated | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
 | Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
 
@@ -148,11 +148,14 @@ the start-up acoustic wave, and it deepens as it goes: 0.58 at r = 3.3
 wrong. Because 59% of the cells become troubled, order 4 costs 3.3 times
 order 5 here.
 
-The cause was the stencils of the cells at r = 4 to 12, of aspect ratio
-about 2.4, just under the ranking metric's cut-off: by physical distance they
-split the near-ties of the graded mesh toward the cylinder, and odd degrees
-amplified the waves that crossed them. 2D odd degrees now rank in the
-[metric on every cell](../numerics/teno_e.md#candidates). With it, a pressure
+The growth came from the stencils of the cells at r = 4 to 12, of aspect
+ratio about 2.4, just under the ranking metric's cut-off: by physical
+distance they split the near-ties of the graded mesh toward the cylinder,
+differently from cell to cell, and odd degrees amplified the waves that
+crossed them. 2D odd degrees now rank in the
+[metric on every cell](../numerics/teno_e.md#candidates), which makes
+neighboring stencils more alike but leaves slow modes and depends on the
+stencil size (see there). With it, at the default stencil size, a pressure
 pulse at rest on this mesh decays at order 4 (largest Mach number 7e-6 at
 t = 12, where it was 0.53) and at order 6 (6e-6, where it reached 0.37 by t = 2), and the
 cylinder to t = 60 at order 4 matches order 5 (a 16-CPU pod, 4 threads per

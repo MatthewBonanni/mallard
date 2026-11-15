@@ -304,7 +304,7 @@ constexpr bool metric_on_every_cell(const uint8_t degree) { return N_DIM == 2 &&
  */
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
                                      const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i,
-                                     bool every_cell = false);
+                                     bool every_cell);
 
 }  // namespace teno_setup
 
