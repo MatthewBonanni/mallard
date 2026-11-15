@@ -620,7 +620,7 @@ with another boundary behind it (a thin body, whose far side can drop mirror
 images) has no key and is fitted on its own.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 22; one file per MPI rank). The file is used
+on later runs (format version 23; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
