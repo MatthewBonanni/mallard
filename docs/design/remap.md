@@ -1,4 +1,4 @@
-# Design: solution remap between meshes
+# Solution remap between meshes
 
 Status: implemented (#323), 2D and 3D, serial and distributed.
 `[initialize] type = "remap"` starts a run from a restart file written on

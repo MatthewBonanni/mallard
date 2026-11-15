@@ -343,7 +343,7 @@ interval = 10000
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les),
 [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
-and 13 more.
+and 14 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot
@@ -355,7 +355,7 @@ the total.
 
 - `[statistics] reset = true` starts the averages afresh instead of
   continuing them.
-- Probes and force monitors append to their files on a restart.
+- Probes and wall forces append to their files on a restart.
 - A restart file is written as `<name>.restart.partial` (in the background with `[output] async`) and renamed to `<name>.restart` once every rank has written its part and it is flushed to storage, so a `.restart` file is always complete. A `.partial` file is what a run killed while writing left behind; resume from the newest `.restart` file instead, as `--restart latest` does.
 - A restart on a mesh file whose contents differ from those the file was written on (the hashes in the files' [run blocks](output.md#run-block)) warns, even with as many cells; the log's *Initial state* says when the input differs from the one that wrote the file.
 

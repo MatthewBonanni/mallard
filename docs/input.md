@@ -77,7 +77,7 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
 | `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel only with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL); the run log says so |
-| `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` outputs, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; HIP and SYCL builds, and CUDA runs without graphs, take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
+| `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; HIP and SYCL builds, and CUDA runs without graphs, take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
 At least one stop condition is required.
 
@@ -89,7 +89,7 @@ At least one stop condition is required.
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
-| `cell_order` | How each rank numbers its cells in memory: `auto` (default), which counts the cache lines that blocks of cells read, over the vertex layers the reconstruction reads around each cell (one; TENO of order p: (p - 1) / 2), in both orders and takes `hilbert` when it needs a tenth fewer, else `input`, then numbers the cells of structured blocks first; `hilbert` (along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order); see [cell numbering](guide/performance.md#cell-numbering). Results, restart and output files do not depend on it |
+| `cell_order` | How each rank numbers its cells in memory: `auto` (default), which counts the cache lines that blocks of cells read, over the vertex layers the reconstruction reads around each cell (one; TENO of order p: (p - 1) / 2), in both orders and takes `hilbert` when it needs a tenth fewer, else `input`, then numbers the cells of structured blocks first; `hilbert` (along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order). With several ranks, every order puts the owned cells within those vertex layers of another rank's cells after the other owned cells; see [cell numbering](guide/performance.md#cell-numbering). Results, restart and output files do not depend on it |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
@@ -401,8 +401,8 @@ eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
 species' diffusivity (mixtures: in the mixture-averaged form, so the
 diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
 eddy viscosity of each cell comes from its least-squares velocity gradient
-`g_ij = du_i/dx_j`, with the filter width `Delta = V^(1/3)` (3D) or `A^(1/2)`
-(2D) of the cell; the time step includes it. Design, choices and validation:
+`g_ij = du_i/dx_j`, with the filter width `Delta` of the cell
+(`filter_width`); the time step includes it. Design, choices and validation:
 the [LES guide](guide/les.md) ([design notes](design/les.md)).
 
 | Key | Description |
@@ -840,7 +840,7 @@ double precision in every build.
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
-| `max_steps` | Sub-steps allowed per cell and half step (default 100000); more stop the run |
+| `max_steps` | Sub-steps allowed per cell and chemistry call (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
 | `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
@@ -1512,7 +1512,7 @@ graphs; domain averages add an exact global sum per stage, on the device).
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
 | `rhoY` | none | Mixtures: table of species partial-density sources, e.g. `{H2 = "1e-3"}`; the mass source `rho` is their sum (and `rho` itself is not allowed) |
 
-Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
+Expressions ([syntax](guide/expressions.md)) read the variables `x`, `y`, `z`, `t`,
 `rho`, `u_x`, `u_y` (3D: `u_z`), `p`, `T`, for mixtures `Y_<species>` and
 `X_<species>` (characters other than letters, digits and `_` in species names
 become `_`), and the domain averages (volume-weighted over the whole mesh)

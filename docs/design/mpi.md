@@ -1,12 +1,12 @@
-# Design: distributed memory (MPI)
+# Distributed memory (MPI)
 
-Status: accepted design (reviewed in #32), implemented through milestone 5 (see Milestones). Tracks issue #2.
+Status: implemented (milestones 1 to 6, reviewed in #32, issue #2); milestone 7, dynamic load balancing, was measured and not adopted.
 
 ## Goals
 
 - Run on one GPU per MPI rank, from one node (8 GPUs) to thousands of GPUs.
 - **No rank ever holds the global mesh.** Reading, partitioning, setup and output are all distributed, so the mesh size is limited only by aggregate memory.
-- Results independent of the rank count up to round-off (bitwise identical stencils and reconstructions; only the summation order of fluxes into a cell may differ).
+- Results bitwise identical on any rank count: stencils, reconstructions, the order in which each cell sums its face fluxes, and the global sums that feed the solution.
 - A single-rank build without MPI keeps working and stays the default for development and CI.
 - Everything here is dimension-agnostic: it works on cells, faces as node lists and the cell graph, so 3D inherits it.
 
@@ -65,8 +65,8 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 ### 6. Halo
 
 - **Local numbering:**
-  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`) or in global order (`"input"`); the default `"auto"` takes whichever reads fewer cache lines over the reconstruction's stencil (`performance.md`, "Cell numbering"). Serial runs number their cells the same way, the mesh's order becoming the global ids.
-  - Faces: in the order the local cells reach them, so faces of owned cells come first; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id).
+  - Cells: `[owned, interior | owned, near the partition | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`) or in global order (`"input"`); the default `"auto"` takes whichever reads fewer cache lines over the reconstruction's stencil (`performance.md`, "Cell numbering"). Owned cells near the partition are those within the reconstruction's vertex layers (one; TENO of order p: (p - 1) / 2) of a halo cell, periodic images counting as one vertex. With `"auto"`, structured blocks are found among the interior cells and numbered first, so cells near the partition stay on the unstructured path. Serial runs number their cells the same way, the mesh's order becoming the global ids.
+  - Faces: in the order the local cells reach them, then grouped as `[faces of owned cells without a halo cell | faces between an owned and a halo cell | faces of halo cells only]`; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id). So the faces whose fluxes are used, and those that wait for the partition faces' far sides, are contiguous ranges, as are the cells reconstructed before and after the halo arrives; kernels over them run on ranges rather than index lists.
   - Nothing that results depend on follows the local numbering: faces, neighbor lists and stencils are ordered by global ids, and so are the sums that mix cells (characteristic boundaries' transverse fits, the mass-flow force, by fixed-point sums), the image-cell search and the rows of periodic translations. Restart, HDF5 and VTU files are written in global order. Measurements: `performance.md`, "Cell numbering".
   - Every cell and node keeps its global id.
 - **Depth k:** the number of vertex-neighbor layers any reconstruction needs:
@@ -93,14 +93,14 @@ the run's report.*
 Per right-hand-side evaluation:
 
 1. Post nonblocking receives and sends of the conservative state of halo cells, packed into contiguous device buffers. Sends use device pointers with GPU-aware MPI, or a host staging copy otherwise.
-2. **Overlap:** reconstruct the owned cells whose stencils and face neighbors are all owned (`FaceReconstruction::cells_independent_of_halo`, exact from the stencils rather than a distance bound) while messages are in flight, on a second execution space instance.
+2. **Overlap:** reconstruct the interior owned cells whose stencils and face neighbors are all owned (`FaceReconstruction::cells_independent_of_halo`, exact from the stencils rather than a distance bound) while messages are in flight, on a second execution space instance. When the numbering's distance bound holds, as it does for TENO5 on hexahedra, these are the interior range `[0, n_interior)`; otherwise they are listed.
 3. Wait, unpack, then reconstruct the near-boundary owned cells and halo layer 1 on the default instance, where they fill the device as the first instance drains. Then come the steps that need every cell: TENO's troubled-cell passes and the fluxes of the faces of owned cells (faces between two halo cells are skipped).
 
 Implemented for TENO, the reconstruction that needs deep halos; FO and MUSCL exchange first and then reconstruct. The first stage of a step reuses the halo that the time-step computation has just filled, so an SSPRK3 step exchanges three times, not four.
 
 **Owner-computes partition faces (TENO, #305).** Each rank reconstructs only its owned cells. The halo side of a partition face is reconstructed by the rank that owns that cell, which sends it (all quadrature points, 5 states) after its reconstruction: a second, dependent message round per stage (`FaceExchange`). Each rank asks the owners for the face sides its fluxes read but does not reconstruct (the halo side of partition faces, and the side of a transmissive face's image face that belongs to a halo cell), naming each by the cell's global id and the face's index among the cell's faces, which every rank count numbers alike. Across a rotational periodic seam the owner sends the side already turned into the face's frame, that of its cell 0, which is the same on every rank since faces take their orientation from the global ids of their cells. The face messages travel while the fluxes of the other faces and the viscous gradients are computed; the partition faces' fluxes follow. Measured (3D TENO5, 64³ per A100, 16 GPUs): the first halo layer was 6% of the cells and its redundant reconstruction 2.3–2.9 ms of a 51.7 ms step, while the face messages are hidden behind the other faces' fluxes. Results are unchanged bit for bit, since the owner computes the same stencil at the same points. The halo exchange then carries only the cells that owned cells' stencils read. FO and MUSCL keep the redundant layer-1 reconstruction, which is cheaper than a second message round for them.
 
-**Time step and priorities.** The first stage's interior reconstruction does not depend on dt, so it starts before the time-step exchange; the exchange, the reduction for dt and its allreduce then happen under it. Packing, unpacking, the dt reduction and the reconstruction of the cells that read the halo run on a high-priority stream (`comm::high_priority_space`): the device schedules them as soon as their inputs arrive, interleaved with the interior cells, instead of after them as a tail of a partially filled device (which had cost 0.3–0.75 ms per stage).
+**Time step and priorities.** The first stage's reconstruction does not depend on dt, so it starts before the time-step exchange, the cells that read the halo included: the exchange, their reconstruction, the reduction for dt and its allreduce then happen under the interior cells' reconstruction. Packing, unpacking, the dt reduction and allreduce, and the reconstruction of the cells that read the halo run on a high-priority stream (`comm::high_priority_space`): the device schedules them as soon as their inputs arrive, interleaved with the interior cells, instead of after them as a tail of a partially filled device (which had cost 0.3–0.75 ms per stage). At equal priority the device starts a kernel's blocks only once the kernels launched before it have started all of theirs, so anything the halo-dependent cells wait for has to be on that stream too. The step's CUDA graph is instantiated with `cudaGraphInstantiateFlagUseNodePriority`: otherwise every node runs at the priority of the stream the graph is launched into, and the captured priorities are lost.
 
 Faces between an owned and a halo cell are computed by both ranks. Each keeps only its owned side's contribution, since residuals of halo cells are never used. This costs a few redundant face fluxes but needs no reverse exchange.
 
@@ -214,7 +214,7 @@ gathers the periodic zones.
      - Host-staged MPI is 15-25% slower; the overlap recovers about 10% of it.
      - dKaMinPar partitions give the same times within a few percent, and 0.141 s on 1M cells at 16 GPUs.
      - What remains at small per-GPU sizes is the cost of troubled cells concentrated on the ranks crossed by shocks, and of the smooth TENO pass's last partial wave of threads. Dynamic load balancing (section 10) was measured against the first and does not pay off.
-6. **Multi-node:** runs across nodes; HDF5/XDMF solution output. Runs across nodes work, with GPUDirect RDMA (milestone 5 table). HDF5/XDMF output is still to do.
+6. **Multi-node:** runs across nodes, with GPUDirect RDMA (milestone 5 table); every rank writes its cells into one shared VTKHDF file per snapshot (parallel HDF5).
 7. **Dynamic load balancing** (section 10): prototyped (weighted partitioners, runtime migration with TENO data carried over, measured cost model and trigger, bitwise tests) and measured on 8 and 16 A100s; not adopted, since a rebalance costs more than the imbalance it removes before the shocks move on. The prototype stays in draft PRs.
 
 ## Decisions from review
