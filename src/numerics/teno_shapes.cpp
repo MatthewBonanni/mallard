@@ -43,7 +43,8 @@ struct Hasher {
     void add_signed(const int64_t v) { add(static_cast<uint64_t>(v)); }
 };
 
-int64_t on_grid(const double v) { return std::llround(std::ldexp(v, ShapeKeys::SHAPE_GRID_BITS)); }
+// Scaling by a power of two is exact, as ldexp is
+int64_t on_grid(const double v) { return std::llround(v * double(int64_t(1) << ShapeKeys::SHAPE_GRID_BITS)); }
 
 using Lattice = std::array<int16_t, 3>;
 
@@ -90,7 +91,7 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
     });
 }
 
-bool ShapeKeys::scan(const uint32_t c, Scan & s) const {
+bool ShapeKeys::scan(const uint32_t c, Scan & s, const uint32_t max_layers) const {
     const uint32_t n_cells = mesh.n_cells;
     if (s.stamp.size() != n_cells) {
         s.stamp.assign(n_cells, 0);
@@ -145,8 +146,12 @@ bool ShapeKeys::scan(const uint32_t c, Scan & s) const {
         }
         return depth;
     };
-    reach(n_large, 64);
-    reach(8 * n_small, 6);
+    if (max_layers > 0) {
+        while (s.end.size() <= max_layers && grow()) {}
+    } else {
+        reach(n_large, 64);
+        reach(8 * n_small, 6);
+    }
     if (!unique) return false;
     double x0[N_DIM];
     for (int d = 0; d < N_DIM; d++) x0[d] = double(mesh.h_cell_coords(c, d));
@@ -168,9 +173,12 @@ bool ShapeKeys::scan(const uint32_t c, Scan & s) const {
             e.q[size_t(d)] = on_grid((x - x0[d]) / h0);
         }
     }
-    std::sort(s.entries.begin(), s.entries.end(), [](const Scan::Entry & a, const Scan::Entry & b) {
-        return a.layer != b.layer ? a.layer < b.layer : a.q < b.q;
-    });
+    // Entries come in layer order: sorting each layer by position sorts them by (layer, position)
+    for (size_t l = 0; l < s.end.size(); l++) {
+        const auto first = s.entries.begin() + (l > 0 ? std::ptrdiff_t(s.end[l - 1]) : 0);
+        std::sort(first, s.entries.begin() + std::ptrdiff_t(s.end[l]),
+                  [](const Scan::Entry & a, const Scan::Entry & b) { return a.q < b.q; });
+    }
     for (size_t k = 1; k < s.entries.size(); k++) {
         if (s.entries[k].layer == s.entries[k - 1].layer && s.entries[k].q == s.entries[k - 1].q) return false;
     }
@@ -240,8 +248,9 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
     return out;
 }
 
-bool ShapeKeys::neighborhood(const uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & s) const {
-    if (!scan(c, s)) return false;
+bool ShapeKeys::neighborhood(const uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & s,
+                             const uint32_t max_layers) const {
+    if (!scan(c, s, max_layers)) return false;
     layers = static_cast<uint32_t>(s.end.size() - 1);
     cells.resize(s.entries.size());
     for (size_t k = 0; k < cells.size(); k++) cells[k] = s.entries[k].cell;

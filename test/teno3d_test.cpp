@@ -838,6 +838,9 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
             difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
         }
         EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+        // Each batch ranks a key's table once, at its first cell there: other batches give the same tables
+        expect_same_tables(*make_teno(mesh, bd, order), *make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_batch_cells = 64; }),
+                           "order " + std::to_string(order) + ", batches of 64 cells");
     }
 }
 

@@ -73,9 +73,12 @@ class ShapeKeys {
 
         /**
          * @brief The cells of c's layers, in key order (equal positions for
-         *        cells of one key), and the number of layers.
+         *        cells of one key), and the number of layers; with max_layers,
+         *        only its first max_layers layers (the first cells of that
+         *        order).
          */
-        bool neighborhood(uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & scratch) const;
+        bool neighborhood(uint32_t c, std::vector<uint32_t> & cells, uint32_t & layers, Scan & scratch,
+                          uint32_t max_layers = 0) const;
 
         /** @brief Position of boundary face f among cell c's boundary faces, in key order (-1: not one). */
         int boundary_rank(uint32_t c, uint32_t f) const;
@@ -84,7 +87,7 @@ class ShapeKeys {
         int64_t boundary_face(uint32_t c, int rank) const;
 
     private:
-        bool scan(uint32_t c, Scan & s) const;
+        bool scan(uint32_t c, Scan & s, uint32_t max_layers = 0) const;
         std::vector<uint32_t> sorted_boundary_faces(uint32_t c) const;
 
         const Mesh & mesh;
