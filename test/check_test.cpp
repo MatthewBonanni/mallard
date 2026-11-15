@@ -177,6 +177,22 @@ TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
     EXPECT_TRUE(r.ok());
 }
 
+TEST(CheckKeys, KeysReadOnlyAfterContainsAreOptionalInTheCatalog) {
+    const Input input = parse_input_string("[t]\nguarded = 1\nx = 2.0\nplain = 3\n");
+    const Input & t = input.at("t");
+    if (t.contains("guarded")) find_value<int>(t, "guarded");
+    if (t.contains("x")) find_real(t, "x", dim::length);
+    find_value<int>(t, "plain");
+    find_value<int>(t, "plain");
+    const ResolvedInput resolved = resolve_input(input);
+    for (const auto & [path, required] :
+         {std::pair{"t.guarded", false}, std::pair{"t.x", false}, std::pair{"t.plain", true}}) {
+        const KeyRecord * record = resolved.find(path);
+        ASSERT_NE(record, nullptr) << path;
+        EXPECT_EQ(record->use.required, required) << path;
+    }
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");
