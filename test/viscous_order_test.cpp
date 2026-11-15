@@ -15,12 +15,16 @@
 #include <cmath>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "data_paths.h"
 #include "mpi_compare.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "teno.h"
 #include "verification.h"
+#include "viscous_flux.h"
 
 namespace {
 
@@ -332,4 +336,138 @@ TEST(ViscousReconstructionGradients, MatchSerialWithAndWithoutStepGraphs) {
       << "[numerics]\nviscous_gradients = \"reconstruction\"\n"
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n[output]\ncheck_interval = 1000000\n";
     expect_matches_serial_with_and_without_step_graphs(s.str());
+}
+
+namespace {
+
+/** @brief The flux of face 0 of f (into f.face_flux), on the device. */
+std::array<double, N_CONSERVATIVE> flux_of_face_0(const ViscousFluxFunctor & f) {
+    Kokkos::parallel_for("face_0_flux", 1, KOKKOS_LAMBDA(const int) { f(0u); });
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), f.face_flux);
+    std::array<double, N_CONSERVATIVE> out{};
+    FOR_I_CONSERVATIVE out[i] = double(h(0, i));
+    return out;
+}
+
+} // namespace
+
+TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAtNishikawasCoefficient) {
+    // Two cells with flat polynomials and different face values: the face gradient is the jump term alone,
+    // 4/3 (q_1 - q_0) n / |d . n| (Nishikawa 2010)
+    const double mu = 0.01, alpha = 4.0 / 3.0, area = 0.5;
+    const double n[3] = {0.6, 0.8, 0.0}, d[3] = {0.9, 0.1, 0.2};
+    const double rho[2] = {1.0, 0.8}, p[2] = {1.0, 1.2};
+    const double u[2][3] = {{0.1, -0.2, 0.05}, {0.3, 0.1, -0.1}};
+    ViscousFluxFunctor f{};
+    f.physics = Euler::from_reference(1.4_r, 1.0_r, 1.0_r, 1.0_r);
+    f.physics.viscosity_model = ViscosityModel::CONSTANT;
+    f.physics.mu_ref = rtype(mu);
+    f.normals = decltype(f.normals)("normals", 1);
+    f.face_area = decltype(f.face_area)("face_area", 1);
+    f.cell_coords = decltype(f.cell_coords)("cell_coords", 2);
+    f.cells_of_face = decltype(f.cells_of_face)("cells_of_face", 1);
+    f.face_shift = decltype(f.face_shift)("face_shift", 1);
+    f.periodic.shifts = decltype(f.periodic.shifts)("shifts", 1);
+    f.face_flux = decltype(f.face_flux)("face_flux", 1);
+    f.face_solution = decltype(f.face_solution)("face_solution", 1, 1);
+    f.quad_weights = decltype(f.quad_weights)("quad_weights", 1);
+    f.face_weights = decltype(f.face_weights)("face_weights", 1, 1);
+    f.points.face_quad_points = decltype(f.points.face_quad_points)("face_quad_points", 1, 1, N_DIM);
+    f.polynomials = CellPolynomials{decltype(f.polynomials.coefficients)("coefficients", 1, teno::n_dof(3)),
+                                    f.cell_coords, 3};
+    auto h_normals = Kokkos::create_mirror_view(f.normals);
+    auto h_area = Kokkos::create_mirror_view(f.face_area);
+    auto h_coords = Kokkos::create_mirror_view(f.cell_coords);
+    auto h_cells = Kokkos::create_mirror_view(f.cells_of_face);
+    auto h_W = Kokkos::create_mirror_view(f.face_solution);
+    FOR_I_DIM {
+        h_normals(0, i) = rtype(2.0 * n[i]);
+        h_coords(0, i) = 0.0_r;
+        h_coords(1, i) = rtype(d[i]);
+    }
+    h_area(0) = rtype(area);
+    h_cells(0, 0) = 0;
+    h_cells(0, 1) = 1;
+    for (uint8_t k = 0; k < 2; k++) {
+        h_W(0, 0, k, 0) = rtype(rho[k]);
+        FOR_I_DIM h_W(0, 0, k, 1 + i) = rtype(u[k][i]);
+        h_W(0, 0, k, N_DIM + 1) = rtype(p[k]);
+    }
+    Kokkos::deep_copy(f.normals, h_normals);
+    Kokkos::deep_copy(f.face_area, h_area);
+    Kokkos::deep_copy(f.cell_coords, h_coords);
+    Kokkos::deep_copy(f.cells_of_face, h_cells);
+    Kokkos::deep_copy(f.face_solution, h_W);
+    Kokkos::deep_copy(f.quad_weights, 2.0_r);
+    Kokkos::deep_copy(f.face_weights, 2.0_r);
+    const auto flux = flux_of_face_0(f);
+
+    double d_n = 0.0, a[N_DIM], a_n = 0.0;
+    FOR_I_DIM d_n += d[i] * n[i];
+    FOR_I_DIM {
+        a[i] = alpha * (u[1][i] - u[0][i]) / d_n;
+        a_n += a[i] * n[i];
+    }
+    const double dT = p[1] / rho[1] - p[0] / rho[0];  // R = 1
+    const double kappa = mu * double(f.physics.cp) / double(f.physics.Pr);
+    std::array<double, N_CONSERVATIVE> expected{};
+    FOR_I_DIM {
+        // grad u = a n^T, so tau n = mu (a + (a . n) n / 3)
+        const double tau_n = mu * (a[i] + a_n * n[i] / 3.0);
+        expected[1 + i] = area * tau_n;
+        expected[N_DIM + 1] += area * 0.5 * (u[0][i] + u[1][i]) * tau_n;
+    }
+    expected[N_DIM + 1] += area * kappa * alpha * dT / d_n;
+    FOR_I_CONSERVATIVE {
+        EXPECT_NEAR(flux[i], expected[i], precision_tol<double>(1e-14, 1e-6)) << "conservative " << int(i);
+    }
+}
+
+TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason) {
+    auto error_of = [](const std::string & text) {
+        Solver solver;
+        solver.set_distributed(false);
+        try {
+            solver.init(parse_toml(text));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string("accepted");
+    };
+    auto replaced = [](std::string text, const std::string & from, const std::string & to) {
+        const size_t k = text.find(from);
+        EXPECT_NE(k, std::string::npos) << from;
+        return k == std::string::npos ? text : text.replace(k, from.size(), to);
+    };
+    const std::string base = box_input("cartesian", 8, 5, "navier_stokes", "reconstruction");
+    const std::string perfect = "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = "
+                                "1.0\nmu = 0.01\nPr = 0.72\n";
+    const std::string teno5 = "type = \"TENO\"\norder = 5\n";
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {box_input("cartesian", 8, 5, "navier_stokes", "polynomial"), "least_squares"},
+        {box_input("cartesian", 8, 5, "euler", "reconstruction"), "without viscosity"},
+        {replaced(base, teno5, "type = \"MUSCL\"\n"), "needs the TENO reconstruction"},
+        {replaced(base, teno5, "type = \"TENO\"\norder = 3\n"), "order 3"},
+        // Viscous mixtures have no single-gas viscosity: the mixture is the reason, not the viscosity
+        {replaced(base, perfect,
+                  "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+                      "/mechanisms/h2o2.yaml\"\n"),
+         "gas mixtures"},
+        {base + "[les]\n", "LES"},
+        {replaced(base, "[numerics]\n", "[numerics]\nconvective_flux = \"hybrid\"\n"), "hybrid convective flux"},
+    };
+    for (const auto & [text, reason] : cases) {
+        const std::string e = error_of(text);
+        EXPECT_NE(e.find(reason), std::string::npos) << e;
+        EXPECT_NE(e.find("viscous_gradients"), std::string::npos) << e;
+    }
+    if constexpr (N_DIM == 2) {
+        const std::string axisymmetric =
+            replaced(replaced(base, "[[periodic]]\nzones = [\"bottom\", \"top\"]\n",
+                              "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
+                              "type = \"wall_adiabatic\"\n"),
+                     "Pr = 0.72\n", "Pr = 0.72\naxisymmetric = true\n");
+        const std::string e = error_of(axisymmetric);
+        EXPECT_NE(e.find("axisymmetric"), std::string::npos) << e;
+    }
 }

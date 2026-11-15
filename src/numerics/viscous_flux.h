@@ -431,7 +431,6 @@ struct ViscousFluxFunctor {
         }
         if (c1 >= 0 && polynomials.on() && polynomials.smooth(c0) && polynomials.smooth(c1)) {
             switch (polynomials.degree) {
-                case 2: polynomial_flux<2>(i_face, out); break;
                 case 3: polynomial_flux<3>(i_face, out); break;
                 case 4: polynomial_flux<4>(i_face, out); break;
                 default: polynomial_flux<5>(i_face, out); break;
