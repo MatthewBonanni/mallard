@@ -1,0 +1,108 @@
+# Laminar reacting mixing layer (V11 of docs/design/chemistry.md, 2D build):
+# H2/N2 (1:1 by volume) at 300 K and 50 m/s below air at 1150 K and 100 m/s,
+# 1 atm, from the trailing edge of a splitter plate of zero thickness at
+# x = 0, h2o2.yaml with mixture-averaged transport. The hot air autoignites
+# the layer about 15 mm downstream and holds a lifted diffusion flame.
+# Reference: the steady boundary-layer equations with the same chemistry and
+# transport (Cantera), marched in x by mixing_layer_reference.py. Two
+# inlet_state halves at x = 0, outlet_pressure on the other sides; cells of
+# 100 um along x and 30 um across the layer, growing by 8% outside it. Make
+# the reference, the mesh and the initial state (the reference solution)
+# first, from this directory; the second command rewrites this file without
+# this header:
+#
+#   python mixing_layer_reference.py reference --field
+#   python mixing_layer_setup.py reference/field.npz .
+#
+# then run, and compare with
+#
+#   python plot_mixing_layer.py --run base . --average 8 --history
+#
+# Results (README.md): lift-off length (peak Y_OH reaching 2e-3) 14.86 mm,
+# 2.6% short of the reference's 15.26 mm (0.5% on 50 x 15 um cells:
+# mixing_layer_setup.py --dx 50e-6 --dy 15e-6); peaks along the layer and
+# profiles across it overlay the reference's up to the Kelvin-Helmholtz waves
+# downstream of the flame base. Cost: 88,759 steps, 10 minutes on one A100.
+#
+# Laminar reacting mixing layer (V11) from field.npz: fuel H2:1,N2:1 at 300 K and
+# 50 m/s (y < 0), air at 1150 K and 100 m/s (y > 0), p = 101325 Pa; 300 x 232 = 69600 quadrilaterals,
+# dx = 100 um, dy = 30 um over y = [-1.800, 2.850] mm, growing by
+# 1.08 to [-8, 12] mm; length 30 mm; t_stop = 2 flow-through(s)
+# of the slower stream
+
+[run]
+t_stop = 0.0012
+cfl = 0.8
+
+[mesh]
+type = "file"
+filename = "mixing_layer.msh"
+
+[initialize]
+type = "restart"
+file = "mixing_layer.restart"
+
+[[boundaries]]
+name = "inlet"
+where = "y < 0"
+type = "inlet_state"
+u = [50, 0.0]
+p = 101325
+T = 300
+X = { "H2" = 1, "N2" = 1 }
+
+[[boundaries]]
+name = "inlet"
+where = "y >= 0"
+type = "inlet_state"
+u = [100, 0.0]
+p = 101325
+T = 1150
+X = { "O2" = 0.21, "N2" = 0.79 }
+
+[[boundaries]]
+name = "outlet"
+type = "outlet_pressure"
+p = 101325
+
+[[boundaries]]
+name = "bottom"
+type = "outlet_pressure"
+p = 101325
+
+[[boundaries]]
+name = "top"
+type = "outlet_pressure"
+p = 101325
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/field"
+format = "vtu"
+time_interval = 5e-05
+fields = ["RHO", "U", "P", "T", "HRR", "Y_*"]
+
+[[write_data]]
+prefix = "./restart/mixing_layer"
+format = "restart"
+time_interval = 5e-05

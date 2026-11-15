@@ -29,7 +29,7 @@ X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }   # mole fractions, normalized
 [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
 [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
 [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
-and 11 more.
+and 12 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -112,7 +112,7 @@ atol = 1.0e-10
 [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
 [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
 [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
-and 10 more.
+and 11 more.
 
 A mixture whose mechanism has reactions reacts when the input has a
 `[chemistry]` table.
@@ -257,7 +257,7 @@ solver's chemistry kernels, which prints cells per second (see
 | `reactive_shock_tube` | Ignition behind a reflected shock, Strang splitting |
 | `detonation_1d`, `detonation_2d`, `detonation_3d` | CJ and cellular detonations, numerical soot foils (`P_MAX`) |
 | `premixed_flame` | Freely propagating H2/air and CH4/air (GRI-3.0) flames against Cantera |
-| `flame_2d`, `triple_flame`, `counterflow_diffusion` | Multidimensional laminar flames, differential diffusion |
+| `flame_2d`, `triple_flame`, `counterflow_diffusion`, `reacting_mixing_layer` | Multidimensional laminar flames, differential diffusion, autoignition in a mixing layer |
 | `flame_vortex`, `flame_vortex_quenching` | Flame-vortex interaction, with radiation |
 | `autoignition_2d` | Stratified autoignition DNS |
 | `shock_bubble_3d` | Non-reacting mixture, `double_flux` |
