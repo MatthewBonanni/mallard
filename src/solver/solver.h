@@ -714,8 +714,9 @@ class Solver {
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
-            FENCE,         // fails while the stream captures
-            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            FENCE,             // fails while the stream captures
+            LEGACY_STREAM,     // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: no step graph
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
