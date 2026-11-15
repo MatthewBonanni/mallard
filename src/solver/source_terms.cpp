@@ -423,7 +423,7 @@ void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::V
 
 void SourceTerms::evaluate(const State & solution, const Kokkos::View<rtype> & time,
                            const Kokkos::View<rtype **, Kokkos::LayoutRight> & out) {
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), out, 0.0_r);
+    gated::fill(out, 0.0_r);
     if (m_empty) return;
     if (m_means) update_means(solution);
     if (!moving.empty()) move(time);
