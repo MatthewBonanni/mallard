@@ -45,7 +45,7 @@ Mallard; their class says only whether we found them published.
 | Dynamic thickened-flame efficiency | Adapted | Charlette et al. 2002 (II); Wang, Boileau & Veynante 2011; Volpiani et al. 2016 | Test filter as repeated vertex-neighbor averages sized by their covariance; exact global sums | [Dynamic efficiency](#dynamic-efficiency) |
 | Conservative remap on an exact supermesh | Adapted | Farrell & Maddison 2011; Menon & Schmidt 2011 | Intersections as lists of clipped simplices; results bitwise independent of both partitions | [Remap](#remap) |
 | Results bitwise independent of rank and thread counts | Adapted | Order-invariant integer sums (Hallberg & Adcroft 2014); reproducible summation (Demmel & Nguyen 2015) | Applied throughout the solver: per-face fluxes gathered in a fixed order, fixed-point global sums, partition-independent setup and restarts | [Bitwise results](#bitwise-results) |
-| Automatic structured fast path | Original extension | Zonal structured/unstructured solvers on zones the user or mesh generator designates (Cambier, Heib & Plot 2013); structure from refining a coarse unstructured mesh (Bergen & Hülsemann 2004) | Structured blocks found in any mesh from its nodes alone, numbered along their axes, and one TENO table per stencil shape, with results bitwise independent of the numbering and partition | [Structured fast path](#structured-fast-path) |
+| Automatic structured fast path | Original extension | Zonal structured/unstructured solvers on zones the user or mesh generator designates (Cambier, Heib & Plot 2013); structure from refining a coarse unstructured mesh (Bergen & Hülsemann 2004) | Structured blocks found in any mesh from its nodes alone, numbered along their axes, one TENO table per stencil shape and stencils read by index, with results bitwise independent of the numbering and partition | [Structured fast path](#structured-fast-path) |
 | Wall-model exchange point located by a walk | Standard | Lawson 1977; Devillers, Pion & Teillaud 2002; exchange height of Kawai & Larsson 2012 | The walk on every cell type and across periodic seams; the halo deepened until each point's cell is local, so the wall flux is the same on any rank count | [Exchange point](#exchange-point) |
 
 ## Original and extended items
@@ -441,15 +441,21 @@ their axes. The TENO tables of a lattice differ from cell to cell only in
 the order of their entries and at round-off; ranked on a grid of $2^{-30}$
 of their magnitude, the cells of one stencil shape read one table, that of
 the shape's cell with the lowest global id, agreed over the ranks, so
-results do not depend on the numbering, partition or rank count
+results do not depend on the numbering, partition or rank count. TENO's
+smooth pass reads the central stencil of a block cell as the cell plus its
+block shape's offsets; only the source of the indices changes, so the result
+is bitwise that of the unstructured path
 ([TENO-E](teno_e.md), [structured blocks](../design/structured_blocks.md)).
 
 **Evidence.** On the meshes measured, 83-100% of the cells have their whole
 TENO5 stencil in one structured block (88% on the 96³ Taylor-Green
 performance case, 95% on the graded Volvo combustor). TENO5 tables take
 1.04 kB per hexahedron of a uniform box instead of 32.0 kB, so an A100-80GB
-holds 11.6M cells instead of 2.08M; the 96³ Taylor-Green vortex runs 1.4%
-faster at order 5 and 6.4% at order 6 on an A100. Meshes are bitwise the
+holds 11.6M cells instead of 2.08M. The speedup is modest: on an A100 the
+96³ Taylor-Green vortex runs 1.4% faster at order 5 and 6.4% at order 6
+with shared tables, and reading block stencils by index adds 2.3% at order 5
+with symmetry walls (88% of the cells on the block path) and 4.4% periodic
+(100%). Meshes are bitwise the
 same by global id in every cell numbering, and shared tables on 1 and 3
 ranks are bitwise equal
 ([performance](../guide/performance.md#structured-fast-path)).
