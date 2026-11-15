@@ -1,4 +1,4 @@
-# Design: wall-modeled large-eddy simulation
+# Wall-modeled large-eddy simulation
 
 Status: stages 1 and 2 implemented (#256); stage 3 (non-equilibrium) and the
 optional comparisons are planned. Recommendations are marked **Decision**;
@@ -378,9 +378,9 @@ Isothermal supersonic channels ($Re_\tau^* \approx 590$), against Trettel & Lars
 4. **Optional comparisons**: slip-wall models (Bose & Moin 2014; Bae et al.
    2019); the flux-controlled compressible law of the wall (arXiv:2512.04688)
    as a cross-check.
-5. **Gas mixtures**: after #295 (isothermal mixture walls): the models with
-   the mixture's $c_p$, $\mu$ and $Pr$ frozen at the exchange point's
-   composition, zero species flux at the wall.
+5. **Gas mixtures**: the models with the mixture's $c_p$, $\mu$ and $Pr$
+   frozen at the exchange point's composition, zero species flux at the
+   wall, on the isothermal mixture walls of #295.
 
 ## References
 

@@ -1,4 +1,4 @@
-# Design: single-GPU performance and parallel scaling
+# Single-GPU performance and parallel scaling
 
 Status: in progress. Baseline measured on `main` at v0.5.0-92 (before any change here); each change below
 lists its measured effect. Results stay bitwise identical to `main` (checked on the cases under
@@ -588,6 +588,10 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
   the change.
 
 Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
+
+With that rounding explicit, the smooth pass stages its entries with the conversion in the loading thread, bitwise
+equal to the unstaged loop: TENO5 in rounds of 10 entries, TENO6 in rounds of 5, which keep two teams per SM
+(#1004: 4.61M cells/s against 3.60M unstaged for the order-6 Taylor-Green vortex on $96^3$ hexahedra).
 
 ### 13. TENO setup on CPUs (#916)
 

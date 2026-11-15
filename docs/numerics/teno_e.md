@@ -147,16 +147,16 @@ across each straight boundary line (2D) or plane (3D) that a gathered cell
 touches, except:
 
 - images that land inside a gathered cell (non-convex boundaries);
-- in 2D, images of cells whose foot on the line lies beyond the line's
-    gathered faces, of cells behind the line, and, for a target cell behind
-    the line, all of its images (#382). A facet of a straight-sided curved
-    wall, extended, passes inside the next columns of cells, by about a cell
-    height for the thin wall cells of an airfoil mesh; reflections across it
-    put the wall-normal profile there at the wrong distance from the wall. At
-    a closed trailing edge thinner than its wall cells, the cells on one side
-    mirrored across the other side land next to the cells on the first. Both
-    gave an odd-even mode in the wall pressure of the NACA 0012 tutorial mesh
-    at order 3;
+- images of cells whose foot on the line or plane lies on none of its
+    gathered faces, of cells behind it, and, for a target cell behind it, all
+    of its images (#382, #443). A facet of a straight-sided curved wall,
+    extended, passes inside the next columns of cells, by about a cell height
+    for the thin wall cells of an airfoil mesh; reflections across it put the
+    wall-normal profile there at the wrong distance from the wall. At a closed
+    trailing edge thinner than its wall cells, the cells on one side mirrored
+    across the other side land next to the cells on the first. Both gave an
+    odd-even mode in the wall pressure of the NACA 0012 tutorial mesh at
+    order 3;
 - boundaries between MPI ranks (`PARTITION` faces), which are not boundaries
     of the domain;
 - curved wall and symmetry faces, which take no images unless
@@ -165,7 +165,8 @@ touches, except:
 
 Coplanar boundary faces form one plane; each image takes the ghost state of
 the boundary condition (applied to its cell's state) from the face of that
-plane nearest to it, so one plane may carry several conditions. A 3D search
+plane nearest to it (in 3D, nearest among the faces under its cell's foot), so
+one plane may carry several conditions. A 3D search
 may meet at most 255 distinct planes (#392; a faceted curved boundary with
 mirror images has one plane per facet); a cell beyond that stops the setup
 with an error that names it. Counting only interior cells toward
@@ -564,7 +565,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 11; one file per MPI rank). The file is used
+on later runs (format version 15; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
