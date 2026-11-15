@@ -149,7 +149,7 @@ std::string number_text(rtype x) {
 
 std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
-    if (!input.contains("periodic")) return pairs;
+    if (!contains_optional(input, "periodic")) return pairs;
     const auto entries = find_value<std::vector<Input>>(input, "periodic");
     for (size_t e = 0; e < entries.size(); e++) {
         const Input & entry = entries[e];

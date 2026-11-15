@@ -1511,7 +1511,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
     statistics_variables = statistics.variables();
     average_interval = statistics.sampling_interval();
     average_start = statistics.sampling_start();
-    if (!input.contains("probes")) return;
+    if (!contains_optional(input, "probes")) return;
     for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
         const std::string copies = find_value_or<std::string>(entry, "copies", "combined");
         record_options("probes.copies", {"combined", "each"});
@@ -1825,7 +1825,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                         .fix = "Add TRACTION_PRESSURE or TRACTION_VISCOUS (or MOMENTUM_FLUX) to fields",
                                         .docs = "docs/guide/probes.md#boundary-data"});
         }
-        const std::vector<rtype> center = entry.contains("moment_center")
+        const std::vector<rtype> center = contains_optional(entry, "moment_center")
                                               ? find_real_vector(entry, "moment_center", dim::length)
                                               : std::vector<rtype>(N_DIM, 0.0_r);
         if (center.size() != N_DIM) {
