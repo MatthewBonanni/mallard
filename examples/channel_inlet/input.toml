@@ -3,7 +3,7 @@
 # inlet face to the nearer of the two walls. n (1 - n) is the parabola
 # y (1 - y) of the developed flow, so the flow enters developed and stays so:
 # u = 6 U y (1 - y) with the bulk velocity U = 0.1 (Mach 0.1, Re = 10).
-# Check the profile at x = 3.5 against the exact one with
+# Check the profile near x = 3.5 against the exact one (2.3e-2 U at 16 cells) with
 #   python plot_channel_inlet.py channel_inlet.png solut/channel_<step>.vtkhdf
 
 [run]

@@ -69,6 +69,7 @@ void collect_used(const Input & v, std::vector<bool> & used) {
     }
 }
 
+#if N_DIM == 2
 double segment_distance2(const Vertex & x, const Vertex & a, const Vertex & b) {
     double ab2 = 0.0, t = 0.0;
     for (size_t d = 0; d < N_DIM; d++) {
@@ -83,8 +84,7 @@ double segment_distance2(const Vertex & x, const Vertex & a, const Vertex & b) {
     }
     return s;
 }
-
-#if N_DIM == 3
+#else
 /** @brief Squared distance from x to the triangle abc (Ericson, Real-Time Collision Detection, 5.1.5). */
 double triangle_distance2(const Vertex & x, const Vertex & a, const Vertex & b, const Vertex & c) {
     auto sub = [](const Vertex & p, const Vertex & q) { return Vertex{p[0] - q[0], p[1] - q[1], p[2] - q[2]}; };

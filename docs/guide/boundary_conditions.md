@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 45 more.
+and 46 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -449,11 +449,12 @@ T = 300.0                   # [K]; or an expression: "300 + 200 * x"
 ```
 
 *Used in:*
+[`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
-[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
+and 1 more.
 
 **Imposes** the wall temperature `T` (required) and the wall velocity as
 `wall_adiabatic`: a single gas through the ghost density and the viscous
@@ -661,6 +662,7 @@ T = 300.0
 
 *Used in:*
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
+[`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
 
 **Imposes** the mass flux, the temperature, the flow direction and the
@@ -754,7 +756,7 @@ p = 101325.0
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet),
 [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet)
-and 13 more.
+and 14 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);
