@@ -14,6 +14,40 @@ At these rates the A100 advances the million-cell TENO-E 5 case by one time step
 
 Fifth-order TENO-E costs 4.7 times as much per step as third order on the CPU and 2.7 times on the A100; its central stencil has 28 neighbors of each cell, against 10 for third order.
 
+## Choosing a scheme for an accuracy target {#accuracy-target}
+
+What a given error costs with each scheme, measured on the isentropic vortex
+(2D squares and irregular triangles, 3D hexahedra and tetrahedra) and on the
+Shu-Osher problem, on 2 CPU threads and on one A100 (v0.10.0-48):
+
+![Error of the isentropic vortex on 2D squares against cells and wall time on 2 CPU threads and on an A100](../images/guide/work_precision_vortex_2d_quad-light.svg#gh-light-mode-only)
+![Error of the isentropic vortex on 2D squares against cells and wall time on 2 CPU threads and on an A100](../images/guide/work_precision_vortex_2d_quad-dark.svg#gh-dark-mode-only)
+
+| Target ($L_2$ error of $\rho$, smooth flow) | Cheapest on CPUs (2D and 3D) | Cheapest on a GPU (2D) |
+|---|---|---|
+| 10<sup>-3</sup> (coarse) | TENO-E 4; MUSCL takes 1.3 to 3× as long | MUSCL; every scheme within 2× |
+| 10<sup>-4</sup> to 10<sup>-5</sup> | TENO-E 4 (at 10<sup>-5</sup> TENO-E 6 is 10 to 20% faster on triangles and hexahedra); MUSCL takes 6 to 45× as long or never gets there | TENO-E 4; MUSCL takes 1.1 to 70× as long |
+| 10<sup>-6</sup> and below | TENO-E 6 (TENO-E 4: 1.2× on squares, 2.2× on triangles) | TENO-E 4 (TENO-E 6 within 1.1×) |
+| Flow with shocks | TENO-E 4 down to an $L_1$ error of 10<sup>-2</sup> (half MUSCL's time); below it every scheme within 2.2× | not measured yet ([#1171](https://github.com/MatthewBonanni/mallard/issues/1171)) |
+
+- **TENO-E 4** is the cheapest scheme over most of the range, on every cell
+  type. **TENO-E 5**, the order of the `high_order` preset, costs 1.0 to 2.3
+  times as much on CPUs (4 to 5 times on tetrahedra) and 1.15 to 1.3 times
+  on a GPU; it is the preset for robustness
+  ([why high order](numerics.md#why-high-order)). For smooth flow on meshes
+  without pyramids, `order = 4` under `[numerics.face_reconstruction]` is the
+  cheaper choice.
+- **On a GPU** a small 2D run takes 0.15 to 0.35 s whatever the scheme, so at
+  coarse targets the scheme hardly matters; TENO-E 4 reaches 10<sup>-6</sup>
+  on squares in 0.85 s, 16 times faster than 2 CPU threads. 45 to 73% of a
+  2D TENO-E run's time there is its setup, which runs on the host. In 3D the
+  setup dominates too: 91% of a TENO-E 3 run on 221,184 hexahedra.
+- **Below about 10<sup>-6</sup>** SSPRK3 at `cfl = 1.0` limits TENO-E 5 and 6
+  to third order: lower `cfl` for smaller errors.
+
+Design notes: [work-precision study](../design/work_precision.md) (every case,
+platform and order, and the method).
+
 ## 3D TENO-E: setup and memory {#teno-3d}
 
 **Setup on the GPU** ([#247](https://github.com/MatthewBonanni/mallard/pull/247)). The 3D TENO-E setup — stencil search, moments, least-squares pseudo-inverses, Lebesgue bounds, smoothness indicators — runs one cell per team on the GPU. Its tables are bitwise identical to the host's. That makes starts without a stencil cache, restarts on another rank count and re-setup after repartitioning cheap. Fifth order on one A100 (host: 16 threads of an AMD EPYC 7763):

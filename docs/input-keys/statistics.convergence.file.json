@@ -1,0 +1,11 @@
+{
+ "default": "\"convergence.csv\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/statistics.toml"
+ ],
+ "type": "string"
+}

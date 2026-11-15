@@ -130,16 +130,16 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
     }
     // sigma / L, or a negative fallback if the key is absent
     auto rate = [&](const char * key, rtype fallback) {
-        if (!table.contains(key)) return fallback;
+        if (!contains_optional(table, key)) return fallback;
         const rtype sigma = find_real(table, key, dim::none);
         if (!(sigma >= 0.0_r)) fail(table, tw, key, "must be non-negative", "", anchor);
         return sigma / L;
     };
-    bc.relax[Relax::ACOUSTIC] = table.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
+    bc.relax[Relax::ACOUSTIC] = contains_optional(table, "sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
     // A turbulent inlet's incoming wave follows the target's own, which carries the target's
     // transverse terms: by default it leaves out the face's, which would count them twice
     bc.relax[Relax::BETA] = (inlet && InletProfile::turbulent(entry)) ? 0.0_r : -1.0_r;
-    if (table.contains("beta")) {
+    if (contains_optional(table, "beta")) {
         bc.relax[Relax::BETA] = find_real(table, "beta", dim::none);
         if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
             fail(table, tw, "beta", "must be in [0, 1]", "", anchor);
