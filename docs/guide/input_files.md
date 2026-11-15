@@ -624,7 +624,8 @@ setup stops on an error, with the keys read up to there. The setup's accessors
 the setup reads only when present, which it tests with `contains_optional`, is
 optional.
 `tools/dev/input_catalog.py build` merges the catalogs of every example and
-tutorial, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
+tutorial, and of the inputs of `tools/dev/catalog_inputs/` for the keys none of
+them sets, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
 key named by its path (percent-encoded outside lowercase letters, digits, `_`, `.`
 and `-`), which the website's input builder reads; CI checks that it is up to
 date, and `tools/dev/input_catalog.py docs`

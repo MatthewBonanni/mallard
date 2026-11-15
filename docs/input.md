@@ -151,31 +151,6 @@ curve their faces (see curved boundaries below).
 Every format and the transform below are illustrated in the user guide
 ([meshes](guide/meshes.md#other-mesh-formats)).
 
-`[mesh.transform]` maps the nodes of a mesh file as it is read,
-`x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
-Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
-(negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
-surfaces, regions, probes and every other coordinate in the input refer to the
-transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
-transformed mesh.
-
-| Key | Description |
-|---|---|
-| `scale` | A factor for every axis, the length of one unit of the mesh file (e.g. `0.001` or `"1 mm"` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
-| `rotate` | 2D: angle in degrees, counterclockwise. 3D: `{axis = [a_x, a_y, a_z], angle = degrees}`, right-handed about the axis through the origin |
-| `translate` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
-
-```toml
-[mesh]
-type = "file"
-filename = "nozzle_mm.msh"
-
-[mesh.transform]
-scale = 0.001
-rotate = {axis = [0, 0, 1], angle = 90}
-translate = [0.0, 0.0, 0.05]
-```
-
 CGNS files (builds with `-DMallard_ENABLE_CGNS=ON`) are read from their one
 base, whose cell dimension must match the build. Every zone must be
 unstructured, with element sections of any of Mallard's cell types (`MIXED`
@@ -232,6 +207,33 @@ count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
 `/boundary/high_order/offsets` (per boundary face) and
 `/boundary/high_order/coordinates` (all nodes of each high-order face, corners
 first in Gmsh order; none for linear faces).
+
+### `[mesh.transform]`
+
+`[mesh.transform]` maps the nodes of a mesh file as it is read,
+`x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
+Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
+(negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
+surfaces, regions, probes and every other coordinate in the input refer to the
+transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
+transformed mesh.
+
+| Key | Description |
+|---|---|
+| `scale` | A factor for every axis, the length of one unit of the mesh file (e.g. `0.001` or `"1 mm"` for a mesh in mm), or one per axis `[s_x, s_y]` (`[s_x, s_y, s_z]` in 3D); nonzero |
+| `rotate` | 2D: angle in degrees, counterclockwise. 3D: `{axis = [a_x, a_y, a_z], angle = degrees}`, right-handed about the axis through the origin |
+| `translate` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
+
+```toml
+[mesh]
+type = "file"
+filename = "nozzle_mm.msh"
+
+[mesh.transform]
+scale = 0.001
+rotate = {axis = [0, 0, 1], angle = 90}
+translate = [0.0, 0.0, 0.05]
+```
 
 ### Curved boundaries
 
@@ -1814,10 +1816,12 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
 | `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it (a [moving](guide/geometry.md#moving-regions) one, or one [defined by the solution](guide/geometry.md#regions-defined-by-the-solution), the cells it covers at each write); a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
 | `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
-| `geometry` | Removed in 0.10.0 (deprecated in 0.9.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and XDMF's HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
 | `relative_error` | (`vtkhdf`, `vtu`, `xdmf`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
+
+`geometry`, deprecated in 0.9.0 for `region`, was removed in 0.10.0; `mallard input upgrade`
+writes `region` in its place (`"all"` as `"domain"`).
 
 `format = "vtkhdf"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) writes [VTKHDF](https://docs.vtk.org/en/latest/vtk_file_formats/vtkhdf_file_format/index.html)
