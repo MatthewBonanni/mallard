@@ -451,7 +451,9 @@ a step the host must act on (or a divergence, or the last allowed rejection), th
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
-launch one step at a time with the IF bodies always run.
+take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
+would run every IF body at every step: the statistics' samples, the fused chemistry's flushes and the staged
+probes would then happen at steps that are not due.
 
 Triggers that read a probe's value are evaluated on the device too. Probes' values are reduced on the host,
 so the probes they read are left to the host: the device stops at their writes, the host writes them and

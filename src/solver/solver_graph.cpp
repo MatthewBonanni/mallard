@@ -303,11 +303,6 @@ template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
 #ifdef MALLARD_CONDITIONAL_NODES
     if (capture_graph) {
-        if (!conditional_steps) {
-            // One step per launch: the body (of pure reductions, or a step that is due) runs every time
-            body();
-            return;
-        }
         cudaGraph_t graph = static_cast<cudaGraph_t>(capture_graph);
         cudaGraphConditionalHandle handle;
         cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
@@ -893,6 +888,10 @@ void Solver::capture_step_graph() {
 
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
+    if (capture_fault == CaptureFault::CONDITIONAL_NODES) {
+        logging::warning(diagnostic_code::CUDA_GRAPH, "CUDA graph conditional nodes failed (test fault); steps run kernel by kernel");
+        return false;
+    }
     // A step under a conditional node captures its NCCL operations there, which fails where NCCL communicates
     // over a network (it then adds host nodes): try one first, on every rank
     bool works = true;
@@ -915,7 +914,7 @@ bool Solver::conditional_nodes_work() {
             if (abandon_capture(e)) graph = nullptr;
             works = false;
             logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
-                             "); one step per launch");
+                             "); steps run kernel by kernel");
         }
         capture_graph = nullptr;
         works = comm::allreduce(static_cast<int>(works), comm::Op::MIN) > 0;
@@ -1011,14 +1010,13 @@ void Solver::begin_device_steps() {
         step_events.push_back(event);
     }
     // Launches that are not graphs read the device's decision on the host: one at a time
-    conditional_steps = use_step_graph;
-    if (conditional_steps) conditional_steps = conditional_nodes_work();
-    queue_depth = conditional_steps ? n_records : 1;
+    conditional_steps = use_step_graph && conditional_nodes_work();
 #else
-    conditional_steps = true;
-    queue_depth = n_records;
+    conditional_steps = capture_fault != CaptureFault::CONDITIONAL_NODES;
 #endif
-    // Graphs without conditional nodes run every IF body: outputs are then the host's
+    // A graph without conditional nodes would run every IF body (samples, chemistry flushes, probes) at every step
+    if (!conditional_steps) use_step_graph = false;
+    queue_depth = conditional_steps ? n_records : 1;
     staged_outputs = conditional_steps && outputs_stageable();
     staged_time_outputs = false;
     requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);

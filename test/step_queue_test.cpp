@@ -420,6 +420,9 @@ TEST(StepQueueTest, OutputsByStep) {
     if (!comm::is_root()) return;
     EXPECT_TRUE(o.files.count("forces.csv"));
     EXPECT_TRUE(o.files.count("restart_000028.restart"));
+    // Where conditional nodes fail (NCCL across a network), the steps run kernel by kernel to the same results
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("by_step_unconditional", c, false);
 }
 
 TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
@@ -610,6 +613,9 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+    // Without conditional nodes the flushes and samples happen at the same steps
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("fused_unconditional", c, false);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
