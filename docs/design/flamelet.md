@@ -501,7 +501,7 @@ Each must fail under a plausible bug (CONTRIBUTING.md).
 - M. Ihme and H. Pitsch, Modeling of radiation and nitric oxide formation in turbulent nonpremixed flames using a flamelet/progress variable formulation, *Phys. Fluids* 20, 055110 (2008c).
 - M. Ihme and Y. C. See, Prediction of autoignition in a lifted methane/air flame using an unsteady flamelet/progress variable model, *Combust. Flame* 157, 1850–1862 (2010).
 - A. Saghafian, V. E. Terrapon and H. Pitsch, An efficient flamelet-based combustion model for compressible flows, *Combust. Flame* 162, 652–667 (2015).
-- J. A. van Oijen and L. P. H. de Goey, Modelling of premixed laminar flames using flamelet-generated manifolds, *Combust. Sci. Technol.* 161, 113–137 (2000).
+- J. A. van Oijen and L. P. H. de Goey, *Combust. Sci. Technol.* 161, 113–137 (2000): flamelet-generated manifolds (FGM) for premixed flames.
 - O. Gicquel, N. Darabiha and D. Thévenin, Laminar premixed hydrogen/air counterflow flame simulations using flame prolongation of ILDM with differential diffusion, *Proc. Combust. Inst.* 28, 1901–1908 (2000).
 - C. M. Kaul, V. Raman, E. Knudsen, E. S. Richardson and J. H. Chen, Large eddy simulation of a lifted ethylene flame using a dynamic nonequilibrium model for subfilter scalar variance and dissipation rate, *Proc. Combust. Inst.* 34, 1289–1297 (2013).
 - G. Kuenne, A. Ketelheun and J. Janicka, LES modeling of premixed combustion using a thickened flame approach coupled with FGM tabulated chemistry, *Combust. Flame* 158, 1750–1767 (2011).
