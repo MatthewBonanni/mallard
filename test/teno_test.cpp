@@ -742,7 +742,7 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
     // fit up to round-off
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
-    for (const auto & [x0, h] : {std::pair{0.0, 0.1}, std::pair{2.0, 0.3}}) {
+    for (const auto & [x0, h] : {std::pair{0.0, 0.125}, std::pair{2.0, 0.375}}) {
         const uint32_t base = static_cast<uint32_t>(nodes.size());
         for (uint32_t j = 0; j <= 10; j++) {
             for (uint32_t i = 0; i <= 10; i++) nodes.push_back({rtype(x0 + i * h), rtype(j * h)});
