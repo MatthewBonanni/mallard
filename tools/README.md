@@ -257,6 +257,7 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 | Script | Reference |
 |---|---|
 | `examples/counterflow_diffusion/counterflow_reference.py` | Counterflow diffusion flames (Cantera): H2/N2 against air swept in strain rate up to extinction, and full solutions at given nozzle velocities (`--profile`) or local strain rates (`--match`) |
+| `examples/reacting_mixing_layer/mixing_layer_reference.py` | Laminar reacting mixing layer (Cantera): the steady boundary-layer equations with detailed chemistry and mixture-averaged transport, marched in x from the splitter plate; peaks and lift-off along x, profiles across the layer and the whole field |
 | `examples/autoignition_2d/autoignition_reference.py` | 0D references of the autoignition runs: homogeneous constant-volume reactor, ignition delay against temperature, multizone model of each run's initial temperatures |
 | `dev/mixture_riemann.py` | Exact Riemann solution for thermally perfect mixtures of frozen composition (the multicomponent shock-tube tests) |
 | `setup/cantera_mechanisms.py` | Copies the mechanisms too large for the repository (n-hexane, 1268 species) from Cantera's data into `mechanisms/external/` |
@@ -406,6 +407,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `flame_speed.py`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
 | [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `flame_speed.py` | `animate_flame_2d.py` |
 | [`counterflow_diffusion`](../examples/counterflow_diffusion) | `counterflow_reference.py`, `counterflow_setup.py` (mesh, initial state and input) | `plot_counterflow.py`: peak temperature against strain rate, profiles | |
+| [`reacting_mixing_layer`](../examples/reacting_mixing_layer) | `mixing_layer_reference.py`, `mixing_layer_setup.py` (mesh, initial state and input) | `plot_mixing_layer.py`: lift-off lengths, peaks along x and profiles against the boundary-layer reference | |
 | [`triple_flame`](../examples/triple_flame) | `triple_flame.py` | `triple_flame_analysis.py`: propagation speed against Ruetsch et al. | `animate_triple_flame.py` |
 | [`flame_vortex`](../examples/flame_vortex), [`flame_vortex_quenching`](../examples/flame_vortex_quenching) | `flame_vortex.py` | `flame_vortex_analysis.py`: regimes on the spectral diagram of Poinsot et al. | `animate_flame_vortex.py` |
 | [`autoignition_2d`](../examples/autoignition_2d) | `autoignition_restart.py`, `autoignition_reference.py` | `autoignition_deflagration.py`, `autoignition_analysis.py`: heat release against the 0D references, deflagration share | `animate_autoignition.py` |

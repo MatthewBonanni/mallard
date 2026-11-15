@@ -1,10 +1,10 @@
 # Numerical fluxes
 
-This chapter gives the numerical flux $\hat{\mathbf{F}}$ of eq. (2) of [chapter 6](finite_volume.md#semi-discrete-equations):
+This chapter gives the numerical flux $\hat{\mathbf{F}}$ of eq. (2) of [Finite-volume discretization and reconstruction](finite_volume.md#semi-discrete-equations):
 the approximate Riemann solvers, the hybrid central-upwind flux of
 large-eddy simulation, their extension to gas mixtures, the species fluxes,
 and the discrete viscous and diffusive fluxes. Face states come from
-[chapter 6](finite_volume.md). Usage: [Numerics](../guide/numerics.md);
+[Finite-volume discretization and reconstruction](finite_volume.md). Usage: [Numerics](../guide/numerics.md);
 the carbuncle and stationary-shock studies:
 [Numerical methods](../numerics/overview.md#stationary-shocks-on-cell-faces).
 
@@ -23,7 +23,7 @@ $$
 
 a single gas has $\rho E = p/(\gamma - 1) + \tfrac12\rho\lvert\mathbf{u}\rvert^2$
 and $a = \sqrt{\gamma p/\rho}$; mixtures use each side's frozen pair,
-eq. (5) of [chapter 2](thermodynamics_transport.md#frozen-surrogates) ([below](#gas-mixtures)).
+eq. (5) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#frozen-surrogates) ([below](#gas-mixtures)).
 
 ## Riemann solvers
 
@@ -211,7 +211,7 @@ the Ducros sensor restricted to compressions
 ([Ducros et al. 1999](../references.md#ducros-1999);
 [Bhagatwala & Lele 2009](../references.md#bhagatwala-lele-2009)),
 evaluated at every stage from the viscous cell gradients
-([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)):
+([Finite-volume discretization and reconstruction](finite_volume.md#gradients-for-the-viscous-terms)):
 
 $$
 \begin{equation}
@@ -245,15 +245,15 @@ $$
 \end{equation}
 $$
 
-where the low-Mach correction (eq. (14) of [chapter 6](finite_volume.md#low-mach-correction)) applies to the Riemann flux only.
+where the low-Mach correction (eq. (14) of [Finite-volume discretization and reconstruction](finite_volume.md#low-mach-correction)) applies to the Riemann flux only.
 The hybrid flux is not available with SIMPLER splitting
-([chapter 3](chemistry_radiation.md#simpler-balanced-splitting)). Its
+([Chemistry and radiation](chemistry_radiation.md#simpler-balanced-splitting)). Its
 validation: [LES design notes](../design/les.md).
 
 ## Gas mixtures
 
 For mixtures each side carries its frozen pair $(\gamma, e_0)$ of
-eq. (5) of [chapter 2](thermodynamics_transport.md#frozen-surrogates), reconstructed to the face ([chapter 6](finite_volume.md#gas-mixtures)),
+eq. (5) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#frozen-surrogates), reconstructed to the face ([Finite-volume discretization and reconstruction](finite_volume.md#gas-mixtures)),
 and the physical flux uses $\rho E = p/(\gamma - 1) + \rho e_0 + \tfrac12\rho\lvert\mathbf{u}\rvert^2$
 on that side (`riemann::SideThermo`):
 
@@ -284,7 +284,7 @@ on that side (`riemann::SideThermo`):
 - The low-Mach correction uses each side's own $\gamma$ in its Mach number.
 
 With double flux, each face evaluates these fluxes twice, with each cell's
-frozen pair on both sides, as [chapter 2](thermodynamics_transport.md#double-flux)
+frozen pair on both sides, as [Thermodynamics and transport of mixtures](thermodynamics_transport.md#double-flux)
 describes.
 
 ### Species fluxes
@@ -303,7 +303,7 @@ $$
 $$
 
 with $Y_{k,q}^{L,R}$ the reconstructed face mass fractions of each side
-([chapter 6](finite_volume.md#gas-mixtures)). Each cell writes the mass of
+([Finite-volume discretization and reconstruction](finite_volume.md#gas-mixtures)). Each cell writes the mass of
 every species leaving it through each of its faces, so no two threads write
 the same entry. On boundary faces the inflowing mass fractions are the
 prescribed ones (`inlet_state`, also with `nscbc`), those of the image face or image
@@ -333,7 +333,7 @@ q_f = \tfrac12(q_L + q_R), \qquad
 \end{equation}
 $$
 
-the average of the cell gradients of [chapter 6](finite_volume.md#gradients-for-the-viscous-terms)
+the average of the cell gradients of [Finite-volume discretization and reconstruction](finite_volume.md#gradients-for-the-viscous-terms)
 corrected along the face normal so that its component along the line of
 centroids equals the direct difference
 ([Diskin et al. 2010](../references.md#diskin-2010)). This suppresses
@@ -353,7 +353,7 @@ Boundary faces:
 - **symmetry planes**: only the normal stress, no work (the normal velocity
     vanishes), no heat or species flux;
 - **transmissive faces** with an image face
-    ([chapter 9](boundaries_sources.md#transmissive-boundaries)): the values
+    ([Boundary conditions and sources](boundaries_sources.md#transmissive-boundaries)): the values
     and gradients of that interior face, eq. $\eqref{eq:face-values-and-gradients}$;
 - **outflow, far-field and characteristic faces** (and transmissive faces
     without an image): the cell's values with the normal derivatives removed;
@@ -361,7 +361,7 @@ Boundary faces:
 
 ### Single gas
 
-With $\mu = \mu(T_f)$ from eq. (6) of [chapter 1](governing_equations.md#viscous-stress-and-heat-flux) and $\lambda = \mu c_p/Pr$ at the face
+With $\mu = \mu(T_f)$ from eq. (6) of [Governing equations](governing_equations.md#viscous-stress-and-heat-flux) and $\lambda = \mu c_p/Pr$ at the face
 temperature (plus $\mu_t$, $\lambda_t$ averaged from the two cells in LES,
 none at walls),
 
@@ -372,7 +372,7 @@ $$
 \end{equation}
 $$
 
-with $\boldsymbol{\tau}_f$ from eq. (5) of [chapter 1](governing_equations.md#viscous-stress-and-heat-flux) at the face gradients (with the
+with $\boldsymbol{\tau}_f$ from eq. (5) of [Governing equations](governing_equations.md#viscous-stress-and-heat-flux) at the face gradients (with the
 hoop term $u_r/r$ in the divergence for axisymmetric runs) and
 $\nabla T = (\nabla p - RT\nabla\rho)/(\rho R)$ from the gradients of
 $\mathbf{W}$.
@@ -380,9 +380,9 @@ $\mathbf{W}$.
 ### Mixture diffusive fluxes
 
 The transport coefficients $\mu$, $\lambda$, $\rho D_k W_k/\overline{W}$
-and $D_k^T$ are computed per cell (eqs. (7)-(13) of [chapter 2](thermodynamics_transport.md#viscosity-and-conductivity)) and averaged to the
+and $D_k^T$ are computed per cell (eqs. (7)-(13) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#viscosity-and-conductivity)) and averaged to the
 face. With $c_k = \overline{\rho D_k W_k/\overline{W}}$ on the face and
-$Y_{k,f}$ the face average of the cell mass fractions, eq. (10) of [chapter 2](thermodynamics_transport.md#diffusive-fluxes) becomes
+$Y_{k,f}$ the face average of the cell mass fractions, eq. (10) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#diffusive-fluxes) becomes
 
 $$
 \begin{equation}

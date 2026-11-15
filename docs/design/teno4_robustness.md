@@ -1,4 +1,4 @@
-# Design: the order of the `high_order` preset
+# The order of the `high_order` preset
 
 Status: `high_order` is TENO-E order 5. Order 4 reaches order 5's error on
 smooth flow at 0.3 to 0.5 times the CPU time, with 0.4 to 0.6 times the
