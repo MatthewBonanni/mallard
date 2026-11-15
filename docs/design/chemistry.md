@@ -1982,12 +1982,12 @@ temperature profile along the axis, started from Cantera's solution. Strain
 is measured on the stagnation line in both, as the local strain rate of the
 oxidizer stream `K_ox` (the first maximum of `-du/dx` ahead of the flame)
 and as the spread rate `V_T = v / r` at the peak temperature. From
-`U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 90% of Cantera's
-extinction strain rate of 1816 1/s) the steady peak temperature is within
-2% of Cantera's at the same `K_ox` (+0.41% to +1.96%), so V10 passes, but
+`U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 91% of Cantera's
+extinction strain rate of 1811 1/s) the steady peak temperature is within
+2% of Cantera's at the same `K_ox` (+0.35% to +1.93%), so V10 passes, but
 the excess grows with strain and is mostly not a resolution error (at 4 m/s
-it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.74% to
-0.34% between 10 and 22). The finite jets give the flame less strain for
+it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.68% to
+0.28% between 10 and 22). The finite jets give the flame less strain for
 the same `K_ox` than the similarity solution (`V_T / K_ox` 0.89 against
 0.95 at 4 m/s), by an amount that depends on the jets: with 7.5 mm jets the
 excess at 4 m/s reaches 1.9% and was still rising. At matched `V_T` the
@@ -1995,7 +1995,7 @@ peak temperatures agree within 0.3-0.6% everywhere on the branch, for both
 jet widths, and 1.0% at Cantera's extinction strain. Mallard's
 flame still burns at `K_ox` = 1818 1/s (`U_o` = 5.1 m/s) and goes out at
 5.6 m/s (`K_ox` 1890-1975 1/s while burning), so its extinction strain rate
-is 0-9% above Cantera's. Stagnation-line temperature, velocity and species
+is 0.4-9% above Cantera's. Stagnation-line temperature, velocity and species
 profiles overlay Cantera's at matched `K_ox`. Results, plots and the
 resolution and domain-size variants are in the example's README.
 
