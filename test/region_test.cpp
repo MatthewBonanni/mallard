@@ -189,6 +189,21 @@ std::vector<Case> cases() {
     return c;
 }
 
+/** @brief A region's distance and a cell's nodes for the sampler, which device kernels also call. */
+struct ViewDistance {
+    const region::RegionView<Kokkos::HostSpace> * view;
+
+    KOKKOS_INLINE_FUNCTION double operator()(const double * x) const { return view->distance(x); }
+};
+
+struct CellCorners {
+    double x[8][3] = {};
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * out) const {
+        for (int i = 0; i < 3; i++) out[i] = x[k][i];
+    }
+};
+
 std::shared_ptr<Mesh> coarse_unstructured_mesh() {
     auto mesh = std::make_shared<Mesh>();
     if constexpr (N_DIM == 2) {
@@ -394,16 +409,17 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
         const region::Region r = make_region(table);
         const std::vector<double> f = region::cell_fractions(*mesh, r);
         const region::RegionView<Kokkos::HostSpace> & view = r.host();
-        const auto distance = [&view](const double * x) { return view.distance(x); };
-        const region::sampler::Shape<decltype(distance)> shape{distance, view.edge, r.bounded()};
+        const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
         const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
                                              view.vertices.data()};
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
-            double inside = 0.0, total = 0.0;
-            region::sampler::clipped_cell(shape, planes, false, mesh->h_n_nodes_of_cell(c), [&](const uint32_t k, double * x) {
+            CellCorners nodes;
+            for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
                 const uint32_t node = mesh->h_node_of_cell(c, k);
-                for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh->h_node_coords(node, i)) : 0.0;
-            }, inside, total);
+                for (size_t i = 0; i < 3; i++) nodes.x[k][i] = i < N_DIM ? double(mesh->h_node_coords(node, i)) : 0.0;
+            }
+            double inside = 0.0, total = 0.0;
+            region::sampler::clipped_cell(shape, planes, false, mesh->h_n_nodes_of_cell(c), nodes, inside, total);
             const double sampled = inside / total;
             EXPECT_EQ(f[c] == 0.0, sampled == 0.0) << table << " cell " << c << ": " << f[c] << " " << sampled;
             EXPECT_NEAR(f[c], sampled, 1e-12) << table << " cell " << c;

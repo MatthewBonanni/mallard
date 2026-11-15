@@ -58,18 +58,25 @@ KOKKOS_INLINE_FUNCTION uint32_t plane_count(const Node & n) {
 /**
  * @brief The values g[k] at the vertices of simplex v of the affine function
  *        that vanishes on plane j of primitive n, and whether the plane cuts
- *        the simplex: g changes sign over it, and the face (of a box or a
- *        polygon) may meet it, not lying wholly beside it.
+ *        the simplex: g changes sign over it by more than the rounding of the
+ *        local coordinates (vertices within it lie on the plane, as mesh
+ *        nodes on a face do), and the face (of a box or a polygon) may meet
+ *        it, not lying wholly beside it.
  */
 KOKKOS_INLINE_FUNCTION bool cuts(const Node & n, const double * vertices, const uint32_t j, const double v[4][3],
                                  double g[4]) {
     constexpr int n_vertices = N_DIM + 1;
-    double q[4][3];
+    constexpr double ROUNDING = 1e-12;
+    double q[4][3], scale[3] = {0.0, 0.0, 0.0};  // scale[i]: the largest magnitude summed into q[k][i]
     for (int k = 0; k < n_vertices; k++) {
         for (int i = 0; i < 3; i++) {
             q[k][i] = n.m[3 * i] * v[k][0] + n.m[3 * i + 1] * v[k][1] + n.m[3 * i + 2] * v[k][2] + n.d[i];
+            const double a = Kokkos::fabs(n.m[3 * i] * v[k][0]) + Kokkos::fabs(n.m[3 * i + 1] * v[k][1]) +
+                             Kokkos::fabs(n.m[3 * i + 2] * v[k][2]) + Kokkos::fabs(n.d[i]);
+            scale[i] = region::detail::max(scale[i], a);
         }
     }
+    double tolerance = 0.0;
     auto beside = [&](const int i, const double lo, const double hi) {
         bool below = true, above = true;
         for (int k = 0; k < n_vertices; k++) {
@@ -86,8 +93,10 @@ KOKKOS_INLINE_FUNCTION bool cuts(const Node & n, const double * vertices, const 
             if (l != i && Kokkos::isfinite(n.p[l]) && beside(l, -n.p[l], n.p[l])) return false;
         }
         for (int k = 0; k < n_vertices; k++) g[k] = side * q[k][i] - n.p[i];
+        tolerance = ROUNDING * (scale[i] + n.p[i]);
     } else if (n.kind == Kind::HALF_SPACE) {
         for (int k = 0; k < n_vertices; k++) g[k] = q[k][2];
+        tolerance = ROUNDING * scale[2];
     } else {
         const double * a = vertices + 2 * (n.first + j);
         const double * b = vertices + 2 * (n.first + (j + 1 == n.count ? 0 : j + 1));
@@ -100,11 +109,13 @@ KOKKOS_INLINE_FUNCTION bool cuts(const Node & n, const double * vertices, const 
             g[k] = ey * (q[k][0] - a[0]) - ex * (q[k][1] - a[1]);
         }
         if (before || after) return false;
+        tolerance = ROUNDING * (Kokkos::fabs(ey) * (scale[0] + Kokkos::fabs(a[0])) +
+                                Kokkos::fabs(ex) * (scale[1] + Kokkos::fabs(a[1])));
     }
     bool negative = false, positive = false;
     for (int k = 0; k < n_vertices; k++) {
-        negative = negative || g[k] < 0.0;
-        positive = positive || g[k] > 0.0;
+        negative = negative || g[k] < -tolerance;
+        positive = positive || g[k] > tolerance;
     }
     return negative && positive;
 }
@@ -198,7 +209,7 @@ KOKKOS_INLINE_FUNCTION int split(const double v[4][3], const double g[4], double
 
 
 /** @brief Where a part of a simplex lies: wholly inside, wholly outside, or crossed by a surface. */
-enum : uint8_t { INSIDE = 0, OUTSIDE = 1, CROSSED = 2 };
+constexpr uint8_t INSIDE = 0, OUTSIDE = 1, CROSSED = 2;
 
 /** @brief A plane to cut along: plane of primitive node, and its values at the part's vertices. */
 struct Cut {
@@ -242,7 +253,7 @@ KOKKOS_INLINE_FUNCTION uint8_t classify(const Planes & planes, const double v[4]
         if (n_planes == 0) {
             if (Kokkos::fabs(phi) < radius) state = CROSSED;
         } else if (i >= node0) {
-            double g[4];
+            double g[4] = {0.0, 0.0, 0.0, 0.0};
             for (uint32_t j = i == node0 ? plane0 : 0; j < n_planes; j++) {
                 if (!cuts(n, planes.vertices, j, v, g)) continue;
                 state = CROSSED;
