@@ -3122,8 +3122,9 @@ namespace {
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
-// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-15";
+// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
+// starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-16";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
