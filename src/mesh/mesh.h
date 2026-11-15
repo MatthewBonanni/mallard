@@ -318,9 +318,10 @@ class Mesh {
         void compute_face_centroids();
 
         /**
-         * @brief Compute all derived geometry (face areas and normals, cell
-         *        volumes and centroids, face centroids) and the vertex-neighbor
-         *        adjacency from the node coordinates and connectivity.
+         * @brief Compute the vertex-neighbor adjacency, then allocate and
+         *        compute all derived geometry (face areas and normals, cell
+         *        volumes and centroids, face centroids) from the node
+         *        coordinates and connectivity.
          */
         void compute_geometry();
 
@@ -623,6 +624,9 @@ class Mesh {
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
         /** @brief Orient 3D cells positively (Gmsh/VTK convention), in place. */
         static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells);
+
+        /** @brief Allocate the cell and face geometry views (planar measures, no covariance). */
+        void allocate_geometry();
 
         /** @brief Copy the connectivity into the mesh's views, freeing each vector once copied. */
         void allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, CellNodes && cells,
