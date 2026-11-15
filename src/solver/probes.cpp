@@ -1439,7 +1439,8 @@ void Probes::Samples::fill_columns(
     for (const auto & entry : columns) {
         const uint32_t column = entry.first;
         const auto field = entry.second;
-        Kokkos::parallel_for("probe_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) { v(i, column) = field(c(i)); });
+        Kokkos::parallel_for("probe_cell_field", c.extent(0),
+                             KOKKOS_LAMBDA(const size_t i) { v(i, column) = field(c(i)); });
     }
 }
 
@@ -2537,14 +2538,10 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     }
     if (p.point_value) r->point = Kokkos::View<int64_t *>("probe_reduction_point", p.variables.size());
     if (p.average) {
+        using Means = Kokkos::View<double **, Kokkos::LayoutRight>;
         const uint32_t n_cols = static_cast<uint32_t>(p.n_evaluated());
-        if (p.samples_nodes()) {
-            r->mean_nodes = Kokkos::View<double **, Kokkos::LayoutRight>("probe_mean_nodes", p.nodes.cells.extent(0), n_cols);
-        }
-        if (p.samples_quadrature()) {
-            r->mean_quadrature =
-                Kokkos::View<double **, Kokkos::LayoutRight>("probe_mean_quadrature", p.quadrature.cells.extent(0), n_cols);
-        }
+        if (p.samples_nodes()) r->mean_nodes = Means("probe_mean_nodes", p.nodes.cells.extent(0), n_cols);
+        if (p.samples_quadrature()) r->mean_quadrature = Means("probe_mean_quadrature", p.quadrature.cells.extent(0), n_cols);
     }
     p.device_reduction = r;
 }
@@ -2647,14 +2644,15 @@ void Probes::resume_staged(const size_t k) {
     Probe & p = *probes[k];
     if (!p.average || !p.device_reduction || p.device_reduction->means_current) return;
     Probe::DeviceReduction & r = *p.device_reduction;
-    const auto copy = [&](const Samples & S, const std::vector<double> & host, const Kokkos::View<double **, Kokkos::LayoutRight> & mean) {
+    using HostRows = Kokkos::View<const double **, Kokkos::LayoutRight, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+    const auto copy = [&](const Samples & S, const std::vector<double> & host,
+                          const Kokkos::View<double **, Kokkos::LayoutRight> & mean) {
         // Rank 0's means in sample order (zero before the first sample), or each rank's undistributed
         const size_t width = p.n_evaluated();
         const bool holds = !S.distributed || comm::is_root();
         const std::vector<double> local =
             S.scatter(holds && host.empty() ? std::vector<double>(S.n_global * width, 0.0) : host, width);
-        Kokkos::deep_copy(mean, Kokkos::View<const double **, Kokkos::LayoutRight, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
-                                    local.data(), mean.extent(0), mean.extent(1)));
+        Kokkos::deep_copy(mean, HostRows(local.data(), mean.extent(0), mean.extent(1)));
     };
     if (p.samples_nodes()) copy(p.nodes, p.mean_nodes, r.mean_nodes);
     if (p.samples_quadrature()) copy(p.quadrature, p.mean_quadrature, r.mean_quadrature);

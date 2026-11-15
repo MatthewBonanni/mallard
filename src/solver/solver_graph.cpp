@@ -538,13 +538,14 @@ void Solver::device_step_body() {
             if ((probe_trigger_vars[k] != NO_TRIGGER_VARS) != reduced) continue;
             const bool averaged = probes.staged_clock(staged_probes[k]).average != 0;
             const uint32_t * const changed = &probe_due.data()[n_probes + 2 + k];
+            const uint32_t * const sampled = &probe_due.data()[2 * n_probes + 2 + k];
             double * const out = reduced ? trigger_vars.data() + probe_trigger_vars[k] : nullptr;
             device_if(&probe_due.data()[k], [&] {
                 ProbeFluxes fluxes;
                 probes.evaluate_staged(staged_probes[k], probe_fields(fluxes), &step_loop.data()->seq);
                 if (!reduced) return;
                 if (averaged) {
-                    probes.average_staged(staged_probes[k], &probe_due.data()[2 * n_probes + 2 + k], &probe_clocks.data()[k].average_a);
+                    probes.average_staged(staged_probes[k], sampled, &probe_clocks.data()[k].average_a);
                 } else {
                     probes.reduce_staged(staged_probes[k], changed, out);
                 }
