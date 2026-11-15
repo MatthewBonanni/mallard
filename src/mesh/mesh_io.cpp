@@ -241,17 +241,28 @@ void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, C
     }
     release(partner);
 
-    // Faces renumbered in the order of the local cells, keeping their orientation
+    // Faces renumbered in the order of the local cells, keeping their orientation; with halo cells, those
+    // between an owned and a halo cell follow the other faces of owned cells, and faces of halo cells only come last
     {
         std::vector<uint32_t> new_face(n_faces, NO_NODE), old_face;
         old_face.reserve(n_faces);
-        for (uint32_t & f : cell_faces) {
+        for (const uint32_t f : cell_faces) {
             if (new_face[f] == NO_NODE) {
                 new_face[f] = static_cast<uint32_t>(old_face.size());
                 old_face.push_back(f);
             }
-            f = new_face[f];
         }
+        if (n_owned_cells) {
+            auto halo = [&](int32_t c) { return c >= static_cast<int32_t>(n_owned_cells); };
+            auto owned = [&](int32_t c) { return c >= 0 && !halo(c); };
+            const auto rest = std::stable_partition(old_face.begin(), old_face.end(), [&](uint32_t f) {
+                return owned(face_cells[f][0]) || owned(face_cells[f][1]);
+            });
+            std::stable_partition(old_face.begin(), rest,
+                                  [&](uint32_t f) { return !halo(face_cells[f][0]) && !halo(face_cells[f][1]); });
+            for (uint32_t f = 0; f < n_faces; f++) new_face[old_face[f]] = f;
+        }
+        for (uint32_t & f : cell_faces) f = new_face[f];
         std::vector<std::array<int32_t, 2>> cells_new(n_faces);
         std::vector<uint8_t> shifts_new(n_faces);
         std::vector<uint32_t> offsets_new{0}, nodes_new;
