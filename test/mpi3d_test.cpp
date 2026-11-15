@@ -76,6 +76,23 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, TENOBlockPathAcrossPeriodicSeamsMatchesSerial) {
+    // The partition cuts the box along x; the y and z seams, split across the
+    // ranks, close each rank's block on itself, and every cell away from the
+    // partition faces takes the block path. The serial run numbers its cells
+    // as the input does, which leaves them all on the unstructured path
+    std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 5\n");
+    const std::string generated = "Nx = 12\nNy = 12\nNz = 12\nLx = 1.0\n";
+    input.replace(input.find(generated), generated.size(), "Nx = 30\nNy = 8\nNz = 8\nLx = 3.75\ncell_order = \"auto\"\n");
+    input.erase(input.find("[[boundaries]]"), input.find("[numerics]") - input.find("[[boundaries]]"));
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+             "[[periodic]]\nzones = [\"back\", \"front\"]\n[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input, [](const Solver & solver) {
+        const auto & teno = dynamic_cast<const TENO &>(solver.get_face_reconstruction());
+        EXPECT_EQ(teno.n_block_cells, solver.get_mesh()->n_interior());
+    });
+}
+
 TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
     // Every rank's cells of a stencil shape read the table of the shape's cell
     // with the lowest global id, which another rank may own
