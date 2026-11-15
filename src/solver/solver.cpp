@@ -2496,7 +2496,7 @@ int Solver::run_loop() {
                 if (record.reasons != 0) {
                     // The steps enqueued after this one do nothing
                     drain_device_steps();
-                    after_step(step_timer, true);
+                    after_step(step_timer, &record);
                     continue;
                 }
                 n_queued_steps++;
@@ -2525,7 +2525,7 @@ int Solver::run_loop() {
             Kokkos::Timer step_timer;
             calc_dt();
             take_step();
-            after_step(step_timer, false);
+            after_step(step_timer, nullptr);
         }
     } catch (const DivergedError &) {
         unflush_chemistry();
@@ -2566,13 +2566,17 @@ int Solver::run_loop() {
     return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
-void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
+void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * record) {
     act_on_requests();
     check_fields();
     // Steps on the device update p_max themselves
-    if (p_max.is_allocated() && !on_device) update_p_max();
+    if (p_max.is_allocated() && !record) update_p_max();
     if (state_needed()) flush_chemistry();
-    if (statistics.due(step, t)) sample_statistics();
+    if (record && record->statistics) {
+        if (record->spectra) statistics.write_staged_spectra(step, t, (record->seq - 1) % step_records.extent(0));
+    } else if (statistics.due(step, t)) {
+        sample_statistics();
+    }
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
     Kokkos::Timer output_timer;

@@ -282,8 +282,6 @@ class Probes {
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
          *         fields and statistics' device averages only. */
         bool can_stage(size_t k, const Statistics & statistics) const;
-        /** @brief Whether a step graph can reduce staged probe k's values: not time-averaged, no host columns. */
-        bool can_reduce(size_t k) const;
         /**
          * @brief Probe k is evaluated in a step graph into staging of n_records record slots; with reduce, its
          *        values are reduced there too (reduce_staged), over the ranks with NCCL if use_nccl (collective).
@@ -297,10 +295,20 @@ class Probes {
             rtype tol = 0.0;        // the round-off allowance of time_interval
             uint64_t n_written = 0;
             uint32_t average = 0;   // samples for its time averages every average_interval steps after average_start
+            // Its time averages' total weight, time of the last sample and samples, and the last sample's weight
+            double average_weight = 0.0, average_t_last = 0.0, average_a = 0.0;
+            uint64_t average_samples = 0;
         };
         StagedClock staged_clock(size_t k) const;
         uint64_t get_average_interval() const { return average_interval; }
         rtype get_average_start() const { return average_start; }
+        /**
+         * @brief Adds staged averaging probe k's samples just evaluated on the device to its device means with weight
+         *        *a, if *sampled (both in device memory), as sample_average adds them to the host's (reduced probes).
+         */
+        void average_staged(size_t k, const uint32_t * sampled, const double * a);
+        /** @brief Staged probe k's device means, from the host's if the host sampled since (collective). */
+        void resume_staged(size_t k);
         /** @brief Adds staged averaging probe k's samples at (step, t) from record slot `slot` (collective). */
         void sample_staged_average(size_t k, uint64_t step, rtype t, uint64_t slot);
         /** @brief As average_needs, of the staged probes. */
@@ -421,11 +429,11 @@ class Probes {
              */
             void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
             void allocate_staging(uint64_t n_records);
-            /** @brief Copies values into record slot (*seq - 1) % n_records of staging, the columns' from their cell
-             *         fields. */
-            void copy_to_staging(const uint64_t * seq,
-                                 const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> &
-                                     columns) const;
+            /** @brief gather's cell columns into values: each sample's cell's value of the column's device field. */
+            void fill_columns(
+                const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const;
+            /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
+            void copy_to_staging(const uint64_t * seq) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
             /**
              * @brief Rows of width values per local sample, from rank 0's rows in global sample order (or each
@@ -508,6 +516,9 @@ class Probes {
                 ExactSums sums;
                 Kokkos::View<double *> lo, hi;                      // extrema of each variable
                 Kokkos::View<int64_t *> point;                      // one-point probes: its values' bits
+                // Averaging probes: the means of the local nodes and quadrature points, the host's as of resume_staged
+                Kokkos::View<double **, Kokkos::LayoutRight> mean_nodes, mean_quadrature;
+                bool means_current = false;
                 bool summed = false;                                // some value is of the sums
                 bool use_nccl = false;
             };
