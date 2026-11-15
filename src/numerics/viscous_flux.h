@@ -377,18 +377,17 @@ struct ViscousFluxFunctor {
             rtype x[N_DIM], x_1[N_DIM];
             points.point(i_face, q, x);
             periodic.backward(s, x, x_1);
-            rtype dU0[N_CONSERVATIVE][N_DIM], dU1[N_CONSERVATIVE][N_DIM];
-            polynomials.gradient<DEG>(c0, x, dU0);
-            polynomials.gradient<DEG>(c1, x_1, dU1);
-            if (periodic.rotated()) periodic.rotate_gradients(s, dU1, N_CONSERVATIVE, 1);
-            rtype W0[N_CONSERVATIVE], W1[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE {
-                W0[i] = face_solution(i_face, q, 0, i);
-                W1[i] = face_solution(i_face, q, 1, i);
-            }
+            // One side at a time, so that a single set of conservative gradients is live
+            auto side = [&](const uint8_t k, rtype * q_k, rtype g_k[NQ][N_DIM]) {
+                rtype dU[N_CONSERVATIVE][N_DIM], W_k[N_CONSERVATIVE];
+                polynomials.gradient<DEG>(k ? c1 : c0, k ? x_1 : x, dU);
+                if (k && periodic.rotated()) periodic.rotate_gradients(s, dU, N_CONSERVATIVE, 1);
+                FOR_I_CONSERVATIVE W_k[i] = face_solution(i_face, q, k, i);
+                point_state(W_k, dU, q_k, g_k);
+            };
             rtype qa[NQ], ga[NQ][N_DIM], qb[NQ], gb[NQ][N_DIM], q_f[NQ], g_f[NQ][N_DIM];
-            point_state(W0, dU0, qa, ga);
-            point_state(W1, dU1, qb, gb);
+            side(0, qa, ga);
+            side(1, qb, gb);
             for (uint8_t k = 0; k < NQ; k++) {
                 q_f[k] = 0.5_r * (qa[k] + qb[k]);
                 const rtype jump = (qb[k] - qa[k]) * inv_d;
