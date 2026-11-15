@@ -1,1 +1,1 @@
-- Moving regions also sample curved cells, and shapes with a smooth edge or in axisymmetric runs, with a team of threads per cell on GPUs, with unchanged results.
+- Moving regions also sample curved cells, and shapes with a smooth edge or in axisymmetric runs, with a team of threads per cell on GPUs, with unchanged results. On an A100, a 3D moving region across curved walls runs in 15 s instead of over 250 s, and a moving region with a smooth edge writing a VTU every 10 steps in 18 s instead of 54 s.
