@@ -414,7 +414,8 @@ class TENO : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
         // When allocated (cell / 2, l, cell % 2, var), the reconstruction also writes there the central
         // coefficients of the conservative variables of the cells it finds smooth, in the unscaled frame
-        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones
+        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones and for those
+        // whose face values fall back to the cell mean (inadmissible at a face point)
         Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
 
         // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)

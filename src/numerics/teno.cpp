@@ -1612,7 +1612,7 @@ struct TENOFunctor {
         }
     }
 
-    /** @brief Marks cell i_cell's polynomial as unusable: TENO selects stencils there. */
+    /** @brief Marks cell i_cell's polynomial as unusable: TENO selects stencils there, or its face values are the mean. */
     KOKKOS_INLINE_FUNCTION
     void mark_troubled_polynomial(const uint32_t i_cell) const {
         polynomials(i_cell >> 1, 0, i_cell & 1u, 0) = Kokkos::Experimental::quiet_NaN_v<rtype>;
@@ -1982,6 +1982,8 @@ struct TENOFunctor {
             }
         }
         if (!admissible) {
+            // The viscous flux would pair the polynomial's gradients with the cell mean
+            if (polynomials.extent(0)) mark_troubled_polynomial(i_cell);
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
                 const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 0 : 1;
@@ -2230,6 +2232,7 @@ struct TENOFunctor {
         if (!admissible) admissible_team[lane] = 0;
         team.team_barrier();
         if (!admissible_team[lane]) {
+            if (part == 0 && polynomials.extent(0)) mark_troubled_polynomial(i_cell);
             rtype W0[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
             for (uint32_t p = part; p < n_points; p += PARTS) {

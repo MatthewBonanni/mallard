@@ -259,6 +259,52 @@ TEST_P(TENOMesh, BoundPreservingScalingLimitsOvershoot) {
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENOMesh, ::testing::Values("cartesian", "cartesian_tri"));
 
+TEST(TENOTest, CellsWhoseFaceValuesFallBackToTheMeanHaveNoPolynomial) {
+    // Every cell smooth, and a pressure step to near vacuum that the central polynomials undershoot below zero:
+    // those cells' face values are their means, so the viscous flux must not differentiate their polynomials
+    auto mesh = make_mesh("cartesian", 24, 24);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages(*mesh, [](double x, double y, double * U) {
+        const double rho = 1.0 + 0.1 * std::cos(M_PI * y);
+        const double p = (x + 0.3 * y < 0.55) ? 1.0 : 1.0e-3;
+        U[0] = rho;
+        U[1] = 0.0;
+        U[2] = 0.0;
+        U[3] = p / (double(GAMMA) - 1.0);
+    });
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = avg(c, i);
+        euler.compute_W_from_conservatives(Wc, U);
+        FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto teno = make_teno(mesh, bd, 5, "troubled_threshold = 1e9\nbound_preserving = false\n");
+    teno->polynomials = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("polynomials", (mesh->n_cells + 1) / 2, teno->n_dof_large);
+    const uint8_t n_quad = teno->n_face_quadrature_points();
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+    teno->calc_face_values(W, face_W);
+    auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+    auto h_p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->polynomials);
+    uint32_t n_mean = 0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        bool mean = true;
+        for (uint32_t k = mesh->h_offsets_faces_of_cell(c); k < mesh->h_offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t f = mesh->h_faces_of_cell(k);
+            const uint8_t side = mesh->h_cells_of_face(f, 0) == int32_t(c) ? 0 : 1;
+            for (uint8_t q = 0; q < n_quad; q++) {
+                FOR_I_CONSERVATIVE mean = mean && h_face_W(f, q, side, i) == h_W(c, i);
+            }
+        }
+        n_mean += mean;
+        EXPECT_EQ(std::isnan(h_p(c / 2, 0, c % 2, 0)), mean) << "cell " << c;
+    }
+    EXPECT_GT(n_mean, 0u);
+}
+
 TEST(TENOTest, ConditionLimitIsEnforced) {
     // Equilibrated least-squares systems on these meshes are well conditioned,
     // so only an impossible limit (below 1) rejects every stencil
