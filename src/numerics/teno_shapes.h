@@ -52,7 +52,8 @@ struct ShapeSearch {
     Kokkos::View<rtype *[N_DIM]> cell_coords, face_coords, node_coords, shifts;
     Kokkos::View<uint32_t *> offsets_cells_of_cell, cells_of_cell, offsets_faces_of_cell, faces_of_cell,
         offsets_nodes_of_cell, nodes_of_cell;
-    Kokkos::View<uint8_t *> cells_of_cell_shift, face_shift;
+    ShiftRows cells_of_cell_shift;
+    Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<int32_t *> face_bc;
     Kokkos::View<int8_t *[3]> shift_lattice;
