@@ -177,6 +177,8 @@ OTHER_GUARDS = [
     ("src/mesh/mesh_io.cpp", "parametric nodes are not supported"),
     ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
+    ("src/solver/solver.cpp", "is not available for gas mixtures yet"),
+    ("src/solver/solver.cpp", "is not available for axisymmetric runs yet"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")
 
