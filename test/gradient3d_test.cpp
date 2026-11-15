@@ -251,10 +251,12 @@ TEST(MUSCL3D, TableGradientsMatchTheLeastSquaresSolveOnAStretchedBoxWithBoundary
     LSQGradientFunctor solve = make_gradient(*mesh, bd, W, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("grad", mesh->n_cells));
     Kokkos::parallel_for(mesh->n_cells, solve);
     const auto direct = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solve.gradients);
+    // Rows share on a grid of about 1e-9 of their magnitude in double, 4e-6 in single precision
+    const double tol = sizeof(rtype) == sizeof(double) ? 1e-7 : 2e-4;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         FOR_I_CONSERVATIVE {
             for (int d = 0; d < 3; d++) {
-                ASSERT_NEAR(table(c, i, d), direct(c, i, d), roundoff(1e-7) * (1.0 + std::abs(double(direct(c, i, d)))))
+                ASSERT_NEAR(table(c, i, d), direct(c, i, d), tol * (1.0 + std::abs(double(direct(c, i, d)))))
                     << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
             }
         }

@@ -19,8 +19,8 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -854,16 +854,42 @@ void MUSCL::find_tables() {
         }
     }
 
-    // Rows equal on the grid share the row of the lowest global id, over the ranks
+    // Rows equal on the grid share the row of the lowest global id, over the ranks. Single precision rows carry
+    // round-off of tens of ulps, so they share on a grid just above it
+    constexpr int grid_bits = std::is_same_v<rtype, double> ? teno::SHARE_GRID_BITS : 18;
     std::vector<teno::CanonicalTable> cw(m), cr(m);
     std::vector<uint64_t> gid(m);
-    for (uint32_t i = 0; i < m; i++) {
+    Kokkos::parallel_for("muscl_table_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, m),
+                         [&](const uint32_t i) {
         const uint32_t c = cells[i];
         const std::vector<uint16_t> segments(k_of(c + 1) - k_of(c), 1);
-        cw[i] = teno::CanonicalTable(wv.data() + size_t(k_of(c)) * N_DIM, N_DIM, segments);
-        cr[i] = teno::CanonicalTable(rv.data() + size_t(k_of(c)) * N_DIM, N_DIM, segments);
-        gid[i] = mesh->h_global_cell_id.empty() ? uint64_t(c) : mesh->h_global_cell_id[c];
-    }
+        cw[i] = teno::CanonicalTable(wv.data() + size_t(k_of(c)) * N_DIM, N_DIM, segments, grid_bits);
+        cr[i] = teno::CanonicalTable(rv.data() + size_t(k_of(c)) * N_DIM, N_DIM, segments, grid_bits);
+        gid[i] = mesh->h_global_cell(c);
+    });
+
+    // Distinct rows over the ranks, counted by their canonical hashes, decide before the rows are stored
+    const int p = comm::size();
+    const auto distinct = [&](const std::vector<teno::CanonicalTable> & t) {
+        std::vector<uint64_t> h;
+        for (uint32_t i = 0; i < m; i++) {
+            if (cells[i] < mesh->n_owned()) h.push_back(t[i].hash);
+        }
+        std::sort(h.begin(), h.end());
+        h.erase(std::unique(h.begin(), h.end()), h.end());
+        std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
+        for (const uint64_t x : h) send[x % uint64_t(p)].push_back(x);
+        std::vector<uint64_t> mine;
+        for (const auto & from : comm::alltoallv(send)) mine.insert(mine.end(), from.begin(), from.end());
+        std::sort(mine.begin(), mine.end());
+        return comm::allreduce(uint64_t(std::unique(mine.begin(), mine.end()) - mine.begin()), comm::Op::SUM);
+    };
+    uint64_t n_owned_candidates = 0;
+    for (uint32_t i = 0; i < m; i++) n_owned_candidates += cells[i] < mesh->n_owned();
+    n_candidates_global = comm::allreduce(n_owned_candidates, comm::Op::SUM);
+    n_rows_global = std::max(distinct(cw), distinct(cr));
+    if (n_rows_global * MIN_CELLS_PER_ROW > n_candidates_global) return;
+
     teno::TableStore<rtype> ws(N_DIM), rs(N_DIM);
     const auto w_row = ws.add(m, cw.data(), [&](const uint32_t i) { return wv.data() + size_t(k_of(cells[i])) * N_DIM; },
                               gid.data());
@@ -871,20 +897,7 @@ void MUSCL::find_tables() {
                               gid.data());
     ws.agree();
     rs.agree();
-
-    // Each distinct row counts on the rank that owns the cell whose row it takes
-    std::unordered_set<uint64_t> owned;
-    for (uint32_t i = 0; i < m; i++) {
-        if (cells[i] < mesh->n_owned()) owned.insert(gid[i]);
-    }
-    const auto distinct = [&](const teno::TableStore<rtype> & store) {
-        uint64_t n = 0;
-        for (size_t k = 0; k < store.size(); k++) n += owned.count(store.owner(k));
-        return comm::allreduce(n, comm::Op::SUM);
-    };
-    n_candidates_global = comm::allreduce(uint64_t(owned.size()), comm::Op::SUM);
-    n_rows_global = std::max(distinct(ws), distinct(rs));
-    if (m == 0 || n_rows_global * MIN_CELLS_PER_ROW > n_candidates_global) return;
+    if (m == 0) return;
 
     uint32_t stride = 0;
     for (size_t k = 0; k < ws.size(); k++) stride = std::max<uint32_t>(stride, ws.slots(k));

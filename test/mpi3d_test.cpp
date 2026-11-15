@@ -107,10 +107,14 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") + layers);
 }
 
-TEST(MPI3DTest, MUSCLTablesOnHexahedraWithBoundaryCellsMatchSerial) {
-    // The outermost halo layer misses faces, which would look like boundary faces and give its cells rows
-    // that their owners don't have
+TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"));
+}
+
+TEST(MPI3DTest, MUSCLTablesLeaveOutTheOutermostHaloLayer) {
+    // Its missing faces would look like boundary faces: a row from them, equal on the grid to its owner's
+    // but not bitwise, could be the one that the owner's cells share
+    expect_matches_serial(box_input("cartesian", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
 
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {

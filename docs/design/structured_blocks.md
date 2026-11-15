@@ -420,10 +420,11 @@ tetrahedron, no face on a characteristic boundary) without a rotational
 periodic face has a row, except in the outermost halo layer, whose missing
 faces would look like boundary faces; the states across its boundary faces
 still come from those faces. Rows equal on #994's grid (about $10^{-9}$ of
-their magnitude) are shared, each taking the row of its lowest global id,
+their magnitude; $2^{-18}$ in single precision, above its round-off) are shared, each taking the row of its lowest global id,
 agreed over the ranks, so a cell's row depends on its own geometry alone and
 not on the partition. When fewer than 8 cells share each distinct row, over
-the ranks, no cell has a row: the rows would cost memory without sharing. The cells of a block whose faces all
+the ranks (counted by the rows' hashes before any is stored), no cell has a
+row: the rows would cost memory without sharing. The cells of a block whose faces all
 have a neighbor take them as the cell plus their block shape's offsets, every
 other cell reads its faces, and both read the same row, so the two are bitwise
 equal.
