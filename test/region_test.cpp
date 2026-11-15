@@ -204,8 +204,8 @@ struct CellCorners {
     }
 };
 
-/** @brief The fraction of the axis-aligned cell from lo to hi in region r: clipped (clipped_cell) or sampled. */
-double box_cell_fraction(const region::Region & r, const Point & lo, const Point & hi, const bool clipped) {
+/** @brief The fraction of the axis-aligned cell from lo to hi in region r, by clipped_cell. */
+double box_cell_fraction(const region::Region & r, const Point & lo, const Point & hi) {
     const region::RegionView<Kokkos::HostSpace> & view = r.host();
     const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
     const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
@@ -220,11 +220,7 @@ double box_cell_fraction(const region::Region & r, const Point & lo, const Point
         nodes.x[k][2] = N_DIM == 3 ? (z_hi ? hi[2] : lo[2]) : 0.0;
     }
     double inside = 0.0, total = 0.0;
-    if (clipped) {
-        region::sampler::clipped_cell(shape, planes, false, n, nodes, inside, total);
-    } else {
-        region::sampler::straight_cell(shape, false, n, nodes, inside, total);
-    }
+    region::sampler::clipped_cell(shape, planes, false, n, nodes, inside, total);
     return inside / total;
 }
 
@@ -528,7 +524,7 @@ TEST(RegionTest, MeshFacesOnARegionsFacesGiveExactlyZeroOrOne) {
             for (int j = 0; j < 10; j++) {
                 for (int k = 0; k < nz; k++) {
                     const Point lo = {0.1 * i, 0.1 * j, 0.1 * k}, hi = {0.1 * (i + 1), 0.1 * (j + 1), 0.1 * (k + 1)};
-                    const double f = box_cell_fraction(r, lo, hi, true);
+                    const double f = box_cell_fraction(r, lo, hi);
                     EXPECT_TRUE(f == 0.0 || f == 1.0) << table << " cell " << i << " " << j << " " << k << ": " << f;
                     ones += f == 1.0;
                 }
@@ -539,7 +535,7 @@ TEST(RegionTest, MeshFacesOnARegionsFacesGiveExactlyZeroOrOne) {
 }
 
 TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
-    // Faces smaller than the cell, around its center: each of its simplices needs more than CLIP_DEPTH cuts
+    // Faces much smaller than the simplex, around its centroid: more than CLIP_DEPTH cuts
     std::string table;
     double exact = 0.0;
     if constexpr (N_DIM == 2) {
@@ -547,23 +543,30 @@ TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
         constexpr int n = 64;
         for (int k = 0; k < n; k++) {
             const double t = 2.0 * PI * k / n;
-            table += (k > 0 ? ", [" : "[") + std::to_string(0.5 + 0.3 * std::cos(t)) + ", " +
-                     std::to_string(0.5 + 0.3 * std::sin(t)) + "]";
+            table += (k > 0 ? ", [" : "[") + std::to_string(0.3 + 0.15 * std::cos(t)) + ", " +
+                     std::to_string(0.3 + 0.15 * std::sin(t)) + "]";
         }
         table += "]}";
-        exact = 0.5 * n * 0.09 * std::sin(2.0 * PI / n);
+        exact = 0.5 * n * 0.0225 * std::sin(2.0 * PI / n);
     } else {
         table = "{type = \"intersection\", regions = [";
         for (const std::string axis : {"[1, 2, 3]", "[3, -1, 2]", "[-2, 3, 1]"}) {
             table += std::string(axis == "[1, 2, 3]" ? "" : ", ") +
-                     "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.5, 0.5, 0.5], rotate = {axis = " + axis +
-                     ", angle = 30}, pivot = [0.5, 0.5, 0.5]}";
+                     "{type = \"box\", center = [0.25, 0.25, 0.25], size = [0.2, 0.2, 0.2], rotate = {axis = " + axis +
+                     ", angle = 30}, pivot = [0.25, 0.25, 0.25]}";
         }
         table += "]}";
     }
     const region::Region r = make_region(table);
-    const Point lo = {0.0, 0.0, 0.0}, hi = {1.0, 1.0, 1.0};
-    const double clipped = box_cell_fraction(r, lo, hi, true), sampled = box_cell_fraction(r, lo, hi, false);
+    const region::RegionView<Kokkos::HostSpace> & view = r.host();
+    const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+    const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                         view.vertices.data()};
+    const double v[4][3] = {{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+    const double measure = N_DIM == 2 ? 0.5 : 1.0 / 6.0;
+    double clipped = 0.0, sampled = 0.0, total = 0.0;
+    region::sampler::clipped_simplex(shape, planes, false, v, measure, clipped, total);
+    region::sampler::simplex(shape, false, v, measure, sampled, total);
     EXPECT_EQ(clipped, sampled);
     if (N_DIM == 2) EXPECT_GT(std::abs(sampled - exact), 1e-9);
 }
