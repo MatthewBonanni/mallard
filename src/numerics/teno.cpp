@@ -110,8 +110,10 @@ struct CellTables {
     std::array<uint16_t, teno::MAX_FACES> small_size = {};
     std::vector<int32_t> small_cells, small_faces;  // the faces' sector stencils one after another
     std::vector<rtype> small_pinv;                  // (s, l)
-    // Cells of one key (KeyedSetup) have one table: after the first, they take its order and shape, values empty
+    // Cells of one key (KeyedSetup) have its representative's table and global id: after the first, they take
+    // its order and shape, values empty
     uint32_t shape_key = ~0u;
+    uint64_t shape_gid = 0;
 };
 
 using IndexRow = std::vector<int32_t> CellTables::*;
@@ -647,7 +649,10 @@ class PackedRows {
             });
             auto id = [&](const uint32_t c) { return gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c); };
             std::vector<uint64_t> ids(n_own);
-            for (uint32_t j = 0; j < n_own; j++) ids[j] = id(own[j]);
+            for (uint32_t j = 0; j < n_own; j++) {
+                const CellTables & t = tables[own[j]];
+                ids[j] = t.shape_key != ~0u ? t.shape_gid : id(own[j]);
+            }
             const std::vector<uint32_t> own_shapes =
                 store.add(n_own, own_canonical.data(), [&](uint32_t j) { return ordered.data() + first_value[j]; }, ids.data());
             ordered = std::vector<rtype>();
@@ -663,7 +668,6 @@ class PackedRows {
                 const auto & [order, shape] = keyed.at(tables[c].shape_key);
                 canonical[c].order = order;
                 shapes[c] = shape;
-                store.join(shape, id(c));
             }
             cell_shape.insert(cell_shape.end(), shapes.begin(), shapes.end());
             std::vector<uint64_t> first_image(n + 1, images.size() / 2);
@@ -1339,6 +1343,7 @@ class KeyedSetup {
                 const int id = token.acquire();
                 taken[j] = take(records[groups.group[c]], c, values[j] != 0, tables[j], cut[j], scans[size_t(id)]);
                 tables[j].shape_key = groups.group[c];
+                tables[j].shape_gid = groups.groups[groups.group[c]].rep_gid;
                 token.release(id);
             });
             for (uint32_t j = 0; j < n; j++) {
@@ -1778,8 +1783,9 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
                                    t.tables, t_pack);
     if (t_shapes >= 0.0) {
+        const auto [fitted, of] = comm::allreduce(std::array<uint64_t, 2>{n_cells_fitted, n_target}, comm::Op::SUM);
         setup_status += logging::format(", stencil shapes %.2f s (%s fitted of %s)", t_shapes,
-                                        logging::count(n_cells_fitted).c_str(), logging::count(n_target).c_str());
+                                        logging::count(fitted).c_str(), logging::count(of).c_str());
     }
     if (t.n_host_cells > 0) {
         setup_status += logging::format(", %llu cells redone on the host in %.2f s",
