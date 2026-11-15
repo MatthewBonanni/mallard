@@ -514,6 +514,100 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
 }
 
+namespace {
+
+// Taylor-Green on the periodic box of side 2 pi, of n^d cells, and the corner [0, pi/4]^d (whole cells for n a
+// multiple of 8): over it <cos^2> = a and <sin^2> = b, so that <|S|^2> = 4 a^2 (2D) or 4 a^3 + 2 a b^2 (3D),
+// against 1 and 3/4 over the box
+const int TG_N = N_DIM == 3 ? 24 : 64;
+const double TG_NU = 0.01;
+
+std::vector<std::string> taylor_green() {
+    return N_DIM == 3 ? std::vector<std::string>{"sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"}
+                      : std::vector<std::string>{"sin(x) * cos(y)", "-cos(x) * sin(y)"};
+}
+
+double tg_strain(const bool corner) {
+    const double a = corner ? 0.5 + 1.0 / std::numbers::pi : 0.5, b = 1.0 - a;
+    return N_DIM == 3 ? 4.0 * a * a * a + 2.0 * a * b * b : 4.0 * a * a;
+}
+
+std::string with_check(std::string input, const std::string & check) {
+    const std::string corner = N_DIM == 3
+        ? "{type = \"box\", center = [0.39269908169872414, 0.39269908169872414, 0.39269908169872414], "
+          "size = [0.7853981633974483, 0.7853981633974483, 0.7853981633974483]}"
+        : "{type = \"rectangle\", center = [0.39269908169872414, 0.39269908169872414], "
+          "size = [0.7853981633974483, 0.7853981633974483]}";
+    return input + "[regions]\ncorner = " + corner + "\n[check]\nregions = [\"corner\"]\n" + check;
+}
+
+const CheckEstimate * find_estimate(const CheckReport & r, const std::string & id) {
+    for (const CheckEstimate & e : r.resolution) {
+        if (e.id == id) return &e;
+    }
+    return nullptr;
+}
+
+/** @brief The restart file of one tiny step of Taylor-Green averaging these [statistics] fields and products. */
+std::string tg_statistics(const std::string & name, const std::string & statistics) {
+    const std::string prefix = (rank_scratch_dir() / name).string();
+    std::string input = periodic_box(TG_N, TG_NU, taylor_green());
+    input.replace(input.find("t_stop = 1.0\ncfl = 0.5\n"), 22, "n_steps = 1\ndt = 1e-7\n");
+    input += "[output]\ncheck_interval = 1000000\n[statistics]\n" + statistics + "[[write_data]]\nprefix = \"" +
+             prefix + "\"\nformat = \"restart\"\ninterval = 1\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_input_string(input));
+    solver.run();
+    return prefix + "_000001.restart";
+}
+
+} // namespace
+
+TEST(CheckResolution, ValuesPerRegionFromTheInitialDissipation) {
+    const CheckReport r = check(with_check(periodic_box(TG_N, TG_NU, taylor_green()), ""));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    const CheckEstimate * size = find_estimate(r, "region.corner.cell_size_mean");
+    const CheckEstimate * eps = find_estimate(r, "region.corner.epsilon");
+    const CheckEstimate * eta = find_estimate(r, "region.corner.eta");
+    ASSERT_TRUE(size && eps && eta);
+    EXPECT_EQ(eps->region, "corner");
+    EXPECT_EQ(eps->quantity, "corner: dissipation epsilon, mean");
+    EXPECT_NEAR(size->value, 2.0 * std::numbers::pi / TG_N, roundoff(1e-12));
+    const double expected = TG_NU * tg_strain(true);
+    EXPECT_NEAR(eps->value, expected, 0.05 * expected);
+    EXPECT_NEAR(r.epsilon, TG_NU * tg_strain(false), 0.05 * TG_NU * tg_strain(false));
+    EXPECT_NEAR(eta->value, std::pow(TG_NU * TG_NU * TG_NU / eps->value, 0.25), roundoff(1e-11) * eta->value);
+    // The region dissipates more than the box: a DNS needing finer cells there warns of the region
+    const CheckReport coarse = check(with_check(periodic_box(TG_N, TG_NU / 100.0, taylor_green()), ""));
+    EXPECT_TRUE(mentions(coarse.warnings(), "eta on average in region corner"));
+}
+
+TEST(CheckResolution, DissipationFromAnEarlierRunsStatistics) {
+    const std::string file =
+        tg_statistics("tg_strain", "fields = [\"STRAIN_RATE\"]\nproducts = [\"STRAIN_RATE*STRAIN_RATE\"]\n");
+    // A flow at rest has no dissipation of its own: every value comes from the file
+    const std::string at_rest = periodic_box(TG_N, TG_NU, std::vector<std::string>(N_DIM, "0.0"));
+    const CheckReport r = check(with_check(at_rest, "statistics = \"" + file + "\"\n"));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_NEAR(r.epsilon, TG_NU * tg_strain(false), 0.05 * TG_NU * tg_strain(false));
+    const CheckEstimate * domain = find_estimate(r, "epsilon");
+    const CheckEstimate * corner = find_estimate(r, "region.corner.epsilon");
+    ASSERT_TRUE(domain && corner);
+    EXPECT_NE(domain->basis.find(file), std::string::npos);
+    EXPECT_NEAR(corner->value, TG_NU * tg_strain(true), 0.05 * TG_NU * tg_strain(true));
+    EXPECT_EQ(find_estimate(r, "taylor"), nullptr);
+    // Enstrophy alone gives nu <omega^2>, which equals nu <|S|^2> over the periodic box
+    const std::string vorticity = tg_statistics("tg_enstrophy", "fields = [\"ENSTROPHY\"]\n");
+    const CheckReport w = check(with_check(at_rest, "statistics = \"" + vorticity + "\"\n"));
+    ASSERT_TRUE(w.ok()) << (first_error(w));
+    EXPECT_NEAR(w.epsilon, r.epsilon, 0.02 * r.epsilon);
+    // A file without either is an error that says what to average
+    const std::string density = tg_statistics("tg_density", "fields = [\"RHO\"]\n");
+    const CheckReport none = check(with_check(at_rest, "statistics = \"" + density + "\"\n"));
+    EXPECT_NE(first_error(none).find("STRAIN_RATE*STRAIN_RATE"), std::string::npos) << first_error(none);
+}
+
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
     if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
     const auto mesh = make_mesh("cartesian", 10, 2, 1.0, 1.0);  // cells 0.1 x 0.5

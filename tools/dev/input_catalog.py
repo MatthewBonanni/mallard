@@ -177,6 +177,7 @@ UNEXERCISED = {
     "parallel.partitioner", "parallel.halo_exchange",
     "output.hash_mesh",
     "write_data.geometry",
+    "check.regions", "check.statistics",
 }
 
 

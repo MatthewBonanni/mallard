@@ -811,8 +811,11 @@ class Solver {
         void init_mesh_fields();
         /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
         CheckFields check_resolution(CheckReport & report);
-        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
-                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
+        CheckCellScales check_viscous_scales(CheckReport & report, CheckFields & fields,
+                                             const std::vector<double> & delta, double delta_mean,
+                                             const std::array<double, N_DIM> & coarsest);
+        /** @brief Reads [check]: its regions' fractions and the dissipation of check.statistics. Collective. */
+        void init_check_inputs();
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
@@ -1140,6 +1143,7 @@ class Solver {
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
         std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
+        CheckInputs check_inputs;
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
