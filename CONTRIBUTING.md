@@ -99,9 +99,10 @@ cmake --build build -j
     `uint16_t` wrap the offset, and the build rejects them.
   - Data lives in `Kokkos::View`s in the default memory space; copy to the host
     with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
-  - A View of rank 2 or more holds at most 2^31 entries: Kokkos computes its offset
-    in the common type of the indices, which can be `int`, and every allocation is
-    checked (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
+  - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
+    in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
+    (`src/CMakeLists.txt`), and every allocation is checked
+    (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
     with 64 bits, as `teno::PackedStencils` does.
   - Results must not depend on the backend, thread count or rank count: reductions
     that feed the solution must be deterministic (the suite checks bitwise

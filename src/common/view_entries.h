@@ -16,11 +16,16 @@ namespace view_entries {
 
 /**
  * @brief The most entries of a View of rank 2 or more, or a strided one. Kokkos computes
- *        such a View's offset in the common type of the indices, which can be int in
- *        Mallard, so offsets from 2^31 on would wrap and alias earlier entries. A rank-1
- *        contiguous View has no such limit: its offset is the index.
+ *        such a View's offset in the common type of the indices, which src/CMakeLists.txt
+ *        makes unsigned and at least 32 bits, so offsets from 2^32 on would wrap and alias
+ *        earlier entries (from 2^31 on with an unpatched Kokkos, where it can be int). A
+ *        rank-1 contiguous View has no such limit: its offset is the index.
  */
+#ifdef Mallard_UNSIGNED_VIEW_OFFSETS
+inline constexpr uint64_t MAX = uint64_t(1) << 32;
+#else
 inline constexpr uint64_t MAX = uint64_t(1) << 31;
+#endif
 
 /** @brief Record the cells on this rank, halo included, for the limit check() reports. */
 void set_cells(uint64_t n);

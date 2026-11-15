@@ -17,10 +17,18 @@ using Bytes2 = Kokkos::View<uint8_t **, Kokkos::HostSpace>;
 using Bytes1 = Kokkos::View<uint8_t *, Kokkos::HostSpace>;
 
 TEST(ViewEntriesTest, AllocationPastTheLimitThrows) {
-    // 2^31 + 2^16 entries: the check runs before the allocation, which would otherwise take 2 GB
+    // 2^32 + 2^16 entries: the check runs before the allocation, which would otherwise take 4 GB
     EXPECT_THROW(Bytes2(Kokkos::view_alloc(Kokkos::WithoutInitializing, "too_big"), size_t(1) << 16,
-                        (size_t(1) << 15) + 1),
+                        (size_t(1) << 16) + 1),
                  diagnostic_code::Error);
+}
+
+TEST(ViewEntriesTest, IntIndicesReachPast2To31Entries) {
+    const int rows = 1 << 16;
+    const int cols = (1 << 15) + 1;
+    const Bytes2 v(Kokkos::view_alloc(Kokkos::WithoutInitializing, "past_int"), size_t(rows), size_t(cols));
+    const auto offset = static_cast<uint64_t>(&v(rows - 1, cols - 1) - v.data());
+    EXPECT_EQ(offset, uint64_t(rows) * uint64_t(cols) - 1);
 }
 
 TEST(ViewEntriesTest, RankOneViewsAreNotLimited) {
