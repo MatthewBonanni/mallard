@@ -10,6 +10,7 @@
  */
 
 #include "solver.h"
+#include "boundary_coordinates.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -845,6 +846,36 @@ void Solver::init_boundaries() {
     boundary_composition.assign(input_boundaries.size(), nullptr);
     field_faces.clear();
     timed_fields = TimedBoundaryFields();
+    boundary_points.clear();
+    // The faces n measures from without walls = [...]: those of every wall entry, gathered once if some entry needs them
+    std::optional<WallDistance> default_walls;
+    auto default_wall_distance = [&]() -> const WallDistance & {
+        if (default_walls) return *default_walls;
+        std::vector<uint32_t> faces;
+        for (const Input & b : input_boundaries) {
+            if (!b.contains("name") || !b.contains("type")) continue;
+            const auto type = BOUNDARY_TYPES.find(find_value<std::string>(b, "type"));
+            if (type == BOUNDARY_TYPES.end() || (type->second != BoundaryType::WALL_ADIABATIC &&
+                                                 type->second != BoundaryType::WALL_ISOTHERMAL &&
+                                                 type->second != BoundaryType::WALL_HEAT_FLUX)) {
+                continue;
+            }
+            const FaceZone * z = mesh->get_face_zone(find_value<std::string>(b, "name"));
+            if (z == nullptr || z->get_type() != FaceZoneType::BOUNDARY) continue;
+            std::vector<uint32_t> zone_faces(z->n_faces());
+            for (uint32_t i = 0; i < z->n_faces(); i++) zone_faces[i] = z->h_faces(i);
+            std::vector<double> keep(zone_faces.size(), 1.0);
+            if (b.contains("where")) {
+                const Expression w(find_value<std::string>(b, "name") + ".where", find_value<std::string>(b, "where"));
+                keep = evaluate_at({&w}, mesh->face_coords, zone_faces);
+            }
+            for (size_t k = 0; k < zone_faces.size(); k++) {
+                if (keep[k] != 0.0) faces.push_back(zone_faces[k]);
+            }
+        }
+        default_walls.emplace(*mesh, faces, is_distributed());
+        return *default_walls;
+    };
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
@@ -914,7 +945,8 @@ void Solver::init_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), expression_unit_hint));
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
+                    boundary_variable::FIRST_LOCAL));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
@@ -945,6 +977,64 @@ void Solver::init_boundaries() {
             std::vector<uint32_t> zone_faces(zone->n_faces());
             for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
             selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
+        }
+        std::string coordinates;
+        {
+            std::vector<uint32_t> entry_faces;
+            for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
+                if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
+            }
+            const std::vector<uint16_t> used = local_coordinates_used(bound);
+            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
+            const bool reads_frame = !used.empty() && used.back() != boundary_variable::N;
+            auto unused_key = [&](const std::string & key, const std::string & what) {
+                return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                   .message = "no expression of the entry reads " + what + ", so " + key +
+                                              " has no effect",
+                                   .fix = "Remove " + key + ", or write a value in the local coordinates",
+                                   .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            };
+            std::optional<WallDistance> named;
+            if (bound.contains("walls")) {
+                if (!reads_n) throw unused_key("walls", "the wall distance n");
+                const auto wall_zones = find_value<std::vector<std::string>>(bound, "walls");
+                if (wall_zones.empty()) {
+                    throw InputError({.key = where_name + ".walls", .line = line_of(bound, "walls"),
+                                      .message = "the list of zones is empty",
+                                      .fix = "Name the zones n measures the distance from, or remove walls to "
+                                             "measure from every wall entry",
+                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                }
+                std::vector<uint32_t> faces;
+                for (const std::string & wall : wall_zones) {
+                    const FaceZone * z = mesh->get_face_zone(wall);
+                    if (z != nullptr && z->get_type() != FaceZoneType::BOUNDARY) z = nullptr;
+                    if (comm::allreduce(uint32_t(z != nullptr), comm::Op::SUM) == 0) {
+                        const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+                        throw InputError({.key = where_name + ".walls",
+                                          .line = line_of(bound, "walls"),
+                                          .message = "the mesh has no boundary zone \"" + wall + "\"",
+                                          .valid = names,
+                                          .suggestion = suggest_value(wall, names),
+                                          .fix = "Name the zones n measures the distance from",
+                                          .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                    }
+                    for (uint32_t i = 0; z && i < z->n_faces(); i++) faces.push_back(z->h_faces(i));
+                }
+                named = WallDistance(*mesh, faces, is_distributed());
+            }
+            if (bound.contains("frame") && !reads_frame) {
+                throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+            }
+            [[maybe_unused]] const FrameKey frame_key(bound, where_name);
+            const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
+            if (!used.empty() && n_entry > 0) {
+                const WallDistance none;
+                const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
+                const std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used,
+                                                                        walls, is_distributed(), coordinates);
+                for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
+            }
         }
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
@@ -981,7 +1071,7 @@ void Solver::init_boundaries() {
                     at += (d ? ", " : "(") + logging::real(x[d]);
                 }
                 try {
-                    const Point d = fields->get_direction().at(x, 0.0);
+                    const Point d = fields->get_direction().at(boundary_point(i_face), 0.0);
                     double into = 0.0;
                     for (size_t j = 0; j < N_DIM; j++) into += d[j] * n_in[j];
                     if (!(into > 0.0)) {
@@ -1057,6 +1147,7 @@ void Solver::init_boundaries() {
         if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
+        if (!coordinates.empty()) detail("local coordinates: " + coordinates);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {
@@ -1072,7 +1163,7 @@ void Solver::init_boundaries() {
             }
             // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
             const BoundaryFields & fields = *boundary_fields[i_bc];
-            if (fields.varies() || fields.per_face()) fields.apply(copy, x, 0.0, double(physics.R), n_in);
+            if (fields.varies() || fields.per_face()) fields.apply(copy, boundary_point(i_face), 0.0, double(physics.R), n_in);
             face_bc[i_face] = static_cast<int32_t>(bcs.size());
             field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
             bcs.push_back(copy);
@@ -1138,7 +1229,7 @@ void Solver::init_boundaries() {
             x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
             n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) / static_cast<double>(mesh->h_face_area(i_face));
         }
-        timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
+        timed_fields.add(i_bc, boundary_point(i_face), n_in, boundary_fields[base], composition);
     }
     for (const auto & outlet : average_pressure_outlets) {
         if (outlet.fields->depends_on_time()) {
@@ -1147,12 +1238,11 @@ void Solver::init_boundaries() {
     }
     for (const auto & [base, profile] : mass_flow_profiles) {
         std::vector<uint32_t> own;
-        std::vector<Point> x;
+        std::vector<FacePoint> x;
         for (const auto & [b, i_face, i_bc] : field_faces) {
             if (b != base) continue;
             own.push_back(i_bc);
-            x.emplace_back();
-            FOR_I_DIM x.back()[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            x.push_back(boundary_point(i_face));
         }
         // Only ranks with faces of the inlet integrate its profile
         if (!own.empty()) timed_fields.add(profile, own, x);
@@ -1162,10 +1252,10 @@ void Solver::init_boundaries() {
     const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
     for (const DirichletBoundary & d : dirichlet_boundaries) {
         std::vector<int32_t> states;
-        std::vector<Point> x(d.faces.size());
+        std::vector<FacePoint> x(d.faces.size());
         for (size_t k = 0; k < d.faces.size(); k++) {
             states.push_back(h_state_index(d.faces[k]));
-            FOR_I_DIM x[k][i] = static_cast<double>(mesh->h_face_coords(d.faces[k], i));
+            x[k] = boundary_point(d.faces[k]);
         }
         dirichlet_states.add(d.W, states, x);
     }
@@ -1176,6 +1266,14 @@ void Solver::init_boundaries() {
     init_inlets(input_boundaries, inlets);
     const bool timed = !timed_fields.empty() || !dirichlet_states.empty() || !timed_inlets.empty();
     timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
+    boundary_points.clear();
+}
+
+FacePoint Solver::boundary_point(const uint32_t f) const {
+    if (const auto it = boundary_points.find(f); it != boundary_points.end()) return it->second;
+    Point x{};
+    FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(f, i));
+    return FacePoint(x);
 }
 
 region::CellFields Solver::cell_fields() const {
