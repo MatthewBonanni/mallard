@@ -504,6 +504,8 @@ class Solver {
         void allocate_restart_mirrors();
         /** @brief What copy_device_to_host computes on the host from the mirrors once output_arrays_to_host ran. */
         void finish_output_arrays();
+        /** @brief The time output fields are computed at on the device: the step graph's t while it records, else t. */
+        Kokkos::View<rtype> output_time();
         /** @brief write_data's files from the mirrors: snapshots, restarts and the statistics' files. */
         void write_outputs(bool force);
         /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
@@ -621,8 +623,9 @@ class Solver {
         void keep_unflushed();
         void restore_unflushed();
         /**
-         * @brief Exchanges the state with the one flush_chemistry kept, also on the host: restart files hold the
-         *        state the run continues from. Called again, it puts them back.
+         * @brief Exchanges the host mirrors of the state with those of the state before the pending half step,
+         *        which output_arrays_to_host copied: restart files hold the state the run continues from. Called
+         *        again, it puts them back.
          */
         void swap_unflushed();
         /**
@@ -974,7 +977,7 @@ class Solver {
         bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs
         bool staged_time_outputs = false;        // some of them by time
         Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
-        Kokkos::View<uint32_t> output_due;       // the current launch stages its outputs
+        Kokkos::View<uint32_t *> output_due;     // the launch stages writer k's output (n: any, n + 1: a region of the solution)
         uint64_t n_staged_outputs = 0;           // records whose outputs the host wrote
         PinnedMirrors pinned_mirrors;            // the host mirrors output_arrays_to_host fills
         Kokkos::View<rtype *>::host_mirror_type h_step_control;  // the step controller's slots
@@ -1057,7 +1060,7 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
-        void launch_flux_functor(Kokkos::View<uint32_t *> faces);
+        void launch_flux_functor(const IndexSet & faces);
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
         bool exchanges_partition_faces() const;
         /**
@@ -1076,16 +1079,16 @@ class Solver {
         /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
         void copy_boundary_gas();
 
-        Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
-        uint32_t n_early_cells = 0;
+        // Reconstructed cells independent of the halo (empty unless split), and the others
+        IndexSet early_cells, late_cells;
         // Cells of structured blocks with a stencil shape, and the shapes (empty if none)
         std::string stencil_shapes_setting;
         void describe_stencil_shapes();
-        Kokkos::View<uint32_t *> rhs_faces;  // faces of owned cells, whose fluxes are used; empty if all faces
+        IndexSet rhs_faces;  // faces of owned cells, whose fluxes are used
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
         FaceExchange face_exchange;
-        Kokkos::View<uint32_t *> local_faces, partition_faces;
+        IndexSet local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
         bool reconstruction_started = false;           // start_reconstruction(conservatives) since its last update
@@ -1301,12 +1304,19 @@ class Solver {
         bool chemistry_flushed = false;
         State unflushed;
         Kokkos::View<rtype *> unflushed_T_seed, unflushed_chem_h, unflushed_chem_cost;
+        // Their host mirrors, which swap_unflushed exchanges with the state's while the mirrors hold them
+        StateView::host_mirror_type h_unflushed;
+        SpeciesView::host_mirror_type h_unflushed_species;
+        Kokkos::View<rtype *>::host_mirror_type h_unflushed_T_seed, h_unflushed_chem_h;
+        bool mirrors_unflushed = false;
 
         // Optically thin radiation ([radiation])
         bool radiating = false;
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
+        Kokkos::View<rtype **, Kokkos::LayoutRight> source_values;  // output: (cell, SOURCE_*)
+        Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_source_values;
+        Kokkos::View<rtype> host_output_time;  // output_time() outside step graphs
         // Output: the mesh and stencil fields [[write_data]] asks for, constant over the run
         std::vector<std::string> mesh_field_names;
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_mesh_fields;  // (cell, field)

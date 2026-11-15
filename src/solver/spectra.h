@@ -27,6 +27,7 @@
 #include "common_typedef.h"
 #include "data_writer.h"
 #include "mesh.h"
+#include "pinned_mirrors.h"
 
 struct CellSampler;
 
@@ -84,10 +85,15 @@ class Spectra {
         void start(rtype t);
         /** @brief Continue the averages of a restart file, or start afresh (none, or reset). */
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        /** @brief Averaged spectra: enqueues copies of the averages and their clock into pinned memory (capturable). */
+        void stage_output();
+        /** @brief The host's copies of the averages from those stage_output made, which have arrived. */
+        void finish_output();
+        /** @brief The averages' attributes and arrays, from the copies finish_output took. */
         RestartAttributes attributes() const;
         RestartArrays arrays() const;
 
-        /** @brief Rank 0 writes the current averages to the output file. */
+        /** @brief Rank 0 writes the averages of the copies finish_output took to the output file. */
         void write(uint64_t step, rtype t, const std::string & reason) const;
 
         /** @brief The output as the setup banner lists it. */
@@ -194,9 +200,14 @@ class Spectra {
         mutable double weight = 0.0;
         mutable rtype t_last = 0.0;
         mutable uint64_t n_samples = 0;
-        // Unaveraged samples staged per record slot: spec, mean, shell; held while write_staged writes a slot's
+        // Unaveraged samples staged per record slot: spec, mean, shell
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
-        mutable bool holding_staged = false;
+        mutable bool holding_staged = false;  // a file is written from the host's copies, which pull leaves
+
+        // Averaged: the averages and their clock as stage_output copied them
+        PinnedMirrors pinned;
+        Kokkos::View<Clock>::host_mirror_type h_clock;
+        Kokkos::View<double *>::host_mirror_type h_spec, h_mean, h_shell;
 };
 
 #endif // SPECTRA_H

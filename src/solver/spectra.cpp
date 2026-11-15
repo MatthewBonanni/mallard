@@ -361,7 +361,32 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     s_mean = Kokkos::View<double *>("spectra_sample_mean", acc_mean.size());
     s_shell = Kokkos::View<double *>("spectra_sample_shell", acc_shell.size());
     clock = Kokkos::View<Clock>("spectra_clock");
+    if (average) {
+        h_clock = pinned(clock);
+        h_spec = pinned(d_spec);
+        h_mean = pinned(d_mean);
+        h_shell = pinned(d_shell);
+    }
     push();
+}
+
+void Spectra::stage_output() {
+    if (!h_clock.data()) return;
+    copy_to_pinned(pinned, h_clock, clock);
+    copy_to_pinned(pinned, h_spec, d_spec);
+    copy_to_pinned(pinned, h_mean, d_mean);
+    copy_to_pinned(pinned, h_shell, d_shell);
+}
+
+void Spectra::finish_output() {
+    if (!h_clock.data()) return;
+    const Clock k = h_clock();
+    weight = k.weight;
+    t_last = k.t_last;
+    n_samples = k.n_samples;
+    std::copy(h_spec.data(), h_spec.data() + h_spec.span(), acc_spec.begin());
+    std::copy(h_mean.data(), h_mean.data() + h_mean.span(), acc_mean.begin());
+    std::copy(h_shell.data(), h_shell.data() + h_shell.span(), acc_shell.begin());
 }
 
 void Spectra::pull() const {
@@ -810,13 +835,11 @@ void Spectra::restore(const RestartData & restart, const std::string & file_name
 
 RestartAttributes Spectra::attributes() const {
     if (!enabled() || !average) return {};
-    pull();
     return {{WEIGHT, weight}, {T_LAST, static_cast<double>(t_last)}, {SAMPLES, static_cast<double>(n_samples)}};
 }
 
 RestartArrays Spectra::arrays() const {
     if (!enabled() || !average) return {};
-    pull();
     RestartArrays a{{SPECTRUM, acc_spec}, {MEAN, acc_mean}};
     if (!acc_shell.empty()) a.emplace_back(SHELL, acc_shell);
     return a;
@@ -824,8 +847,14 @@ RestartArrays Spectra::arrays() const {
 
 void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!enabled() || !average || !comm::is_root()) return;
-    pull();
-    write_file(file, step, t, reason);
+    holding_staged = true;
+    try {
+        write_file(file, step, t, reason);
+    } catch (...) {
+        holding_staged = false;
+        throw;
+    }
+    holding_staged = false;
 }
 
 void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const std::string & reason) const {
