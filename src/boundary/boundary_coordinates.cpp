@@ -430,10 +430,18 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
         }
         for (size_t k = 0; k < faces.size(); k++) points[k][bv::N] = walls(points[k].point());
-        double farthest = 0.0;
-        for (const FacePoint & p : points) farthest = std::max(farthest, p[bv::N]);
-        if (distributed) farthest = comm::allreduce(farthest, comm::Op::MAX);
-        if (!(farthest > 0.0)) {
+        // Faces on the walls come out at round-off, not exactly 0
+        double farthest = 0.0, scale = 0.0;
+        for (const FacePoint & p : points) {
+            farthest = std::max(farthest, p[bv::N]);
+            for (size_t d = 0; d < N_DIM; d++) scale = std::max(scale, std::abs(p[d]));
+        }
+        if (distributed) {
+            farthest = comm::allreduce(farthest, comm::Op::MAX);
+            scale = comm::allreduce(scale, comm::Op::MAX);
+        }
+        const double round_off = (sizeof(rtype) == sizeof(double) ? 1e-10 : 1e-5) * std::max(scale, 1e-300);
+        if (!(farthest > round_off)) {
             throw InputError({.key = where, .line = line_of(entry),
                               .message = "n, the distance to the nearest wall, is 0 on every face: the faces lie on "
                                          "the walls it measures from (by default every wall entry, this one too if "
