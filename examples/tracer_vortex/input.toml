@@ -38,6 +38,9 @@ rho_ref = 1.0
 [particles]
 type = "tracer"
 file = "tracers.csv"
+# One more tracer at the center of another vortex, where the flow is at rest
+points = [[0.75, 0.75]]
+capacity = 82
 
 [particles.lattice]
 lo = [0.05, 0.05]
