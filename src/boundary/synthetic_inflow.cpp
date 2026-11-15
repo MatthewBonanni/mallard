@@ -156,23 +156,12 @@ std::string stress_names() {
 
 } // namespace
 
-double InletProfile::Field::at(const Point & x) const {
-    if (!expression) return value;
-    return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, 0.0);
-}
-
 InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
     auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
-        Field f;
-        if (v.is_string() && !has_unit(v.as_string())) {
-            f.expression = std::make_shared<Expression>(name, v.as_string());
-            varies = true;
-        } else {
-            f.value = as_double(v, name, dimension);
-        }
-        return f;
+        varies = varies || BoundaryValue::is_expression(v);
+        return BoundaryValue(v, name, dimension);
     };
     if (turbulence && contains_optional(*turbulence, "profile")) {
         if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {
@@ -204,9 +193,9 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     for (uint8_t k = 0; k < N_STRESS; k++) {
         const std::string key = where + ".turbulence.reynolds_stress[" + std::to_string(k) + "]";
         stress.push_back(field(r_in.as_array()[k], key, dim::velocity_squared, varies));
-        if (stress.back().expression && stress.back().expression->depends_on_time()) {
+        if (stress.back().depends_on_time()) {
             throw InputError(key + " depends on t, but the Reynolds stress is fixed at setup: write it in x, y, z "
-                             "only (the mean velocity u may depend on t).");
+                             "and the local coordinates only (the mean velocity u may depend on t).");
         }
     }
 }
@@ -290,25 +279,25 @@ double InletProfile::table(size_t column, double s) const {
     return (1.0 - f) * columns[column][i - 1] + f * columns[column][i];
 }
 
-std::array<double, N_DIM> InletProfile::velocity(const Point & x, const Point & n_in) const {
+std::array<double, N_DIM> InletProfile::velocity(const FacePoint & x, const Point & n_in) const {
     std::array<double, N_DIM> v{};
     if (axis < 0 && speed) {
-        const double s = u[0].at(x);
+        const double s = u[0].at(x, 0.0);
         const Point d = directed ? direction.at(x, 0.0) : n_in;
         FOR_I_DIM v[i] = s * d[i];
         return v;
     }
-    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
+    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x, 0.0);
     return v;
 }
 
-std::array<double, N_STRESS> InletProfile::stress_at(const Point & x) const {
+std::array<double, N_STRESS> InletProfile::stress_at(const FacePoint & x) const {
     std::array<double, N_STRESS> s{};
     for (uint8_t k = 0; k < N_STRESS; k++) {
         if (axis >= 0) {
             s[k] = table(N_DIM + k, x[static_cast<size_t>(axis)]);
         } else if (!stress.empty()) {
-            s[k] = stress[k].at(x);
+            s[k] = stress[k].at(x, 0.0);
         }
     }
     return s;
@@ -316,7 +305,7 @@ std::array<double, N_STRESS> InletProfile::stress_at(const Point & x) const {
 
 SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream_,
                                  const Mesh & mesh, const std::vector<uint32_t> & faces,
-                                 const std::vector<int32_t> & char_index) {
+                                 const std::vector<FacePoint> & points, const std::vector<int32_t> & char_index) {
     const std::string tw = where + ".turbulence";
     const InletProfile profile(boundary, where);
     const Input & turbulence = boundary.at("turbulence");
@@ -411,14 +400,16 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
 
     // The inlet's faces of owned cells on all ranks, in the order of their global keys
     std::vector<uint64_t> keys;
-    std::vector<double> geometry;  // x, area
-    for (uint32_t f : faces) {
+    constexpr size_t W = boundary_variable::COUNT + 1;
+    std::vector<double> geometry;  // point, area
+    for (size_t k = 0; k < faces.size(); k++) {
+        const uint32_t f = faces[k];
         const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
         if (c >= mesh.n_owned()) continue;
         uint32_t slot = 0;
         while (mesh.h_face_of_cell(c, slot) != f) slot++;
         keys.push_back(mesh.h_global_cell(c) * 8 + slot);  // No cell has 8 faces
-        FOR_I_DIM geometry.push_back(double(mesh.h_face_coords(f, i)));
+        geometry.insert(geometry.end(), points[k].v.begin(), points[k].v.end());
         geometry.push_back(double(mesh.h_face_area(f)));
     }
     if (distributed) {
@@ -429,16 +420,16 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     std::iota(order.begin(), order.end(), size_t(0));
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return keys[a] < keys[b]; });
     const size_t n_global = keys.size();
-    std::vector<Point> x_global(n_global);
+    std::vector<FacePoint> x_global(n_global);
     std::vector<double> area_global(n_global);
     for (size_t i = 0; i < n_global; i++) {
         const size_t g = order[i];
-        for (size_t d = 0; d < N_DIM; d++) x_global[i][d] = geometry[g * (N_DIM + 1) + d];
-        area_global[i] = geometry[g * (N_DIM + 1) + N_DIM];
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) x_global[i][d] = geometry[g * W + d];
+        area_global[i] = geometry[g * W + boundary_variable::COUNT];
     }
 
     // Every rank checks the stresses of every face, so that all throw on one that is not semidefinite
-    for (const Point & x : x_global) cholesky(profile.stress_at(x), x, tw);
+    for (const FacePoint & x : x_global) cholesky(profile.stress_at(x), x.point(), tw);
 
     // Mean flow and convection velocity
     area = 0.0;
@@ -463,7 +454,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     for (int d = 0; d < N_T; d++) {
         lo[d] = std::numeric_limits<double>::infinity();
         hi[d] = -lo[d];
-        for (const Point & x : x_global) {
+        for (const FacePoint & x : x_global) {
             lo[d] = std::min(lo[d], x[axes[d]]);
             hi[d] = std::max(hi[d], x[axes[d]]);
         }
@@ -529,7 +520,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     Kokkos::deep_copy(kernels, h_kernels);
 
     // Interpolation from the grid to a point: corners and fractions per transverse direction
-    auto locate = [&](const Point & x, int32_t corner[N_T][2], double fraction[N_T]) {
+    auto locate = [&](const FacePoint & x, int32_t corner[N_T][2], double fraction[N_T]) {
         for (int d = 0; d < N_T; d++) {
             const double s = (x[axes[d]] - origin[d]) / spacing[d];
             const double i = std::floor(s);
@@ -569,7 +560,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
             int32_t corner[N_T][2];
             double fraction[N_T];
             locate(x_global[i], corner, fraction);
-            const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x_global[i]), x_global[i], tw);
+            const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x_global[i]), x_global[i].point(), tw);
             for (uint8_t j = 0; j <= normal_axis; j++) {
                 const double a = area_global[i] * chol[lower(normal_axis, j)] * scale(fraction, j);
                 for (uint32_t bits = 0; bits < (1u << N_T); bits++) {
@@ -601,8 +592,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     auto h_cholesky = Kokkos::create_mirror_view(face_cholesky);
     for (uint32_t i = 0; i < n_faces; i++) {
         const uint32_t f = faces[i];
-        Point x;
-        for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh.h_face_coords(f, d));
+        const FacePoint & x = points[i];
         int32_t corner[N_T][2];
         double fraction[N_T];
         locate(x, corner, fraction);
@@ -615,7 +605,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         Point n_in;
         for (size_t d = 0; d < N_DIM; d++) n_in[d] = -double(mesh.h_face_normals(f, d)) / double(mesh.h_face_area(f));
         const std::array<double, N_DIM> mean = profile.velocity(x, n_in);
-        const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x), x, tw);
+        const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x), x.point(), tw);
         for (uint8_t j = 0; j < N_DIM; j++) {
             h_scale(i, j) = static_cast<rtype>(scale(fraction, j));
             h_mean(i, j) = static_cast<rtype>(mean[j]);
