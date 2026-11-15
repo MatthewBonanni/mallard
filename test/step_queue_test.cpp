@@ -691,7 +691,7 @@ TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
 TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
     // A disk (sphere) leaving the box: its reductions, and its time averages kept per cell, which the restart carries
     const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
-                             vector_of("0.5 + 4 * t", "0.5", "0.2") + ", radius = 0.3}";
+                             vector_of("0.5 + 10 * t", "0.5", "0.2") + ", radius = 0.3}";
     const std::string restart = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 24\n";
     Case c;
     c.run = "n_steps = 24\ncfl = 0.5\n";
