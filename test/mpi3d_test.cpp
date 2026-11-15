@@ -108,7 +108,7 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
 }
 
 TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
-    // Rows shared over the ranks, with block cells and boundary cells
+    // Rows shared over the ranks, with boundary cells
     expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"));
 }
 

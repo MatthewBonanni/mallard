@@ -20,7 +20,6 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
-#include <unordered_map>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -28,7 +27,6 @@
 
 #include "common.h"
 #include "quadrature.h"
-#include "structured_blocks.h"
 #include "teno_sharing.h"
 
 FaceReconstruction::FaceReconstruction() {
@@ -500,12 +498,11 @@ struct MUSCLGradientFunctor {
     KOKKOS_INLINE_FUNCTION
     void table(const uint32_t c) const {
         const LSQGradientFunctor & m = vertex.faces;
-        const int32_t * o = tables.block_offsets(c);
         const uint32_t n = m.offsets_faces_of_cell(c + 1) - m.offsets_faces_of_cell(c);
         rtype W_i[N_CONSERVATIVE], g[N_CONSERVATIVE][N_DIM] = {};
         FOR_I_CONSERVATIVE W_i[i] = m.W(c, i);
         for (uint32_t k = 0; k < n; k++) {
-            const int32_t j = tables.neighbor(c, k, o);
+            const int32_t j = tables.neighbor(c, k);
             rtype W_j[N_CONSERVATIVE];
             if (j >= 0) {
                 FOR_I_CONSERVATIVE W_j[i] = m.W(j, i);
@@ -575,10 +572,9 @@ struct LimiterFunctor {
         const uint32_t k_begin = neighbors.offsets_faces_of_cell(i_cell);
         const uint32_t k_end = neighbors.offsets_faces_of_cell(i_cell + 1);
         const bool table = tables.has(i_cell);
-        const int32_t * o = table ? tables.block_offsets(i_cell) : nullptr;
         for (uint32_t k = k_begin; k < k_end; k++) {
             rtype W_j[N_CONSERVATIVE];
-            const int32_t j = table ? tables.neighbor(i_cell, k - k_begin, o) : -1;
+            const int32_t j = table ? tables.neighbor(i_cell, k - k_begin) : -1;
             if (j >= 0) {
                 FOR_I_CONSERVATIVE W_j[i] = neighbors.W(j, i);
             } else {
@@ -788,26 +784,12 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     Kokkos::parallel_for("muscl_faces", mesh->n_faces, face_functor);
 }
 
-namespace {
-
-struct OffsetsHash {
-    size_t operator()(const std::vector<int32_t> & v) const {
-        uint64_t h = 1469598103934665603ULL;
-        for (const int32_t x : v) h = (h ^ uint32_t(x)) * 1099511628211ULL;
-        return size_t(h);
-    }
-};
-
-} // namespace
-
 void MUSCL::find_tables() {
     tables = MUSCLTables{};
     tables.offsets_faces_of_cell = mesh->offsets_faces_of_cell;
     tables.faces_of_cell = mesh->faces_of_cell;
     tables.cells_of_face = mesh->cells_of_face;
     n_table_cells = 0;
-    n_block_cells = 0;
-    n_block_shapes = 0;
     const auto & k_of = mesh->h_offsets_faces_of_cell;
     const LSQGradientFunctor g = make_gradient(*mesh, boundaries, {}, gradients);
     // The cells of MUSCLGradientFunctor's face-neighbor fit without a rotational periodic face, and with all their
@@ -922,41 +904,4 @@ void MUSCL::find_tables() {
     }
     Kokkos::deep_copy(tables.row, h_row);
     n_table_cells = m;
-
-    // The block cells' neighbors as the cell plus their shape's offsets
-    const uint32_t n_blocks = structured_block_cells(mesh->structured_blocks);
-    if (!block_path || n_blocks == 0) return;
-    std::vector<uint32_t> shape(mesh->n_cells, teno::BlockStencils::NONE);
-    std::vector<std::vector<int32_t>> shapes;
-    std::unordered_map<std::vector<int32_t>, uint32_t, OffsetsHash> index;
-    std::vector<int32_t> offsets;
-    for (const uint32_t c : cells) {
-        if (c >= n_blocks) break;
-        offsets.clear();
-        bool interior = true;
-        for (uint32_t k = k_of(c); k < k_of(c + 1) && interior; k++) {
-            const uint32_t f = mesh->h_faces_of_cell(k);
-            const int32_t c0 = mesh->h_cells_of_face(f, 0);
-            interior = mesh->h_cells_of_face(f, 1) >= 0;
-            offsets.push_back((c0 == int32_t(c) ? mesh->h_cells_of_face(f, 1) : c0) - int32_t(c));
-        }
-        if (!interior) continue;
-        const auto [it, fresh] = index.try_emplace(offsets, uint32_t(shapes.size()));
-        if (fresh) shapes.push_back(offsets);
-        shape[c] = it->second;
-        n_block_cells++;
-    }
-    if (shapes.empty()) return;
-    size_t width = 0;
-    for (const auto & o : shapes) width = std::max(width, o.size());
-    std::vector<int32_t> table(shapes.size() * width, 0);
-    for (size_t k = 0; k < shapes.size(); k++) {
-        std::copy(shapes[k].begin(), shapes[k].end(), table.begin() + std::ptrdiff_t(k * width));
-    }
-    tables.block.stride = static_cast<uint32_t>(width);
-    tables.block.shape = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "muscl_block_shape"), mesh->n_cells);
-    Kokkos::deep_copy(tables.block.shape, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(shape.data(), shape.size()));
-    tables.block.offsets = Kokkos::View<int32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "muscl_block_offsets"), table.size());
-    Kokkos::deep_copy(tables.block.offsets, Kokkos::View<const int32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(table.data(), table.size()));
-    n_block_shapes = static_cast<uint32_t>(shapes.size());
 }

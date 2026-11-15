@@ -298,7 +298,7 @@ Bytes per cell after setup, `mallard check` on $64^3$ boxes (Kokkos
 allocations; with CUDA the pseudo-inverses live outside Kokkos, change 2 in
 [performance.md](performance.md#2-teno-setup-stencil-tables-streamed-to-the-device-host-memory)):
 
-| | TENO5, today | TENO5, block cell | MUSCL, today and block cell |
+| | TENO5, today | TENO5, block cell | MUSCL |
 |---|---:|---:|---:|
 | reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 8 B (row indices; 0.29 kB per distinct row) |
 | faces and gradients (face states 2.2 kB, troubled-pass scratch) | 4.20 kB | 4.20 kB | 0.65 kB |
@@ -389,7 +389,7 @@ One pull request per step, as a stack on #431:
 1. Detection and the block numbering.
 2. Block shapes from each cell's own stencil (below); keyed tables and one fit
    per shape at setup are #986.
-3. The TENO and MUSCL block kernels (below).
+3. The TENO block kernel and MUSCL's shared rows (below).
 4. Mirror images at straight walls.
 5. `mallard check` reporting.
 6. The documentation of [Documentation](#documentation).
@@ -420,11 +420,11 @@ tetrahedron, no face on a characteristic boundary) without a rotational
 periodic face has a row, except in the outermost halo layer, whose missing
 faces would look like boundary faces; the states across its boundary faces
 still come from those faces. Rows equal on #994's grid (about $10^{-9}$ of
-their magnitude; $2^{-18}$ in single precision, above its round-off) are shared, each taking the row of its lowest global id,
-agreed over the ranks, so a cell's row depends on its own geometry alone and
-not on the partition. When fewer than 8 cells share each distinct row, over
-the ranks (counted by the rows' hashes before any is stored), no cell has a
-row: the rows would cost memory without sharing. The cells of a block whose faces all
-have a neighbor take them as the cell plus their block shape's offsets, every
-other cell reads its faces, and both read the same row, so the two are bitwise
-equal.
+their magnitude; $2^{-18}$ in single precision, above its round-off) are
+shared, each taking the row of its lowest global id, agreed over the ranks, so
+a cell's row depends on its own geometry alone and not on the partition. When
+fewer than 8 cells share each distinct row, over the ranks (counted by the
+rows' hashes before any is stored), no cell has a row: the rows would cost
+memory without sharing. MUSCL has no block path: reading the face neighbors
+by block offsets instead of through the faces measured within noise on an
+A100 (#1035).
