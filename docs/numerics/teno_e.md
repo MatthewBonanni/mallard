@@ -576,7 +576,10 @@ the same position of their own sorted layers, its pseudo-inverses, basis means
 and smoothness-indicator matrix; the table comparison above then runs on those
 tables. Cells whose key no other cell has, whose layers reach the outermost halo
 layer or hold two periodic copies of a cell are fitted on their own, so a mesh
-with a shape per cell is set up as before. The shared tables are those of the
+with a shape per cell is set up as before. Once the halo is as deep as the
+searches need, the layers of every reconstructed halo cell lie within the
+complete layers, so each cell has the same key on every rank, and a key's table
+enters the table comparison under its fitted cell's global id. The shared tables are those of the
 table comparison, except where the cells of one key fall on either side of its
 grid: they take one table instead of two.
 
