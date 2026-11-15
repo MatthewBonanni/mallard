@@ -11,6 +11,7 @@ set(MALLARD_TEST_SOURCES
     region_test.cpp
     region_mesh_test.cpp
     region_motion_test.cpp
+    region_sampler_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
