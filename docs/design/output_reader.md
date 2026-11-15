@@ -94,7 +94,10 @@ in [The Python package](python_package.md)) therefore reads through this reader.
 C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
 with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,
 and errors as a message, so that no C++ exception or type crosses it. The
-package loads it with ctypes and copies the arrays into numpy:
+package loads it with ctypes, and its numpy arrays view the library's arrays
+without a copy: each holds the library's result, which the last of them to go
+frees. A read peaks at the size of what it returns
+([measurements](python_package.md#performance)):
 
 - **C and ctypes, not a binding library.** pybind11 or nanobind would give
   richer types, but add a build dependency and tie the library to one Python
