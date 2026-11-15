@@ -16,9 +16,7 @@
 #ifndef BATCH_MEANS_H
 #define BATCH_MEANS_H
 
-#include <cmath>
 #include <cstdint>
-#include <limits>
 
 #include <Kokkos_Core.hpp>
 
@@ -40,9 +38,9 @@ KOKKOS_INLINE_FUNCTION void add(T & mean, T & m2, T n, T v) {
  *        sum of squared deviations m2, t the Student's t quantile for n - 1 degrees
  *        of freedom: t sqrt(m2 / (n - 1) / n); NaN for fewer than 2.
  */
-inline double half_width(double m2, uint64_t n, double t) {
-    if (n < 2) return std::numeric_limits<double>::quiet_NaN();
-    return t * std::sqrt(m2 / static_cast<double>(n - 1) / static_cast<double>(n));
+KOKKOS_INLINE_FUNCTION double half_width(double m2, uint64_t n, double t) {
+    if (n < 2) return Kokkos::Experimental::quiet_NaN_v<double>;
+    return t * Kokkos::sqrt(m2 / static_cast<double>(n - 1) / static_cast<double>(n));
 }
 
 } // namespace batch_means

@@ -231,6 +231,8 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         h_ci = decltype(h_ci)("statistics_ci", n_cells, n);
         batch_clock = Kokkos::View<BatchClock>("statistics_batch_clock");
         h_batch_clock = pinned_mirrors(batch_clock);
+        interval_t = Kokkos::View<double *>("statistics_interval_t", INTERVAL_WINDOW);
+        interval_first = Kokkos::View<uint64_t>("statistics_interval_first");
     }
 
     std::vector<int32_t> h_codes;
@@ -441,14 +443,39 @@ void Statistics::register_data(std::vector<Data> & data) const {
     phase.register_data(data);
 }
 
-Kokkos::View<const rtype *, Kokkos::LayoutStride> Statistics::device_average(const std::string & name) const {
+Statistics::DeviceColumn Statistics::device_column(const std::string & name) const {
     const std::vector<std::string> names = average_names(fields, products);
     for (size_t i = 0; i < names.size(); i++) {
-        if (names[i] != name) continue;
-        return i < fields.size() ? Kokkos::subview(mean, Kokkos::ALL(), i)
-                                 : Kokkos::subview(cov, Kokkos::ALL(), i - fields.size());
+        if (names[i] == name) {
+            return {i < fields.size() ? Kokkos::subview(mean, Kokkos::ALL(), i)
+                                      : Kokkos::subview(cov, Kokkos::ALL(), i - fields.size()),
+                    {}, {}, {}};
+        }
+        if (batches_enabled() && "CI_" + names[i] == name) {
+            return {Kokkos::subview(batch_m2, Kokkos::ALL(), i), batch_clock, interval_t, interval_first};
+        }
     }
-    return phase.device_average(name);
+    return {phase.device_average(name), {}, {}, {}};
+}
+
+double Statistics::t_quantile(const uint64_t n) const {
+    while (t_quantiles.size() + 2 <= n) {
+        t_quantiles.push_back(time_series::student_t(confidence, static_cast<uint32_t>(t_quantiles.size() + 1)));
+    }
+    return t_quantiles[n - 2];
+}
+
+void Statistics::refresh_intervals(const uint64_t step, uint64_t & step_limit) {
+    const uint64_t n = std::max<uint64_t>(host_batch_clock().n_closed, 2);
+    if (n < interval_t_first || n > interval_t_first + INTERVAL_WINDOW / 2) {
+        interval_t_first = n;
+        const auto h_t = Kokkos::create_mirror_view(interval_t);
+        for (uint64_t i = 0; i < INTERVAL_WINDOW; i++) h_t(i) = t_quantile(n + i);
+        Kokkos::deep_copy(interval_t, h_t);
+        Kokkos::deep_copy(interval_first, n);
+    }
+    // At most one batch closes per sample
+    step_limit = std::min(step_limit, step + (interval_t_first + INTERVAL_WINDOW - 1 - n) * interval);
 }
 
 void Statistics::copy_device_to_host() {
@@ -481,7 +508,7 @@ void Statistics::finish_output() {
     phase.copy_device_to_host();
     if (!means_enabled() || !batches_enabled()) return;
     const uint64_t n_batches = h_batch_clock().n_closed;
-    const double t = n_batches >= 2 ? time_series::student_t(confidence, static_cast<uint32_t>(n_batches - 1)) : 0.0;
+    const double t = n_batches >= 2 ? t_quantile(n_batches) : 0.0;
     for (size_t c = 0; c < h_ci.extent(0); c++) {
         for (size_t q = 0; q < h_ci.extent(1); q++) {
             h_ci(c, q) = static_cast<rtype>(batch_means::half_width(static_cast<double>(h_batch_m2(c, q)), n_batches, t));

@@ -468,7 +468,11 @@ it stops at, a restart, averages started afresh), the device's means are copied 
 Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
 the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
 written), the record says so, and the host takes the step without sampling them again (writing the spectra's
-staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
+staged sample instead). Confidence intervals `CI_<average>` are computed at each sample's cell from the
+device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
+Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
+half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
+Probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
@@ -515,8 +519,7 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
-intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of regions that move or follow the solution. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
