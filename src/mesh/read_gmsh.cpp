@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <span>
@@ -204,7 +205,10 @@ class Scanner {
         size_t pos = 0, len = 0;
 };
 
-/** @brief Nodes [first, first + n) of a $Nodes section: lines "tag x y z" at tags_at (2.2), or n tags at tags_at and n "x y z" at coords_at (4.1). */
+/**
+ * @brief Nodes [first, first + n) of a $Nodes section: lines "tag x y z" at
+ *        tags_at (2.2), or n tags at tags_at and n "x y z" at coords_at (4.1).
+ */
 struct NodeRun {
     uint64_t first, n, tags_at, coords_at;
 };
@@ -215,7 +219,10 @@ struct ElementRun {
     int64_t type, dim, entity;
 };
 
-/** @brief Where a Gmsh file's nodes and elements are, in pieces that each lie in one rank's share, and its small sections. */
+/**
+ * @brief Where a Gmsh file's nodes and elements are, in pieces that each lie
+ *        in one rank's share, and its small sections.
+ */
 struct GmshLayout {
     double version = 0.0;
     uint64_t file_size = 0, n_nodes = 0, n_elements = 0;
@@ -458,9 +465,27 @@ std::vector<uint64_t> lookup(const std::vector<uint64_t> & keys, size_t words, O
     return out;
 }
 
-std::vector<uint64_t> sorted_unique(std::vector<uint64_t> values) {
-    std::sort(values.begin(), values.end());
-    values.erase(std::unique(values.begin(), values.end()), values.end());
+/**
+ * @brief The distinct values of lists, sorted; deduplicated as they are
+ *        gathered, so that no copy of all of them is held.
+ */
+std::vector<uint64_t> sorted_unique(std::initializer_list<const std::vector<uint64_t> *> lists) {
+    constexpr size_t CHUNK = size_t(1) << 20;
+    std::vector<uint64_t> values;
+    size_t unique = 0;
+    auto squeeze = [&] {
+        std::sort(values.begin(), values.end());
+        values.erase(std::unique(values.begin(), values.end()), values.end());
+        unique = values.size();
+    };
+    for (const std::vector<uint64_t> * list : lists) {
+        for (size_t a = 0; a < list->size(); a += CHUNK) {
+            values.insert(values.end(), list->begin() + std::ptrdiff_t(a),
+                          list->begin() + std::ptrdiff_t(std::min(list->size(), a + CHUNK)));
+            if (values.size() >= 2 * unique + CHUNK) squeeze();
+        }
+    }
+    squeeze();
     values.shrink_to_fit();
     return values;
 }
@@ -469,7 +494,10 @@ size_t position(const std::vector<uint64_t> & sorted, uint64_t value) {
     return size_t(std::lower_bound(sorted.begin(), sorted.end(), value) - sorted.begin());
 }
 
-/** @brief Zone names in order of first appearance, from every rank's (first item, physical) pairs, and each physical's zone. */
+/**
+ * @brief Zone names in order of first appearance, from every rank's
+ *        (first item, physical) pairs, and each physical's zone.
+ */
 template <typename Name>
 std::pair<std::vector<std::string>, std::map<int64_t, uint32_t>> zones(const std::vector<int64_t> & physical,
                                                                         uint64_t first, Name name) {
@@ -714,10 +742,7 @@ MeshBlock read_gmsh_block(const std::string & filename) {
 
     // Node tags -> indices in the file
     {
-        std::vector<uint64_t> keys = el.cells.values;
-        keys.insert(keys.end(), el.faces.values.begin(), el.faces.values.end());
-        keys.insert(keys.end(), el.face_nodes.values.begin(), el.face_nodes.values.end());
-        keys = sorted_unique(std::move(keys));
+        const std::vector<uint64_t> keys = sorted_unique({&el.cells.values, &el.faces.values, &el.face_nodes.values});
         constexpr uint64_t NONE = ~uint64_t(0);
         const std::vector<uint64_t> found = lookup(keys, 1, [P](uint64_t tag) { return size_t(tag % P); },
                                                    [&](uint64_t tag, std::vector<uint64_t> & out) {
@@ -743,7 +768,7 @@ MeshBlock read_gmsh_block(const std::string & filename) {
     // High-order faces' node coordinates
     std::vector<double> face_coords;
     if (face_high_order) {
-        const std::vector<uint64_t> keys = sorted_unique(el.face_nodes.values);
+        const std::vector<uint64_t> keys = sorted_unique({&el.face_nodes.values});
         const std::vector<uint64_t> found = lookup(keys, N_DIM, [&](uint64_t i) { return owner(i, n_file_nodes, p); },
                                                    [&](uint64_t i, std::vector<uint64_t> & out) {
                                                        for (size_t d = 0; d < N_DIM; d++) {
@@ -761,9 +786,7 @@ MeshBlock read_gmsh_block(const std::string & filename) {
     // With high-order elements, the nodes no cell or boundary face has as a corner are dropped
     uint64_t n_nodes = n_file_nodes;
     if (high_order) {
-        std::vector<uint64_t> keys = el.cells.values;
-        keys.insert(keys.end(), el.faces.values.begin(), el.faces.values.end());
-        keys = sorted_unique(std::move(keys));
+        const std::vector<uint64_t> keys = sorted_unique({&el.cells.values, &el.faces.values});
         std::vector<std::vector<uint64_t>> questions(P);
         for (const uint64_t i : keys) questions[owner(i, n_file_nodes, p)].push_back(i);
         const comm::Received<uint64_t> asked = comm::exchange(std::move(questions));
