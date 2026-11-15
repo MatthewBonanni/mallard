@@ -455,6 +455,101 @@ TEST(TENOTest, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
     for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
 }
 
+/**
+ * @brief Checks that every cell sees the members of its central stencil: the
+ *        segment from it to a member cell, or the path from it to the foot of
+ *        a mirror image on its face's line and from there to the image's cell
+ *        and to the image, crosses no boundary face. Returns the number of
+ *        members that would be hidden without the face itself.
+ */
+uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_ptr, int order) {
+    const Mesh & m = *mesh_ptr;
+    std::vector<int32_t> face_bc(m.n_faces, -1);
+    std::vector<uint32_t> boundary;
+    for (uint32_t f = 0; f < m.n_faces; f++) {
+        if (m.h_cells_of_face(f, 1) >= 0) continue;
+        face_bc[f] = 0;
+        boundary.push_back(f);
+    }
+    BoundaryCondition sym;
+    sym.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(m, face_bc, {sym}, GAMMA);
+    auto teno = make_teno(mesh_ptr, bd, order);
+    const TENO::Stencils stencils = teno->large_stencils();
+    using P = std::array<double, 2>;
+    auto node = [&](uint32_t f, int k) {
+        const uint32_t n = m.h_node_of_face(f, k);
+        return P{double(m.h_node_coords(n, 0)), double(m.h_node_coords(n, 1))};
+    };
+    auto centroid = [&](uint32_t c) { return P{double(m.h_cell_coords(c, 0)), double(m.h_cell_coords(c, 1))}; };
+    auto side = [](const P & a, const P & b, const P & q) {
+        const double cross = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
+        return (cross > 1e-6) - (cross < -1e-6);
+    };
+    auto hidden = [&](const P & a, const P & b) {
+        for (uint32_t f : boundary) {
+            const P p = node(f, 0), q = node(f, 1);
+            if (side(a, b, p) * side(a, b, q) < 0 && side(p, q, a) * side(p, q, b) < 0) return true;
+        }
+        return false;
+    };
+    uint32_t n_checked = 0;
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        const P x = centroid(c);
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const P y = centroid(static_cast<uint32_t>(stencils.cells[s]));
+            const int32_t f = stencils.faces[s];
+            if (f < 0) {
+                EXPECT_FALSE(hidden(x, y)) << "cell " << c << " takes cell " << stencils.cells[s] << " across a boundary";
+                n_checked++;
+                continue;
+            }
+            const P a = node(static_cast<uint32_t>(f), 0), b = node(static_cast<uint32_t>(f), 1);
+            const double tx = b[0] - a[0], ty = b[1] - a[1];
+            const double t = ((y[0] - a[0]) * tx + (y[1] - a[1]) * ty) / (tx * tx + ty * ty);
+            const P foot{a[0] + t * tx, a[1] + t * ty};
+            const P image{2 * foot[0] - y[0], 2 * foot[1] - y[1]};
+            EXPECT_FALSE(hidden(x, foot) || hidden(y, foot) || hidden(foot, image))
+                << "cell " << c << " takes the image of cell " << stencils.cells[s] << " across face " << f
+                << " at " << image[0] << ", " << image[1] << ", past another boundary";
+            n_checked++;
+        }
+    }
+    return n_checked;
+}
+
+TEST(TENOTest, StencilsAtAClosedTrailingEdgeStayOnTheirSideOfTheBody) {
+    // Square with a lens-shaped hole, closed at both ends and at most three
+    // quarters of a cell thick, as at the closed trailing edge of an airfoil:
+    // the cells on one side would reach across it to the cells on the other,
+    // and images of one side would land past the other, among the cells
+    // there (#976)
+    const uint32_t n = 8;
+    const double h = 1.0 / n;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({rtype(i * h), rtype(j * h)});
+    }
+    // The upper side of the hole, between the shared nodes at its ends (i = 2 and 6)
+    const double thickness[] = {0.5 * h, 0.75 * h, 0.5 * h};
+    const uint32_t upper0 = static_cast<uint32_t>(nodes.size());
+    for (uint32_t i = 3; i <= 5; i++) nodes.push_back({rtype(i * h), rtype(0.5 + thickness[i - 3])});
+    auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
+    auto lower_of_row4 = [&](uint32_t i) { return i >= 3 && i <= 5 ? upper0 + i - 3 : id(i, 4); };
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (j == 4) {
+                cells.push_back({lower_of_row4(i), lower_of_row4(i + 1), id(i + 1, 5), id(i, 5)});
+            } else {
+                cells.push_back({id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)});
+            }
+        }
+    }
+    const auto mesh = mesh_from(nodes, cells);
+    for (int order : {3, 4, 5}) EXPECT_GT(expect_stencils_see_their_members(mesh, order), 0u) << "order " << order;
+}
+
 TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
     // Cells ten times wider than tall: by physical distance the nearest cells
     // are whole columns above and below, and the fit resolves x only from the

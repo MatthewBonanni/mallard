@@ -3844,6 +3844,7 @@ struct Geometry2D {
     R<int32_t *> boundary_ordinal;  // (face): teno::entry_code
     R<double *> cell_h;             // square root of the area
     R<uint8_t *> mirror_face;       // (face): mirrors stencil entries
+    R<uint8_t *> boundary_face;     // (face): a boundary of the domain (not between ranks), which hides what is behind it
     R<uint8_t *> wall_cell;         // (cell): has a curved wall face without mirror images (empty if none)
     R<double *[9]> metric;          // (reconstructed cell)
     R<double *[3]> triangle_rule;   // (q, [xi, eta, w]) on the reference triangle
@@ -4078,6 +4079,39 @@ struct CellSetup2D {
         return true;
     }
 
+    /**
+     * @brief Whether the segment from (ax, ay) to (bx, by) crosses a boundary
+     *        face of the domain touched by the first n_visits visits, at an
+     *        interior point of both: what lies across it is hidden.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool crosses_boundary(const Lanes2D & w, const uint32_t n_visits, const double ax, const double ay, const double bx,
+                          const double by, const double h) const {
+        const double tol = precision_tol<double>(1e-12, 1e-5) * h * h;
+        auto side = [tol](const double px, const double py, const double qx, const double qy, const double x, const double y) {
+            const double cross = (qx - px) * (y - py) - (qy - py) * (x - px);
+            return (cross > tol) - (cross < -tol);
+        };
+        for (uint32_t v = 0; v < n_visits; v++) {
+            const uint32_t c = w.visit_cell[v];
+            const LatticeMap2D m = lattice_map(w.visit_lattice[v]);
+            for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
+                const uint32_t f = g.faces_of_cell(k);
+                if (!g.boundary_face(f)) continue;
+                const uint32_t n0 = g.nodes_of_face(g.offsets_nodes_of_face(f));
+                const uint32_t n1 = g.nodes_of_face(g.offsets_nodes_of_face(f) + 1);
+                double px, py, qx, qy;
+                m.point(double(g.node_coords(n0, 0)), double(g.node_coords(n0, 1)), px, py);
+                m.point(double(g.node_coords(n1, 0)), double(g.node_coords(n1, 1)), qx, qy);
+                if (side(ax, ay, bx, by, px, py) * side(ax, ay, bx, by, qx, qy) < 0 &&
+                    side(px, py, qx, qy, ax, ay) * side(px, py, qx, qy, bx, by) < 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     KOKKOS_INLINE_FUNCTION
     double distance2(const uint32_t i, const double dx, const double dy) const {
         return g.metric(i, 0) * dx * dx + (g.metric(i, 1) + g.metric(i, 3)) * dx * dy + g.metric(i, 4) * dy * dy;
@@ -4156,28 +4190,39 @@ struct CellSetup2D {
      *        extension of a facet of a curved wall, or across the far side of
      *        a thin body, it lands on another part of the flow. Images that
      *        land inside the domain (non-convex boundaries) are not ghosts.
-     *        Returns their number, or -1 when the scratch is full.
+     *        Candidates are seen from the target cell: a cell across a
+     *        boundary face (the other side of a thin body) is none, and an
+     *        image only if the path from the target to the foot on its line,
+     *        and from there to its cell and to the image, crosses no other
+     *        boundary face (at a closed trailing edge, an image of one side
+     *        lands beyond the other). Returns their number, or -1 when the
+     *        scratch is full.
      */
     KOKKOS_INLINE_FUNCTION
     int gather(const Lanes2D & w, const uint32_t i, const uint32_t n_visits, const double x0, const double y0,
                const double h) const {
         uint32_t n_lines = 0, n_lf = 0;
+        bool bounded = false;
         for (uint32_t v = 0; v < n_visits; v++) {
             const uint32_t c = w.visit_cell[v];
             const LatticeMap2D m = lattice_map(w.visit_lattice[v]);
             for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
                 const uint32_t f = g.faces_of_cell(k);
+                if (g.boundary_face(f)) bounded = true;
                 if (!g.mirror_face(f)) continue;
                 if (!add_line_face(w, c, f, m, h, n_lines, n_lf)) return -1;
             }
         }
+        auto hidden = [&](const double ax, const double ay, const double bx, const double by) {
+            return bounded && crosses_boundary(w, n_visits, ax, ay, bx, by, h);
+        };
         const double tol = GEOMETRY_TOL * h;
         uint32_t n_entries = 0;
         for (uint32_t v = 0; v < n_visits; v++) {
             const uint32_t c = w.visit_cell[v];
             double cx, cy;
             lattice_map(w.visit_lattice[v]).point(double(g.cell_coords(c, 0)), double(g.cell_coords(c, 1)), cx, cy);
-            if (!(c == i && w.visit_lattice[v] == LATTICE_ZERO)) {
+            if (!(c == i && w.visit_lattice[v] == LATTICE_ZERO) && !hidden(x0, y0, cx, cy)) {
                 if (n_entries == scratch.caps.entries) return -1;
                 w.entry_visit[n_entries] = v;
                 w.entry_face[n_entries] = -1;
@@ -4200,6 +4245,8 @@ struct CellSetup2D {
                 bool inside = false;
                 for (uint32_t o = 0; o < n_visits && !inside; o++) inside = point_in_cell(w, o, ex, ey, h);
                 if (inside) continue;
+                const double px = cx - d * lnx, py = cy - d * lny;
+                if (hidden(x0, y0, px, py) || hidden(cx, cy, px, py) || hidden(px, py, ex, ey)) continue;
                 // The ghost state comes from the line's face nearest to the image
                 double best = Kokkos::Experimental::finite_max_v<double>;
                 int32_t nearest = -1;
@@ -4703,10 +4750,11 @@ class Setup2D {
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
+            h.boundary_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_boundary_face", mesh.n_faces);
             Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
-                h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
-                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
-                                   !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
+                h.boundary_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                                     h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+                h.mirror_face(f) = h.boundary_face(f) && !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
             });
             if (mesh.curved_geometry && !opt.curved_mirrors && opt.curved_wall_degree < opt.degree) {
                 h.wall_cell = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_wall_cell", n_cells);
@@ -4800,6 +4848,7 @@ class Setup2D {
             d.boundary_ordinal = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.boundary_ordinal);
             d.cell_h = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.cell_h);
             d.mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.mirror_face);
+            d.boundary_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.boundary_face);
             if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
             d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
             d.triangle_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.triangle_rule);
