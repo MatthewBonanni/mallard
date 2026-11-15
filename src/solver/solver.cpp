@@ -10,7 +10,6 @@
  */
 
 #include "solver.h"
-#include "stencil_shapes.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -682,18 +681,13 @@ bool Solver::exchanges_partition_faces() const {
 }
 
 void Solver::init_rhs_split() {
-    auto to_device = [](const std::vector<uint32_t> & v, const char * label) {
-        Kokkos::View<uint32_t *> d(label, v.size());
-        Kokkos::deep_copy(d, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(v.data(), v.size()));
-        return d;
-    };
     const uint32_t n_owned = mesh->n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && c < static_cast<int32_t>(n_owned); };
     std::vector<uint32_t> faces;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (owned(mesh->h_cells_of_face(f, 0)) || owned(mesh->h_cells_of_face(f, 1))) faces.push_back(f);
     }
-    rhs_faces = to_device(faces.size() < mesh->n_faces ? faces : std::vector<uint32_t>(), "rhs_faces");
+    rhs_faces = IndexSet::of(faces, "rhs_faces");
 
     const bool own_faces = exchanges_partition_faces();
     if (own_faces) {
@@ -723,30 +717,31 @@ void Solver::init_rhs_split() {
             }
             (waits ? remote : local).push_back(f);
         }
-        local_faces = to_device(local, "local_faces");
-        partition_faces = to_device(remote, "partition_faces");
+        local_faces = IndexSet::of(local, "local_faces");
+        partition_faces = IndexSet::of(remote, "partition_faces");
         face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
                                      static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
     }
 
-    std::vector<uint32_t> cells;
-    if (halo.active()) cells = face_reconstruction->cells_independent_of_halo(n_owned);
-    n_early_cells = static_cast<uint32_t>(cells.size());
-    if (n_early_cells == 0 && !(own_faces && halo.active())) return;
-    std::vector<bool> early(mesh->n_cells, false);
-    for (uint32_t c : cells) early[c] = true;
+    // Early: the cells independent of the halo among [0, n_interior()), where the numbering puts them
+    std::vector<uint32_t> early, late;
+    if (halo.active()) early = face_reconstruction->cells_independent_of_halo(n_owned);
+    early.erase(std::lower_bound(early.begin(), early.end(), mesh->n_interior()), early.end());
+    if (early.empty() && !(own_faces && halo.active())) return;
+    std::vector<bool> is_early(mesh->n_cells, false);
+    for (uint32_t c : early) is_early[c] = true;
     for (uint32_t c = 0; c < (own_faces ? n_owned : mesh->n_reconstructed()); c++) {
-        if (!early[c]) cells.push_back(c);
+        if (!is_early[c]) late.push_back(c);
     }
-    rhs_cells = to_device(cells, "rhs_cells");
+    early_cells = IndexSet::of(early, "rhs_cells");
+    late_cells = IndexSet::of(late, "rhs_cells");
     // Host backends run kernels to completion anyway; on devices the early cells get their own stream
     if constexpr (!Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                               Kokkos::DefaultExecutionSpace::memory_space>::accessible) {
         // Without early cells nothing forks overlap_space into a step graph's capture, and joining a stream
         // outside the capture invalidates it
-        overlap_space = n_early_cells > 0
-                            ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
-                            : Kokkos::DefaultExecutionSpace();
+        overlap_space = !early.empty() ? Kokkos::Experimental::partition_space(Kokkos::DefaultExecutionSpace(), 1)[0]
+                                       : Kokkos::DefaultExecutionSpace();
         if (own_faces) comm_space = comm::high_priority_space();
     }
 }
@@ -1477,7 +1472,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
-    describe_stencil_shapes();
+    describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
@@ -1551,26 +1546,16 @@ void Solver::init_numerics() {
     init_error_control();
 }
 
-void Solver::describe_stencil_shapes() {
-    // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
-    const FaceReconstructionType type = face_reconstruction->get_type();
-    if (type == FaceReconstructionType::FIRST_ORDER) return;
-    uint32_t reach = 1;
-    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
-        reach = 0;
-        for (const uint8_t depth : teno->gather_depth) reach = std::max<uint32_t>(reach, depth);
-        reach = comm::allreduce(reach, comm::Op::MAX);
-    }
-    const StencilShapes shapes = stencil_shapes(*mesh, reach);
-    const uint64_t interior = comm::allreduce(
-        uint64_t(std::count_if(shapes.shape.begin(), shapes.shape.end(), [](uint32_t s) { return s != StencilShapes::NONE; })),
-        comm::Op::SUM);
-    if (interior == 0) return;
-    const uint64_t most = comm::allreduce(uint64_t(shapes.first.size()), comm::Op::MAX);
-    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks with a stencil shape, ",
-                                             100.0 * double(interior) / double(n_cells_global)) +
-                             (is_distributed() ? "up to " + logging::count(most, "shape") + " per rank"
-                                               : logging::count(most, "shape"));
+void Solver::describe_block_path() {
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (teno == nullptr) return;
+    const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
+    if (cells == 0) return;
+    const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
+    block_path_setting = logging::format("%.1f%% of the cells on the block path, ",
+                                         100.0 * double(cells) / double(n_cells_global)) +
+                         (is_distributed() ? "up to " + logging::count(most, "block shape") + " per rank"
+                                           : logging::count(most, "block shape"));
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -2504,7 +2489,7 @@ int Solver::run_loop() {
                 if (record.reasons != 0) {
                     // The steps enqueued after this one do nothing
                     drain_device_steps();
-                    after_step(step_timer, true);
+                    after_step(step_timer, &record);
                     continue;
                 }
                 n_queued_steps++;
@@ -2533,7 +2518,7 @@ int Solver::run_loop() {
             Kokkos::Timer step_timer;
             calc_dt();
             take_step();
-            after_step(step_timer, false);
+            after_step(step_timer, nullptr);
         }
     } catch (const DivergedError &) {
         unflush_chemistry();
@@ -2574,13 +2559,17 @@ int Solver::run_loop() {
     return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
-void Solver::after_step(Kokkos::Timer & step_timer, const bool on_device) {
+void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * record) {
     act_on_requests();
     check_fields();
     // Steps on the device update p_max themselves
-    if (p_max.is_allocated() && !on_device) update_p_max();
+    if (p_max.is_allocated() && !record) update_p_max();
     if (state_needed()) flush_chemistry();
-    if (statistics.due(step, t)) sample_statistics();
+    if (record && record->statistics) {
+        if (record->spectra) statistics.write_staged_spectra(step, t, (record->seq - 1) % step_records.extent(0));
+    } else if (statistics.due(step, t)) {
+        sample_statistics();
+    }
     if (probes.averages_due(step, t)) sample_probe_averages();
     t_wall_stepping += step_timer.seconds();
     Kokkos::Timer output_timer;
@@ -2815,7 +2804,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
                                            .wall_stop = double(t_wall_stop)});
     if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
     numerics.add(face_reconstruction->summary());
-    if (!stencil_shapes_setting.empty()) numerical.emplace_back("Structured blocks", stencil_shapes_setting);
+    if (!block_path_setting.empty()) numerical.emplace_back("Structured blocks", block_path_setting);
     numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
         numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +

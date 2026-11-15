@@ -519,6 +519,10 @@ class Mesh {
         // Cells [0, n_owned()) are owned by this rank; the rest are halo cells
         uint32_t n_owned_cells = 0;
         uint32_t n_owned() const { return n_owned_cells ? n_owned_cells : n_cells; }
+        // Cells [0, n_interior()) are owned and farther than the reconstruction's vertex layers from every halo cell.
+        // Faces are numbered: those of no halo cell, then those between an owned and a halo cell, then the rest
+        uint32_t n_interior_cells = 0;
+        uint32_t n_interior() const { return n_owned_cells ? n_interior_cells : n_cells; }
         // Cells [0, n_reconstructed()) need face values: owned cells and halo layer 1
         uint32_t n_reconstructed_cells = 0;
         uint32_t n_reconstructed() const { return n_reconstructed_cells ? n_reconstructed_cells : n_cells; }
