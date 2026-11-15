@@ -2913,6 +2913,12 @@ void Solver::print_summary(const RunEnd & end) const {
         s.chemistry_mean = sums[0] / comm::size();
         if (chemistry_load_balance && sums[1] > 0.0) s.chemistry_sent = sums[2] / sums[1];
     }
+    if (reacting && chemistry_explicit_step) {
+        const comm::SelfScope scope = communication_scope();
+        const double active = comm::allreduce(double(cell_chemistry.statistics().active), comm::Op::SUM);
+        s.chemistry_explicit = active > 0.0 ? chemistry_explicit_steps() / active : 0.0;
+        s.chemistry_marked = chemistry_explicit_marked();
+    }
     if (!data_writers.empty()) {
         uint64_t bytes = 0;
         for (const auto & writer : data_writers) {
