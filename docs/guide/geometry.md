@@ -682,8 +682,8 @@ both), so it covers its whole measure in the domain. There is no key; a region
 that crosses no periodic boundary is unchanged. Copies wrap each on their own,
 and a moving region wraps while it stays within one period of where it is at
 `t = 0`. `mallard check` and the run log
-note `wrapped across periodic boundaries (N images)`. A region long enough to
-need more than 4096 images is an error.
+note `wrapped across periodic boundaries (N images)`, counting the region
+itself. A region with more than 4096 images that meet the domain is an error.
 
 ![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-light.svg#gh-light-mode-only)
 ![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-dark.svg#gh-dark-mode-only)

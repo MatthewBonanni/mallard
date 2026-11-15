@@ -340,7 +340,12 @@ TEST(InitialStateTest, DataFilesRejectValuesThatAreNotFinite) {
         }
     }
     tabulated::Data data;
-    EXPECT_THROW(data.add_table({{0.0, 1.0}}, {{1.0, std::nan("")}}, false, "t"), InputError);
+    try {
+        data.add_table({{0.0, 1.0}}, {{1.0, 2.0}, {1.0, std::nan("")}}, false, "t");
+        ADD_FAILURE() << "nan was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("row 2 of value column 2"), std::string::npos) << e.what();
+    }
     EXPECT_THROW(data.add_points({{0.0, 1.0}}, {{1.0, INFINITY}}, 1, "p"), InputError);
 }
 

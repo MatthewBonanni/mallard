@@ -1,3 +1,3 @@
 - A region `difference` of a shape minus further shapes and a region of the mesh gave approximate volume fractions in cells cut by both the first shape's surface and another's; the shapes' difference is now exact there (#1109).
-- Regions across periodic boundaries placed at most 32 rotational and 16 translational images each way, so a region longer than that lost its far parts without a message; they now place every image, and a region that would need more than 4096 is an error naming it (#1110).
+- Regions across periodic boundaries placed at most 32 rotational and 16 translational images each way, so a region longer than that lost its far parts without a message; they now place every image that meets the domain, and a region with more than 4096 such images is an error naming it (#1110).
 - Data files (`[[initialize.data]]`, table spectra) and synthetic inflow profiles accepted `nan` and `inf` values; they are now errors naming the file, line and column (#1111).

@@ -434,12 +434,13 @@ TEST(SyntheticInflowTest, InvalidInputIsRejected) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(input)), std::runtime_error) << input;
     }
-    // A profile value that is not a finite number is an error naming its file, line and column
+    // A value that is not a finite number in a column the profile reads is an error naming its file, line and
+    // column; the columns it does not read (T, and the z columns in 2D) are not checked
     const std::string not_finite = (scratch_dir() / "mallard_inflow_not_finite.csv").string();
     {
         std::ofstream out(not_finite);
-        out << "y,MEAN_U_X,MEAN_U_Y,MEAN_U_Z,COV_U_X_U_X,COV_U_Y_U_Y,COV_U_Z_U_Z\n"
-               "0.0,1,0,0,0.01,0.01,0.01\n1.0,1,nan,0,0.01,0.01,0.01\n";
+        out << "y,MEAN_U_X,MEAN_U_Y,MEAN_U_Z,COV_U_X_U_X,COV_U_Y_U_Y,COV_U_Z_U_Z,T\n"
+               "0.0,1,0,0,0.01,0.01,0.01,nan\n1.0,1,nan,0,0.01,0.01,0.01,300\n";
     }
     try {
         Solver solver;

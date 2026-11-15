@@ -256,7 +256,7 @@ TEST(RegionMotionTest, RegionsManyPeriodsLongWrapWhole) {
     };
     const region::Region r = read(strip(20.0, 0.025), &automatic);
     for (int j = 0; j < 20; j++) {
-        const double x[3] = {0.5, 0.5 + 0.8 * ((j + 0.5) / 20.0 - 0.5), 0.5};
+        const double x[3] = {0.5, 0.5 + 0.8 * ((j + 0.5) / 20.0 - 0.5), N_DIM == 2 ? 0.0 : 0.5};
         EXPECT_LT(r.distance(x), 0.0) << "period " << j;
     }
     if constexpr (N_DIM == 2) {
@@ -269,6 +269,33 @@ TEST(RegionMotionTest, RegionsManyPeriodsLongWrapWhole) {
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("at most 4096"), std::string::npos) << e.what();
     }
+}
+
+TEST(RegionMotionTest, TheImageLimitCountsImagesThatMeetTheDomain) {
+    // A ball far larger than the box, periodic in every direction: many more images to test than meet the domain
+    std::string box = "type = \"cartesian\"\nNx = 4\nNy = 4\n" + std::string(N_DIM == 3 ? "Nz = 4\n" : "") +
+                      "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if (N_DIM == 3) box += "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    const auto periodic = solver_on(box, {});
+    const region::MeshRegions automatic(*periodic->get_mesh());
+    const region::Region r = read(ball(point(0.5, 0.5), N_DIM == 2 ? 30.0 : 5.0) + "}", &automatic);
+    EXPECT_NE(r.summary().find(N_DIM == 2 ? "(3721 images)" : "(1331 images)"), std::string::npos) << r.summary();
+}
+
+TEST(RegionMotionTest, RegionsWrapAcrossEverySectorOfANarrowSector) {
+    // A 5 degree sector: a ball half a turn away enters it only as its image 36 sectors on
+    std::string sector = "type = \"annulus\"\nNtheta = 4\nNr = 2\nr_inner = 1.0\nr_outer = 2.0\nangle = 5\n";
+    std::vector<std::string> rims = {"inner", "outer"};
+    if (N_DIM == 3) {
+        sector += "Nz = 2\nLz = 1.0\n";
+        rims.insert(rims.end(), {"back", "front"});
+    }
+    const auto mesh = solver_on(sector + "[[periodic]]\nzones = [\"start\", \"end\"]\n", rims);
+    const region::MeshRegions automatic(*mesh->get_mesh());
+    const double a = 182.5 * std::numbers::pi / 180.0, b = 2.5 * std::numbers::pi / 180.0;
+    const region::Region r = read(ball(point(1.5 * std::cos(a), 1.5 * std::sin(a)), 0.05) + "}", &automatic);
+    const double image[3] = {1.5 * std::cos(b), 1.5 * std::sin(b), N_DIM == 2 ? 0.0 : 0.5};
+    EXPECT_LT(r.distance(image), 0.0) << r.summary();
 }
 
 TEST(RegionMotionTest, MovingFractionsAreTheFractionsOfTheRegionWhereItIs) {

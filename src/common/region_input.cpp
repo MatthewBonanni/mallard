@@ -1467,6 +1467,7 @@ Definition definition(Parser & parser, Parsed & p, const std::string & where, co
 }
 
 constexpr int MAX_IMAGES = 4096;
+constexpr int MAX_IMAGE_CANDIDATES = 1000000;
 
 /**
  * @brief The steps from the world's frame to each image of a region in the
@@ -1482,7 +1483,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
     auto finite = [&](const size_t i) { return std::isfinite(box[0][i]) && std::isfinite(box[1][i]); };
     std::array<Vec, 2> reach = mesh.domain;
     std::vector<int> range(n, 0), low(n, 0);
-    auto bounded = [](const double r) { return static_cast<int>(std::min(r, double(MAX_IMAGES) + 1.0)); };
+    auto bounded = [](const double r) { return static_cast<int>(std::min(r, double(MAX_IMAGE_CANDIDATES) + 1.0)); };
     for (size_t l = 0; l < n; l++) {
         const Vec & v = mesh.translations[l];
         if (static_cast<int>(l) == mesh.rotation) {
@@ -1515,13 +1516,14 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
     }
     double candidates = 1.0;
     for (size_t l = 0; l < n; l++) candidates *= double(range[l] - low[l] + 1);
-    if (candidates - 1.0 > double(MAX_IMAGES)) {
+    const std::string fix =
+        "Shorten the region along the periodic directions, or leave it unbounded along them (such as a half_space)";
+    if (candidates > double(MAX_IMAGE_CANDIDATES)) {
         fail(where, line,
-             "crosses periodic boundaries over more periods than Mallard wraps: " +
-                 std::to_string(static_cast<uint64_t>(candidates - 1.0)) + " images to test, at most " +
-                 std::to_string(MAX_IMAGES),
-             "Shorten the region along the periodic directions, or leave it unbounded along them (such as a half_space)",
-             "docs/guide/geometry.md#periodic-boundaries");
+             "spans too many periods of the mesh to wrap across its periodic boundaries: " +
+                 std::to_string(static_cast<uint64_t>(candidates)) + " images to test against the domain, at most " +
+                 std::to_string(MAX_IMAGE_CANDIDATES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
     }
     const double tol = 1e-9 * norm({mesh.domain[1][0] - mesh.domain[0][0], mesh.domain[1][1] - mesh.domain[0][1],
                                     mesh.domain[1][2] - mesh.domain[0][2]});
@@ -1576,6 +1578,12 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             l++;
         }
         if (l == n) break;
+    }
+    if (out.size() > static_cast<size_t>(MAX_IMAGES)) {
+        fail(where, line,
+             "wraps across periodic boundaries into " + std::to_string(out.size()) + " images, at most " +
+                 std::to_string(MAX_IMAGES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
     }
     return out;
 }
