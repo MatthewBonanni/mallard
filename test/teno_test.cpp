@@ -12,10 +12,13 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -25,6 +28,7 @@
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "scratch.h"
+#include "solver.h"
 
 namespace {
 
@@ -477,6 +481,52 @@ TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
         }
         EXPECT_GT(std::min(left, right), 1.5 * dx) << "cell " << c;
     }
+}
+
+TEST(TENOTest, OddDegreesAndDegreeFourOnQuadsRankInTheSpacingMetricBelowItsCutOff) {
+    // Cells of spacing ratio 1.67 (quads) and 1.73 (triangles), below the cut-off of 2.5 (#975)
+    const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    for (const bool triangles : {false, true}) {
+        auto mesh = make_mesh(triangles ? "cartesian_tri" : "cartesian", 12, 8, 1.0_r, 0.4_r);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        for (const int order : {3, 4, 5, 6}) {
+            auto teno = make_teno(mesh, bd, order);
+            uint32_t n_metric = 0;
+            for (uint32_t i = 0; i < mesh->n_cells; i++) n_metric += teno->stencil_metric(i) != identity;
+            const bool metric = order % 2 == 0 || (order == 5 && !triangles);
+            EXPECT_EQ(n_metric, metric ? mesh->n_cells : 0u)
+                << "order " << order << (triangles ? " triangles" : " quads");
+        }
+    }
+}
+
+TEST(TENOTest, Order4DoesNotAmplifyWavesOnCellsGradedBelowTheMetricCutOff) {
+    // Columns of cells stretched along x by up to 1.13 per cell, of aspect
+    // ratio 0.4 to 5. Ranked by physical distance, the cells below the cut-off
+    // of 2.5 took their finer neighbors first, differently from column to
+    // column, and order 4 amplified a wave along the columns: the linearized
+    // scheme grew at 6.7 sound speeds per box length, and the speeds of this
+    // pulse reached 0.03 by t = 3 (#975). In the spacing metric: 1.3e-4
+    std::ostringstream in;
+    in << "[run]\nt_stop = 3.0\ncfl = 0.8\n"
+       << "[mesh]\ntype = \"cartesian\"\nNx = 64\nNy = 16\nLx = 1.0\nLy = 0.1\nstretching = [2.0, 0.0]\n"
+       << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\n"
+       << "p = \"1 + 1e-3 * exp(-((x - 0.5)^2 + (y - 0.05)^2) / 0.001)\"\n"
+       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+       << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(in.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double speed = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+        const double rho = double(solver.h_conservatives(i, 0));
+        speed = std::max(speed, std::hypot(double(solver.h_conservatives(i, 1)), double(solver.h_conservatives(i, 2))) / rho);
+    }
+    EXPECT_LT(speed, 1e-3);
 }
 
 /**

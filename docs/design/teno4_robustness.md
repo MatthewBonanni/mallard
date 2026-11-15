@@ -8,7 +8,7 @@ fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 
 | Failure at order 4 | Issue |
 |---|---|
-| An outgoing acoustic wave amplified on a stretched O-grid (cylinder) | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
+| An outgoing acoustic wave amplified on a stretched O-grid (cylinder); mitigated | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
 | Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
 
@@ -149,6 +149,31 @@ the start-up acoustic wave, and it deepens as it goes: 0.58 at r = 3.3
 (t = 2.5), 0.30 at r = 7.7 (t = 9.6). The run never stops, but its flow is
 wrong. Because 59% of the cells become troubled, order 4 costs 3.3 times
 order 5 here.
+
+The growth came from the stencils of the cells at r = 4 to 12, of aspect
+ratio about 2.4, just under the ranking metric's cut-off: by physical
+distance they split the near-ties of the graded mesh toward the cylinder,
+differently from cell to cell, and odd degrees amplified the waves that
+crossed them. 2D odd degrees, and degree 4 on quads, now rank in the
+[metric on every cell](../numerics/teno_e.md#candidates), which makes
+neighboring stencils more alike but leaves slow modes and depends on the
+stencil size (see there). Order 5 grows on such meshes too: on a
+planar Mach 0.3 cylinder O-grid (radial growth 1.26 at 512 cells), the mean
+wall entropy error rose from 1.8e-2 at 512 cells to 6.2e-2 at 2048 by
+physical distance, and falls from 1.9e-3 to 7.2e-4 in the metric. In the
+metric, at the default stencil size, a pressure pulse at rest on the mesh of
+this section decays at order 4 (largest Mach number 7e-6 at
+t = 12, where it was 0.53) and at order 6 (6e-6, where it reached 0.37 by t = 2), and the
+cylinder to t = 60 at order 4 matches order 5 (a 16-CPU pod, 4 threads per
+run):
+
+| | Order 4 | Order 5 |
+|---|---|---|
+| largest Mach number | 0.339 | 0.339 |
+| lowest density / pressure | 0.860 / 0.580 | 0.860 / 0.580 |
+| troubled cells, the most at a progress row | 0% | 0% |
+| pressure drag, mean ± std over t = 30 to 60 | 0.0198 ± 0.0003 | 0.0198 ± 0.0004 |
+| wall time [s] | 280 | 527 |
 
 **NACA 0012** ([#976](https://github.com/MatthewBonanni/mallard/issues/976)).
 The case is the laminar tutorial mesh (28,672 quads; wall cells of aspect

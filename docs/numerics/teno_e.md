@@ -193,7 +193,7 @@ $$
 \begin{equation}
 \mathbf{M} =
 \begin{cases}
-(\det\mathbf{C})^{1/d}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5, \\
+(\det\mathbf{C})^{1/d}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5 \text{, 2D odd degree or 2D quad of degree 4}, \\
 \mathbf{I} & \text{otherwise},
 \end{cases}
 \label{eq:metric}
@@ -207,6 +207,74 @@ of the NACA 0012 tutorial mesh (aspect ratios of 10 to 30) took whole
 wall-normal columns by physical distance, and orders 3 to 6 settled into an
 odd-even wall-pressure mode, which at order 4 neither the metric nor the
 mirror-image rules above remove alone.
+
+**2D odd degrees** (orders 4 and 6) take the metric on every cell, and
+**degree 4** (order 5) on every quad (#975). This mitigates growing modes;
+it does not remove them. On cells graded along a direction with aspect ratios below 2.5, physical distance
+splits the near-ties of the local lattice toward the finer neighbors: a cell
+of aspect ratio 1.7 whose neighbors grow by 1.1 takes the cells two columns
+away on its finer side but not on its coarser side, and its neighbors split
+their ties differently. The leading error of a fit cancels across a face only
+between matching stencils, so the mismatch between neighboring stencils
+drives growth wherever the degree's own dissipation does not cover it: odd
+degrees have almost none, and degree 4 too little on the trapezoidal graded
+cells of an O-grid. Ranking in the metric makes neighboring stencils more
+alike; it does not add dissipation, so what remains depends on the stencil
+size. Largest real part of the eigenvalues of the linearized scheme
+(acoustics at rest), in sound speeds over the box length: on 64 × 16 quads
+with `stretching = [2, 0]` (aspect ratios 0.4 to 5, periodic, HLLC) over a
+fine scan of the wavenumber along the uniform direction, on 32 × 32 quads
+with `stretching = [2, 2]` and symmetry walls from the whole Jacobian, and
+on a half cylinder O-grid of 32 × 16 cells (radii 0.5 to 8, radial growth 1.26,
+aspect ratios 1 to 2.2, symmetry wall and far field, HLL), whose rates are in
+sound speeds over the cylinder radius, from the whole Jacobian:
+
+| Case | Cut-off 2.5 | Metric on every cell |
+|---|---|---|
+| graded quads, order 4, `stencil_factor` 1.5 / 1.6 / 1.75 | 7.9 / 10 / 9.1 | **21 / 18** / 1e-3 |
+| graded quads, order 4, `stencil_factor` 2 (default) / 2.2 / 2.6 / 3 | 6.7 / 3.8 / 0.46 / 2.5e-4 | 2.1e-4 / < 1e-7 / 1.3e-5 / 5.6e-5 |
+| graded quads, order 6, `stencil_factor` 1.5 / 1.75 / 2 (default) | 2.9 / 2.1 / 1.4 | 1.8 / < 1e-7 / 5.6e-6 |
+| graded quads, order 6, `stencil_factor` 2.2 / 2.6 / 3 | 2.6 / 1.7e-7 / 6.7e-6 | **3.2 / 5.6e-3** / 4.8e-6 |
+| graded quads, orders 3 and 5, `stencil_factor` 1.5 to 3 | < 1e-7 | < 1e-7 |
+| graded quads with walls, order 4 / 6 | 0.30 / 1.9e-3 | 1.1e-4 / 8.1e-4 |
+| `cartesian_tri` graded as above, order 4 / 6 | 1.4e-4 / 2.4e-5 | 2.0e-4 / 2.4e-5 |
+| `cartesian_tri` 24 × 24, periodic, order 4 / 6 | 3.0e-4 / 3e-8 | 6.9e-5 / 3e-8 |
+| `cartesian_tri`, graded and 24 × 24, orders 3 and 5 | < 2e-7 | < 2e-7 |
+| O-grid (32 × 16), order 3 / 4 / 5 / 6 | stable / 7.2 / 4.6 / 0.43 | stable / 7.7e-3 / 1.6e-3 / 2.4e-3 |
+| O-grid (64 × 32), order 3 / 4 / 5 / 6 | stable / 55 / 18 / 14 | stable / stable / 6.8e-4 / **0.41** |
+| O-grid, `stencil_factor` 1.5, order 4 / 5 / 6 | 18 / 7.8 / 2.1 | **0.86 / 3.8 / 3.1** |
+| O-grid, `stencil_factor` 2.6, order 4 / 5 / 6 | 0.28 / 1.5 / 3e-4 | 1.5e-2 / 2.1e-3 / **6.4e-2** |
+| O-grid, `stencil_factor` 3, order 4 / 5 / 6 | 6.2e-2 / 0.73 / 3.2e-3 | 7.1e-3 / 3.4e-3 / 2.6e-4 |
+
+At the default stencil size the metric removes the growth of order 1 on
+graded quads and on the O-grid, except at order 6 on the finer O-grid (a
+mode near the wall) (also on the coarse cylinder O-grid of the
+[order-4 study](../design/teno4_robustness.md#wall-bounded-flows)), but slow
+modes of 1e-6 to 1e-2 remain, and some stencil sizes are worse than with the
+cut-off or still grow: `stencil_factor` 1.6 or less at orders 4 and 6 and
+1.5 at order 5 on the O-grid, and
+2.2 and 2.6 at order 6. Keep the default `stencil_factor` at orders 4 to 6
+on graded meshes. The Lebesgue bound does not see these stencils
+($\Lambda \approx 2.4$). On triangles the metric changes little; their slow
+modes are those of face-asymmetric lattices
+([#1136](https://github.com/MatthewBonanni/mallard/issues/1136),
+[#1216](https://github.com/MatthewBonanni/mallard/issues/1216)). Ranking only
+quads in the metric at odd degrees was tried as well: it is the same on quads, keeps the
+triangles' errors, and leaves triangles at the cut-off's rates above (4 to 7
+times faster growth on the uniform and walled triangle boxes).
+
+The metric costs accuracy where physical distance gave compact stencils: on
+`cartesian_tri` (spacing ratio 1.73 from the cell shapes alone, along the
+diagonal) the face-value errors grow by 1.4 at order 4 and 4 at order 6, and
+at the curved walls of the [verification](../verification/index.md) annulus
+and ellipse by 1.4 to 3.2 (order 5 on quads among them), within the
+verification bounds; on squares nothing changes. Degree 4 keeps the cut-off
+on triangles, where it is stable either way (above) and the metric would
+cost a factor of 2 in face-value errors and 13 in a smooth mixture wave.
+Degree 2 (order 3) keeps the cut-off everywhere: it is stable without the
+metric, and with it TENO3 converges more slowly at curved walls (order 2.46
+on ellipses, below the bound of 2.5). A root-cause fix would make neighboring stencils match by
+construction, or add dissipation of the degree's leading error.
 
 ### Central stencil
 
@@ -571,7 +639,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 16; one file per MPI rank). The file is used
+on later runs (format version 20; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,

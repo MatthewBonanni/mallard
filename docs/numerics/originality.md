@@ -32,7 +32,7 @@ Mallard; their class says only whether we found them published.
 | Feature | Class | Closest prior work | What Mallard adds | Evidence |
 |---|---|---|---|---|
 | Central-stencil size chosen by a Lebesgue-constant bound | Original | Lebesgue constants rating spectral-volume partitions (Wang 2002; Chen 2005); eigenvalue-based reconstruction stabilization (Zangeneh & Ollivier-Gooch 2019) | A per-cell, a priori rule: grow the least-squares stencil until the reconstruction's Lebesgue constant at the face points is at most 10 (2D) or 4 (3D) | [Lebesgue bound](#lebesgue-bound) |
-| Stencil ranking in a mesh-spacing metric on thin 3D cells | Original extension | Local tangential-normal frames for least squares on anisotropic meshes (Jalali & Ollivier-Gooch 2013, 2017) | Candidates ranked by the unit-determinant inverse of the second moment of the vertex-neighbor offsets, only where that metric's ratio exceeds 2.5 | [Ranking metric](#ranking-metric) |
+| Stencil ranking in a mesh-spacing metric on thin 3D cells | Original extension | Local tangential-normal frames for least squares on anisotropic meshes (Jalali & Ollivier-Gooch 2013, 2017) | Candidates ranked by the unit-determinant inverse of the second moment of the vertex-neighbor offsets, only where that metric's ratio exceeds 2.5 (2D odd degrees and degree-4 quads: on every cell) | [Ranking metric](#ranking-metric) |
 | TENO-E on 3D hexahedra, prisms, pyramids and mixed meshes, orders 3 to 6 | Original extension | TENO on unstructured meshes (Ji, Liang & Fu 2022: 2D, one 3D tetrahedral test); TENO-E (Liang, Shyy & Fu 2025); WENO on 3D mixed elements (Tsoutsanis et al. 2011) | The TENO-E algorithm on every 3D cell type without splitting cells, with the two items above, mirror stencils and curved walls; stability measured on the linearized operator | [TENO-E in 3D](#teno-e-in-3d) |
 | Species reconstructed with the flow's contact-field stencil choice | Original extension | Mass-flux upwinding of species (Larrouturou 1991); primitive-variable reconstruction at material interfaces (Johnsen & Colonius 2006) | Every scalar takes, per face, the stencil TENO chose for the entropy/contact field (one byte), so all species share linear weights and one bound-preserving factor | [Species stencils](#species-stencils) |
 | Double flux with TENO on unstructured meshes | Original extension (narrow) | Double flux (Abgrall & Karni 2001; Billet & Abgrall 2003); with WENO on structured grids (Houim & Kuo 2011); in DG on unstructured meshes (Lv & Ihme 2014; Johnson & Kercher 2020) | The combination with high-order TENO finite volumes on mixed meshes, and wave speeds from each side's own frozen pair so both fluxes carry the same mass flux | [Double flux](#double-flux) |
@@ -108,7 +108,8 @@ with $\mathbf{d}_j$ the offsets of the cell's vertex neighbors (mirrored at
 boundary faces), on cells where
 $\sqrt{\lambda_{\max}/\lambda_{\min}}$ of $\mathbf{C}$ exceeds 2.5, a value
 above what cell shapes alone give on regular tilings
-([ranking metric](teno_e.md#3d-stability)). Least squares on anisotropic
+([ranking metric](teno_e.md#3d-stability)), and on every cell for 2D odd degrees
+and degree-4 quads ([candidates](teno_e.md#candidates)). Least squares on anisotropic
 meshes has been improved by fitting in a local tangential-normal frame
 (Jalali & Ollivier-Gooch 2013, 2017); we did not find a metric of this kind
 used to rank stencil candidates.
