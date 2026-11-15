@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "input.h"
@@ -1185,6 +1186,10 @@ class Solver {
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
         std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
         std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        // Boundary faces with local coordinates (of entries whose expressions read them), during init_boundaries
+        std::unordered_map<uint32_t, FacePoint> boundary_points;
+        /** @brief Face f's point for boundary expressions: its center and, where computed, its local coordinates. */
+        FacePoint boundary_point(uint32_t f) const;
         TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
