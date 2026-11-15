@@ -911,30 +911,53 @@ TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
     EXPECT_EQ(run_case("convergence_triggers", c, 3).queued, run_case("convergence_triggers_at_step", at_step, 3).queued);
 }
 
-TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueOnce) {
-    // An integral sampled every step fills its history's 4096 samples on the device: the device stops there once, and
-    // goes on from histories with room for four times as many, on which a condition equal to a later row's values
-    // stops the queue at that row, as a checkpoint at that step does. The waves of a closed box keep the kinetic
-    // energy correlated over many lags.
-    Case c;
-    c.run = "n_steps = 4200\ncfl = 0.5\n";
+/**
+ * @brief The box's mesh, numerics and physics with `initialize`'s [initialize] keys: the left, right and top sides of
+ *        type `sides`, the bottom an adiabatic wall.
+ */
+std::string box_body(const std::string & initialize, const std::string & sides) {
     std::ostringstream box;
     box << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) box << "Nz = 4\nLz = 0.4\n";
-    box << "[initialize]\ntype = \"analytical\"\n"
-        << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
-        << "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n";
-    for (const char * zone : {"left", "right", "top", "bottom"}) {
-        box << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"wall_adiabatic\"\n";
-    }
+    box << "[initialize]\n" << initialize;
+    for (const char * zone : {"left", "right", "top"}) box << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"" << sides << "\"\n";
+    box << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n";
     if (N_DIM == 3) box << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
     box << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
         << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
         << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
-    c.body = box.str();
+    return box.str();
+}
+
+/** @brief The box's initial state. */
+std::string box_state() {
+    return "type = \"analytical\"\nrho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " +
+           vector_of("0.3", "0.1", "0.05") + "\np = \"1.0 + exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\n";
+}
+
+/** @brief The rows of a CSV file after step `after` (root). */
+std::vector<std::string> rows_after(const std::string & csv, const uint64_t after) {
+    std::vector<std::string> rows;
+    std::istringstream in(csv);
+    for (std::string row; std::getline(in, row);) {
+        if (!row.empty() && std::isdigit(static_cast<unsigned char>(row[0])) && std::stoull(row) > after) rows.push_back(row);
+    }
+    return rows;
+}
+
+TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueOnce) {
+    // An integral sampled every step fills its history's 4096 samples on the device, a probe sampled every 7 steps does
+    // not: the device stops there once, and goes on from histories with room for four times as many, on which a
+    // condition equal to a later row's values stops the queue at that row, as a checkpoint at that step does. The
+    // waves of a closed box keep the kinetic energy correlated over many lags.
+    Case c;
+    c.run = "n_steps = 4200\ncfl = 0.5\n";
+    c.body = box_body(box_state(), "wall_adiabatic");
     const std::string convergence = "check_interval = 100000\n" + RESTARTS +
                                     "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
-                                    "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\"]\n"
+                                    "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 7\nfields = [\"P\"]\n"
+                                    "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+                                    "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\n"
                                     "file = \"{dir}/convergence.csv\"\n";
     c.extra = convergence;
     c.distributed = comm::size() > 1;
@@ -957,6 +980,63 @@ TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueO
     at_step.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"step == " + std::to_string(at) +
                     "\"\ndo = \"checkpoint\"\n";
     EXPECT_EQ(run_case("convergence_room", c, 3).queued + 1, run_case("convergence_room_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, ConvergenceHistoryStopsTheQueueAtTheSampleItsDeviceMemoryHasNoRoomFor) {
+    // An integral sampled at every step from step 0: the 4096th sample, at step 4095, fills the history's device memory
+    // without a stop; the queue stops at step 4096, whose sample it has no room for
+    const auto queued = [](const uint64_t n_steps, const bool convergence) {
+        Case c;
+        c.run = "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n";
+        c.extra = "check_interval = 100000\n[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
+                  "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\"]\nfile = \"{dir}/convergence.csv\"\n"
+                  "[[triggers]]\nname = \"never\"\ndo = \"stop\"\nwhen = \"" +
+                  std::string(convergence ? "convergence_integrals_kinetic_energy_samples < 0" : "step < 0") + "\"\n";
+        c.distributed = comm::size() > 1;
+        const std::string name = "convergence_capacity_" + std::to_string(n_steps) + (convergence ? "" : "_host");
+        return run_case(name, c, 3).queued;
+    };
+    EXPECT_EQ(queued(4096, true), queued(4096, false));
+    EXPECT_EQ(queued(4097, true) + 1, queued(4097, false));
+}
+
+TEST(StepQueueTest, ConvergenceRestartedFromACheckpointGoesOnOnTheDevice) {
+    // A run restarted from a checkpoint stages the restart's histories on the device, with a force's, an integral's
+    // and a probe's convergence: a condition equal to a row's values after the restart stops the queue at that row, as
+    // a checkpoint at that step does, and the restarted run's rows are the uninterrupted run's
+    Case c;
+    c.run = "n_steps = 200\ncfl = 0.5\n";
+    const std::string convergence =
+        "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 100\n"
+        "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+        "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"forces_bottom_Fy_pressure\", \"pt_P\"]\n"
+        "min_samples = 10\nbatches = 4\nfile = \"{dir}/convergence.csv\"\n";
+    c.extra = convergence;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("convergence_restart_reference", c, 0);
+    const auto [at, when] = convergence_row(reference, 2, 100);
+    ASSERT_GT(at, 0u);
+    const fs::path checkpoint = (c.distributed ? scratch_dir() : rank_scratch_dir()) /
+                                "convergence_restart_reference_0" / "restart_000100.restart";
+    Case restarted = c;
+    restarted.body = box_body("type = \"restart\"\nfile = \"" + checkpoint.string() + "\"\n", "outlet_extrapolation");
+    restarted.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    const Outcome o = expect_queue_invariant("convergence_restarted", restarted);
+    EXPECT_EQ(o.step, 200u);
+    if (comm::is_root()) {
+        char restart[64];
+        std::snprintf(restart, sizeof restart, "restart_%06llu.restart", static_cast<unsigned long long>(at));
+        EXPECT_TRUE(o.files.count(restart)) << restart;
+        EXPECT_EQ(rows_after(o.files.at("convergence.csv"), 100), rows_after(reference.files.at("convergence.csv"), 100));
+    }
+    Case at_step = restarted;
+    at_step.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"step == " + std::to_string(at) +
+                    "\"\ndo = \"checkpoint\"\n";
+    EXPECT_EQ(run_case("convergence_restarted", restarted, 3).queued,
+              run_case("convergence_restarted_at_step", at_step, 3).queued);
 }
 
 TEST(StepQueueTest, OutputsByTimeAndTStop) {

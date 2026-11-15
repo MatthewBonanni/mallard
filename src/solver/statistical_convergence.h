@@ -146,16 +146,17 @@ class Convergence {
         /** @brief Whether a history fills half its room on the device: stage again (the step graph is captured anew). */
         bool staged_room_low() const;
         /**
-         * @brief The device's histories and state from the host's, whose samples since the last call it copies (nothing
-         *        when the host added none).
+         * @brief The device's histories and state from the host's, whose samples since the last call it copies (none
+         *        when the host added none; the state always).
          */
         void resume_staged();
         /**
          * @brief In a step graph: add's update on the device, bit for bit, of the samples of the signals whose
          *        staged_written() is set, valued staged_input() (then t and window_start); the values into result, as
-         *        last() holds them. The caller ensures room for them (staged_signals, staged_capacity).
+         *        last() holds them; nothing while *due (device memory) is 0, as in graphs whose IF bodies all run. The
+         *        caller ensures room for them (staged_signals, staged_capacity).
          */
-        void add_staged(double * result);
+        void add_staged(const uint32_t * due, double * result);
         /** @brief Per signal: its sample is added (device memory). */
         const Kokkos::View<uint32_t *> & staged_written() const { return d_written; }
         /** @brief Per signal: its sample's value; then t and window_start (device memory). */
@@ -193,7 +194,7 @@ class Convergence {
         // Staged: (signal, [t, x, s1, s2], sample), the signals, [stationary, t_stationary], MSER's batch means and
         // the autocorrelations of a chunk of lags
         uint64_t capacity = 0;
-        bool staged_current = false;  // the device's copy holds every sample and state
+        bool staged_current = false;  // the device's histories hold every sample
         Kokkos::View<double ***, Kokkos::LayoutRight> d_history;
         Kokkos::View<DeviceSignal *> d_signals;
         Kokkos::View<double *> d_global, d_batches, d_lags;

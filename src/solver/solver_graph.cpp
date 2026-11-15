@@ -729,7 +729,7 @@ void Solver::sample_convergence() {
     });
     if (!on_device) return;
     double * const out = trigger_vars.data() + (triggers.variables().size() - convergence.columns().size());
-    device_if(convergence_due.data(), [&] { convergence.add_staged(out); });
+    device_if(convergence_due.data(), [&] { convergence.add_staged(convergence_due.data(), out); });
 }
 
 void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
@@ -1053,6 +1053,7 @@ void Solver::begin_device_steps() {
         chemistry_flush = Kokkos::View<uint32_t *>("step_chemistry_flush", 2);
         allocate_unflushed();
     }
+    allocate_monitors();
     if (triggers_on_device()) {
         trigger_vars = Kokkos::View<double *>("step_trigger_vars", triggers.variables().size());
         trigger_states = Kokkos::View<Triggers::DeviceState *>("step_trigger_states", triggers.size());
@@ -1083,7 +1084,6 @@ void Solver::begin_device_steps() {
         Kokkos::deep_copy(trigger_sources, Kokkos::View<const TriggerSource *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                                sources.data(), sources.size()));
     }
-    allocate_monitors();
     if (monitors_on_device()) {
         const size_t n_monitors = force_monitors.size() + 1;
         monitor_due = Kokkos::View<uint32_t *>("step_monitor_due", n_monitors);

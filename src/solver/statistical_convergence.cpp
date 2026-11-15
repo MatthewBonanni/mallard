@@ -514,13 +514,12 @@ bool Convergence::staged_room_low() const {
 }
 
 void Convergence::resume_staged() {
-    if (staged_current) return;
-    staged_current = true;
     const auto h_signals = Kokkos::create_mirror_view(d_signals);
     for (size_t i = 0; i < signals.size(); i++) {
         Signal & s = signals[i];
         const uint64_t n = s.x.size(), from = std::min(s.n_staged, n);
         h_signals(i) = {static_cast<const SignalState &>(s), n};
+        if (staged_current) continue;
         // The samples since the last copy (with those the device added itself, the same), and s1, s2 from entry 0
         const auto copy = [&](size_t row, const std::vector<double> & host, uint64_t begin, uint64_t end) {
             if (end <= begin) return;
@@ -534,12 +533,13 @@ void Convergence::resume_staged() {
         copy(3, s.s2, from, n + 1);
         s.n_staged = n;
     }
+    staged_current = true;
     Kokkos::deep_copy(d_signals, h_signals);
     const double global[2] = {stationary ? 1.0 : 0.0, t_stationary};
     Kokkos::deep_copy(d_global, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(global, 2));
 }
 
-void Convergence::add_staged(double * result) {
+void Convergence::add_staged(const uint32_t * due, double * result) {
     using Team = Kokkos::TeamPolicy<>::member_type;
     const auto history = d_history;
     const auto states = d_signals;
@@ -555,6 +555,7 @@ void Convergence::add_staged(double * result) {
     // add and update in the host's order of operations; mser's batch means and the autocorrelation of each lag are
     // each summed by one thread
     Kokkos::parallel_for("convergence_add", Kokkos::TeamPolicy<>(1, Kokkos::AUTO), KOKKOS_LAMBDA(const Team & team) {
+        if (*due == 0) return;
         constexpr uint32_t m = time_series::MSER_BATCH;
         const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
         const double t = input(n_signals);
