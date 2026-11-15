@@ -1,0 +1,1 @@
+- TENO6 in 3D on GPUs stages the smooth pass's stencil entries in team scratch, five at a time, as TENO5 does ten at a time: 28% more cells per second on a 96³ Taylor-Green vortex on an A100; results are bitwise unchanged (#1004).
