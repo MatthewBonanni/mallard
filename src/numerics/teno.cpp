@@ -1851,6 +1851,7 @@ struct TENOFunctor {
                 const uint32_t mid = (lo + hi) / 2;
                 (extra_cells(mid) <= i_cell ? lo : hi) = mid;
             }
+            KOKKOS_ASSERT(extra_cells(lo) == i_cell);
             i_row = n_direct_rows + lo;
         }
         rtype U0[N_CONSERVATIVE];
@@ -3147,7 +3148,7 @@ namespace {
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-15";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-16";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
