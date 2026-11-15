@@ -287,13 +287,24 @@ teno::SmoothnessTerms smoothness_terms(uint8_t degree);
 uint16_t n_moments(uint8_t degree);
 
 /**
+ * @brief Whether fits of this degree rank their stencil candidates in the
+ *        spacing metric on every cell, not only on markedly anisotropic ones.
+ *        On graded 2D cells below the cut-off, physical distance splits the
+ *        near-ties of the local lattice toward the finer neighbors, differently
+ *        from cell to cell, and odd degrees, which have little dissipation of
+ *        their own, then amplify grid-scale waves (#975).
+ */
+constexpr bool metric_on_every_cell(const uint8_t degree) { return N_DIM == 2 && degree % 2 == 1; }
+
+/**
  * @brief Metric (3 x 3, row-major) in which the stencil candidates of cell i
- *        are ranked by distance: the identity unless the spacing of its vertex
- *        neighbors (completed across its boundary faces by mirror images) is
- *        markedly anisotropic.
+ *        are ranked by distance: unless every_cell, the identity unless the
+ *        spacing of its vertex neighbors (completed across its boundary faces
+ *        by mirror images) is markedly anisotropic.
  */
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
-                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i);
+                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i,
+                                     bool every_cell = false);
 
 }  // namespace teno_setup
 

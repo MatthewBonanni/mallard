@@ -3115,8 +3115,9 @@ namespace {
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
-// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-15";
+// version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
+// ranks the candidates of 2D odd-degree stencils in the mesh-spacing metric on every cell (#975)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-16";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -3275,7 +3276,7 @@ void TENO::allocate_scratch() {
 std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {
     auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
     auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
-    return teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i);
+    return teno_setup::ranking_metric(*mesh, h_face_bc, h_bcs, i, teno_setup::metric_on_every_cell(degree));
 }
 
 namespace {

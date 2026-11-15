@@ -193,7 +193,7 @@ $$
 \begin{equation}
 \mathbf{M} =
 \begin{cases}
-(\det\mathbf{C})^{1/d}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5, \\
+(\det\mathbf{C})^{1/d}\,\mathbf{C}^{-1} & \sqrt{\lambda_{\max}/\lambda_{\min}} > 2.5 \text{ or 2D odd degree}, \\
 \mathbf{I} & \text{otherwise},
 \end{cases}
 \label{eq:metric}
@@ -207,6 +207,34 @@ of the NACA 0012 tutorial mesh (aspect ratios of 10 to 30) took whole
 wall-normal columns by physical distance, and orders 3 to 6 settled into an
 odd-even wall-pressure mode, which at order 4 neither the metric nor the
 mirror-image rules above remove alone.
+
+**2D odd degrees** (orders 4 and 6) take the metric on every cell (#975). On
+cells graded along a direction with aspect ratios below 2.5, physical
+distance splits the near-ties of the local lattice toward the finer
+neighbors: a cell of aspect ratio 1.7 whose neighbors grow by 1.1 takes the
+cells two columns away on its finer side but not on its coarser side, and the
+next cells split their ties differently. Odd degrees have little dissipation
+of their own (their leading error cancels across a face only between
+matching stencils), and the linearized scheme (acoustics at rest, HLLC) grew
+on such meshes. Largest real part of its eigenvalues, in sound speeds over
+the box length (64 × 16 quads, `stretching = [2, 0]`, aspect ratios 0.4 to
+5, periodic; 32 × 32 quads, `stretching = [2, 2]`, symmetry walls):
+
+| Case | Physical distance below 2.5 | Metric on every cell |
+|---|---|---|
+| periodic, order 4 / 6 | 6.7 / 1.4 | 2e-4 / < 1e-7 |
+| walls, order 4 / 6 | 0.30 / 2e-3 | 1e-4 / 8e-4 |
+
+The Lebesgue bound does not see these stencils ($\Lambda \approx 2.4$), and
+the growth comes and goes with the stencil size (order 4 grew at
+`stencil_factor` 2 and 2.6, not at 3). With the metric, `stencil_factor` 2
+to 3.4 is stable. The metric costs accuracy where physical distance gave
+compact stencils: on `cartesian_tri` (spacing ratio 1.73 from the cell shapes
+alone, along the diagonal) the face-value errors grow by 1.4 at order 4 and
+4 at order 6, and at the curved walls of the [verification](../verification/index.md)
+annulus and ellipse by 1.4 to 3, within the verification bounds; on squares
+nothing changes. Even degrees keep the cut-off: with the metric on every
+cell, TENO3 converges more slowly at curved walls.
 
 ### Central stencil
 

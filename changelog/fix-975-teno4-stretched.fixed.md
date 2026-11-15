@@ -1,0 +1,1 @@
+- TENO-E orders 4 and 6 no longer amplify acoustic waves on graded 2D meshes, such as the coarse cylinder O-grid at order 4 (largest Mach number 1.02 in a Mach 0.2 flow, now 0.34 as at order 5): 2D odd-degree stencils rank their candidates in the mesh-spacing metric on every cell, not only where the spacing ratio exceeds 2.5. TENO cache files are rewritten (format 16) (#975).

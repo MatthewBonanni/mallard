@@ -3460,7 +3460,7 @@ class Setup3D {
                                      0, n_metric),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, metric_on_every_cell(opt.degree));
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with n points per direction is exact to degree 2n - 3 on a tet
@@ -4723,7 +4723,7 @@ class Setup2D {
                                      0, n_target),
                                  [&](const uint32_t k) {
                 const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
-                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i, metric_on_every_cell(opt.degree));
                 for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
             });
             // Collapsed Gauss with r + 2 points per direction, exact to degree 2r + 2
@@ -5072,16 +5072,17 @@ void symmetric_eigen(std::array<double, 9> a, double w[3], double v[9]) {
 // spacing where its largest to smallest spacing ratio exceeds this. Regular
 // tilings of cubes measure 1 (hexahedra), 2.13 (Kuhn tetrahedra), 1.73
 // (prisms) and 1.57 (pyramids) from their cell shapes alone, and keep
-// physical distance; a 2:1 stretch of Kuhn tetrahedra measures 3.15
+// physical distance; a 2:1 stretch of Kuhn tetrahedra measures 3.15. 2D
+// odd-degree fits take the metric on every cell (metric_on_every_cell)
 constexpr double SPACING_ANISOTROPY = 2.5;
 
 /**
  * @brief Metric of unit determinant whose unit length is the mesh spacing in
  *        every direction, from the second moment m of the offsets of a cell's
- *        neighbors; the identity unless its spacing ratio exceeds
- *        SPACING_ANISOTROPY.
+ *        neighbors; unless every_cell, the identity unless its spacing ratio
+ *        exceeds SPACING_ANISOTROPY.
  */
-std::array<double, 9> spacing_metric(const double m[9]) {
+std::array<double, 9> spacing_metric(const double m[9], const bool every_cell) {
     const std::array<double, 9> identity = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double w[3], v[9];
     symmetric_eigen({m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]}, w, v);
@@ -5092,7 +5093,7 @@ std::array<double, 9> spacing_metric(const double m[9]) {
     const double mean = (l[0] + l[1] + l[2]) / 3.0;
     for (size_t k = 0; k < 3; k++) l[k] -= mean;
     const double spread = std::max({l[0], l[1], l[2]}) - std::min({l[0], l[1], l[2]});
-    if (!(spread > std::log(SPACING_ANISOTROPY))) return identity;
+    if (!every_cell && !(spread > std::log(SPACING_ANISOTROPY))) return identity;
     std::array<double, 9> metric = {};
     for (size_t k = 0; k < 3; k++) {
         const double e = std::exp(-2.0 * l[k]);
@@ -5106,7 +5107,8 @@ std::array<double, 9> spacing_metric(const double m[9]) {
 }  // namespace
 
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
-                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i) {
+                                     const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, const uint32_t i,
+                                     const bool every_cell) {
     using Point = std::array<double, 3>;
     double spread[9] = {};
     Point x0 = {0.0, 0.0, 0.0};
@@ -5160,7 +5162,7 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     }
     // 2D: a third spacing at the geometric mean of the other two changes neither their ratio nor the metric
     if constexpr (N_DIM == 2) spread[8] = std::sqrt(std::max(0.0, spread[0] * spread[4] - spread[1] * spread[3]));
-    return spacing_metric(spread);
+    return spacing_metric(spread, every_cell);
 }
 
 }  // namespace teno_setup

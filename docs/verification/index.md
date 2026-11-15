@@ -66,9 +66,9 @@ one):
 | | Quadrilaterals | Triangles | Hexahedra | Tetrahedra | Prisms | Pyramids | Mixed |
 |---|---|---|---|---|---|---|---|
 | TENO3 (design 3) | 2.89 | 2.92 | 2.72 | 2.68 | 2.81 | 2.88 | 2.54 |
-| TENO4 (design 4) | 4.08 | 3.97 | 3.77 | 3.55 | 3.55 | 3.78 | 3.56 |
+| TENO4 (design 4) | 4.08 | 3.99 | 3.77 | 3.55 | 3.55 | 3.78 | 3.56 |
 | TENO5 (design 5) | 4.90 | 4.98 | 4.93 | 4.73 | 5.07 | 4.84 | 5.04 |
-| TENO6 (design 6) | 6.05 | 5.95 | 5.73 | 5.58 | 5.58 | 5.60 | – |
+| TENO6 (design 6) | 6.05 | 5.94 | 5.73 | 5.58 | 5.58 | 5.60 | – |
 <!-- END GENERATED matrix-reconstruction -->
 
 ![Reconstruction convergence by cell type](../images/verification/reconstruction-light.svg#gh-light-mode-only)
@@ -105,9 +105,9 @@ Dashed lines show the design slope of each study.
 | TENO5 | quadrilaterals | max face-value error, interior | 16 → 32 | 1.32e-04 → 4.42e-06 | 5 | 4.90 | > 4.8 | pass |
 | TENO6 | quadrilaterals | max face-value error, interior | 16 → 32 | 2.39e-05 → 3.61e-07 | 6 | 6.05 | > 5.8 | pass |
 | TENO3 | triangles | max face-value error, interior | 16 → 32 | 6.77e-04 → 8.92e-05 | 3 | 2.92 | > 2.8 | pass |
-| TENO4 | triangles | max face-value error, interior | 16 → 32 | 1.26e-04 → 7.99e-06 | 4 | 3.97 | > 3.8 | pass |
+| TENO4 | triangles | max face-value error, interior | 16 → 32 | 1.80e-04 → 1.13e-05 | 4 | 3.99 | > 3.8 | pass |
 | TENO5 | triangles | max face-value error, interior | 16 → 32 | 4.81e-05 → 1.52e-06 | 5 | 4.98 | > 4.8 | pass |
-| TENO6 | triangles | max face-value error, interior | 16 → 32 | 4.53e-06 → 7.33e-08 | 6 | 5.95 | > 5.8 | pass |
+| TENO6 | triangles | max face-value error, interior | 16 → 32 | 1.80e-05 → 2.93e-07 | 6 | 5.94 | > 5.8 | pass |
 <!-- END GENERATED table-reconstruction -->
 
 ## Euler equations: advection of a smooth wave
@@ -256,9 +256,9 @@ isothermal no-slip and moving walls; the axisymmetric studies below, the axis.
 | TENO5 | quadrilaterals | max face-value error, symmetry walls | 32 → 64 | 6.57e-06 → 2.08e-07 | 5 | 4.98 | > 4.6 | pass |
 | TENO6 | quadrilaterals | max face-value error, symmetry walls | 32 → 64 | 7.36e-07 → 1.19e-08 | 6 | 5.96 | > 5.6 | pass |
 | TENO3 | triangles | max face-value error, symmetry walls | 32 → 64 | 1.28e-04 → 1.62e-05 | 3 | 2.98 | > 2.6 | pass |
-| TENO4 | triangles | max face-value error, symmetry walls | 32 → 64 | 1.22e-05 → 7.74e-07 | 4 | 3.97 | > 3.6 | pass |
+| TENO4 | triangles | max face-value error, symmetry walls | 32 → 64 | 1.80e-05 → 1.13e-06 | 4 | 3.99 | > 3.6 | pass |
 | TENO5 | triangles | max face-value error, symmetry walls | 32 → 64 | 2.09e-06 → 6.69e-08 | 5 | 4.96 | > 4.6 | pass |
-| TENO6 | triangles | max face-value error, symmetry walls | 32 → 64 | 1.26e-07 → 2.02e-09 | 6 | 5.97 | > 5.6 | pass |
+| TENO6 | triangles | max face-value error, symmetry walls | 32 → 64 | 3.24e-07 → 5.17e-09 | 6 | 5.97 | > 5.6 | pass |
 | Forced channel, transmissive sides | hexahedra | max velocity error | 8 → 16 | 5.49e-04 → 1.42e-04 | 2 | 1.95 | > 1.8 | pass |
 | Forced channel, transmissive sides | tetrahedra | max velocity error | 8 → 16 | 1.94e-04 → 4.78e-05 | 2 | 2.02 | > 1.8 | pass |
 | Forced channel, transmissive sides | prisms | max velocity error | 8 → 16 | 2.45e-04 → 6.32e-05 | 2 | 1.95 | > 1.8 | pass |
@@ -305,36 +305,36 @@ in the cells whose stencils reach a curved wall.
 | TENO3, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 5.89e-04 → 8.01e-05 | 3 | 2.88 | > 2.5 | pass |
 | TENO3, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.21e-02 → 1.08e-02 | 2 | 1.03 | < 2.3 | pass |
 | TENO3, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.17e-02 → 5.79e-03 | 2 | 1.01 | < 2.3 | pass |
-| TENO4, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.37e-03 → 7.22e-05 | 4 | 4.24 | > 3.5 | pass |
-| TENO4, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 2.51e-04 → 1.06e-05 | 4 | 4.56 | > 3.5 | pass |
+| TENO4, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.96e-03 → 1.57e-04 | 4 | 3.65 | > 3.5 | pass |
+| TENO4, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 3.42e-04 → 2.33e-05 | 4 | 3.88 | > 3.5 | pass |
 | TENO4, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.53e-02 → 7.50e-03 | 2 | 1.03 | < 2.3 | pass |
-| TENO4, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 8.91e-03 → 4.24e-03 | 2 | 1.07 | < 2.3 | pass |
+| TENO4, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 8.35e-03 → 4.13e-03 | 2 | 1.02 | < 2.3 | pass |
 | TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
 | TENO5, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 3.47e-05 → 1.05e-06 | 5 | 5.05 | > 4.5 | pass |
 | TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 4 → 8 | 1.42e-03 → 7.52e-05 | 4 | 4.23 | 3.5 to 4.5 | pass |
 | TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
 | TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.16e-02 → 1.06e-02 | 2 | 1.03 | < 2.3 | pass |
 | TENO5, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.18e-02 → 5.76e-03 | 2 | 1.03 | < 2.3 | pass |
-| TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.13e-03 → 1.43e-05 | 6 | 7.22 | > 5.5 | pass |
-| TENO6, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 5.51e-05 → 8.21e-07 | 6 | 6.07 | > 5.5 | pass |
-| TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.93e-02 → 8.96e-03 | 2 | 1.11 | < 2.3 | pass |
-| TENO6, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.00e-02 → 4.53e-03 | 2 | 1.14 | < 2.3 | pass |
+| TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.82e-03 → 2.92e-05 | 6 | 6.59 | > 5.5 | pass |
+| TENO6, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.70e-04 → 2.20e-06 | 6 | 6.27 | > 5.5 | pass |
+| TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.56e-02 → 7.72e-03 | 2 | 1.02 | < 2.3 | pass |
+| TENO6, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 8.34e-03 → 4.12e-03 | 2 | 1.02 | < 2.3 | pass |
 | TENO3, curved walls | triangles | max wall-value error | 4 → 8 | 2.47e-03 → 3.30e-04 | 3 | 2.91 | > 2.5 | pass |
 | TENO3, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 3.48e-04 → 5.11e-05 | 3 | 2.77 | > 2.5 | pass |
 | TENO3, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.76e-02 → 8.85e-03 | 2 | 0.99 | < 2.3 | pass |
 | TENO3, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.03e-02 → 5.23e-03 | 2 | 0.97 | < 2.3 | pass |
-| TENO4, curved walls | triangles | max wall-value error | 4 → 8 | 5.68e-04 → 4.27e-05 | 4 | 3.73 | > 3.5 | pass |
-| TENO4, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 9.56e-05 → 6.14e-06 | 4 | 3.96 | > 3.5 | pass |
-| TENO4, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.32e-02 → 1.17e-02 | 2 | 0.98 | < 2.3 | pass |
-| TENO4, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.04e-02 → 5.51e-03 | 2 | 0.92 | < 2.3 | pass |
+| TENO4, curved walls | triangles | max wall-value error | 4 → 8 | 9.47e-04 → 6.65e-05 | 4 | 3.83 | > 3.5 | pass |
+| TENO4, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 1.50e-04 → 1.15e-05 | 4 | 3.70 | > 3.5 | pass |
+| TENO4, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.46e-02 → 7.30e-03 | 2 | 1.00 | < 2.3 | pass |
+| TENO4, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 6.92e-03 → 3.83e-03 | 2 | 0.85 | < 2.3 | pass |
 | TENO5, curved walls | triangles | max wall-value error | 4 → 8 | 1.91e-04 → 7.51e-06 | 5 | 4.67 | > 4.5 | pass |
 | TENO5, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 1.60e-05 → 5.44e-07 | 5 | 4.88 | > 4.5 | pass |
 | TENO5, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.22e-02 → 1.10e-02 | 2 | 1.01 | < 2.3 | pass |
 | TENO5, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.04e-02 → 5.67e-03 | 2 | 0.88 | < 2.3 | pass |
-| TENO6, curved walls | triangles | max wall-value error | 4 → 8 | 2.81e-04 → 1.40e-06 | 6 | 7.65 | > 5.5 | pass |
-| TENO6, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 3.74e-06 → 5.56e-08 | 6 | 6.07 | > 5.5 | pass |
-| TENO6, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.71e-02 → 9.25e-03 | 2 | 0.89 | < 2.3 | pass |
-| TENO6, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 9.52e-03 → 4.76e-03 | 2 | 1.00 | < 2.3 | pass |
+| TENO6, curved walls | triangles | max wall-value error | 4 → 8 | 2.54e-04 → 1.56e-06 | 6 | 7.35 | > 5.5 | pass |
+| TENO6, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 6.91e-06 → 8.24e-08 | 6 | 6.39 | > 5.5 | pass |
+| TENO6, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.71e-02 → 7.53e-03 | 2 | 1.19 | < 2.3 | pass |
+| TENO6, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 6.45e-03 → 3.63e-03 | 2 | 0.83 | < 2.3 | pass |
 | quadratic walls | hexahedra | spherical shell volume error | 4 → 8 | 9.63e-03 → 6.07e-04 | 4 | 3.99 | > 3.7 | pass |
 | straight walls | hexahedra | spherical shell volume error | 4 → 8 | 6.48e-01 → 1.66e-01 | 2 | 1.96 | 1.85 to 2.15 | pass |
 | quadratic walls | prisms | spherical shell volume error | 4 → 8 | 4.63e-03 → 2.91e-04 | 4 | 3.99 | > 3.7 | pass |
