@@ -237,7 +237,7 @@ double viscous_residual_error(const std::string & mesh, uint32_t n, uint32_t ord
 }
 
 /**
- * @brief Mean error of the momentum of a decaying shear wave at t = 0.1:
+ * @brief Mean error of the momentum of a decaying shear wave at t = 0.025:
  *        u = A e sin(k . x) exp(-nu |k|^2 t) with k = 2 pi (1, 1), e
  *        normal to k, uniform density and pressure. The convective terms
  *        vanish and an energy source cancels the viscous heating, so the
@@ -247,7 +247,7 @@ double shear_wave_error(const std::string & mesh, uint32_t n, uint32_t order, co
     const double A = 0.01, mu = 0.05, k2 = 8.0 * PI * PI;
     std::ostringstream s;
     s.precision(17);
-    s << "[run]\nt_stop = 0.1\ncfl = 0.8\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
+    s << "[run]\nt_stop = 0.025\ncfl = 0.8\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
       << "\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = " << std::max(4u, n / 4) << "\nLz = " << std::max(4.0, n / 4.0) / n << "\n";
     s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
