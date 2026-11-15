@@ -163,7 +163,7 @@ KOKKOS_INLINE_FUNCTION constexpr uint32_t tree_nodes(const int levels = MAX_LEVE
 }
 
 /** @brief Team scratch of team_simplex: 2 bits per node of the subdivision tree. */
-constexpr size_t TREE_BYTES = sizeof(uint32_t) * ((2 * tree_nodes() + 31) / 32);
+KOKKOS_INLINE_FUNCTION constexpr size_t tree_bytes() { return sizeof(uint32_t) * ((2 * tree_nodes() + 31) / 32); }
 
 namespace detail {
 
@@ -179,7 +179,7 @@ KOKKOS_INLINE_FUNCTION uint32_t node_state(const uint32_t * tree, const uint32_t
 /**
  * @brief simplex, with the threads of a team: they classify the simplices of
  *        each level of the subdivision together, each one placed from the
- *        root along its path, into a table of their states (tree, TREE_BYTES
+ *        root along its path, into a table of their states (tree, tree_bytes()
  *        of team scratch), and one thread then sums the kept ones depth first,
  *        so that the sums are those of simplex. Every thread of the team
  *        calls it, with the same arguments.
@@ -197,7 +197,7 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, uint32_t * tree,
             return;
         }
     }
-    constexpr uint32_t words = static_cast<uint32_t>(TREE_BYTES / sizeof(uint32_t));
+    constexpr uint32_t words = static_cast<uint32_t>(tree_bytes() / sizeof(uint32_t));
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, words), [&](const uint32_t i) {
         tree[i] = i == 0 ? uint32_t(detail::SUBDIVIDED) : 0u;
     });

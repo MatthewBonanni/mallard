@@ -592,10 +592,10 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     using Policy = Kokkos::TeamPolicy<>;
     constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
     Policy policy(static_cast<int>(n_cells), gpu ? TEAM : 1);
-    if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::TREE_BYTES));
+    if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::tree_bytes()));
     Kokkos::parallel_for("region_moving_fractions", policy, KOKKOS_LAMBDA(const Policy::member_type & member) {
         const uint32_t c = static_cast<uint32_t>(member.league_rank());
-        uint32_t * tree = gpu ? static_cast<uint32_t *>(member.team_scratch(0).get_shmem(sampler::TREE_BYTES)) : nullptr;
+        uint32_t * tree = gpu ? static_cast<uint32_t *>(member.team_scratch(0).get_shmem(sampler::tree_bytes())) : nullptr;
         const double t = static_cast<double>(time());
         double stack[MAX_STACK];
         int top = -1;
