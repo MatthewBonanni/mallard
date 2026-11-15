@@ -745,6 +745,7 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
         {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]", "write_data"},
         {"MACH", "dimensionless", "Mach number", "every case", "write_data, post derive"},
         {"U", "m s-1", "velocity (vector)", "every case", "write_data, probes, statistics"},
+        {"VORTICITY", "s-1", "vorticity (vector)", "every case", "write_data, post derive"},
         {"Y_<s>", "dimensionless", "mass fraction of species s", "a mixture", "write_data, probes, statistics"},
         {"MASS_FLUX", "kg m-2 s-1", "normal mass flux", "[[probes]] on a surface or boundary zone", "probes"},
         {"MEAN_<A>", "A's", "time average of A", "[statistics] fields with A, or [[probes]] averaging A",
