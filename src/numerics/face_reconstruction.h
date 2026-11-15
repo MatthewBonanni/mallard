@@ -389,8 +389,9 @@ class TENO : public FaceReconstruction {
         // Pseudo-inverses stored in single precision (opt-in: halves the
         // largest tables, and changes results at single-precision round-off)
         bool single_tables = false;
-        // The cells of a stencil shape share one table of pseudo-inverses (teno::TableStore);
-        // false (tests only) keeps a table per cell
+        // The cells of a stencil shape share one table of pseudo-inverses, and the
+        // cells of a cell shape one row of basis_mean and si_matrix or moments
+        // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
         // false: the central stencils alone, which cell_gradients and point_values read, and no
         // face values (output of states read from files); such tables are never written to the cache
@@ -410,13 +411,16 @@ class TENO : public FaceReconstruction {
         // increasing order, by boundary ordinal (empty otherwise)
         Kokkos::View<rtype *[N_DIM][N_DIM]> entry_rotations;
         Kokkos::View<int32_t *> boundary_faces;
-        Kokkos::View<rtype **> basis_mean;                 // (cell, l): mean of phi_l over the cell
+        // (cell): its cell shape, the row of basis_mean and si_matrix or moments it reads
+        Kokkos::View<uint32_t *> cell_shape;
+        std::vector<uint64_t> cell_shape_owner;            // (cell shape): global id of the cell whose row it is
+        Kokkos::View<rtype **> basis_mean;                 // (cell shape, l): mean of phi_l over the cell
         Kokkos::View<uint16_t *> stencil_large_size;       // (cell)
         teno::PackedStencils stencil_large;                // pseudo-inverse width: nk
         Kokkos::View<uint16_t **> stencil_small_size;      // (cell, face); 0 if stencil invalid
         teno::PackedStencils stencil_small;                // the faces' stencils one after another; width NK_SMALL
-        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell, upper_index(l, m)): symmetric
-        teno::Moments moments;                             // 3D: (cell, k), from which the troubled passes form it
+        Kokkos::View<rtype **> si_matrix;                  // 2D: (cell shape, upper_index(l, m)): symmetric
+        teno::Moments moments;                             // 3D: (cell shape, k), from which the troubled passes form it
         teno::SmoothnessTerms si_terms;                    // 3D
         Kokkos::View<rtype *> troubled;                    // (local cell): sigma, for diagnostics
         Kokkos::View<rtype ***> troubled_coeffs;           // (queue slot, l, var): scratch for the troubled passes

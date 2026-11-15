@@ -626,6 +626,7 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
         out.emplace_back(p, p + h.span() * sizeof(*h.data()));
     };
     add(teno.scale);
+    add(teno.cell_shape);
     add(teno.basis_mean);
     add(teno.si_matrix);
     add(teno.stencil_large_size);
@@ -666,14 +667,22 @@ TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemU
 
 TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
     // Output of states read from files sets up only what cell_gradients and point_values read: scale,
-    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses
+    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses. With
+    // share_tables, cells share basis means on the means alone, without smoothness matrices
     auto mesh = make_mesh("cartesian_tri", 12, 10);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    const auto full = teno_tables(*make_teno(mesh, bd, 5));
-    const auto central = tables_with(mesh, bd, 5, [](TENO & t) { t.sector_stencils = false; });
-    for (const size_t k : {0u, 1u, 3u, 5u, 6u, 7u, 8u}) EXPECT_TRUE(central[k] == full[k]) << "table " << k;
-    EXPECT_TRUE(central[2].empty()) << "smoothness matrices";
-    EXPECT_TRUE(central[12].empty()) << "sector pseudo-inverses";
+    for (const bool share : {true, false}) {
+        const auto full = tables_with(mesh, bd, 5, [&](TENO & t) { t.share_tables = share; });
+        const auto central = tables_with(mesh, bd, 5, [&](TENO & t) {
+            t.share_tables = share;
+            t.sector_stencils = false;
+        });
+        std::vector<size_t> same = {0u, 4u, 6u, 7u, 8u, 9u};
+        if (!share) same.insert(same.end(), {1u, 2u});
+        for (const size_t k : same) EXPECT_TRUE(central[k] == full[k]) << "table " << k << (share ? ", shared" : "");
+        EXPECT_TRUE(central[3].empty()) << "smoothness matrices";
+        EXPECT_TRUE(central[13].empty()) << "sector pseudo-inverses";
+    }
 }
 
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
