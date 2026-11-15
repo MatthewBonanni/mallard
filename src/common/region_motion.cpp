@@ -591,11 +591,8 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const auto sampled = shapes;
     if (l.extent(0) > 0) {
         // On GPUs a team per cell, whose threads classify the simplices or cone boxes it subdivides together
-        using Policy = Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>>;
         constexpr bool gpu = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
-        Policy policy(static_cast<int>(n_cells), gpu ? TEAM : 1);
-        if (gpu) policy.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-        Kokkos::parallel_for("region_moving_shapes", policy, KOKKOS_LAMBDA(const Policy::member_type & member) {
+        const auto sample = KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type & member) {
             const uint32_t c = static_cast<uint32_t>(member.league_rank());
             const sampler::TeamScratch scratch = gpu ? sampler::team_scratch(member) : sampler::TeamScratch{};
             const double t = static_cast<double>(time());
@@ -641,7 +638,17 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                 }
                 Kokkos::single(Kokkos::PerTeam(member), [&]() { sampled(c, i) = value; });
             }
-        });
+        };
+        // 8 teams per SM where its shared memory holds them, otherwise as many as it does
+        Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), gpu ? TEAM : 1);
+        if (gpu) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
+        if (!gpu || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
+            Kokkos::parallel_for("region_moving_shapes", tuned, sample);
+        } else {
+            Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM>> fitted(static_cast<int>(n_cells), TEAM);
+            fitted.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
+            Kokkos::parallel_for("region_moving_shapes", fitted, sample);
+        }
     }
     const Kokkos::View<double *> out = m_fractions;
     Kokkos::parallel_for("region_moving_fractions", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
