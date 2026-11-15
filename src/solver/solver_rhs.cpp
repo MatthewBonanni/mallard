@@ -388,20 +388,12 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     const CellWFunctor w_functor{physics, solution, W_cells};
     const bool own_faces = halo.active() && exchanges_partition_faces();
     if (own_faces) {
-        // Owned cells only: the halo sides of partition faces come from their
-        // owners. The cells that read the halo run on the high-priority instance,
-        // as soon as the halo arrives, rather than in a tail after the others
-        if (!started) start_reconstruction(solution);
+        // Owned cells only: the halo sides of partition faces come from their owners
+        if (!started) {
+            start_reconstruction(solution);
+            reconstruct_near_partition(state, exchange);
+        }
         reconstruction_started = false;
-        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
-        if (exchange) {
-            halo.start(state, comm_space);
-            halo.finish(state, comm_space);
-        }
-        Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(comm_space, n_owned, mesh->n_cells), w_functor);
-        if (late_cells.size() > 0) {
-            face_reconstruction->calc_cell_face_values(comm_space, W_cells, face_solution, late_cells);
-        }
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
@@ -559,15 +551,21 @@ void Solver::start_reconstruction(StateView solution) {
 
 void Solver::discard_reconstruction() {
     comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
     face_reconstruction->discard_cell_face_values();
     reconstruction_started = false;
 }
 
-void Solver::exchange_halo(const State & state) {
+void Solver::reconstruct_near_partition(const State & state, const bool exchange) {
+    // On the high-priority instance, as soon as the halo arrives, rather than in a tail after the other cells
     comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
-    halo.start(state, comm_space);
-    halo.finish(state, comm_space);
-    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+    if (exchange) {
+        halo.start(state, comm_space);
+        halo.finish(state, comm_space);
+    }
+    Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(comm_space, mesh->n_owned(), mesh->n_cells),
+                         CellWFunctor{physics, state.flow, W_cells});
+    if (late_cells.size() > 0) face_reconstruction->calc_cell_face_values(comm_space, W_cells, face_solution, late_cells);
 }
 
 void Solver::exchange_for_first_stage() {
@@ -586,7 +584,12 @@ void Solver::exchange_for_first_stage() {
         update_boundary_states(t);
         start_reconstruction(conservatives);
         reconstruction_started = true;
-        exchange_halo(state());
+        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+        halo.start(state(), comm_space);
+        halo.finish(state(), comm_space);
+        // The default instance waits for the halo, not for the reconstruction that follows it
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+        reconstruct_near_partition(state(), false);
     } else {
         halo.exchange(state());
     }

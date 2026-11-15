@@ -10,7 +10,6 @@
  */
 
 #include "solver.h"
-#include "stencil_shapes.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -1512,7 +1511,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     face_reconstruction->init(face_reconstruction_input);
-    describe_stencil_shapes();
+    describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
@@ -1614,26 +1613,16 @@ void Solver::init_viscous_gradients(const bool teno) {
     if (axisymmetric) throw unavailable("is not available for axisymmetric runs yet", "Use a planar run");
 }
 
-void Solver::describe_stencil_shapes() {
-    // TENO's setup reads the cells within its gather depth, MUSCL the face neighbors
-    const FaceReconstructionType type = face_reconstruction->get_type();
-    if (type == FaceReconstructionType::FIRST_ORDER) return;
-    uint32_t reach = 1;
-    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
-        reach = 0;
-        for (const uint8_t depth : teno->gather_depth) reach = std::max<uint32_t>(reach, depth);
-        reach = comm::allreduce(reach, comm::Op::MAX);
-    }
-    const StencilShapes shapes = stencil_shapes(*mesh, reach);
-    const uint64_t interior = comm::allreduce(
-        uint64_t(std::count_if(shapes.shape.begin(), shapes.shape.end(), [](uint32_t s) { return s != StencilShapes::NONE; })),
-        comm::Op::SUM);
-    if (interior == 0) return;
-    const uint64_t most = comm::allreduce(uint64_t(shapes.first.size()), comm::Op::MAX);
-    stencil_shapes_setting = logging::format("%.1f%% of the cells in structured blocks with a stencil shape, ",
-                                             100.0 * double(interior) / double(n_cells_global)) +
-                             (is_distributed() ? "up to " + logging::count(most, "shape") + " per rank"
-                                               : logging::count(most, "shape"));
+void Solver::describe_block_path() {
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (teno == nullptr) return;
+    const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
+    if (cells == 0) return;
+    const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
+    block_path_setting = logging::format("%.1f%% of the cells on the block path, ",
+                                         100.0 * double(cells) / double(n_cells_global)) +
+                         (is_distributed() ? "up to " + logging::count(most, "block shape") + " per rank"
+                                           : logging::count(most, "block shape"));
 }
 
 void Solver::init_axisymmetric_weights() {
@@ -2878,7 +2867,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
                                            .wall_stop = double(t_wall_stop)});
     if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
     numerics.add(face_reconstruction->summary());
-    if (!stencil_shapes_setting.empty()) numerical.emplace_back("Structured blocks", stencil_shapes_setting);
+    if (!block_path_setting.empty()) numerical.emplace_back("Structured blocks", block_path_setting);
     numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
         numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +
