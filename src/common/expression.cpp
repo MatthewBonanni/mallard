@@ -16,9 +16,10 @@
 #include "input.h"
 
 kexpr::Program compile_expression(const std::string & key, const std::size_t line, const std::string & text,
-                                  const std::vector<std::string> & variables, const kexpr::SymbolHint hint) {
+                                  const std::vector<std::string> & variables, const kexpr::SymbolHint hint,
+                                  const std::size_t first_shadowable) {
     try {
-        return kexpr::Program(key, text, variables, hint);
+        return kexpr::Program(key, text, variables, hint, first_shadowable);
     } catch (const kexpr::SyntaxError & e) {
         throw InputError(Diagnostic{.key = key,
                                     .line = line,

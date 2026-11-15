@@ -38,11 +38,12 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;
-        std::vector<Point> x(faces.size()), n_in(faces.size());
+        std::vector<FacePoint> x(faces.size());
+        std::vector<Point> n_in(faces.size());
         for (size_t i = 0; i < faces.size(); i++) {
             chars.push_back(h_face_char(faces[i]));
+            x[i] = boundary_point(faces[i]);
             for (size_t d = 0; d < N_DIM; d++) {
-                x[i][d] = double(mesh->h_face_coords(faces[i], d));
                 n_in[i][d] = -double(mesh->h_face_normals(faces[i], d)) / double(mesh->h_face_area(faces[i]));
             }
         }
@@ -57,7 +58,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
             profiled = true;
         }
         if (InletProfile::turbulent(bound)) {
-            inflows.push_back(std::make_unique<SyntheticInflow>(bound, where, i_bc, *mesh, faces, chars));
+            inflows.push_back(std::make_unique<SyntheticInflow>(bound, where, i_bc, *mesh, faces, x, chars));
             for (CheckBoundary & b : boundary_summary) {
                 if (b.zone == name) b.turbulence = inflows.back()->summary();
             }
@@ -85,9 +86,12 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
             table->record_use("mdot", input_detail::real_use("number", dim::mass_flow, "", true));
         }
         const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow);
-        if (v.compiled()->uses(0) || v.compiled()->uses(1) || v.compiled()->uses(2)) {
-            throw InputError(where + ".mdot is the total mass flow through the inlet, so it may depend on t but not "
-                             "on x, y, z: give its shape across the inlet in profile, or the local flux in mass_flux.");
+        for (uint16_t i = 0; i < boundary_variable::COUNT; i++) {
+            if (i != boundary_variable::T && v.compiled()->uses(i)) {
+                throw InputError(where + ".mdot is the total mass flow through the inlet, so it may depend on t but "
+                                 "not on x, y, z or the local coordinates: give its shape across the inlet in profile, "
+                                 "or the local flux in mass_flux.");
+            }
         }
         mdot = v.at(Point{}, 0.0);
         if (v.depends_on_time()) mdot_program = v.compiled();
@@ -97,17 +101,18 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     if (mdot_program ? !(mdot >= 0.0) : !(mdot > 0.0)) {
         throw InputError(where + ".mdot must be " + (mdot_program ? "non-negative (at t = 0)" : "positive") + ".");
     }
-    std::unique_ptr<Expression> shape;
+    std::unique_ptr<kexpr::Program> shape;
     if (bound.contains("profile")) {
-        shape = std::make_unique<Expression>(
+        shape = std::make_unique<kexpr::Program>(compile_expression(
             where + ".profile", line_of(bound, "profile"),
-            quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
+            quantity_or_expression(bound.at("profile"), where + ".profile", dim::none), BoundaryValue::variables(),
+            BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
     }
-    const bool profile_of_t = shape && shape->depends_on_time();
+    const bool profile_of_t = shape && shape->uses(boundary_variable::T);
     // Either of t: the faces' fluxes are recomputed on the device at every stage
     const bool of_t = profile_of_t || mdot_program;
-    std::vector<double> value = shape ? evaluate_at({shape.get()}, mesh->face_coords, faces)
-                                      : std::vector<double>(faces.size(), 1.0);
+    std::vector<double> value(faces.size(), 1.0);
+    for (size_t k = 0; shape && k < faces.size(); k++) value[k] = (*shape)(boundary_point(faces[k]).at(0.0).data());
     std::string error;
     for (size_t k = 0; shape && k < faces.size(); k++) {
         if (!(value[k] >= 0.0)) {
@@ -119,7 +124,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     // The faces' measures as the flux integral weighs them, owned faces only so that none counts twice,
     // summed in an order every rank count agrees on: by global cell, then the face's position in it
     std::vector<uint64_t> keys;
-    std::vector<double> terms, x, measure;
+    std::vector<double> terms, x, measure;  // x: the faces' points (FacePoint::v)
     for (size_t k = 0; k < faces.size(); k++) {
         const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(faces[k], 0));
         if (c >= mesh->n_owned()) continue;
@@ -128,7 +133,8 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
         keys.push_back(mesh->h_global_cell(c) * 8 + j);  // No cell has 8 faces
         terms.push_back(value[k] * static_cast<double>(mesh->h_face_measure(faces[k])));
         if (of_t) {
-            FOR_I_DIM x.push_back(static_cast<double>(mesh->h_face_coords(faces[k], i)));
+            const FacePoint point = boundary_point(faces[k]);
+            x.insert(x.end(), point.v.begin(), point.v.end());
             measure.push_back(static_cast<double>(mesh->h_face_measure(faces[k])));
         }
     }
@@ -159,13 +165,13 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
         timed = MassFlowProfile{
             where,
             std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(),
-                                                   expression_unit_hint),
+                                                   BoundaryValue::hint, boundary_variable::FIRST_LOCAL),
             mdot_program ? mdot_program
                          : std::make_shared<const kexpr::Program>(where + ".mdot", mdot_text.str(),
                                                                   BoundaryValue::variables()),
-            std::vector<Point>(order.size()), std::vector<double>(order.size())};
+            std::vector<FacePoint>(order.size()), std::vector<double>(order.size())};
         for (size_t j = 0; j < order.size(); j++) {
-            for (size_t d = 0; d < N_DIM; d++) timed.x[j][d] = x[order[j] * N_DIM + d];
+            for (size_t d = 0; d < boundary_variable::COUNT; d++) timed.x[j][d] = x[order[j] * boundary_variable::COUNT + d];
             timed.measure[j] = measure[order[j]];
         }
     }

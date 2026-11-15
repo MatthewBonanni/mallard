@@ -29,6 +29,7 @@
   "examples/flame_vortex/input.toml",
   "examples/flame_vortex_quenching/input.toml",
   "examples/forced_inlet/input.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/heated_duct/closed.toml",
   "examples/heated_duct/closed_upt.toml",
   "examples/heated_duct/input.toml",

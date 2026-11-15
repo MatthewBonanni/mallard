@@ -9,7 +9,7 @@ fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 | Failure at order 4 | Issue |
 |---|---|
 | An outgoing acoustic wave amplified on a stretched O-grid (cylinder) | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
-| Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
+| Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh (fixed: mirror images past the far side of the body) | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
 
 ## Setup
@@ -163,7 +163,10 @@ pressure.
 | largest for 0.1 < x < 0.9 | 0.0014 | 0.0002 |
 
 The odd-even wall-pressure mode that the [mirror-image rules and the metric](../numerics/teno_e.md#candidates)
-remove elsewhere remains at order 4 at the trailing edge.
+remove elsewhere remained at order 4 at the trailing edge. Its cause was
+mirror images that land past the far side of the thin trailing edge, among the
+flow there; without them the largest value near the trailing edge is
+0.0002 of the dynamic pressure up to t = 10, against 0.064 before (steady from t = 15 to 30) and 0.001 for order 5 (#976).
 
 **Taylor–Green vortex at Mach 0.1.** The kinetic energy agrees to 0.1%,
 but order 4 leaves more compressible noise:

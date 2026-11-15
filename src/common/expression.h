@@ -35,7 +35,7 @@
  */
 kexpr::Program compile_expression(const std::string & key, std::size_t line, const std::string & text,
                                   const std::vector<std::string> & variables,
-                                  kexpr::SymbolHint hint = expression_unit_hint);
+                                  kexpr::SymbolHint hint = expression_unit_hint, std::size_t first_shadowable = SIZE_MAX);
 
 /**
  * @brief An expression of named variables (by default x, y, z and t), so
@@ -45,8 +45,10 @@ class Expression {
     public:
         /** @brief The expression of the input's key on line, as compile_expression. */
         Expression(const std::string & key, const std::size_t line, const std::string & text,
-                   const std::vector<std::string> & variables = {"x", "y", "z", "t"}) :
-            Expression(compile_expression(key, line, text, variables), variables) {}
+                   const std::vector<std::string> & variables = {"x", "y", "z", "t"},
+                   const std::size_t first_shadowable = SIZE_MAX) :
+            Expression(compile_expression(key, line, text, variables, expression_unit_hint, first_shadowable),
+                       variables) {}
 
         /** @brief An expression from elsewhere (a command-line option); errors are kexpr::SyntaxError. */
         Expression(const std::string & name, const std::string & text,

@@ -1,6 +1,10 @@
 {
  "dims": [
+  2,
   3
  ],
- "set_in": []
+ "set_in": [
+  "examples/forced_isotropic_turbulence/input.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml"
+ ]
 }
