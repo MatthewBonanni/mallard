@@ -661,14 +661,17 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
 TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
     // batches split the cells differently, and the host setup is the fallback
-    // for cells that do not fit the device's scratch
+    // for cells that do not fit the device's scratch. Order 4 takes the
+    // pyramids' larger odd-degree stencils
     auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    auto reference = make_teno(mesh, bd, 5);
-    auto batched = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; });
-    auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
-    expect_same_tables(*reference, *batched, "batches of 64 cells");
-    expect_same_tables(*reference, *host, "host setup");
+    for (const int order : {4, 5}) {
+        auto reference = make_teno(mesh, bd, order);
+        auto batched = make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_batch_cells = 64; });
+        auto host = make_teno_with(mesh, bd, order, [](TENO & t) { t.setup_on_host = true; });
+        expect_same_tables(*reference, *batched, "order " + std::to_string(order) + ", batches of 64 cells");
+        expect_same_tables(*reference, *host, "order " + std::to_string(order) + ", host setup");
+    }
 }
 
 namespace {

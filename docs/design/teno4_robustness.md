@@ -108,7 +108,7 @@ speed over the box size. Negative or about zero is bounded.
 | `cartesian_pyramid` 6³ | periodic | −0.005 | +0.0013 | −0.003 |
 | `cartesian_pyramid` 6³ | symmetry walls | −0.005 | +0.0048 | +0.0004 |
 | `cartesian_pyramid` 4³ | periodic | −0.0003 | +0.0007 | −0.0007 |
-| `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | side walls, periodic in z | −0.003 | THIN | −0.005 |
+| `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | side walls, periodic in z | −0.003 | +0.0002 | −0.005 |
 | `cartesian_pyramid` 6 × 6 × 4, aspect ratio 6.25 | walls | −0.006 | −0.001 | −0.003 |
 | `cartesian`, `cartesian_tet`, `cartesian_prism`, `cartesian_mixed` 6³ | periodic; walls | ≤ +0.0009 | ≤ +0.0024 | ≤ +0.0013 |
 | jittered Kuhn tetrahedra 6³ (0.15 h) | periodic; walls | ≤ +0.0006 | ≤ −0.0007 | ≤ +0.0008 |
