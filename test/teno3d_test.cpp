@@ -492,6 +492,9 @@ TEST_P(TENO3DPyramidLattice, LinearizedSchemeHasNoGrowingMode) {
     // the Lebesgue bound, and this lattice had growing modes: largest real
     // part 6e-3 (order 4) and 2e-3 (order 6) in sound speeds over the block
     // size, a norm of e^30 and e^10 by t = 5000 (#236)
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "finite differences of the right-hand side need double precision";
+    }
     const double growth = largest_linear_growth("cartesian_pyramid", 6, GetParam(), 5000.0);
     std::cout << "order " << GetParam() << ": largest |exp(t J)| at t = 5000 h/c: " << growth << std::endl;
     EXPECT_LT(growth, 100.0);
