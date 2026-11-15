@@ -706,7 +706,7 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
         EXPECT_GT(std::count(o.files.at("mean_disk.csv").begin(), o.files.at("mean_disk.csv").end(), '\n'), 4);
     }
     Case bare = c;
-    bare.extra = "check_interval = 1000\n" + restart + "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
