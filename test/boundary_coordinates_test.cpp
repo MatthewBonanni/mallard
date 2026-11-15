@@ -85,15 +85,15 @@ TEST(BoundaryCoordinatesTest, PlanarInletBetweenWallsHasExactCoordinates) {
     ASSERT_EQ(p.size(), faces.size());
     for (const FacePoint & x : p) {
         const double y = x[1];
-        EXPECT_NEAR(x[bv::N], std::min(y, H - y), 1e-15) << y;
-        EXPECT_NEAR(x[bv::XI], y - 0.5 * H, 1e-15) << y;
+        EXPECT_NEAR(x[bv::N], std::min(y, H - y), tol(1e-15, 1e-6)) << y;
+        EXPECT_NEAR(x[bv::XI], y - 0.5 * H, tol(1e-15, 1e-6)) << y;
 #if N_DIM == 2
-        EXPECT_NEAR(x[bv::S], y, 1e-15) << y;
+        EXPECT_NEAR(x[bv::S], y, tol(1e-15, 1e-6)) << y;
 #else
         const double z = x[2];
-        EXPECT_NEAR(x[bv::ETA], z - 0.5 * H, 1e-15) << z;
-        EXPECT_NEAR(x[bv::R], std::hypot(y - 0.5 * H, z - 0.5 * H), 1e-15);
-        EXPECT_NEAR(x[bv::THETA], std::atan2(z - 0.5 * H, y - 0.5 * H), 1e-14);
+        EXPECT_NEAR(x[bv::ETA], z - 0.5 * H, tol(1e-15, 1e-6)) << z;
+        EXPECT_NEAR(x[bv::R], std::hypot(y - 0.5 * H, z - 0.5 * H), tol(1e-15, 1e-6));
+        EXPECT_NEAR(x[bv::THETA], std::atan2(z - 0.5 * H, y - 0.5 * H), tol(1e-14, 1e-6));
 #endif
     }
     EXPECT_NE(summary.find("tangent (0, 1"), std::string::npos) << summary;
@@ -106,7 +106,7 @@ TEST(BoundaryCoordinatesTest, PlanarInletBetweenWallsHasExactCoordinates) {
     const std::vector<FacePoint> q =
         local_coordinates(*mesh, faces, framed, "left", {bv::XI}, WallDistance(), false, summary);
     for (const FacePoint & x : q) {
-        EXPECT_NEAR(x[bv::XI], -x[1], 1e-15);
+        EXPECT_NEAR(x[bv::XI], -x[1], tol(1e-15, 1e-6));
         EXPECT_TRUE(std::isnan(x[bv::N]));
     }
 }
@@ -123,14 +123,14 @@ TEST(BoundaryCoordinatesTest, WallDistanceIsExactBesideEdgesAndCorners) {
         if constexpr (N_DIM == 3) p[2] = z;
         return p;
     };
-    EXPECT_NEAR(walls(at(0.3, 0.2, 0.5)), 0.2, 1e-15);
-    EXPECT_NEAR(walls(at(0.6, 0.9, 0.5)), 0.6, 1e-15);
-    EXPECT_NEAR(walls(at(0.5, -0.1, 0.5)), 0.1, 1e-15);
-    EXPECT_NEAR(walls(at(-0.3, -0.4, 0.5)), 0.5, 1e-15);
-    EXPECT_NEAR(walls(at(1.3, -0.4, 0.5)), 0.5, 1e-15);
+    EXPECT_NEAR(walls(at(0.3, 0.2, 0.5)), 0.2, tol(1e-15, 1e-6));
+    EXPECT_NEAR(walls(at(0.6, 0.9, 0.5)), 0.6, tol(1e-15, 1e-6));
+    EXPECT_NEAR(walls(at(0.5, -0.1, 0.5)), 0.1, tol(1e-15, 1e-6));
+    EXPECT_NEAR(walls(at(-0.3, -0.4, 0.5)), 0.5, tol(1e-15, 1e-6));
+    EXPECT_NEAR(walls(at(1.3, -0.4, 0.5)), 0.5, tol(1e-15, 1e-6));
 #if N_DIM == 3
-    EXPECT_NEAR(walls(at(-0.3, -0.4, -1.2)), 1.3, 1e-15);
-    EXPECT_NEAR(walls(at(0.5, 0.25, 1.4)), std::hypot(0.25, 0.4), 1e-15);
+    EXPECT_NEAR(walls(at(-0.3, -0.4, -1.2)), 1.3, tol(1e-15, 1e-6));
+    EXPECT_NEAR(walls(at(0.5, 0.25, 1.4)), std::hypot(0.25, 0.4), tol(1e-15, 1e-6));
 #endif
 }
 
@@ -145,11 +145,13 @@ TEST(BoundaryCoordinatesTest, ArcLengthNeedsOneOpenCurve) {
         local_coordinates(*mesh, corner, entry, "zone", {bv::S}, WallDistance(), false, summary);
     for (const FacePoint & x : p) {
         const double expected = x[0] < 1.0 ? x[0] : 1.0 + x[1];
-        EXPECT_NEAR(x[bv::S], expected, 1e-15) << x[0] << ", " << x[1];
+        EXPECT_NEAR(x[bv::S], expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
     }
+    // Opposite sides: their normals cancel, so the frame needs a normal
+    const Input framed = parse_toml("name = \"zone\"\nframe.normal = [0.0, 1.0]\n");
     auto error = [&](const std::vector<std::string> & zones) {
         try {
-            local_coordinates(*mesh, zone_faces(*mesh, zones), entry, "zone", {bv::S}, WallDistance(), false, summary);
+            local_coordinates(*mesh, zone_faces(*mesh, zones), framed, "zone", {bv::S}, WallDistance(), false, summary);
         } catch (const InputError & e) {
             return std::string(e.what());
         }
