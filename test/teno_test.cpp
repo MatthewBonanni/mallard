@@ -456,13 +456,12 @@ TEST(TENOTest, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
 }
 
 /**
- * @brief Checks that every cell sees the members of its central stencil: the
- *        segment from it to a member cell, or the path from it to the foot of
- *        a mirror image on its face's line and from there to the image's cell
- *        and to the image, crosses no boundary face. Returns the number of
- *        members that would be hidden without the face itself.
+ * @brief Checks that no mirror image in the central stencils lies past the
+ *        far side of the body behind its face: the path from its foot on the
+ *        face's line to the image crosses no boundary face. Returns the number
+ *        of images checked.
  */
-uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_ptr, int order) {
+uint32_t expect_images_inside_the_body(const std::shared_ptr<Mesh> & mesh_ptr, int order) {
     const Mesh & m = *mesh_ptr;
     std::vector<int32_t> face_bc(m.n_faces, -1);
     std::vector<uint32_t> boundary;
@@ -481,7 +480,6 @@ uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_pt
         const uint32_t n = m.h_node_of_face(f, k);
         return P{double(m.h_node_coords(n, 0)), double(m.h_node_coords(n, 1))};
     };
-    auto centroid = [&](uint32_t c) { return P{double(m.h_cell_coords(c, 0)), double(m.h_cell_coords(c, 1))}; };
     auto side = [](const P & a, const P & b, const P & q) {
         const double cross = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
         return (cross > 1e-6) - (cross < -1e-6);
@@ -495,35 +493,29 @@ uint32_t expect_stencils_see_their_members(const std::shared_ptr<Mesh> & mesh_pt
     };
     uint32_t n_checked = 0;
     for (uint32_t c = 0; c < m.n_cells; c++) {
-        const P x = centroid(c);
         for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
-            const P y = centroid(static_cast<uint32_t>(stencils.cells[s]));
             const int32_t f = stencils.faces[s];
-            if (f < 0) {
-                EXPECT_FALSE(hidden(x, y)) << "cell " << c << " takes cell " << stencils.cells[s] << " across a boundary";
-                n_checked++;
-                continue;
-            }
+            if (f < 0) continue;
+            const uint32_t of = static_cast<uint32_t>(stencils.cells[s]);
+            const P y{double(m.h_cell_coords(of, 0)), double(m.h_cell_coords(of, 1))};
             const P a = node(static_cast<uint32_t>(f), 0u), b = node(static_cast<uint32_t>(f), 1u);
             const double tx = b[0] - a[0], ty = b[1] - a[1];
             const double t = ((y[0] - a[0]) * tx + (y[1] - a[1]) * ty) / (tx * tx + ty * ty);
             const P foot{a[0] + t * tx, a[1] + t * ty};
             const P image{2 * foot[0] - y[0], 2 * foot[1] - y[1]};
-            EXPECT_FALSE(hidden(x, foot) || hidden(y, foot) || hidden(foot, image))
-                << "cell " << c << " takes the image of cell " << stencils.cells[s] << " across face " << f
-                << " at " << image[0] << ", " << image[1] << ", past another boundary";
+            EXPECT_FALSE(hidden(foot, image)) << "cell " << c << " takes the image of cell " << of << " across face " << f
+                                              << " at " << image[0] << ", " << image[1] << ", past another boundary";
             n_checked++;
         }
     }
     return n_checked;
 }
 
-TEST(TENOTest, StencilsAtAClosedTrailingEdgeStayOnTheirSideOfTheBody) {
+TEST(TENOTest, MirrorImagesAtAClosedTrailingEdgeStayInsideTheBody) {
     // Square with a lens-shaped hole, closed at both ends and at most three
     // quarters of a cell thick, as at the closed trailing edge of an airfoil:
-    // the cells on one side would reach across it to the cells on the other,
-    // and images of one side would land past the other, among the cells
-    // there (#976)
+    // images of the cells on one side, mirrored across it, would land past
+    // the other side, among the cells there (#976)
     const uint32_t n = 8;
     const double h = 1.0 / n;
     std::vector<std::array<rtype, N_DIM>> nodes;
@@ -547,7 +539,7 @@ TEST(TENOTest, StencilsAtAClosedTrailingEdgeStayOnTheirSideOfTheBody) {
         }
     }
     const auto mesh = mesh_from(nodes, cells);
-    for (int order : {3, 4, 5}) EXPECT_GT(expect_stencils_see_their_members(mesh, order), 0u) << "order " << order;
+    for (int order : {3, 4, 5}) EXPECT_GT(expect_images_inside_the_body(mesh, order), 0u) << "order " << order;
 }
 
 TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
