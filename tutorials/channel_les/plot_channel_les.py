@@ -160,7 +160,7 @@ def results(args):
 
     g, a = snapshots.read(snapshots.series(os.path.join(run, "solut", "flow")))
     polys, c = snapshots.cells(g)
-    ux = a["U_X"]
+    ux = a["U"][:, 0]
     y_cells = np.unique(np.round(c[:, 1], 10))
     y15 = y_cells[np.argmin(np.abs(y_cells * u_tau / nu_w - 15))]
     near = np.isclose(c[:, 1], y15, rtol=0, atol=1e-9)

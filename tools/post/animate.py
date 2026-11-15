@@ -29,10 +29,14 @@ import mallard  # noqa: E402
 
 
 def plane(f, k):
-    """2D points, triangles (a fan of each cell) and the cell of each triangle of snapshot k of an open file."""
+    """2D points, triangles (a fan of each cell) and the cell of each triangle of snapshot k of an open file.
+    The points the pieces of a PVTU file share are merged, so that the triangles form one triangulation."""
     g = f.geometry(k)
     tris, cell = g.triangles()
-    return g.points[:, :2], tris, cell
+    pts, inverse = np.unique(g.points, axis=0, return_inverse=True)
+    if len(pts) == len(g.points):
+        return g.points[:, :2], tris, cell
+    return pts[:, :2], inverse.ravel()[tris], cell
 
 
 def snapshot_fields(f, k):
