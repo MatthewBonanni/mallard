@@ -131,6 +131,9 @@ Commands:
     mallard post average      Means, RMS, covariances, PDFs and conditional
                               statistics over saved snapshots, as [statistics]
                               keeps them
+    mallard post flame        Position, thermal thickness, consumption and
+                              displacement speed of a premixed flame in saved
+                              snapshots
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -862,7 +865,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 Usage: mallard post <command> [options]
 
 Commands on a run's output: probes, integrals, snapshots, derived fields and
-averages of it, and the grid convergence of several runs.
+averages of it, the speeds of a premixed flame in it, and the grid convergence
+of several runs.
 
 Commands:
   mallard post extract        Probes, region integrals and snapshots of existing
@@ -873,6 +877,9 @@ Commands:
   mallard post average        Means, RMS, covariances, PDFs and conditional
                               statistics over saved snapshots, as [statistics]
                               keeps them
+  mallard post flame          Position, thermal thickness, consumption and
+                              displacement speed of a premixed flame in saved
+                              snapshots
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -1193,6 +1200,87 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-average
+```
+
+### mallard post flame
+
+```text
+Usage: mallard post flame FILE... [--direction x|y|z] [--species NAME] [--reference-speed S_L] [-o DIR]
+
+Sets up the case of a series of restart files or snapshots of a premixed flame,
+planar on average, and measures the flame in each: its profile along --direction
+(each row the mean over the other directions, weighted by cell volume), with the
+fresh gas at its colder end and the burnt gas at the other, gives its position
+x_f, where T is midway between the fresh temperature T_u and the peak T_b; its
+thermal thickness delta_T = (T_b - T_u) / max |dT/dx|; its consumption speed S_c
+= -int omega_k dx / (rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which
+in a steady flame is the flame speed, in any frame; and its displacement speed
+S_d, the speed of x_f relative to the fresh gas.
+
+The production rates are the run's own: the OMEGA_* fields of snapshots that
+hold them with T, RHO, the velocity and Y_* (read on the mesh alone), else
+computed from each stored state by the case's chemistry (restart files,
+snapshots of the state). The report gives the consumption speed averaged over
+the last third of the series and the displacement speed from x_f fitted over its
+last half, which settle once the flame is steady, against --reference-speed if
+given; OUTPUT/NAME.csv has a row per snapshot.
+
+FILE, the case and the choice of snapshots are as for mallard post extract: the
+case comes from -i, else from FILE's run block, and its mesh must be the file's;
+the snapshots' steps and times are those the files record, in increasing time.
+The states are read one at a time. Under mpirun -n N the cells are split over N
+ranks.
+
+Options:
+  --direction x|y|z      The direction the flame propagates along: the profile
+                         is along it, each row the mean over the other
+                         directions, weighted by cell volume. Default: x.
+  --species NAME         The species whose consumption gives the consumption
+                         speed: the deficient reactant (H2 of a lean H2/air
+                         flame, O2 of a rich one). Default: the species the
+                         flame depletes most, relative to its mass fraction in
+                         the fresh gas, in the first snapshot.
+  --reference-speed S_L  A laminar flame speed to compare with, in m/s
+                         (Cantera's): the report gives the errors of the
+                         consumption and displacement speeds. Default: none.
+  --rtol R               Cells share a row of the profile where their centers
+                         agree to R times the mesh's extent along --direction.
+                         Default: 1e-6.
+  -i FILE                The input file of the case: its mesh, physics and
+                         chemistry. Default: the input in the run block of FILE
+                         (Mallard 0.10 and later record it resolved), whose mesh
+                         file, mechanism and TENO cache_file resolve from the
+                         run's directory.
+  --name NAME            The name of the table: NAME.csv. Default: flame.
+  --steps LIST           The snapshots of these steps, separated by commas
+                         (--steps 100,200). Default: every snapshot.
+  --times T|T1:T2        The snapshot nearest to simulated time T, or every one
+                         with T1 <= t <= T2, in seconds. Default: every
+                         snapshot.
+  --every N              Every Nth of the snapshots selected, starting with the
+                         first. Default: 1.
+  --latest               Only the last snapshot selected.
+  -o, --output DIR       The directory the table goes to. Default: flame.
+  --format text|json     text: sections and tables, with the units of every
+                         quantity; json: the same as one JSON object, for
+                         scripts. Default: text.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
+
+Examples:
+  $ mallard post flame solut/flame.vtkhdf
+  $ mallard post flame solut/flame.vtkhdf --reference-speed 2.33237
+  $ mallard post flame solut/restart_*.restart --species O2 --times 2e-4:6e-4
+  $ mallard post flame solut/flame.vtkhdf --format json | jq .summary
+
+Exit status:
+  0  the flame was measured in every snapshot
+  1  a file cannot be read, the case cannot be set up or has no chemistry, a snapshot holds no flame, or the file is not of its mesh
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-flame
 ```
 
 ### mallard post convergence

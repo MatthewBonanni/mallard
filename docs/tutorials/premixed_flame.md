@@ -101,11 +101,14 @@ frame. This **consumption speed** needs only one snapshot, so it can follow
 the run:
 
 ```bash
-python3 $MALLARD/tools/post/flame_speed.py . 2.33237
+$MALLARD/build/src/mallard post flame solut/flame.vtkhdf --reference-speed 2.33237
 ```
 
-prints it for every snapshot written so far (and the displacement speed, from
-the motion of the flame). `plot_flame.py` draws it:
+prints it for every snapshot written so far, with the flame's position,
+thermal thickness and displacement speed (from the motion of the flame), and
+writes them to `flame/flame.csv`; see
+[mallard post flame](../guide/thermochemistry.md#flame-speed-and-thickness).
+`plot_flame.py` draws it:
 
 ```bash
 python3 $MALLARD/tutorials/premixed_flame/plot_flame.py results . --out .

@@ -26,7 +26,7 @@
 #       --run "Unity Lewis numbers" unity/solut/flame h2_phi0.4_T700_unity_full.csv
 #
 # Validation, planar flames on the same mesh (1D runs of flame_restart.py with
-# --ref-delta 4.343e-4 --cfl 1.0, measured with flame_speed.py): consumption
+# --ref-delta 4.343e-4 --cfl 1.0, measured with mallard post flame): consumption
 # speeds 3.3446 m/s mixture-averaged and 3.1093 m/s unity Lewis, against
 # Cantera's grid-converged 3.346 and 3.129 m/s (-0.04% and -0.6%; -0.3% and
 # -1.0% with 24 um cells). Results in 2D: with mixture-averaged transport the

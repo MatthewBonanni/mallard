@@ -1516,7 +1516,7 @@ end. Isothermal and heat-flux walls with chemistry and Soret, and with
 double flux (inert), are bitwise identical on 1-4 ranks.
 
 V8 (`examples/premixed_flame`, `tools/setup/flame_reference.py`,
-`flame_restart.py`, `flame_speed.py`): a 1D strip in
+`flame_restart.py`, `mallard post flame`): a 1D strip in
 the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
 and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
 thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the

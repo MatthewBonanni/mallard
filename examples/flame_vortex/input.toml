@@ -91,7 +91,7 @@
 # the same outcome, the largest Q / Q_0 1.785 against 1.797, the longest front
 # 2.68 against 2.66 channel heights and q_min 0.378 against 0.389.
 #
-# 1D checks (planar flame, tools/setup/flame_restart.py and tools/post/flame_speed.py):
+# 1D checks (planar flame, tools/setup/flame_restart.py and mallard post flame):
 # consumption speed against Cantera's -1.44%, -1.46%, -0.93% and -0.70% at
 # 10, 12, 16 and 24 cells per delta_L (CFL 0.4), and at 12 cells the same to
 # 5 digits at CFL 0.4, 0.6 and 0.8 (half the steps at 0.8).

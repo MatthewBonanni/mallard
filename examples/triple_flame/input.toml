@@ -75,7 +75,7 @@
 # D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
 #
 # 1D checks (planar flame at Z_st, tools/setup/flame_restart.py and
-# tools/post/flame_speed.py): consumption speed against Cantera's -1.08%, -0.28%,
+# mallard post flame): consumption speed against Cantera's -1.08%, -0.28%,
 # -0.17% and +0.18% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
 # 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
 # repeated on a finer mesh.

@@ -12,7 +12,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py` |
 | [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
@@ -218,11 +218,11 @@ python tools/setup/flame_reference.py --single h2 1.0 300 full/        # Cantera
 python tools/setup/flame_restart.py full/h2_phi1_T300_mix_full.csv mechanisms/h2o2.yaml ohmech 8 run/
     [--ny 48 --perturb 1.5]                                       # a 2D channel with a wrinkled front
 cd run && ../build/src/mallard -i input.toml && cd ..
-python tools/post/flame_speed.py run/ 2.332                            # consumption and displacement speeds
+build/src/mallard post flame run/solut/flame.vtkhdf --reference-speed 2.332    # consumption and displacement speeds
 python examples/premixed_flame/plot_flame.py run/ examples/premixed_flame/reference/h2_phi1.0_mix.csv out.png
 ```
 
-`flame_reference.py` computes freely propagating flames with Cantera (without `--single`, the H2/air and CH4/air sweep of [`premixed_flame`](../examples/premixed_flame)); `flame_restart.py` turns one into a Mallard run (input and restart) in the flame's frame at a given number of cells per thermal thickness, as a 1D strip or, with `--ny`, a periodic 2D channel whose front is displaced by random modes; `flame_speed.py` and `plot_flame.py` compare the run with Cantera. Used by [`premixed_flame`](../examples/premixed_flame) and [`flame_2d`](../examples/flame_2d).
+`flame_reference.py` computes freely propagating flames with Cantera (without `--single`, the H2/air and CH4/air sweep of [`premixed_flame`](../examples/premixed_flame)); `flame_restart.py` turns one into a Mallard run (input and restart) in the flame's frame at a given number of cells per thermal thickness, as a 1D strip or, with `--ny`, a periodic 2D channel whose front is displaced by random modes; `mallard post flame` and `plot_flame.py` compare the run with Cantera. Used by [`premixed_flame`](../examples/premixed_flame) and [`flame_2d`](../examples/flame_2d).
 
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-light.svg#gh-light-mode-only)
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-dark.svg#gh-dark-mode-only)
@@ -404,8 +404,8 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`detonation_1d`](../examples/detonation_1d) | `detonation_reference.py`, `znd_restart.py` | `plot_detonation.py`: front speed and induction length against CJ and ZND | |
 | [`detonation_2d`](../examples/detonation_2d) | `znd_restart.py --ny` | `soot_foil.py`: front speed, triple points, cell width, soot foil | `animate_detonation_2d.py` |
 | [`detonation_3d`](../examples/detonation_3d) | `detonation_window.py` (moving window, `extrude` from 2D) | `soot_foil_3d.py`: the four wall foils and track spacings | `animate_detonation_3d.py` |
-| [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `flame_speed.py`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
-| [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `flame_speed.py` | `animate_flame_2d.py` |
+| [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `mallard post flame`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
+| [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `mallard post flame` | `animate_flame_2d.py` |
 | [`counterflow_diffusion`](../examples/counterflow_diffusion) | `counterflow_reference.py`, `counterflow_setup.py` (mesh, initial state and input) | `plot_counterflow.py`: peak temperature against strain rate, profiles | |
 | [`reacting_mixing_layer`](../examples/reacting_mixing_layer) | `mixing_layer_reference.py`, `mixing_layer_setup.py` (mesh, initial state and input) | `plot_mixing_layer.py`: lift-off lengths, peaks along x and profiles against the boundary-layer reference | |
 | [`triple_flame`](../examples/triple_flame) | `triple_flame.py` | `triple_flame_analysis.py`: propagation speed against Ruetsch et al. | `animate_triple_flame.py` |

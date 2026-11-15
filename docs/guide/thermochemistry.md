@@ -249,6 +249,43 @@ solver's chemistry kernels, which prints cells per second (see
 `benchmarks/README.md`; keys `cells`, `samples`, `dt`, `repeats`,
 `igniting_fraction`, `lanes`, `threads`, `shared`, `bin_by_cost`, `output`).
 
+## Flame speed and thickness
+
+`mallard post flame` measures a premixed flame, planar on average, in a run's
+snapshots or restart files:
+
+```sh
+mallard post flame solut/flame.vtkhdf --reference-speed 2.33237
+```
+
+For each snapshot it averages the state over the directions normal to
+`--direction` (default `x`; cells weighted by volume) into a profile, with the
+fresh gas at its colder end, and reports:
+
+| Column | Meaning |
+|---|---|
+| `x_f` | Flame position: where T is midway between the fresh temperature T_u (at the colder end) and the peak temperature T_b |
+| `delta_T` | Thermal thickness (T_b − T_u) / max \|dT/dx\| |
+| `S_c` | Consumption speed −∫ ω_k dx / (ρ_u (Y_k,u − Y_k,b)) of the deficient reactant k: in a steady flame the flame speed, in any frame |
+| `S_d` | Displacement speed: the speed of `x_f` relative to the fresh gas |
+
+The production rates ω_k are the run's own: the `OMEGA_*` fields of snapshots
+that hold them with `T`, `RHO`, the velocity and `Y_*` (read on the mesh
+alone), else computed from each stored state by the case's `[chemistry]`
+(restart files, snapshots of the state). k is the species the flame depletes
+most relative to its fresh mass fraction (H2 of a lean H2/air flame, O2 of a
+rich one) unless `--species` names it. The summary averages `S_c` over the last
+third of the series and fits `x_f` over its last half for `S_d`; choose the
+snapshots of a settled flame with `--times`. The table, with a row per
+snapshot, goes to `flame/flame.csv` (`-o`, `--name`); `--format json` gives the
+report to scripts.
+
+On a mesh whose cells do not line up in rows normal to `--direction`, each
+cell is a row of its own and the profile is not a flame's: the command is for
+strips and channels (the
+[premixed flame tutorial](../tutorials/premixed_flame.md), `flame_2d`). Every
+option: [`mallard post flame --help`](cli.md#mallard-post-flame).
+
 ## Examples
 
 | Example | Shows |
