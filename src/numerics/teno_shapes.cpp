@@ -91,7 +91,7 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
     });
 }
 
-bool ShapeKeys::scan(const uint32_t c, Scan & s, const uint32_t max_layers) const {
+bool ShapeKeys::scan(const uint32_t c, Scan & s, const uint32_t layer_cap) const {
     const uint32_t n_cells = mesh.n_cells;
     if (s.stamp.size() != n_cells) {
         s.stamp.assign(n_cells, 0);
@@ -146,8 +146,8 @@ bool ShapeKeys::scan(const uint32_t c, Scan & s, const uint32_t max_layers) cons
         }
         return depth;
     };
-    if (max_layers > 0) {
-        while (s.end.size() <= max_layers && grow()) {}
+    if (layer_cap > 0) {
+        while (s.end.size() <= layer_cap && grow()) {}
     } else {
         reach(n_large, 64);
         reach(8 * n_small, 6);

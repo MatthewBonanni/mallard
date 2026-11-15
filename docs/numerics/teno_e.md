@@ -566,10 +566,8 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
-**One fit per stencil shape.** In builds that run on the host (Serial, Threads,
-OpenMP), the setup groups the cells before fitting any table (`teno_shapes.h`);
-GPU builds fit every cell, which the device does faster than the host builds
-the keys (#1082). A cell's search reads the geometry of the cells in its
+**One fit per stencil shape.** With shared tables, the setup groups the cells
+before fitting any table (`teno_shapes.h`), on the host, in every build. A cell's search reads the geometry of the cells in its
 vertex-neighbor layers, as many as the layers' cell counts make it take, and
 its own faces; its key hashes exactly that, relative to the cell and in units of
 its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
@@ -577,10 +575,14 @@ and its boundary faces with their conditions, sorted by position so that the
 key does not depend on the numbering, and the cell's own faces in its own order.
 The cell with the lowest global id of each key, over the ranks, is fitted, and
 the other cells of the key take its stencil, each entry mapped to the cell at
-the same position of their own sorted layers, its pseudo-inverses, basis means
-and smoothness-indicator matrix. Batches of fitted cells and cells taken from
-their keys then go through the table comparison above, where the cells of a key,
-whose tables are bitwise equal, take one shape. Cells whose key no other cell
+the same position of their own sorted layers (walking only the layers that
+hold the stencil's entries), its pseudo-inverses, basis means and
+smoothness-indicator matrix. Batches of fitted cells and cells taken from their
+keys then go through the table comparison above. The tables of a key are
+bitwise equal, so a batch carries them only at the key's first cell, which is
+ranked and compared once for the key: the store sees each table once, with the
+lowest global id of its cells, which gives the shapes of ranking every cell, and
+the key's other cells take its shape and canonical order. Cells whose key no other cell
 has, whose layers reach the outermost halo layer or hold two periodic copies of
 a cell are fitted on their own, so a mesh with a shape per cell is set up as
 before. Once the halo is as deep as the searches need, the layers of every

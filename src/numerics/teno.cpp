@@ -1684,12 +1684,12 @@ class KeyedSetup {
                 to.small_total(k) = static_cast<uint16_t>(ns);
                 for (int f = 0; f < teno::MAX_FACES; f++) to.small_size(k, f) = static_cast<uint16_t>(meta(i, 6 + f));
                 to.scale.lane(k)[0] = rtype(scale(i));
-                auto put = [&](const auto & cells_of, const auto & faces_of, const uint64_t first, const uint32_t count) {
+                auto put = [&](const auto & cells_of, const auto & faces_of, const uint64_t entry0, const uint32_t count) {
                     const auto c = cells_of.lane(k);
                     const auto f = faces_of.lane(k);
                     for (uint32_t s = 0; s < count; s++) {
-                        c[s] = entries(first + s, 0);
-                        f[s] = entries(first + s, 1);
+                        c[s] = entries(entry0 + s, 0);
+                        f[s] = entries(entry0 + s, 1);
                     }
                 };
                 put(to.large_cells, to.large_faces, meta(i, 1), nl);
@@ -2046,9 +2046,6 @@ void fill_range(const Kokkos::View<uint32_t *> & cells, const uint32_t c0, const
                          KOKKOS_LAMBDA(const uint32_t t) { cells(t) = c0 + t; });
 }
 
-// The keys and records are built on the host; on GPUs fitting every cell is faster (#1082)
-constexpr bool KEYED_SETUP = Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
-
 /** @brief Failed central stencils, left-out sector stencils and the largest central stencil of slots 0..n. */
 void batch_counts(const teno_setup::TableBatch & out, const uint32_t n, uint32_t & failed, uint32_t & invalid,
                   uint16_t & largest) {
@@ -2097,7 +2094,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     if (subset == nullptr) builder = std::make_unique<TableBuilder>(*this, n_target);
     std::unique_ptr<KeyedSetup> keyed;
     if (subset == nullptr) n_cells_fitted = n_target;
-    if (KEYED_SETUP && subset == nullptr && share_tables && teno::ShapeKeys::supported(*mesh)) {
+    if (subset == nullptr && share_tables && teno::ShapeKeys::supported(*mesh)) {
         keyed = std::make_unique<KeyedSetup>(*this, *mesh, boundaries, setup, cells, out);
         n_cells_fitted = keyed->n_representatives;
     }
