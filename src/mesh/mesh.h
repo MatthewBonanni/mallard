@@ -574,11 +574,12 @@ class Mesh {
         // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)); vertex
         // neighbor k of a cell is at Q cell_coords(cells_of_cell(k)) +
         // shifts(cells_of_cell_shift(k)), with Q that row of shift_rotations
-        // (empty, and Q the identity, without rotational pairs)
+        // (empty, and Q the identity, without rotational pairs).
+        // cells_of_cell_shift holds no rows when no neighbor crosses a periodic boundary
         Kokkos::View<rtype *[N_DIM]> shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]> shift_rotations;
         Kokkos::View<uint8_t *> face_shift;
-        Kokkos::View<uint8_t *> cells_of_cell_shift;
+        ShiftRows cells_of_cell_shift;
 
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
@@ -598,7 +599,7 @@ class Mesh {
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]>::host_mirror_type h_shift_rotations;
         Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
-        Kokkos::View<uint8_t *>::host_mirror_type h_cells_of_cell_shift;
+        HostShiftRows h_cells_of_cell_shift;
 
         // Periodicity (host): the translation of each lattice direction (zero
         // for the rotation's), the rotation, the zones the pairs joined, and
