@@ -33,7 +33,7 @@ void Solver::init_sponges(region::Regions & regions) {
     sponge_cells = Kokkos::View<uint32_t *>();
     moving_sponges.clear();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
-    if (!input.contains("sponges")) return;
+    if (!contains_optional(input, "sponges")) return;
     const std::vector<Input> sponges = find_value<std::vector<Input>>(input, "sponges");
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());

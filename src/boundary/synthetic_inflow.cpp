@@ -174,7 +174,7 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
         }
         return f;
     };
-    if (turbulence && turbulence->contains("profile")) {
+    if (turbulence && contains_optional(*turbulence, "profile")) {
         if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {
             throw InputError(where + ".u depends on t, but " + where + ".turbulence.profile gives the mean velocity "
                              "too: remove the profile and give reynolds_stress, or remove u to take the profile's mean.");

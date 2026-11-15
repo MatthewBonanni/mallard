@@ -1304,7 +1304,7 @@ struct InitialState::Impl {
             }
         } else {
             std::vector<std::string> at;
-            if (e.contains("at")) {
+            if (contains_optional(e, "at")) {
                 at = find_value<std::vector<std::string>>(e, "at");
             } else {
                 for (const auto & c : coordinates) {
@@ -1447,7 +1447,7 @@ struct InitialState::Impl {
             fractions.push_back({static_cast<uint32_t>(k), static_cast<uint32_t>(p)});
         }
         L.n_fractions = static_cast<uint32_t>(fractions.size()) - L.fractions;
-        if (t.contains("balance")) {
+        if (contains_optional(t, "balance")) {
             const std::string name = find_value<std::string>(t, "balance");
             L.balance = mixture->mechanism().species_index(name);
             if (L.balance < 0) throw mixture->unknown_species(t, where + ".balance", name);
