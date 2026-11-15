@@ -176,7 +176,7 @@ TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
 TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
-    // wherever it runs, also with fused half steps, the thickened flame's
+    // wherever it runs, also with fused half steps, explicit steps, the thickened flame's
     // multiplier of dt and SIMPLER's forcing. The capacities grow after the
     // first step, which records the step graph again
     const std::string balanced = "[chemistry]\nload_balance = true\n";
@@ -184,6 +184,8 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "explicit_step = true\n",
                                                 "navier_stokes"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",

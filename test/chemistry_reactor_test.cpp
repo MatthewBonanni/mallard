@@ -71,6 +71,8 @@ Table read_table(const std::string & file) {
 
 /** @brief Van der Pol oscillator with mu = 1 (not stiff). */
 struct VanDerPol {
+    KOKKOS_INLINE_FUNCTION uint32_t size() const { return 2; }
+    KOKKOS_INLINE_FUNCTION double atol(uint32_t) const { return 1.0; }
     template <typename L> KOKKOS_INLINE_FUNCTION bool admissible(const L &, const double *) const { return true; }
     template <typename L> KOKKOS_INLINE_FUNCTION void rhs(const L &, const double * y, double * f) const {
         f[0] = y[1];
@@ -106,6 +108,22 @@ struct Robertson {
         J[7] = 6e7 * y[1];
         J[8] = 0.0;
         for (int j = 0; j < 3; j++) J[3 + j] = -J[j] - J[6 + j];
+    }
+};
+
+/** @brief dy/dt = -lambda y: stiff for lambda h >> 1, however small y. */
+struct Decay {
+    double lambda;
+    KOKKOS_INLINE_FUNCTION uint32_t size() const { return 1; }
+    KOKKOS_INLINE_FUNCTION double atol(uint32_t) const { return 1e-10; }
+    template <typename L> KOKKOS_INLINE_FUNCTION bool admissible(const L &, const double *) const { return true; }
+    template <typename L> KOKKOS_INLINE_FUNCTION void rhs(const L &, const double * y, double * f) const {
+        f[0] = -lambda * y[0];
+    }
+    template <typename L> KOKKOS_INLINE_FUNCTION void rhs_jacobian(const L & lanes, const double * y, double * f,
+                                                                    double * J) const {
+        rhs(lanes, y, f);
+        J[0] = -lambda;
     }
 };
 
@@ -330,6 +348,44 @@ TEST(ChemistryReactorTest, RodasSolvesTheStiffRobertsonProblem) {
     const double reference[3] = {0.7158270687193e+00, 0.9185534764529e-05, 0.2841637457462e+00};
     for (int i = 0; i < 3; i++) EXPECT_NEAR(y[i], reference[i], 1e-6 * reference[i]) << i;
     EXPECT_LT(r.steps + r.rejected, 1000u);  // about 460 at this tolerance; an unstable scheme needs millions
+}
+
+/** @brief One explicit_step() of size h from y (updated if accepted); whether it was accepted. */
+template <typename System, uint32_t N>
+bool explicit_step(const System & system, const double h, const double rtol, double (&y)[N]) {
+    double k_data[4 * N], y_new[N], y_tmp[N];
+    double * const k[4] = {k_data, k_data + N, k_data + 2 * N, k_data + 3 * N};
+    const SerialLanes lanes;
+    system.rhs(lanes, y, k[0]);
+    if (!explicit_step(lanes, system, N, h, rtol, y, k, y_new, y_tmp)) return false;
+    for (uint32_t i = 0; i < N; i++) y[i] = y_new[i];
+    return true;
+}
+
+TEST(ChemistryReactorTest, ExplicitStepIsThirdOrderAndRejectsStiffSteps) {
+    // Van der Pol at t = 1 in n accepted explicit steps (atol 1: the error test passes)
+    auto explicit_steps = [](const uint32_t n) {
+        double y[2] = {2.0, 0.0};
+        for (uint32_t s = 0; s < n; s++) EXPECT_TRUE(explicit_step(VanDerPol(), 1.0 / n, 1e-6, y));
+        return std::array<double, 2>{y[0], y[1]};
+    };
+    double err_ref;
+    const auto reference = van_der_pol(4096, err_ref);
+    double error[2];
+    for (int i = 0; i < 2; i++) {
+        const auto y = explicit_steps(32u << i);
+        error[i] = std::hypot(y[0] - reference[0], y[1] - reference[1]);
+    }
+    verification::expect_order({"time", "Bogacki-Shampine (chemistry explicit step)", "",
+                                "error, Van der Pol oscillator", {32, 64}, {error[0], error[1]}, 3.0, 2.8, 3.3});
+
+    // From 1e-14 with lambda h = 10 the error estimate (1.25e-11) passes the test, but the step is unstable and
+    // would amplify y 126 times: the stiffness estimate rejects it. With lambda h = 2 the step is stable
+    double y[1] = {1e-14};
+    EXPECT_FALSE(explicit_step(Decay{10.0}, 1.0, 1e-6, y));
+    EXPECT_EQ(y[0], 1e-14);
+    EXPECT_TRUE(explicit_step(Decay{2.0}, 1.0, 1e-6, y));
+    EXPECT_NEAR(y[0], -1e-14 / 3.0, 1e-20);  // times 1 + z + z^2 / 2 + z^3 / 6 at z = -2
 }
 
 TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {

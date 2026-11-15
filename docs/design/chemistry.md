@@ -1375,6 +1375,72 @@ test for near-equilibrium burnt gas (most of the integrated cells in the
 detonations take one sub-step and change little) would cut the work being
 balanced; it is a separate question of accuracy.
 
+### Explicit steps for non-stiff cells (issue #298)
+
+`[chemistry] explicit_step = true` (off by default). In the h2o2 flames and
+detonations most active cells take one or two RODAS sub-steps per call
+(above); for such a cell a sub-step costs a Jacobian, a factorization, six
+right-hand sides and six solves, though over a short call its chemistry is
+often not stiff at all. With the option, `CellChemistry::advance` first
+gives every queued cell whose last sub-step (`CHEM_H`) covered a call of
+this length, or that has none, one explicit Bogacki–Shampine 3(2) step over
+the whole call (`explicit_reactor_step` in `reactor.h`, `explicit_step` in
+`rosenbrock.h`): four right-hand sides, no Jacobian, no linear algebra. The
+step is kept only if
+
+- its embedded error estimate passes RODAS's own test (the RMS of
+  `err_i / (atol_i + rtol max(|y0_i|, |y1_i|)) <= 1`), so its local error
+  is bounded as a RODAS sub-step's is;
+- its state is admissible and has no negative mass fraction (so nothing is
+  clipped), and the initial one had none;
+- it is not stiff: twice, from the first two stages and from the last two,
+  `||f(y_a) - f(y_b)|| / ||y_a - y_b||` (weighted by
+  `1 / (atol_i + rtol |y0_i|)`) estimates the spectral radius of the
+  Jacobian (Hairer, Nørsett & Wanner, *Solving ODEs I*, II.10), and `h` times
+  it must stay within 2.5, the method's stability bound on the negative real
+  axis. The error estimate alone does not suffice: near equilibrium a stiff
+  mode's amplitude can be small enough to pass it while an unstable step
+  amplifies it (`ChemistryReactorTest.ExplicitStepIsThirdOrderAndRejectsStiffSteps`:
+  126 times at `h lambda = 10`). A stiff start stops after two right-hand
+  sides.
+
+Accepted cells leave the queue (a second scan of the flags) before it is
+ordered by cost and balanced across ranks, so the RODAS kernels, unchanged,
+integrate only the others, with no idle lanes for the cells that finished;
+an accepted step counts one sub-step and leaves `CHEM_H` as it was. The
+explicit pass is one kernel over the queue, by one thread or the lanes of
+a team per cell like RODAS, and one scan, all on the device: no host work
+and graph-capturable. Whether a cell takes the explicit step depends only
+on its own state and `CHEM_H`, which restarts and balancing carry, so
+results stay bitwise independent of the rank count, partition, balancing,
+queue order and graphs
+(`MPITest.ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs`).
+Without the option the explicit pass is not launched and results are
+bitwise those of RODAS alone.
+
+Results change within the tolerances: the local error of each explicit step
+passes the same test as a RODAS sub-step, but the two methods' errors
+differ. Measured on one A100 (thread per cell) and on 8 OpenMP threads of
+its host, per step; `T` and `Y` are the largest differences from RODAS
+alone at the end, on the A100:
+
+| Case | Steps | Hardware | Chemistry, RODAS | With explicit steps | Step | `T` | `Y` |
+|---|---|---|---|---|---|---|---|
+| 2D wrinkled H2/air flame (h2o2, 115k cells, `dt` 3.9 ns) | 200 | A100 | 9.43 ms | 5.07 ms | 16.4 to 12.1 ms | 0.0019 K | 1.3e-6 |
+| | 50 | CPU | 230 ms | 140 ms | 486 to 393 ms | | |
+| `flame_3d` (propane two-step, TFLES) | 100 | A100 | 19.4 ms | 21.4 ms | 33.2 to 35.2 ms | 0.67 K | 3.6e-5 |
+| | 20 | CPU | 204 ms | 230 ms | 684 to 712 ms | | |
+
+The H2 flame's explicit steps take nearly half of its chemistry time off.
+`flame_3d` is slower: its chemistry time is in the cells of many sub-steps
+(trace fuel burning out in hot gas), and of the cells that try the explicit
+step about half fail, most of them burnt gas whose fractional-order fuel
+consumption is stiff (after two right-hand sides), so the attempts cost
+more than the cells that pass save. Hence off by default.
+`ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
+bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
+of `T`, against RODAS's own 5e-5 from Cantera.
+
 ## 6. Transport
 
 ### Models
