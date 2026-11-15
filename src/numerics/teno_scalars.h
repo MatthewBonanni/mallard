@@ -52,6 +52,7 @@ struct TENOScalarValues {
     Kokkos::View<rtype ***> face_quad_points;
     Kokkos::View<rtype **> face_quad_weights;
     Kokkos::View<rtype *> scale;
+    Kokkos::View<uint32_t *> cell_shape;
     Kokkos::View<rtype **> basis_mean;
     Kokkos::View<uint16_t *> stencil_large_size;
     teno::PackedStencils stencil_large;
@@ -96,6 +97,7 @@ struct TENOScalarValues {
     KOKKOS_INLINE_FUNCTION
     bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, rtype * psi) const {
         const rtype h = scale(c);
+        const uint32_t row = cell_shape(c);
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
         rtype x[N_DIM], p[N_DIM];
         if constexpr (N_DIM == 2) {
@@ -104,7 +106,7 @@ struct TENOScalarValues {
                 FOR_I_DIM x[i] = face_quad_points(f, q, i);
                 periodic.backward(s, x, p);
                 teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
-                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(c, l);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
                 return true;
             }
             const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
@@ -122,7 +124,7 @@ struct TENOScalarValues {
             FOR_I_DIM xi[i] = (p[i] - cell_coords(c, i)) / h;
             teno::monomials(DEG, xi, psi);
         }
-        for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(c, l);
+        for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
         return true;
     }
 
@@ -232,7 +234,7 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
                                  teno.offsets_nodes_of_face, teno.nodes_of_face, teno.node_coords,
                                  mesh.cell_coords, mesh.face_coords, mesh.periodic_maps(), mesh.face_shift,
                                  teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
-                                 teno.scale, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
+                                 teno.scale, teno.cell_shape, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
                                  teno.stencil_small_size, teno.stencil_small, teno.troubled,
                                  teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species,
                                  teno.boundary_faces};

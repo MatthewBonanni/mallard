@@ -1,4 +1,4 @@
-# Design: finite-rate chemistry
+# Finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
 Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11.
@@ -1825,8 +1825,9 @@ surrogate `(gamma, e0)`:
 `farfield` uses the Riemann invariants with each side's frozen `gamma`.
 Catalytic walls and species-specific wall fluxes are out of scope.
 
-Milestone 3 supports `outlet_extrapolation`, `symmetry`, `wall_adiabatic` (slip for
-`euler`, no-slip for `navier_stokes` from milestone 9), `inlet_state` and `outlet_pressure` for mixtures;
+Mixtures support `outlet_extrapolation`, `symmetry`, the `wall_*` types (slip for
+`euler`, no-slip for `navier_stokes`), `inlet_state` (also with `nscbc`), `inlet_stagnation`,
+`inlet_mass_flow` and `outlet_pressure` (also with `nscbc`);
 `farfield`, `dirichlet` and `outlet_pressure` with `average` are rejected at input until they
 are needed. The composition of `inlet_state` may vary along the boundary (stratified
 inflows such as a mixing layer feeding a triple flame): each value of `X` or
@@ -1849,9 +1850,9 @@ are unchanged.
   (they seed Newton and the chemistry step size). Reading checks the species
   names against the mechanism; a restart can start a reacting run from a
   non-reacting multicomponent one, and a mechanism change that keeps names
-  (e.g. a reduced mechanism) maps by name, with missing species set to zero
-  after an explicit `allow_missing_species = true`. Version 1 files still
-  read for perfect-gas runs.
+  (e.g. a reduced mechanism) maps by name; a species the file lacks, or one
+  the run does not transport, is an error. Version 1 files still read for
+  perfect-gas runs.
 - **Diagnostics**: `check_interval` prints min/max `T`, `max |sum Y - 1|`,
   the number of active chemistry cells and the max/mean sub-steps, and the
   chemistry wall time fraction.

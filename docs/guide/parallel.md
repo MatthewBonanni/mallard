@@ -87,7 +87,7 @@ In NCCL builds every communication between ranks during the steps goes through N
 
 Sums that feed the solution are exact in fixed point, so NCCL, MPI and serial runs agree bit for bit. Setup, partitioning, output (probes, monitors, snapshots, restarts, progress and health reports) and run control between steps (triggers, control files) communicate with MPI.
 
-Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
+Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as wall forces, are reduced across ranks and can differ in the last digits.
 
 Each rank numbers its cells along a Hilbert curve when that reads fewer cache lines in the reconstruction ([cell numbering](performance.md#cell-numbering)); restart, HDF5 and VTU files list cells in global order whatever the rank count.
 
@@ -113,7 +113,7 @@ solut/r_000100_p0001.vtu
 solut/r_000100_p0002.vtu
 ```
 
-A volume region's VTU (`region = ...`) likewise holds each rank's own cells of it; boundary zones, cut planes and other regions of lower dimension are gathered and written by rank 0, as probes are. Force monitors are summed over the ranks and written by rank 0.
+A volume region's VTU (`region = ...`) likewise holds each rank's own cells of it; boundary zones, cut planes and other regions of lower dimension are gathered and written by rank 0, as probes are. Wall forces are summed over the ranks and written by rank 0.
 
 ### Restarts
 
@@ -231,8 +231,8 @@ The Taylor–Green vortex of the 0.8.0 measurements, on the same hardware, with 
 With 128³ cells per GPU, 4 GPUs take 346 ms per step and one takes 344 ms (99.4%).
 
 - **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures also reconstruct the first halo layer.
-- **Overlapped time step:** the first stage's interior reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells run on a high-priority stream, so that they fill the device alongside the interior cells instead of in a tail of their own.
-- **What is left at 8–16 GPUs** (busiest rank, about 1.7 ms per step): the halo-dependent cells and the faces are taken from index lists rather than contiguous ranges (TENO and flux kernels 2–8% slower per item), the gradients of halo-layer-1 cells that the viscous fluxes read, and packing face states. Numbering each rank's cells and faces as [interior | near the partition] (#277) would turn the lists into ranges.
+- **Overlapped time step:** the first stage's reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells, the exchanges and the time-step reduction run on a high-priority stream, also inside the step's CUDA graph, so that they fill the device alongside the interior cells instead of in a tail of their own.
+- **What is left** (one node, NCCL and CUDA graphs, 33.1 ms per step on one GPU; 33.45 ms on 2 GPUs, 99.0%, and 33.5 ms on 4, 98.8%): the interior cells' reconstruction takes longer while the halo-dependent cells' and NCCL's kernels share the device with it, and NCCL's send and receive kernels hold their SMs while they wait for the other rank. Each rank numbers its cells and faces as [interior | near the partition], so the cells reconstructed before and after the halo arrives and the faces that wait for the partition faces are contiguous ranges.
 
 ### 2D, Mallard 0.3.0 {#scaling-2d}
 

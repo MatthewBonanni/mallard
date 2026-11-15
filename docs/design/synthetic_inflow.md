@@ -1,4 +1,4 @@
-# Design: synthetic turbulent inflow
+# Synthetic turbulent inflow
 
 Status: implemented (`[boundaries.turbulence]` of `inlet_state` with `nscbc`).
 

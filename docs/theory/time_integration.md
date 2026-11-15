@@ -1,10 +1,10 @@
 # Time integration
 
-Mallard advances the semi-discrete equations (1) of [chapter 6](finite_volume.md#semi-discrete-equations),
+Mallard advances the semi-discrete equations (1) of [Finite-volume discretization and reconstruction](finite_volume.md#semi-discrete-equations),
 $\mathrm{d}\overline{\mathbf{U}}/\mathrm{d}t = \mathbf{L}(\overline{\mathbf{U}}, t)$,
 with explicit Runge-Kutta methods and a global time step from per-cell
 spectral radii. Chemistry is split from this step
-([chapter 3](chemistry_radiation.md#coupling-with-the-flow)). Usage:
+([Chemistry and radiation](chemistry_radiation.md#coupling-with-the-flow)). Usage:
 [Numerics](../guide/numerics.md); measured stability and accuracy limits:
 [Numerical methods](../numerics/overview.md#time-step).
 
@@ -13,15 +13,15 @@ spectral radii. Chemistry is split from this step
 $\mathbf{L}$ is evaluated at every stage (`Solver::calc_rhs`,
 `src/solver/solver_rhs.cpp`, `solver_mixture.cpp`) in this order:
 boundary states and the cell primitive variables (for mixtures, $T$ by
-Newton, eq. (4) of [chapter 2](thermodynamics_transport.md#temperature-from-the-internal-energy));
-the face reconstruction ([chapter 6](finite_volume.md#reconstruction)); the
+Newton, eq. (4) of [Thermodynamics and transport of mixtures](thermodynamics_transport.md#temperature-from-the-internal-energy));
+the face reconstruction ([Finite-volume discretization and reconstruction](finite_volume.md#reconstruction)); the
 shock sensor of the hybrid flux; the convective face fluxes and, for
-mixtures, the species fluxes ([chapter 7](fluxes.md)); the transport
+mixtures, the species fluxes ([Numerical fluxes](fluxes.md)); the transport
 coefficients, the eddy viscosity and the viscous face fluxes; the sum over
 each cell's faces; the axisymmetric source, gravity, expression sources,
 mass-flow forcing and radiation, integrated over the cell; the division by
 the cell volume; and the sponge layers, as rates
-([chapter 9](boundaries_sources.md#sources)). Characteristic boundaries,
+([Boundary conditions and sources](boundaries_sources.md#sources)). Characteristic boundaries,
 the dynamic SGS constant and the TFLES and PaSR fields are updated once per
 step, at its first stage.
 
@@ -90,7 +90,7 @@ vortex (40 × 40 quads, TENO5, t = 2) against RK4 at `cfl` 0.02, from
 
 The face reconstructions fall back to first order where a face state would
 have a non-positive density or pressure
-([chapter 6](finite_volume.md#reconstruction)). Positivity of the cell
+([Finite-volume discretization and reconstruction](finite_volume.md#reconstruction)). Positivity of the cell
 averages is enforced only by bound-preserving TENO's flux limiter (planar
 single-gas runs, $\mathrm{CFL} \le 0.5$, SSP integrators), which bounds each
 forward-Euler stage.
@@ -100,7 +100,7 @@ forward-Euler stage.
 With `[run] cfl`, the step is $\Delta t = \mathrm{CFL}\,\min_i\Delta t_i$
 over all cells and ranks (otherwise the fixed `dt`), further limited by the
 sponge layers to $\Delta t \le 1/\max_i\sigma_i$
-([chapter 9](boundaries_sources.md#sponge-layers)) and shortened to land
+([Boundary conditions and sources](boundaries_sources.md#sponge-layers)) and shortened to land
 exactly on the end time and on output times. Each cell's step for
 $\mathrm{CFL} = 1$ comes from its convective and viscous spectral radii
 ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with $C = 4$;
@@ -131,7 +131,7 @@ $$
 $$
 
 with the SGS term only in LES; in thickened flames the whole of it is
-multiplied by $\mathcal{E}F$ (a bound: the SGS fluxes themselves are scaled by $1 - \Omega$) ([chapter 4](les.md#thickened-flame-model)).
+multiplied by $\mathcal{E}F$ (a bound: the SGS fluxes themselves are scaled by $1 - \Omega$) ([Large-eddy simulation](les.md#thickened-flame-model)).
 Half the sum over faces stands for the sum over coordinate directions of the
 projected areas: on a uniform grid of spacing $h$, eq. $\eqref{eq:time-step-1}$ gives
 $\Delta t = \mathrm{CFL}\,h/(\lvert u\rvert + \lvert v\rvert + 2a)$ in 2D
@@ -144,9 +144,9 @@ A time step of a reacting run is (`Solver::take_step`):
 
 1. Strang splitting: chemistry over $\Delta t/2$ (fused with the previous
     step's second half by default, `fuse_half_steps`); SIMPLER: the transport
-    tendency, then chemistry over $\Delta t$ ([chapter 3](chemistry_radiation.md#coupling-with-the-flow));
+    tendency, then chemistry over $\Delta t$ ([Chemistry and radiation](chemistry_radiation.md#coupling-with-the-flow));
 2. with double flux, freezing each cell's $(\gamma, e_0)$
-    ([chapter 2](thermodynamics_transport.md#double-flux));
+    ([Thermodynamics and transport of mixtures](thermodynamics_transport.md#double-flux));
 3. one Runge-Kutta step over $\Delta t$ (SIMPLER: over the second half step,
     with the frozen transport tendency subtracted);
 4. with double flux, resetting $\rho E$ to the true equation of state;

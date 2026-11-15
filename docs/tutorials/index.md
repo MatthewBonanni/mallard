@@ -14,13 +14,14 @@ the commands stay working.
 | 2 | [Oblique shock on a ramp](wedge.md) | Generated meshes and boundary zones, inflow, outflow and slip walls, units and the gas constant, line probes, ParaView, mesh refinement | seconds, laptop | θ-β-M relation |
 | 3 | [Vortex shedding behind a cylinder](cylinder.md) | A Gmsh geometry with a structured ring and triangles, Navier-Stokes, initial conditions as expressions, wall forces, Strouhal number | 5 minutes, laptop | Reference computations |
 | 4 | [Supersonic flow over a cone](cone.md) | 3D builds, tetrahedra, symmetry planes, a characteristic far field, surface output, MPI ranks and GPUs | minutes, laptop | Taylor-Maccoll solution |
-| 5 | Premixed flame against Cantera (in preparation) | Gas mixtures, mechanisms, finite-rate chemistry, flame speed | | Cantera |
+| 5 | [Premixed flame](premixed_flame.md) | Gas mixtures, mechanisms, finite-rate chemistry, mixture-averaged transport, flame speed from φ = 0.6 to 1.4 | 4 minutes, laptop | Cantera's `FreeFlame` |
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
 | 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
 | 8 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
 | 9 | [From run to figure](post_processing.md) | What a run wrote (the run report, `mallard info`), probes, fields and averages after the run (`mallard post extract`, `post derive`, `post average`), a grid convergence study (`mallard post convergence`), figures with the Python package | 16 minutes, laptop | Steady wake at Re = 40: reference computations and experiment |
+| 10 | [Laminar airfoil](airfoil.md) | A structured Gmsh C-grid, steady state by time marching, wall forces, Cp and Cf, separation | 15 minutes, one GPU | High-Order CFD Workshop case C1.3 |
 
-Tutorials 1 to 4 and 7 to 9 run on a laptop CPU; 8 and 9 follow on from 3. For more cases, the
+Tutorials 1 to 5 and 7 to 9 run on a laptop CPU; 8 and 9 follow on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
 each with what it demonstrates and how long it takes, and the
 [verification and validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.

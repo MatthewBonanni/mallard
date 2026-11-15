@@ -1,4 +1,4 @@
-# Design: single-GPU performance and parallel scaling
+# Single-GPU performance and parallel scaling
 
 Status: in progress. Baseline measured on `main` at v0.5.0-92 (before any change here); each change below
 lists its measured effect. Results stay bitwise identical to `main` (checked on the cases under
@@ -572,6 +572,10 @@ round's entries in order. This was tried in two forms. Times are for `teno5_3d` 
 
 Keeping the 7% bitwise needs the stencil loop's rounding made explicit (#931).
 
+With that rounding explicit, the smooth pass stages its entries with the conversion in the loading thread, bitwise
+equal to the unstaged loop: TENO5 in rounds of 10 entries, TENO6 in rounds of 5, which keep two teams per SM
+(#1004: 4.61M cells/s against 3.60M unstaged for the order-6 Taylor-Green vortex on $96^3$ hexahedra).
+
 ### 13. TENO setup on CPUs (#916)
 
 A start without a TENO cache, and `mallard post derive` or `post extract` of a run without one, spend nearly
@@ -646,6 +650,29 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
   mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
   count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+- **Shared basis means and moments (#972).** Next to its entries' cells, a shared-table cell kept its basis
+  means and its central moments (2D: smoothness-indicator matrix), the same for every cell of a shape up to
+  round-off. They are now one row per cell shape, found the same way as the shared tables (on a grid of 2^-30 of
+  each row's magnitude, the lowest global id's row, agreed over the ranks) and reached through a per-cell index;
+  the scale stays per cell, as a shape index would cost as much. Bytes per cell of the tables after the setup and
+  cells per A100-80GB (`mallard check --memory a100-80` on the A100, $16^3$ hexahedra and $10^3 \times 6$
+  tetrahedra, periodic):
+
+  | case | tables, before | tables | cells per A100-80GB, before / after |
+  |---|---|---|---|
+  | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
+  | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
+  | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
+  | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
+  | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
+  | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
+  | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
+  | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
+
+  The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
+  8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
+  against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
+  most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
 
 ### 15. Working set beyond the TENO tables (#552)
 
