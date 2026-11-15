@@ -315,8 +315,9 @@ class CompositionExpressions {
     public:
         /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(). */
         CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name,
-                               const std::vector<std::string> & variables = {"x", "y", "z", "t"}) :
-            mixture(mixture_model), where(name) {
+                               const std::vector<std::string> & variables = {"x", "y", "z", "t"},
+                               const size_t first_shadowable = SIZE_MAX) :
+            mixture(mixture_model), where(name), shadowable(first_shadowable) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
@@ -328,7 +329,7 @@ class CompositionExpressions {
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
                 texts.push_back(quantity_or_expression(value, species, dim::none));
-                values.emplace_back(where + "." + key + "." + species, texts.back(), variables);
+                values.emplace_back(where + "." + key + "." + species, texts.back(), variables, shadowable);
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");
@@ -343,7 +344,8 @@ class CompositionExpressions {
             for (size_t i = 0; i < listed.size(); i++) {
                 c->species.push_back(static_cast<uint32_t>(listed[i]));
                 c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i],
-                                                                       BoundaryValue::variables(), BoundaryValue::hint));
+                                                                       BoundaryValue::variables(), BoundaryValue::hint,
+                                                                       shadowable));
             }
             c->balance = balance;
             c->mole = mole;
@@ -395,6 +397,7 @@ class CompositionExpressions {
 
         const MixtureModel & mixture;
         std::string where;
+        size_t shadowable;
         bool mole = false;
         int32_t balance = -1;
         std::vector<int32_t> listed;
@@ -767,7 +770,8 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 std::vector<double> Y_uniform;
                 if (MixtureModel::composition_varies(bound)) {
                     composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where,
-                                                                           BoundaryValue::variables());
+                                                                           BoundaryValue::variables(),
+                                                                           boundary_variable::FIRST_LOCAL);
                     const auto programs = composition->compiled();
                     if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
                 } else {

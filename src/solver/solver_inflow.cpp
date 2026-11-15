@@ -105,7 +105,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     if (bound.contains("profile")) {
         shape = std::make_unique<kexpr::Program>(
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-            BoundaryValue::variables(), BoundaryValue::hint);
+            BoundaryValue::variables(), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
     }
     const bool profile_of_t = shape && shape->uses(boundary_variable::T);
     // Either of t: the faces' fluxes are recomputed on the device at every stage
@@ -164,7 +164,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
         timed = MassFlowProfile{
             where,
             std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(),
-                                                   BoundaryValue::hint),
+                                                   BoundaryValue::hint, boundary_variable::FIRST_LOCAL),
             mdot_program ? mdot_program
                          : std::make_shared<const kexpr::Program>(where + ".mdot", mdot_text.str(),
                                                                   BoundaryValue::variables()),

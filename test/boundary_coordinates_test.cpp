@@ -18,6 +18,8 @@
 #include <vector>
 
 #include "boundary_coordinates.h"
+#include "boundary_fields.h"
+#include "data_paths.h"
 #include "mesh.h"
 #include "mpi_compare.h"
 #include "solver.h"
@@ -69,6 +71,22 @@ TEST(BoundaryCoordinatesTest, ExpressionsOfAnEntryListTheCoordinatesTheyRead) {
         "where = \"x < 1\"\nX = { O2 = \"0.21 * xi\", N2 = 0.79 }\nturbulence = { profile = \"bl.csv\" }\n");
     EXPECT_EQ(local_coordinates_used(entry), (std::vector<uint16_t>{bv::N, bv::XI}));
     EXPECT_TRUE(local_coordinates_used(parse_toml("name = \"inlet\"\nu = [\"x * t\", 0]\n")).empty());
+}
+
+TEST(BoundaryCoordinatesTest, LocalVariablesHideTheLocalCoordinates) {
+    // Expressions written before the local coordinates keep their meaning in
+    // 2D and 3D alike; x, y, z and t still cannot be hidden
+    const Input v = parse_toml("v = \"var s := y; var r := 2 * x; var n := 1; s + r + n\"\n");
+    const BoundaryValue value(v.at("v"), "inlet.T", dim::none);
+    Point x{};
+    x[0] = 0.25;
+    x[1] = 0.5;
+    EXPECT_DOUBLE_EQ(value.at(FacePoint(x), 0.0), 2.0);
+    EXPECT_TRUE(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var theta := atan2(y, x); theta\"\n")).empty());
+    EXPECT_EQ(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var q := n; q\"\n")),
+              (std::vector<uint16_t>{bv::N}));
+    EXPECT_THROW(BoundaryValue(parse_toml("v = \"var y := 1; y\"\n").at("v"), "inlet.T", dim::none),
+                 std::invalid_argument);
 }
 
 TEST(BoundaryCoordinatesTest, PlanarInletBetweenWallsHasExactCoordinates) {
@@ -164,11 +182,25 @@ TEST(BoundaryCoordinatesTest, ArcLengthNeedsOneOpenCurve) {
 
 namespace {
 
-std::string channel(const std::string & inlet, const std::string & run, const std::string & sides = "symmetry") {
+std::string vec(const std::string & a, const std::string & b, const std::string & c = "0.0") {
+    return "[" + a + ", " + b + (N_DIM == 3 ? ", " + c : std::string()) + "]";
+}
+
+std::string euler_state() {
+    return "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.25\nu = " + vec("3.0", "0.0") +
+           "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+}
+
+std::string ns_state() {
+    return "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + vec("0.3", "0.0") +
+           "\n[physics]\ntype = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\n"
+           "rho_ref = 1.0\n";
+}
+
+std::string channel(const std::string & inlet, const std::string & run, const std::string & sides = "symmetry",
+                    const std::string & state = euler_state()) {
     std::ostringstream s;
-    s << "[run]\n" << run << mesh_block(N_DIM == 2 ? 24 : 12, N_DIM == 2 ? 8 : 4, 1.0, 0.5)
-      << "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.25\nu = " << (N_DIM == 2 ? "[3.0, 0.0]" : "[3.0, 0.0, 0.0]")
-      << "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+    s << "[run]\n" << run << mesh_block(N_DIM == 2 ? 24 : 12, N_DIM == 2 ? 8 : 4, 1.0, 0.5) << state
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[output]\ncheck_interval = 1000000\n"
       << "[[boundaries]]\nname = \"left\"\n" << inlet
@@ -224,7 +256,8 @@ TEST(BoundaryCoordinatesTest, ConditionsOfLocalCoordinatesAndTimeMatchSerialAndK
     // setup: bit for bit on any rank count, with the step graph and without
     const std::string run = "t_stop = 0.05\ncfl = 0.5\n";
     expect_matches_serial_with_and_without_step_graphs(
-        channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"(1 + n + 0.1 * xi) * (1 + 0.1 * sin(60 * t))\"\n",
+        channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"(1 + n + 0.1 * xi + " +
+                    (N_DIM == 2 ? "0.2 * s" : "0.2 * r + 0.01 * theta + 0.1 * eta") + ") * (1 + 0.1 * sin(60 * t))\"\n",
                 run, "wall_adiabatic"));
     expect_matches_serial_with_and_without_step_graphs(
         channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 0.5\nprofile = \"(0.01 + n) * (1 + 0.5 * sin(60 * t))\"\n",
@@ -237,6 +270,17 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
                  "no wall faces to measure it from");
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = [\"botom\"]\n", run),
                  "no boundary zone \"botom\"");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = 1.0\nwalls = [\"botom\"]\n", run),
+                 "no expression of the entry reads the wall distance n");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = []\n", run),
+                 "the list of zones is empty");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = [\"bottom\"]\n"
+                         "frame.tangent = " + vec("0.0", "1.0") + "\n", run),
+                 "so frame has no effect");
+    // A wall reading n measures from itself by default
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = 1.0\n", run,
+                         "wall_isothermal\"\nT = \"1 + n", ns_state()),
+                 "is 0 on every face");
     expect_error(channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = \"0.5 + n\"\n", run, "wall_adiabatic"),
                  "not on x, y, z or the local coordinates");
 #if N_DIM == 2
@@ -245,3 +289,71 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + s\"\n", run), "arc length");
 #endif
 }
+
+namespace {
+
+struct LocalCase {
+    std::string name, inlet, state = euler_state();
+};
+
+std::string with(std::string text, const std::string & coordinate) {
+    for (size_t at = text.find('Y'); at != std::string::npos; at = text.find('Y', at + coordinate.size())) {
+        text.replace(at, 1, coordinate);
+    }
+    return text;
+}
+
+std::vector<LocalCase> local_cases() {
+    const std::string mixture = "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " + vec("100.0", "0.0") +
+                                "\nX = { N2 = 0.79, O2 = 0.21 }\n[physics]\ntype = \"euler\"\ngas = \"mixture\"\n"
+                                "mechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
+    const std::string ns = ns_state();
+    const std::string stress = N_DIM == 2 ? "[\"0.004 * (1 + Y)\", 0.002, -0.001]"
+                                          : "[\"0.004 * (1 + Y)\", 0.002, 0.002, -0.001, 0.0, 0.0]";
+    return {
+        {"dirichlet", "type = \"dirichlet\"\nrho = \"1 + 0.2 * Y\"\nu = " + vec("\"3 + Y\"", "0.0") + "\np = 1.0\n"},
+        {"direction", "type = \"inlet_state\"\nu = 3.0\ndirection = " + vec("1.0", "\"0.3 * Y\"") +
+                          "\np = 1.0\nT = 1.25\n"},
+        {"inlet_stagnation", "type = \"inlet_stagnation\"\np0 = \"8 + Y\"\nT0 = \"3 + Y\"\ndirection = " +
+                                 vec("1.0", "\"0.2 * Y\"") + "\n"},
+        {"nscbc", "type = \"inlet_state\"\nu = " + vec("\"0.3 + 0.1 * Y\"", "0.0") +
+                      "\np = 1.0\nT = \"1 + 0.2 * Y\"\nnscbc.L = 1.0\n", ns},
+        {"turbulence", "type = \"inlet_state\"\nu = " + vec("\"0.3 + 0.1 * Y\"", "0.0") +
+                           "\np = 1.0\nT = 1.0\nnscbc.L = 1.0\nturbulence = { reynolds_stress = " + stress +
+                           ", length_scale = 0.2 }\n", ns},
+        {"mixture", "type = \"inlet_state\"\nu = " + vec("100.0", "0.0") +
+                        "\np = 1.0e5\nT = \"300 + 100 * Y\"\nX = { N2 = \"0.79 - 0.1 * Y\", O2 = \"0.21 + 0.1 * Y\" }\n",
+         mixture},
+    };
+}
+
+class LocalCoordinateConditions : public ::testing::TestWithParam<LocalCase> {};
+
+} // namespace
+
+TEST_P(LocalCoordinateConditions, MatchTheSameConditionWrittenInY) {
+    // n from the bottom is y: every path that evaluates an entry's expressions
+    // on the device must see the faces' local coordinates (not NaN)
+    const LocalCase & c = GetParam();
+    const std::string run = "n_steps = 3\ncfl = 0.4\n";
+    auto solve = [&](const std::string & inlet) {
+        auto solver = std::make_unique<Solver>();
+        solver->set_distributed(false);
+        solver->init(parse_toml(channel(inlet, run, "symmetry", c.state)));
+        solver->run();
+        solver->copy_device_to_host();
+        return solver;
+    };
+    const auto local = solve(with(c.inlet, "n") + "walls = [\"bottom\"]\n");
+    const auto plain = solve(with(c.inlet, "y"));
+    const Mesh & mesh = *local->get_mesh();
+    for (uint32_t i = 0; i < mesh.n_owned(); i++) {
+        for (uint32_t k = 0; k < uint32_t(local->h_conservatives.extent(1)); k++) {
+            const double a = double(local->h_conservatives(i, k)), b = double(plain->h_conservatives(i, k));
+            ASSERT_NEAR(a, b, tol(1e-12, 1e-5) * std::max(1.0, std::abs(b))) << c.name << ", cell " << i << ", " << k;
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(BoundaryCoordinates, LocalCoordinateConditions, ::testing::ValuesIn(local_cases()),
+                         [](const auto & p) { return p.param.name; });

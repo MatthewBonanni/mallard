@@ -950,7 +950,8 @@ void Solver::init_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint));
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
+                    boundary_variable::FIRST_LOCAL));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
@@ -989,36 +990,54 @@ void Solver::init_boundaries() {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
             const std::vector<uint16_t> used = local_coordinates_used(bound);
-            std::vector<std::string> wall_zones;
-            if (bound.contains("walls")) wall_zones = find_value<std::vector<std::string>>(bound, "walls");
-            const FrameKey frame_key(bound, where_name);
+            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
+            const bool reads_frame = !used.empty() && used.back() != boundary_variable::N;
+            auto unused_key = [&](const std::string & key, const std::string & what) {
+                return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                   .message = "no expression of the entry reads " + what + ", so " + key +
+                                              " has no effect",
+                                   .fix = "Remove " + key + ", or write a value in the local coordinates",
+                                   .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            };
+            std::optional<WallDistance> named;
+            if (bound.contains("walls")) {
+                if (!reads_n) throw unused_key("walls", "the wall distance n");
+                const auto wall_zones = find_value<std::vector<std::string>>(bound, "walls");
+                if (wall_zones.empty()) {
+                    throw InputError({.key = where_name + ".walls", .line = line_of(bound, "walls"),
+                                      .message = "the list of zones is empty",
+                                      .fix = "Name the zones n measures the distance from, or remove walls to "
+                                             "measure from every wall entry",
+                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                }
+                std::vector<uint32_t> faces;
+                for (const std::string & wall : wall_zones) {
+                    const FaceZone * z = mesh->get_face_zone(wall);
+                    if (z != nullptr && z->get_type() != FaceZoneType::BOUNDARY) z = nullptr;
+                    if (comm::allreduce(uint32_t(z != nullptr), comm::Op::SUM) == 0) {
+                        const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+                        throw InputError({.key = where_name + ".walls",
+                                          .line = line_of(bound, "walls"),
+                                          .message = "the mesh has no boundary zone \"" + wall + "\"",
+                                          .valid = names,
+                                          .suggestion = suggest_value(wall, names),
+                                          .fix = "Name the zones n measures the distance from",
+                                          .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                    }
+                    for (uint32_t i = 0; z && i < z->n_faces(); i++) faces.push_back(z->h_faces(i));
+                }
+                named = WallDistance(*mesh, faces, is_distributed());
+            }
+            if (bound.contains("frame") && !reads_frame) {
+                throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+            }
+            [[maybe_unused]] const FrameKey frame_key(bound, where_name);
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
             if (!used.empty() && n_entry > 0) {
-                WallDistance named;
-                const WallDistance * walls = &named;
-                if (used.front() == boundary_variable::N && wall_zones.empty()) {
-                    walls = &default_wall_distance();
-                } else if (used.front() == boundary_variable::N) {
-                    std::vector<uint32_t> faces;
-                    for (const std::string & wall : wall_zones) {
-                        const FaceZone * z = mesh->get_face_zone(wall);
-                        if (z != nullptr && z->get_type() != FaceZoneType::BOUNDARY) z = nullptr;
-                        if (comm::allreduce(uint32_t(z != nullptr), comm::Op::SUM) == 0) {
-                            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
-                            throw InputError({.key = where_name + ".walls",
-                                              .line = line_of(bound, "walls"),
-                                              .message = "the mesh has no boundary zone \"" + wall + "\"",
-                                              .valid = names,
-                                              .suggestion = suggest_value(wall, names),
-                                              .fix = "Name the zones n measures the distance from",
-                                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-                        }
-                        for (uint32_t i = 0; z && i < z->n_faces(); i++) faces.push_back(z->h_faces(i));
-                    }
-                    named = WallDistance(*mesh, faces, is_distributed());
-                }
+                const WallDistance none;
+                const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
                 const std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used,
-                                                                        *walls, is_distributed(), coordinates);
+                                                                        walls, is_distributed(), coordinates);
                 for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
             }
         }

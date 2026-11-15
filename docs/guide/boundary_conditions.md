@@ -338,7 +338,8 @@ zones instead, of any type (a symmetry plane too). A curved wall counts by
 its straight faces.
 
 **The arc length** `s` (2D) runs along the faces from their end with the
-lowest `xi`, so it is the distance along the boundary on a curved inlet. It
+lowest `xi` (of two ends at the same `xi`, the one with the lower x, then
+y), so it is the distance along the boundary on a curved inlet. It
 needs the faces to form one open curve; a closed curve or several pieces
 are an error naming the entry (split it with `where`, or use `xi` or `n`).
 In 3D a curved surface has no single arc length: use `xi`, `eta` or `r`,
@@ -387,8 +388,16 @@ Pitfalls:
   boundary layer needs faces finer than its thickness to be resolved.
 - On a closed surface (the whole surface of a cylinder) the normals cancel
   and the frame has no normal: give `frame.normal`, or split the zone.
-- A local variable of the same name as a coordinate (`var r := ...`) is an
-  error in boundary expressions: rename it.
+- A local variable named like a coordinate (`var r := sqrt(x^2 + y^2)`)
+  hides it inside that expression, so expressions written before the local
+  coordinates keep their meaning.
+- On an inlet oblique to the axes (near 45 degrees), the dominant axis of the
+  normal, and so the default tangent, can flip with round-off between two
+  meshes of the same inlet: give `frame.tangent` there.
+- On a wall entry that reads `n`, the default walls include the entry
+  itself, so `n` is 0 on every face, which is an error: name the other walls
+  in `walls`. `walls` and `frame` are errors on an entry whose expressions
+  don't read the coordinates they set.
 - 2D runs have no `eta`, `r`, `theta`, and 3D runs no `s`: the error says
   which coordinates the run has.
 

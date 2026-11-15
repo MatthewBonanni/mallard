@@ -2,8 +2,8 @@
 # profile is written in the inlet's wall distance n, the distance of each
 # inlet face to the nearer of the two walls. n (1 - n) is the parabola
 # y (1 - y) of the developed flow, so the flow enters developed and stays so:
-# u = 6 U y (1 - y) with the bulk velocity U = 0.1 (Mach 0.1, Re = 10).
-# Check the profile near x = 3.5 against the exact one (2.3e-2 U at 16 cells) with
+# u = 6 U y (1 - y) with the bulk velocity U = 0.1 (Mach 0.1, Re = 200: a uniform inlet would still be 13% off at x = 3.5).
+# Check the profile near x = 3.5 against the exact one (6.6e-3 U at 16 cells) with
 #   python plot_channel_inlet.py channel_inlet.png solut/channel_<step>.vtkhdf
 
 [run]
@@ -59,7 +59,7 @@ gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
 rho_ref = 1.0
-mu = 0.01
+mu = 0.0005
 Pr = 0.72
 
 [output]

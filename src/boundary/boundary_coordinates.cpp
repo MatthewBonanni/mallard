@@ -51,7 +51,7 @@ double dot(const Point & a, const Point & b) {
 void collect_used(const Input & v, std::vector<bool> & used) {
     if (v.is_string()) {
         try {
-            const kexpr::Program p("", v.as_string(), BoundaryValue::variables());
+            const kexpr::Program p("", v.as_string(), BoundaryValue::variables(), nullptr, boundary_variable::FIRST_LOCAL);
             for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::COUNT; i++) {
                 if (p.uses(i)) used[i] = true;
             }
@@ -430,6 +430,17 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
         }
         for (size_t k = 0; k < faces.size(); k++) points[k][bv::N] = walls(points[k].point());
+        double farthest = 0.0;
+        for (const FacePoint & p : points) farthest = std::max(farthest, p[bv::N]);
+        if (distributed) farthest = comm::allreduce(farthest, comm::Op::MAX);
+        if (!(farthest > 0.0)) {
+            throw InputError({.key = where, .line = line_of(entry),
+                              .message = "n, the distance to the nearest wall, is 0 on every face: the faces lie on "
+                                         "the walls it measures from (by default every wall entry, this one too if "
+                                         "it is a wall)",
+                              .fix = "Name the zones to measure from in walls = [\"...\"]",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
     }
     bool framed = false;
     for (const uint16_t i : used) framed = framed || i != bv::N;

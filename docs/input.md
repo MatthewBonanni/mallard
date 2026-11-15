@@ -645,7 +645,9 @@ the entry's frame from its origin; in 3D `eta` (along the second tangent),
 the arc length along the boundary from its end with the lowest `xi`.
 They are computed once at setup from all of the entry's faces, the same on
 every rank count. `where`, `mdot` and an `average` outlet `p` do not read
-them. Guide:
+them. A local variable of the same name (`var s := ...`) hides a coordinate
+in its expression. `walls` and `frame` are errors on an entry that reads no
+coordinate they set. Guide:
 [local coordinates](guide/boundary_conditions.md#local-coordinates).
 
 | Key | Default | Meaning |
@@ -653,7 +655,7 @@ them. Guide:
 | `frame.origin` | the area-weighted center of the entry's faces | Origin of `xi`, `eta`, `r`, `theta` [m] |
 | `frame.normal` | the area-weighted mean inward normal of the entry's faces | Normal of the frame (normalized) |
 | `frame.tangent` | the coordinate axis after the normal's dominant one (x to y, y to x in 2D; x to y, y to z, z to x in 3D) | Direction of `xi`, made perpendicular to the normal; in 3D the span (`eta`) is perpendicular to both, its largest component positive |
-| `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` measures the distance from, of any type |
+| `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` measures the distance from, of any type (a non-empty list) |
 
 ### Characteristic boundaries (`nscbc`)
 
