@@ -1,9 +1,11 @@
 {
  "default": "\"trigger_0\"",
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/source_regions/input.toml"
  ],
  "type": "string"

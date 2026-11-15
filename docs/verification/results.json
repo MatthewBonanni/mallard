@@ -623,13 +623,13 @@
     12.0
    ],
    "errors": [
-    0.003386089,
-    0.0002457369
+    0.003564194,
+    0.0002846097
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 3.784434,
+   "order": 3.646519,
    "pass": true
   },
   {
@@ -661,17 +661,17 @@
    "dim": 3,
    "test": "DISABLED_Verification/TENO3DOrder.SmoothReconstructionConvergesAtDesignOrder/9",
    "n": [
-    6.0,
-    12.0
+    8.0,
+    16.0
    ],
    "errors": [
-    0.000439532,
-    9.032072e-06
+    0.0002095297,
+    4.302952e-06
    ],
    "design": 6.0,
    "min_order": 5.5,
    "max_order": null,
-   "order": 5.604768,
+   "order": 5.605684,
    "pass": true
   },
   {
@@ -1589,13 +1589,13 @@
     16.0
    ],
    "errors": [
-    0.0009536885,
-    5.263599e-05
+    0.001212508,
+    6.342779e-05
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 4.179397,
+   "order": 4.256735,
    "pass": true
   },
   {
@@ -1673,13 +1673,13 @@
     16.0
    ],
    "errors": [
-    0.00981967,
-    0.0007295685
+    0.01037095,
+    0.00072327
    ],
    "design": 4.0,
    "min_order": 3.5,
    "max_order": null,
-   "order": 3.750559,
+   "order": 3.84187,
    "pass": true
   },
   {

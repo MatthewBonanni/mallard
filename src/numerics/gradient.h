@@ -279,7 +279,7 @@ struct LSQVertexGradientFunctor {
     LSQGradientFunctor faces;
     Kokkos::View<uint32_t *> offsets_cells_of_cell;
     Kokkos::View<uint32_t *> cells_of_cell;
-    Kokkos::View<uint8_t *> cells_of_cell_shift;
+    ShiftRows cells_of_cell_shift;
     VertexGradientWeights weights;
     bool quadratic = true;
     // Axisymmetric runs: r-weighted second moments of the cells (Mesh::cell_covariance),
