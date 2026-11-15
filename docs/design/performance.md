@@ -739,9 +739,9 @@ Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas,
 
 ### 16. TENO setup: one fit per stencil shape (#986)
 
-With shared tables, the host backends key each cell's stencil geometry before the fit and fit one cell per key
-(`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table packing of
-#1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
+cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
+packing of #1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
 Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
 restart file (`--fields Q_CRITERION`):
 
@@ -758,11 +758,22 @@ of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixe
 2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
 ranks give the 1-rank result bit for bit.
 
-GPU builds fit every cell. On one A100 the host keys and records cost more than the device fit (#776) and
-packing (#1031) save: double Mach $2048 \times 512 \times 2$ at orders 3 / 4 / 5 / 6 takes 0.86 / 1.42 / 4.47 /
-19.3 s for the tables and 0.9-1.2 s for the packing when fitting every cell, against 22 s of keys and 27-31 s of
-records with 323 cells fitted; the $96^3$ Taylor-Green vortex of `teno5_3d` 5.3 + 1.0 s against 35 + 47 s
-(#1082).
+On one A100 (base = #1069, device packing), restart files after 3 steps are bitwise those of the base, and a
+GPU run that reads the tables cache an OpenMP run wrote gives its own result bit for bit; the two caches differ
+only in the producer's name. Seconds of the numerics setup:
+
+| A100 | base: tables / packing | keyed: tables / packing / shapes | fitted |
+|---|---|---|---|
+| double Mach $2048 \times 512 \times 2$, TENO3 | 0.87 / 0.96 | 0.17 / 1.17 / 0.40 | 323 of 2,097,152 |
+| TENO4 | 1.43 / 0.96 | 0.20 / 1.24 / 0.40 | 323 |
+| TENO5 | 4.52 / 1.16 | 0.32 / 1.47 / 0.46 | 323 |
+| TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
+| $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
+| 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+
+The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
+tetrahedra, where every cell has a shape of its own and the keyed path drops the base's 676 MiB above main
+(11,955 to 11,279 MiB).
 
 ## Scaling (one node)
 
