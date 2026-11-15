@@ -1185,10 +1185,23 @@ TEST(StepQueueTest, SpectraTheDeviceSampledAtAStopOfTheQueueAreWrittenOnce) {
               "[[triggers]]\nname = \"at\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("staged_spectra_at_stop", c);
-    if (comm::is_root()) {
-        EXPECT_TRUE(o.files.count("restart_000020.restart"));
-        EXPECT_TRUE(o.files.count("spectra_000020.csv"));
-    }
+    if (!comm::is_root()) return;
+    EXPECT_TRUE(o.files.count("restart_000020.restart"));
+    EXPECT_TRUE(o.files.count("spectra_000020.csv"));
+    // A file written twice has the same bytes: the run log records each write
+    const auto spectra_writes = [&](const int depth) {
+        std::vector<uint64_t> steps;
+        const fs::path root = c.distributed ? scratch_dir() : rank_scratch_dir();
+        std::ifstream in(root / ("staged_spectra_at_stop_" + std::to_string(depth)) / "mallard.jsonl");
+        for (std::string line; std::getline(in, line);) {
+            const json::Value v = json::parse(line);
+            if (v["type"].string == "output" && v["kind"].string == "spectra") steps.push_back(uint64_t(v["step"].number));
+        }
+        return steps;
+    };
+    const std::vector<uint64_t> host = spectra_writes(0);
+    EXPECT_EQ(std::count(host.begin(), host.end(), 20u), 1);
+    for (const int depth : {1, 3}) EXPECT_EQ(spectra_writes(depth), host) << "step_queue = " << depth;
 }
 
 TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {
