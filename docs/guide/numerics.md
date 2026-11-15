@@ -209,7 +209,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 49 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -262,7 +262,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 49 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -339,7 +339,7 @@ Pitfalls:
 - **Memory.** 3D TENO5 needs about 40 KB per unstructured cell on the device
   (an A100-80GB holds about 2.1M); `single_precision_tables` stretches that to
   about 3.4M. Cells of one stencil shape share their tables, so a uniform box
-  of hexahedra needs about 8 KB per cell (about 10M on an A100-80GB).
+  of hexahedra needs about 7 KB per cell (about 11.6M on an A100-80GB).
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 
@@ -356,7 +356,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 49 more.
 
 | `riemann_solver` | Use |
 |---|---|
