@@ -1,0 +1,91 @@
+# For the key catalog only (tools/dev/input_catalog.py): spectra, phase averages
+# on a fixed period, confidence intervals and convergence of a periodic box of
+# turbulence from a tabulated spectrum, with the hybrid flux and error control.
+
+[run]
+t_stop = 1.0
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+p = 71.42857142857143
+T = 1.0
+u = [0.0, 0.0]
+
+[initialize.turbulence]
+spectrum = "table"
+file = "spectrum.csv"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.005
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "RDPK3Sp35"
+
+[numerics.face_reconstruction]
+type = "TENO"
+
+[numerics.hybrid]
+sensor_threshold = 0.65
+upwind_floor = 0.05
+central = "cell_averages"
+
+[numerics.error_control]
+tolerance = 1.0e-4
+abs_tolerance = 1.0e-5
+rel_tolerance = 1.0e-4
+beta = [0.64, -0.31, 0.04]
+
+[integrals]
+interval = 10
+
+[statistics]
+fields = ["U_X", "U_Y"]
+batch = 0.5
+confidence = 0.9
+
+[statistics.spectra]
+fields = ["U_X", "U_Y"]
+products = ["U_X*U_Y"]
+directions = ["x", "y"]
+average = true
+file = "spectra.csv"
+interval = 2
+t_start = 0.1
+
+[statistics.phase]
+fields = ["U_X"]
+bins = 4
+period = 0.5
+t_reference = 0.0
+interval = 2
+t_start = 0.1
+
+[statistics.convergence]
+signals = ["integrals_enstrophy"]
+confidence = 0.9
+batches = 10
+tolerance = 0.02
+variance_tolerance = 0.1
+min_samples = 20
+file = "convergence.csv"

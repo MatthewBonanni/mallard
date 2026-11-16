@@ -50,7 +50,7 @@ fields = ["P", "T"]
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 51 more.
+and 52 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -106,7 +106,7 @@ other fields.
 |  | `TENO_SIGMA` | `1` | TENO troubled-cell indicator | face_reconstruction type = "TENO" | write_data |
 |  | `REGION_FRACTION` | `1` | volume fraction of the region in the cell | a [[write_data]] region, which writes it | write_data |
 |  | `DIVERGED` | `1` | 1 in the cells that became invalid | a run that diverges, whose divergence report snapshot writes it | - |
-|  | `VORTICITY` | `s-1` | vorticity (vector) | every case | write_data |
+|  | `VORTICITY` | `s-1` | vorticity (vector) | every case | write_data, post derive |
 | transport | `MU` | `kg m-1 s-1` | dynamic viscosity | a mixture with navier_stokes | write_data |
 |  | `LAMBDA` | `kg m s-3 K-1` | thermal conductivity | a mixture with navier_stokes | write_data |
 |  | `D_<s>` | `m2 s-1` | diffusion coefficient of species s | a mixture with navier_stokes | write_data |
@@ -568,7 +568,7 @@ check_interval = 100   # a progress row every 100 steps
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 51 more.
+and 52 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),

@@ -384,6 +384,9 @@ class MUSCL : public FaceReconstruction {
         uint64_t n_rows_global = 0;           // distinct rows over the ranks (weights or offsets, the more)
         /** @brief The tables of the cells that have one (MUSCLTables; collective). */
         void find_tables();
+        // Measured on A100s: one fused kernel per cell is faster from about 2^17 cells, separate kernels (more
+        // parallel, shorter chains) below. Tests lower it to run the fused kernel on small meshes
+        static inline uint32_t fused_cells = 1u << 17;
 };
 
 /**

@@ -204,7 +204,7 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
                          "a probe with average = true).");
     }
     const uint32_t n_cells = mesh.n_cells;
-    if (table.contains("batch")) {
+    if (contains_optional(table, "batch")) {
         batch = find_real(table, "batch", dim::time);
         if (!(batch > 0.0_r)) {
             throw InputError({.key = "statistics.batch",
