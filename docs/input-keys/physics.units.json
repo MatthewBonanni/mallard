@@ -15,6 +15,7 @@
   "examples/channel_wmles/tl_m3.0.toml",
   "examples/double_mach/input.toml",
   "examples/explosion_3d/input.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/hot_gas_regions/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/moving_heaters/input.toml",
@@ -39,6 +40,9 @@
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml",
   "tutorials/cluster/input.toml"
  ],
  "type": "string",

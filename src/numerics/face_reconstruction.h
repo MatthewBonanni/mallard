@@ -331,6 +331,9 @@ class MUSCL : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
         LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
+        // Measured on A100s: one fused kernel per cell is faster from about 2^17 cells, separate kernels (more
+        // parallel, shorter chains) below. Tests lower it to run the fused kernel on small meshes
+        static inline uint32_t fused_cells = 1u << 17;
 };
 
 /**

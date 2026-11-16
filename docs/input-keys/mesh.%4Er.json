@@ -1,11 +1,14 @@
 {
  "default": "16",
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [
   "examples/rotational_sector/annulus.toml",
-  "examples/rotational_sector/sector.toml"
+  "examples/rotational_sector/sector.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
  ],
  "type": "integer"
 }
