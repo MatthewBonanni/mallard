@@ -31,15 +31,20 @@ using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
  *        stencil that is reconstructed as constant: such a species is
  *        round-off (e.g. 1e-34 next to 0), so it neither limits the other
  *        scalars nor moves away from its cell value, and stays non-negative.
+ *        The slopes so dropped are not given to another species, so the face
+ *        mass fractions sum to one within n_species * SPECIES_NOISE: about
+ *        4e-15 per species in double precision, 2e-6 in single.
  */
 constexpr rtype SPECIES_NOISE = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
 
 /**
- * @brief Change of a mass fraction at a face above which its cut to stay in
- *        [0, 1] goes to the shared limiter of all scalars instead of its own
- *        slope: a cut of one species alone acts as numerical diffusion of
- *        that species only, harmless when it is small but a differential
- *        diffusion of order u dx when it is large.
+ * @brief Change of a mass fraction at a face (absolute, not relative to the
+ *        species' value) above which its cut to stay in [0, 1] goes to the
+ *        shared limiter of all scalars instead of its own slope: a cut of one
+ *        species alone acts as numerical diffusion of that species only,
+ *        harmless when it is small but a differential diffusion of order
+ *        u dx when it is large. The limiter of the whole cell jumps where a
+ *        cut crosses it.
  */
 constexpr rtype OWN_CUT_MAX = 1.0e-4_r;
 
@@ -53,7 +58,7 @@ using FacePointValues = rtype[teno::MAX_FACE_QUAD];
  *        mass fractions already scaled to their bounds); one point per face.
  *        Least-squares reconstruction reproduces constants, so mass fractions
  *        summing to one in every cell sum to one at every face point to
- *        round-off.
+ *        round-off and SPECIES_NOISE.
  *
  * A plain aggregate of Views, captured by value in kernels. Face-value
  * evaluators (also TENOScalarValues) provide cell_values(c, j, out), the
@@ -113,14 +118,15 @@ struct ScalarFaceValues {
  *        that the flow block uses:
  *        - first order;
  *        - MUSCL: least-squares gradients and one limiter value per cell, the
- *          minimum over all scalars of the flow block's limiter type; each
- *          mass fraction then scales its own slope to stay in [0, 1] at every
- *          face, the cell's most abundant species taking what the others give
- *          up (the slopes still sum to zero). The slopes of gamma and e0, and
- *          the face density, change with that composition at the cell's p and
- *          T, so the face state stays that of its composition. The limiter
- *          value is reduced further only to keep that species in [0, 1] and
- *          gamma above 1;
+ *          minimum over all scalars of the flow block's limiter type. A mass
+ *          fraction that would leave [0, 1] at a face by at most OWN_CUT_MAX
+ *          then scales its own slope to stay in, the cell's most abundant
+ *          species taking what the others give up (the slopes still sum to
+ *          zero); the slopes of gamma and e0, and the face density, change
+ *          with that composition at the cell's p and T, so the face state
+ *          stays that of its composition. A larger cut reduces the limiter
+ *          value of all scalars instead, as does keeping the most abundant
+ *          species in [0, 1] and gamma above 1;
  *        - TENO: the flow block's linear weights (TENOScalarValues) with one
  *          bound-preserving factor theta per cell (Zhang & Shu 2010), the
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at

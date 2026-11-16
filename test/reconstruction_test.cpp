@@ -17,8 +17,9 @@
 #include <cmath>
 #include <functional>
 #include <limits>
-#include <utility>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "data_paths.h"
 #include "test_fixtures.h"
@@ -449,10 +450,15 @@ TEST_F(AirScalars, TraceSpeciesAtItsBoundLimitsOnlyItself) {
     }
 }
 
-TEST_F(AirScalars, LargeCutLimitsEveryScalar) {
-    // N2 = 0.5 next to 0 vanishes over a cell: cutting its slope alone would
-    // diffuse it alone, so the cut limits every scalar, HE included
-    const FaceStates face = reconstruct("none", trace_composition(NX, 0.5));
+TEST_F(AirScalars, OnlyCutsUpToOwnCutMaxLimitOnlyTheirSpecies) {
+    // The N2 trace next to two zeros: its cell's neighbor without it needs
+    // its N2 cut by trace / 4 at the far face. Below OWN_CUT_MAX only N2 is
+    // cut and HE keeps its linear profile; above, the cut limits every
+    // scalar, HE included, since cutting N2 alone where it vanishes over a
+    // cell would diffuse it alone
+    const double limit = 4.0 * double(OWN_CUT_MAX);
+    expect_he_linear(*mesh, reconstruct("none", trace_composition(NX, 0.99 * limit)).Y, "below OWN_CUT_MAX");
+    const FaceStates face = reconstruct("none", trace_composition(NX, 1.01 * limit));
     double HE_off = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t side = 0; side < 2; side++) {
@@ -463,15 +469,18 @@ TEST_F(AirScalars, LargeCutLimitsEveryScalar) {
                                                          double(mesh->h_face_coords(f, 1)))));
         }
     }
-    EXPECT_GT(HE_off, 1.0e-3);
+    EXPECT_GT(HE_off, 1.0e-3) << "above OWN_CUT_MAX";
 }
 
 TEST_P(ScalarLimiters, MassFractionsStayInBoundsWithTheirThermodynamics) {
-    for (const double trace : {1.0e-34, 1.0e-6, 0.5}) {
+    // N2 = 0.5 next to 0 is cut beyond OWN_CUT_MAX, which limits all scalars;
+    // Barth-Jespersen limits a trace (1e-6) without any cut at all
+    std::vector<double> traces = {0.5};
+    if (GetParam() == "barth_jespersen") traces.push_back(1.0e-6);
+    for (const double trace : traces) {
         const FaceStates face = reconstruct(GetParam(), trace_composition(NX, trace));
-        // A large cut limits all scalars, which leaves the flow block's density alone
-        const double T_tol = trace < double(OWN_CUT_MAX) ? 1.0e-3 : std::numeric_limits<double>::infinity();
-        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-3, face_T_tol(GetParam(), T_tol),
+        // The shared limiter leaves the flow block's density alone, which is not that of the face composition
+        expect_face_state_of_face_composition(*mesh, host, face, 1.0e-3, std::numeric_limits<double>::infinity(),
                                               GetParam() + " trace " + std::to_string(trace));
     }
 }

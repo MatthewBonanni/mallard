@@ -931,8 +931,8 @@ TEST(MixtureTest, InertContactKeepsTemperatureAndPressureUniformWhereMassFractio
     // with inert CO2, at uniform p and T, MUSCL without a limiter: the slope
     // of CO (or N2) is cut at the contact to keep it non-negative, and O2,
     // not its complement, takes it. The face gamma, e0 and density must
-    // follow that composition, or T moves by tens of kelvin and p by percent;
-    // CO and N2 have nearly equal molar masses, so p and T then stay uniform
+    // follow that composition at the cell's p and T, since the cut species
+    // (28 g/mol) and O2 (32 g/mol) differ in formation energy and molar mass
     std::ostringstream input;
     input << "[run]\nt_stop = 2.5e-3\ncfl = 0.25\n" << mesh_block("cartesian", 40, 1, 1.0, 1.0 / 40, "[\"x\"]")
           << "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"300.0\"\nu = " << velocity("100.0")
@@ -955,8 +955,9 @@ TEST(MixtureTest, InertContactKeepsTemperatureAndPressureUniformWhereMassFractio
         err[1] = std::max(err[1], std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0));
     }
     err = comm::allreduce(err, comm::Op::MAX);
-    EXPECT_LT(err[0], tol(0.05, 0.5)) << "max |T - 300 K|";
-    EXPECT_LT(err[1], tol(1e-5, 1e-4)) << "max |p / 1e5 Pa - 1|";
+    // Without the chain rule: 0.33 K and 1e-4 in both precisions
+    EXPECT_LT(err[0], tol(5e-3, 0.1)) << "max |T - 300 K|";
+    EXPECT_LT(err[1], tol(1e-5, 3e-5)) << "max |p / 1e5 Pa - 1|";
 }
 
 TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {

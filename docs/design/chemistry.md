@@ -284,23 +284,26 @@ The design:
      the flow block's neighbors and ghost placement. The gradients are
      stored (`N_DIM` words per scalar and cell; recomputing them in the
      species-flux kernel instead is a milestone-10 memory option). Each
-     `Y_k` that leaves `[0, 1]` at a face by a small amount then scales its
-     own gradient so that it stays in, and the cell's most abundant species
-     takes the gradient the others give up, so the gradients still sum to
-     zero; a cut that changes `Y_k` at a face by more than `1e-4` goes to the
-     shared limiter value instead. The gradients of
-     `gamma` and `e0`, and the face density, change with that composition by
-     their derivatives with respect to `Y_k` at the cell's `p` and `T`, so the
-     face state stays the state of the face composition. The limiter value
-     is reduced further only so that this species stays in `[0, 1]` and
-     `gamma - 1` keeps at least half its cell value at every face (the
-     physical bounds of item 3). Barth-Jespersen keeps each `Y_k` within its
-     neighbors' range, so with it no gradient is ever cut.
+     `Y_k` that leaves `[0, 1]` at a face by at most `OWN_CUT_MAX = 1e-4`
+     (an absolute change of `Y_k` at the face) then scales its own gradient
+     so that it stays in, and the cell's most abundant species takes the
+     gradient the others give up, so the gradients still sum to zero. The
+     gradients of `gamma` and `e0`, and the face density, change with that
+     composition by their derivatives with respect to `Y_k` at the cell's
+     `p` and `T`, so the face state stays the state of the face composition.
+     A larger cut reduces the shared limiter value instead, as do the most
+     abundant species' bounds and `gamma - 1` keeping at least half its cell
+     value at every face (the physical bounds of item 3). Barth-Jespersen
+     keeps each `Y_k` within its neighbors' range, so with it no gradient is
+     ever cut.
    Least-squares reconstruction reproduces constants, so with shared weights
    `sum_k Y_k = 1` at every face point to round-off.
    A mass fraction within 16 machine epsilons of its cell value over the
    whole stencil is reconstructed constant and left out of the limiter (MUSCL
-   and TENO alike).
+   and TENO alike). Its dropped slope goes to no other species, so the face
+   mass fractions sum to one within `n_species` times that spread: about
+   4e-15 per species in double precision, but 2e-6 in single, where 16
+   machine epsilons are 1.9e-6.
 
    As implemented (issue #1169): the bounds of item 3 were first applied to
    the shared limiter value, so a species about to vanish in a cell put every
@@ -310,25 +313,29 @@ The design:
    (`1e-11` against `0`), or the fuel's tail in burnt gas (`1e-14` against
    `1e-19`). On `flame_3d` (MUSCL without limiter) two thirds of the cells
    were at first order, and which ones followed the chemistry's noise:
-   after 100 steps `explicit_step` moved the temperature by up to 0.86 K,
-   `rtol` 1e-7 against 1e-8 by 0.55 K, and so did `atol` 1e-11 against
-   1e-12. Per-species bounds leave no cell below a limiter value of 1 there,
-   and the three differences fall to 1e-5, 2e-7 and 5e-7 K. Excluding only
-   round-off species (16 machine epsilons) or tolerating 16 machine epsilons
-   below zero leaves 8% of the cells at first order and 0.3 K between the
-   two `atol`, since the chemistry's noise in burnt gas reaches `1e-14`.
-   TENO keeps one `theta` per cell with the round-off exclusion; per-species
-   factors would need the most abundant species' face values to depend on
-   every other species' polynomial.
+   after 100 steps at `rtol` 1e-8 and `atol` 1e-12, `explicit_step` moved
+   the temperature by up to 0.87 K, `rtol` 1e-7 with `atol` 1e-11 by
+   0.26 K, and `atol` 1e-11 against 1e-12 at `rtol` 1e-7 by 0.55 K. With
+   cuts up to `OWN_CUT_MAX` kept to their species, the three fall to
+   1.5e-7, 8.0e-7 and 7.3e-7 K. Excluding only round-off species
+   (16 machine epsilons) or tolerating 16 machine epsilons below zero
+   leaves 8% of the cells at first order and 0.3 K between the two `atol`,
+   since the chemistry's noise in burnt gas reaches `1e-14`. TENO keeps one
+   `theta` per cell with the round-off exclusion; per-species factors would
+   need the most abundant species' face values to depend on every other
+   species' polynomial.
 
    A cut slope moves the face composition between species of different
    formation energy, heat capacity and molar mass, so the face state follows
-   it. Without that, an inert contact of `O2` against `H2O` in `N2` with `Ar`,
-   at uniform 300 K and 1e5 Pa (MUSCL without limiter), drifted to 274-324 K
-   and 0.97e5 Pa; `e0` carried nearly all of it, through the formation energy
-   of `H2O`, and the density the rest where the cut species and the one
-   taking its slope differ in molar mass (`CO` against `N2` in `O2`: within
-   300 +- 1 K with `gamma` and `e0` alone, 5 mK with the density too).
+   it. Without that, with every cut kept to its species, an inert contact
+   of `O2` against `H2O` in `N2` with `Ar`, at uniform 300 K and 1e5 Pa
+   (MUSCL without limiter), drifted to 271-324 K and 0.97e5 Pa; `e0`
+   carried nearly all of it, through the formation energy of `H2O`, and the
+   density the rest where the cut species and the one taking its slope
+   differ in molar mass. With the threshold, a contact of `CO` against `N2`
+   in `O2` (`MixtureTest.InertContact...`) stays within 0.8 mK of 300 K;
+   without the derivatives of `gamma` and `e0` it moves by 0.33 K, and
+   without the face density by 3 mK.
 
    Cutting one species alone is numerical diffusion of that species only:
    for a round-off trace it is negligible, but where a species vanishes over
@@ -337,14 +344,32 @@ The design:
    at 2 mm cells drifted to -10% of `s_L` in consumption speed that way,
    where shared bounds give -4.3%, whichever species took the slope given up
    (the most abundant or all in proportion). Hence large cuts go to the
-   shared value, where every species gets the same diffusion: -4.3% with
-   the threshold at `1e-4`, while the temperature error of a 1D flame front
-   at 2 mm stays at 3.3 K (shared bounds 10.7 K, per-species bounds
-   throughout 3.4 K), and 5.7 K in 2D (36.9 K, 5.6 K). Blending the two
-   over cuts from 0 to the threshold traded one for the other (`1e-3`:
-   -4.9% and 3.5 K; `1e-5`: -4.4% and 9.9 K) and, with the face density,
-   broke the uniform pressure of a double-flux contact with the rotated
-   Riemann solver in 3D.
+   shared value, where every species gets the same diffusion. A 1D flame
+   front at 2 mm then has a temperature error of 3.3 K (shared bounds
+   10.7 K, per-species bounds throughout 3.4 K), and 5.7 K in 2D (36.9 K,
+   5.6 K). Blending the two over cuts from 0 to the threshold instead does
+   worse on both at `1e-4` (-4.44% and 4.4 K against -4.28% and 3.3 K), so
+   the switch is plain. Against the threshold (consumption speed over
+   0.16-0.20 s of the thickened flame, and the front's temperature error
+   against 0.125 mm cells, both 1D at 2 mm):
+
+   | Cuts kept to their species up to | `1e-5` | `1e-4` (used) | `1e-3` |
+   |---|---|---|---|
+   | Consumption speed against `s_L` | -4.43% | -4.28% | -5.12% |
+   | Front temperature error [K] | 6.3 | 3.3 | 3.4 |
+
+   Three things to know about the threshold:
+   - it is absolute, a change of `Y_k` at a face, not relative to `Y_k`:
+     whether a cut stays with its species depends on how steeply the species
+     vanishes across the cell, not on how abundant it is;
+   - detailed mechanisms are untested: their radicals (`H`, `O`, `OH`, `HO2`)
+     peak at `1e-5` to `1e-4`, so their cuts at a flame front sit on either
+     side of it, and the two-step propane flames above have no such species
+     (issue #1243);
+   - the limiter of the whole cell jumps where a cut crosses it: a cut just
+     below leaves the other scalars alone, one just above reduces all of
+     them, so cells near it can switch from step to step (a ramp between two
+     thresholds: issue #1242).
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and
