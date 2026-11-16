@@ -324,7 +324,8 @@ struct AdvanceFunctor {
         double T;
         const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
         const double rho = static_cast<double>(U(c, 0));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         chemistry::RosenbrockResult r;
         if (forcing_offset > 0) {
             double * g = Y + forcing_offset;
@@ -350,7 +351,7 @@ struct AdvanceFunctor {
                                                            nullptr, nullptr, clipped);
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
-        chem_h(c) = static_cast<rtype>(h);
+        chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
         chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
         previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
@@ -360,13 +361,24 @@ struct AdvanceFunctor {
     /**
      * @brief Whether cell c's chemistry may take an explicit step over the
      *        call: its last sub-step covered a call of this length, or there
-     *        was none.
+     *        was none, and no explicit step failed since its sub-steps last
+     *        fell short of a call (chem_h < 0).
      */
     KOKKOS_INLINE_FUNCTION
     bool explicit_candidate(const uint32_t c) const {
         const double h = static_cast<double>(chem_h(c));
-        return !(h > 0.0 && h < cell_dt(c));
+        return h == 0.0 || !(h < cell_dt(c));
     }
+
+    /** @brief What cell c keeps of RODAS's proposal h: negated while its failed explicit step (h_last < 0) stands. */
+    KOKKOS_INLINE_FUNCTION
+    double proposal(const uint32_t c, const double h_last, const double h) const {
+        return h_last < 0.0 && h >= cell_dt(c) ? -h : h;
+    }
+
+    /** @brief After cell c's failed explicit step: no other until its sub-steps fall short of a call. */
+    KOKKOS_INLINE_FUNCTION
+    void explicit_failed(const uint32_t c) const { chem_h(c) = -chem_h(c); }
 
     /** @brief After cell c's accepted explicit step: one sub-step, and the cell leaves the queue. */
     KOKKOS_INLINE_FUNCTION
@@ -394,6 +406,7 @@ struct AdvanceFunctor {
         }
         if (!chemistry::explicit_reactor_step(chemistry::SerialLanes(), gas.thermo, kinetics, rho, cell_dt(c), Y, T,
                                               options, Y + ns, g)) {
+            explicit_failed(c);
             return;
         }
         if (forcing_offset > 0) {
@@ -429,6 +442,7 @@ struct AdvanceFunctor {
             team.sync();
         }
         if (!chemistry::explicit_reactor_step(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, options, Y + ns, g)) {
+            team.single([&]() { explicit_failed(c); });
             return;
         }
         if (forcing_offset > 0) {
@@ -457,7 +471,8 @@ struct AdvanceFunctor {
         FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
         const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
         double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         double * g = nullptr;
         if (forcing_offset > 0) {
             g = &work(slot, forcing_offset);
@@ -475,7 +490,7 @@ struct AdvanceFunctor {
             team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
         }
         team.single([&]() {
-            chem_h(c) = static_cast<rtype>(h);
+            chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
             chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
             previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         });
