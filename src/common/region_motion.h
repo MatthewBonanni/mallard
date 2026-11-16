@@ -151,6 +151,7 @@ class MovingFractions {
         uint32_t n_cells = 0;
         bool bounded = true;
         bool axisymmetric = false;
+        bool implicit_shapes = false;
         Kokkos::View<Node *> nodes;
         Kokkos::View<const double *> vertices;
         kexpr::ProgramTable<> programs, times;
@@ -168,6 +169,7 @@ class MovingFractions {
         Kokkos::View<const CurvedFace *> curved_faces;
         Kokkos::View<const double *[3]> coefficients;
         Kokkos::View<rtype> host_time;
+        Kokkos::View<double **, Kokkos::LayoutLeft> shapes;  // (cell, leaf): the fractions of the shapes
         Kokkos::View<double *> m_fractions;
         std::shared_ptr<const SolutionLevels> m_levels;
 };
