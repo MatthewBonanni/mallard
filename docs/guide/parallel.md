@@ -42,7 +42,9 @@ Each rank owns a piece of the mesh, plus as many layers of halo cells as its rec
 *The cells of rank 1 of 3 and its halo, from Mallard runs (`tools/docs/runs.py`):
 MUSCL needs two layers, fifth-order TENO eight on these triangles, about
 four times as many halo cells. The halo cells' state is exchanged at every
-stage; layer 1 is reconstructed on both ranks so that one exchange suffices.*
+stage.*
+
+The layers beyond the first hold only what the stencils read: the cells' state and geometry. Face states, face quadrature points and the weights of the viscous gradients are stored for the owned cells and halo layer 1 alone, so a halo cell takes about half the memory of an owned one.
 
 The pieces come from one of three partitioners, chosen with `partitioner` in a `[parallel]` table of the input. All three give the same results bit for bit:
 

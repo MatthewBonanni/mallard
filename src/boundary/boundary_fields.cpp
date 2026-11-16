@@ -37,13 +37,31 @@ std::string real(const double v) {
 } // namespace
 
 const std::vector<std::string> & BoundaryValue::variables() {
-    static const std::vector<std::string> names = {"x", "y", "z", "t"};
+#if N_DIM == 2
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "s"};
+#else
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "eta", "r", "theta"};
+#endif
     return names;
+}
+
+std::string BoundaryValue::hint(const std::string & symbol) {
+#if N_DIM == 2
+    if (symbol == "eta" || symbol == "r" || symbol == "theta") {
+        return " (" + symbol + " is a local coordinate of 3D boundaries; 2D boundaries have n, xi and s)";
+    }
+#else
+    if (symbol == "s") {
+        return " (s, the arc length along a boundary, exists in 2D only; 3D boundaries have n, xi, eta, r and theta)";
+    }
+#endif
+    return expression_unit_hint(symbol);
 }
 
 BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension) {
     if (is_expression(v)) {
-        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables(), expression_unit_hint);
+        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables(), BoundaryValue::hint,
+                                                   boundary_variable::FIRST_LOCAL);
     } else {
         program = constant(as_double(v, name, dimension), name);
     }
@@ -51,9 +69,13 @@ BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Di
 
 bool BoundaryValue::is_expression(const Input & v) { return v.is_string() && !has_unit(v.as_string()); }
 
-double BoundaryValue::at(const Point & x, const double t) const {
-    const double vars[4] = {x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, t};
-    return (*program)(vars);
+double BoundaryValue::at(const FacePoint & x, const double t) const {
+    for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::COUNT; i++) {
+        if (program->uses(i) && std::isnan(x[i])) {
+            throw std::logic_error(variables()[i] + " was not computed for this face");
+        }
+    }
+    return (*program)(x.at(t).data());
 }
 
 DirectionKey::DirectionKey(const Input & entry, const std::string & where_) : where(where_) {
@@ -96,7 +118,7 @@ bool DirectionKey::depends_on_time() const {
     return false;
 }
 
-Point DirectionKey::at(const Point & x, const double t) const {
+Point DirectionKey::at(const FacePoint & x, const double t) const {
     if (constant()) return value;
     Point d{};
     double norm = 0.0;
@@ -115,7 +137,7 @@ Point DirectionKey::at(const Point & x, const double t) const {
     return d;
 }
 
-Point DirectionKey::inward(const Point & x, const double t, const Point & n_in) const {
+Point DirectionKey::inward(const FacePoint & x, const double t, const Point & n_in) const {
     const Point d = at(x, t);
     double into = 0.0;
     FOR_I_DIM into += d[i] * n_in[i];
@@ -249,9 +271,9 @@ std::string BoundaryFields::slot_key(const int s) const {
     return flux_key;
 }
 
-double BoundaryFields::temperature(const Point & x, const double t) const { return has_T ? T.at(x, t) : 0.0; }
+double BoundaryFields::temperature(const FacePoint & x, const double t) const { return has_T ? T.at(x, t) : 0.0; }
 
-void BoundaryFields::apply(BoundaryCondition & bc, const Point & x, const double t, const double R, const Point & n_in,
+void BoundaryFields::apply(BoundaryCondition & bc, const FacePoint & x, const double t, const double R, const Point & n_in,
                            const bool numbers_only) const {
     constexpr uint8_t E = N_DIM + 1;
     auto use = [&](const BoundaryValue & v) { return !numbers_only || !v.varies(); };
@@ -344,12 +366,12 @@ void BoundaryFields::apply(BoundaryCondition & bc, const Point & x, const double
 
 bool CompositionPrograms::depends_on_time() const {
     for (const auto & f : fractions) {
-        if (f->uses(3)) return true;
+        if (f->uses(boundary_variable::T)) return true;
     }
     return false;
 }
 
-void TimedBoundaryFields::add(const uint32_t i_bc, const Point & x, const Point & n_in,
+void TimedBoundaryFields::add(const uint32_t i_bc, const FacePoint & x, const Point & n_in,
                               const std::shared_ptr<const BoundaryFields> & fields,
                               const std::shared_ptr<const CompositionPrograms> & composition, const bool at_face) {
     uint32_t set = 0;
@@ -362,7 +384,7 @@ void TimedBoundaryFields::add(const uint32_t i_bc, const Point & x, const Point 
 }
 
 void TimedBoundaryFields::add(const MassFlowProfile & profile, const std::vector<uint32_t> & bcs,
-                              const std::vector<Point> & x) {
+                              const std::vector<FacePoint> & x) {
     const uint32_t p = static_cast<uint32_t>(profiles.size());
     profiles.push_back(profile);
     for (size_t k = 0; k < bcs.size(); k++) {
@@ -376,7 +398,7 @@ void TimedBoundaryFields::finish() {
     const size_t n = faces_host.size(), n_sets = sets.size();
     face_bc = Kokkos::View<uint32_t *>("timed_face_bc", n);
     face_set = Kokkos::View<uint32_t *>("timed_face_set", n);
-    face_x = Kokkos::View<double *[3]>("timed_face_x", n);
+    face_x = Kokkos::View<double *[boundary_variable::COUNT]>("timed_face_x", n);
     face_direction = Kokkos::View<double *[N_DIM]>("timed_face_direction", n);
     auto h_bc = Kokkos::create_mirror_view(face_bc);
     auto h_set = Kokkos::create_mirror_view(face_set);
@@ -385,7 +407,7 @@ void TimedBoundaryFields::finish() {
     for (size_t k = 0; k < n; k++) {
         h_bc(k) = faces_host[k].i_bc;
         h_set(k) = faces_host[k].set;
-        for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? faces_host[k].x[d] : 0.0;
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) h_x(k, d) = faces_host[k].x[d];
         const BoundaryFields & fields = *sets[faces_host[k].set];
         const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW || !fields.is_directed() ||
                             fields.get_direction().depends_on_time();
@@ -465,7 +487,7 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
     }
     profile_program = Kokkos::View<uint32_t *>("profile_program", n_p);
     profile_mdot = Kokkos::View<uint32_t *>("profile_mdot", n_p);
-    inlet_x = Kokkos::View<double *[3]>("profile_inlet_x", first.back());
+    inlet_x = Kokkos::View<double *[boundary_variable::COUNT]>("profile_inlet_x", first.back());
     inlet_measure = Kokkos::View<double *>("profile_inlet_measure", first.back());
     chunk_range = Kokkos::View<uint32_t *[3]>("profile_chunk_range", chunks.size());
     profile_chunks = Kokkos::View<uint32_t *>("profile_chunks", n_p + 1);
@@ -473,7 +495,7 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
     profile_scale = Kokkos::View<double *>("profile_scale", n_p);
     profile_bc = Kokkos::View<uint32_t *>("profile_bc", profile_bc_host.size());
     profile_of = Kokkos::View<uint32_t *>("profile_of", profile_bc_host.size());
-    profile_x = Kokkos::View<double *[3]>("profile_x", profile_bc_host.size());
+    profile_x = Kokkos::View<double *[boundary_variable::COUNT]>("profile_x", profile_bc_host.size());
     profile_error = Kokkos::View<int32_t>("profile_error");
     profile_error_value = Kokkos::View<double[3]>("profile_error_value");
     auto h_program = Kokkos::create_mirror_view(profile_program);
@@ -491,7 +513,7 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
         h_mdot(p) = static_cast<uint32_t>(all.size());
         all.push_back(profiles[p].mdot.get());
         for (uint32_t f = first[p]; f < first[p + 1]; f++) {
-            for (size_t d = 0; d < 3; d++) h_inlet_x(f, d) = d < N_DIM ? profiles[p].x[f - first[p]][d] : 0.0;
+            for (size_t d = 0; d < boundary_variable::COUNT; d++) h_inlet_x(f, d) = profiles[p].x[f - first[p]][d];
             h_measure(f) = profiles[p].measure[f - first[p]];
         }
     }
@@ -502,7 +524,7 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
     for (size_t k = 0; k < profile_bc_host.size(); k++) {
         h_bc(k) = profile_bc_host[k];
         h_of(k) = profile_of_host[k];
-        for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? profile_x_host[k][d] : 0.0;
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) h_x(k, d) = profile_x_host[k][d];
     }
     Kokkos::deep_copy(profile_program, h_program);
     Kokkos::deep_copy(profile_mdot, h_mdot);
@@ -516,6 +538,14 @@ void TimedBoundaryFields::finish_profiles(std::vector<const kexpr::Program *> & 
 }
 
 namespace {
+
+/** @brief The variables of boundary expressions at face k of x (boundary_variable), at time t. */
+struct FaceVariables {
+    const Kokkos::View<double *[boundary_variable::COUNT]> & x;
+    uint32_t k;
+    double t;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const { return i == boundary_variable::T ? t : x(k, i); }
+};
 
 /**
  * @brief Reduces a launch's errors to the lowest index, the same on every schedule, and keeps it unless an earlier
@@ -547,7 +577,7 @@ struct FirstError {
 struct TimedFieldsFunctor : FirstError {
     Kokkos::View<uint32_t *> face_bc;
     Kokkos::View<uint32_t *> face_set;
-    Kokkos::View<double *[3]> face_x;
+    Kokkos::View<double *[boundary_variable::COUNT]> face_x;
     Kokkos::View<double *[N_DIM]> face_direction;
     Kokkos::View<uint8_t *[2]> set_type;
     Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]> set_slot;
@@ -567,8 +597,7 @@ struct TimedFieldsFunctor : FirstError {
         };
         const uint32_t i_bc = face_bc(k), s = face_set(k);
         const double t = static_cast<double>(time());
-        const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), t};
-        const kexpr::ArrayVariables variables{vars};
+        const FaceVariables variables{face_x, k, t};
         double value[BoundaryFields::N_SLOTS] = {};
         bool has[BoundaryFields::N_SLOTS] = {};
         for (int j = 0; j < BoundaryFields::N_SLOTS; j++) {
@@ -699,7 +728,7 @@ struct TimedFieldsFunctor : FirstError {
 
 struct InletTargetsFunctor : FirstError {
     Kokkos::View<int32_t *> chars;
-    Kokkos::View<double *[3]> x;
+    Kokkos::View<double *[boundary_variable::COUNT]> x;
     Kokkos::View<uint32_t *[N_DIM]> slots;
     Kokkos::View<int32_t *[N_DIM]> direction;
     Kokkos::View<double *[N_DIM]> scale;
@@ -709,8 +738,7 @@ struct InletTargetsFunctor : FirstError {
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, LaunchError & e) const {
         const double t = static_cast<double>(time());
-        const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), t};
-        const kexpr::ArrayVariables variables{vars};
+        const FaceVariables variables{x, k, t};
         double factor[N_DIM];
         FOR_I_DIM factor[i] = scale(k, i);
         if (direction(k, 0) >= 0) {
@@ -736,7 +764,7 @@ struct InletTargetsFunctor : FirstError {
 struct ProfileChunkFunctor : FirstError {
     Kokkos::View<uint32_t *[3]> chunk_range;
     Kokkos::View<uint32_t *> program;
-    Kokkos::View<double *[3]> x;
+    Kokkos::View<double *[boundary_variable::COUNT]> x;
     Kokkos::View<double *> measure;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
@@ -747,8 +775,8 @@ struct ProfileChunkFunctor : FirstError {
         const uint32_t p = program(chunk_range(c, 0));
         double sum = 0.0;
         for (uint32_t f = chunk_range(c, 1); f < chunk_range(c, 2); f++) {
-            const double vars[4] = {x(f, 0), x(f, 1), x(f, 2), t};
-            const double v = programs(p, kexpr::ArrayVariables{vars});
+            const FaceVariables vars{x, f, t};
+            const double v = programs(p, vars);
             if (!(v >= 0.0)) fail(e, f, TimedBoundaryFields::NEGATIVE_PROFILE, t, v);
             sum += v * measure(f);
         }
@@ -769,8 +797,9 @@ struct ProfileScaleFunctor : FirstError {
         const double t = static_cast<double>(time());
         double area = 0.0;
         for (uint32_t c = chunks(p); c < chunks(p + 1); c++) area += chunk_sum(c);
-        const double vars[4] = {0.0, 0.0, 0.0, t};
-        const double m = programs(mdot(p), kexpr::ArrayVariables{vars});
+        const double at_t[4] = {0.0, 0.0, 0.0, t};
+        const kexpr::ArrayVariables vars{at_t};
+        const double m = programs(mdot(p), vars);
         if (!(area > 0.0)) fail(e, p, TimedBoundaryFields::ZERO_INTEGRAL, t, area);
         if (!(m >= 0.0)) fail(e, p, TimedBoundaryFields::NEGATIVE_MDOT, t, m);
         scale(p) = area > 0.0 && m >= 0.0 ? m / area : 0.0;
@@ -781,7 +810,7 @@ struct ProfileScaleFunctor : FirstError {
 struct ProfileFluxFunctor {
     Kokkos::View<uint32_t *> face_bc;
     Kokkos::View<uint32_t *> face_profile;
-    Kokkos::View<double *[3]> x;
+    Kokkos::View<double *[boundary_variable::COUNT]> x;
     Kokkos::View<uint32_t *> program;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
@@ -790,9 +819,9 @@ struct ProfileFluxFunctor {
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
         const uint32_t p = face_profile(k);
-        const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), static_cast<double>(time())};
+        const FaceVariables vars{x, k, static_cast<double>(time())};
         bcs(face_bc(k)).data[N_DIM + 1] =
-            static_cast<rtype>(scale(p) * programs(program(p), kexpr::ArrayVariables{vars}));
+            static_cast<rtype>(scale(p) * programs(program(p), vars));
     }
 };
 
@@ -909,7 +938,7 @@ void TimedBoundaryFields::check() const {
 }
 
 void DirichletStates::add(const std::vector<std::shared_ptr<const kexpr::Program>> & W,
-                          const std::vector<int32_t> & states, const std::vector<Point> & x) {
+                          const std::vector<int32_t> & states, const std::vector<FacePoint> & x) {
     const uint32_t set = static_cast<uint32_t>(set_timed.size());
     const bool timed = std::any_of(W.begin(), W.end(), [](const auto & w) { return w->uses(3); });
     set_timed.push_back(timed);
@@ -923,17 +952,17 @@ namespace {
 struct DirichletStatesFunctor {
     Kokkos::View<int32_t *> face_state_index;
     Kokkos::View<uint32_t *> face_set;
-    Kokkos::View<double *[3]> face_x;
+    Kokkos::View<double *[boundary_variable::COUNT]> face_x;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
     Kokkos::View<rtype *[N_DIM + 2]> face_state;
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
         constexpr uint32_t N_W = N_DIM + 2;
-        const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), static_cast<double>(time())};
+        const FaceVariables vars{face_x, k, static_cast<double>(time())};
         for (uint32_t i = 0; i < N_W; i++) {
             face_state(face_state_index(k), i) =
-                static_cast<rtype>(programs(face_set(k) * N_W + i, kexpr::ArrayVariables{vars}));
+                static_cast<rtype>(programs(face_set(k) * N_W + i, vars));
         }
     }
 };
@@ -945,14 +974,14 @@ void DirichletStates::finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state
     const size_t n = faces_host.size();
     face_state_index = Kokkos::View<int32_t *>("dirichlet_face_state_index", n);
     face_set = Kokkos::View<uint32_t *>("dirichlet_face_set", n);
-    face_x = Kokkos::View<double *[3]>("dirichlet_face_x", n);
+    face_x = Kokkos::View<double *[boundary_variable::COUNT]>("dirichlet_face_x", n);
     auto h_index = Kokkos::create_mirror_view(face_state_index);
     auto h_set = Kokkos::create_mirror_view(face_set);
     auto h_x = Kokkos::create_mirror_view(face_x);
     for (size_t k = 0; k < n; k++) {
         h_index(k) = faces_host[k].state;
         h_set(k) = faces_host[k].set;
-        for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? faces_host[k].x[d] : 0.0;
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) h_x(k, d) = faces_host[k].x[d];
     }
     Kokkos::deep_copy(face_state_index, h_index);
     Kokkos::deep_copy(face_set, h_set);
@@ -990,14 +1019,15 @@ bool TimedInletTargets::depends_on_time(const Input & entry, const std::string &
     for (size_t d = 0; d < u.items.size(); d++) {
         const Input & v = u.items[d];
         if (!BoundaryValue::is_expression(v)) continue;
-        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables(), expression_unit_hint);
-        if (p.uses(3)) return true;
+        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables(),
+                                BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
+        if (p.uses(boundary_variable::T)) return true;
     }
     return false;
 }
 
 void TimedInletTargets::add(const Input & entry, const std::string & where, const std::vector<int32_t> & chars_in,
-                            const std::vector<Point> & x_in, const std::vector<Point> & n_in) {
+                            const std::vector<FacePoint> & x_in, const std::vector<Point> & n_in) {
     const VectorKey u(entry, "u", where);
     std::array<uint32_t, N_DIM> slot{};
     for (size_t i = 0; i < u.items.size(); i++) {
@@ -1028,7 +1058,7 @@ void TimedInletTargets::add(const Input & entry, const std::string & where, cons
 void TimedInletTargets::finish() {
     const size_t n = host_chars.size();
     chars = Kokkos::View<int32_t *>("timed_inlet_chars", n);
-    x = Kokkos::View<double *[3]>("timed_inlet_x", n);
+    x = Kokkos::View<double *[boundary_variable::COUNT]>("timed_inlet_x", n);
     slots = Kokkos::View<uint32_t *[N_DIM]>("timed_inlet_slots", n);
     direction = Kokkos::View<int32_t *[N_DIM]>("timed_inlet_direction", n);
     scale = Kokkos::View<double *[N_DIM]>("timed_inlet_scale", n);
@@ -1042,7 +1072,7 @@ void TimedInletTargets::finish() {
     auto h_slots = Kokkos::create_mirror_view(slots);
     for (size_t k = 0; k < n; k++) {
         h_chars(k) = host_chars[k];
-        for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? host_x[k][d] : 0.0;
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) h_x(k, d) = host_x[k][d];
         FOR_I_DIM {
             h_slots(k, i) = host_slots[k][i];
             h_direction(k, i) = host_direction[k][i];

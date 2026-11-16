@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "input.h"
@@ -1173,6 +1174,10 @@ class Solver {
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
         std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
         std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        // Boundary faces with local coordinates (of entries whose expressions read them), during init_boundaries
+        std::unordered_map<uint32_t, FacePoint> boundary_points;
+        /** @brief Face f's point for boundary expressions: its center and, where computed, its local coordinates. */
+        FacePoint boundary_point(uint32_t f) const;
         TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
@@ -1297,6 +1302,7 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
+        bool chemistry_explicit_step = false;
         CellChemistry cell_chemistry;
         double t_wall_chemistry = 0.0;    // this rank's
         Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks
