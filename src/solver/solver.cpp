@@ -2606,6 +2606,7 @@ int Solver::run_loop() {
                     // The steps enqueued after this one do nothing
                     drain_device_steps();
                     after_step(step_timer, &record);
+                    if (record.reasons & step_queue::PROBES) destroy_step_graph();
                     continue;
                 }
                 n_queued_steps++;
