@@ -1,0 +1,1 @@
+- The periodic shift of every vertex neighbor is stored only when a neighbor crosses a periodic boundary: about 26 bytes less memory per hexahedron and 70 per tetrahedron on meshes without periodic pairs (twice that on GPUs, with the host copy during setup); results are bitwise unchanged (#964).

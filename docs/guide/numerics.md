@@ -84,8 +84,8 @@ Why each, and what it passes (each check runs in the test suite,
   ([benchmark](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
   `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
   induction length within 5% (25% at 1.0). A stoichiometric H2/air flame at
-  700 K, 6 cells per thermal thickness, propagates within 0.7% of Cantera's
-  speed. Steady flames alone are insensitive to `cfl` (0.05% from 0.2 to
+  700 K, 6 cells per thermal thickness, propagates within 0.2% of Cantera's
+  grid-converged speed. Steady flames alone are insensitive to `cfl` (0.05% from 0.2 to
   2.0): set `cfl = 1.0` to run them three times faster, or use
   `[chemistry] coupling = "simpler"`.
 
@@ -175,15 +175,17 @@ Read off the curves (interpolated between the measured meshes):
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
-  - it grows on pyramid lattices;
   - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
     (Mach 1 in a Mach 0.2 flow);
   - it keeps an odd-even wall-pressure mode at the NACA 0012 trailing edge;
   - it undershoots ahead of shocks on quads about 10 times as much as order 5.
 
   Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
-  For smooth flow on meshes without pyramids, setting `order = 4` under
+  For smooth flow, setting `order = 4` under
   `[numerics.face_reconstruction]` is the cheaper choice.
+
+The same comparison on squares, in 3D, with a shock and on a GPU is in
+[Performance: choosing a scheme for an accuracy target](performance.md#accuracy-target).
 
 The advantage is for **smooth flow**. At shocks and contacts TENO-E falls
 back to its ENO sector stencils and every scheme is first order there, so on
@@ -209,7 +211,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 50 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -262,7 +264,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 50 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -356,7 +358,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 48 more.
+and 50 more.
 
 | `riemann_solver` | Use |
 |---|---|

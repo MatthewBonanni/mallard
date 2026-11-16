@@ -1,7 +1,8 @@
 {
  "default": "false",
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [
   "examples/moving_heaters/input.toml",

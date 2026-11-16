@@ -1,8 +1,9 @@
 # Single-GPU performance and parallel scaling
 
 Status: in progress. Baseline measured on `main` at v0.5.0-92 (before any change here); each change below
-lists its measured effect. Results stay bitwise identical to `main` (checked on the cases under
-*Verification*), and bitwise independent of the rank count, thread count and restarts.
+lists its measured effect. Results stay bitwise independent of the rank count, thread count and restarts,
+and, unless a change says otherwise with a measured reason, bitwise identical to `main` (checked on the cases
+under *Verification*; the contract and what it costs: section 16).
 
 ## Hardware and method
 
@@ -453,8 +454,24 @@ one-step path. Progress rows' reductions sit under a second IF node. Builds with
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
 launch one step at a time with the IF bodies always run.
 
-Runs with triggers that read a probe's value stop the device at every step (probes' values are reduced on
-the host).
+Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
+their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
+graph reduces them into the trigger variables with the host's arithmetic (`probe_reduction.h`): every sum's
+per-sample terms, each product rounded on its own, are summed exactly in fixed point (`ExactSums`, reduced
+over the ranks with `comm::allreduce_device`, on NCCL in the graph), the extrema are reduced with `MIN` and
+`MAX`, and a one-point probe's values go to every rank as bit patterns summed with zeros, so the values equal
+the host's `Probe::reduce` bit for bit on any number of ranks. The host still writes the files from the staged
+samples. A time-averaged probe's running means are kept on the device as well, per local sample: the clock
+kernel weighs each sample as `Probes::sample_average` does (`w = t - t_last`, `a = w / W`), and every mean takes
+`mean += a (x - mean)` with the product rounded on its own, as the host's means of the same staged samples do,
+so the reductions of the device's means are those of rank 0's. Whenever the host samples a probe itself (a step
+it stops at, a restart, averages started afresh), the device's means are copied from the host's on resuming.
+Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
+the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
+written), the record says so, and the host takes the step without sampling them again (writing the spectra's
+staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
+the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
+values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -467,10 +484,15 @@ mirrors are pinned (never the device's own arrays, also off GPUs), so the copies
 writes the files from them as it takes the record, after the step's probes and before its progress row, as
 `after_step` orders them. One set of mirrors serves every output: each rank posts the number of staged outputs
 it has written in the step's time-step reduction, whose minimum the device compares with the number it
-staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. Outputs of runs with
-`[sources]` (evaluated at the host's `t`), regions that move or follow the solution, fused chemistry, averaged
-spectra, phase averages (whose files and restart arrays read the device) stop the
-device at their steps, as do all outputs of builds without conditional nodes.
+staged, so every rank stages, or stops for the host (`OUTPUT`), at the same steps. The staging also evaluates
+the `[sources]` at the device's `t` into a device array, and copies the averaged spectra, the phase averages and
+their clocks and bin weights, from which the host writes the spectra file and the restart attributes and
+arrays. A region that moves or follows the solution takes its cells from its fractions, computed under an IF
+node on its writer's own flag at the device's `t` (after the cell states, for a region of the solution) and
+copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
+With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
+copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
+of builds without conditional nodes stop the device at their steps.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -498,17 +520,19 @@ entries' fixed-point sums are reduced with `comm::allreduce_device`. Spectra wri
 false`) are copied into a pinned array per record slot on rank 0, with a bit in the record, and the host writes
 the file from it as it takes the record.
 
-Probes written every few steps (not time-based, not time-averaged, not reading `[statistics]` outputs) are
-evaluated in the graph as well. A kernel sets one flag per probe and one for any; under the latter the
+Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
+as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
+intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
-array per record slot. The host gathers them over the ranks, reduces and writes them from that slot as it
+array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
+from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
-of the monitors, statistics, probes and progress row due at a step, a kernel sets a flag if the launch has not
+of the monitors, statistics, probes, outputs and progress row due at a step, a kernel sets a flag if the launch has not
 flushed yet; under its IF node the state, temperature seeds, last sub-steps, costs, the integrator's tallies and
 last costs are copied to the kept buffers and the chemistry runs over the pending time (outside the repair
 audit, as on the host). After the progress row a last IF node copies them back. The flush runs the host's code
@@ -710,6 +734,69 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
+
+### 16. Cost of bitwise reproducibility (#429)
+
+Three places where the bitwise contract constrains the arithmetic were relaxed one at a time on a branch that is
+not merged, and measured on one A100 (CUDA 13.5, best of two runs; setup times are the TENO setup's `tables`
+line of the run summary):
+
+- **TENO setup with FMA contraction and tree sums.** `teno_setup.cpp` and `teno.cpp` compiled with contraction
+  (no `--fmad=false`, `-ffp-contract=off`), then also the setup's dot products (`strided_dot`, every sum of the
+  Householder QR and the back substitution) with four partial sums added pairwise instead of one sequential sum.
+- **Plain sums instead of `ExactSums`.** One `Kokkos::Sum<double>` per column, without the max reduction and the
+  rounding to fixed point.
+- **Atomic scatter of the face fluxes.** `face_flux_sum` replaced by a kernel over the faces that adds each flux
+  to its two cells with `atomic_add` (the reduction order then depends on scheduling).
+
+Unconstrained chunking in the team TENO kernel (section 1) was not measured on its own: `teno.cpp` no longer
+contracts, so runtime chunk bounds would give the same bits as compile-time ones, and the compile-time bounds
+stay because they keep each thread's coefficients in registers. Its cost in bits is covered by the contraction
+row below.
+
+| case | change | TENO tables | throughput (cells/s) | result vs `main` after N steps |
+|---|---|---|---|---|
+| `teno5_3d` ($96^3$ hexahedra) | none | 6.35 s | 8.22M | - |
+| | FMA contraction | 6.10 s (-3.9%) | 8.26M (+0.4%) | all cells differ, max 4.5e-13 of each field's max (N = 100) |
+| | FMA + tree sums | 6.07 s (-4.4%) | 8.24M (+0.2%) | max 4.9e-13 |
+| | atomic scatter | | 8.20M (-0.3%) | max 4.7e-13 |
+| 3D explosion, $55^3 \times 6$ tetrahedra | none | 24.4 s | 5.90M | - |
+| | FMA contraction | 23.5 s (-3.9%) | 5.91M (+0.2%) | 52% of cells differ, max 1.8e-15 (N = 20) |
+| | FMA + tree sums | 23.6 s (-3.6%) | 5.85M (-0.8%) | max 1.8e-15 |
+| `sphere_3d` mesh with TENO5 (176,243 tetrahedra, 4,000 prisms) | none | 33.4 s | 3.24M | - |
+| | FMA contraction | 32.0 s (-4.2%) | 3.22M (noise) | 67% of cells differ, max 6.0e-14 (N = 20) |
+| | FMA + tree sums | 32.2 s (-3.5%) | 3.21M (noise) | max 5.9e-14 |
+| `teno5_2d` | none | 3.35 s | 76.2M | - |
+| | FMA contraction | 3.35 s | 76.4M (+0.3%) | 30% of cells differ, max 2.0e-14 (N = 300) |
+| | atomic scatter | | 75.6M (-0.8%) | max 1.8e-14 |
+| `air_3d` | atomic scatter | | 45.9M vs 46.0M (noise) | max 8.4e-14 (N = 100) |
+| `air_3d` with `les.dynamic` | plain sums | | 35.31M vs 35.27M (+0.1%) | 71% of cells differ, max 2.5e-14 (N = 100) |
+| `flame_3d` with `efficiency = "dynamic"` | plain sums | | 7.80M vs 7.79M (+0.2%) | every cell differs, momentum by up to 2%, chemistry sub-steps by 60% (N = 100) |
+
+- **Setup.** Contraction saves 4% of the fits on every cell type; the tree sums add nothing beyond it. On these
+  meshes the setup is dominated by the host's packing of shared tables (#1031), so the whole setup changes by
+  less than 1%. The price would be the portable cache: with contraction the device's tables no longer equal the
+  host's (cells redone on the host, CPU builds, a cache written by the other), and 13-31% of the cache's bytes
+  change.
+- **Per step.** `teno.cpp` already writes its FMAs explicitly where they count, so contracting the rest gains
+  0.2-0.4%. The atomic scatter is slower than the gather on every case: it writes each cell's sum through
+  atomics in global memory twice per face, where the gather sums in registers and writes once
+  (`face_flux_sum` is 99 us per stage on `teno5_2d`, 2.1% of the stage).
+- **Exact sums.** `ExactSums` takes 59 us per call for the dynamic constant (2 columns, 221k cells) and 107 us
+  for the dynamic TFLES efficiency (4 columns), against 26 and 49 us for plain sums (Nsight Systems): the
+  difference is 0.5% and 0.2% of a step. On CPUs (48 threads as 1, 2, 4 or 8 ranks, `air_3d` with
+  `les.dynamic`) it stays inside the run-to-run spread (5%). Distributed, exact sums add one all-reduce of the
+  column maxima per call to the one of the sums. The flame shows what the plain sums would cost: last
+  bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
+  or a restart on another partition, could no longer be checked against the original.
+
+**Contract.** Within one build and version, results stay bitwise independent of the rank count, partition,
+thread count, step queue depth, CUDA graphs and restarts: it costs at most 0.5% per step here, and it is what
+makes restarts, partitions and GPU against CPU checkable by `mallard diff` with no tolerance. Against the previous
+`main`, a change may move the last bits when it brings a measured speedup, with tolerance checks and an unchanged
+verification manual instead of bitwise identity ([CONTRIBUTING.md](../../CONTRIBUTING.md#reproducibility));
+none of the three relaxations above qualifies, so none was kept, and the TENO setup keeps its host and device
+tables equal.
 
 ## Scaling (one node)
 

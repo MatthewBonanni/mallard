@@ -66,7 +66,7 @@ class SolutionLevels {
         CellFields fields;
         Kokkos::View<rtype *[N_DIM]> m_centroids;
         Kokkos::View<uint32_t *> offsets_cells_of_cell, cells_of_cell;
-        Kokkos::View<uint8_t *> cells_of_cell_shift;
+        ShiftRows cells_of_cell_shift;
         PeriodicMaps periodic;
         Kokkos::View<rtype> host_time;
         Kokkos::View<double **[N_DIM + 1]> m_levels;

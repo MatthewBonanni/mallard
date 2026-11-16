@@ -29,7 +29,7 @@ X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }   # mole fractions, normalized
 [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
 [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
 [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
-and 11 more.
+and 12 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -112,7 +112,7 @@ atol = 1.0e-10
 [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
 [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
 [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
-and 10 more.
+and 11 more.
 
 A mixture whose mechanism has reactions reacts when the input has a
 `[chemistry]` table.
@@ -143,6 +143,7 @@ Chemistry and flow are split:
 | `rtol`, `atol` | 1e-6, 1e-10 | Integrator tolerances (relative on Y and T, absolute on Y) |
 | `max_steps` | 100000 | Sub-steps allowed per cell and call; more stop the run |
 | `T_frozen` | 0 | No chemistry in cells below this temperature |
+| `explicit_step` | `false` | First try one explicit step (no Jacobian, no factorization) in cells whose chemistry is not stiff over the call, kept only where it passes RODAS's error test; results change within the tolerances. Faster for flames of detailed mechanisms at small time steps (H2/air: chemistry 1.8 times faster); a cell whose step failed stops trying it while it stays stiff, so cases where most cells are (`flame_3d`) run as fast as without it |
 | `fuse_half_steps` | `true` | Strang: one chemistry call per step, the closing half step fused with the next opening one; output still shows the state at the step's end, and results do not depend on output or restarts. `false` takes the two half steps separately |
 | `C_reg` | 1e-12 | Concentration [kmol/m³] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
@@ -257,7 +258,7 @@ solver's chemistry kernels, which prints cells per second (see
 | `reactive_shock_tube` | Ignition behind a reflected shock, Strang splitting |
 | `detonation_1d`, `detonation_2d`, `detonation_3d` | CJ and cellular detonations, numerical soot foils (`P_MAX`) |
 | `premixed_flame` | Freely propagating H2/air and CH4/air (GRI-3.0) flames against Cantera |
-| `flame_2d`, `triple_flame`, `counterflow_diffusion` | Multidimensional laminar flames, differential diffusion |
+| `flame_2d`, `triple_flame`, `counterflow_diffusion`, `reacting_mixing_layer` | Multidimensional laminar flames, differential diffusion, autoignition in a mixing layer |
 | `flame_vortex`, `flame_vortex_quenching` | Flame-vortex interaction, with radiation |
 | `autoignition_2d` | Stratified autoignition DNS |
 | `shock_bubble_3d` | Non-reacting mixture, `double_flux` |
