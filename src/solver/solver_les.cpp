@@ -902,7 +902,6 @@ void Solver::thicken_transport() {
 }
 
 void Solver::init_les() {
-    les_on = LES::in_input(input);
     if (!les_on) return;
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");

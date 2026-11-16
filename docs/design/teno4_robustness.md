@@ -9,8 +9,8 @@ fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 | Failure at order 4 | Issue |
 |---|---|
 | An outgoing acoustic wave amplified on a stretched O-grid (cylinder) | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
-| Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh (fixed: mirror images past the far side of the body) | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
+| Growing acoustic modes on graded hexahedra (from 5% cell-to-cell grading; also order 6) | [#1232](https://github.com/MatthewBonanni/mallard/issues/1232) |
 
 ## Setup
 
@@ -200,8 +200,8 @@ tetrahedra and 0.0822 against 0.0857 on pyramids.
 ## What would change the default
 
 When [#975](https://github.com/MatthewBonanni/mallard/issues/975),
-[#976](https://github.com/MatthewBonanni/mallard/issues/976) and
-[#977](https://github.com/MatthewBonanni/mallard/issues/977) are fixed and
+[#977](https://github.com/MatthewBonanni/mallard/issues/977) and
+[#1232](https://github.com/MatthewBonanni/mallard/issues/1232) are fixed and
 this page's cases pass at order 4, `high_order` can move to order 4. The
 cylinder is the deciding check. Until then, order 4 is an explicit choice for
 smooth flow:
