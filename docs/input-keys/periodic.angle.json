@@ -1,7 +1,14 @@
 {
+ "default": "0.0",
+ "dimension": "angle (rad)",
  "dims": [
   2,
   3
  ],
- "set_in": []
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
+ ],
+ "type": "number",
+ "unit": "deg"
 }

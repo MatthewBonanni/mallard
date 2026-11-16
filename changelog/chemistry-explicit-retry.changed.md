@@ -1,0 +1,1 @@
+- `[chemistry] explicit_step`: a cell whose explicit step fails skips it in the next calls until its RODAS sub-steps fall short of a call, recorded as the sign of `CHEM_H`; `flame_3d` with the option is now within 0.5% of RODAS alone (was 10-13% slower), and the 2D H2/air flame keeps its 1.8x chemistry speedup (#1089).

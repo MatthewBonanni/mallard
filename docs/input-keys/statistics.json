@@ -13,6 +13,9 @@
   "examples/channel_wmles/tl_m1.7.toml",
   "examples/channel_wmles/tl_m3.0.toml",
   "examples/flame_turbulence/input.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/forced_isotropic_turbulence/input.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml"
  ]
 }

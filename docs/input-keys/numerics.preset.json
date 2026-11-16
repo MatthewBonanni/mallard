@@ -5,7 +5,12 @@
  ],
  "set_in": [
   "examples/cbc_les/input.toml",
-  "examples/detonation_1d/input.toml"
+  "examples/detonation_1d/input.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/3d/mesh_file.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
  ],
  "values": [
   "first_order",
