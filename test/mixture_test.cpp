@@ -1075,6 +1075,30 @@ TEST(ReactingTest, UniformMixtureIgnitesLikeTheConstantVolumeReactor) {
     }
 }
 
+TEST(ReactingTest, ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance) {
+    // The same reactor through ignition with explicit_step: the calls that
+    // take the explicit step move T at 2 tau, still 50 K short of
+    // equilibrium, by less than 1e-5 (RODAS alone is 5e-5 from Cantera's).
+    // A team per cell (lanes = 32) takes the same explicit steps to round-off
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    const double tau = 4.42e-5;  // the ignition delay (h2o2_ignition.csv): 100 steps to 2 tau
+    const std::string options[] = {"", "explicit_step = true\n", "explicit_step = true\nlanes = 32\n"};
+    std::vector<double> T[3];
+    for (int e = 0; e < 3; e++) {
+        Solver solver;
+        solver.init(parse_toml(reacting_box(100, tau / 50.0) + options[e]));
+        solver.run();
+        solver.copy_device_to_host();
+        T[e] = cell_temperatures(solver, thermo);
+    }
+    for (size_t c = 0; c < T[0].size(); c++) {
+        EXPECT_NE(T[1][c], T[0][c]);
+        EXPECT_NEAR(T[1][c], T[0][c], 1e-5 * T[0][c]);
+        EXPECT_NEAR(T[2][c], T[1][c], 1e-10 * T[1][c]);
+    }
+}
+
 namespace {
 
 /**

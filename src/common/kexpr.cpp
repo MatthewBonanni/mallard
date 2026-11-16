@@ -285,8 +285,8 @@ double literal_value(const std::string & text) {
 class Parser {
     public:
         Parser(const std::string & name_, const std::string & text_, const std::vector<std::string> & variables_,
-               const SymbolHint hint_) :
-            name(name_), text(text_), variables(variables_), hint(hint_) {
+               const SymbolHint hint_, const size_t first_shadowable_) :
+            name(name_), text(text_), variables(variables_), hint(hint_), first_shadowable(first_shadowable_) {
             tokenize();
         }
 
@@ -308,6 +308,7 @@ class Parser {
         const std::string & text;
         const std::vector<std::string> & variables;
         const SymbolHint hint;
+        const size_t first_shadowable;
         std::vector<Token> tokens;
         size_t at = 0;
         std::vector<std::vector<std::pair<std::string, uint16_t>>> scopes{1};
@@ -517,8 +518,8 @@ class Parser {
                 functions().count(l) > 0) {
                 fail("'" + t.text + "' is a reserved word and cannot name a variable", t.pos);
             }
-            for (const auto & v : variables) {
-                if (lower(v) == l) fail("variable '" + t.text + "' would hide '" + v + "'", t.pos);
+            for (size_t i = 0; i < std::min(first_shadowable, variables.size()); i++) {
+                if (lower(variables[i]) == l) fail("variable '" + t.text + "' would hide '" + variables[i] + "'", t.pos);
             }
             for (const auto & s : scopes) {
                 for (const auto & v : s) {
@@ -804,7 +805,9 @@ class Parser {
 
         NodePtr symbol(const Token & t) {
             const auto v = std::find(variables.begin(), variables.end(), t.text);
-            if (v != variables.end()) {
+            const bool shadowed = v != variables.end() &&
+                                  static_cast<size_t>(v - variables.begin()) >= first_shadowable && local(t.text);
+            if (v != variables.end() && !shadowed) {
                 auto n = std::make_unique<Node>();
                 n->op = Op::VAR;
                 n->index = static_cast<uint16_t>(v - variables.begin());
@@ -1006,9 +1009,9 @@ class Emitter {
 } // namespace
 
 Program::Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
-                 const SymbolHint hint) :
+                 const SymbolHint hint, const size_t first_shadowable) :
     m_name(name), m_text(text), m_uses(variables.size(), false) {
-    Parser parser(name, text, variables, hint);
+    Parser parser(name, text, variables, hint, first_shadowable);
     const NodePtr root = parser.parse();
     Emitter emitter(parser.n_locals());
     try {

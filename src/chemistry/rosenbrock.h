@@ -241,6 +241,75 @@ KOKKOS_INLINE_FUNCTION void rodas_step(const Lanes & lanes, const System & syste
     lanes.sync();
 }
 
+/** @brief sqrt(mean((err_i / (atol_i + rtol max(|y0_i|, |y1_i|)))^2)), the error norm of integrate(). */
+template <typename Lanes, typename System>
+KOKKOS_INLINE_FUNCTION double error_norm(const Lanes & lanes, const System & system, const uint32_t n,
+                                         const double rtol, const double * y0, const double * y1, const double * err) {
+    const double sum = lanes.sum(n, [&](const uint32_t i) {
+        const double scale = system.atol(i) + rtol * Kokkos::fmax(Kokkos::fabs(y0[i]), Kokkos::fabs(y1[i]));
+        const double e = err[i] / scale;
+        return e * e;
+    });
+    return Kokkos::sqrt(sum / n);
+}
+
+/**
+ * @brief Whether h ||k_a - k_b|| > bound ||y_a - y_b|| in the norm weighted
+ *        by 1 / (atol_i + rtol |y0_i|), with k = f(y): the estimate
+ *        ||k_a - k_b|| / ||y_a - y_b|| of the spectral radius of the Jacobian
+ *        (Hairer, Norsett & Wanner, Solving ODEs I, II.10) times h is past
+ *        an explicit method's stability bound.
+ */
+template <typename Lanes, typename System>
+KOKKOS_INLINE_FUNCTION bool stiff(const Lanes & lanes, const System & system, const uint32_t n, const double rtol,
+                                  const double h, const double bound, const double * y0, const double * k_a,
+                                  const double * k_b, const double * y_a, const double * y_b) {
+    auto weighted = [&](const uint32_t i, const double v) {
+        const double w = v / (system.atol(i) + rtol * Kokkos::fabs(y0[i]));
+        return w * w;
+    };
+    const double dk = lanes.sum(n, [&](const uint32_t i) { return weighted(i, k_a[i] - k_b[i]); });
+    const double dy = lanes.sum(n, [&](const uint32_t i) { return weighted(i, y_a[i] - y_b[i]); });
+    return h * h * dk > bound * bound * dy;
+}
+
+/**
+ * @brief One explicit Bogacki-Shampine 3(2) step of size h from y0, with
+ *        f(y0) in k[0]. It is accepted if its error estimate passes
+ *        integrate()'s test, the result is admissible, and neither the
+ *        first nor the last stages' estimate of the spectral radius of the
+ *        Jacobian times h exceeds the method's stability bound on the
+ *        negative real axis (2.5; the error estimate of an unstable step is
+ *        unreliable). A stiff start returns after one more right-hand side.
+ * @param k Four stage vectors; y receives the step, y_tmp is scratch.
+ */
+template <typename Lanes, typename System>
+KOKKOS_INLINE_FUNCTION bool explicit_step(const Lanes & lanes, const System & system, const uint32_t n,
+                                          const double h, const double rtol, const double * y0, double * const k[4],
+                                          double * y, double * y_tmp) {
+    constexpr double bound = 2.5;
+    lanes.for_each(n, [&](const uint32_t i) { y_tmp[i] = y0[i] + 0.5 * h * k[0][i]; });
+    lanes.sync();
+    system.rhs(lanes, y_tmp, k[1]);
+    if (stiff(lanes, system, n, rtol, h, bound, y0, k[1], k[0], y_tmp, y0)) return false;
+    lanes.for_each(n, [&](const uint32_t i) { y_tmp[i] = y0[i] + 0.75 * h * k[1][i]; });
+    lanes.sync();
+    system.rhs(lanes, y_tmp, k[2]);
+    lanes.for_each(n, [&](const uint32_t i) {
+        y[i] = y0[i] + h * (2.0 / 9.0 * k[0][i] + 1.0 / 3.0 * k[1][i] + 4.0 / 9.0 * k[2][i]);
+    });
+    lanes.sync();
+    if (!system.admissible(lanes, y)) return false;
+    system.rhs(lanes, y, k[3]);
+    if (stiff(lanes, system, n, rtol, h, bound, y0, k[3], k[2], y, y_tmp)) return false;
+    lanes.for_each(n, [&](const uint32_t i) {
+        y_tmp[i] = h * (-5.0 / 72.0 * k[0][i] + 1.0 / 12.0 * k[1][i] + 1.0 / 9.0 * k[2][i] - 0.125 * k[3][i]);
+    });
+    lanes.sync();
+    const double err = error_norm(lanes, system, n, rtol, y0, y, y_tmp);
+    return Kokkos::isfinite(err) && err <= 1.0;
+}
+
 /**
  * @brief Integrate dy/dt = f(y) from t_start to t_end with adaptive RODAS
  *        steps and error control
