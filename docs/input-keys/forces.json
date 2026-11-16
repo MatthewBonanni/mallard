@@ -3,7 +3,6 @@
   2,
   3
  ],
- "required": true,
  "set_in": [
   "examples/channel_les/input.toml",
   "examples/channel_les/input_590.toml",

@@ -41,6 +41,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 **Boundary conditions** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/boundary_conditions/))
 - Walls, inlets, outlets, far field and symmetry, with composable options (NSCBC, averaging, turbulence, wall models)
 - Every value a number or an expression of x, y, z and t
+- Profiles in the boundary's own coordinates: wall distance, position along it, radius and angle
 
 **Performance** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/))
 - CPUs (OpenMP, threads) and NVIDIA and AMD GPUs; single or double precision

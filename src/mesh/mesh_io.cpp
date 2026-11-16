@@ -339,7 +339,7 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
                              std::vector<uint8_t> && face_shifts,
                              std::vector<uint32_t> && interior,
                              std::map<std::string, std::vector<uint32_t>> && zone_faces) {
-    // Each input is freed once copied, before the geometry is allocated
+    // Each input is freed once copied
     node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
     h_node_coords = Kokkos::create_mirror_view(node_coords);
     for (uint32_t i_node = 0; i_node < n_nodes; i_node++) {
@@ -391,7 +391,9 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
     m_face_zones.clear();
     add_zone("interior", FaceZoneType::INTERIOR, interior);
     for (auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
+}
 
+void Mesh::allocate_geometry() {
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
     face_area = Kokkos::View<rtype *>("face_area", n_faces);

@@ -63,6 +63,7 @@ class InputTable : public std::map<K, V> {
         struct Lookups {
             std::set<K> keys;
             std::map<K, KeyUse> uses;
+            std::set<K> optional;
             bool all = false;
         };
 
@@ -75,6 +76,11 @@ class InputTable : public std::map<K, V> {
         const V & at(const K & k) const { note(k); return Base::at(k); }
         std::size_t count(const K & k) const { note(k); return Base::count(k); }
         bool contains(const K & k) const { note(k); return Base::contains(k); }
+        /** @brief Whether the table holds k, an optional key: a read of it that follows records no requirement. */
+        bool contains_optional(const K & k) const {
+            lookups->optional.insert(k);
+            return contains(k);
+        }
         V & operator[](const K & k) { note(k); return Base::operator[](k); }
 
         auto begin() { lookups->all = true; return Base::begin(); }
@@ -87,6 +93,7 @@ class InputTable : public std::map<K, V> {
         const Lookups & lookups_made() const { return *lookups; }
         void record_use(const K & k, KeyUse use) const {
             note(k);
+            if (lookups->optional.contains(k)) use.required = false;
             lookups->uses[k] = std::move(use);
         }
         void forget_lookups() { lookups = std::make_shared<Lookups>(); }
@@ -107,6 +114,15 @@ struct InputConfig : toml::type_config {
  *        no setup code read are known afterwards (see unused_keys).
  */
 using Input = toml::basic_value<InputConfig>;
+
+/**
+ * @brief Whether the table holds an optional key. Setup tests a key it reads only
+ *        if present with this rather than contains(), so that the read, which
+ *        would otherwise record the key as required, records it as optional.
+ */
+inline bool contains_optional(const Input & table, const std::string & key) {
+    return table.as_table().contains_optional(key);
+}
 
 /** @brief Parse an input file, with no key counted as read. */
 Input parse_input(const std::string & filename);
