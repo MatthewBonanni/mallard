@@ -249,10 +249,10 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     fields.apply(bc, Point{}, 0.0, double(physics.R), Point{}, true);
     if (bc.has(AVERAGE)) {
         const BoundaryValue * p = fields.slot(BoundaryFields::SLOT_P);
-        for (uint16_t x = 0; x < 3 && p->compiled(); x++) {
-            if (p->compiled()->uses(x)) {
+        for (uint16_t x = 0; x < boundary_variable::COUNT && p->compiled(); x++) {
+            if (x != boundary_variable::T && p->compiled()->uses(x)) {
                 fail(input, where, "p", "with average = true is one area-averaged pressure: it may depend on t, not "
-                                        "on x, y or z",
+                                        "on x, y, z or the local coordinates",
                      "Remove average to impose p face by face", "average-area-averaged-pressure");
             }
         }
@@ -668,7 +668,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             h_face_state_index(f) = n_dirichlet++;
         }
         if (h_face_bc_vec[f] < 0 || !h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_transmissive()) continue;
-        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic()) {
+        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic() &&
+            static_cast<uint32_t>(mesh.h_cells_of_face(f, 0)) < mesh.n_reconstructed()) {
             h_face_char(f) = static_cast<int32_t>(char_faces.size());
             char_faces.push_back(f);
             const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
