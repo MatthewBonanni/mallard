@@ -1407,7 +1407,12 @@ step is kept only if
 Accepted cells leave the queue (a second scan of the flags) before it is
 ordered by cost and balanced across ranks, so the RODAS kernels, unchanged,
 integrate only the others, with no idle lanes for the cells that finished;
-an accepted step counts one sub-step and leaves `CHEM_H` as it was. The
+an accepted step counts one sub-step and leaves `CHEM_H` as it was. A
+failed step negates `CHEM_H` (issue #1089), and a negative `CHEM_H` is no
+candidate: RODAS starts from its magnitude and keeps the sign as long as its
+proposal covers a call, so a cell that stays stiff (burnt gas) tries once,
+not every call, and tries again once its sub-steps have fallen short of a
+call (a front passing) and grown back. The
 explicit pass is one kernel over the queue, by one thread or the lanes of
 a team per cell like RODAS, and one scan, all on the device: no host work
 and graph-capturable. Whether a cell takes the explicit step depends only
@@ -1426,20 +1431,24 @@ alone at the end, on the A100:
 
 | Case | Steps | Hardware | Chemistry, RODAS | With explicit steps | Step | `T` | `Y` |
 |---|---|---|---|---|---|---|---|
-| 2D wrinkled H2/air flame (h2o2, 115k cells, `dt` 3.9 ns) | 200 | A100 | 9.43 ms | 5.07 ms | 16.4 to 12.1 ms | 0.0019 K | 1.3e-6 |
-| | 50 | CPU | 230 ms | 140 ms | 486 to 393 ms | | |
-| `flame_3d` (propane two-step, TFLES) | 100 | A100 | 19.4 ms | 21.4 ms | 33.2 to 35.2 ms | 0.67 K | 3.6e-5 |
-| | 20 | CPU | 204 ms | 230 ms | 684 to 712 ms | | |
+| 2D wrinkled H2/air flame (h2o2, 115k cells, `dt` 3.9 ns) | 200 | A100 | 9.44 ms | 5.12 ms | 16.4 to 12.0 ms | 0.0019 K | 1.3e-6 |
+| | 50 | CPU | 230 ms | 144 ms | 485 to 399 ms | | |
+| `flame_3d` (propane two-step, TFLES) | 100 | A100 | 19.4 ms | 19.5 ms | 33.2 to 33.3 ms | 0.67 K | 3.6e-5 |
+| | 20 | CPU | 206 ms | 207 ms | 690 to 688 ms | | |
 
 The H2 flame's explicit steps take nearly half of its chemistry time off.
-`flame_3d` is slower: its chemistry time is in the cells of many sub-steps
-(trace fuel burning out in hot gas), and of the cells that try the explicit
-step about half fail, most of them burnt gas whose fractional-order fuel
-consumption is stiff (after two right-hand sides), so the attempts cost
-more than the cells that pass save. Hence off by default.
+`flame_3d`'s chemistry time is in the cells of many sub-steps (trace fuel
+burning out in hot gas); about half the cells that try the explicit step
+fail, most of them burnt gas whose fractional-order fuel consumption is
+stiff, and as each of them tries once rather than every call its chemistry
+stays within 0.5% of RODAS alone. Off by default (issue #1090: enabling it
+where it pays).
 `ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
 bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
-of `T`, against RODAS's own 5e-5 from Cantera.
+of `T`, against RODAS's own 5e-5 from Cantera;
+`ReactingTest.CellsWhoseExplicitStepFailedStopTryingIt` checks that a
+failed step leaves RODAS's state and proposal bitwise as without the option,
+with `CHEM_H` negated, and that an ignition's short sub-steps clear it.
 
 ## 6. Transport
 
