@@ -467,7 +467,9 @@ into the result in the reduction's final step. Copies and fills there are kernel
 `StepGraphGuard` reports others). On CUDA a thread of a parallel_for that does nothing exits rather than
 returns: a return would leave the rest of the kernel in a divergent region, which costs TENO's kernels about
 0.4% of a step also where nothing is gated. The NCCL operations always run, on the same buffers on every rank,
-since the flags come from values reduced over the ranks. A gated body costs its kernel launches (and its NCCL
+since the flags come from values reduced over the ranks. Nothing outside a gated body may therefore read a buffer
+that an NCCL collective reduces in place: while the body is gated, a `SUM` buffer that its kernels no longer refill
+grows by the rank count at each launch. A gated body costs its kernel launches (and its NCCL
 latency) whether or not it is due: in every step for an output due only every few steps (a probe's reductions,
 say), and in each launch after a stop, `step_queue` - 1 times per stop, instead of nothing. Off CUDA, the tests'
 launches of the code a capture records gate every body.

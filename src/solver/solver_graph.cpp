@@ -130,12 +130,11 @@ std::pair<cudaGraphNode_t, cudaGraph_t> add_if_node(cudaGraph_t graph, const std
     return {node, params.conditional.phGraph_out[0]};
 }
 
-/** @brief Sets the condition to whether flag and the enclosing gate parent (null: none) are set. */
-void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * parent, const uint32_t * flag) {
-    const gated::Scope always(nullptr);
+/** @brief Sets the condition to whether flag is set. */
+void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * flag) {
     gated::parallel_for("step_condition", 1, KOKKOS_LAMBDA(const int) {
-        KOKKOS_IF_ON_DEVICE((cudaGraphSetConditional(handle, (!parent || *parent) && *flag ? 1u : 0u);))
-        KOKKOS_IF_ON_HOST(((void)handle; (void)parent; (void)flag;))
+        KOKKOS_IF_ON_DEVICE((cudaGraphSetConditional(handle, *flag ? 1u : 0u);))
+        KOKKOS_IF_ON_HOST(((void)handle; (void)flag;))
     });
 }
 #endif
@@ -337,16 +336,13 @@ void Solver::device_if(const uint32_t * flag, F && body) {
         cudaGraphConditionalHandle handle;
         cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
                    "cudaGraphConditionalHandleCreate");
-        set_condition(handle, gated::flag(), flag);
+        set_condition(handle, flag);
         const std::vector<cudaGraphNode_t> after = capture_frontier();
         end_capture(graph);
         const auto [node, branch] = add_if_node(graph, after, handle);
         capture_graph = branch;
         begin_capture(branch, nullptr, 0);
-        {
-            const gated::Scope ungated(nullptr);
-            body();
-        }
+        body();
         end_capture(branch);
         capture_graph = graph;
         begin_capture(graph, &node, 1);

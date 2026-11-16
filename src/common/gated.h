@@ -132,6 +132,8 @@ struct For {
     KOKKOS_FUNCTION void operator()(A &&... a) const {
         if (on && !*on) {
 #ifdef __CUDA_ARCH__
+            // Kokkos's CUDA ParallelFor (5.2) runs nothing after the functor but the release of level-1 scratch,
+            // which for_ refuses; re-check this whenever Kokkos is updated
             asm volatile("exit;");
 #else
             return;

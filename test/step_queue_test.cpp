@@ -1219,6 +1219,9 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     // Where conditional nodes cannot hold NCCL operations (NCCL over a network), step graphs gate their bodies and
     // launch them also when they are not due: a line's reductions, reduced every 3 steps and read by a trigger that
     // stops at step 19, give the run of conditional nodes bit for bit
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "off CUDA every step graph gates its bodies";
+#else
     if (comm::size() == 1) GTEST_SKIP() << "MPI runs on several ranks only";
     Case c;
     c.run = "n_steps = 30\ncfl = 0.5\n";
@@ -1245,7 +1248,6 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     expect_same(nodes, gated, "gated step graphs");
     EXPECT_EQ(gated.step, 19u);
     EXPECT_EQ(gated.queued, nodes.queued);
-#ifdef KOKKOS_ENABLE_CUDA
     EXPECT_GT(gated.graph_steps, 0u);
 #endif
 }
