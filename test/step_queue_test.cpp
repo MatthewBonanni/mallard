@@ -462,6 +462,18 @@ TEST(StepQueueTest, OutputsByStep) {
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     const Outcome o = expect_queue_invariant("by_step", c);
     EXPECT_EQ(o.step, 30u);
+    // Where conditional nodes fail (NCCL across a network), the steps run kernel by kernel to the same results
+    Case unconditional = c;
+    unconditional.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("by_step_unconditional", unconditional, false);
+#ifdef KOKKOS_ENABLE_CUDA
+    const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
+    EXPECT_EQ(fallback.graph_steps, 0u);
+    if (comm::is_root()) {
+        ASSERT_EQ(fallback.warnings.size(), 1u);
+        EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
+    }
+#endif
     // Serial runs on several ranks write their files and log on the root rank only
     if (!comm::is_root()) return;
     EXPECT_TRUE(o.files.count("forces.csv"));
@@ -656,6 +668,9 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+    // Without conditional nodes the flushes and samples happen at the same steps
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("fused_unconditional", c, false);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
