@@ -440,7 +440,7 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
             Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
         });
     }
-    Kokkos::parallel_for("face_thermo", mesh->n_faces,
+    Kokkos::parallel_for("face_thermo", mesh->n_state_faces(),
                          FaceThermoFunctor{face_values(scalars), density_slope, face_W, face_thermo, n_species});
 }
 

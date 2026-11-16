@@ -1108,6 +1108,82 @@ TEST(ReactingTest, UniformMixtureIgnitesLikeTheConstantVolumeReactor) {
     }
 }
 
+TEST(ReactingTest, ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance) {
+    // The same reactor through ignition with explicit_step: the calls that
+    // take the explicit step move T at 2 tau, still 50 K short of
+    // equilibrium, by less than 1e-5 (RODAS alone is 5e-5 from Cantera's).
+    // A team per cell (lanes = 32) takes the same explicit steps to round-off
+    const auto mech = chemistry::read_mechanism(H2O2);
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    const double tau = 4.42e-5;  // the ignition delay (h2o2_ignition.csv): 100 steps to 2 tau
+    const std::string options[] = {"", "explicit_step = true\n", "explicit_step = true\nlanes = 32\n"};
+    std::vector<double> T[3];
+    for (int e = 0; e < 3; e++) {
+        Solver solver;
+        solver.init(parse_toml(reacting_box(100, tau / 50.0) + options[e]));
+        solver.run();
+        solver.copy_device_to_host();
+        T[e] = cell_temperatures(solver, thermo);
+    }
+    for (size_t c = 0; c < T[0].size(); c++) {
+        EXPECT_NE(T[1][c], T[0][c]);
+        EXPECT_NEAR(T[1][c], T[0][c], 1e-5 * T[0][c]);
+        EXPECT_NEAR(T[2][c], T[1][c], 1e-10 * T[1][c]);
+    }
+}
+
+TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
+    // The burnt reactor at 4 tau is too stiff for an explicit step: with explicit_step, every call leaves
+    // RODAS's state and proposal bitwise as without it, and CHEM_H negated, which skips the next attempts
+    // until the cell's sub-steps fall short of a call
+    const double tau = 4.42e-5;
+    const std::string dir = (scratch_dir() / "mallard_explicit_failures").string();
+    std::filesystem::remove_all(dir);
+    const auto writer = [&](const std::string & prefix, uint32_t interval) {
+        return "[[write_data]]\nprefix = \"" + dir + "/" + prefix + "\"\nformat = \"restart\"\ninterval = " +
+               std::to_string(interval) + "\n";
+    };
+    Solver burnt;
+    burnt.init(parse_toml(reacting_box(200, tau / 50.0) + writer("burnt", 200)));
+    burnt.run();
+    const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/burnt_000200.restart\"\n";
+    std::string box = reacting_box(205, tau / 50.0);
+    const size_t init = box.find("[initialize]\n") + 13;
+    box.replace(init, box.find("\n[", init) + 1 - init, restart);
+    Solver runs[2];
+    for (int e = 0; e < 2; e++) {
+        const std::string name = e ? "on" : "off";
+        runs[e].init(parse_toml(box + (e ? "explicit_step = true\n" : "") + writer(name, 205)));
+        runs[e].run();
+        runs[e].copy_device_to_host();
+    }
+    for (uint32_t c = 0; c < runs[0].get_mesh()->n_cells; c++) {
+        FOR_I_CONSERVATIVE ASSERT_EQ(runs[1].h_conservatives(c, i), runs[0].h_conservatives(c, i));
+        for (uint32_t k = 0; k < runs[0].get_species_names().size(); k++) {
+            ASSERT_EQ(runs[1].h_species(c, k), runs[0].h_species(c, k));
+        }
+    }
+    const std::vector<rtype> h_off = *read_restart(dir + "/off_000205.restart").find("CHEM_H");
+    const std::vector<rtype> h_on = *read_restart(dir + "/on_000205.restart").find("CHEM_H");
+    ASSERT_EQ(h_on.size(), h_off.size());
+    for (size_t c = 0; c < h_off.size(); c++) {
+        EXPECT_GT(h_off[c], rtype(0));
+        EXPECT_EQ(h_on[c], -h_off[c]);
+    }
+    // Explicit steps fail late in the induction; the ignition's sub-steps, shorter than a call, clear that
+    Solver igniting;
+    igniting.init(parse_toml(reacting_box(40, tau / 50.0) + "explicit_step = true\n" + writer("igniting", 20)));
+    igniting.run();
+    // Copies: a range-for over *read_restart(...).find(...) would read the restart data after it is destroyed
+    const std::vector<rtype> h_induction = *read_restart(dir + "/igniting_000020.restart").find("CHEM_H");
+    const std::vector<rtype> h_ignited = *read_restart(dir + "/igniting_000040.restart").find("CHEM_H");
+    for (rtype h : h_induction) EXPECT_LT(h, rtype(0));
+    for (rtype h : h_ignited) {
+        EXPECT_GT(h, rtype(0));
+        EXPECT_LT(h, rtype(tau / 50.0));
+    }
+}
+
 namespace {
 
 /**

@@ -34,6 +34,7 @@ import schematics
 import teno
 import theory
 import time_integrators
+import work_precision
 
 
 def main():
@@ -53,6 +54,7 @@ def main():
     teno.figures()
     theory.figures()
     time_integrators.figures()
+    work_precision.figures()
     if args.mallard:
         case_view.figures(args.mallard, args.mallard3d)
         mesh_fields.figures(args.mallard, args.mallard3d)

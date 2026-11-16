@@ -375,7 +375,7 @@ struct TestFilterFunctor {
 struct TestFilterWidthFunctor {
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
-    Kokkos::View<uint8_t *> neighbor_shift;
+    ShiftRows neighbor_shift;
     Kokkos::View<rtype *[N_DIM]> shifts;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
@@ -514,7 +514,7 @@ struct DynamicProcedureFunctor {
     SGSModel model;
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
-    Kokkos::View<uint8_t *> neighbor_shift;
+    ShiftRows neighbor_shift;
     PeriodicMaps periodic;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
@@ -902,7 +902,6 @@ void Solver::thicken_transport() {
 }
 
 void Solver::init_les() {
-    les_on = LES::in_input(input);
     if (!les_on) return;
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");
