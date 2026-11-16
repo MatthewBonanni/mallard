@@ -79,11 +79,14 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
 TEST(MPI3DTest, TENOBlockPathAcrossPeriodicSeamsMatchesSerial) {
     // The partition cuts the box along x; the y and z seams, split across the
     // ranks, close each rank's block on itself, and every cell away from the
-    // partition faces takes the block path. The serial run numbers its cells
-    // as the input does, which leaves them all on the unstructured path
+    // partition faces takes the block path. On up to 4 ranks, each rank's
+    // interior is whole slabs (48 is a multiple of the ranks) at least
+    // 2 layers + 1 = 5 cells thick, a block's least extent. The serial run
+    // numbers its cells as the input does, which leaves them all on the
+    // unstructured path
     std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 5\n");
     const std::string generated = "Nx = 12\nNy = 12\nNz = 12\nLx = 1.0\n";
-    input.replace(input.find(generated), generated.size(), "Nx = 30\nNy = 8\nNz = 8\nLx = 3.75\ncell_order = \"auto\"\n");
+    input.replace(input.find(generated), generated.size(), "Nx = 48\nNy = 8\nNz = 8\nLx = 6.0\ncell_order = \"auto\"\n");
     input.erase(input.find("[[boundaries]]"), input.find("[numerics]") - input.find("[[boundaries]]"));
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
              "[[periodic]]\nzones = [\"back\", \"front\"]\n[parallel]\npartitioner = \"multijagged\"\n";
