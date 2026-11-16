@@ -1297,6 +1297,7 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
+        bool chemistry_explicit_step = false;
         CellChemistry cell_chemistry;
         double t_wall_chemistry = 0.0;    // this rank's
         Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks

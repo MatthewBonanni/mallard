@@ -381,6 +381,55 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
     return result;
 }
 
+/** @brief Doubles of work memory explicit_reactor_step() needs. */
+template <typename MemorySpace>
+KOKKOS_INLINE_FUNCTION uint32_t explicit_reactor_work_size(const KineticsTable<MemorySpace> & kinetics) {
+    return ConstantVolumeReactor<MemorySpace>::scratch_size(kinetics) + 7 * (kinetics.n_species + 1);
+}
+
+/**
+ * @brief Advance one reactor over dt as advance_reactor() would, but by one
+ *        explicit_step() (no Jacobian, no factorization), if it is accepted
+ *        and leaves no negative mass fraction; else Y and T stay as they
+ *        are and it returns false. Also false for negative initial mass
+ *        fractions, which advance_reactor() clips.
+ * @param work explicit_reactor_work_size(kinetics) doubles.
+ */
+template <typename Lanes, typename MemorySpace>
+KOKKOS_INLINE_FUNCTION bool explicit_reactor_step(const Lanes & lanes, const ThermoTable<MemorySpace> & thermo,
+                                                  const KineticsTable<MemorySpace> & kinetics, const double rho,
+                                                  const double dt, double * Y, double & T,
+                                                  const ReactorOptions & options, double * work,
+                                                  const double * forcing = nullptr) {
+    const uint32_t ns = thermo.n_species, n = ns + 1;
+    double * scratch = work;
+    double * y = scratch + ConstantVolumeReactor<MemorySpace>::scratch_size(kinetics);
+    double * y_new = y + n;
+    double * y_tmp = y_new + n;
+    double * k[4] = {y_tmp + n, y_tmp + 2 * n, y_tmp + 3 * n, y_tmp + 4 * n};
+    if (lanes.sum(ns, [&](const uint32_t i) { return Y[i] < 0.0 ? 1.0 : 0.0; }) > 0.0) return false;
+    double e, cv;
+    thermo.e_cv(T, MassFractions{Y}, e, cv);
+    lanes.for_each(ns, [&](const uint32_t i) { y[i] = Y[i]; });
+    lanes.single([&]() { y[ns] = T; });
+    lanes.sync();
+    const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,     options.atol_Y, scratch,
+                                                     nullptr, nullptr,  forcing, dt};
+    reactor.rhs(lanes, y, k[0]);
+    if (!explicit_step(lanes, reactor, n, dt, options.integrator.rtol, y, k, y_new, y_tmp)) return false;
+    if (lanes.sum(ns, [&](const uint32_t i) { return y_new[i] < 0.0 ? 1.0 : 0.0; }) > 0.0) return false;
+    const double total = lanes.sum(ns, [&](const uint32_t i) { return y_new[i]; });
+    lanes.for_each(ns, [&](const uint32_t i) { Y[i] = y_new[i] / total; });
+    lanes.sync();
+    if (forcing) {
+        const double growth = 1.0 + dt * lanes.sum(ns, [&](const uint32_t i) { return forcing[i]; });
+        T = thermo.T_from_e((e + dt * forcing[ns]) / growth, MassFractions{Y}, y_new[ns]);
+    } else {
+        T = thermo.T_from_e(e, MassFractions{Y}, y_new[ns]);
+    }
+    return true;
+}
+
 /** @brief advance_reactor() by one thread. */
 template <typename MemorySpace, typename Observer = NoObserver>
 KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const ThermoTable<MemorySpace> & thermo,
