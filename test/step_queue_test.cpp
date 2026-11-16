@@ -289,6 +289,7 @@ struct Outcome {
     uint64_t rejected = 0;
     uint64_t queued = 0;
     uint64_t graph_steps = 0;
+    bool gated = false;  // step graphs gated their bodies
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
@@ -335,6 +336,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             for (size_t k = 0; k < n_species; k++) o.U.push_back(solver.h_species(i, k));
         }
         o.graph_steps = solver.get_graph_steps();
+        o.gated = solver.get_gate_steps();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -401,6 +403,10 @@ Outcome expect_queue_invariant(const std::string & name, const Case & c, const b
         if (depth > 1 && runs_ahead) {
             EXPECT_GT(queued.queued, 0u) << name << ": no step ran ahead of the host";
         }
+        if (c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES) {
+            EXPECT_TRUE(queued.gated) << name << ": step graphs did not gate their bodies";
+            EXPECT_GT(queued.graph_steps, 0u) << name;
+        }
     }
     return host;
 }
@@ -465,14 +471,12 @@ TEST(StepQueueTest, OutputsByStep) {
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     const Outcome o = expect_queue_invariant("by_step", c);
     EXPECT_EQ(o.step, 30u);
+#ifdef KOKKOS_ENABLE_CUDA
     // Where conditional nodes fail (NCCL across a network), gated step graphs reach the same results
     Case unconditional = c;
     unconditional.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
     expect_queue_invariant("by_step_unconditional", unconditional);
-#ifdef KOKKOS_ENABLE_CUDA
-    const Outcome gated = run_case("by_step_unconditional", unconditional, 3);
-    EXPECT_GT(gated.graph_steps, 0u);
-    EXPECT_TRUE(gated.warnings.empty());
+    EXPECT_TRUE(run_case("by_step_unconditional", unconditional, 3).warnings.empty());
 #endif
     // Serial runs on several ranks write their files and log on the root rank only
     if (!comm::is_root()) return;
@@ -668,9 +672,11 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+#ifdef KOKKOS_ENABLE_CUDA
     // Without conditional nodes the flushes and samples happen at the same steps
     c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
     expect_queue_invariant("fused_unconditional", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -783,6 +789,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("moving_probes_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
@@ -804,6 +814,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
     EXPECT_LT(queued, unstopped);
     // Each stop regrows the staging to twice the cells covered then
     EXPECT_GE(queued + 3, unstopped);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("growing_probe_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
@@ -1324,6 +1338,8 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     EXPECT_EQ(gated.step, 19u);
     EXPECT_EQ(gated.queued, nodes.queued);
     EXPECT_GT(gated.graph_steps, 0u);
+    EXPECT_FALSE(nodes.gated);
+    EXPECT_TRUE(gated.gated);
 #endif
 }
 

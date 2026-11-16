@@ -199,7 +199,7 @@ void launch(const ShapeSampler<CURVED, IMPLICIT> & sample, const uint32_t n_cell
     const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
     Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
     if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-    if (!GPU_SAMPLING || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
+    if (!GPU_SAMPLING || gated::team_size_max(tuned, sample) >= TEAM) {
         gated::parallel_for(name, tuned, sample);
     } else {
         Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM>> fitted(static_cast<int>(n_cells), TEAM);

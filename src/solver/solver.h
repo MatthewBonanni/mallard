@@ -18,6 +18,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -476,7 +477,7 @@ class Solver {
         /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
         void unflush_chemistry_on_device();
         void capture_step_graph();
-        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
+        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried once on every rank). */
         bool conditional_nodes_work();
         /**
          * @brief Runs body if the device flag is set: in a step graph's capture, under a conditional node, or gated
@@ -747,6 +748,8 @@ class Solver {
         uint64_t get_step() const { return step; }
         /** @brief Steps launched as a captured CUDA graph so far. */
         uint64_t get_graph_steps() const { return graph_steps; }
+        /** @brief Whether the last step graphs gated their bodies (conditional nodes cannot hold NCCL there). */
+        bool get_gate_steps() const { return gate_steps; }
         /** @brief Steps the host took from their records without acting on them (steps run ahead of it). */
         uint64_t get_queued_steps() const { return n_queued_steps; }
         /** @brief Launches the host keeps ahead of the device's steps. */
@@ -969,6 +972,7 @@ class Solver {
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
         bool gate_steps = false;               // step graphs gate their bodies: conditional nodes cannot hold NCCL
+        std::optional<bool> conditional_nodes; // conditional_nodes_work, once tried
         bool gating = false;                   // in a gated launch
         uint32_t gate_depth = 0;               // gated device_if's nesting
         Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate

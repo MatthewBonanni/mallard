@@ -1027,6 +1027,7 @@ void Solver::capture_step_graph() {
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
     if (capture_fault == CaptureFault::CONDITIONAL_NODES) return false;
+    if (conditional_nodes) return *conditional_nodes;
     // A step under a conditional node captures its NCCL operations there, which fails where NCCL communicates
     // over a network (it then adds host nodes): try one first, on every rank
     bool works = true;
@@ -1058,6 +1059,7 @@ bool Solver::conditional_nodes_work() {
         if (exec) cudaGraphExecDestroy(exec);
         if (graph) cudaGraphDestroy(graph);
     }
+    conditional_nodes = works;
     return works;
 #else
     return false;

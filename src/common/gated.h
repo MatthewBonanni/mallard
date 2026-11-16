@@ -392,6 +392,13 @@ void parallel_scan(const std::string & label, const P & policy, const F & f, T &
     detail::scan(&label, policy, f, static_cast<T &&>(total)...);
 }
 
+/** @brief policy.team_size_max for f launched through gated::parallel_for: Kokkos takes the kernel's registers from
+ *         the functor it launches. */
+template <class P, class F>
+int team_size_max(const P & policy, const F & f) {
+    return policy.team_size_max(detail::For<F>{f, flag()}, Kokkos::ParallelForTag());
+}
+
 /** @brief Kokkos::deep_copy(exec, dst, src) of contiguous Views of one layout and span; a kernel on exec under a Scope. */
 template <class E, class D, class S>
 void copy(const E & exec, const D & dst, const S & src) {
