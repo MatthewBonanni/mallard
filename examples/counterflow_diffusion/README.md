@@ -38,7 +38,9 @@ python plot_counterflow.py counterflow --run "U_o = 2 m/s" . --history --still 5
 The first command writes the mesh, the initial state and `input.toml`
 (replacing this one, without its header). 46,464 cells; 4 / `K_ox` = 5.5 ms
 is 312,000 steps, 75 minutes on one A100. The references are made by
-`examples/counterflow_diffusion/counterflow_reference.py`: the strain sweep (`strain.csv`), full
+`examples/counterflow_diffusion/counterflow_reference.py`: the strain sweep (`strain.csv`,
+grid-converged: each row extrapolated from Cantera's grid and that grid
+bisected, since its upwind convection converges at first order), full
 solutions at given oxidizer velocities (`--profile 2` writes `U2.csv`, the
 initial state) and at given strain rates (`--match 711` writes `K711.csv`,
 the profile overlay).
@@ -56,26 +58,28 @@ are at its end, 5.4-6.3 / `K_ox`.
 
 | `U_o` [m/s] | cells per FWHM | `K_ox` [1/s] | `T_max` [K] | Cantera at `K_ox` | error | `V_T` [1/s] | Cantera at `V_T` | error |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 15 | 344 | 1495.1 | 1489.8 | +0.35% | 387 | 1488.5 | +0.44% |
-| 2 | 10 | 704 | 1431.5 | 1421.8 | +0.68% | 727 | 1420.2 | +0.80% |
-| 2 | 15 (this input) | 711 | 1426.9 | 1420.8 | +0.43% | 717 | 1421.8 | +0.36% |
-| 2 | 22 (to 3.3 / `K_ox`) | 713 | 1424.4 | 1420.5 | +0.28% | 719 | 1421.5 | +0.20% |
-| 2, jets 7.5 mm, sides 11.25 mm | 15 | 688 | 1433.9 | 1424.2 | +0.68% | 674 | 1429.1 | +0.34% |
-| 3 | 15 | 1064 | 1383.2 | 1371.0 | +0.89% | 1003 | 1376.7 | +0.47% |
-| 4 | 10 | 1418 | 1343.8 | 1324.0 | +1.49% | 1317 | 1329.1 | +1.10% |
-| 4 | 15 | 1418 | 1343.7 | 1324.0 | +1.48% | 1257 | 1338.6 | +0.38% |
-| 4, jets 7.5 mm, sides 11.25 mm | 15 (to 4 / `K_ox`, still rising) | 1325 | 1361.5 | 1336.8 | +1.85% | 1137 | 1356.6 | +0.36% |
-| 4.6 | 15 | 1640 | 1313.8 | 1289.0 | +1.93% | 1454 | 1305.8 | +0.61% |
-| 5.1 | 15 | 1818 | 1287.5 | 1238.1 (extinction, 1811 1/s) | +4.0% | 1593 | 1274.6 | +1.02% |
+| 1 | 15 | 344 | 1495.1 | 1489.9 | +0.35% | 387 | 1488.4 | +0.45% |
+| 2 | 10 | 704 | 1431.5 | 1422.0 | +0.67% | 727 | 1420.2 | +0.79% |
+| 2 | 15 (this input) | 711 | 1426.9 | 1420.9 | +0.42% | 717 | 1421.9 | +0.35% |
+| 2 | 22 (to 3.3 / `K_ox`) | 713 | 1424.4 | 1420.6 | +0.26% | 719 | 1421.5 | +0.20% |
+| 2, jets 7.5 mm, sides 11.25 mm | 15 | 688 | 1433.9 | 1424.4 | +0.67% | 674 | 1429.1 | +0.34% |
+| 3 | 15 | 1064 | 1383.2 | 1371.1 | +0.88% | 1003 | 1376.7 | +0.47% |
+| 4 | 10 | 1418 | 1343.8 | 1324.1 | +1.49% | 1317 | 1329.1 | +1.10% |
+| 4 | 15 | 1418 | 1343.7 | 1324.1 | +1.48% | 1257 | 1338.5 | +0.39% |
+| 4, jets 7.5 mm, sides 11.25 mm | 15 (to 4 / `K_ox`, still rising) | 1325 | 1361.5 | 1336.9 | +1.84% | 1137 | 1356.6 | +0.36% |
+| 4.6 | 15 | 1640 | 1313.8 | 1289.0 | +1.92% | 1454 | 1305.7 | +0.62% |
+| 5.1 | 15 | 1818 | 1287.5 | 1236.2 (extinction, 1811 1/s) | +4.2% | 1593 | 1274.1 | +1.05% |
 | 5.6 | 15 | 1890-1975 | goes out | extinct | | | | |
 
 ![Peak temperature against strain](../../docs/images/counterflow_strain.png)
+
+*The table's Mallard runs (#171) against the grid-converged `strain.csv`.*
 
 With the 5 mm jets, the peak temperature at matched `K_ox` is within 2% of
 Cantera's up to 1640 1/s, 91% of Cantera's extinction strain rate (1811
 1/s), but the excess grows with strain, from 0.35% at 344 1/s to 1.9% at 1640
 1/s. Resolution accounts for little of it: at `U_o = 2 m/s` it falls from
-0.68% to 0.43% and 0.28% at 10, 15 and 22 cells per FWHM, and at 4 m/s it is
+0.67% to 0.42% and 0.26% at 10, 15 and 22 cells per FWHM, and at 4 m/s it is
 the same at 10 and 15. The flames see less strain than the similarity
 solution for the same `K_ox`: `V_T / K_ox` is 0.89 in Mallard at `U_o = 4
 m/s` against 0.95 in Cantera, presumably because finite jets with coflows

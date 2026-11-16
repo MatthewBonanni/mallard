@@ -2059,10 +2059,10 @@ oxidizer stream `K_ox` (the first maximum of `-du/dx` ahead of the flame)
 and as the spread rate `V_T = v / r` at the peak temperature. From
 `U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 91% of Cantera's
 extinction strain rate of 1811 1/s) the steady peak temperature is within
-2% of Cantera's at the same `K_ox` (+0.35% to +1.93%), so V10 passes, but
+2% of Cantera's at the same `K_ox` (+0.35% to +1.92%), so V10 passes, but
 the excess grows with strain and is mostly not a resolution error (at 4 m/s
-it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.68% to
-0.28% between 10 and 22). The finite jets give the flame less strain for
+it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.67% to
+0.26% between 10 and 22). The finite jets give the flame less strain for
 the same `K_ox` than the similarity solution (`V_T / K_ox` 0.89 against
 0.95 at 4 m/s), by an amount that depends on the jets: with 7.5 mm jets the
 excess at 4 m/s reaches 1.9% and was still rising. At matched `V_T` the
