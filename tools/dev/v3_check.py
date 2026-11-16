@@ -40,7 +40,10 @@ def main():
         log = subprocess.run([exe, "reactor", "-i", os.path.join(work, name + ".toml")], capture_output=True, text=True).stdout
         delay = float([line for line in log.splitlines() if "Ignition delay" in line][0].split()[2])
         wall = [line for line in log.splitlines() if "Wall time" in line][0].split()[2]
-        data = np.loadtxt(out, delimiter=",", skiprows=1, usecols=(0, 1))
+        with open(out) as f:
+            lines = [line for line in f if not line.startswith("#")]
+        header = lines[0].strip().split(",")
+        data = np.loadtxt(lines[1:], delimiter=",", usecols=(header.index("t"), header.index("T")), ndmin=2)
         T_half, T_2 = np.interp(0.5 * tau, data[:, 0], data[:, 1]), np.interp(2.0 * tau, data[:, 0], data[:, 1])
         errors = (delay / tau - 1, T_half / row[c["T_half_tau"]] - 1, T_2 / row[c["T_2tau"]] - 1)
         good = abs(errors[0]) < 5e-3 and abs(errors[1]) < 1e-2 and abs(errors[2]) < 1e-2

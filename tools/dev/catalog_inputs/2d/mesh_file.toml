@@ -1,0 +1,75 @@
+# For the key catalog only (tools/dev/input_catalog.py): a transformed mesh file,
+# Sutherland's viscosity, the moments of a boundary probe, phase averages triggered
+# in the wake, [parallel] and hash_mesh.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "file"
+filename = "../../../../test/data/meshes/cyl2d.msh"
+
+[mesh.transform]
+scale = 0.01
+rotate = 90.0
+translate = [0.0, 0.1]
+
+[initialize]
+p = 101325.0
+T = 300.0
+u = [0.0, 10.0]
+
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = [0.0, 10.0]
+p = 101325.0
+T = 300.0
+
+[[boundaries]]
+name = "outlet"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "walls"
+type = "symmetry"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[numerics]
+preset = "second_order"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 300.0
+rho_ref = 1.1766
+viscosity_model = "sutherland"
+mu = 1.716e-5
+T_mu_ref = 273.15
+sutherland_S = 110.4
+
+[[probes]]
+name = "cylinder"
+boundary = "cylinder"
+fields = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+reductions = ["integral", "moment"]
+moment_center = [-0.005, 0.105]
+
+[statistics.phase]
+fields = ["U_X", "U_Y"]
+bins = 8
+probe = [-0.005, 0.108]
+variable = "U_X"
+level = 0.0
+
+[parallel]
+partitioner = "hilbert"
+halo_exchange = "mpi"
+
+[output]
+hash_mesh = false
