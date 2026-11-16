@@ -972,7 +972,7 @@ class Solver {
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
         bool gate_steps = false;               // step graphs gate their bodies: conditional nodes cannot hold NCCL
-        std::optional<bool> conditional_nodes; // conditional_nodes_work, once tried
+        std::optional<bool> conditional_nodes_tried;  // conditional_nodes_work, once tried
         bool gating = false;                   // in a gated launch
         uint32_t gate_depth = 0;               // gated device_if's nesting
         Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate
