@@ -1,5 +1,6 @@
 # Triple flame: fuel H2:0.5,N2:0.5 / oxidizer O2:1,N2:3.76 at 300 K, 1 atm; Z_st = 0.30427.
-# Planar flame at Z_st (Cantera): S_L = 1.19142 m/s, delta_L = 0.3847 mm, rho_u / rho_b = 5.9416.
+# Planar flame at Z_st (Cantera, refine criteria 0.02, from which these inputs were built): S_L = 1.19142 m/s,
+# delta_L = 0.3847 mm, rho_u / rho_b = 5.9416 (grid-converged: 1.1959 m/s, 0.382 mm, 5.959).
 # Inlet mixing thickness delta_M = 4 delta_L, inflow 1.35 S_L, 12 cells per delta_L.
 #
 # Triple (tribrachial) flame against Ruetsch, Vervisch & Linan (1995), Phys.
@@ -19,7 +20,7 @@
 # Here: fuel H2:N2 = 1:1 (by mole) against air, 300 K, 1 atm, detailed H2/O2
 # chemistry, mixture-averaged transport. The planar flame at Z_st = 0.304 has
 # S_L = 1.1959 m/s, thermal thickness delta_L = 0.382 mm, burnt gas 2008 K and
-# rho_u / rho_b = 5.94 (sqrt: 2.44), on a grid-converged Cantera flame (the
+# rho_u / rho_b = 5.96 (sqrt: 2.44), on a grid-converged Cantera flame (the
 # inputs were built from its solution at refine criteria 0.02, S_L = 1.19142
 # m/s and delta_L = 0.3847 mm, so u_in, the mixing thicknesses and the cell
 # size are in those units; the ratios below are over the converged S_L);
@@ -77,11 +78,13 @@
 # Ruetsch et al.'s numbers, which hold for one-step, unity-Lewis chemistry.
 # D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
 #
-# 1D checks (planar flame at Z_st, tools/setup/flame_restart.py and
-# mallard post flame): consumption speed against Cantera's -1.45%, -0.66%,
-# -0.55% and -0.20% at 10, 12, 16 and 24 cells per delta_L (CFL 0.4); at
-# 12 cells the same to 5 digits at CFL 0.4, 0.6 and 0.8. The 2D runs were not
-# repeated on a finer mesh.
+# 1D checks (planar flame at Z_st, tools/setup/flame_restart.py from the
+# converged flame and mallard post flame, 3 flame times): consumption
+# speed against Cantera's -0.15%, -0.05% and -0.02% at 24, 32 and 48 cells
+# per delta_L, converging to it. At this input's 12 cells the speed settles
+# only after about 8 flame times, at -0.85% (after 3 flame times it is
+# -0.25% from the converged flame and -0.54% from the 0.02 one; CFL 0.4 and
+# 1.0 agree within 0.03%). The 2D runs were not repeated on a finer mesh.
 #
 # Cost on two A100s (one MPI rank each): first stage 2 h 45 min for 326,000
 # steps (thick/: 2 h 42 min, 327,000 steps), continuation 1 h 07 min

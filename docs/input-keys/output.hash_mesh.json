@@ -1,0 +1,10 @@
+{
+ "default": "true",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/mesh_file.toml"
+ ],
+ "type": "bool"
+}
