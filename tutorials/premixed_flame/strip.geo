@@ -8,7 +8,7 @@
 // Boundary zones: "inlet" (x = 0), "outlet" (x = L) and "sides".
 
 DefineConstant[
-  L = {4.9366e-3, Name "Length (m)"},
+  L = {4.9252e-3, Name "Length (m)"},
   n = {300, Name "Cells along x"}
 ];
 h = 10 * L / n;

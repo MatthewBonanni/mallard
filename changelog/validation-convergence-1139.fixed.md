@@ -1,0 +1,1 @@
+- `counterflow_diffusion`: the Cantera strain sweep (`reference/strain.csv`) is grid-converged at every strain rate; its local strain rates were up to 4% low below 150 1/s.
