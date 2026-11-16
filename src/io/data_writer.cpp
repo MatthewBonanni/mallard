@@ -143,8 +143,8 @@ void DataWriter::init(const Input & input,
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
     }
-    const bool has_interval = input.contains("interval");
-    const bool has_time_interval = input.contains("time_interval");
+    const bool has_interval = contains_optional(input, "interval");
+    const bool has_time_interval = contains_optional(input, "time_interval");
     if (has_interval == has_time_interval) {
         throw InputError({.key = "write_data",
                           .line = line_of(input),
@@ -175,7 +175,7 @@ void DataWriter::init(const Input & input,
     owned_by_id = mesh->cells_by_global_id();
     std::erase_if(owned_by_id, [&](uint32_t c) { return c >= mesh->n_owned(); });
     const bool many_writers = mesh->n_global_cells > 0 && comm::size() > 1;
-    if (input.contains("format")) {
+    if (contains_optional(input, "format")) {
         format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"),
                              line_of(input, "format"))
                      ->second;

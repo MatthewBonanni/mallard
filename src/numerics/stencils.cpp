@@ -185,7 +185,7 @@ bool zero_lattice(const std::array<int, 3> & l) { return l[0] == 0 && l[1] == 0 
 struct Lattices {
     const Mesh & mesh;
     Kokkos::View<uint32_t *>::host_mirror_type offsets, neighbors;
-    Kokkos::View<uint8_t *>::host_mirror_type shifts;
+    HostShiftRows shifts;
     std::vector<uint32_t> stamp;
     std::vector<std::array<int, 3>> lattice;
     std::vector<uint32_t> front, next;
@@ -194,7 +194,7 @@ struct Lattices {
         : mesh(m), stamp(m.n_cells, 0), lattice(m.n_cells) {
         offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.offsets_cells_of_cell);
         neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell);
-        shifts = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell_shift);
+        shifts.rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell_shift.rows);
     }
 
     /** @brief Search depth layers from cell c; periodic(cell) then tells about the cells it met. */
@@ -292,7 +292,8 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     auto ghost_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.ghost_faces);
     auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.offsets_cells_of_cell);
     auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell);
-    auto neighbor_shift = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift);
+    const HostShiftRows neighbor_shift{
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift.rows)};
     auto image_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbor_offsets);
     auto images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbors);
     const std::vector<int32_t> face_image = boundaries.host_images().cell;

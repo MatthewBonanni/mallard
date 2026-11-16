@@ -90,10 +90,12 @@ conditions of `t`, the step, `dt`, `wall` and the monitors at every step, and
 the steps queued ahead of the host (`[run] step_queue`) stop only at a step a
 trigger fires at; every rank holds the same values, so every rank acts after
 the same step. There `wall` is rank 0's as its host last posted it before the
-step. A probe's values are reduced on rank 0's host: the steps queued ahead
-stop at the writes of a probe a condition reads, and rank 0 sends its values
-to every rank, whose device evaluates the conditions on them until the next
-write.
+step. The device also reduces the probes a condition reads at their writes,
+time-averaged probes and probes of `[statistics]` outputs included, to the
+values the host writes, so they do not stop the queue either, except probes
+reading cell data or `[statistics]` confidence intervals: the steps queued
+ahead stop at their writes, where rank 0's host reduces them and sends their
+values to every rank.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
 final output and a restart are written, the exit status is 0 and the log
@@ -271,6 +273,29 @@ command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)
 | <a id="e-convergence"></a>`E-CONVERGENCE` | `mallard post convergence` cannot read a run or compare the runs | The message names the run ([Grid convergence](convergence.md)) |
 | <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
 | <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
+
+## compute-sanitizer
+
+To check a CUDA build's kernels with NVIDIA's `compute-sanitizer` (`memcheck`, `racecheck`, `synccheck`,
+`initcheck`), turn the step graphs off so that the steps run kernel by kernel, with the same results:
+
+```toml
+[run]
+cuda_graphs = false
+```
+
+```bash
+compute-sanitizer --tool memcheck mallard2d -i input.toml   # mallard3d in 3D
+```
+
+With step graphs on, each step runs in the body of a CUDA graph conditional node, and compute-sanitizer
+(tested with 2026.4 on driver 595) misreports kernels there: `synccheck` and `initcheck` stop correct kernels
+with an illegal memory access or report divergent barriers, `racecheck` reports hazards across `__syncthreads()`
+or aborts with heap corruption in its own library, and `memcheck` reports reads of a kernel's own parameters.
+A body of two kernels is enough; the same kernels in a graph without conditional nodes, or launched one by one,
+are clean ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)). Reports on the step graph's
+kernels (a host backtrace through `cuGraphLaunch`) are therefore not to be trusted: check those kernels with
+`cuda_graphs = false`.
 
 ## Kubernetes
 

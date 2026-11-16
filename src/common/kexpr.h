@@ -434,9 +434,10 @@ class Program {
          * @param text The expression.
          * @param variables Names of the variables it may read, by index.
          * @param hint Adds to the error for an unknown symbol, or null.
+         * @param first_shadowable Variables from this index on may be hidden by a local variable of the same name.
          */
         Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
-                SymbolHint hint = nullptr);
+                SymbolHint hint = nullptr, size_t first_shadowable = SIZE_MAX);
 
         const std::vector<Instr> & code() const { return m_code; }
 
