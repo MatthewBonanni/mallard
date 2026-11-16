@@ -45,7 +45,7 @@ p = """\
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 19 more.
+and 20 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -184,7 +184,8 @@ at = ["hypot(x - 0.6, y)"]   # the distance from the bubble's center
 
 *Used in:*
 [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d),
-[`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
+[`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo),
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d).
 
 Each `[[initialize.data]]` entry reads a CSV file (a header of column names,
 then rows of numbers; lines starting with `#` are comments) and gives every
