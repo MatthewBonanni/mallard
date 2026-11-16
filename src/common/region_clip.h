@@ -59,14 +59,14 @@ KOKKOS_INLINE_FUNCTION uint32_t plane_count(const Node & n) {
  * @brief The values g[k] at the vertices of simplex v of the affine function
  *        that vanishes on plane j of primitive n, and whether the plane cuts
  *        the simplex: g changes sign over it by more than the rounding of the
- *        local coordinates (vertices within it lie on the plane, as mesh
- *        nodes on a face do), and the face (of a box or a polygon) may meet
- *        it, not lying wholly beside it.
+ *        local coordinates, those of rtype mesh nodes (vertices within it lie
+ *        on the plane, as mesh nodes on a face do), and the face (of a box or
+ *        a polygon) may meet it, not lying wholly beside it.
  */
 KOKKOS_INLINE_FUNCTION bool cuts(const Node & n, const double * vertices, const uint32_t j, const double v[4][3],
                                  double g[4]) {
     constexpr int n_vertices = N_DIM + 1;
-    constexpr double ROUNDING = 1e-12;
+    constexpr double ROUNDING = precision_tol<double>(1e-12, 1e-6);
     double q[4][3], scale[3] = {0.0, 0.0, 0.0};  // scale[i]: the largest magnitude summed into q[k][i]
     for (int k = 0; k < n_vertices; k++) {
         for (int i = 0; i < 3; i++) {

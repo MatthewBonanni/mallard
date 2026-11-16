@@ -501,7 +501,7 @@ TEST(RegionTest, RegionsOfPlanarFacesHaveExactFractions) {
             cut += f[i] > 0.0 && f[i] < 1.0;
         }
         EXPECT_GT(cut, 0) << e.table;
-        EXPECT_NEAR(volume, e.volume, 1e-13) << e.table;
+        EXPECT_NEAR(volume, e.volume, roundoff(1e-13)) << e.table;
     }
 }
 
