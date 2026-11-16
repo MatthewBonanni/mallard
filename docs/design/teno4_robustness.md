@@ -2,14 +2,15 @@
 
 Status: `high_order` is TENO-E order 5. Order 4 reaches order 5's error on
 smooth flow at 0.3 to 0.5 times the CPU time, with 0.4 to 0.6 times the
-memory, but it fails two robustness checks that order 5 passes. Each failure
-has its own issue, and the preset can move to order 4 once both are
+memory, but it fails three robustness checks that order 5 passes. Each failure
+has its own issue, and the preset can move to order 4 once all three are
 fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
 
 | Failure at order 4 | Issue |
 |---|---|
 | An outgoing acoustic wave amplified on a stretched O-grid (cylinder) | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
 | Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
+| Growing acoustic modes on graded hexahedra (from 5% cell-to-cell grading; also order 6) | [#1232](https://github.com/MatthewBonanni/mallard/issues/1232) |
 
 ## Setup
 
@@ -198,8 +199,9 @@ tetrahedra and 0.0822 against 0.0857 on pyramids.
 
 ## What would change the default
 
-When [#975](https://github.com/MatthewBonanni/mallard/issues/975) and
-[#977](https://github.com/MatthewBonanni/mallard/issues/977) are fixed and
+When [#975](https://github.com/MatthewBonanni/mallard/issues/975),
+[#977](https://github.com/MatthewBonanni/mallard/issues/977) and
+[#1232](https://github.com/MatthewBonanni/mallard/issues/1232) are fixed and
 this page's cases pass at order 4, `high_order` can move to order 4. The
 cylinder is the deciding check. Until then, order 4 is an explicit choice for
 smooth flow:
