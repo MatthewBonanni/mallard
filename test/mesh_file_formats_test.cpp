@@ -176,7 +176,7 @@ void put(std::ostringstream & s, T value) {
 }
 
 /** @brief The cells of zone "fluid" (first) and "solid" (second half) of Fluent and CGNS files. */
-uint64_t half(const TestMesh & t) { return t.mesh.n_cells() / 2; }
+uint64_t fluid_cells(const TestMesh & t) { return t.mesh.n_cells() / 2; }
 
 /**
  * @brief The mesh as a Fluent file: the interior faces, then a face zone per
