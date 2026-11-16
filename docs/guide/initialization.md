@@ -234,6 +234,56 @@ those of the interpolated field. Pitfalls:
 - An entry that no expression reads is an error; so are rows that do not
   form a grid.
 
+**An axisymmetric table in 3D.** `at` can map every point to a radius, so a
+solution on the `(x, r)` plane fills a 3D box; the expressions then turn its
+radial velocity into `y` and `z` components. `examples/vortex_ring_3d` starts
+a vortex ring this way, and reads the table at a slightly displaced radius
+and axial position, a sum of cosines of the azimuth, to seed every azimuthal
+mode at once:
+
+```toml
+# examples/vortex_ring_3d: the ring's axis is y = z = 2.4; q = u_r / r is finite on the axis
+[initialize]
+type = "analytical"
+rho = "(ring_p / 0.7142857142857143)^(1 / 1.4)"
+p = "ring_p"
+u = ["ring_ux - 0.1471739010081762", "ring_q * (y - 2.4)", "ring_q * (z - 2.4)"]
+
+[[initialize.data]]
+name = "ring"
+file = "ring.csv"              # x,r,ux,q,p from examples/vortex_ring_3d/vortex_ring.py table
+interpolation = "cubic"
+coordinates = ["x", "r"]
+at = [   # displaced by 3e-4 R in each mode n = 1..24, with incommensurate phases
+    """\
+    var th := atan2(z - 2.4, y - 2.4); var d := 0; \
+    for (var n := 1; n <= 24; n += 1) { d += cos(n * th + 2 * pi * frac(0.6180339887 * n * n)) }; \
+    x - 3e-4 * d""",
+    """\
+    var th := atan2(z - 2.4, y - 2.4); var d := 0; \
+    for (var n := 1; n <= 24; n += 1) { d += cos(n * th + 2 * pi * frac(0.4142135624 * n * n)) }; \
+    hypot(y - 2.4, z - 2.4) - 3e-4 * d""",
+]
+```
+
+![Vorticity magnitude in the plane of a vortex ring as an azimuthal wave of 11 lobes grows and breaks down, the growth of modes 9 to 13, and the growth rate of every mode against the theory of the elliptic instability](../images/guide/vortex_ring_3d-light.svg#gh-light-mode-only)
+![Vorticity magnitude in the plane of a vortex ring as an azimuthal wave of 11 lobes grows and breaks down, the growth of modes 9 to 13, and the growth rate of every mode against the theory of the elliptic instability](../images/guide/vortex_ring_3d-dark.svg#gh-dark-mode-only)
+
+*`examples/vortex_ring_3d` on 192³ hexahedra (a Gaussian core, a = 0.2 R,
+Re = 5000, swirl Mach 0.3; `vortex_ring.py compare`). Top: |ω| in the
+ring's plane as the seeded perturbation grows into a wave of 11 lobes and
+breaks down. Bottom left: the vorticity of modes 9 to 13 in the core, with
+their exponential fits over t Γ / 2πR² = 2.8-6.6; the dashed line has the
+theory's growth rate. Bottom right: the fitted rate of every mode. Mode 11
+grows fastest, at σ 2πR²/Γ = 0.91, against n = 2.33 R/a = 10.6 and 0.88 for
+the principal elliptic mode with viscous damping
+([Blanco-Rodríguez & Le Dizès 2016](../references.md#blanco-rodriguez-le-dizes-2016),
+[Hattori et al. 2019](../references.md#hattori-2019); 0.93 inviscid). The
+mode number is the same on 144³, but the rate is not grid-converged: there it
+is 15-20% lower, as the coarser mesh's dissipation thickens the core. Modes
+21 to 23 start growing only midway through the fit window, so their fitted
+rates are not those of an exponential.*
+
 ## Synthetic turbulence
 
 A divergence-free random velocity with a prescribed energy spectrum E(k),
