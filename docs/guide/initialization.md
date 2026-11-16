@@ -273,7 +273,9 @@ at = [   # displaced by 3e-4 R in each mode n = 1..24, with incommensurate phase
 *`examples/vortex_ring_3d` on 192³ hexahedra (a Gaussian core, a = 0.2 R,
 Re = 5000, swirl Mach 0.3; `vortex_ring.py compare`). Top: |ω| in the
 ring's plane as the seeded perturbation grows into a wave of 11 lobes and
-breaks down. Bottom left: the vorticity of modes 9 to 13 in the core, with
+breaks down; the ring itself stays circular, but the wave is larger on one
+side, as modes 10 and 12, also unstable and seeded with other phases, beat
+with mode 11. Bottom left: the vorticity of modes 9 to 13 in the core, with
 their exponential fits over t Γ / 2πR² = 2.8-6.6; the dashed line has the
 theory's growth rate. Bottom right: the fitted rate of every mode. Mode 11
 grows fastest, at σ 2πR²/Γ = 0.91, against n = 2.33 R/a = 10.6 and 0.88 for
