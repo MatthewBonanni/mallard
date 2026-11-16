@@ -99,7 +99,7 @@ FileLines index_lines(const std::string & filename, uint64_t size, uint64_t chun
             if (!in) throw cannot_read("the mesh file", filename);
             const char * data = buffer.data();
             if (at == 0) line_start(data, data + len, 0);
-            for (const char * nl = data; (nl = static_cast<const char *>(std::memchr(nl, '\n', counted - uint64_t(nl - data))));) {
+            for (const char * nl = data; (nl = static_cast<const char *>(std::memchr(nl, '\n', counted - uint64_t(nl - data)))) != nullptr;) {
                 n_newlines++;
                 nl++;
                 line_start(nl, data + len, at + uint64_t(nl - data));
