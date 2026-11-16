@@ -35,6 +35,17 @@ for comparison with multicomponent transport with and without it ("multi_soret",
 the mixture-averaged flames with Soret, with species mass fractions
 (<case>.csv, e.g. h2_phi0.5_mix_soret.csv), and with FULL_DIR the full
 solutions of the mixture-averaged flames.
+
+    python tools/setup/flame_reference.py --convergence
+
+prints S_L of every flame above on three uniform doublings of its grid, and
+the extrapolated S_L from the first two and from the last two.
+
+Cantera's convection is first-order upwind, so S_L depends on the grid
+(on its usual adaptive grid of slope = curve = 0.02, by up to 3.6% for lean
+H2/air). Every flame is solved on the adaptive grid of 0.01, then on that
+grid doubled uniformly twice, and S_L is extrapolated from the two doubled
+grids (converge()); the profiles are those of the finer one.
 """
 import os
 import sys
@@ -48,6 +59,7 @@ FUELS = {
     "ch4": ("mechanisms/gri30.yaml", "gri30", "CH4", 0.05),
     "ch4_bfer": ("mechanisms/ch4_bfer.yaml", "gas", "CH4", 0.05),
 }
+V8_FUELS = ["h2", "ch4"]
 PHIS = [0.6, 0.8, 1.0, 1.2, 1.4]
 MODELS = {"mix": "mixture-averaged", "unity": "unity-Lewis-number"}
 SORET_PHIS = [0.4, 0.5, 0.6, 1.0]
@@ -68,10 +80,57 @@ def solve(fuel, phi, model, T_u=T_U, width=None, soret=False, radiation=False):
     gas.TP = T_u, P
     flame = ct.FreeFlame(gas, width=width or FUELS[fuel][3])
     flame.soret_enabled = soret
-    flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
     flame.radiation_enabled = radiation
+    return converge(flame)
+
+
+def doublings(flame, n):
+    """Solve a FreeFlame on the adaptive grid of slope = curve = 0.01, then on that grid doubled uniformly n times.
+
+    Yields S_L after each of the n doublings.
+    """
+    flame.set_max_grid_points(flame.flame, 100000)
+    flame.set_refine_criteria(ratio=2.0, slope=0.01, curve=0.01, prune=0.001)
     flame.solve(loglevel=0, auto=True)
-    return flame
+    flame.set_refine_criteria(ratio=2.0, slope=0.0, curve=0.0, prune=0.0)  # every interval split in two
+    # Cantera's default rtol of 1e-4 leaves S_L of the radiating flames 0.4% off
+    flame.flame.set_steady_tolerances(default=(1e-8, 1e-9))
+    flame.flame.set_transient_tolerances(default=(1e-8, 1e-9))
+    for _ in range(n):
+        flame.refine(loglevel=0)
+        flame.solve(loglevel=0, refine_grid=False, auto=False)
+        yield flame.velocity[0]
+
+
+def converge(flame):
+    """Solve a FreeFlame; returns it, on the twice-doubled grid, and its grid-converged S_L.
+
+    Cantera's convection is first-order upwind, so S_L converges linearly in
+    the grid spacing; it is extrapolated from the two doubled grids
+    (Richardson, first order). A third doubling changes the extrapolated S_L
+    by at most 0.01% (H2/air at phi = 0.4-4, the radiating CH4/air flame of
+    examples/flame_vortex_quenching; --convergence).
+    """
+    s = list(doublings(flame, 2))
+    return flame, 2 * s[1] - s[0]
+
+
+def convergence():
+    """S_L of every flame on each doubled grid, and Richardson's S_L from the first two and from the last two."""
+    cases = [(fuel, phi, model, False, FUELS[fuel][3]) for fuel in V8_FUELS for model in MODELS for phi in PHIS]
+    cases += [("h2", phi, "mix", soret, 0.03) for phi in SORET_PHIS for soret in (False, True)]
+    for fuel, phi, model, soret, width in cases:
+        mech, phase, species, _ = FUELS[fuel]
+        gas = ct.Solution(os.path.join(ROOT, mech), phase, transport_model=MODELS[model])
+        gas.set_equivalence_ratio(phi, species, "O2:1.0, N2:3.76")
+        gas.TP = T_U, P
+        flame = ct.FreeFlame(gas, width=width)
+        flame.soret_enabled = soret
+        s = list(doublings(flame, 3))
+        r2, r3 = 2 * s[1] - s[0], 2 * s[2] - s[1]
+        print(f"{case_name(fuel, phi, model)}{'_soret' if soret else ''}: "
+              + ", ".join(f"x{2 ** (i + 1)}: {v:.6f}" for i, v in enumerate(s))
+              + f"; Richardson {r2:.6f}, {r3:.6f} ({100 * (r3 / r2 - 1):+.4f}%)", flush=True)
 
 
 def write_full(f, path):
@@ -84,13 +143,13 @@ def single(fuel, phi, T_u, full, radiation=False, width=0.03):
     os.makedirs(full, exist_ok=True)
     for model in MODELS:
         try:
-            f = solve(fuel, phi, model, T_u, width=width, radiation=radiation)
+            f, s_l = solve(fuel, phi, model, T_u, width=width, radiation=radiation)
         except ct.CanteraError as e:
             print(f"{fuel} phi = {phi:g}, {MODELS[model]}: no solution ({str(e).strip().splitlines()[-1]})")
             continue
         delta = (f.T.max() - f.T[0]) / np.gradient(f.T, f.grid).max()
         name = f"{fuel}_phi{phi:g}_T{T_u:.0f}_{model}" + ("_rad" if radiation else "")
-        print(f"{name}: S_L = {f.velocity[0]:.5f} m/s, T_b = {f.T[-1]:.1f} K, delta = {delta * 1e3:.4f} mm, "
+        print(f"{name}: S_L = {s_l:.5f} m/s, T_b = {f.T[-1]:.1f} K, delta = {delta * 1e3:.4f} mm, "
               f"rho_u / rho_b = {f.density[0] / f.density[-1]:.3f}")
         write_full(f, os.path.join(full, name + "_full.csv"))
 
@@ -102,13 +161,13 @@ def soret_flames(out, full):
     rows = []
     for phi in SORET_PHIS:
         for name, (model, soret) in SORET_MODELS.items():
-            f = solve("h2", phi, model, width=0.03, soret=soret)
+            f, s_l = solve("h2", phi, model, width=0.03, soret=soret)
             x, T = f.grid, f.T
             dTdx = np.gradient(T, x)
             delta = (T[-1] - T[0]) / dTdx.max()
             case = case_name("h2", phi, name)
-            rows.append(("h2", phi, name, f.velocity[0], T[-1], delta, x.size))
-            print(f"{case}: S_L = {f.velocity[0]:.5f} m/s, T_b = {T[-1]:.1f} K, "
+            rows.append(("h2", phi, name, s_l, T[-1], delta, x.size))
+            print(f"{case}: S_L = {s_l:.5f} m/s, T_b = {T[-1]:.1f} K, "
                   f"delta = {delta * 1e3:.4f} mm, {x.size} points")
             if not name.startswith("mix"):
                 continue
@@ -132,6 +191,9 @@ def soret_flames(out, full):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--convergence":
+        convergence()
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "--soret":
         out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "examples", "premixed_flame", "reference")
         soret_flames(out, sys.argv[3] if len(sys.argv) > 3 else None)
@@ -146,16 +208,16 @@ def main():
     if full:
         os.makedirs(full, exist_ok=True)
     rows = []
-    for fuel in FUELS:
+    for fuel in V8_FUELS:
         for model in MODELS:
             for phi in PHIS:
-                f = solve(fuel, phi, model)
+                f, s_l = solve(fuel, phi, model)
                 x, T = f.grid, f.T
                 dTdx = np.gradient(T, x)
                 delta = (T[-1] - T[0]) / dTdx.max()
                 name = case_name(fuel, phi, model)
-                rows.append((fuel, phi, model, f.velocity[0], T[-1], delta, x.size))
-                print(f"{name}: S_L = {f.velocity[0]:.5f} m/s, T_b = {T[-1]:.1f} K, "
+                rows.append((fuel, phi, model, s_l, T[-1], delta, x.size))
+                print(f"{name}: S_L = {s_l:.5f} m/s, T_b = {T[-1]:.1f} K, "
                       f"delta = {delta * 1e3:.4f} mm, {x.size} points")
                 i_max = np.argmax(dTdx)
                 xs = np.linspace(x[i_max] - 4 * delta, x[i_max] + 8 * delta, 200)

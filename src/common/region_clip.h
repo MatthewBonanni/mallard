@@ -285,19 +285,20 @@ KOKKOS_INLINE_FUNCTION bool clips(const Shape<Distance> & shape, const Planes & 
     return false;
 }
 
+namespace detail {
+
 /**
  * @brief Adds the integrals of the indicator (times r in axisymmetric runs) and
  *        of 1 over a simplex of N_DIM + 1 vertices v, for a region that clips:
- *        a part wholly inside or outside (detail::classify) is added whole,
- *        otherwise it is cut along the first plane that crosses it, depth
- *        first. The simplex is sampled instead (simplex), as by straight_cell,
- *        where a curved surface crosses a part, a part is still crossed after
+ *        a part wholly inside or outside (classify) is added whole, otherwise
+ *        it is cut along the first plane that crosses it, depth first. Adds
+ *        nothing and returns false where the simplex is to be sampled instead:
+ *        a curved surface crosses a part, a part is still crossed after
  *        CLIP_DEPTH cuts, or it takes more than CLIP_PARTS parts.
  */
 template <typename Distance>
-KOKKOS_INLINE_FUNCTION void clipped_simplex(const Shape<Distance> & shape, const Planes & planes,
-                                            const bool axisymmetric, const double v0[4][3], const double measure0,
-                                            double & inside, double & total) {
+KOKKOS_INLINE_FUNCTION bool clip(const Shape<Distance> & shape, const Planes & planes, const bool axisymmetric,
+                                 const double v0[4][3], const double measure0, double & inside, double & total) {
     struct Item {
         double v[4][3];
         double measure;
@@ -321,12 +322,9 @@ KOKKOS_INLINE_FUNCTION void clipped_simplex(const Shape<Distance> & shape, const
     stack[0].depth = 0;
     const double w0 = weight(v0, measure0);
     double in = 0.0;
-    bool some_in = false, some_out = false, sample = false;
+    bool some_in = false, some_out = false;
     for (int parts = 0; top >= 0; parts++) {
-        if (parts == CLIP_PARTS) {
-            sample = true;
-            break;
-        }
+        if (parts == CLIP_PARTS) return false;
         const Item item = stack[top--];
         const double w = weight(item.v, item.measure);
         double c[3] = {0.0, 0.0, 0.0};
@@ -340,40 +338,78 @@ KOKKOS_INLINE_FUNCTION void clipped_simplex(const Shape<Distance> & shape, const
             radius = region::detail::max(radius, detail::norm(d));
         }
         const double phi = shape.distance(c);
-        detail::Cut cut;
-        const uint8_t state = Kokkos::fabs(phi) >= radius ? (phi < 0.0 ? detail::INSIDE : detail::OUTSIDE)
-                                                           : detail::classify(planes, item.v, c, radius, item.node,
-                                                                              item.plane, cut);
-        if (state != detail::CROSSED) {
-            some_in = some_in || state == detail::INSIDE;
-            some_out = some_out || state == detail::OUTSIDE;
-            in += state == detail::INSIDE ? w : 0.0;
+        Cut cut;
+        const uint8_t state = Kokkos::fabs(phi) >= radius ? (phi < 0.0 ? INSIDE : OUTSIDE)
+                                                           : classify(planes, item.v, c, radius, item.node, item.plane,
+                                                                      cut);
+        if (state != CROSSED) {
+            some_in = some_in || state == INSIDE;
+            some_out = some_out || state == OUTSIDE;
+            in += state == INSIDE ? w : 0.0;
             continue;
         }
-        if (cut.node == planes.count || item.depth >= CLIP_DEPTH) {
-            sample = true;
-            break;
-        }
+        if (cut.node == planes.count || item.depth >= CLIP_DEPTH) return false;
         double pieces[CLIP_PIECES][4][3];
-        const int n_pieces = detail::split(item.v, cut.g, pieces);
+        const int n_pieces = split(item.v, cut.g, pieces);
         for (int p = n_pieces - 1; p >= 0; p--) {
             Item & next = stack[++top];
             for (int k = 0; k < 4; k++) {
                 for (int i = 0; i < 3; i++) next.v[k][i] = pieces[p][k][i];
             }
-            next.measure = detail::measure(pieces[p]);
+            next.measure = measure(pieces[p]);
             next.node = cut.node;
             next.plane = cut.plane + 1;
             next.depth = item.depth + 1;
         }
     }
-    if (sample) {
-        simplex(shape, axisymmetric, v0, measure0, inside, total);
-        return;
-    }
     // Wholly inside or outside, it adds exactly what sampling adds
     inside += !some_out ? w0 : some_in ? region::detail::min(in, w0) : 0.0;
     total += w0;
+    return true;
+}
+
+} // namespace detail
+
+/**
+ * @brief Adds the integrals of the indicator (times r in axisymmetric runs) and
+ *        of 1 over a simplex of N_DIM + 1 vertices v, for a region that clips:
+ *        cut along its planes (detail::clip), or sampled (simplex), as by
+ *        straight_cell, where that gives up.
+ */
+template <typename Distance>
+KOKKOS_INLINE_FUNCTION void clipped_simplex(const Shape<Distance> & shape, const Planes & planes,
+                                            const bool axisymmetric, const double v0[4][3], const double measure0,
+                                            double & inside, double & total) {
+    if (!detail::clip(shape, planes, axisymmetric, v0, measure0, inside, total)) {
+        simplex(shape, axisymmetric, v0, measure0, inside, total);
+    }
+}
+
+/**
+ * @brief clipped_simplex, with the threads of a team: one thread cuts it, and
+ *        the team samples it (team_simplex) where that gives up, so that the
+ *        sums are those of clipped_simplex. Every thread of the team calls it,
+ *        with the same arguments.
+ */
+template <typename Member, typename Distance>
+KOKKOS_INLINE_FUNCTION void team_clipped_simplex(const Member & member, const TeamScratch & scratch,
+                                                 const Shape<Distance> & shape, const Planes & planes,
+                                                 const bool axisymmetric, const double v0[4][3],
+                                                 const double measure0, double & inside, double & total) {
+    struct Sums {
+        double inside, total;
+        bool clipped;
+    };
+    Sums sums{inside, total, false};
+    Kokkos::single(Kokkos::PerTeam(member), [&](Sums & s) {
+        s.clipped = detail::clip(shape, planes, axisymmetric, v0, measure0, s.inside, s.total);
+    }, sums);
+    if (!sums.clipped) {
+        team_simplex(member, scratch, shape, axisymmetric, v0, measure0, inside, total);
+        return;
+    }
+    inside = sums.inside;
+    total = sums.total;
 }
 
 /**
@@ -392,6 +428,21 @@ KOKKOS_INLINE_FUNCTION void clipped_cell(const Shape<Distance> & shape, const Pl
     }
     straight_simplices(n, node, [&](const double s[4][3], const double measure) {
         clipped_simplex(shape, planes, axisymmetric, s, measure, inside, total);
+    });
+}
+
+/** @brief clipped_cell, with the threads of a team (team_clipped_simplex, team_straight_cell). */
+template <typename Member, typename Distance, typename Nodes>
+KOKKOS_INLINE_FUNCTION void team_clipped_cell(const Member & member, const TeamScratch & scratch,
+                                              const Shape<Distance> & shape, const Planes & planes,
+                                              const bool axisymmetric, const uint32_t n, const Nodes & node,
+                                              double & inside, double & total) {
+    if (!clips(shape, planes)) {
+        team_straight_cell(member, scratch, shape, axisymmetric, n, node, inside, total);
+        return;
+    }
+    straight_simplices(n, node, [&](const double s[4][3], const double measure) {
+        team_clipped_simplex(member, scratch, shape, planes, axisymmetric, s, measure, inside, total);
     });
 }
 

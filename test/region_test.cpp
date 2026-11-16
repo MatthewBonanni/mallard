@@ -534,20 +534,16 @@ TEST(RegionTest, MeshFacesOnARegionsFacesGiveExactlyZeroOrOne) {
     }
 }
 
-TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
-    // Faces much smaller than the simplex, around its centroid: more than CLIP_DEPTH cuts
+/** @brief Faces much smaller than the unit simplex, around its centroid: more than CLIP_DEPTH cuts. */
+std::string past_the_clip_budget() {
     std::string table;
-    double exact = 0.0;
     if constexpr (N_DIM == 2) {
         table = "{type = \"polygon\", vertices = [";
-        constexpr int n = 64;
-        for (int k = 0; k < n; k++) {
-            const double t = 2.0 * PI * k / n;
+        for (int k = 0; k < 64; k++) {
+            const double t = 2.0 * PI * k / 64;
             table += (k > 0 ? ", [" : "[") + std::to_string(0.3 + 0.15 * std::cos(t)) + ", " +
                      std::to_string(0.3 + 0.15 * std::sin(t)) + "]";
         }
-        table += "]}";
-        exact = 0.5 * n * 0.0225 * std::sin(2.0 * PI / n);
     } else {
         table = "{type = \"intersection\", regions = [";
         for (const std::string axis : {"[1, 2, 3]", "[3, -1, 2]", "[-2, 3, 1]"}) {
@@ -555,9 +551,13 @@ TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
                      "{type = \"box\", center = [0.25, 0.25, 0.25], size = [0.2, 0.2, 0.2], rotate = {axis = " + axis +
                      ", angle = 30}, pivot = [0.25, 0.25, 0.25]}";
         }
-        table += "]}";
     }
-    const region::Region r = make_region(table);
+    return table + "]}";
+}
+
+TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
+    const double exact = 0.5 * 64 * 0.0225 * std::sin(2.0 * PI / 64);  // 2D: the 64-gon's area
+    const region::Region r = make_region(past_the_clip_budget());
     const region::RegionView<Kokkos::HostSpace> & view = r.host();
     const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
     const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
@@ -570,6 +570,56 @@ TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
     EXPECT_EQ(clipped, sampled);
     if (N_DIM == 2) {
         EXPECT_GT(std::abs(sampled - exact), 1e-9);
+    }
+}
+
+TEST(RegionTest, TeamsClipWhatOneThreadClips) {
+    // A rotated box, cut exactly, and faces past the clip budget, sampled by the team
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.45, 0.5], size = [0.5, 0.3], rotate = 20}"
+                                       : "{type = \"box\", center = [0.45, 0.5, 0.55], size = [0.5, 0.3, 0.4], "
+                                         "rotate = {axis = [1, 2, 3], angle = 20}}";
+    const std::string small = past_the_clip_budget();
+    CellCorners nodes;
+    constexpr uint32_t n = N_DIM == 2 ? 4 : 8;
+    for (uint32_t k = 0; k < n; k++) {
+        nodes.x[k][0] = (k & 3) == 1 || (k & 3) == 2 ? 1.0 : 0.0;
+        nodes.x[k][1] = (k & 3) >= 2 ? 1.0 : 0.0;
+        nodes.x[k][2] = k >= 4 ? 1.0 : 0.0;
+    }
+    for (const std::string & table : {box, small}) {
+        const region::Region r = make_region(table);
+        const region::RegionView<Kokkos::HostSpace> & view = r.host();
+        const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+        const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                             view.vertices.data()};
+        double inside = 0.0, total = 0.0, sampled = 0.0, sampled_total = 0.0;
+        region::sampler::clipped_cell(shape, planes, false, n, nodes, inside, total);
+        region::sampler::straight_cell(shape, false, n, nodes, sampled, sampled_total);
+        if (table == small) {
+            EXPECT_EQ(inside, sampled);
+        } else {
+            EXPECT_NE(inside, sampled);
+        }
+        using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
+        const int size =
+            std::min(4, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
+        Policy policy(2, size);
+        policy.set_scratch_size(0, Kokkos::PerTeam(region::sampler::team_bytes(size)));
+        Kokkos::View<double *[2], Kokkos::HostSpace> out("region_test_team_clip", 2 * size);
+        Kokkos::parallel_for("region_test", policy, [=](const Policy::member_type & member) {
+            const auto scratch = region::sampler::team_scratch(member);
+            double in = 0.0, all = 0.0;
+            region::sampler::team_clipped_cell(member, scratch, shape, planes, false, n, nodes, in, all);
+            const int i = member.league_rank() * member.team_size() + member.team_rank();
+            out(i, 0) = in;
+            out(i, 1) = all;
+        });
+        Kokkos::fence();
+        EXPECT_GT(inside, 0.0) << table;
+        for (size_t i = 0; i < out.extent(0); i++) {
+            EXPECT_EQ(out(i, 0), inside) << table << " thread " << i;
+            EXPECT_EQ(out(i, 1), total) << table << " thread " << i;
+        }
     }
 }
 
