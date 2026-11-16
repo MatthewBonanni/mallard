@@ -209,7 +209,7 @@ KOKKOS_INLINE_FUNCTION int split(const double v[4][3], const double g[4], double
 
 
 /** @brief Where a part of a simplex lies: wholly inside, wholly outside, or crossed by a surface. */
-constexpr uint8_t INSIDE = 0, OUTSIDE = 1, CROSSED = 2;
+constexpr uint8_t WHOLLY_IN = 0, WHOLLY_OUT = 1, CROSSED = 2;
 
 /** @brief A plane to cut along: plane of primitive node, and its values at the part's vertices. */
 struct Cut {
@@ -239,16 +239,22 @@ KOKKOS_INLINE_FUNCTION uint8_t classify(const Planes & planes, const double v[4]
             top--;
             const uint8_t a = s[top], b = s[top + 1];
             if (n.kind == Kind::UNION) {
-                s[top] = a == INSIDE || b == INSIDE ? INSIDE : a == OUTSIDE && b == OUTSIDE ? OUTSIDE : CROSSED;
+                s[top] = a == WHOLLY_IN || b == WHOLLY_IN     ? WHOLLY_IN
+                         : a == WHOLLY_OUT && b == WHOLLY_OUT ? WHOLLY_OUT
+                                                              : CROSSED;
             } else if (n.kind == Kind::INTERSECTION) {
-                s[top] = a == OUTSIDE || b == OUTSIDE ? OUTSIDE : a == INSIDE && b == INSIDE ? INSIDE : CROSSED;
+                s[top] = a == WHOLLY_OUT || b == WHOLLY_OUT ? WHOLLY_OUT
+                         : a == WHOLLY_IN && b == WHOLLY_IN ? WHOLLY_IN
+                                                            : CROSSED;
             } else {
-                s[top] = a == OUTSIDE || b == INSIDE ? OUTSIDE : a == INSIDE && b == OUTSIDE ? INSIDE : CROSSED;
+                s[top] = a == WHOLLY_OUT || b == WHOLLY_IN   ? WHOLLY_OUT
+                         : a == WHOLLY_IN && b == WHOLLY_OUT ? WHOLLY_IN
+                                                             : CROSSED;
             }
             continue;
         }
         const double phi = region::detail::primitive(n, planes.vertices, no_implicit, c);
-        uint8_t state = phi < 0.0 ? INSIDE : OUTSIDE;
+        uint8_t state = phi < 0.0 ? WHOLLY_IN : WHOLLY_OUT;
         const uint32_t n_planes = plane_count(n);
         if (n_planes == 0) {
             if (Kokkos::fabs(phi) < radius) state = CROSSED;
@@ -339,13 +345,13 @@ KOKKOS_INLINE_FUNCTION bool clip(const Shape<Distance> & shape, const Planes & p
         }
         const double phi = shape.distance(c);
         Cut cut;
-        const uint8_t state = Kokkos::fabs(phi) >= radius ? (phi < 0.0 ? INSIDE : OUTSIDE)
+        const uint8_t state = Kokkos::fabs(phi) >= radius ? (phi < 0.0 ? WHOLLY_IN : WHOLLY_OUT)
                                                            : classify(planes, item.v, c, radius, item.node, item.plane,
                                                                       cut);
         if (state != CROSSED) {
-            some_in = some_in || state == INSIDE;
-            some_out = some_out || state == OUTSIDE;
-            in += state == INSIDE ? w : 0.0;
+            some_in = some_in || state == WHOLLY_IN;
+            some_out = some_out || state == WHOLLY_OUT;
+            in += state == WHOLLY_IN ? w : 0.0;
             continue;
         }
         if (cut.node == planes.count || item.depth >= CLIP_DEPTH) return false;

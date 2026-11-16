@@ -532,7 +532,8 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
             h_ops.push_back({Op::Kind::SHAPES, static_cast<uint32_t>(h_leaves.size())});
             h_leaves.push_back({f.first, f.count, i == region.root() ? region.edge() : 0.0});
             const sampler::Planes planes{region.nodes().data() + f.first, f.count, region.vertices().data()};
-            clipping = clipping || sampler::clips(sampler::Shape<NoImplicit>{{}, h_leaves.back().edge, bounded}, planes);
+            const sampler::Shape<NoImplicit> shape{{}, h_leaves.back().edge, bounded};
+            clipping = clipping || sampler::clips(shape, planes);
             return;
         }
         if (f.kind == Filled::Kind::CONDITION) {
