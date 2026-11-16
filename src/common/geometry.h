@@ -258,6 +258,7 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
 template <typename Implicit>
 KOKKOS_INLINE_FUNCTION double distance(const Node * nodes, const uint32_t n, const double * vertices,
                                        const Implicit & implicit, const double x[3]) {
+    if (n == 1) return detail::primitive(nodes[0], vertices, implicit, x);
     double s[MAX_STACK] = {};
     int top = -1;
     for (uint32_t i = 0; i < n; i++) {
