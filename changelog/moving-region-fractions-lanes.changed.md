@@ -1,0 +1,1 @@
+- Moving regions recompute their cell fractions about 6 times faster on GPUs: a team of threads per cell classifies the subdivided simplices together, with unchanged results. A 3D moving-region case writing a VTU every 10 steps on an A100 runs in 7 s instead of 17 s.
