@@ -820,7 +820,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     for (uint32_t i = 0; i < n_local; i++) {
         if (i + 1 == n_local || cells.layer[i + 1] != cells.layer[i]) group_ends.push_back(i + 1);
     }
-    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends);
+    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends, classes.key);
     const std::vector<uint32_t> & order = numbered.order;
     CellNodes ordered_cells;
     ordered_cells.offsets.reserve(n_local + 1);
@@ -856,14 +856,18 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     mesh->n_global_cells = n_global_cells();
     mesh->h_global_node_id = std::move(node_ids);
     mesh->n_global_nodes = node_dist.back();
+    mesh->n_owned_cells = dist.n_owned;
+    mesh->n_interior_cells = numbered.n_interior;
     mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, classes);
     if (!block.cell_zone_names.empty()) {
         mesh->cell_zone_names = block.cell_zone_names;
         mesh->h_cell_zone = std::move(cell_zone);
     }
-    mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));
+    for (uint32_t k = 0; k < mesh->h_offsets_faces_of_cell(mesh->n_reconstructed_cells); k++) {
+        mesh->n_state_faces_count = std::max(mesh->n_state_faces_count, mesh->h_faces_of_cell(k) + 1);
+    }
     mesh->n_complete_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; }));
     return mesh;

@@ -23,7 +23,7 @@ Pr = 0.72
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 50 more.
+and 52 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -97,7 +97,7 @@ mechanism = "../../mechanisms/h2o2.yaml"
 [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
 [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
 [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
-and 11 more.
+and 12 more.
 
 `gas = "mixture"` replaces `gamma` and the reference state with the species
 of a Cantera mechanism: thermally perfect thermodynamics, mixture-averaged or

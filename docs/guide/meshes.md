@@ -31,7 +31,7 @@ Ly = 1.0
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 40 more.
+and 41 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -226,7 +226,7 @@ filename = "cylinder.msh"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle),
 [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo)
-and 5 more.
+and 6 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).

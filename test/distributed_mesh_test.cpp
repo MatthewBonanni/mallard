@@ -71,6 +71,17 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
         dist.layer.push_back(0);
     }
     dist.n_owned = static_cast<uint32_t>(dist.global_cell.size());
+    // Owned cells with a vertex neighbor on another rank last (one vertex layer, as build_local_mesh's default)
+    auto near = [&](uint64_t c) {
+        for (uint32_t k = 0; k < global.h_n_nodes_of_cell(uint32_t(c)); k++) {
+            for (uint32_t nb : cells_of_node[global.h_node_of_cell(uint32_t(c), k)]) {
+                if (owner[nb] != me) return true;
+            }
+        }
+        return false;
+    };
+    std::stable_partition(dist.global_cell.begin(), dist.global_cell.end(), [&](uint64_t c) { return !near(c); });
+    for (uint32_t i = 0; i < dist.n_owned; i++) local_of[dist.global_cell[i]] = static_cast<int32_t>(i);
     size_t layer_begin = 0;
     for (int l = 1; l <= halo_layers; l++) {
         const size_t layer_end = dist.global_cell.size();
@@ -156,8 +167,8 @@ std::shared_ptr<Mesh> build_local_mesh_from_global(Mesh & global, const std::vec
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
     local->h_global_cell_id = dist.global_cell;
     local->n_global_cells = n_global;
-    local->init_from_connectivity(nodes, cells, boundary_faces);
     local->n_owned_cells = dist.n_owned;
+    local->init_from_connectivity(nodes, cells, boundary_faces);
     local->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));
     local->n_complete_cells =
@@ -432,6 +443,76 @@ TEST(DistributedMeshTest, HilbertPartitionSplitsTheGlobalCurveOrderEvenly) {
     for (uint64_t k = 0; k < n; k++) expected[order[k].second] = static_cast<int>((k * static_cast<uint64_t>(comm::size())) / n);
     for (uint32_t c = 0; c < distributed.n_block_cells(); c++) {
         ASSERT_EQ(owner[c], expected[distributed.first_cell() + c]) << "cell " << distributed.first_cell() + c;
+    }
+}
+
+TEST(DistributedMeshTest, OwnedCellsAndFacesNearThePartitionComeLast) {
+    // Every numbering puts the owned cells within `layers` vertex layers of a
+    // halo cell (across periodic seams too) after the others, and orders the
+    // faces as: no halo cell, an owned and a halo cell, halo cells only
+    const std::string input = N_DIM == 2
+        ? "[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 16\ncell_order = \"input\"\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        : "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 8\nNz = 8\ncell_order = \"input\"\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    const Input parsed = parse_toml(input);
+    Mesh global;
+    global.init(parsed);
+    DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
+    const std::vector<int> block_owner = partition_hilbert(distributed, comm::size());
+    std::vector<uint64_t> pairs;
+    for (uint32_t c = 0; c < block_owner.size(); c++) {
+        pairs.insert(pairs.end(), {distributed.first_cell() + c, uint64_t(block_owner[c])});
+    }
+    pairs = comm::allgatherv(pairs);
+    std::vector<int> owner(global.n_cells);
+    for (size_t i = 0; i < pairs.size(); i += 2) owner[pairs[i]] = static_cast<int>(pairs[i + 1]);
+    distributed.distribute(block_owner);
+
+    constexpr uint32_t layers = 2;
+    // Vertex steps from each cell to the nearest cell of another rank, up to layers + 1
+    std::vector<uint32_t> distance(global.n_cells, layers + 1);
+    std::vector<uint32_t> front;
+    for (uint32_t c = 0; c < global.n_cells; c++) {
+        if (owner[c] != comm::rank()) {
+            distance[c] = 0;
+            front.push_back(c);
+        }
+    }
+    for (uint32_t l = 1; l <= layers; l++) {
+        std::vector<uint32_t> next;
+        for (uint32_t c : front) {
+            for (uint32_t k = global.h_offsets_cells_of_cell(c); k < global.h_offsets_cells_of_cell(c + 1); k++) {
+                const uint32_t nb = global.h_cells_of_cell(k);
+                if (distance[nb] > l) {
+                    distance[nb] = l;
+                    next.push_back(nb);
+                }
+            }
+        }
+        front = next;
+    }
+    for (const CellNumbering numbering : {CellNumbering{CellOrder::INPUT, layers}, CellNumbering{CellOrder::HILBERT, layers},
+                                          CellNumbering{CellOrder::AUTO, layers, true}}) {
+        Distribution dist;
+        const auto mesh = distributed.build_local_mesh(4, dist, numbering);
+        if (comm::size() > 1) {
+            EXPECT_LT(mesh->n_interior(), mesh->n_owned());
+        }
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            EXPECT_EQ(distance[mesh->h_global_cell(c)] > layers, c < mesh->n_interior()) << "cell " << c;
+        }
+        for (const StructuredBlock & block : mesh->structured_blocks) {
+            uint32_t size = 1;
+            for (uint32_t e : block.n) size *= e;
+            EXPECT_LE(block.first + size, mesh->n_interior());
+        }
+        auto halo = [&](int32_t c) { return c >= static_cast<int32_t>(mesh->n_owned()); };
+        int last = 0;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+            const int group = halo(c0) && (c1 < 0 || halo(c1)) ? 2 : (halo(c0) || halo(c1)) ? 1 : 0;
+            EXPECT_GE(group, last) << "face " << f;
+            last = group;
+        }
     }
 }
 

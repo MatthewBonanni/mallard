@@ -1,0 +1,1 @@
+- Shell completion of `mallard post derive --fields` offers only the fields `mallard post derive` writes (`MACH`, `P0`, `Q_CRITERION`, ...), each item of the comma-separated list, in bash, zsh and fish.

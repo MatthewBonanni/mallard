@@ -26,7 +26,10 @@
 #include <sstream>
 #include <unordered_map>
 
+#include <Kokkos_BitManipulation.hpp>
+
 #include "comm.h"
+#include "device_comm.h"
 #include "diagnostic_code.h"
 #include "region_mesh.h"
 #include "common_io.h"
@@ -64,6 +67,7 @@ std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
                                         const std::vector<std::pair<std::string, Dimension>> & columns) {
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
+    resume = resume && std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw cannot_write("the probe file", file);
     if (!resume) {
@@ -1406,9 +1410,39 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
     }
 }
 
+std::vector<double> Probes::Samples::scatter(const std::vector<double> & global, const size_t width) const {
+    std::vector<double> rows;
+    if (!distributed || comm::is_root()) {
+        rows.resize(n_global * width);
+        for (uint64_t p = 0; p < n_global; p++) {
+            for (size_t j = 0; j < width; j++) rows[gathered_row[p] * width + j] = global[p * width + j];
+        }
+    }
+    if (!distributed) return rows;
+    const uint64_t n_local = cells.extent(0);
+    const std::vector<uint64_t> counts = comm::allgatherv(std::vector<uint64_t>{n_local});
+    uint64_t first = 0;
+    for (int r = 0; r < comm::rank(); r++) first += counts[static_cast<size_t>(r)];
+    rows = comm::allgatherv(rows);
+    return std::vector<double>(rows.begin() + static_cast<std::ptrdiff_t>(first * width),
+                               rows.begin() + static_cast<std::ptrdiff_t>((first + n_local) * width));
+}
+
 void Probes::Samples::allocate_staging(const uint64_t n_records) {
     staging = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "probe_staging", n_records, values.extent(0) * values.extent(1));
+}
+
+void Probes::Samples::fill_columns(
+    const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const {
+    const auto v = values;
+    const auto c = cells;
+    for (const auto & entry : columns) {
+        const uint32_t column = entry.first;
+        const auto field = entry.second;
+        Kokkos::parallel_for("probe_cell_field", c.extent(0),
+                             KOKKOS_LAMBDA(const size_t i) { v(i, column) = field(c(i)); });
+    }
 }
 
 void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
@@ -1500,7 +1534,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
     statistics_variables = statistics.variables();
     average_interval = statistics.sampling_interval();
     average_start = statistics.sampling_start();
-    if (!input.contains("probes")) return;
+    if (!contains_optional(input, "probes")) return;
     for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
         const std::string copies = find_value_or<std::string>(entry, "copies", "combined");
         record_options("probes.copies", {"combined", "each"});
@@ -1552,7 +1586,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (other->name == p.name && other->snapshot == p.snapshot) throw InputError(key + ": name is used twice.");
     }
 
-    const bool steps = entry.contains("interval"), times = entry.contains("time_interval");
+    const bool steps = entry.contains("interval"), times = contains_optional(entry, "time_interval");
     if (steps && times) throw InputError(key + ": give interval or time_interval, not both.");
     if (snapshot && !steps && !times) throw InputError(key + ": give interval or time_interval.");
     if (times) {
@@ -1814,7 +1848,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                         .fix = "Add TRACTION_PRESSURE or TRACTION_VISCOUS (or MOMENTUM_FLUX) to fields",
                                         .docs = "docs/guide/probes.md#boundary-data"});
         }
-        const std::vector<rtype> center = entry.contains("moment_center")
+        const std::vector<rtype> center = contains_optional(entry, "moment_center")
                                               ? find_real_vector(entry, "moment_center", dim::length)
                                               : std::vector<rtype>(N_DIM, 0.0_r);
         if (center.size() != N_DIM) {
@@ -2434,22 +2468,196 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
     }
 }
 
-bool Probes::can_stage(const size_t k) const {
+bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const Probe & p = *probes[k];
-    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && p.cell_columns.empty() &&
+    const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
+        return statistics.device_average(c.second->name()).data() != nullptr;
+    });
+    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
-void Probes::stage(const size_t k, const uint64_t n_records) {
+void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const bool reduce,
+                   const bool use_nccl) {
     Probe & p = *probes[k];
     p.staged = true;
+    p.device_columns.clear();
+    for (const auto & [column, data] : p.cell_columns) {
+        p.device_columns.emplace_back(column, statistics.device_average(data->name()));
+    }
     if (p.samples_nodes()) p.nodes.allocate_staging(n_records);
     if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
+    if (!reduce) return;
+    // The samples Probe::reduce sums: of point sets and boundaries, the nodes; of curves and regions, the quadrature
+    auto r = std::make_shared<Probe::DeviceReduction>();
+    std::vector<ProbeTerm> terms;
+    std::vector<ProbeOutput> outputs;
+    p.reduction_plan(terms, outputs);
+    const bool points = p.quadrature.n_global == 0;
+    const Samples & S = points ? p.nodes : p.quadrature;
+    const uint32_t n_local = static_cast<uint32_t>(S.cells.extent(0));
+    const bool holds = !S.distributed || comm::is_root();  // the geometry
+    if (holds && (points ? p.geometry.nodes.size() : p.geometry.quad_weights.size()) != S.n_global) {
+        throw std::logic_error("probe " + p.name + ": samples and geometry differ");
+    }
+    r->use_nccl = use_nccl;
+    r->summed = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
+        return o.kind != ProbeOutput::MIN && o.kind != ProbeOutput::MAX;
+    });
+    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & t) { return t.kind == ProbeTerm::MOMENT; });
+    int weighted = r->summed && holds && (!points || !p.geometry.node_weights.empty()) ? 1 : 0;
+    if (S.distributed) weighted = comm::allreduce(weighted, comm::Op::MAX);
+    if (weighted) {
+        const std::vector<double> & global = points ? p.geometry.node_weights : p.geometry.quad_weights;
+        r->weights = to_device(S.scatter(holds ? global : std::vector<double>{}, 1), "probe_reduction_weights");
+    }
+    if (r->summed && moments) {
+        std::vector<double> global;
+        for (size_t i = 0; holds && i < S.n_global; i++) {
+            for (size_t d = 0; d < 3; d++) global.push_back(d < N_DIM ? p.geometry.nodes[i][d] - p.moment_center[d] : 0.0);
+        }
+        const std::vector<double> local = S.scatter(global, 3);
+        r->positions = Kokkos::View<double *[3]>("probe_reduction_positions", n_local);
+        const auto h = Kokkos::create_mirror_view(r->positions);
+        for (uint32_t i = 0; i < n_local; i++) {
+            for (size_t d = 0; d < 3; d++) h(i, d) = local[i * 3 + d];
+        }
+        Kokkos::deep_copy(r->positions, h);
+    }
+    r->outputs = to_device(outputs, "probe_reduction_outputs");
+    if (r->summed) {
+        r->terms = to_device(terms, "probe_reduction_terms");
+        r->values = Kokkos::View<double **, Kokkos::LayoutRight>("probe_reduction_values", n_local, terms.size());
+        r->sums = ExactSums(static_cast<uint32_t>(terms.size()), n_local, S.distributed, use_nccl);
+    }
+    const bool extrema = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
+        return o.kind == ProbeOutput::MIN || o.kind == ProbeOutput::MAX;
+    });
+    if (extrema) {
+        r->lo = Kokkos::View<double *>("probe_reduction_lo", p.variables.size());
+        r->hi = Kokkos::View<double *>("probe_reduction_hi", p.variables.size());
+    }
+    if (p.point_value) r->point = Kokkos::View<int64_t *>("probe_reduction_point", p.variables.size());
+    if (p.average) {
+        using Means = Kokkos::View<double **, Kokkos::LayoutRight>;
+        const uint32_t n_cols = static_cast<uint32_t>(p.n_evaluated());
+        if (p.samples_nodes()) r->mean_nodes = Means("probe_mean_nodes", p.nodes.cells.extent(0), n_cols);
+        if (p.samples_quadrature()) r->mean_quadrature = Means("probe_mean_quadrature", p.quadrature.cells.extent(0), n_cols);
+    }
+    p.device_reduction = r;
+}
+
+void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) const {
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    const Probe & p = *probes[k];
+    const Probe::DeviceReduction & r = *p.device_reduction;
+    const bool points = p.quadrature.n_global == 0;
+    const Samples & S = points ? p.nodes : p.quadrature;
+    const uint32_t n_local = static_cast<uint32_t>(S.cells.extent(0));
+    // The samples' values, or an averaging probe's means of them
+    const auto q = S.values;
+    const auto mq = points ? r.mean_nodes : r.mean_quadrature;
+    const auto mn = r.mean_nodes;
+    const bool averaged = p.average;
+    if (r.summed) {
+        const auto terms = r.terms;
+        const auto weights = r.weights;
+        const auto positions = r.positions;
+        const auto values = r.values;
+        const bool weighted = weights.extent(0) > 0, moments = positions.extent(0) > 0;
+        const uint32_t n_terms = static_cast<uint32_t>(terms.extent(0));
+        Kokkos::parallel_for("probe_reduction_terms", n_local, KOKKOS_LAMBDA(const uint32_t i) {
+            double x[3] = {0.0, 0.0, 0.0};
+            if (moments) {
+                for (int d = 0; d < 3; d++) x[d] = positions(i, d);
+            }
+            const double w = weighted ? weights(i) : 1.0;
+            for (uint32_t t = 0; t < n_terms; t++) {
+                values(i, t) = averaged ? probe_term(terms(t), w, &mq(i, 0), x) : probe_term(terms(t), w, &q(i, 0), x);
+            }
+        });
+        r.sums.sum(values);
+    }
+    const auto lo = r.lo, hi = r.hi;
+    if (lo.extent(0) > 0) {
+        // Probe::reduce's extrema: over the reduced samples, then the nodes
+        const auto nodes = p.nodes.values;
+        const uint32_t n_nodes = points || !p.samples_nodes() ? 0 : static_cast<uint32_t>(p.nodes.cells.extent(0));
+        for (uint32_t v = 0; v < lo.extent(0); v++) {
+            Kokkos::parallel_reduce("probe_reduction_min", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+                const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
+                                          : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
+                if (x < m) m = x;
+            }, Kokkos::Min<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(lo.data() + v)));
+            Kokkos::parallel_reduce("probe_reduction_max", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+                const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
+                                          : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
+                if (x > m) m = x;
+            }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(hi.data() + v)));
+        }
+        if (S.distributed) {
+            comm::allreduce_device(lo, comm::Op::MIN, r.use_nccl);
+            comm::allreduce_device(hi, comm::Op::MAX, r.use_nccl);
+        }
+    }
+    const auto point = r.point;
+    if (point.extent(0) > 0) {
+        // Its one sample's values, from the rank that holds it
+        const auto nodes = p.nodes.values;
+        const bool held = p.nodes.cells.extent(0) == 1;
+        Kokkos::parallel_for("probe_reduction_point", static_cast<uint32_t>(point.extent(0)), KOKKOS_LAMBDA(const uint32_t v) {
+            point(v) = held ? Kokkos::bit_cast<int64_t>(averaged ? mn(0, v) : static_cast<double>(nodes(0, v))) : 0;
+        });
+        if (p.nodes.distributed) comm::allreduce_device(point, comm::Op::SUM, r.use_nccl);
+    }
+    const auto outputs = r.outputs;
+    const auto sums = r.sums.sums();
+    Kokkos::parallel_for("probe_reduction_values", 1, KOKKOS_LAMBDA(const int) {
+        if (*due == 0) return;
+        const uint32_t n_outputs = static_cast<uint32_t>(outputs.extent(0));
+        for (uint32_t j = 0; j < n_outputs; j++) out[j] = probe_output(outputs(j), sums.data(), lo.data(), hi.data());
+        for (uint32_t v = 0; v < point.extent(0); v++) out[n_outputs + v] = Kokkos::bit_cast<double>(point(v));
+    });
 }
 
 Probes::StagedClock Probes::staged_clock(const size_t k) const {
     const Probe & p = *probes[k];
-    return {p.interval, p.time_interval, p.time_tol(), p.n_written, p.average ? 1u : 0u};
+    return {p.interval,       p.time_interval,    p.time_tol(), p.n_written, p.average ? 1u : 0u,
+            p.average_weight, p.average_t_last, 0.0,          p.average_samples};
+}
+
+void Probes::average_staged(const size_t k, const uint32_t * sampled, const double * a) {
+    const Probe & p = *probes[k];
+    const Probe::DeviceReduction & r = *p.device_reduction;
+    for (const auto & [S, mean] : {std::pair(&p.nodes, r.mean_nodes), std::pair(&p.quadrature, r.mean_quadrature)}) {
+        const auto q = S->values;
+        const auto m = mean;
+        const uint32_t n_cols = static_cast<uint32_t>(m.extent(1));
+        Kokkos::parallel_for("probe_mean", m.extent(0) * n_cols, KOKKOS_LAMBDA(const size_t j) {
+            if (*sampled == 0) return;
+            const size_t i = j / n_cols, v = j % n_cols;
+            m(i, v) += rounded_product(*a, static_cast<double>(q(i, v)) - m(i, v));
+        });
+    }
+}
+
+void Probes::resume_staged(const size_t k) {
+    Probe & p = *probes[k];
+    if (!p.average || !p.device_reduction || p.device_reduction->means_current) return;
+    Probe::DeviceReduction & r = *p.device_reduction;
+    using HostRows = Kokkos::View<const double **, Kokkos::LayoutRight, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+    const auto copy = [&](const Samples & S, const std::vector<double> & host,
+                          const Kokkos::View<double **, Kokkos::LayoutRight> & mean) {
+        // Rank 0's means in sample order (zero before the first sample), or each rank's undistributed
+        const size_t width = p.n_evaluated();
+        const bool holds = !S.distributed || comm::is_root();
+        const std::vector<double> local =
+            S.scatter(holds && host.empty() ? std::vector<double>(S.n_global * width, 0.0) : host, width);
+        Kokkos::deep_copy(mean, HostRows(local.data(), mean.extent(0), mean.extent(1)));
+    };
+    if (p.samples_nodes()) copy(p.nodes, p.mean_nodes, r.mean_nodes);
+    if (p.samples_quadrature()) copy(p.quadrature, p.mean_quadrature, r.mean_quadrature);
+    r.means_current = true;
 }
 
 void Probes::sample_staged_average(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
@@ -2472,10 +2680,12 @@ void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const u
     Probe & p = *probes[k];
     if (p.samples_nodes()) {
         p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
+        p.nodes.fill_columns(p.device_columns);
         p.nodes.copy_to_staging(seq);
     }
     if (p.samples_quadrature()) {
         p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
+        p.quadrature.fill_columns(p.device_columns);
         p.quadrature.copy_to_staging(seq);
     }
 }
@@ -2710,7 +2920,7 @@ const std::string AVERAGE_PREFIX = "PROBE_AVERAGE_";
 /** @brief West's running mean: mean += a (x - mean), from zero at the first sample. */
 void accumulate(std::vector<double> & mean, const std::vector<double> & x, double a) {
     if (mean.empty()) mean.assign(x.size(), 0.0);
-    for (size_t i = 0; i < x.size(); i++) mean[i] += a * (x[i] - mean[i]);
+    for (size_t i = 0; i < x.size(); i++) mean[i] += rounded_product(a, x[i] - mean[i]);
 }
 
 /**
@@ -2782,6 +2992,8 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
     if (p.isosurface) p.extract(static_cast<double>(t));
     if (p.solution) m_region_seconds += timer.seconds();
     p.sample(fields, nodes, quad, slot);
+    // The device means took the staged samples themselves
+    if (slot < 0 && p.device_reduction) p.device_reduction->means_current = false;
     p.average_weight += w;
     p.average_t_last = static_cast<double>(t);
     p.average_samples++;
@@ -2801,6 +3013,7 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
 void Probes::start_averages(rtype t) {
     for (auto & p : probes) {
         if (!p->average) continue;
+        if (p->device_reduction) p->device_reduction->means_current = false;
         p->average_weight = 0.0;
         p->average_t_last = static_cast<double>(std::max(t, average_start));
         p->average_samples = 0;
@@ -3334,6 +3547,56 @@ void Probes::Probe::mean_fields(std::vector<double> & quad) {
     }
 }
 
+void Probes::Probe::reduction_plan(std::vector<ProbeTerm> & terms, std::vector<ProbeOutput> & outputs) const {
+    terms.assign(1, ProbeTerm{});
+    outputs.clear();
+    auto term = [&](const ProbeTerm & t) {
+        for (uint32_t k = 0; k < terms.size(); k++) {
+            const ProbeTerm & u = terms[k];
+            if (u.kind == t.kind && u.column == t.column && u.rho == t.rho && u.n_dim == t.n_dim &&
+                std::equal(u.vector, u.vector + 3, t.vector)) {
+                return k;
+            }
+        }
+        terms.push_back(t);
+        return static_cast<uint32_t>(terms.size() - 1);
+    };
+    for (const Reduction r : reductions) {
+        if (r == Reduction::MOMENT) {
+            for (const auto & [base, columns] : moment_vectors) {
+                ProbeTerm t{.kind = ProbeTerm::MOMENT, .n_dim = N_DIM};
+                for (size_t d = 0; d < N_DIM; d++) t.vector[d] = columns[d];
+                for (uint32_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
+                    t.column = a;
+                    outputs.push_back({ProbeOutput::SUM, term(t), 0});
+                }
+            }
+            continue;
+        }
+        for (uint32_t v = 0; v < variables.size(); v++) {
+            switch (r) {
+                case Reduction::INTEGRAL:
+                    outputs.push_back({ProbeOutput::SUM, term({.kind = ProbeTerm::WEIGHTED, .column = v}), 0});
+                    break;
+                case Reduction::MEAN:
+                    outputs.push_back({ProbeOutput::RATIO, term({.kind = ProbeTerm::WEIGHTED, .column = v}), 0});
+                    break;
+                case Reduction::FAVRE:
+                    outputs.push_back({ProbeOutput::RATIO,
+                                       term({.kind = ProbeTerm::WEIGHTED_RHO, .column = v, .rho = rho_column}),
+                                       term({.kind = ProbeTerm::RHO, .rho = rho_column})});
+                    break;
+                case Reduction::RMS:
+                    outputs.push_back({ProbeOutput::ROOT_RATIO, term({.kind = ProbeTerm::WEIGHTED_SQUARE, .column = v}), 0});
+                    break;
+                case Reduction::MIN: outputs.push_back({ProbeOutput::MIN, v, 0}); break;
+                case Reduction::MAX: outputs.push_back({ProbeOutput::MAX, v, 0}); break;
+                case Reduction::MOMENT: break;
+            }
+        }
+    }
+}
+
 void Probes::Probe::reduce(const std::vector<double> & node_values, const std::vector<double> & quad) {
     // Point sets and boundaries reduce their samples; curves their quadrature points
     const bool points = !cell_means() && quadrature.n_global == 0;
@@ -3342,75 +3605,40 @@ void Probes::Probe::reduce(const std::vector<double> & node_values, const std::v
     const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
     const double * weights = points ? (geometry.node_weights.empty() ? nullptr : geometry.node_weights.data())
                                     : geometry.quad_weights.data();
-    // One loop per reduction, without branches: these run over every sample at every write
-    // add(sum, w, i) adds sample i of weight w in one expression, as a single rounding (or FMA)
-    auto weighted_sum = [&](auto add) {
-        double sum = 0.0;
-        if (weights) {
-            for (size_t i = 0; i < n_q; i++) add(sum, weights[i], i);
-        } else {
-            for (size_t i = 0; i < n_q; i++) add(sum, 1.0, i);
+    std::vector<ProbeTerm> terms;
+    std::vector<ProbeOutput> outputs;
+    reduction_plan(terms, outputs);
+    const size_t n_terms = terms.size();
+    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & t) { return t.kind == ProbeTerm::MOMENT; });
+    std::vector<double> & values = reduction_terms;
+    values.resize(n_q * n_terms);
+    for (size_t i = 0; i < n_q; i++) {
+        double x[3] = {0.0, 0.0, 0.0};
+        // Moments: of boundary probes, which reduce their samples
+        for (size_t d = 0; moments && d < N_DIM; d++) x[d] = geometry.nodes[i][d] - moment_center[d];
+        const double w = weights ? weights[i] : 1.0;
+        for (size_t t = 0; t < n_terms; t++) values[i * n_terms + t] = probe_term(terms[t], w, q + i * n_cols, x);
+    }
+    std::vector<double> sums(n_terms);
+    for (size_t t = 0; t < n_terms; t++) sums[t] = exact_column_sum(values.data() + t, n_q, n_terms);
+    measure = sums[0];
+    std::vector<double> lo(variables.size(), std::numeric_limits<double>::infinity()), hi(variables.size(), -lo[0]);
+    const bool extrema = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
+        return o.kind == ProbeOutput::MIN || o.kind == ProbeOutput::MAX;
+    });
+    for (size_t v = 0; extrema && v < variables.size(); v++) {
+        for (size_t i = 0; i < n_q; i++) {
+            if ((motion || cell_means()) && !(weights[i] > 0.0)) continue;
+            lo[v] = std::min(lo[v], q[i * n_cols + v]);
+            hi[v] = std::max(hi[v], q[i * n_cols + v]);
         }
-        return sum;
-    };
-    measure = weighted_sum([](double & sum, double w, size_t) { sum += w; });
-    last.clear();
-    for (const Reduction r : reductions) {
-        if (r == Reduction::MOMENT) {
-            // sum of (x - x_c) x f w over the faces (boundary probes reduce their samples)
-            for (const auto & [base, columns] : moment_vectors) {
-                double M[3] = {0.0, 0.0, 0.0};
-                for (size_t i = 0; i < n_q; i++) {
-                    const double w = weights ? weights[i] : 1.0;
-                    double x[3] = {0.0, 0.0, 0.0}, f[3] = {0.0, 0.0, 0.0};
-                    for (size_t d = 0; d < N_DIM; d++) {
-                        x[d] = geometry.nodes[i][d] - moment_center[d];
-                        f[d] = w * q[i * n_cols + columns[d]];
-                    }
-                    M[0] += x[1] * f[2] - x[2] * f[1];
-                    M[1] += x[2] * f[0] - x[0] * f[2];
-                    M[2] += x[0] * f[1] - x[1] * f[0];
-                }
-                for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) last.push_back(M[a]);
-            }
-            continue;
-        }
-        for (size_t v = 0; v < variables.size(); v++) {
-            auto value = [&](size_t i) { return q[i * n_cols + v]; };
-            auto integrand = [&](double & sum, double w, size_t i) { sum += w * value(i); };
-            double result = 0.0;
-            switch (r) {
-                case Reduction::INTEGRAL: result = weighted_sum(integrand); break;
-                case Reduction::MEAN: result = weighted_sum(integrand) / measure; break;
-                case Reduction::FAVRE: {
-                    auto rho = [&](size_t i) { return q[i * n_cols + rho_column]; };
-                    result = weighted_sum([&](double & sum, double w, size_t i) { sum += w * rho(i) * value(i); }) /
-                             weighted_sum([&](double & sum, double w, size_t i) { sum += w * rho(i); });
-                    break;
-                }
-                case Reduction::RMS:
-                    result = std::sqrt(weighted_sum([&](double & sum, double w, size_t i) { sum += w * value(i) * value(i); }) / measure);
-                    break;
-                case Reduction::MOMENT: break;
-                case Reduction::MIN:
-                case Reduction::MAX: {
-                    double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-                    for (size_t i = 0; i < n_q; i++) {
-                        if ((motion || cell_means()) && !(weights[i] > 0.0)) continue;
-                        lo = std::min(lo, value(i));
-                        hi = std::max(hi, value(i));
-                    }
-                    for (size_t i = 0; i < geometry.nodes.size(); i++) {
-                        lo = std::min(lo, node_values[i * n_cols + v]);
-                        hi = std::max(hi, node_values[i * n_cols + v]);
-                    }
-                    result = r == Reduction::MIN ? lo : hi;
-                    break;
-                }
-            }
-            last.push_back(result);
+        for (size_t i = 0; i < geometry.nodes.size(); i++) {
+            lo[v] = std::min(lo[v], node_values[i * n_cols + v]);
+            hi[v] = std::max(hi[v], node_values[i * n_cols + v]);
         }
     }
+    last.clear();
+    for (const ProbeOutput & o : outputs) last.push_back(probe_output(o, sums.data(), lo.data(), hi.data()));
 }
 
 std::vector<std::string> Probes::Probe::reduction_names() const {
