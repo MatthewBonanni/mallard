@@ -1,5 +1,6 @@
 # Triple flame: fuel H2:0.5,N2:0.5 / oxidizer O2:1,N2:3.76 at 300 K, 1 atm; Z_st = 0.30427.
-# Planar flame at Z_st (Cantera): S_L = 1.19142 m/s, delta_L = 0.3847 mm, rho_u / rho_b = 5.9416.
+# Planar flame at Z_st (Cantera, refine criteria 0.02, from which these inputs were built): S_L = 1.19142 m/s,
+# delta_L = 0.3847 mm, rho_u / rho_b = 5.9416 (grid-converged: 1.1959 m/s, 0.382 mm, 5.959).
 # Inlet mixing thickness delta_M = 12 delta_L, inflow 1.6 S_L, 12 cells per delta_L.
 #
 # The triple flame of ../input.toml in a mixing layer three times thicker
