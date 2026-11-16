@@ -1589,7 +1589,7 @@ void Solver::init_numerics() {
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture()) {
-        scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
+        scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
