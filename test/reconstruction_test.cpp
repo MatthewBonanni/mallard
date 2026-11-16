@@ -243,7 +243,7 @@ using AirComposition = std::function<std::array<double, N_AIR>(double x, double 
 
 /** @brief [gamma, e0] of mass fractions Y at T_CELLS, as Mixture::cell_state defines them. */
 std::array<double, 2> surrogates(const HostThermo & thermo, const std::array<double, N_AIR> & Y) {
-    const auto y = [&](const uint32_t k) { return Y[k]; };
+    const chemistry::MassFractions y{Y.data()};
     double e, cv;
     thermo.e_cv(T_CELLS, y, e, cv);
     const double R = thermo.gas_constant(y);
@@ -268,7 +268,7 @@ AirCells air_cells(const Mesh & mesh, const HostThermo & thermo, const AirCompos
         h_S(c, N_AIR + 1) = rtype(th[1]);
         FOR_I_CONSERVATIVE h_W(c, i) = 0.0_r;
         h_W(c, 0) = 1.0_r;
-        h_W(c, N_DIM + 1) = rtype(thermo.gas_constant([&](const uint32_t k) { return Y[k]; }) * T_CELLS);
+        h_W(c, N_DIM + 1) = rtype(thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T_CELLS);
     }
     Kokkos::deep_copy(cells.S, h_S);
     Kokkos::deep_copy(cells.W, h_W);
@@ -344,7 +344,7 @@ void expect_face_state_of_face_composition(const Mesh & mesh, const HostThermo &
             EXPECT_NEAR(double(face.thermo(f, 0, side, 0)), th[0], gamma_tol) << what << " face " << f;
             EXPECT_NEAR(double(face.thermo(f, 0, side, 1)), th[1], roundoff(1e-12) * std::abs(th[1]))
                 << what << " face " << f;
-            const double R = thermo.gas_constant([&](const uint32_t k) { return Y_f[k]; });
+            const double R = thermo.gas_constant(chemistry::MassFractions{Y_f.data()});
             EXPECT_NEAR(double(face.W(f, 0, side, N_DIM + 1)) / (double(face.W(f, 0, side, 0)) * R), T_CELLS, T_tol)
                 << what << " face " << f;
         }
