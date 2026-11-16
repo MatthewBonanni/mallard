@@ -568,7 +568,9 @@ TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
     region::sampler::clipped_simplex(shape, planes, false, v, measure, clipped, total);
     region::sampler::simplex(shape, false, v, measure, sampled, total);
     EXPECT_EQ(clipped, sampled);
-    if (N_DIM == 2) EXPECT_GT(std::abs(sampled - exact), 1e-9);
+    if (N_DIM == 2) {
+        EXPECT_GT(std::abs(sampled - exact), 1e-9);
+    }
 }
 
 TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {
