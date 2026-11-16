@@ -166,8 +166,8 @@ times the Riemann solver's), and `hybrid` does not combine with
 ```toml
 [les.combustion]          # examples/flame_turbulence/les.toml: stoichiometric H2/air
 model = "tfles"
-delta_L = 3.3013976e-4    # laminar thermal thickness [m], from Cantera
-s_L = 2.3323744           # laminar flame speed [m/s]
+delta_L = 3.282e-4        # laminar thermal thickness [m], from Cantera
+s_L = 2.3311              # laminar flame speed [m/s]
 T_unburnt = 300.0
 T_burnt = 2384.28
 # n_res = 5               # cells across the thickened flame (default)

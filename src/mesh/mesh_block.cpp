@@ -47,7 +47,7 @@ rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta) {
 
 Stretching mesh_stretching(const Input & input) {
     Stretching stretching{};
-    if (!input.contains("mesh") || !input.at("mesh").contains("stretching")) return stretching;
+    if (!input.contains("mesh") || !contains_optional(input.at("mesh"), "stretching")) return stretching;
     const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching", dim::none);
     if (beta.size() != N_DIM) {
         throw InputError("[mesh] stretching must have " + std::to_string(N_DIM) + " components.");

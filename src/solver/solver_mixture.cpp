@@ -36,16 +36,6 @@ void set_primitives(const Kokkos::View<rtype *[N_PRIMITIVE]> & P, const uint32_t
     P(c, N_DIM + 2) = W[N_DIM + 1] / W[0] * gamma / (gamma - 1.0_r) + e0;
 }
 
-/** @brief Applies a per-face functor to the entries of a list. */
-template <typename F>
-struct OverFaces {
-    F f;
-    Kokkos::View<uint32_t *> faces;
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t k) const { f(faces(k)); }
-};
-
 /** @brief W, the scalars [Y, gamma, e0] and (optionally) the temperature seed of each cell. */
 struct MixtureCellFunctor {
     Mixture gas;
@@ -313,8 +303,11 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name) :
-            mixture(mixture_model), where(name) {
+        /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(). */
+        CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name,
+                               const std::vector<std::string> & variables = {"x", "y", "z", "t"},
+                               const size_t first_shadowable = SIZE_MAX) :
+            mixture(mixture_model), where(name), shadowable(first_shadowable) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
@@ -326,7 +319,7 @@ class CompositionExpressions {
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
                 texts.push_back(quantity_or_expression(value, species, dim::none));
-                values.emplace_back(where + "." + key + "." + species, texts.back());
+                values.emplace_back(where + "." + key + "." + species, texts.back(), variables, shadowable);
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");
@@ -341,7 +334,8 @@ class CompositionExpressions {
             for (size_t i = 0; i < listed.size(); i++) {
                 c->species.push_back(static_cast<uint32_t>(listed[i]));
                 c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i],
-                                                                       BoundaryValue::variables(), expression_unit_hint));
+                                                                       BoundaryValue::variables(), BoundaryValue::hint,
+                                                                       shadowable));
             }
             c->balance = balance;
             c->mole = mole;
@@ -357,6 +351,19 @@ class CompositionExpressions {
             std::vector<std::vector<double>> Y;
             Y.reserve(rows.size());
             for (size_t k = 0; k < rows.size(); k++) Y.push_back(mass_fractions(v.data() + k * values.size()));
+            return Y;
+        }
+
+        /** @brief Mass fractions at boundary faces, at t = 0 (expressions of BoundaryValue::variables()). */
+        std::vector<std::vector<double>> mass_fractions(const std::vector<FacePoint> & points) const {
+            std::vector<std::vector<double>> Y;
+            Y.reserve(points.size());
+            std::vector<double> v(values.size());
+            for (const FacePoint & p : points) {
+                const auto vars = p.at(0.0);
+                for (size_t i = 0; i < values.size(); i++) v[i] = values[i].value(vars);
+                Y.push_back(mass_fractions(v.data()));
+            }
             return Y;
         }
 
@@ -380,6 +387,7 @@ class CompositionExpressions {
 
         const MixtureModel & mixture;
         std::string where;
+        size_t shadowable;
         bool mole = false;
         int32_t balance = -1;
         std::vector<int32_t> listed;
@@ -443,7 +451,7 @@ void Solver::update_transport() {
                          MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                  transport_values});
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
-        Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+        Kokkos::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
                                  viscous_gradient, transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport});
@@ -526,13 +534,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
                 transport_gradients, cell_transport, cell_diffusion, face_flux, species_slots, axisymmetric,
                 mesh->cell_covariance, les_coefficients, sgs_only,
                 double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
-            if (rhs_faces.extent(0) == 0) {
-                Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, functor);
-            } else {
-                Kokkos::View<uint32_t *> list = rhs_faces;
-                Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
-                                     OverFaces<decltype(functor)>{functor, list});
-            }
+            parallel_for_set("mixture_viscous_flux", rhs_faces, functor);
         });
     };
     if (is_viscous()) {
@@ -611,12 +613,7 @@ void Solver::launch_mixture_flux_functor() {
         face_reconstruction->face_quad_normals,
         central_states()};
     // Faces of owned cells, as the single-gas flux
-    if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
-    } else {
-        Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, list.extent(0)), OverFaces<MixtureFluxFunctor<T_riemann_solver>>{functor, list});
-    }
+    parallel_for_set<HeavyBounds>("mixture_flux", rhs_faces, functor);
 }
 
 template <typename T_riemann_solver>
@@ -640,13 +637,7 @@ void Solver::launch_double_flux_functor() {
         cell_upwind,
         face_reconstruction->face_quad_normals,
         central_states()};
-    if (rhs_faces.extent(0) == 0) {
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
-    } else {
-        Kokkos::View<uint32_t *> list = rhs_faces;
-        Kokkos::parallel_for("double_flux", HeavyRange<>(0, list.extent(0)),
-                             OverFaces<MixtureDoubleFluxFunctor<T_riemann_solver>>{functor, list});
-    }
+    parallel_for_set<HeavyBounds>("double_flux", rhs_faces, functor);
 }
 
 rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
@@ -751,7 +742,9 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 std::shared_ptr<CompositionExpressions> composition;
                 std::vector<double> Y_uniform;
                 if (MixtureModel::composition_varies(bound)) {
-                    composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where);
+                    composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where,
+                                                                           BoundaryValue::variables(),
+                                                                           boundary_variable::FIRST_LOCAL);
                     const auto programs = composition->compiled();
                     if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
                 } else {
@@ -760,18 +753,16 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 }
                 on_every_rank([&] {
                     std::vector<size_t> profiled;
-                    std::vector<uint32_t> faces;
+                    std::vector<FacePoint> points;
                     for (size_t k = 0; k < profiled_faces.size(); k++) {
                         if (profiled_faces[k][0] != i_bc) continue;
                         profiled.push_back(k);
-                        faces.push_back(profiled_faces[k][1]);
+                        points.push_back(boundary_point(profiled_faces[k][1]));
                     }
                     const std::vector<std::vector<double>> Y =
-                        composition ? composition->mass_fractions(mesh->face_coords, faces) : std::vector<std::vector<double>>();
+                        composition ? composition->mass_fractions(points) : std::vector<std::vector<double>>();
                     for (size_t j = 0; j < profiled.size(); j++) {
-                        Point x{};
-                        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(faces[j], i));
-                        const double T = T_varies ? fields->temperature(x, 0.0) : T_uniform;
+                        const double T = T_varies ? fields->temperature(points[j], 0.0) : T_uniform;
                         prescribe(input_boundaries.size() + profiled[j], composition ? Y[j] : Y_uniform, T);
                     }
                 });

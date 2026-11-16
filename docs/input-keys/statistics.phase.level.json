@@ -1,0 +1,11 @@
+{
+ "default": "0.0",
+ "dimension": "velocity (m s^-1)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/mesh_file.toml"
+ ],
+ "type": "number"
+}
