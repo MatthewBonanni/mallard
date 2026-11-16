@@ -202,7 +202,7 @@ std::string fluent_file(const TestMesh & t, bool binary) {
         }
         s << "))\n";
     }
-    s << "(12 (0 1 " << n_cells << " 0 0))\n(12 (5 1 " << half(t) << " 1 0))\n(12 (6 " << half(t) + 1 << " " << n_cells << " 1 0))\n";
+    s << "(12 (0 1 " << n_cells << " 0 0))\n(12 (5 1 " << fluid_cells(t) << " 1 0))\n(12 (6 " << fluid_cells(t) + 1 << " " << n_cells << " 1 0))\n";
     s << "(13 (0 1 " << n_faces << " 0 0))\n";
     for (size_t f = 0; f < n_faces;) {
         size_t end = f;
@@ -385,7 +385,7 @@ TEST(MeshFileFormatsTest, EachRankGetsItsPartOfAFluentFile) {
     for (const MeshType type : test_types()) {
         const TestMesh t = test_mesh(type);
         std::vector<uint32_t> cell_zone(t.mesh.n_cells());
-        for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < half(t) ? 0 : 1;
+        for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < fluid_cells(t) ? 0 : 1;
         for (const bool binary : {false, true}) {
             SCOPED_TRACE(std::string(binary ? "binary" : "ASCII") + (type == MeshType::CARTESIAN_TET ? ", tetrahedra" : ""));
             TestMesh written = t;
@@ -510,7 +510,7 @@ TEST(MeshFileFormatsTest, EachRankGetsItsPartOfACgnsFile) {
             next = end + 1;
         };
         std::vector<std::vector<uint64_t>> first, second;
-        for (uint64_t c = 0; c < m.n_cells(); c++) (c < half(t) ? first : second).push_back(cell_of(m, c));
+        for (uint64_t c = 0; c < m.n_cells(); c++) (c < fluid_cells(t) ? first : second).push_back(cell_of(m, c));
         write_mixed("cells", first, N_DIM);
         const cgsize_t solid[2] = {next, next + cgsize_t(second.size()) - 1};
         write_mixed("solid_cells", second, N_DIM);
@@ -529,7 +529,7 @@ TEST(MeshFileFormatsTest, EachRankGetsItsPartOfACgnsFile) {
     }
     comm::barrier();
     std::vector<uint32_t> cell_zone(m.n_cells());
-    for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < half(t) ? Mesh::NO_CELL_ZONE : 0;
+    for (uint64_t c = 0; c < cell_zone.size(); c++) cell_zone[c] = c < fluid_cells(t) ? Mesh::NO_CELL_ZONE : 0;
     expect_part(t, read_file_block(file), true, {"solid"}, cell_zone);
 }
 #endif
