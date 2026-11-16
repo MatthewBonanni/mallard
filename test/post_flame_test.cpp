@@ -253,7 +253,7 @@ TEST(PostFlameTest, AMirroredFlameAlongAnotherDirectionMeasuresTheSame) {
     const json::Value & b = y.find("snapshots")->array.front();
     EXPECT_NEAR(number(b, "S_c"), number(a, "S_c"), roundoff(1e-11) * std::abs(number(a, "S_c")));
     EXPECT_NEAR(number(b, "delta_T"), number(a, "delta_T"), roundoff(1e-11) * DELTA);
-    EXPECT_NEAR(number(b, "x_f"), LENGTH - number(a, "x_f"), 1e-9 * LENGTH);
+    EXPECT_NEAR(number(b, "x_f"), LENGTH - number(a, "x_f"), roundoff(1e-11) * LENGTH);
     // The flame burns toward the closed end, into the fresh gas: a positive displacement speed from each end
     std::vector<std::string> x_series = restart_files(x_dir), y_series = restart_files(y_dir);
     x_series.insert(x_series.end(), {"-o", x_dir + "/out"});
