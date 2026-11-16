@@ -342,7 +342,7 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
             gated::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
         });
     }
-    gated::parallel_for("face_thermo", mesh->n_faces, FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
+    gated::parallel_for("face_thermo", mesh->n_state_faces(), FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
 }
 
 template <typename Eval>

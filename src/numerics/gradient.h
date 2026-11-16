@@ -12,6 +12,9 @@
 #ifndef GRADIENT_H
 #define GRADIENT_H
 
+#include <algorithm>
+#include <limits>
+
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
@@ -491,21 +494,23 @@ inline LSQGradientFunctor make_gradient(const Mesh & mesh, const BoundaryData & 
 /**
  * @brief LSQVertexGradientFunctor over the given gradient functor's mesh,
  *        boundaries, states and gradients, with its weights computed for a
- *        quadratic or a linear fit.
+ *        quadratic or a linear fit, for cells [0, n_cells) (all by default).
  */
 inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & faces, const Mesh & mesh,
-                                                     bool quadratic = true) {
+                                                     bool quadratic = true,
+                                                     uint32_t n_cells = std::numeric_limits<uint32_t>::max()) {
+    n_cells = std::min(n_cells, mesh.n_cells);
     LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
-                                     {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
+                                     {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells",
+                                                                   mesh.h_offsets_cells_of_cell(n_cells)),
                                       {},
                                       Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_images",
                                                                    faces.boundaries.image_neighbors.extent(0)),
-                                      Kokkos::View<uint32_t *>("vertex_gradient_weights_ghost_offsets", mesh.n_cells + 1),
+                                      Kokkos::View<uint32_t *>("vertex_gradient_weights_ghost_offsets", n_cells + 1),
                                       {}},
                                      quadratic, quadratic ? mesh.cell_covariance : Kokkos::View<rtype *[3]>()};
     // Only boundary faces have ghosts: the weights of a cell's faces are stored for those alone
     const Kokkos::View<uint32_t *> ghost_offsets = functor.weights.ghost_offsets;
-    const uint32_t n_cells = mesh.n_cells;
     uint32_t n_ghosts = 0;
     gated::parallel_scan("vertex_gradient_ghost_offsets", n_cells + 1,
                           KOKKOS_LAMBDA(const uint32_t c, uint32_t & sum, const bool final) {
@@ -525,7 +530,7 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
             if (functor.ghost_face(i_face)) ghost_faces(g++) = i_face;
         }
     });
-    gated::parallel_for("vertex_gradient_weights", mesh.n_cells,
+    gated::parallel_for("vertex_gradient_weights", n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;
 }

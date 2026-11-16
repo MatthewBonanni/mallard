@@ -58,6 +58,7 @@ void Solver::init_chemistry() {
     }
     chemistry_options = reactor_options(input);
     T_frozen = find_double_or(table, "T_frozen", dim::temperature, 0.0);
+    chemistry_explicit_step = find_value_or<bool>(table, "explicit_step", false);
     fuse_chemistry = find_value_or<bool>(table, "fuse_half_steps", !simpler);
     if (simpler && fuse_chemistry) {
         throw InputError("chemistry.fuse_half_steps applies to Strang splitting; coupling = \"simpler\" makes one "
@@ -92,6 +93,7 @@ void Solver::allocate_chemistry() {
     options.reactor = chemistry_options;
     options.T_frozen = T_frozen;
     options.lanes = chemistry_lanes;
+    options.explicit_step = chemistry_explicit_step;
     options.forced = simpler;
     if (simpler) transport_rate = State("transport_rate", mesh->n_cells, mixture.n_species);
     cell_chemistry.init(mixture, mixture_model->mechanism(), kinetics, options, mesh->n_cells);

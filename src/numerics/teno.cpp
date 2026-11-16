@@ -2969,7 +2969,7 @@ void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos
     primitive = true;
     cell_gamma = gamma;
     cell_molar_mass = molar_mass;
-    selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_faces, 2);
+    selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_state_faces(), 2);
 }
 
 bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,

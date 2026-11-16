@@ -865,6 +865,9 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     }
     mesh->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));
+    for (uint32_t k = 0; k < mesh->h_offsets_faces_of_cell(mesh->n_reconstructed_cells); k++) {
+        mesh->n_state_faces_count = std::max(mesh->n_state_faces_count, mesh->h_faces_of_cell(k) + 1);
+    }
     mesh->n_complete_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; }));
     return mesh;

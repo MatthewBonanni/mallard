@@ -70,7 +70,7 @@ void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSER
     if (!mesh->is_rotational()) return;
     if (!rotated_faces_found) {
         std::vector<uint32_t> faces;
-        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
             if (mesh->h_cells_of_face(f, 1) >= 0 && mesh->h_rotated_row(mesh->h_face_shift(f))) faces.push_back(f);
         }
         rotated_faces = Kokkos::View<uint32_t *>("rotated_faces", faces.size());
@@ -254,11 +254,12 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         n_max = std::max(n_max, pts.size());
         add_face(f);
     }
-    face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_max, N_DIM);
-    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_max);
+    const uint32_t n_state = mesh->n_state_faces();
+    face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_state, n_max, N_DIM);
+    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_state, n_max);
     auto h_points = Kokkos::create_mirror_view(face_quad_points);
     auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
-    for (uint32_t f = 0; f < n_faces; f++) {
+    for (uint32_t f = 0; f < n_state; f++) {
         for (size_t q = 0; q < n_max; q++) {
             const size_t qq = offsets[f] + std::min(q, n_points(f) - 1);
             FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[qq][i]);
@@ -268,9 +269,9 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     Kokkos::deep_copy(face_quad_points, h_points);
     Kokkos::deep_copy(face_quad_weights, h_weights);
     if (geometry) {
-        face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_max, N_DIM);
+        face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_state, n_max, N_DIM);
         auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
-        for (uint32_t f = 0; f < n_faces; f++) {
+        for (uint32_t f = 0; f < n_state; f++) {
             for (size_t q = 0; q < n_max; q++) {
                 if (!curved_normals[f].empty()) {
                     const size_t qq = std::min(q, curved_normals[f].size() - 1);
@@ -315,7 +316,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
 void FaceReconstruction::init_face_quadrature_2d_curved() {
     if (N_DIM != 2 || !mesh->curved_geometry) return;
     const curved::Geometry & geometry = *mesh->curved_geometry;
-    const uint32_t n_faces = mesh->n_faces;
+    const uint32_t n_faces = mesh->n_state_faces();
     const uint32_t n_q = static_cast<uint32_t>(quadrature_face.h_points.extent(0));
     std::vector<std::array<double, 2>> ref(n_q);
     std::vector<double> ref_w(n_q);
@@ -417,7 +418,7 @@ struct FirstOrderFunctor {
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     FirstOrderFunctor recon_functor(mesh->cells_of_face, face_solution, solution);
-    gated::parallel_for(mesh->n_faces, recon_functor);
+    gated::parallel_for(mesh->n_state_faces(), recon_functor);
 }
 
 MUSCL::MUSCL() {
@@ -614,8 +615,10 @@ struct MUSCLFaceFunctor {
 
 /**
  * @brief Gradient, limiter and face states of each listed cell, on its own
- *        side of its faces, with the arithmetic of the per-cell gradient and
- *        limiter kernels and of MUSCLFaceFunctor.
+ *        side of its faces that hold face states (Mesh::n_state_faces), with
+ *        the arithmetic of the per-cell gradient and limiter kernels and of
+ *        MUSCLFaceFunctor. Halo cells past layer 1 fill the outer sides of
+ *        the faces of layer 1 and of image faces, but have faces beyond.
  */
 struct MUSCLCellFunctor {
     MUSCLGradientFunctor gradient;
@@ -631,18 +634,15 @@ struct MUSCLCellFunctor {
         const auto & mesh_faces = limiter.neighbors;
         for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
             const uint32_t f = mesh_faces.faces_of_cell(j);
+            if (f >= face.face_solution.extent(0)) continue;
             face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
         }
     }
 };
 
-// Measured on A100s: one fused kernel per cell is faster from about 2^17 cells,
-// separate kernels (more parallel, shorter chains) below
-constexpr uint32_t MUSCL_FUSED_CELLS = 1u << 17;
-
 std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) const {
     // Subsets run fused; smaller meshes exchange first and reconstruct in separate kernels
-    if (n_owned < MUSCL_FUSED_CELLS) return {};
+    if (n_owned < fused_cells) return {};
     // Gradients read the face or vertex neighbors, limiters the face neighbors
     std::vector<uint32_t> cells;
     for (uint32_t c = 0; c < n_owned; c++) {
@@ -681,7 +681,7 @@ void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokko
 
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
-    if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
+    if (mesh->n_cells >= fused_cells) {
         calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, IndexSet{{}, 0, mesh->n_cells});
         return;
     }
@@ -700,5 +700,5 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   gradients,
                                   limiters,
                                   face_solution};
-    gated::parallel_for("muscl_faces", mesh->n_faces, face_functor);
+    gated::parallel_for("muscl_faces", mesh->n_state_faces(), face_functor);
 }
