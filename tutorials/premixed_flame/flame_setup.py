@@ -5,7 +5,8 @@
 
 Solves Cantera's FreeFlame of H2/air at equivalence ratio PHI, 300 K and
 1 atm with mixture-averaged transport (mechanisms/h2o2.yaml, as Mallard),
-and writes to RUN_DIR:
+with its flame speed extrapolated to a converged grid (converge() of
+tools/setup/flame_reference.py), and writes to RUN_DIR:
 
   reference.csv  Cantera's flame: x (relative to the maximum of dT/dx), u, T,
                  heat release rate, H2, O2, H2O and OH mass fractions; first line: S_L, T_b and the thermal
@@ -21,11 +22,15 @@ PHI = 1.
 """
 import argparse
 import os
+import sys
 
 import cantera as ct
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "setup"))
+from flame_reference import converge  # noqa: E402
+
 MECH = os.path.join(HERE, "..", "..", "mechanisms", "h2o2.yaml")
 T_U, P = 300.0, ct.one_atm
 UPSTREAM, DOWNSTREAM = 6, 9  # domain in thermal thicknesses
@@ -35,10 +40,7 @@ def cantera_flame(phi):
     gas = ct.Solution(MECH, "ohmech", transport_model="mixture-averaged")
     gas.set_equivalence_ratio(phi, "H2", "O2:1.0, N2:3.76")
     gas.TP = T_U, P
-    flame = ct.FreeFlame(gas, width=0.03)
-    flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
-    flame.solve(loglevel=0, auto=True)
-    return flame
+    return converge(ct.FreeFlame(gas, width=0.03))
 
 
 def main():
@@ -52,11 +54,11 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.run_dir, exist_ok=True)
 
-    f = cantera_flame(args.phi)
+    f, s_l = cantera_flame(args.phi)
     x, T = f.grid, f.T
     dTdx = np.gradient(T, x)
     delta = (T[-1] - T[0]) / dTdx.max()
-    s_l, t_b = f.velocity[0], T[-1]
+    t_b = T[-1]
     i_max = np.argmax(dTdx)
     xs = np.linspace(x[i_max] - 4 * delta, x[i_max] + 8 * delta, 400)
     with open(os.path.join(args.run_dir, "reference.csv"), "w") as fh:
