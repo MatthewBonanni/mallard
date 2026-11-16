@@ -289,8 +289,7 @@ AirComposition trace_composition(const uint32_t nx, const double trace) {
 }
 
 /** @brief Mass fractions at each face from each side, (face, side, k) on the host; one point per face. */
-auto face_Y(const Mesh & mesh, const ScalarFaceValues & values) {
-    Kokkos::View<rtype *[2][N_AIR]> Y("face_Y", mesh.n_faces);
+void fill_face_Y(const Mesh & mesh, const ScalarFaceValues & values, const Kokkos::View<rtype *[2][N_AIR]> & Y) {
     Kokkos::parallel_for(mesh.n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const uint32_t begin = values.offsets_faces_of_cell(c);
         const uint32_t n = values.offsets_faces_of_cell(c + 1) - begin;
@@ -303,6 +302,11 @@ auto face_Y(const Mesh & mesh, const ScalarFaceValues & values) {
             }
         }
     });
+}
+
+auto face_Y(const Mesh & mesh, const ScalarFaceValues & values) {
+    Kokkos::View<rtype *[2][N_AIR]> Y("face_Y", mesh.n_faces);
+    fill_face_Y(mesh, values, Y);
     return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Y);
 }
 
