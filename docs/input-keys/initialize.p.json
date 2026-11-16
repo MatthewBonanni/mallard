@@ -8,6 +8,7 @@
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
+  "examples/channel_inlet/input.toml",
   "examples/explosion_3d/input.toml",
   "examples/flame_outflow/input.toml",
   "examples/forced_inlet/input.toml",

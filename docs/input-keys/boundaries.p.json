@@ -9,6 +9,7 @@
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
   "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_inlet/input.toml",
   "examples/double_mach/input.toml",
   "examples/flame_2d/input.toml",
   "examples/flame_2d/unity/input.toml",
