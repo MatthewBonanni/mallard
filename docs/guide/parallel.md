@@ -81,7 +81,7 @@ every step.*
 
 What each GPU backend does with the steps (the run log's `CUDA graphs` and `Steps` rows say which applies):
 
-| Build | Each step | Steps enqueued ahead of the host | Chemistry queue's cost sort (`bin_by_cost`) |
+| Build | Each step | Steps enqueued ahead of the host | Sort of the chemistry queue by cost |
 |---|---|---|---|
 | CUDA 12.4 or later, one rank or NCCL's halo exchange | One CUDA graph, its device decisions in conditional nodes | Up to `step_queue` | CUB's stable radix sort, into scratch sized beforehand, in the graph |
 | CUDA before 12.4, `cuda_graphs = false`, MPI's halo exchange, or NCCL failing under a conditional node | Kernel by kernel; the host reads each decision of the device | One | The same sort, kernel by kernel |
