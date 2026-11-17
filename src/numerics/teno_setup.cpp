@@ -902,6 +902,8 @@ struct CellSetup {
     double stencil_factor = 2.0;
     // Central stencil sizes to start from on pyramids, at the full and the wall degree (PYRAMID_ODD_FACTOR)
     uint16_t pyramid_ns = 0, pyramid_wall_ns = 0;
+    // Central stencil size up to which a cell with no full-rank size up to ns_max searches on (WIDE_FACTOR)
+    uint16_t ns_wide = 0;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1606,19 +1608,36 @@ struct CellSetup {
         uint16_t n_used = n_first;
         bool found = false;
         uint32_t n_tried = 0;
-        const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
-            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
-            if (!build(static_cast<int>(n_try))) continue;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
-            w.tried_n[n_tried] = n_try;
-            w.tried_lebesgue[n_tried] = lebesgue;
-            n_tried++;
-            if (lebesgue <= MAX_LEBESGUE_3D) {
-                n_used = static_cast<uint16_t>(n_try);
-                found = true;
-                break;
+        auto try_sizes = [&](const uint32_t n_cap) {
+            const uint32_t try_max = uint32_t(n_entries) < n_cap ? uint32_t(n_entries) : n_cap;
+            for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
+                if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+                if (!build(static_cast<int>(n_try))) continue;
+                const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
+                w.tried_n[n_tried] = n_try;
+                w.tried_lebesgue[n_tried] = lebesgue;
+                n_tried++;
+                if (lebesgue <= MAX_LEBESGUE_3D) {
+                    n_used = static_cast<uint16_t>(n_try);
+                    found = true;
+                    return;
+                }
             }
+        };
+        try_sizes(ns_max);
+        if (n_tried == 0 && !truncated && ns_wide > ns_max) {
+            // Only the host's batches have rows for ns_wide entries
+            if (out.max_large < ns_wide) return OUT_OF_SCRATCH;
+            const int depth = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_wide, 64, end, n_end, exhausted, n_hash, truncated, ok);
+            if (!ok) return OUT_OF_SCRATCH;
+            layers_used = depth > layers_used ? depth : layers_used;
+            if (depth != entries_depth) {
+                entries_depth = depth;
+                n_entries = gather(w, i, end[depth], x0, h, n_planes, n_plane_faces);
+                if (n_entries < 0) return uint8_t(-n_entries);
+                n_means = 0;
+            }
+            try_sizes(ns_wide);
         }
         if (!found && n_tried > 0) {
             double best = Kokkos::Experimental::finite_max_v<double>;
@@ -2817,6 +2836,8 @@ struct CellTeam {
             }
             found = build(n_used);
         }
+        // The host searches on to ns_wide
+        if (n_tried == 0 && !ctl[TRUNCATED] && c.ns_wide > c.ns_max) return OUT_OF_SCRATCH;
         if (!found) {
             if (!ctl[TRUNCATED]) failed = 1;
         } else {
@@ -3387,6 +3408,7 @@ class Setup3D {
             wall_ns = opt.wall_ns;
             nss = opt.nss;
             ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
+            ns_wide = static_cast<uint16_t>(WIDE_FACTOR * ns_max);
             nss_max = 2 * nss;
             pyramid_ns = pyramid_start(opt.degree, ns);
             pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);
@@ -3548,7 +3570,7 @@ class Setup3D {
 
             // On host backends the host setup reads the very same geometry
             assign_if_same(host, device);
-            caps.rows = std::max<uint32_t>(ns_max, nss_max);
+            caps.rows = std::max<uint32_t>(ns_wide, nss_max);
             d_tables = Kokkos::View<Tables, DefaultMem>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_setup_tables"));
             Kokkos::deep_copy(d_tables, Kokkos::View<const Tables, HostMem, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(&tables));
             caps.sector = nss_max + 1;
@@ -3599,7 +3621,8 @@ class Setup3D {
         TeamLayout team_layout() const {
             TeamLayout l;
             const size_t V = caps.visits, H = caps.hash, E = caps.entries, P = caps.planes, PF = caps.plane_faces;
-            const size_t R = caps.rows;
+            // The device leaves cells that search past ns_max to the host
+            const size_t R = std::max<uint32_t>(ns_max, nss_max);
             l.candidates = 16 * caps.visits;
             size_t at = 0;
             auto take = [&](size_t & off, const size_t bytes) {
@@ -3674,7 +3697,7 @@ class Setup3D {
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
+                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, ns_wide};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3687,7 +3710,7 @@ class Setup3D {
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns},
+                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, ns_wide},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3754,11 +3777,11 @@ class Setup3D {
                 const uint32_t m = static_cast<uint32_t>(which.size());
                 Kokkos::View<uint32_t *, HostMem> h_cells("teno_setup_host_cells", m);
                 for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
-                TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
+                TableBatchT<HostMem> h_out(m, nk, ns_wide, max_small(), false);
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
+                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, ns_wide};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -3786,7 +3809,10 @@ class Setup3D {
                         h_src(j) = done[j];
                         h_dst(j) = done_slot[j];
                     }
-                    TableBatchT<HostMem> h_compact(n_done, nk, ns_max, max_small(), out.large_cells.interleaved);
+                    uint16_t largest = 0;
+                    for (uint32_t j = 0; j < n_done; j++) largest = std::max(largest, h_out.large_size(done[j]));
+                    if (largest > out.max_large) widen(out, largest, uint32_t(cells.extent(0)));
+                    TableBatchT<HostMem> h_compact(n_done, nk, out.max_large, max_small(), out.large_cells.interleaved);
                     copy_slots<HostMem>(h_out, h_compact, h_src, {}, n_done);
                     Kokkos::fence();
                     // Copies compacted rows to the device, then into place
@@ -3797,6 +3823,14 @@ class Setup3D {
                 }
                 which.swap(again);
             }
+        }
+
+        /** @brief out with rows for width central stencil entries, keeping its first n slots. */
+        void widen(TableBatch & out, const uint16_t width, const uint32_t n) const {
+            TableBatch wide(out.slots, nk, width, out.max_small, out.large_cells.interleaved);
+            copy_slots<DefaultMem>(out, wide, {}, {}, n);
+            Kokkos::fence();
+            out = wide;
         }
 
         static void copy_slots_indirect(const TableBatchT<DefaultMem> & from, const TableBatchT<DefaultMem> & to,
@@ -3810,7 +3844,7 @@ class Setup3D {
         uint8_t wall_nk = 0;
         uint16_t wall_ns = 0, pyramid_ns = 0, pyramid_wall_ns = 0;
         uint8_t r = 0, nk = 0;
-        uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
+        uint16_t ns = 0, nss = 0, ns_max = 0, ns_wide = 0, nss_max = 0;
         Caps caps;
         Geometry<HostMem> host;
         Geometry<DefaultMem> device;

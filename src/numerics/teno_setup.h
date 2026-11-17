@@ -48,6 +48,12 @@ constexpr double LEBESGUE_SLACK = 1.25;
 // every stencil within the Lebesgue bound below about 2.5 times the monomials
 // of degree r + 1, a threshold found by von Neumann analysis (#236)
 constexpr double PYRAMID_ODD_FACTOR = 2.5;
+// A cell with no full-rank central stencil up to the 3D cap searches on to this
+// factor times it. Physical distance takes the r + 1 cell layers that degree r
+// needs along the coarsest axis only from about the square of the spacing ratio
+// times as many cells, and keeps up to the ranking metric's cut-off: order-6
+// prisms stretched 1.2 to 1.6 : 1 along their axis need 1.2 to 1.85 times the cap
+constexpr double WIDE_FACTOR = 2.0;
 
 /** @brief Central stencil size to start from on a pyramid, at degree r, given the size ns elsewhere. */
 inline uint16_t pyramid_start(const uint8_t r, const uint16_t ns) {
@@ -220,7 +226,8 @@ TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h);
 
 /**
  * @brief Why a cell's setup stopped: OUT_OF_SCRATCH is redone on the host with
- *        more room; TOO_MANY_PLANES (its search meets more distinct mirror
+ *        more room, or with rows for central stencils past the cap
+ *        (WIDE_FACTOR); TOO_MANY_PLANES (its search meets more distinct mirror
  *        planes than an entry can index) is not.
  */
 enum Status : uint8_t { OK = 0, OUT_OF_SCRATCH = 1, TOO_MANY_PLANES = 2 };

@@ -682,6 +682,26 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     }
 }
 
+TEST(TENO3DSetup, PrismsStretchedAlongTheirAxisSearchPastTheCapForAFullRankOrderSixStencil) {
+    // Order 6 needs six cell layers along the prisms' axis; at 1.3 : 1, below
+    // the ranking metric's cut-off, the nearest 257 candidates hold five (#1232).
+    // The device leaves those cells to the host, which widens the batch
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian_prism\"\nNx = 4\nNy = 4\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 1.3\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+                          "[[periodic]]\nzones = [\"back\", \"front\"]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto reference = make_teno(mesh, bd, 6);
+    size_t largest = 0;
+    reference->for_each_stencil([&](uint32_t, const TENO::CellStencils & st) { largest = std::max<size_t>(largest, st.central); }, false);
+    EXPECT_GT(double(largest), std::ceil(3.5 * reference->n_dof_large) + 64.0);
+    auto batched = make_teno_with(mesh, bd, 6, [](TENO & t) { t.setup_batch_cells = 64; });
+    auto host = make_teno_with(mesh, bd, 6, [](TENO & t) { t.setup_on_host = true; });
+    expect_same_tables(*reference, *batched, "batches of 64 cells");
+    expect_same_tables(*reference, *host, "host setup");
+}
+
 TEST(TENO3DSetup, PyramidsWhoseOddDegreeStencilsReachACurvedWallFitTheWallDegree) {
     // Order 6: a pyramid's stencil starts from 208 entries, other cells' from
     // 110, and a curved-wall cell anywhere among the first 208 makes it fit
