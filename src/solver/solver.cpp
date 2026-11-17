@@ -244,7 +244,7 @@ void Solver::setup_from_input() {
     // The cache describes the local mesh at this halo depth
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     if (teno && output_files_enabled()) teno->save_cache(static_cast<uint8_t>(halo_layers));
-    setup.reset();
+    block_owners.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
         // Output of states read from files takes no steps
@@ -435,9 +435,11 @@ void Solver::init_mesh() {
     if (exchange != "nccl" && exchange != "mpi") {
         throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
     }
+    curved::Surfaces surfaces;
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
+        surfaces = curved::surfaces_of_mesh(*mesh, input);
     } else {
         if (halo_layers == 0) {
             // A TENO cache records the halo depth its stencils need, which spares
@@ -449,14 +451,17 @@ void Solver::init_mesh() {
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
             halo_layers = std::max(base_halo_layers(), cached);
         }
-        // Partition once; deeper halos (see halo_too_shallow) keep the partition
-        if (!setup) {
-            setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
-            setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
-                              : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
-                                                             : partition_hilbert(*setup, comm::size()));
+        // The block is freed before the Mesh is built, so a deeper halo (see
+        // halo_too_shallow) reads it again; it keeps the partition
+        DistributedMesh setup(read_mesh_block(input), Mesh::periodic_pairs(input));
+        if (!block_owners) {
+            block_owners = partitioner == "graph"         ? partition_graph(setup, comm::size())
+                         : partitioner == "multijagged" ? partition_multijagged(setup, comm::size())
+                                                        : partition_hilbert(setup, comm::size());
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
+        setup.distribute(*block_owners);
+        surfaces = curved::surfaces_of_block(setup.mesh_block(), input);
+        mesh = std::move(setup).build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
@@ -466,8 +471,6 @@ void Solver::init_mesh() {
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
-    const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
-                                                       : curved::surfaces_of_mesh(*mesh, input);
     mesh->apply_curved(surfaces);
     mesh_setup = describe_mesh(*mesh);
     Settings & mesh_settings = mesh_setup.settings;
