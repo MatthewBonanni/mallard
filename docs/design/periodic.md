@@ -56,6 +56,8 @@ a clear error.
   `x_c1 + shift`; the face seen from cell 1 is at `x_f - shift`).
 - `cells_of_cell_shift`: a `uint8` row index per vertex-neighbor entry. Vertex
   neighbors are found through shared node keys and become (cell, shift) pairs.
+  When no entry crosses a periodic boundary it holds no rows, and readers
+  (`ShiftRows`) see row 0 for every entry: 26 B per hexahedron saved.
 
 On a non-periodic mesh every index is 0, and kernels add the zero row as
 `(x_c1 + 0) - x_c0` or `(x_f - 0) - x_c1`, which round exactly like the

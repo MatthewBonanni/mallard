@@ -53,6 +53,7 @@ enum Reason : uint32_t {
     BOUNDARY = 256,    // a boundary value of t went out of range at a progress row's step
     TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
     OUTPUT = 1024,     // an output is due while the one staged before is still being written on some rank
+    PROBES = 2048,     // a staged probe's moving region covers more cells than its staging holds
 };
 
 /**
