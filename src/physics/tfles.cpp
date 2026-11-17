@@ -24,7 +24,7 @@ const char * const DOCS = "docs/guide/les.md#non-premixed-and-partially-premixed
 /** @brief The flame table of sensor = "reaction": columns Z, s_L, delta_L and omega_max, Z increasing. */
 Kokkos::View<double *[4]> read_flame_table(const Input & table, ThickenedFlame & tf) {
     const std::string file = find_value<std::string>(table, "flame_table");
-    const tabulated::Csv csv = tabulated::read_csv(file);
+    const tabulated::Csv csv = tabulated::read_csv(file, DOCS);
     const char * names[4] = {"Z", "s_L", "delta_L", "omega_max"};
     int32_t column[4];
     for (int k = 0; k < 4; k++) {
