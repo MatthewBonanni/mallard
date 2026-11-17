@@ -3721,7 +3721,7 @@ class Setup3D {
             const std::pair<uint32_t, uint32_t> direct(0u, n_direct);
             Kokkos::deep_copy(Kokkos::subview(out, direct, Kokkos::ALL()), Kokkos::subview(device.moments, direct, Kokkos::ALL()));
             const auto from = device.moments;
-            Kokkos::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
+            gated::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
                 for (size_t m = 0; m < n_moments; m++) out(n_direct + k, m) = from(extra(k), m);
             });
             return out;
