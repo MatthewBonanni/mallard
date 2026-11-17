@@ -748,6 +748,7 @@ class Solver {
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        const FaceReconstruction & get_face_reconstruction() const { return *face_reconstruction; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
         /** @brief The numerics preset and the origin of each of its keys. */
