@@ -276,25 +276,14 @@ whatever their shape, size and place, and `n` from 0 on the walls to 1 at the
 point farthest from them. A profile written in them needs no dimensions and
 no axes, and fits the same inlet on any mesh:
 
-```toml
-# A rectangular duct of any size, anywhere: zero on its four sides, U at the middle
-u = "U * 16 * u * (1 - u) * v * (1 - v)"
-
-# A pipe of any radius: Poiseuille flow of bulk velocity 10 m/s (r is 0 at the center, 1 at the wall)
-u = "20 * (1 - r^2)"
-
-# A turbulent profile on any duct or pipe: 1/7 power law in the wall distance
-u = "30 * n^(1/7)"
-
-# The same with a boundary layer 0.01 m thick, in meters from the wall
-u = "30 * min(n_m / 0.01, 1)^(1/7)"
-
-# Eight hot streaks around an annular inlet
-T = "300 + 50 * sin(8 * theta)"
-
-# 2D, examples/channel_inlet: plane Poiseuille flow along an inlet of any height
-profile = "u * (1 - u)"
-```
+| For | Write |
+|---|---|
+| A rectangular duct of any size, anywhere: zero on its four sides, `U` at the middle | `u = "U * 16 * u * (1 - u) * v * (1 - v)"` |
+| A pipe of any radius: Poiseuille flow of bulk velocity 10 m/s (`r` is 0 at the center, 1 at the wall) | `u = "20 * (1 - r^2)"` |
+| A turbulent profile on any duct or pipe: a 1/7 power law in the wall distance | `u = "30 * n^(1/7)"` |
+| The same with a boundary layer 0.01 m thick, in meters from the wall | `u = "30 * min(n_m / 0.01, 1)^(1/7)"` |
+| Eight hot streaks around an annular inlet | `T = "300 + 50 * sin(8 * theta)"` |
+| 2D ([`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet)): plane Poiseuille flow along an inlet of any height | `profile = "u * (1 - u)"` |
 
 (`u = "..."` on the left is the entry's velocity key, a speed along the
 inward normal; the `u` inside the expression is the coordinate. Replace `U`
