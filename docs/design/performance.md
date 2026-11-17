@@ -451,8 +451,8 @@ which the reduction's minimum gives every rank for the triggers that read `wall`
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
-take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
+before 12.4, a failed capture of NCCL operations under one, tried on every rank before the first step, and
+HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
 would run every IF body at every step: the statistics' samples, the fused chemistry's flushes and the staged
 probes would then happen at steps that are not due.
 

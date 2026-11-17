@@ -35,7 +35,11 @@ std::filesystem::path rank_scratch_dir();
  */
 std::string serial_name(const std::string & name);
 
-/** @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS(). */
-void install_scratch_directories();
+/**
+ * @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS().
+ *        False, with the reason on stderr, when the ranks do not share the
+ *        temporary directory (TMPDIR), which the tests' files need.
+ */
+bool install_scratch_directories();
 
 #endif // SCRATCH_H

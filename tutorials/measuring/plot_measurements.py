@@ -131,9 +131,8 @@ def main():
     print(f"Strouhal: {st_lift:.4f} from the lift's crossings, {st_run:.4f} from the run's wake spectrum "
           f"(bin width {bin_width:.4f}), {st_spec:.4f} from the wake samples' spectrum")
 
-    phase_snap = snapshots.last(os.path.join(run, "solut", "box"))
-    pts, conn, offs, a = snapshots.read(phase_snap)
-    polys, _ = snapshots.cells(pts, conn, offs)
+    g, a = snapshots.read(snapshots.series(os.path.join(run, "solut", "box")))
+    polys, _ = snapshots.cells(g)
     polys = [p[:, :2] for p in polys]
     bins = sorted({k.split("_")[1] for k in a if k.startswith("PHASE_") and k.endswith("_U_Y")})
 
