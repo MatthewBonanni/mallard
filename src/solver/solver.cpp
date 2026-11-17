@@ -1701,12 +1701,12 @@ void Solver::revolve_curved_flux_points(const Kokkos::View<rtype **>::host_mirro
         ref_w[q] = double(weights(q));
         w_sum += ref_w[q];
     }
-    flux_normals = Kokkos::View<rtype ***>("flux_normals", mesh->n_faces, n_q, N_DIM);
+    flux_normals = Kokkos::View<rtype ***>("flux_normals", mesh->n_state_faces(), n_q, N_DIM);
     Kokkos::deep_copy(flux_normals, face_reconstruction->face_quad_normals);
     auto h_normals = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), flux_normals);
     std::vector<curved::Vec3> x, n, V(n_q);
     std::vector<double> w;
-    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
         if (!geometry.face_is_curved(f)) continue;
         geometry.face_rule(f, ref, ref_w, x, n, w);
         const curved::Vec3 R = geometry.revolved_area_vector(f);
