@@ -12,6 +12,7 @@
 
 #include "mesh_block.h"
 #include "mesh_file.h"
+#include "read_parallel.h"
 
 #include <algorithm>
 #include <bit>
@@ -34,8 +35,15 @@
 
 namespace {
 
+using parallel_read::ask;
+using parallel_read::collectively;
+using parallel_read::Fields;
+using parallel_read::FileLines;
+using parallel_read::LineReader;
+using parallel_read::NONE;
+using parallel_read::part_of;
+
 constexpr int BOUNDARY_DIM = N_DIM - 1;
-constexpr uint64_t NONE = ~uint64_t(0);
 
 struct GmshElementType {
     int dim;
@@ -80,209 +88,8 @@ GmshElementType gmsh_element_type(int type, const std::string & filename) {
 
 /** @brief The error of a file that is malformed at (1-based) line `line`, or that ends before it. */
 std::runtime_error malformed(const std::string & filename, uint64_t line) {
-    return std::runtime_error("Gmsh file " + filename + " is malformed or ends early (line " + std::to_string(line) + ").");
+    return parallel_read::malformed("Gmsh file " + filename, line);
 }
-
-/** @brief Run f on every rank; if it throws on any, throw the lowest rank's error on every rank. */
-template <typename F>
-void collectively(F && f) {
-    std::string error;
-    try {
-        f();
-    } catch (const std::exception & e) {
-        error = e.what();
-        if (error.empty()) error = "error reading a Gmsh file";
-    }
-    error = comm::first_error(error);
-    if (!error.empty()) throw std::runtime_error(error);
-}
-
-/** @brief The rank whose part of n items, split into p near-equal parts (block_begin), holds item i. */
-int part_of(uint64_t i, uint64_t n, int p) { return static_cast<int>(((i + 1) * uint64_t(p) - 1) / n); }
-
-/** @brief The whitespace-separated fields of a line. */
-class Fields {
-  public:
-    /** @brief The fields of the text of line `number` (1-based). */
-    Fields(const std::string & text, const std::string & filename, uint64_t number)
-        : at(text.c_str()), end(text.c_str() + text.size()), file(filename), line(number) {}
-
-    template <typename T>
-    T integer() {
-        skip();
-        if (at != end && *at == '+') at++;
-        T value{};
-        const auto [next, ec] = std::from_chars(at, end, value);
-        if (ec != std::errc()) throw malformed(file, line);
-        at = next;
-        return value;
-    }
-
-    /** @brief A count, which cannot exceed the file's size: every item it announces takes a byte. */
-    uint64_t count(uint64_t file_size) {
-        skip();
-        if (at != end && *at == '+') at++;
-        int64_t n = 0;
-        const auto [next, ec] = std::from_chars(at, end, n);
-        if (ec != std::errc()) throw malformed(file, line);
-        at = next;
-        if (n < 0 || uint64_t(n) > file_size) {
-            throw std::runtime_error("Gmsh file " + file + ": bad count " + std::to_string(n) + ".");
-        }
-        return uint64_t(n);
-    }
-
-    double real() {
-        skip();
-        char * next = nullptr;
-        const double value = std::strtod(at, &next);
-        if (next == at) throw malformed(file, line);
-        if (!std::isfinite(value)) {
-            throw std::runtime_error("Gmsh file " + file + ", line " + std::to_string(line) + ": " +
-                                     std::string(at, size_t(next - at)) + " is not a finite number.");
-        }
-        at = next;
-        return value;
-    }
-
-    std::string rest() const { return std::string(at, end); }
-
-  private:
-    void skip() {
-        while (at != end && (*at == ' ' || *at == '\t' || *at == '\r')) at++;
-    }
-
-    const char * at;
-    const char * end;
-    const std::string & file;
-    uint64_t line;
-};
-
-/**
- * @brief Where a file's lines start: at least every spacing-th line (see
- *        index_lines), and every line whose first word starts with '$' (a
- *        section marker), by that word.
- */
-struct FileLines {
-    std::vector<uint64_t> line, offset;  // sorted by line, line 0 first
-    std::map<std::string, std::vector<uint64_t>> marks;
-
-    /** @brief The lines of the first section of that name and of its end marker; NONE if absent. */
-    std::array<uint64_t, 2> section(const std::string & name) const {
-        auto begin = marks.find("$" + name), end = marks.find("$End" + name);
-        if (begin == marks.end()) return {NONE, NONE};
-        const uint64_t b = begin->second.front();
-        if (end != marks.end()) {
-            for (uint64_t e : end->second) {
-                if (e > b) return {b, e};
-            }
-        }
-        return {b, NONE};
-    }
-};
-
-/**
- * @brief Index the lines of a file of the given size, each rank scanning its
- *        share of the bytes in reads of `chunk` bytes, and recording at least
- *        every spacing-th line (collective).
- */
-FileLines index_lines(const std::string & filename, uint64_t size, uint64_t chunk, uint64_t spacing) {
-    const int p = comm::size(), r = comm::rank();
-    const uint64_t begin = block_begin(size, r, p), end = block_begin(size, r + 1, p);
-    const uint64_t CHUNK = std::max<uint64_t>(chunk, 1);
-    constexpr uint64_t WORD = 64;
-    // Local lines are numbered by the newlines of this part before them, so that rank 0's first is line 0
-    std::vector<uint64_t> local;
-    std::string words;
-    uint64_t n_newlines = 0;
-    collectively([&] {
-        std::ifstream in(filename, std::ios::binary);
-        std::vector<char> buffer(CHUNK + WORD);
-        auto line_start = [&](const char * s, const char * stop, uint64_t offset) {
-            if (n_newlines % spacing == 0) local.insert(local.end(), {n_newlines, offset});
-            while (s != stop && (*s == ' ' || *s == '\t')) s++;
-            if (s == stop || *s != '$') return;
-            const char * w = s;
-            while (w != stop && *w != ' ' && *w != '\t' && *w != '\r' && *w != '\n') w++;
-            words += std::string(s, w) + " " + std::to_string(n_newlines) + " " + std::to_string(offset) + "\n";
-        };
-        for (uint64_t at = begin; at < end; at += CHUNK) {
-            const uint64_t counted = std::min(CHUNK, end - at), len = std::min(counted + WORD, size - at);
-            in.seekg(static_cast<std::streamoff>(at));
-            in.read(buffer.data(), static_cast<std::streamsize>(len));
-            if (!in) throw cannot_read("the mesh file", filename);
-            const char * data = buffer.data();
-            if (at == 0) line_start(data, data + len, 0);
-            for (const char * nl = data; (nl = static_cast<const char *>(std::memchr(nl, '\n', counted - uint64_t(nl - data))));) {
-                n_newlines++;
-                nl++;
-                line_start(nl, data + len, at + uint64_t(nl - data));
-                if (uint64_t(nl - data) >= counted) break;
-            }
-        }
-    });
-    const std::vector<uint64_t> counts = comm::allgatherv(std::vector<uint64_t>{n_newlines});
-    uint64_t first = 0;
-    for (int q = 0; q < r; q++) first += counts[size_t(q)];
-    for (size_t k = 0; k < local.size(); k += 2) local[k] += first;
-    std::istringstream mine(words);
-    std::ostringstream marks;
-    std::string word;
-    uint64_t line = 0, offset = 0;
-    while (mine >> word >> line >> offset) {
-        marks << word << " " << first + line << "\n";
-        local.insert(local.end(), {first + line, offset});
-    }
-    const std::vector<uint64_t> all = comm::allgatherv(local);
-    std::vector<std::pair<uint64_t, uint64_t>> points = {{0, 0}};
-    for (size_t k = 0; k + 1 < all.size(); k += 2) points.emplace_back(all[k], all[k + 1]);
-    std::sort(points.begin(), points.end());
-    points.erase(std::unique(points.begin(), points.end()), points.end());
-    FileLines lines;
-    for (const auto & [l, o] : points) {
-        lines.line.push_back(l);
-        lines.offset.push_back(o);
-    }
-    for (const std::string & part : comm::allgather(marks.str())) {
-        std::istringstream in(part);
-        while (in >> word >> line) lines.marks[word].push_back(line);
-    }
-    for (auto & [name, at] : lines.marks) std::sort(at.begin(), at.end());
-    return lines;
-}
-
-/** @brief Reads lines of a file by their number, seeking to the nearest indexed line before. */
-class LineReader {
-  public:
-    LineReader(const std::string & filename, const FileLines & index)
-        : in(filename, std::ios::binary), lines(index), file(filename) {}
-
-    /** @brief Go to the start of line l. */
-    void seek(uint64_t l) {
-        const size_t k = size_t(std::upper_bound(lines.line.begin(), lines.line.end(), l) - lines.line.begin()) - 1;
-        if (!(at <= l && lines.line[k] <= at)) {
-            in.clear();
-            in.seekg(static_cast<std::streamoff>(lines.offset[k]));
-            at = lines.line[k];
-        }
-        for (; at < l; at++) in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        if (!in) throw malformed(file, l + 1);
-    }
-
-    /** @brief The fields of the next line. */
-    Fields next() {
-        if (!std::getline(in, text)) throw malformed(file, at + 1);
-        at++;
-        return Fields(text, file, at);
-    }
-
-  private:
-    std::ifstream in;
-    const FileLines & lines;
-    const std::string & file;
-    std::string text;
-    uint64_t at = 0;
-};
 
 /** @brief A run of nodes: tags from line tag_line on, coordinates from coord_line on (Gmsh 2.2: both on one line). */
 struct NodeBlock {
@@ -445,49 +252,6 @@ std::vector<ElementBlock> element_blocks(LineReader & reader, const FileLines & 
     return blocks;
 }
 
-/**
- * @brief Send each distinct key to rank owner(key), which writes the width
- *        words of its answer with answer(key, out); put(k, words) receives the
- *        answer to keys[k] (collective).
- */
-template <typename Owner, typename Answer, typename Put>
-void ask(const std::vector<uint64_t> & keys, size_t width, Owner owner, Answer answer, Put put) {
-    const size_t p = size_t(comm::size());
-    std::vector<std::vector<uint64_t>> distinct(p);
-    std::vector<size_t> sorted(p, 0);
-    auto deduplicate = [&](size_t q) {
-        std::sort(distinct[q].begin(), distinct[q].end());
-        distinct[q].erase(std::unique(distinct[q].begin(), distinct[q].end()), distinct[q].end());
-        sorted[q] = distinct[q].size();
-    };
-    for (uint64_t key : keys) {
-        const size_t q = size_t(owner(key));
-        distinct[q].push_back(key);
-        if (distinct[q].size() > 2 * sorted[q] + 4096) deduplicate(q);
-    }
-    for (size_t q = 0; q < p; q++) {
-        deduplicate(q);
-        distinct[q].shrink_to_fit();
-    }
-    comm::Received<uint64_t> asked = comm::exchange(std::vector<std::vector<uint64_t>>(distinct));
-    std::vector<std::vector<uint64_t>> reply(p);
-    for (size_t q = 0; q < p; q++) {
-        reply[q].resize(asked.from(q).size() * width);
-        uint64_t * out = reply[q].data();
-        for (uint64_t key : asked.from(q)) {
-            answer(key, out);
-            out += width;
-        }
-    }
-    release(asked.data);
-    const comm::Received<uint64_t> got = comm::exchange(std::move(reply));
-    for (size_t k = 0; k < keys.size(); k++) {
-        const size_t q = size_t(owner(keys[k]));
-        const auto at = std::lower_bound(distinct[q].begin(), distinct[q].end(), keys[k]) - distinct[q].begin();
-        put(k, got.data.data() + got.offsets[q] + uint64_t(at) * width);
-    }
-}
-
 /** @brief Node tag -> position of the node in the file, over every rank's nodes. */
 class NodePositions {
   public:
@@ -578,21 +342,6 @@ struct Elements {
     size_t size() const { return offsets.size() - 1; }
 };
 
-/** @brief Names in order of first appearance on rank 0, then rank 1, ... (collective). */
-std::vector<std::string> names_in_order(const std::vector<std::string> & local) {
-    std::string joined;
-    for (const std::string & name : local) joined += name + "\n";
-    std::vector<std::string> names;
-    std::set<std::string> seen;
-    for (const std::string & part : comm::allgather(joined)) {
-        std::istringstream in(part);
-        for (std::string name; std::getline(in, name);) {
-            if (seen.insert(name).second) names.push_back(name);
-        }
-    }
-    return names;
-}
-
 /** @brief The zone names of elements in order of first appearance (collective), and each element's zone index. */
 std::vector<std::string> zones_of(const Elements & elements, const std::map<int, std::string> & names,
                                   std::vector<uint32_t> & zone) {
@@ -605,7 +354,7 @@ std::vector<std::string> zones_of(const Elements & elements, const std::map<int,
     for (int physical : elements.physical) {
         if (physical != 0 && seen.insert(physical).second) local.push_back(name_of(physical));
     }
-    const std::vector<std::string> all = names_in_order(local);
+    const std::vector<std::string> all = parallel_read::names_in_order(local);
     std::map<int, uint32_t> index;
     for (int physical : seen) index[physical] = uint32_t(std::find(all.begin(), all.end(), name_of(physical)) - all.begin());
     zone.clear();
@@ -620,8 +369,8 @@ MeshBlock read_gmsh_block(const std::string & filename, uint64_t chunk_bytes, ui
     const int p = comm::size(), r = comm::rank();
     if (comm::allreduce(std::ifstream(filename).good() ? 0 : 1, comm::Op::MAX)) throw cannot_read("the mesh file", filename);
     const uint64_t file_size = std::filesystem::file_size(filename);
-    const FileLines lines = index_lines(filename, file_size, chunk_bytes, std::max<uint64_t>(index_spacing, 1));
-    LineReader reader(filename, lines);
+    const FileLines lines = parallel_read::index_lines(filename, file_size, chunk_bytes, index_spacing);
+    LineReader reader(filename, lines, "Gmsh file " + filename);
     GmshHeader header;
     collectively([&] { header = read_header(reader, lines, filename, file_size); });
     const std::vector<NodeBlock> node_runs = node_blocks(reader, lines, header, filename, file_size);
@@ -878,36 +627,4 @@ MeshBlock read_gmsh_block(const std::string & filename, uint64_t chunk_bytes, ui
         }
     }
     return block;
-}
-
-MeshFileData read_gmsh(const std::string & filename) {
-    comm::SelfScope self;
-    const MeshBlock block = read_gmsh_block(filename);
-    MeshFileData data;
-    data.nodes.resize(block.n_nodes());
-    for (uint64_t n = 0; n < block.n_nodes(); n++) {
-        FOR_I_DIM data.nodes[n][i] = static_cast<rtype>(block.node_coords[n][i]);
-    }
-    data.cells.offsets = block.cell_offsets;
-    for (uint64_t n : block.cell_nodes) data.cells.nodes.push_back(static_cast<uint32_t>(n));
-    for (uint64_t f = 0; f < block.n_faces(); f++) {
-        Mesh::BoundaryFace face;
-        for (uint64_t k = block.face_offsets[f]; k < block.face_offsets[f + 1]; k++) {
-            face.nodes.push_back(static_cast<uint32_t>(block.face_nodes[k]));
-        }
-        face.zone = block.zone_names[block.face_zone[f]];
-        data.boundary_faces.push_back(std::move(face));
-        std::vector<curved::Vec3> high_order;
-        if (!block.face_high_order_offsets.empty()) {
-            for (uint64_t k = block.face_high_order_offsets[f]; k < block.face_high_order_offsets[f + 1]; k++) {
-                curved::Vec3 x = {0.0, 0.0, 0.0};
-                FOR_I_DIM x[i] = block.face_high_order_nodes[k][i];
-                high_order.push_back(x);
-            }
-        }
-        data.boundary_high_order.push_back(std::move(high_order));
-    }
-    data.cell_zone = block.cell_zone;
-    data.cell_zone_names = block.cell_zone_names;
-    return data;
 }

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "mesh.h"
@@ -252,57 +253,67 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
 }
 
 /**
- * @brief Every rank's block of a mesh file is its part of the file's
- *        contents, which rank 0 alone reads: cells, nodes, boundary faces
- *        and their zones, cell zones and high-order nodes.
+ * @brief Every rank's block of a mesh file is its part of the mesh one rank
+ *        reads alone, whatever the number of ranks: cells, nodes, boundary
+ *        faces and their zones, cell zones and high-order nodes, for every
+ *        format (CGNS zones joined by 1-to-1 connectivities included).
  */
 TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshFile) {
+    const std::string meshes = source_dir() + "/test/data/meshes/";
 #if N_DIM == 2
-    const std::vector<std::string> files = {write_temp_shared("mallard_part_zones.msh", jittered_mixed_mesh(6, true)),
-                                            write_temp_shared("mallard_part_curved.msh", annulus_gmsh(3, 16, 2))};
+    std::vector<std::string> files = {write_temp_shared("mallard_part_zones.msh", jittered_mixed_mesh(6, true)),
+                                      write_temp_shared("mallard_part_curved.msh", annulus_gmsh(3, 16, 2))};
+    for (const char * name : {"cyl2d_fluent.msh", "cyl2d_fluent_bin.msh", "cyl2d_foam", "cyl2d_foam_bin"}) files.push_back(meshes + name);
+    if (have_cgns()) {
+        for (const char * name : {"cyl2d.cgns", "cyl2d_zones.cgns", "cyl2d_o2.cgns"}) files.push_back(meshes + name);
+    }
 #else
-    const std::vector<std::string> files = {write_temp_shared("mallard_part_curved.msh", shell_gmsh(2, 2, false, true))};
+    std::vector<std::string> files = {write_temp_shared("mallard_part_curved.msh", shell_gmsh(2, 2, false, true))};
+    for (const char * name : {"cyl3d_fluent.msh", "cyl3d_fluent_bin.msh", "cyl3d_foam", "cyl3d_foam_bin"}) files.push_back(meshes + name);
+    if (have_cgns()) {
+        for (const char * name : {"cyl3d.cgns", "cyl3d_zones.cgns", "cyl3d_tet.cgns"}) files.push_back(meshes + name);
+    }
 #endif
     const int r = comm::rank(), p = comm::size();
     for (const std::string & file : files) {
         SCOPED_TRACE(file);
-        const MeshFileData data = read_mesh_file(file);
+        MeshBlock whole;
+        {
+            comm::SelfScope self;
+            whole = read_file_block(file);
+        }
         const MeshBlock block = read_file_block(file);
-        ASSERT_EQ(block.first_cell, block_begin(data.cells.size(), r, p));
-        ASSERT_EQ(block.n_cells(), block_begin(data.cells.size(), r + 1, p) - block.first_cell);
-        for (uint64_t c = 0; c < block.n_cells(); c++) {
-            const auto cell = data.cells[block.first_cell + c];
-            ASSERT_EQ(std::vector<uint64_t>(block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c]),
-                                            block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c + 1])),
-                      std::vector<uint64_t>(cell.begin(), cell.end()));
+        ASSERT_EQ(block.first_cell, block_begin(whole.n_cells(), r, p));
+        ASSERT_EQ(block.n_cells(), block_begin(whole.n_cells(), r + 1, p) - block.first_cell);
+        const uint64_t first_corner = whole.cell_offsets[block.first_cell];
+        for (uint64_t c = 0; c <= block.n_cells(); c++) {
+            ASSERT_EQ(block.cell_offsets[c], whole.cell_offsets[block.first_cell + c] - first_corner);
         }
-        ASSERT_EQ(block.first_node, block_begin(data.nodes.size(), r, p));
-        ASSERT_EQ(block.n_nodes(), block_begin(data.nodes.size(), r + 1, p) - block.first_node);
-        for (uint64_t n = 0; n < block.n_nodes(); n++) {
-            FOR_I_DIM EXPECT_EQ(block.node_coords[n][i], double(data.nodes[block.first_node + n][i]));
-        }
-        const uint64_t first_face = block_begin(data.boundary_faces.size(), r, p);
-        ASSERT_EQ(block.n_faces(), block_begin(data.boundary_faces.size(), r + 1, p) - first_face);
-        std::vector<std::array<double, N_DIM>> high_order;
+        ASSERT_TRUE(std::equal(block.cell_nodes.begin(), block.cell_nodes.end(), whole.cell_nodes.begin() + std::ptrdiff_t(first_corner)));
+        ASSERT_EQ(block.first_node, block_begin(whole.n_nodes(), r, p));
+        ASSERT_EQ(block.n_nodes(), block_begin(whole.n_nodes(), r + 1, p) - block.first_node);
+        EXPECT_TRUE(std::equal(block.node_coords.begin(), block.node_coords.end(),
+                               whole.node_coords.begin() + std::ptrdiff_t(block.first_node)));
+        const uint64_t first_face = block_begin(whole.n_faces(), r, p);
+        ASSERT_EQ(block.n_faces(), block_begin(whole.n_faces(), r + 1, p) - first_face);
+        EXPECT_EQ(block.zone_names, whole.zone_names);
+        ASSERT_EQ(block.face_high_order_offsets.empty(), whole.face_high_order_offsets.empty());
         for (uint64_t f = 0; f < block.n_faces(); f++) {
-            const Mesh::BoundaryFace & face = data.boundary_faces[first_face + f];
-            EXPECT_EQ(block.zone_names[block.face_zone[f]], face.zone);
+            const uint64_t g = first_face + f;
+            EXPECT_EQ(block.face_zone[f], whole.face_zone[g]);
             EXPECT_EQ(std::vector<uint64_t>(block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f]),
                                             block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f + 1])),
-                      std::vector<uint64_t>(face.nodes.begin(), face.nodes.end()));
-            for (const curved::Vec3 & x : data.boundary_high_order[first_face + f]) {
-                std::array<double, N_DIM> y;
-                FOR_I_DIM y[i] = x[i];
-                high_order.push_back(y);
-            }
+                      std::vector<uint64_t>(whole.face_nodes.begin() + std::ptrdiff_t(whole.face_offsets[g]),
+                                            whole.face_nodes.begin() + std::ptrdiff_t(whole.face_offsets[g + 1])));
+            if (whole.face_high_order_offsets.empty()) continue;
+            EXPECT_TRUE(std::equal(block.face_high_order_nodes.begin() + std::ptrdiff_t(block.face_high_order_offsets[f]),
+                                   block.face_high_order_nodes.begin() + std::ptrdiff_t(block.face_high_order_offsets[f + 1]),
+                                   whole.face_high_order_nodes.begin() + std::ptrdiff_t(whole.face_high_order_offsets[g]),
+                                   whole.face_high_order_nodes.begin() + std::ptrdiff_t(whole.face_high_order_offsets[g + 1])));
         }
-        EXPECT_EQ(block.face_high_order_nodes, high_order);
-        EXPECT_EQ(block.cell_zone_names, data.cell_zone_names);
-        ASSERT_EQ(block.cell_zone.size(), data.cell_zone_names.empty() ? 0 : block.n_cells());
-        for (uint64_t c = 0; c < block.cell_zone.size(); c++) {
-            const uint64_t g = block.first_cell + c;
-            EXPECT_EQ(block.cell_zone[c], g < data.cell_zone.size() ? data.cell_zone[g] : Mesh::NO_CELL_ZONE);
-        }
+        EXPECT_EQ(block.cell_zone_names, whole.cell_zone_names);
+        ASSERT_EQ(block.cell_zone.size(), whole.cell_zone.empty() ? 0 : block.n_cells());
+        EXPECT_TRUE(std::equal(block.cell_zone.begin(), block.cell_zone.end(), whole.cell_zone.begin() + std::ptrdiff_t(block.first_cell)));
     }
 }
 
