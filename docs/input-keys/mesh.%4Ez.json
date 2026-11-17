@@ -1,7 +1,8 @@
 {
  "default": "100",
  "defaults_by_dim": {
-  "2": "16"
+  "2": "16",
+  "3": "16"
  },
  "dims": [
   2,
@@ -22,13 +23,17 @@
   "examples/flame_turbulence/hit.toml",
   "examples/flame_turbulence/input.toml",
   "examples/flame_turbulence/les.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/sedov_3d/input.toml",
   "examples/shock_bubble_3d/input.toml",
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
  ],
  "type": "integer"
 }

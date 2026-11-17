@@ -44,7 +44,8 @@ import numpy as np
 from scipy import ndimage
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../triple_flame"))
-from triple_flame_analysis import grid, snapshots  # noqa: E402
+from triple_flame_analysis import grid  # noqa: E402
+from mallard.vtu import read_index  # noqa: E402
 
 OUTCOMES = ["no effect", "wrinkled", "pocket", "quenched"]
 MARKERS = {"no effect": ("o", "#9aa0a6"), "wrinkled": ("s", "#4fc3f7"), "pocket": ("D", "#ffb74d"),
@@ -151,7 +152,7 @@ def classify(rows, control=None):
 
 
 def analyze(run_dir, p):
-    return np.array([frame_metrics(f, p) for _, f in snapshots(os.path.join(run_dir, "solut", "flame"))])
+    return np.array([frame_metrics(f, p) for _, f in read_index(os.path.join(run_dir, "solut", "flame"))])
 
 
 def main():

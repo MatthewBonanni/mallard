@@ -277,6 +277,56 @@ TEST(StructuredBlocks, ARingIsCutOnceAndThreeBlocksMeetingAtAVertexStayBoxes) {
     expect_boxes(star, blocks, block_cells, 3);
 }
 
+/** Keys of the nodes of make_box(n, ...) periodic along x: a node at x = n[0] takes the key of its image at x = 0. */
+std::vector<uint32_t> periodic_in_x(const Box & box, const std::array<uint32_t, N_DIM> & n) {
+    std::vector<uint32_t> key(box.nodes.size());
+    for (uint32_t v = 0; v < key.size(); v++) key[v] = box.nodes[v][0] == rtype(n[0]) ? v - n[0] : v;
+    return key;
+}
+
+/** @brief A box closed on itself by a periodic direction is one block in its own numbering, cut at the periodic boundary. */
+TEST(StructuredBlocks, APeriodicBoxIsCutAtItsPeriodicBoundary) {
+    std::array<uint32_t, N_DIM> n;
+    n.fill(5);
+    n[0] = 8;
+    const Box box = make_box(n, natural());
+    std::vector<uint32_t> block_cells;
+    const auto blocks = structured_blocks(nodes_of(box.cells), count(box.cells), 5, block_cells, periodic_in_x(box, n));
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_EQ(blocks[0].n, n);
+    std::vector<uint32_t> identity(box.cells.size());
+    std::iota(identity.begin(), identity.end(), 0u);
+    EXPECT_EQ(block_cells, identity);
+}
+
+/** @brief Cells on both sides of a periodic boundary, each side too short for a block, form one block across it. */
+TEST(StructuredBlocks, ABlockContinuesAcrossAPeriodicBoundary) {
+    std::array<uint32_t, N_DIM> n;
+    n.fill(5);
+    n[0] = 10;
+    const Box box = make_box(n, natural());
+    const std::vector<uint32_t> key = periodic_in_x(box, n);
+    // The cells at x = 7, 8, 9 and 0, 1, 2: three on each side of the boundary
+    Cells cells;
+    std::vector<uint32_t> x_of;
+    for (uint32_t c = 0; c < box.cells.size(); c++) {
+        const uint32_t x = c % n[0];
+        if (x >= 3 && x < 7) continue;
+        cells.push_back(box.cells[c]);
+        x_of.push_back(x);
+    }
+    std::vector<uint32_t> block_cells;
+    EXPECT_TRUE(structured_blocks(nodes_of(cells), count(cells), 5, block_cells).empty());
+    const auto blocks = structured_blocks(nodes_of(cells), count(cells), 5, block_cells, key);
+    ASSERT_EQ(blocks.size(), 1u);
+    std::array<uint32_t, N_DIM> expected = n;
+    expected[0] = 6;
+    EXPECT_EQ(blocks[0].n, expected);
+    ASSERT_EQ(block_cells.size(), cells.size());
+    const uint32_t row[6] = {7, 8, 9, 0, 1, 2};
+    for (uint32_t l = 0; l < block_cells.size(); l++) ASSERT_EQ(x_of[block_cells[l]], row[l % 6]) << "block cell " << l;
+}
+
 /** @brief Auto numbers the blocks' cells first and the others after them in their order; input and Hilbert find none. */
 TEST(StructuredBlocks, AutoNumbersBlocksFirst) {
     std::array<uint32_t, N_DIM> n;
