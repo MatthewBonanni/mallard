@@ -53,8 +53,8 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 | CUDA 13.5 (sm_80), OpenMP host, MPI, GPU-aware MPI, 2D and 3D | | Compile | | main, device PRs | `ci.yml/cuda-13.5` |
 | CUDA 13.4 (sm_80), same options | | Compile | | main | `ci.yml/cuda-13.4` |
 | CUDA 13.5 (sm_90), same options | arm64 (Grace) | Compile | | main | `ci.yml/cuda-13.5-arm64` |
-| HIP (ROCm 10.1, gfx90a), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an AMD GPU | device PRs | `ci.yml/hip` |
-| SYCL (oneAPI 2026.2, Intel GEN), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an Intel GPU | device PRs | `ci.yml/sycl` |
+| HIP (ROCm 10.1, gfx90a), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an AMD GPU. Steps kernel by kernel, one at a time: HIP's graphs have no conditional nodes ([steps by backend](parallel.md#mpi)) | device PRs | `ci.yml/hip` |
+| SYCL (oneAPI 2026.2, Intel GEN), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an Intel GPU. Steps kernel by kernel, one at a time: SYCL's graphs have no conditional nodes ([steps by backend](parallel.md#mpi)) | device PRs | `ci.yml/sycl` |
 | Serial, MPI, HDF5, 2D, AddressSanitizer and UBSan | x86-64 CPU | Run | Full suite on 1 rank; MPI tests on 2 ranks | nightly | `sanitizers.yml/asan-ubsan` |
 | Serial, HDF5, CGNS, Clang, libFuzzer, ASan and UBSan | x86-64 CPU | Run | Input and mesh reader harnesses: a minute each in 2D (every PR); ten minutes each in 2D and 3D (nightly) | main, nightly | `ci.yml/fuzz`, `fuzz.yml/fuzz` |
 | Serial, 2D and 3D | x86-64 CPU | Run | [Convergence studies](../verification/index.md) | by hand | `verification.yml/verification` |

@@ -451,7 +451,8 @@ which the reduction's minimum gives every rank for the triggers that read `wall`
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4) take their steps kernel by kernel, one at a time, the host reading each IF node's flag.
+before 12.4, and HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host
+reading each IF node's flag.
 
 Where NCCL communicates over a network, it adds host nodes to the operations it captures, which a conditional
 node's body cannot hold; a capture of NCCL operations under one is tried on every rank before the first step.

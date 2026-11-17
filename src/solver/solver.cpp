@@ -2936,11 +2936,16 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     if (step_controller.enabled()) numerics.add(step_controller.summary());
     std::string on_device = "decided on the device, up to " + logging::count(step_queue_depth) + " ahead";
-#ifdef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP) || defined(KOKKOS_ENABLE_SYCL)
     const std::string no_graph = step_graph_unsupported();
+#ifdef KOKKOS_ENABLE_CUDA
     numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+#endif
     // Steps ahead of the host need the step graph's conditional nodes
     if (!no_graph.empty()) on_device = "decided on the device, one at a time";
+#ifndef KOKKOS_ENABLE_CUDA
+    if (!no_graph.empty()) on_device += " (" + no_graph + ")";
+#endif
 #endif
     const std::string by_host = device_steps_unsupported();
     numerical.emplace_back("Steps", by_host.empty() ? on_device : "taken by the host: " + by_host);
