@@ -157,8 +157,8 @@ Every prescribed number may be a number (SI units), a quantity with a unit
 y"`, in SI units): wall temperatures and heat fluxes, outlet pressures, inflow
 and stagnation states, mass fluxes, wall velocities, far-field states and
 compositions. Expressions also read the boundary's
-[local coordinates](#local-coordinates): the wall distance `n`, `xi` and `eta`
-along the boundary, `r` and `theta` about its center, the arc length `s`.
+[local coordinates](#local-coordinates): `u` and `v` from 0 to 1 across the
+boundary whatever its shape, and the wall distance `n`.
 
 Vectors (`u` of `inlet_state`, `farfield` and walls; `mass_flux` of
 `inlet_mass_flow`) take either form:
@@ -270,117 +270,161 @@ Pitfalls:
 
 ## Local coordinates
 
-Expressions of a `[[boundaries]]` entry also read coordinates of the
-boundary itself, so one profile fits an inlet wherever it sits and however
-it is turned: a boundary layer in the distance from the wall, a pipe profile
-in the radius from the inlet's center.
+Expressions of a `[[boundaries]]` entry also read coordinates that belong to
+the boundary itself: `u` and `v` run from 0 to 1 across the entry's faces,
+whatever their shape, size and place, and `n` from 0 on the walls to 1 at the
+point farthest from them. A profile written in them needs no dimensions and
+no axes, and fits the same inlet on any mesh:
 
 ```toml
-# examples/channel_inlet: plane Poiseuille flow from the inlet's own wall distance n
-[[boundaries]]
-name = "left"
-type = "inlet_mass_flow"
-mdot = 0.1               # bulk velocity 0.1 across the channel of height 1
-profile = "n * (1 - n)"  # zero on both walls (n = 0), largest at the center (n = 0.5)
-T = 0.7142857142857143
+# A rectangular duct of any size, anywhere: zero on its four sides, U at the middle
+u = "U * 16 * u * (1 - u) * v * (1 - v)"
+
+# A pipe of any radius: Poiseuille flow of bulk velocity 10 m/s (r is 0 at the center, 1 at the wall)
+u = "20 * (1 - r^2)"
+
+# A turbulent profile on any duct or pipe: 1/7 power law in the wall distance
+u = "30 * n^(1/7)"
+
+# The same with a boundary layer 0.01 m thick, in meters from the wall
+u = "30 * min(n_m / 0.01, 1)^(1/7)"
+
+# Eight hot streaks around an annular inlet
+T = "300 + 50 * sin(8 * theta)"
+
+# 2D, examples/channel_inlet: plane Poiseuille flow along an inlet of any height
+profile = "u * (1 - u)"
 ```
 
-| Variable | Runs | Meaning | Unit |
+(`u = "..."` on the left is the entry's velocity key, a speed along the
+inward normal; the `u` inside the expression is the coordinate. Replace `U`
+by a number.)
+
+Each coordinate comes as a fraction and as a length. The fraction has the
+bare name; its twin in meters, measured along the boundary, ends in `_m`:
+
+| Fraction | In meters | Runs | Meaning |
 |---|---|---|---|
-| `n` | 2D, 3D | Distance from the face center to the nearest wall face | m |
-| `xi` | 2D, 3D | Coordinate along the frame's tangent, from its origin | m |
-| `eta` | 3D | Coordinate along the frame's second tangent (span), from its origin | m |
-| `r` | 3D | Distance from the origin in the boundary's plane: `hypot(xi, eta)` | m |
-| `theta` | 3D | Angle from the tangent toward the span: `atan2(eta, xi)`, in (-pi, pi] | rad |
-| `s` | 2D | Arc length along the boundary, from its end with the lowest `xi` | m |
+| `u` | `u_m` | 2D, 3D | Along the boundary: from one end of a 2D boundary to the other, or from one side of a four-sided patch to the opposite one; around a ring or a disk |
+| `v` | `v_m` | 3D | Across the patch, from the side `v = 0` to the opposite one; from one rim of a ring to the other; from the center of a disk to its edge |
+| `n` | `n_m` | 2D, 3D | Distance to the nearest wall face; `n` is `n_m` over its largest value on the boundary |
+| `r` | `r_m` | 3D, rings and disks | Another name for `v`, `v_m`: the radius of a disk, 0 at its center and 1 at its edge |
+| `theta` | | 3D, rings and disks | The angle around: `2 * pi * u`, in [0, 2 pi) |
 
-![The inlet of a pipe in its 3D mesh: the frame's origin at the inlet's center, the normal into the pipe, the tangent and the span in the inlet's plane, and one face's n to the wall, xi, eta, r and theta](../images/guide/boundary_frame-light.svg#gh-light-mode-only)
-![The inlet of a pipe in its 3D mesh: the frame's origin at the inlet's center, the normal into the pipe, the tangent and the span in the inlet's plane, and one face's n to the wall, xi, eta, r and theta](../images/guide/boundary_frame-dark.svg#gh-dark-mode-only)
+![The inlet of a rectangular duct in its 3D mesh, colored by u with lines of constant u and v, and one face's u, v and wall distance n](../images/guide/boundary_patch-light.svg#gh-light-mode-only)
+![The inlet of a rectangular duct in its 3D mesh, colored by u with lines of constant u and v, and one face's u, v and wall distance n](../images/guide/boundary_patch-dark.svg#gh-dark-mode-only)
 
-*The inlet of a pipe in its mesh, the inlet's frame and the local coordinates
-of one of its faces (`tools/docs/boundary_coordinates.py`).*
+*The inlet of a duct in its mesh: `u` and `v` across the inlet's faces, and
+the wall distance `n` of one face (`tools/docs/boundary_coordinates.py`).*
 
-They are available in every value of the entry (`u`, `direction`, `p`, `T`,
-`p0`, `T0`, `mass_flux`, `profile`, `q`, `X` and `Y`, `dirichlet` states and
-the `turbulence` table's `reynolds_stress`), alone or with `x`, `y`, `z` and
-`t`: `"30 * min(n / 0.01, 1)^(1/7) * (1 + 0.05 * sin(2 * pi * 100 * t))"`
-pulses the boundary layer. `where` selects faces by `x`, `y`, `z` only (the
-frame is built from the faces it selects), and `mdot` and an `average`
-outlet pressure, totals over the boundary, read neither.
+**The patch.** The faces of an entry (after `where`) are its patch, and its
+outline decides what `u` and `v` are. The run log names the patch and shows
+the range of every coordinate the entry reads, as `local coordinates:
+four-sided patch, (u, v) = (0, 0) at (0, 0, 0), (1, 0) at (0, 0.2, 0), ...; u
+0.03125 to 0.96875`, so a coordinate that runs the wrong way is visible
+before the run starts.
 
-**The frame.** Each entry has one frame, from all of its faces (after
-`where`), the same on every rank:
+| Patch | Outline | `u` | `v` |
+|---|---|---|---|
+| Four-sided | One loop with four corners (where it turns by more than 30 degrees): a rectangle, a parallelogram, a sector, a curved or warped panel | 0 on one side, 1 on the opposite one | 0 on a third side, 1 on the fourth |
+| Ring | Two loops: an annulus, the side of a pipe, of a cone or of a nozzle | Around the ring, in [0, 1) | 0 on one rim, 1 on the other |
+| Disk | One loop without corners: a circle, an ellipse, a rounded slot | Around the center, in [0, 1) | 0 at the center, 1 on the edge |
+| Curve (2D) | A 2D boundary: one open curve | Arc length over the boundary's length | |
 
-- **origin**: the area-weighted center of the faces;
-- **normal**: their area-weighted mean normal, into the domain;
-- **tangent**: the coordinate axis after the normal's dominant one (x to y,
-  y to x in 2D; x to y, y to z, z to x in 3D), made perpendicular to the
-  normal. An inlet in the `x = 0` plane has its tangent along +y, so `xi` is
-  `y` minus the inlet's center;
-- **span** (3D): perpendicular to both, its largest component positive (+z
-  for that inlet).
+![u and v over a rectangle, a parallelogram, a warped four-sided patch, a circle, an annulus, the side of a cone and the side of a pipe, as face colors and contour lines](../images/guide/boundary_coordinates-light.svg#gh-light-mode-only)
+![u and v over a rectangle, a parallelogram, a warped four-sided patch, a circle, an annulus, the side of a cone and the side of a pipe, as face colors and contour lines](../images/guide/boundary_coordinates-dark.svg#gh-dark-mode-only)
 
-`frame = { origin = [...], normal = [...], tangent = [...] }` overrides any of
-them: `origin = [0, 0]` measures `xi` from the corner rather than the
-center, and a `tangent` is made perpendicular to the normal. The run log
-shows each entry's frame and the range of every coordinate its expressions
-read, as `local coordinates: frame origin (0, 0.05), normal (1, 0), tangent
-(0, 1); n 0.000625 to 0.05`, so a misplaced frame is visible before the run
-starts.
+*`u` (top) and `v` (bottom) over seven patches: each face in the color of
+its value, the lines those of the coordinate between the faces
+(`tools/docs/boundary_coordinates.py`, which checks the ranges against
+Mallard's own on the same meshes).*
 
-**The wall distance** `n` is the exact distance from the face center to the
+`u` and `v` are smooth everywhere on the patch and follow its sides: on a
+rectangle or a parallelogram they are the fractions of the way across, on a
+circle the radius over the circle's and the angle, and on any other shape the
+coordinates that Laplace's equation on the patch's own surface gives
+([design note](../design/patch_coordinates.md)). They are computed once at
+setup from all of the entry's faces, the same on any number of ranks.
+
+Where `u` and `v` start:
+
+- **Four-sided.** `u` grows along the coordinate axis after the one the patch
+  faces, and `v` along the next (x to y to z to x): on an inlet across x, `u`
+  runs along +y and `v` along +z; across y, `u` along +z and `v` along +x;
+  across z, `u` along +x and `v` along +y. On a patch oblique to the axes it
+  is the pair of sides nearest to that.
+- **Ring.** `v` is 0 on the shorter rim (the inner circle of an annulus, the
+  narrow end of a cone) and, between rims as long as each other (a pipe), on
+  the lower one along the ring's axis. `u` is 0 on the side of the axis after
+  the one the ring is around, and grows toward the next: around z, `theta` is
+  the angle from +x toward +y.
+- **Disk.** `v` is 0 at the center of the faces' area; `u` as on a ring.
+- **Curve (2D).** `u` is 0 at the end with the lower coordinate along the axis
+  the boundary mostly runs along (the lower y on an inlet across x).
+
+Write `1 - u` to turn a coordinate around. `corners` sets the corners of a
+four-sided patch instead, in the order `(u, v)` = (0, 0), (1, 0), (1, 1),
+(0, 1): for a patch whose outline has no clear corners or more than four
+(each point is moved to the nearest node of the outline), or to choose where
+`u` and `v` start. `corners = []` treats a patch with corners as a disk.
+
+```toml
+[[boundaries]]
+name = "panel"
+type = "wall_isothermal"
+T = "300 + 200 * u"   # from the side through the first and last corner to the opposite one
+corners = [[0, 0, 0], [0.4, 0, 0.1], [0.4, 0.3, 0.1], [0, 0.3, 0]]
+```
+
+**Lengths.** `v_m` is the distance along the patch's surface from where `v`
+is 0 (a side, a rim or the center), in meters, and `u_m` that from the side
+`u = 0` of a four-sided patch; around a ring or a disk `u_m` is the arc
+length from where `u` is 0, on the circle through the face. On a rectangle
+they are the distances from two of its sides, on a pipe's wall the height and
+the arc length, on a disk `r_m` is the radius. In 2D `u_m` is the arc length
+along the boundary.
+
+**The wall distance** `n_m` is the exact distance from the face center to the
 nearest wall face: to segments in 2D and to the faces' triangles in 3D, so
 it holds on curved and slanted walls, in corners (a rectangular duct's
 inlet gets the distance to its nearest side) and on inlets that do not touch
 a wall. By default the walls are the faces of every `wall_adiabatic`,
 `wall_isothermal` and `wall_heat_flux` entry; `walls = ["bottom"]` names the
 zones instead, of any type (a symmetry plane too). A curved wall counts by
-its straight faces.
+its straight faces. `n` divides it by its largest value over the boundary's
+faces and nodes (the half height of a channel, the radius of a pipe).
 
-![n, xi, eta, r and theta over the inlet faces of a rectangular duct, a circular pipe and an annulus, as face colors and contour lines](../images/guide/boundary_coordinates-light.svg#gh-light-mode-only)
-![n, xi, eta, r and theta over the inlet faces of a rectangular duct, a circular pipe and an annulus, as face colors and contour lines](../images/guide/boundary_coordinates-dark.svg#gh-dark-mode-only)
+![A 2D inlet on the outer arc of half a ring: u along the arc from 0 to 1, and n to the nearer straight wall](../images/guide/boundary_arc_length-light.svg#gh-light-mode-only)
+![A 2D inlet on the outer arc of half a ring: u along the arc from 0 to 1, and n to the nearer straight wall](../images/guide/boundary_arc_length-dark.svg#gh-dark-mode-only)
 
-*The local coordinates over three inlets with the default frame, seen along
-the normal (tangent to the right, span up, + at the origin): each face in the
-color of its value, the lines those of the coordinate between the faces, and
-the range of the faces' values as the run log prints it. `n` follows every
-wall, the inner one of the annulus too; the annulus's origin, the center of
-its faces, lies in its hole, so `r` is the radius and `theta` goes around it
-(`tools/docs/boundary_coordinates.py`, which checks the frame and the ranges
-against Mallard's).*
+*A curved 2D inlet: `u` follows the arc from one end to the other, `n` is 1
+where the walls are farthest (`tools/docs/boundary_coordinates.py`).*
 
-**The arc length** `s` (2D) runs along the faces from their end with the
-lowest `xi` (of two ends at the same `xi`, the one with the lower x, then
-y), so it is the distance along the boundary on a curved inlet. It
-needs the faces to form one open curve; a closed curve or several pieces
-are an error naming the entry (split it with `where`, or use `xi` or `n`).
-In 3D a curved surface has no single arc length: use `xi`, `eta` or `r`,
-`theta`.
+The coordinates are available in every value of the entry (`u`,
+`direction`, `p`, `T`, `p0`, `T0`, `mass_flux`, `profile`, `q`, `X` and `Y`,
+`dirichlet` states and the `turbulence` table's `reynolds_stress`), alone or
+with `x`, `y`, `z` and `t`: `"30 * n^(1/7) * (1 + 0.05 * sin(2 * pi * 100 *
+t))"` pulses the profile. `where` selects faces by `x`, `y`, `z` only (the
+patch is made of the faces it selects), and `mdot` and an `average` outlet
+pressure, totals over the boundary, read neither.
 
-![A 2D inlet on the outer arc of half a ring: s along the arc, xi along the frame's straight tangent, n to the nearer straight wall, and the three along the inlet](../images/guide/boundary_arc_length-light.svg#gh-light-mode-only)
-![A 2D inlet on the outer arc of half a ring: s along the arc, xi along the frame's straight tangent, n to the nearer straight wall, and the three along the inlet](../images/guide/boundary_arc_length-dark.svg#gh-dark-mode-only)
-
-*A curved 2D inlet, colored by `s`: `s` grows evenly along the faces, while
-`xi`, their position along the frame's straight tangent, flattens toward the
-ends where the inlet turns along the normal (`tools/docs/boundary_coordinates.py`).*
-
-A 1/7 power-law boundary layer of thickness 0.01 m on every wall an inlet
-touches, a fully developed pipe flow of bulk velocity 10 m/s on a circular inlet of
-radius 0.02 m (3D), wherever the pipe is and however it is turned, and a
-mass-flow inlet shaped like a boundary layer:
+A boundary layer of thickness 0.01 m on every wall an inlet touches, a fully
+developed pipe flow of bulk velocity 10 m/s on a circular inlet (3D),
+wherever the pipe is and however it is turned, and a mass-flow inlet shaped
+like a boundary layer:
 
 ```toml
 [[boundaries]]
 name = "inlet"
 type = "inlet_state"
-u = ["30 * min(n / 0.01, 1)^(1/7)", "0"]
+u = ["30 * min(n_m / 0.01, 1)^(1/7)", "0"]
 p = 1.0e5
 T = 300.0
 
 [[boundaries]]
 name = "pipe_inlet"
 type = "inlet_state"
-u = "20 * (1 - (r / 0.02)^2)"  # a speed along the inward normal
+u = "20 * (1 - r^2)"  # a speed along the inward normal
 p = 1.0e5
 T = 300.0
 
@@ -388,37 +432,45 @@ T = 300.0
 name = "slot"
 type = "inlet_mass_flow"
 mdot = 0.05
-profile = "min(n / 0.002, 1)^(1/7)"  # rescaled so that the faces carry mdot
+profile = "min(n_m / 0.002, 1)^(1/7)"  # rescaled so that the faces carry mdot
 T = 300.0
 walls = ["slot_wall"]
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `frame.origin` | the area-weighted center of the entry's faces | Origin of `xi`, `eta`, `r`, `theta` [m] |
-| `frame.normal` | the area-weighted mean inward normal | Normal of the frame (normalized) |
-| `frame.tangent` | the axis after the normal's dominant one | Direction of `xi`, made perpendicular to the normal |
-| `walls` | every wall entry's faces | Zones `n` measures the distance from |
+| `corners` | found from the patch's outline | 3D: the four corners of the patch [m], where `(u, v)` is (0, 0), (1, 0), (1, 1), (0, 1); `[]` for a disk |
+| `walls` | every wall entry's faces | Zones `n` and `n_m` measure the distance from |
 
 Pitfalls:
 
 - The coordinates are computed once at setup, at the face centers, from the
   mesh the run starts with; a profile is sampled at the face centers, so a
   boundary layer needs faces finer than its thickness to be resolved.
-- On a closed surface (the whole surface of a cylinder) the normals cancel
-  and the frame has no normal: give `frame.normal`, or split the zone.
+- `u` and `v` belong to one patch: an entry whose faces form separate pieces,
+  a closed surface, or a patch with more than one hole is an error naming
+  the entry. Split it with `where`, one entry per patch.
+- An outline with corners other than four (an L, a triangle, a half disk, a
+  staircase cut by `where`) is an error listing the corners found: give the
+  four to use in `corners`, or `corners = []`.
+- A circle of fewer than about 12 faces around turns by more than 30 degrees
+  at every node, so its nodes count as corners: give `corners = []`.
+- `r`, `r_m` and `theta` exist on rings and disks; on a four-sided patch they
+  are an error (use `u`, `v` or `n`). On a ring `r` is 0 on the rim `v = 0`,
+  not on the axis, and `v` varies as the logarithm of the radius across a
+  flat annulus (`r_m` is the distance from the inner rim in meters).
+- Near the center of a disk (within about two faces) `v` and `u` are
+  accurate to the size of a face.
+- `n` reaches 1 only if a face center or node lies at the point farthest
+  from the walls; otherwise it is `n_m` over the largest distance the mesh
+  holds.
 - A local variable named like a coordinate (`var r := sqrt(x^2 + y^2)`)
-  hides it inside that expression, so expressions written before the local
-  coordinates keep their meaning.
-- On an inlet oblique to the axes (near 45 degrees), the dominant axis of the
-  normal, and so the default tangent, can flip with round-off between two
-  meshes of the same inlet: give `frame.tangent` there.
+  hides it inside that expression.
 - On a wall entry that reads `n`, the default walls include the entry
-  itself, so `n` is 0 on every face, which is an error: name the other walls
-  in `walls`. `walls` and `frame` are errors on an entry whose expressions
+  itself, so `n_m` is 0 on every face, which is an error: name the other walls
+  in `walls`. `walls` and `corners` are errors on an entry whose expressions
   don't read the coordinates they set.
-- 2D runs have no `eta`, `r`, `theta`, and 3D runs no `s`: the error says
-  which coordinates the run has.
+- 2D runs have `u`, `n` and their lengths only: the error says so.
 
 ## Walls
 
