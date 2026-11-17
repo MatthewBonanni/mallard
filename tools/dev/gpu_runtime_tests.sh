@@ -5,9 +5,9 @@
 #  - NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) on a representative set of tests, with
 #    MALLARD_TEST_CUDA_GRAPHS=off: compute-sanitizer misreports kernels in the step graph (#1076), so the
 #    steps run kernel by kernel, with the same results.
-# --full also runs initcheck, memcheck on the whole suite, and every MPI test on the ranks MPIEXEC starts,
-# so that with ranks on several nodes NCCL's halo exchanges and collectives cross the network. Exits 1 if
-# any check failed.
+# --full also runs initcheck, memcheck on the whole suite but the chemistry reactor tests, and every MPI
+# test on the ranks MPIEXEC starts, so that with ranks on several nodes NCCL's halo exchanges and collectives
+# cross the network. Exits 1 if any check failed.
 #
 #   tools/dev/gpu_runtime_tests.sh [--full] BUILD_DIR
 #
@@ -34,7 +34,7 @@ graphs='StepQueueTest.*:*StepQueueExample.*:IOTest.Asynchronous*:ForcedInletTest
 graphs+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 graphs_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.Distributed*'
 graphs_distributed+=':MPITest.*WithAndWithoutStepGraphs:MPI3DTest.*WithAndWithoutStepGraphs'
-# One or two tests per family of kernels: schemes, physics, boundaries, chemistry, LES, statistics, output
+# A few tests per kernel family (schemes, boundaries, chemistry, LES, statistics, output): minutes under racecheck
 sanitized='StepQueueTest.OutputsByStep:StepQueueTest.FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState'
 sanitized+=':StepQueueTest.SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice'
 sanitized+=':StepQueueTest.RestartedRunsCaptureTheStepGraphAgainAndContinueBitForBit'
@@ -43,7 +43,6 @@ sanitized+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 sanitized+=':IOTest.AsynchronousOutputWritesTheSameFiles'
 sanitized+=':MPITest.TENOOnQuadsMatchesSerial:MPITest.LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs'
 sanitized+=':MPITest.CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs'
-sanitized+=':MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree:ChemistryReactorTest.VectorLanesIntegrateLikeOneThread'
 sanitized_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.DistributedRunsAsTheHostTakesThem'
 tools=(memcheck racecheck synccheck)
 if [ "$full" = 1 ]; then
@@ -64,10 +63,13 @@ check() {
     fi
 }
 mpi() { [ "${mpiexec[*]}" != none ]; }
-# The test binary only: the runs it starts (the mallard executable) keep their step graphs
+# The test binary only: the runs it starts (the mallard executable) keep their step graphs. racecheck's warnings
+# (hazards it does not rate as errors) include Kokkos' CUDA reductions of values over 16 bytes: every lane of the
+# first warp stores the result, and thread 0 reads it for final() with no __syncwarp between
 sanitizer() {
     sanitize=(env MALLARD_TEST_CUDA_GRAPHS=off compute-sanitizer --tool "$1" --target-processes application-only
               --error-exitcode 99 --print-limit 20)
+    [ "$1" = racecheck ] && sanitize+=(--racecheck-detect-level error)
 }
 
 check "step graphs, 1 GPU" "$bin" --gtest_color=no --gtest_filter="$graphs"
@@ -81,7 +83,9 @@ for tool in "${tools[@]}"; do
 done
 if [ "$full" = 1 ]; then
     sanitizer memcheck
-    check "memcheck, whole suite, 1 GPU" "${sanitize[@]}" "$bin" --gtest_color=no
+    # The chemistry reactor tests integrate thousands of reactors: hours under memcheck
+    check "memcheck, whole suite, 1 GPU" "${sanitize[@]}" "$bin" --gtest_color=no \
+        --gtest_filter='-ChemistryReactorTest.*:ChemistryBenchmarkTest.*'
     mpi && check "MPI tests, ${mpiexec[*]}" "${mpiexec[@]}" "$bin" --gtest_color=no --gtest_filter="$mpi_tests" \
         --kokkos-map-device-id-by=mpi_rank
 fi

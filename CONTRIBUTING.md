@@ -279,8 +279,9 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   compute-sanitizer misreports kernels in step graphs
   ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)), so the sanitized tests run
   with `MALLARD_TEST_CUDA_GRAPHS=off`: every solver as with `[run] cuda_graphs = false`, and
-  the assertions that steps were graphed are skipped. `--full` adds `initcheck`, `memcheck` on
-  the whole suite, and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
+  the assertions that steps were graphed are skipped. `racecheck` fails on hazards it rates as
+  errors, not on its warnings, which Kokkos' reductions of large values raise. `--full` adds
+  `initcheck`, `memcheck` on the whole suite but the chemistry reactor tests, and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
   across the network).
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
