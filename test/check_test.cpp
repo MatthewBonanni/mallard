@@ -40,6 +40,7 @@
 #include "report.h"
 #include "scratch.h"
 #include "solver.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -354,6 +355,20 @@ TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
     EXPECT_LE(double(r.min_peak), third);
     EXPECT_NEAR(double(r.min_peak), predicted_peak(r, double(r.min_owned + r.min_halo)), 1.0);
     EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
+}
+
+TEST(CheckSizing, CellsPerRankStayWithinTheEntriesOfAView) {
+    // With a terabyte per rank, a View of rank 2 or more runs out of entries before the memory does
+    CheckOptions options;
+    options.memory = 1ull << 40;
+    options.memory_name = "1TiB";
+    const CheckReport r = check(sized_box(256, 64), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    ASSERT_GE(r.view_entries_per_cell, double(N_CONSERVATIVE));  // the conserved state at least
+    EXPECT_EQ(r.view_max_local_cells, uint64_t(double(view_entries::MAX) / r.view_entries_per_cell));
+    EXPECT_TRUE(r.sizing_view_entries);
+    EXPECT_EQ(r.max_local_cells, r.view_max_local_cells);
+    EXPECT_LT(double(r.max_local_cells) * r.bytes_per_cell, double(options.memory));
 }
 
 TEST(CheckSizing, MemoryIsASizeWithItsUnitOrAGpu) {

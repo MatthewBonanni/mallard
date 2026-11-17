@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
     if (const char * limit = std::getenv("MALLARD_TEST_TIMEOUT")) {
         ::testing::UnitTest::GetInstance()->listeners().Append(new Watchdog(std::atof(limit)));
     }
-    install_scratch_directories();
+    if (!install_scratch_directories()) return 1;
     Kokkos::initialize(argc, argv);
     int result = RUN_ALL_TESTS();
     Kokkos::finalize();
