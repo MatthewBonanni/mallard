@@ -180,6 +180,21 @@ TEST(RegionSamplerTest, AdditionsInABinadeAtOnceAreTheAdditionsOneAtATime) {
     }
 }
 
+TEST(RegionSamplerTest, UlpsOfAnAddendAreRoundedToTheNearestExceptTies) {
+    using region::sampler::detail::add_ulps;
+    const double per_ulp = 1024.0, tie = 5.5 / per_ulp;
+    uint64_t k = 0;
+    EXPECT_TRUE(add_ulps(5.25 / per_ulp, per_ulp, k));
+    EXPECT_TRUE(add_ulps(std::nextafter(tie, 1.0), per_ulp, k));
+    EXPECT_TRUE(add_ulps(std::nextafter(tie, 0.0), per_ulp, k));
+    EXPECT_TRUE(add_ulps(0.0, per_ulp, k));
+    EXPECT_EQ(k, 16u);
+    EXPECT_FALSE(add_ulps(tie, per_ulp, k));
+    EXPECT_FALSE(add_ulps(0x1p52 / per_ulp, per_ulp, k));
+    EXPECT_FALSE(add_ulps(-1.0 / per_ulp, per_ulp, k));
+    EXPECT_EQ(k, 16u);
+}
+
 TEST(RegionSamplerTest, SharpSumsAcrossABinadeAreTheSumsOfOneThread) {
     namespace sampler = region::sampler;
     namespace detail = region::sampler::detail;
@@ -236,7 +251,9 @@ TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
     implicit.implicit = true;
     std::vector<Case> cases = {{"sharp", {ball, 0.0, true}, false},
                                {"smooth", {ball, 0.06, true}, false},
-                               {"implicit", {implicit, 0.0, false}, false}};
+                               {"implicit", {implicit, 0.0, false}, false},
+                               // Subdivided everywhere: more subdivided simplices on a level than team_classify lists
+                               {"implicit smooth", {implicit, 0.06, false}, false}};
     if (N_DIM == 2) cases.push_back({"axisymmetric", {ball, 0.0, true}, true});
     for (const Case & c : cases) {
         const Shape<Ball> shape = c.shape;

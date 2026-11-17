@@ -218,27 +218,64 @@ constexpr uint32_t SUBTREES = 64;
 /** @brief Words of the counts of team_simplex: kept nodes and kept inside per level below COUNTED, per subtree. */
 constexpr size_t COUNT_WORDS = SUBTREES * (MAX_LEVEL - COUNTED);
 
+/** @brief Most subdivided nodes of a level that team_classify lists; past that, it scans the level's parents. */
+constexpr uint32_t SUBDIVIDED_LIST = N_DIM == 2 ? 512 : 2048;
+
+/**
+ * @brief Binades of inside, from its own on, and of total in which
+ *        team_sample sums each slot's terms in ulps: inside, small where a
+ *        cell's first simplices are mostly outside, can grow further in one.
+ */
+constexpr int IN_BINADES = N_DIM == 2 ? 2 : 4, ALL_BINADES = 2, SLOT_SUMS = IN_BINADES + ALL_BINADES;
+
+/** @brief Bytes of the sums of the slots of team_sample: SLOT_SUMS sums in ulps each, then a word of flags each. */
+constexpr size_t SLOT_BYTES = SUBTREES * (SLOT_SUMS * sizeof(uint64_t) + sizeof(uint32_t));
+
+/**
+ * @brief Bytes the lists of subdivided nodes of two levels (team_classify)
+ *        share with what is used after it: the counts of kept nodes, or a
+ *        weight and indicator per thread of a team of team_size threads.
+ */
+KOKKOS_INLINE_FUNCTION constexpr size_t shared_bytes(const int team_size) {
+    size_t bytes = 2 * SUBDIVIDED_LIST * sizeof(uint16_t);
+    if (COUNT_WORDS * sizeof(uint32_t) > bytes) bytes = COUNT_WORDS * sizeof(uint32_t);
+    if (2 * static_cast<size_t>(team_size) * sizeof(double) > bytes) bytes = 2 * static_cast<size_t>(team_size) * sizeof(double);
+    return (bytes + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
+}
+
 /** @brief Team scratch of team_simplex and team_cone, for a team of team_size threads. */
 KOKKOS_INLINE_FUNCTION constexpr size_t team_bytes(const int team_size) {
-    return 2 * static_cast<size_t>(team_size) * sizeof(double) + tree_bytes() + COUNT_WORDS * sizeof(uint32_t);
+    return shared_bytes(team_size) + SLOT_BYTES + tree_bytes() + 3 * sizeof(uint32_t);
 }
 
 /**
- * @brief Team scratch of team_simplex and team_cone: the table of states, a
- *        weight and indicator per thread, and the counts of kept nodes.
+ * @brief Team scratch of team_simplex and team_cone: the lists of subdivided
+ *        nodes, then in the same bytes the counts of kept nodes or a weight
+ *        and indicator per thread; the sums of the slots; the table of
+ *        states; and the lengths of the lists.
  */
 struct TeamScratch {
     uint32_t * tree = nullptr;
     double * terms = nullptr;
     uint32_t * counts = nullptr;
+    uint16_t * subdivided = nullptr;
+    uint32_t * n_subdivided = nullptr;
+    uint64_t * sums = nullptr;
 };
 
 /** @brief The TeamScratch in team_bytes(member.team_size()) of level 0 team scratch. */
 template <typename Member>
 KOKKOS_INLINE_FUNCTION TeamScratch team_scratch(const Member & member) {
-    auto * terms = static_cast<double *>(member.team_scratch(0).get_shmem(team_bytes(member.team_size())));
-    auto * tree = reinterpret_cast<uint32_t *>(terms + 2 * member.team_size());
-    return {tree, terms, tree + tree_bytes() / sizeof(uint32_t)};
+    const int size = member.team_size();
+    char * bytes = static_cast<char *>(member.team_scratch(0).get_shmem(team_bytes(size)));
+    auto * sums = reinterpret_cast<uint64_t *>(bytes + shared_bytes(size));
+    auto * tree = reinterpret_cast<uint32_t *>(bytes + shared_bytes(size) + SLOT_BYTES);
+    return {tree,
+            reinterpret_cast<double *>(bytes),
+            reinterpret_cast<uint32_t *>(bytes),
+            reinterpret_cast<uint16_t *>(bytes),
+            tree + tree_bytes() / sizeof(uint32_t),
+            sums};
 }
 
 namespace detail {
@@ -311,12 +348,13 @@ struct Walk {
 /**
  * @brief The states of the nodes of a subdivision tree, classify(node, level)
  *        each, into scratch.tree: the threads of a team classify each level
- *        together, the children of each subdivided parent placed from root.
+ *        together, the children of each subdivided parent placed from root,
+ *        and call kept(node, level, code) for each kept node below the root.
  *        Returns the state of the root.
  */
-template <typename Member, typename Node, typename Child, typename Classify>
+template <typename Member, typename Node, typename Child, typename Classify, typename Kept>
 KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamScratch & scratch, const Node & root,
-                                              const Child & child, const Classify & classify) {
+                                              const Child & child, const Classify & classify, const Kept & kept) {
     uint32_t * tree = scratch.tree;
     const uint32_t root_state = classify(root, 0);
     if (root_state != SUBDIVIDED) {
@@ -326,47 +364,94 @@ KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamS
         return root_state;
     }
     constexpr uint32_t words = static_cast<uint32_t>(tree_bytes() / sizeof(uint32_t));
+    const int rank = member.team_rank(), size = member.team_size();
+    uint16_t * lists = scratch.subdivided;
+    uint32_t * counts = scratch.n_subdivided;
     Kokkos::parallel_for(Kokkos::TeamThreadRange(member, words), [&](const uint32_t i) {
         tree[i] = i == 0 ? root_state : 0u;
     });
+    if (rank == 0) {
+        lists[0] = 0;
+        counts[0] = 1;
+        counts[1] = 0;
+    }
     member.team_barrier();
     uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
     for (int level = 1; level <= MAX_LEVEL; level++) {
         const uint32_t parents = first, n_parents = width;
         first += width;
         width *= CHILDREN;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_parents), [&](const uint32_t p) {
-            if (node_state(tree, parents + p) != SUBDIVIDED) return;
-            const Node parent = place(root, child, level - 1, p);
-            for (int j = 0; j < CHILDREN; j++) {
-                Node next;
-                child(parent, j, next);
-                const uint32_t node = first + p * CHILDREN + static_cast<uint32_t>(j);
-                set_state(tree, node, classify(next, level));
+        // The subdivided parents of level - 1 are listed in lists[(level - 1) % 2] unless they overflowed it;
+        // this level's go to lists[level % 2], and the count of the next level's (read two levels ago) is cleared
+        const uint16_t * listed = lists + SUBDIVIDED_LIST * static_cast<uint32_t>((level - 1) % 2);
+        uint16_t * list = lists + SUBDIVIDED_LIST * static_cast<uint32_t>(level % 2);
+        const uint32_t n_listed = counts[(level - 1) % 3];
+        uint32_t * n_list = counts + level % 3;
+        if (rank == 0) counts[(level + 1) % 3] = 0;
+        auto add = [&](const Node & next, const uint32_t code) {
+            const uint32_t state = classify(next, level);
+            set_state(tree, first + code, state);
+            if (state != SUBDIVIDED) {
+                kept(next, level, code);
+            } else if (level < MAX_LEVEL) {
+                const uint32_t i = Kokkos::atomic_fetch_add(n_list, 1u);
+                if (i < SUBDIVIDED_LIST) list[i] = static_cast<uint16_t>(code);
             }
-        });
+        };
+        if (n_listed <= SUBDIVIDED_LIST) {
+            // Each thread classifies a contiguous range of the children of the listed parents, placing each parent once
+            const uint32_t n_children = n_listed * CHILDREN;
+            const uint32_t begin = n_children * static_cast<uint32_t>(rank) / static_cast<uint32_t>(size);
+            const uint32_t end = n_children * static_cast<uint32_t>(rank + 1) / static_cast<uint32_t>(size);
+            uint32_t placed = ~0u;
+            Node parent;
+            for (uint32_t i = begin; i < end; i++) {
+                const uint32_t p = listed[i / CHILDREN];
+                if (p != placed) {
+                    parent = place(root, child, level - 1, p);
+                    placed = p;
+                }
+                Node next;
+                child(parent, static_cast<int>(i % CHILDREN), next);
+                add(next, p * CHILDREN + i % CHILDREN);
+            }
+        } else {
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_parents), [&](const uint32_t p) {
+                if (node_state(tree, parents + p) != SUBDIVIDED) return;
+                const Node parent = place(root, child, level - 1, p);
+                for (int j = 0; j < CHILDREN; j++) {
+                    Node next;
+                    child(parent, j, next);
+                    add(next, p * CHILDREN + static_cast<uint32_t>(j));
+                }
+            });
+        }
         member.team_barrier();
     }
     return root_state;
 }
 
+/** @brief team_classify, without a call for the kept nodes. */
+template <typename Member, typename Node, typename Child, typename Classify>
+KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamScratch & scratch, const Node & root,
+                                              const Child & child, const Classify & classify) {
+    return team_classify(member, scratch, root, child, classify, [](const Node &, int, uint32_t) {});
+}
+
 /**
- * @brief Adds the terms of the kept nodes of scratch.tree to inside and
- *        total, depth first, n_terms per node, term(node, level, q, w,
- *        indicated) giving term q's weight w and indicator: the threads of a
- *        team compute a term each, and each thread then sums them in order,
- *        so that the sums are those of one thread summing every term.
+ * @brief Adds the terms of the kept nodes under walk's node (to its end) to
+ *        in and all, n_terms per node, term(node, level, q, w, indicated)
+ *        giving term q's weight w and indicator: the threads of a team compute
+ *        a term each, and each thread then sums them in order, so that the
+ *        sums are those of one thread summing every term.
  */
 template <typename Member, typename Node, typename Child, typename Term>
-KOKKOS_INLINE_FUNCTION void team_fold(const Member & member, const TeamScratch & scratch, const Node & root,
-                                      const Child & child, const int n_terms, const Term & term, double & inside,
-                                          double & total) {
+KOKKOS_INLINE_FUNCTION void fold_walk(const Member & member, const TeamScratch & scratch, const Node & root,
+                                      const Child & child, const int n_terms, const Term & term, Walk walk,
+                                      double & in, double & all) {
     const int rank = member.team_rank(), size = member.team_size();
     double *w = scratch.terms, *indicated = scratch.terms + size;
-    Walk walk;
-    walk.down(scratch.tree);
     int q = 0;
-    double in = inside, all = total;
     while (!walk.done) {
         int n = 0, mine = -1, level = 0;
         uint32_t code = 0;
@@ -389,8 +474,173 @@ KOKKOS_INLINE_FUNCTION void team_fold(const Member & member, const TeamScratch &
         }
         member.team_barrier();
     }
+}
+
+/** @brief 1 / ulp of the doubles of biased exponent e, for 53 <= e <= 2046. */
+KOKKOS_INLINE_FUNCTION double per_ulp(const uint64_t e) { return Kokkos::bit_cast<double>((2098 - e) << 52); }
+
+/**
+ * @brief Adds x * per_ulp, a power of two, rounded to the nearest integer to
+ *        k. Returns false where it is too large or a tie. A tie is at least an
+ *        ulp of x away otherwise, so an addend x was rounded from (a product
+ *        fused into the addition), within half an ulp of x, rounds the same.
+ */
+KOKKOS_INLINE_FUNCTION bool add_ulps(const double x, const double per_ulp, uint64_t & k) {
+    const double q = x * per_ulp;
+    if (!(q >= 0.0 && q < 0x1p52)) return false;
+    const double whole = Kokkos::floor(q), rest = q - whole;
+    if (rest == 0.5) return false;
+    k += static_cast<uint64_t>(whole) + (rest > 0.5 ? 1u : 0u);
+    return true;
+}
+
+/**
+ * @brief Adds k[c] ulps to r, c its binade's exponent above e: while every
+ *        partial sum stays in r's binade, each rounded addition of a
+ *        nonnegative x adds x / ulp(r) rounded to the nearest, unless that is
+ *        a tie, in any order. Returns false, r unchanged, where r is not in
+ *        binade e to e + n - 1, exact does not have bit c (some addition may have
+ *        been a tie), or r + k[c] ulps reaches the next binade.
+ */
+KOKKOS_INLINE_FUNCTION bool add_ulp_sum(double & r, const uint64_t e, const int n, const uint64_t * k,
+                                        const uint32_t exact) {
+    constexpr uint64_t ONE = uint64_t(1) << 52, END = uint64_t(1) << 53;
+    const uint64_t bits = Kokkos::bit_cast<uint64_t>(r);
+    const uint64_t exponent = bits >> 52;  // a negative r's sign bit makes it too large
+    if (exponent < e || exponent >= e + static_cast<uint64_t>(n) || !((exact >> (exponent - e)) & 1u)) return false;
+    const uint64_t sum = (bits & (ONE - 1)) | ONE, add = k[exponent - e];
+    if (add > END - 1 - sum) return false;
+    r = static_cast<double>(sum + add) * Kokkos::bit_cast<double>((exponent - 52) << 52);
+    return true;
+}
+
+/**
+ * @brief Node level and code of slot s of team_sample: the kept or
+ *        subdivided node of level COUNTED with code s, or its kept ancestor,
+ *        if s is its first slot. Returns false for a slot of no node.
+ */
+KOKKOS_INLINE_FUNCTION bool slot_node(const uint32_t * tree, const uint32_t s, int & level, uint32_t & code) {
+    uint32_t stride = SUBTREES;
+    for (level = 0; level <= COUNTED; level++, stride /= CHILDREN) {
+        code = s / stride;
+        if (node_state(tree, tree_nodes(level) + code) != SUBDIVIDED) return s % stride == 0;
+    }
+    level = COUNTED;
+    return true;
+}
+
+/** @brief The slot of team_sample of the node of level and code. */
+KOKKOS_INLINE_FUNCTION uint32_t slot_of(const int level, uint32_t code) {
+    for (int l = level; l > COUNTED; l--) code /= CHILDREN;
+    for (int l = level; l < COUNTED; l++) code *= CHILDREN;
+    return code;
+}
+
+/** @brief A Walk of the kept nodes under the node of level and code. */
+KOKKOS_INLINE_FUNCTION Walk walk_from(const uint32_t * tree, const int level, const uint32_t code) {
+    Walk walk;
+    walk.level = walk.top = level;
+    walk.code = code;
+    walk.first = tree_nodes(level);
+    walk.down(tree);
+    return walk;
+}
+
+/** @brief Flags of a slot of team_sample: its sums in ulps exact (bit i of sum i), and inside unchanged. */
+constexpr uint32_t SLOT_EXACT = (1u << SLOT_SUMS) - 1u, SLOT_IN_ZERO = 1u << SLOT_SUMS;
+
+/**
+ * @brief Adds the terms of the kept nodes of a subdivision tree, classified
+ *        by team_classify, to inside and total, n_terms per node, term(node,
+ *        level, q, w, indicated) giving term q's weight w and indicator, as
+ *        one thread adding every term in the depth-first order would. The kept
+ *        nodes fall in SUBTREES slots in that order, a node of level COUNTED
+ *        each or a kept node above in its first. The thread that classifies a
+ *        kept node adds its terms to its slot's sums in ulps of the binades of
+ *        inside and total and of the next ones (add_ulps); each slot then
+ *        adds to inside and total at once where add_ulp_sum can, and one term
+ *        at a time otherwise (fold_walk).
+ */
+template <typename Member, typename Node, typename Child, typename Classify, typename Term>
+KOKKOS_INLINE_FUNCTION void team_sample(const Member & member, const TeamScratch & scratch, const Node & root,
+                                        const Child & child, const Classify & classify, const int n_terms,
+                                        const Term & term, double & inside, double & total) {
+    const uint32_t * tree = scratch.tree;
+    const uint64_t e_in = Kokkos::bit_cast<uint64_t>(inside) >> 52, e_all = Kokkos::bit_cast<uint64_t>(total) >> 52;
+    const bool in_binade = e_in >= 53 && e_in + IN_BINADES <= 2047;
+    const bool slots = e_all >= 53 && e_all + ALL_BINADES <= 2047 && (in_binade || inside == 0.0);
+    uint64_t * sums = scratch.sums;  // per slot: inside in ulps of binades e_in, e_in + 1, ..., then total's
+    uint32_t * flags = reinterpret_cast<uint32_t *>(sums + SLOT_SUMS * SUBTREES);
+    if (slots) {
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, SUBTREES), [&](const uint32_t s) {
+            for (uint32_t i = 0; i < SLOT_SUMS; i++) sums[SLOT_SUMS * s + i] = 0;
+            flags[s] = SLOT_EXACT | SLOT_IN_ZERO;
+        });
+    }
+    // This thread's sums of its slot, added to the slot's when it moves to another
+    double per[SLOT_SUMS];
+    for (int c = 0; c < SLOT_SUMS; c++) {
+        const bool in_sum = c < IN_BINADES;
+        const uint64_t e = in_sum ? e_in + static_cast<uint64_t>(c) : e_all + static_cast<uint64_t>(c - IN_BINADES);
+        per[c] = (in_sum ? in_binade : slots) ? per_ulp(e) : 0.0;
+    }
+    uint32_t slot = SUBTREES, exact = 0;
+    uint64_t k[SLOT_SUMS] = {};
+    auto flush = [&]() {
+        if (slot == SUBTREES) return;
+        for (uint32_t i = 0; i < SLOT_SUMS; i++) {
+            if (k[i] > 0) Kokkos::atomic_add(&sums[SLOT_SUMS * slot + i], k[i]);
+        }
+        if (exact != (SLOT_EXACT | SLOT_IN_ZERO)) Kokkos::atomic_and(&flags[slot], exact);
+    };
+    auto kept = [&](const Node & node, const int level, const uint32_t code) {
+        if (!slots) return;
+        const uint32_t s = slot_of(level, code);
+        if (s != slot) {
+            flush();
+            slot = s;
+            exact = SLOT_EXACT | SLOT_IN_ZERO;
+            for (int i = 0; i < SLOT_SUMS; i++) k[i] = 0;
+        }
+        for (int q = 0; q < n_terms; q++) {
+            double w, indicated;
+            term(node, level, q, w, indicated);
+            if (!(w == 0.0 || indicated == 0.0)) exact &= ~SLOT_IN_ZERO;
+            const double product = w * indicated;
+            for (int c = 0; c < SLOT_SUMS; c++) {
+                const bool in_sum = c < IN_BINADES;
+                if (!((!in_sum || in_binade) && add_ulps(in_sum ? product : w, per[c], k[c]))) exact &= ~(1u << c);
+            }
+        }
+    };
+    const uint32_t root_state = team_classify(member, scratch, root, child, classify, kept);
+    flush();
+    member.team_barrier();
+    if (root_state != SUBDIVIDED || !slots) {
+        fold_walk(member, scratch, root, child, n_terms, term, walk_from(tree, 0, 0), inside, total);
+        member.team_barrier();
+        return;
+    }
+    double in = inside, all = total;
+    for (uint32_t s = 0; s < SUBTREES; s++) {
+        int top = 0;
+        uint32_t code = 0;
+        if (!slot_node(tree, s, top, code)) continue;
+        const uint32_t f = flags[s];
+        double in_slot = in, all_slot = all;
+        const uint64_t * sum = sums + SLOT_SUMS * s;
+        const bool in_added =
+            in == 0.0 ? (f & SLOT_IN_ZERO) != 0 : add_ulp_sum(in_slot, e_in, IN_BINADES, sum, f);
+        if (in_added && add_ulp_sum(all_slot, e_all, ALL_BINADES, sum + IN_BINADES, f >> IN_BINADES)) {
+            in = in_slot;
+            all = all_slot;
+            continue;
+        }
+        fold_walk(member, scratch, root, child, n_terms, term, walk_from(tree, top, code), in, all);
+    }
     inside = in;
     total = all;
+    member.team_barrier();
 }
 
 /**
@@ -420,7 +670,8 @@ KOKKOS_INLINE_FUNCTION bool add_in_binade(double & r, const double * m, const ui
         const double rest = q - static_cast<double>(k);
         if (rest == 0.5) return false;
         if (rest > 0.5) k++;
-        if (k > (END - 1 - sum) / n[l]) return false;  // sum + n[l] k would reach the next binade
+        // sum + n[l] k would reach the next binade (a product past 2^53 is, and below it is exact in 64 bits)
+        if (static_cast<double>(n[l]) * static_cast<double>(k) > 0x1p53 || n[l] * k > END - 1 - sum) return false;
         sum += n[l] * k;
     }
     r = static_cast<double>(sum) * ulp;
@@ -558,9 +809,9 @@ struct SimplexNode {
  *        each level of the subdivision together (detail::team_classify), then
  *        sum the kept ones depth first, so that the sums are those of simplex:
  *        one thread from their states and counts alone with a sharp edge in
- *        Cartesian runs (detail::sharp_sum), otherwise each thread placing
- *        one (detail::team_fold). Every
- *        thread of the team calls it, with the same arguments.
+ *        Cartesian runs (detail::sharp_sum), otherwise in ulps by the threads
+ *        that classify them (detail::team_sample). Every thread of the team
+ *        calls it, with the same arguments.
  */
 template <typename Member, typename Distance>
 KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratch & scratch,
@@ -581,7 +832,6 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratc
                : phi < 0.0                                    ? uint32_t(detail::INSIDE)
                                                               : uint32_t(detail::OUTSIDE);
     };
-    const uint32_t root_state = detail::team_classify(member, scratch, root, child, classify);
     if (axisymmetric || shape.edge > 0.0) {
         auto term = [&](const detail::SimplexNode & s, const int level, int, double & w, double & indicated) {
             double c[3], phi;
@@ -589,9 +839,10 @@ KOKKOS_INLINE_FUNCTION void team_simplex(const Member & member, const TeamScratc
             w = s.measure * (axisymmetric ? c[1] : 1.0);
             indicated = indicator(phi, shape.edge);
         };
-        detail::team_fold(member, scratch, root, child, 1, term, inside, total);
+        detail::team_sample(member, scratch, root, child, classify, 1, term, inside, total);
         return;
     }
+    const uint32_t root_state = detail::team_classify(member, scratch, root, child, classify);
     if (root_state != detail::SUBDIVIDED) {
         inside += measure0 * (root_state == detail::INSIDE ? 1.0 : 0.0);
         total += measure0;
@@ -928,9 +1179,8 @@ KOKKOS_INLINE_FUNCTION void cone(const Shape<Distance> & shape, const bool axisy
 /**
  * @brief cone, with the threads of a team: they classify the boxes of each
  *        level of the subdivision together, and compute a Gauss point each of
- *        the kept boxes, summed in the order of cone (detail::team_classify,
- *        detail::team_fold). Every thread of the team calls it, with the same
- *        arguments.
+ *        the kept boxes, summed as cone sums them (detail::team_sample).
+ *        Every thread of the team calls it, with the same arguments.
  */
 template <typename Member, typename Distance, typename Cone>
 KOKKOS_INLINE_FUNCTION void team_cone(const Member & member, const TeamScratch & scratch, const Shape<Distance> & shape,
@@ -942,13 +1192,13 @@ KOKKOS_INLINE_FUNCTION void team_cone(const Member & member, const TeamScratch &
         root.hi[i] = hi0[i];
     }
     auto child = [](const detail::Box & b, const int j, detail::Box & out) { detail::box_child(b, j, out); };
-    detail::team_classify(member, scratch, root, child, [&](const detail::Box & b, const int level) {
+    auto classify = [&](const detail::Box & b, const int level) {
         return detail::box_is_uniform(shape, at, k, b, level) ? uint32_t(detail::OUTSIDE) : uint32_t(detail::SUBDIVIDED);
-    });
+    };
     auto term = [&](const detail::Box & b, int, const int q, double & w, double & indicated) {
         detail::gauss_point(shape, axisymmetric, at, k, b, q, w, indicated);
     };
-    detail::team_fold(member, scratch, root, child, detail::GAUSS_POINTS, term, inside, total);
+    detail::team_sample(member, scratch, root, child, classify, detail::GAUSS_POINTS, term, inside, total);
 }
 
 } // namespace region::sampler
