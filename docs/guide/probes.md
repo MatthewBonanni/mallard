@@ -675,11 +675,11 @@ budget = true        # kinetic-energy budget (LES), default false
 
 *Used in:*
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d),
 [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d),
 [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
-[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
-[`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence)
-and 5 more.
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180)
+and 6 more.
 
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,

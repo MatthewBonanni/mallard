@@ -4,6 +4,8 @@
   3
  ],
  "set_in": [
-  "examples/shock_bubble_2d/input.toml"
+  "examples/shock_bubble_2d/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml"
  ]
 }
