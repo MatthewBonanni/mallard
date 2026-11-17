@@ -1,0 +1,1 @@
+- A value of the wrong type where Mallard reads a table or a number (`mesh = 1`, a number where an array of numbers goes, `boundaries = [1]`), and a non-integer `basis_order` in an old input, is reported with its key, line, the type it has and the type it takes, instead of an internal toml11 or `stoll` error, a silent default or a wrong value (#1113).

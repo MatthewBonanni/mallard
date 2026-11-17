@@ -25,6 +25,9 @@
   "examples/taylor_green_3d/remap.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/viscous_shock_tube/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml",
   "tutorials/cluster/input.toml"
  ],
  "type": "integer"
