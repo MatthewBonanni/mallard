@@ -218,6 +218,31 @@ bool FileCursor::read(char * out, uint64_t n) {
     return uint64_t(in.gcount()) == n;
 }
 
+std::vector<uint64_t> balanced_boundaries(std::vector<uint64_t> values) {
+    const int p = comm::size();
+    const uint64_t n = comm::allreduce(uint64_t(values.size()), comm::Op::SUM);
+    std::sort(values.begin(), values.end());
+    // Boundary j - 1 is the least value v with at least block_begin(n, j, p) values <= v, bisected for all j at once
+    const size_t m = size_t(p - 1);
+    std::vector<uint64_t> lo(m, 0), hi(m, NONE), below(m);
+    while (lo != hi) {
+        for (size_t j = 0; j < m; j++) {
+            const uint64_t mid = lo[j] + (hi[j] - lo[j]) / 2;
+            below[j] = uint64_t(std::upper_bound(values.begin(), values.end(), mid) - values.begin());
+        }
+        comm::allreduce(std::span<uint64_t>(below), comm::Op::SUM);
+        for (size_t j = 0; j < m; j++) {
+            const uint64_t mid = lo[j] + (hi[j] - lo[j]) / 2;
+            if (below[j] >= block_begin(n, int(j) + 1, p)) {
+                hi[j] = mid;
+            } else {
+                lo[j] = mid + 1;
+            }
+        }
+    }
+    return lo;
+}
+
 std::vector<std::string> names_in_order(const std::vector<std::string> & local) {
     std::string joined;
     for (const std::string & name : local) joined += name + "\n";
