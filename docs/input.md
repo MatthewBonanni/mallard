@@ -205,9 +205,7 @@ OpenFOAM runs): each cell is its face at the lowest z, the other patches give
 the boundary edges, and the empty patches disappear.
 
 In a distributed run the ranks read a mesh file of any format together, each parsing its share,
-so no rank holds the whole mesh. ASCII Fluent node and face sections and ASCII OpenFOAM lists
-must hold one item per line (short OpenFOAM lists may be on one line), as Fluent and OpenFOAM
-write them. Mallard's HDF5 mesh format (builds with `-DMallard_ENABLE_HDF5=ON`), of which each
+so no rank holds the whole mesh, whatever the layout of ASCII files. Mallard's HDF5 mesh format (builds with `-DMallard_ENABLE_HDF5=ON`), of which each
 rank reads only its share, needs no parsing, so large meshes used for many runs are best
 converted to it; generated meshes are also produced per rank:
 
