@@ -18,6 +18,7 @@
 #include <set>
 #include <unordered_map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -227,7 +228,8 @@ void expect_same(Mesh & mesh, const Distribution & dist, Mesh & ref, const Distr
 
 /**
  * @brief The distributed setup (face matching by hashing, migration, halo
- *        layers by distributed search, and regrowing them) must build exactly
+ *        layers by distributed search, regrowing them, and the last build that
+ *        frees the block) must build exactly
  *        the local meshes and exchange plans that the global-mesh setup builds
  *        for the same owners, so solutions stay rank-count independent.
  */
@@ -265,6 +267,11 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
             auto ref = build_local_mesh_from_global(global, std::vector<int>(all_owners.begin(), all_owners.end()), layers, ref_dist);
             expect_same(*mesh, dist, *ref, ref_dist);
         }
+        // Built for the last time, freeing the block before the Mesh
+        Distribution dist, ref_dist;
+        auto mesh = std::move(distributed).build_local_mesh(2, dist);
+        auto ref = build_local_mesh_from_global(global, std::vector<int>(all_owners.begin(), all_owners.end()), 2, ref_dist);
+        expect_same(*mesh, dist, *ref, ref_dist);
     }
 }
 
