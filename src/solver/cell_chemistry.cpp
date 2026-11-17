@@ -18,8 +18,12 @@
 #include <type_traits>
 
 #include <Kokkos_Sort.hpp>
-#ifdef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_CUDA)
 #include <cub/device/device_radix_sort.cuh>
+#define MALLARD_RADIX_SORT 1
+#elif defined(KOKKOS_ENABLE_HIP)
+#include <hipcub/device/device_radix_sort.hpp>
+#define MALLARD_RADIX_SORT 1
 #endif
 
 #include "chemistry_balance.h"
@@ -761,17 +765,36 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
     }
 }
 
+#ifdef MALLARD_RADIX_SORT
+namespace {
+
+/** @brief CUB's (hipCUB's) stable radix sort of n (key, value) pairs; with no scratch, the scratch bytes it needs. */
+void radix_sort_pairs(void * scratch, size_t & bytes, const float * keys_in, float * keys_out, const uint32_t * values_in,
+                      uint32_t * values_out, const uint32_t n) {
+    const Kokkos::DefaultExecutionSpace exec;
+#if defined(KOKKOS_ENABLE_CUDA)
+    const cudaError_t err = cub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                            static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                            exec.cuda_stream());
+    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+#else
+    const hipError_t err = hipcub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                              static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                              exec.hip_stream());
+    if (err != hipSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + hipGetErrorString(err));
+#endif
+}
+
+} // namespace
+#endif
+
 void CellChemistry::size_sort_scratch(const size_t n) {
-#ifdef KOKKOS_ENABLE_CUDA
+#ifdef MALLARD_RADIX_SORT
     if (sorted_queue.extent(0) >= n) return;
     sorted_queue = Kokkos::View<uint32_t *>("chem_sorted_queue", n);
     sorted_cost = Kokkos::View<float *>("chem_sorted_cost", n);
     size_t bytes = 0;
-    const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-        nullptr, bytes, static_cast<const float *>(nullptr), static_cast<float *>(nullptr),
-        static_cast<const uint32_t *>(nullptr), static_cast<uint32_t *>(nullptr), static_cast<int>(n), 0,
-        static_cast<int>(8 * sizeof(float)));
-    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+    radix_sort_pairs(nullptr, bytes, nullptr, nullptr, nullptr, nullptr, static_cast<uint32_t>(n));
     sort_scratch = Kokkos::View<uint8_t *>("chem_sort_scratch", bytes);
 #else
     (void)n;
@@ -789,18 +812,15 @@ void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Ko
         if (i >= r(2)) key(i) = Kokkos::Experimental::finite_max_v<float>;
     });
     if (n > 0) {
-#ifdef KOKKOS_ENABLE_CUDA
-        // Into scratch sized beforehand: captured in a step's graph
+#ifdef MALLARD_RADIX_SORT
+        // Into scratch sized beforehand: no allocation or fence, so a step's graph captures it
         if (sorted_queue.extent(0) < n) {
             throw std::logic_error("CellChemistry::sort_queue: more cells than its scratch holds.");
         }
         const Kokkos::View<uint32_t *> q_out = sorted_queue;
         const Kokkos::View<float *> key_out = sorted_cost;
         size_t bytes = sort_scratch.extent(0);
-        const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-            sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), static_cast<int>(n), 0,
-            static_cast<int>(8 * sizeof(float)), Kokkos::DefaultExecutionSpace().cuda_stream());
-        if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+        radix_sort_pairs(sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), n);
         Kokkos::parallel_for("chemistry_sort_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
             if (i >= r(2)) return;
             q(i) = q_out(i);
