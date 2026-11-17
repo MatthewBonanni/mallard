@@ -158,7 +158,8 @@ y"`, in SI units): wall temperatures and heat fluxes, outlet pressures, inflow
 and stagnation states, mass fluxes, wall velocities, far-field states and
 compositions. Expressions also read the boundary's
 [local coordinates](#local-coordinates): the wall distance `n`, `xi` and `eta`
-along the boundary, `r` and `theta` about its center, the arc length `s`.
+along the boundary, `r` and `theta` about its center, the arc length `s`;
+and the columns of [profiles from data](#profiles-from-data).
 
 Vectors (`u` of `inlet_state`, `farfield` and walls; `mass_flux` of
 `inlet_mass_flow`) take either form:
@@ -400,6 +401,63 @@ Pitfalls:
   don't read the coordinates they set.
 - 2D runs have no `eta`, `r`, `theta`, and 3D runs no `s`: the error says
   which coordinates the run has.
+
+## Profiles from data
+
+A `[[boundaries.data]]` table after a `[[boundaries]]` entry reads a profile
+from a CSV file, in the format and with the keys of
+[`[[initialize.data]]`](initialization.md#tabulated-data-and-point-clouds),
+and gives every column other than the coordinates to the entry's expressions
+as a variable `<name>_<column>`. Its `at` expressions read `x`, `y`, `z` and
+the [local coordinates](#local-coordinates), so one measured or precomputed
+boundary-layer profile fits every wall-bounded inlet, wherever it is and
+however it is turned:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = "bl_u * (1 + 0.05 * sin(2 * pi * 100 * t))"  # a speed along the inward normal
+p = 1.0e5
+T = "bl_T"
+
+[[boundaries.data]]
+name = "bl"
+file = "boundary_layer.csv"  # y,u,T: wall distance in mm
+at = ["n"]                   # the distance to the nearest wall
+units = { y = "mm" }
+interpolation = "cubic"
+```
+
+The data are read once at setup, at each face center, and stored with the
+face like its coordinates: an expression of the data and `t` is evaluated on
+the device at the stage times like any other, with no work on the host and
+the same bits on every rank count. A table holds its end values beyond its
+range (a boundary-layer table up to its edge gives the free stream above
+it). The run log shows, per entry, each coordinate's range at the faces, how
+many faces fall outside the table, and each variable's range, e.g. `data bl
+(boundary_layer.csv: table 41, cubic; y = n 0.000625 to 0.05, 24 faces
+outside the table's 0 to 0.02 take its end values): bl_u 0 to 30, bl_T 300 to
+340`, and the run block records the file's hash.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Prefix of the variables: `<name>_<column>` |
+| `file` | required | CSV file, relative to where Mallard runs |
+| `type` | `"table"` | `table` (on a grid of 1-3 coordinates, interpolated) or `points` (scattered, by nearest points) |
+| `coordinates` | first column (`table`); `x`, `y` (`z`) (`points`) | Names of the coordinate columns |
+| `at` | the coordinates, if named `x`, `y`, `z` or like a local coordinate | One expression of `x`, `y`, `z` and the local coordinates per coordinate (not of `t`) |
+| `interpolation` | `"linear"` | Tables: `linear` or `cubic` |
+| `neighbors` | 1 | Points: how many nearest points to weight (1-16) |
+| `units` | SI | Units of columns, e.g. `{y = "mm", T = "degC"}` |
+
+Pitfalls:
+
+- An entry's data have at most 16 value columns in all; data that none of
+  the entry's expressions read are an error.
+- `at` may not read `t`: read the data at a fixed place and combine them with
+  `t` in the entry's expressions.
+- `where`, `mdot` and an `average` outlet pressure do not read the data.
 
 ## Walls
 

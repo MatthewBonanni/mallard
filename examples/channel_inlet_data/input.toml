@@ -1,0 +1,77 @@
+# channel_inlet with its profile from a data file: poiseuille.csv tabulates
+# the developed velocity u / U = 6 n (1 - n) against the wall distance n up to
+# the channel's center, and [[boundaries.data]] reads it at each inlet face's
+# own n (cubic interpolation is exact for the parabola), so the flow enters
+# developed and stays so, as in channel_inlet: U = 0.1, Mach 0.1, Re = 200.
+# Check the profile near x = 3.5 against the exact one with
+#   python ../channel_inlet/plot_channel_inlet.py channel_inlet_data.png solut/channel_<step>.vtkhdf
+
+[run]
+t_stop = 120.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 16
+Lx = 4.0
+Ly = 1.0
+
+[initialize]
+type = "constant"
+u = [0.1, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "inlet_mass_flow"
+mdot = 0.1               # bulk velocity 0.1 across the channel of height 1
+profile = "dev_u"        # the shape of the mass flux, rescaled to mdot
+T = 0.7142857142857143
+
+[[boundaries.data]]
+name = "dev"                 # columns other than the coordinate become dev_<column>
+file = "poiseuille.csv"      # n,u
+at = ["n"]                   # the table's coordinate n is the inlet's wall distance
+interpolation = "cubic"
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 0.7142857142857143
+
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "top"
+type = "wall_isothermal"
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.0005
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/channel"
+time_interval = 120.0
+fields = ["RHO", "U_X", "U_Y", "P", "T"]

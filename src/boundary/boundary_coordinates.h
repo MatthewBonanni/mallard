@@ -26,8 +26,15 @@
 class Mesh;
 
 /**
+ * @brief Which variables (BoundaryValue::variables(entry)) some expression
+ *        of a [[boundaries]] entry reads, outside its [[boundaries.data]].
+ */
+std::vector<bool> variables_read(const Input & entry);
+
+/**
  * @brief The local coordinates (boundary_variable indices) that some
- *        expression of a [[boundaries]] entry reads, in increasing order.
+ *        expression of a [[boundaries]] entry reads, in increasing order,
+ *        outside its [[boundaries.data]].
  */
 std::vector<uint16_t> local_coordinates_used(const Input & entry);
 

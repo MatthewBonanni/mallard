@@ -31,6 +31,7 @@ domain-averaged state ([Sources](sources.md)), initial states the columns of
 tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds)),
 boundary conditions the boundary's local coordinates `n`, `xi`, `eta`, `r`,
 `theta` and `s` ([Boundary conditions](boundary_conditions.md#local-coordinates))
+and the columns of their data ([profiles from data](boundary_conditions.md#profiles-from-data)),
 and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 **Operators and functions.**

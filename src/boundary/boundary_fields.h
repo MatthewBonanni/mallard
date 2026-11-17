@@ -30,8 +30,9 @@
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief The variables of boundary expressions, by index: x, y, z, t, then the
- *        local coordinates of the face (docs/guide/boundary_conditions.md#local-coordinates).
+ * @brief The variables of boundary expressions, by index: x, y, z, t, the
+ *        local coordinates of the face (docs/guide/boundary_conditions.md#local-coordinates),
+ *        then the columns of the entry's [[boundaries.data]] at the face.
  */
 namespace boundary_variable {
 constexpr uint16_t T = 3;
@@ -39,20 +40,22 @@ constexpr uint16_t N = 4;   // distance to the nearest wall
 constexpr uint16_t XI = 5;  // along the tangent axis of the zone's frame
 #if N_DIM == 2
 constexpr uint16_t S = 6;   // arc length along the zone
-constexpr uint16_t COUNT = 7;
+constexpr uint16_t FIRST_DATA = 7;
 #else
 constexpr uint16_t ETA = 6;    // along the second tangent axis
 constexpr uint16_t R = 7;      // hypot(xi, eta)
 constexpr uint16_t THETA = 8;  // atan2(eta, xi)
-constexpr uint16_t COUNT = 9;
+constexpr uint16_t FIRST_DATA = 9;
 #endif
 constexpr uint16_t FIRST_LOCAL = N;
+constexpr uint16_t MAX_DATA = 16;  // data columns of an entry, at most
+constexpr uint16_t COUNT = FIRST_DATA + MAX_DATA;
 } // namespace boundary_variable
 
 /**
  * @brief A face's values of the variables of boundary expressions, by index
- *        (boundary_variable), t's slot unused: its position, and its local
- *        coordinates, NaN where they were not computed.
+ *        (boundary_variable), t's slot unused: its position, its local
+ *        coordinates and its data, NaN where they were not computed.
  */
 struct FacePoint {
     std::array<double, boundary_variable::COUNT> v;
@@ -86,13 +89,21 @@ struct FacePoint {
 class BoundaryValue {
     public:
         BoundaryValue() = default;
-        BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension);
+        /** @param variables Those of the entry's expressions (variables(entry)). */
+        BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension,
+                      const std::vector<std::string> & variables = BoundaryValue::variables());
 
         /** @brief Whether v is an expression rather than a number or a quantity with a unit. */
         static bool is_expression(const Input & v);
 
         /** @brief The variables of the expressions, by index (boundary_variable): x, y, z, t, then the local coordinates. */
         static const std::vector<std::string> & variables();
+
+        /**
+         * @brief The variables of the expressions of a [[boundaries]] entry: variables(), then
+         *        the variables of its [[boundaries.data]], <name>_<column>, from the files' headers.
+         */
+        static std::vector<std::string> variables(const Input & entry);
 
         /** @brief Adds to the error for an unknown symbol: a local coordinate of the other dimension, or a unit. */
         static std::string hint(const std::string & symbol);

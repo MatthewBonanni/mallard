@@ -989,14 +989,6 @@ std::string number(const double v) {
     return text;
 }
 
-std::string identifier(const std::string & name) {
-    std::string out = name;
-    for (char & c : out) {
-        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
-    }
-    return out;
-}
-
 template <typename T>
 Kokkos::View<const T *> upload(const std::vector<T> & v, const std::string & label) {
     Kokkos::View<T *> d(label, v.size());
@@ -1161,124 +1153,8 @@ struct InitialState::Impl {
     }
 
     std::string add_data(const Input & e, const std::string & where) {
-        if (!e.is_table()) {
-            throw InputError({.key = where, .line = line_of(e), .message = "must be a table",
-                              .fix = "Write [[initialize.data]] with name and file", .docs = DATA_DOCS});
-        }
-        if (!e.contains("name")) throw missing_key(e, where + ".name", "Add name = \"...\": the prefix of the variables");
-        if (!e.contains("file")) throw missing_key(e, where + ".file", "Add file = \"...\": a CSV file");
-        const std::string name = find_value<std::string>(e, "name");
-        if (name.empty() || identifier(name) != name || std::isdigit(static_cast<unsigned char>(name[0]))) {
-            throw invalid(e, where + ".name", "name", "\"" + name + "\" is not an identifier",
-                          "Use letters, digits and _, starting with a letter: the variables are <name>_<column>",
-                          DATA_DOCS);
-        }
-        const std::string file = find_value<std::string>(e, "file");
-        const std::string type = find_value_or<std::string>(e, "type", "table");
-        record_options(where + ".type", {"table", "points"});
-        if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
-        const bool points = type == "points";
-        const tabulated::Csv csv = tabulated::read_csv(file);
-        std::vector<std::string> coordinates;
-        if (e.contains("coordinates")) {
-            coordinates = find_value<std::vector<std::string>>(e, "coordinates");
-        } else if (points) {
-            coordinates = N_DIM == 2 ? std::vector<std::string>{"x", "y"} : std::vector<std::string>{"x", "y", "z"};
-        } else {
-            coordinates = {csv.names[0]};
-        }
-        if (coordinates.empty() || coordinates.size() > tabulated::MAX_DIMS) {
-            throw invalid(e, where + ".coordinates", "coordinates",
-                          "names " + std::to_string(coordinates.size()) + " columns", "Name 1 to 3 columns of " + file,
-                          DATA_DOCS);
-        }
-        std::vector<int32_t> coordinate_columns;
-        for (const auto & c : coordinates) {
-            const int32_t i = csv.column(c);
-            if (i < 0) {
-                throw InputError({.key = where + ".coordinates",
-                                  .line = line_of(e, e.contains("coordinates") ? "coordinates" : "file"),
-                                  .message = file + " has no column " + c,
-                                  .valid = csv.names,
-                                  .suggestion = suggest_value(c, csv.names),
-                                  .fix = "Name the coordinate columns with coordinates = [...]",
-                                  .docs = DATA_DOCS});
-            }
-            coordinate_columns.push_back(i);
-        }
-        // Units of columns, as affine maps to SI (a + b v)
-        std::vector<double> offset(csv.names.size(), 0.0), factor(csv.names.size(), 1.0);
-        if (e.contains("units")) {
-            const Input & units = e.at("units");
-            if (!units.is_table()) {
-                throw invalid(e, where + ".units", "units", "must be a table of columns and their units",
-                              "Write units = {x = \"mm\", T = \"degC\"}", DATA_DOCS);
-            }
-            for (const auto & [column, unit] : units.as_table()) {
-                const int32_t i = csv.column(column);
-                if (i < 0) {
-                    throw InputError({.key = where + ".units." + column,
-                                      .line = line_of(units, column),
-                                      .message = file + " has no column " + column,
-                                      .valid = csv.names,
-                                      .suggestion = suggest_value(column, csv.names),
-                                      .docs = DATA_DOCS});
-                }
-                const std::string text = find_value<std::string>(units, column);
-                try {
-                    const Quantity q0 = parse_quantity("0 " + text), q1 = parse_quantity("1 " + text);
-                    offset[size_t(i)] = q0.value;
-                    factor[size_t(i)] = q1.value - q0.value;
-                } catch (const UnitError & err) {
-                    throw invalid(units, where + ".units." + column, column, err.what(),
-                                  "Give a unit such as \"mm\", \"bar\" or \"degC\"", DATA_DOCS);
-                }
-            }
-        }
-        auto column = [&](const size_t i) {
-            std::vector<double> c = csv.columns[i];
-            for (double & v : c) v = offset[i] + factor[i] * v;
-            return c;
-        };
-        std::vector<std::vector<double>> coords, fields;
-        for (const int32_t i : coordinate_columns) coords.push_back(column(size_t(i)));
-        std::vector<std::string> field_names;
-        for (size_t i = 0; i < csv.names.size(); i++) {
-            if (std::find(coordinate_columns.begin(), coordinate_columns.end(), int32_t(i)) != coordinate_columns.end()) continue;
-            fields.push_back(column(i));
-            field_names.push_back(csv.names[i]);
-        }
-        if (fields.empty()) {
-            throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
-                          "Add value columns to the file, or name fewer coordinates", DATA_DOCS);
-        }
-        uint32_t set;
-        std::string kind;
-        if (points) {
-            if (e.contains("interpolation")) {
-                throw invalid(e, where + ".interpolation", "interpolation", "is for tables (type = \"table\")",
-                              "Remove it; point clouds take neighbors = k", DATA_DOCS);
-            }
-            const uint32_t neighbors = find_value_or<uint32_t>(e, "neighbors", 1);
-            set = data.add_points(coords, fields, neighbors, where);
-            kind = logging::count(coords[0].size(), "point") + ", " +
-                   (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance");
-        } else {
-            if (e.contains("neighbors")) {
-                throw invalid(e, where + ".neighbors", "neighbors", "is for point clouds (type = \"points\")",
-                              "Remove it; tables take interpolation = \"linear\" or \"cubic\"", DATA_DOCS);
-            }
-            const std::string interpolation = find_value_or<std::string>(e, "interpolation", "linear");
-            record_options(where + ".interpolation", {"linear", "cubic"});
-            if (interpolation != "linear" && interpolation != "cubic") {
-                throw not_accepted(e, where + ".interpolation", interpolation, {"cubic", "linear"});
-            }
-            set = data.add_table(coords, fields, interpolation == "cubic", where);
-            const tabulated::Set & s = data.set(set);
-            std::string shape;
-            for (uint32_t d = 0; d < s.dims; d++) shape += (d ? " x " : "") + std::to_string(s.n_axis[d]);
-            kind = "table " + shape + ", " + interpolation;
-        }
+        const tabulated::Entry entry = tabulated::read_entry(e, where, DATA_DOCS, data);
+        const std::vector<std::string> & coordinates = entry.coordinates;
         Mapping m;
         m.dims = static_cast<uint32_t>(coordinates.size());
         std::string at_text;
@@ -1329,17 +1205,17 @@ struct InitialState::Impl {
         }
         mappings.push_back(m);
         std::string vars;
-        for (uint32_t f = 0; f < field_names.size(); f++) {
-            const std::string var = name + "_" + identifier(field_names[f]);
+        for (uint32_t f = 0; f < entry.variables.size(); f++) {
+            const std::string & var = entry.variables[f];
             if (std::find(names.begin(), names.end(), var) != names.end()) {
                 throw invalid(e, where + ".name", "name", "makes the variable " + var + ", which is already defined",
                               "Give each [[initialize.data]] entry its own name", DATA_DOCS);
             }
             names.push_back(var);
-            variables.push_back({set, f});
+            variables.push_back({entry.set, f});
             vars += (f ? ", " : "") + var;
         }
-        return name + " (" + file + ": " + kind + "; " + at_text + "): " + vars;
+        return entry.name + " (" + entry.file + ": " + entry.kind + "; " + at_text + "): " + vars;
     }
 
     /** @brief The programs of a state table: the base (complete) or a region's layer (any fields). */

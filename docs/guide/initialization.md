@@ -234,6 +234,9 @@ those of the interpolated field. Pitfalls:
 - An entry that no expression reads is an error; so are rows that do not
   form a grid.
 
+Boundaries read the same files, in their local coordinates, with
+[`[[boundaries.data]]`](boundary_conditions.md#profiles-from-data).
+
 ## Synthetic turbulence
 
 A divergence-free random velocity with a prescribed energy spectrum E(k),

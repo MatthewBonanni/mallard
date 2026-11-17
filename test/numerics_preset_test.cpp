@@ -190,6 +190,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"autoignition_2d/input.toml", "reacting", 2,
      "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}, ""},
     {"channel_inlet/input.toml", "second_order", 2, "", {}, ""},
+    {"channel_inlet_data/input.toml", "second_order", 2, "", {}, ""},
     {"cylinder/input.toml", "high_order", 2, "",
      {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}}, ""},
     {"detonation_1d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
