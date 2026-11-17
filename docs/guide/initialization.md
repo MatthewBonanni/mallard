@@ -234,6 +234,10 @@ those of the interpolated field. Pitfalls:
   temperatures are not: use `linear` there.
 - An entry that no expression reads is an error; so are rows that do not
   form a grid.
+- A column's name belongs to its table: expressions see a value column only
+  as `<name>_<column>`, and `at` fills a coordinate column from the cell's
+  `x`, `y`, `z`, so a column may be named like a coordinate. The run log
+  shows each mapping as `column r <- cell "hypot(y, z)"`.
 
 **An axisymmetric table in 3D.** `at` can map every point to a radius, so a
 solution on the `(x, r)` plane fills a 3D box; the expressions then turn its

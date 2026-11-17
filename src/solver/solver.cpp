@@ -1182,7 +1182,7 @@ void Solver::init_boundaries() {
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
-        if (!data_summary.empty()) detail("data " + data_summary);
+        if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {

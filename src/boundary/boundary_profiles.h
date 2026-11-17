@@ -58,7 +58,8 @@ class BoundaryProfiles {
         struct Mapped {
             tabulated::Entry entry;
             std::vector<std::shared_ptr<kexpr::Program>> at;
-            std::vector<std::string> at_text;
+            std::vector<std::string> at_text;  // as the run log shows it
+            std::vector<std::string> unit;     // " m" where at is a length coordinate
             uint16_t first = 0;  // slot of the first column
         };
         std::string where;

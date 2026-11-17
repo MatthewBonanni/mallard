@@ -1171,7 +1171,7 @@ struct InitialState::Impl {
             }
             double edge;
             bool bounded;
-            at_text = "distance to " + add_region(e.at("region"), where + ".region", m.nodes, m.n_nodes, edge, bounded);
+            at_text = " column " + coordinates[0] + " <- cell distance to " + add_region(e.at("region"), where + ".region", m.nodes, m.n_nodes, edge, bounded);
             if (edge > 0.0) {
                 throw invalid(e, where + ".region", "region", "has an edge, which a distance does not use",
                               "Remove edge from the region", DATA_DOCS);
@@ -1184,9 +1184,10 @@ struct InitialState::Impl {
                 for (const auto & c : coordinates) {
                     if (c != "x" && c != "y" && c != "z") {
                         throw invalid(e, where + ".at", "at",
-                                      "is missing, and the coordinate " + c + " is not x, y or z",
-                                      "Add at = [...], an expression of x, y, z for each coordinate, or region = {...} "
-                                      "for the distance to a region",
+                                      "is missing, and the table's coordinate column " + c +
+                                          " is not named like a cell coordinate (x, y, z)",
+                                      "Add at = [...], one expression of the cell's x, y, z per coordinate column, "
+                                      "or region = {...} for the distance to a region",
                                       DATA_DOCS);
                     }
                 }
@@ -1196,11 +1197,12 @@ struct InitialState::Impl {
                 throw invalid(e, where + ".at", "at",
                               "has " + std::to_string(at.size()) + " expressions for " +
                                   std::to_string(coordinates.size()) + " coordinates",
-                              "Give one expression of x, y, z per coordinate", DATA_DOCS);
+                              "Give one expression of the cell's x, y, z per coordinate column", DATA_DOCS);
             }
             for (size_t d = 0; d < at.size(); d++) {
                 m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", at[d], {"x", "y", "z"});
-                at_text += (d ? ", " : "") + coordinates[d] + " = " + at[d];
+                at_text += std::string(d ? "," : "") + " column " + coordinates[d] + " <- cell " +
+                           tabulated::at_text(at[d], {"x", "y", "z"});
             }
         }
         mappings.push_back(m);
@@ -1208,14 +1210,14 @@ struct InitialState::Impl {
         for (uint32_t f = 0; f < entry.variables.size(); f++) {
             const std::string & var = entry.variables[f];
             if (std::find(names.begin(), names.end(), var) != names.end()) {
-                throw invalid(e, where + ".name", "name", "makes the variable " + var + ", which is already defined",
-                              "Give each [[initialize.data]] entry its own name", DATA_DOCS);
+                throw tabulated::taken(e, where, DATA_DOCS, entry, var, var == "x" || var == "y" || var == "z",
+                                       "cell");
             }
             names.push_back(var);
             variables.push_back({entry.set, f});
             vars += (f ? ", " : "") + var;
         }
-        return entry.name + " (" + entry.file + ": " + entry.kind + "; " + at_text + "): " + vars;
+        return "data \"" + entry.name + "\" (" + entry.file + ", " + entry.kind + "):" + at_text + "; values " + vars;
     }
 
     /** @brief The programs of a state table: the base (complete) or a region's layer (any fields). */
@@ -1435,20 +1437,23 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
         impl->layers.push_back(e.layer);
         summary << (summary.tellp() > 0 ? "; " : "") << e.text;
     }
-    for (const auto & d : data_text) summary << (summary.tellp() > 0 ? "; " : "") << "data " << d;
+    for (const auto & d : data_text) summary << (summary.tellp() > 0 ? "; " : "") << d;
 
     // Data no expression reads are a mistake
     const uint16_t n_fixed = 3;
     for (size_t s = 0; s < impl->mappings.size(); s++) {
         bool used = false;
+        std::vector<std::string> set_names;
         for (uint16_t v = 0; v < impl->variables.size(); v++) {
             if (impl->variables[v].set != s) continue;
+            set_names.push_back(impl->names[n_fixed + v]);
             for (const auto & p : impl->programs) used = used || p.uses(static_cast<uint16_t>(n_fixed + v));
         }
         if (!used) {
             const Input & entry = init.at("data").as_array()[s];
             throw invalid(entry, "initialize.data[" + std::to_string(s) + "].name", "name",
-                          "no expression of [initialize] or its regions reads its variables",
+                          "no expression of [initialize] or its regions reads " + tabulated::one_of(set_names) +
+                              ", the values of this table",
                           "Read them as <name>_<column> in an expression, or remove the entry", DATA_DOCS);
         }
     }

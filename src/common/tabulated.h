@@ -291,6 +291,23 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
  */
 std::vector<std::string> entry_variables(const Input & e);
 
+/** @brief The column of a variable <name>_<column> of an entry. */
+std::string column_of(const Entry & entry, const std::string & variable);
+
+/**
+ * @brief The error for a variable <name>_<column> that is already a name of
+ *        the expressions: a coordinate (of `coordinates`, e.g. "boundary"), or
+ *        another entry's variable.
+ */
+InputError taken(const Input & e, const std::string & where, const std::string & docs, const Entry & entry,
+                 const std::string & variable, bool coordinate, const std::string & side);
+
+/** @brief "a", "a or b", "a, b or c". */
+std::string one_of(const std::vector<std::string> & names);
+
+/** @brief How the run log shows the expression at that fills a column: bare if it is a name, else quoted. */
+std::string at_text(const std::string & at, const std::vector<std::string> & names);
+
 } // namespace tabulated
 
 #endif // TABULATED_H

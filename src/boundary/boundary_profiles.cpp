@@ -30,6 +30,13 @@ InputError invalid(const Input & table, const std::string & key, const std::stri
     return InputError({.key = key, .line = line_of(table, leaf), .message = message, .fix = fix, .docs = DOCS});
 }
 
+/** @brief Whether the boundary variable named v is a length in meters. */
+bool is_length(const std::string & v) {
+    if (v == "x" || v == "y" || v == "z") return true;
+    const std::vector<std::string> & base = BoundaryValue::variables();
+    return v.size() > 2 && v.compare(v.size() - 2, 2, "_m") == 0 && std::find(base.begin(), base.end(), v) != base.end();
+}
+
 } // namespace
 
 BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & where_) : where(where_) {
@@ -51,8 +58,8 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
         m.first = static_cast<uint16_t>(names.size());
         for (const std::string & var : m.entry.variables) {
             if (std::find(names.begin(), names.end(), var) != names.end()) {
-                throw invalid(e, key + ".name", "name", "makes the variable " + var + ", which is already defined",
-                              "Give each [[boundaries.data]] entry of a boundary its own name");
+                const bool coordinate = std::find(base.begin(), base.end(), var) != base.end();
+                throw tabulated::taken(e, key, DOCS, m.entry, var, coordinate, "boundary");
             }
             names.push_back(var);
         }
@@ -63,10 +70,14 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
         } else {
             for (const auto & c : coordinates) {
                 if (c == "t" || std::find(base.begin(), base.end(), c) == base.end()) {
+                    std::string known;
+                    for (const std::string & b : base) known += b == "t" ? "" : (known.empty() ? "" : ", ") + b;
                     throw invalid(e, key + ".at", "at",
-                                  "is missing, and the coordinate " + c + " is not x, y, z or a local coordinate",
-                                  "Add at = [...], an expression of x, y, z and the local coordinates for each "
-                                  "coordinate, e.g. at = [\"n_m\"] for the distance to the wall in meters");
+                                  "is missing, and the table's coordinate column " + c +
+                                      " is not named like a boundary coordinate (" + known + ")",
+                                  "Add at = [...], one expression of the boundary's x, y, z and local coordinates "
+                                  "per coordinate column, e.g. at = [\"n_m\"] to read column " + c +
+                                      " at the boundary's n_m");
                 }
             }
             at = coordinates;
@@ -75,17 +86,19 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
             throw invalid(e, key + ".at", "at",
                           "has " + std::to_string(at.size()) + " expressions for " +
                               std::to_string(coordinates.size()) + " coordinates",
-                          "Give one expression of x, y, z and the local coordinates per coordinate");
+                          "Give one expression of the boundary's x, y, z and local coordinates per coordinate column");
         }
         for (size_t d = 0; d < at.size(); d++) {
             const std::string name = key + ".at[" + std::to_string(d) + "]";
             m.at.push_back(std::make_shared<kexpr::Program>(name, at[d], base, BoundaryValue::hint, bv::FIRST_LOCAL));
             if (m.at.back()->uses(bv::T)) {
-                throw invalid(e, key + ".at", "at", "depends on t, but the data are read once, at setup",
+                throw invalid(e, key + ".at", "at",
+                              "reads t for column " + coordinates[d] + ", but the data are read once, at setup",
                               "Read the data at a fixed place and combine them with t in the boundary's "
                               "expressions, e.g. u = \"" + m.entry.name + "_u * (1 + 0.1 * sin(t))\"");
             }
-            m.at_text.push_back(at[d]);
+            m.at_text.push_back(tabulated::at_text(at[d], base));
+            m.unit.push_back(is_length(at[d]) ? " m" : "");
         }
         sets.push_back(std::move(m));
     }
@@ -96,7 +109,8 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
         for (size_t f = 0; f < sets[i].entry.variables.size(); f++) used = used || read[sets[i].first + f];
         if (!used) {
             throw invalid(list[i], where + ".data[" + std::to_string(i) + "].name", "name",
-                          "no expression of the boundary reads its variables",
+                          "no expression of the boundary reads " + tabulated::one_of(sets[i].entry.variables) +
+                              ", the values of this table",
                           "Read them as <name>_<column> in an expression of the entry, or remove the data");
         }
     }
@@ -133,8 +147,8 @@ std::string BoundaryProfiles::evaluate(const Mesh & mesh, const std::vector<uint
                 if (!std::isfinite(q[d]) && error.empty()) {
                     std::string at;
                     for (size_t j = 0; j < N_DIM; j++) at += (j ? ", " : "(") + logging::real(points[k][j]);
-                    error = m.entry.name + ".at[" + std::to_string(d) + "] = \"" + m.at_text[d] + "\" is " +
-                            logging::real(q[d]) + " at the face at " + at + ")";
+                    error = "data \"" + m.entry.name + "\": column " + m.entry.coordinates[d] + " <- boundary " +
+                            m.at_text[d] + " is " + logging::real(q[d]) + " at the face at " + at + ")";
                 }
                 lo[d] = std::min(lo[d], q[d]);
                 hi[d] = std::max(hi[d], q[d]);
@@ -164,17 +178,18 @@ std::string BoundaryProfiles::evaluate(const Mesh & mesh, const std::vector<uint
             for (uint64_t & n : outside) n = comm::allreduce(n, comm::Op::SUM);
         }
         auto range = [&](const size_t j) { return logging::real(lo[j]) + " to " + logging::real(hi[j]); };
-        std::string text = m.entry.name + " (" + m.entry.file + ": " + m.entry.kind;
+        std::string text = "data \"" + m.entry.name + "\" (" + m.entry.file + ", " + m.entry.kind + "):";
         for (size_t d = 0; d < dims; d++) {
-            text += "; " + m.entry.coordinates[d] + " = " + m.at_text[d] + " " + range(d);
+            text += std::string(d ? "," : "") + " column " + m.entry.coordinates[d] + " <- boundary " + m.at_text[d] +
+                    ", " + range(d) + m.unit[d];
             if (outside[d] > 0) {
                 const double * axis = host.axes.data() + set.axes[d];
-                text += ", " + logging::count(outside[d], "face") + " outside the table's " +
-                        logging::real(axis[0]) + " to " + logging::real(axis[set.n_axis[d] - 1]) +
+                text += ", " + logging::count(outside[d], "face") + " beyond the column's " +
+                        logging::real(axis[0]) + " to " + logging::real(axis[set.n_axis[d] - 1]) + m.unit[d] +
                         " take its end values";
             }
         }
-        text += "):";
+        text += "; values";
         for (size_t f = 0; f < n_fields; f++) text += (f ? ", " : " ") + m.entry.variables[f] + " " + range(dims + f);
         summary += (summary.empty() ? "" : "; ") + text;
     }

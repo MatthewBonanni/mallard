@@ -410,4 +410,33 @@ DataView<> Data::device() const {
     return v;
 }
 
+std::string column_of(const Entry & entry, const std::string & variable) {
+    return variable.substr(entry.name.size() + 1);
+}
+
+InputError taken(const Input & e, const std::string & where, const std::string & docs, const Entry & entry,
+                 const std::string & variable, const bool coordinate, const std::string & side) {
+    const std::string what = "makes the variable " + variable + " (name " + entry.name + ", column " +
+                             column_of(entry, variable) + "), which ";
+    return InputError({.key = where + ".name",
+                       .line = line_of(e, "name"),
+                       .message = what + (coordinate ? "is the " + side + " coordinate " + variable
+                                                     : "another data entry also makes"),
+                       .fix = "Give the entry another name",
+                       .docs = docs});
+}
+
+std::string one_of(const std::vector<std::string> & names) {
+    std::string text;
+    for (size_t i = 0; i < names.size(); i++) {
+        text += (i == 0 ? "" : i + 1 == names.size() ? " or " : ", ") + names[i];
+    }
+    return text;
+}
+
+std::string at_text(const std::string & at, const std::vector<std::string> & names) {
+    if (std::find(names.begin(), names.end(), at) != names.end()) return at;
+    return "\"" + at + "\"";
+}
+
 } // namespace tabulated

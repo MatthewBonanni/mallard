@@ -547,16 +547,25 @@ whatever the inlet's size; a normalized one (`n`, `u`, `v`, from 0 to 1)
 stretches the table over the boundary, so `at = ["u"]` with a table from 0 to
 1 fits a profile across an inlet of any width.
 
+**Names.** A column's name belongs to its table: expressions see a value
+column only as `<name>_<column>`, and a coordinate column is filled only by
+`at`, from the boundary's quantities. So any column may be named like a
+coordinate (a coordinate column `n_m` reads the boundary's `n_m` unless `at`
+says otherwise, and a value column `u` is the variable `bl_u`); only the
+variables `<name>_<column>` must be new names (`name = "u"` with a column `m`
+would make `u_m`, the boundary's coordinate, and is an error).
+
 The data are read once at setup, at each face center, and stored with the
 face like its coordinates: an expression of the data and `t` is evaluated on
 the device at the stage times like any other, with no work on the host and
 the same bits on every rank count. A table holds its end values beyond its
 range (a boundary-layer table up to its edge gives the free stream above
-it). The run log shows, per entry, each coordinate's range at the faces, how
-many faces fall outside the table, and each variable's range, e.g. `data bl
-(boundary_layer.csv: table 41, cubic; y = n_m 0.000625 to 0.05, 24 faces
-outside the table's 0 to 0.02 take its end values): bl_u 0 to 30, bl_T 300 to
-340`, and the run block records the file's hash.
+it). The run log shows, per entry, which boundary quantity fills each
+coordinate column and its range at the faces, how many faces fall beyond the
+column, and each value variable's range, e.g. `data "bl" (boundary_layer.csv,
+table 41, cubic): column y <- boundary n_m, 0.000625 to 0.05 m, 24 faces
+beyond the column's 0 to 0.02 m take its end values; values bl_u 0 to 30,
+bl_T 300 to 340`, and the run block records the file's hash.
 
 | Key | Default | Meaning |
 |---|---|---|

@@ -187,8 +187,11 @@ TEST(BoundaryProfilesTest, ProfileOutsideItsTableIsReported) {
     for (const FacePoint & p : points) {
         EXPECT_NEAR(p[boundary_variable::FIRST_DATA], profile(std::min(p[1], 0.2)), 0.01) << p[1];
     }
-    const std::string outside = std::to_string(N_DIM == 2 ? 6 : 12) + " faces outside the table's 0 to 0.2";
+    const std::string mapped = "data \"bl\" (" + csv + ", table 13, linear): column d <- boundary n_m, ";
+    EXPECT_EQ(summary.rfind(mapped, 0), 0u) << summary;
+    const std::string outside = std::to_string(N_DIM == 2 ? 6 : 12) + " faces beyond the column's 0 to 0.2 m take";
     EXPECT_NE(summary.find(outside), std::string::npos) << summary;
+    EXPECT_NE(summary.find("; values bl_T "), std::string::npos) << summary;
 }
 
 TEST(BoundaryProfilesTest, MisplacedDataAreInputErrors) {
@@ -199,9 +202,24 @@ TEST(BoundaryProfilesTest, MisplacedDataAreInputErrors) {
                            "\n[[boundaries.data]]\nname = \"bl\"\nfile = \"" + csv + "\"\n" + data_keys,
                        run);
     };
-    EXPECT_NE(error_of(inlet("1.25", "at = [\"n_m\"]\n")).find("no expression of the boundary reads its variables"),
+    EXPECT_NE(error_of(inlet("1.25", "at = [\"n_m\"]\n")).find("no expression of the boundary reads bl_T, the values"),
               std::string::npos);
-    EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n_m + t\"]\n")).find("depends on t"), std::string::npos);
-    EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the coordinate d is not x, y, z or a local coordinate"),
+    EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n_m + t\"]\n")).find("reads t for column d, but the data are read once"), std::string::npos);
+    EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the table's coordinate column d is not named like a boundary coordinate"),
+              std::string::npos);
+    // Column names are the table's: a coordinate column and a value column named like coordinates
+    std::ostringstream named;
+    named << "n_m, u\n";
+    for (int k = 0; k <= 4; k++) named << number(0.0625 * k) << ", " << number(0.25 * k) << "\n";
+    const std::string same = write_temp_shared("same.csv", named.str());
+    EXPECT_EQ(error_of(channel("type = \"inlet_state\"\nu = " + vec("\"3 + bl_u\"", "0.0") +
+                                   "\np = 1.0\nT = 1.25\n[[boundaries.data]]\nname = \"bl\"\nfile = \"" + same + "\"\n",
+                               run)),
+              "no error");
+    EXPECT_NE(error_of(channel("type = \"inlet_state\"\nu = " + vec("\"3 + u_m\"", "0.0") +
+                                   "\np = 1.0\nT = 1.25\n[[boundaries.data]]\nname = \"u\"\nfile = \"" +
+                                   write_temp_shared("m.csv", "n_m, m\n0, 0\n1, 1\n") + "\"\n",
+                               run))
+                  .find("makes the variable u_m (name u, column m), which is the boundary coordinate u_m"),
               std::string::npos);
 }
