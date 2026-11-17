@@ -387,7 +387,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
                         {"most cells per " + unit, count(r.max_local_cells), "owned and halo cells", "",
                          r.sizing_view_entries
                              ? format("%.0f", r.view_entries_per_cell) + " entries per cell in a View of rank 2 or "
-                                   "more, which addresses " + std::to_string(view_entries::MAX)
+                                   "more, which addresses " + count(view_entries::MAX)
                              : bytes(r.bytes_per_cell) + " per cell" +
                                    (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
                                    (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});

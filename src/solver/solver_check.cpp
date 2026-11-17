@@ -384,7 +384,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
                 "the largest part on " + std::to_string(r.target_ranks) + " ranks holds " +
                     logging::count(target_cells, "cell") + ", halo included, and a multi-dimensional View of " +
                     logging::format("%.0f", r.view_entries_per_cell) + " entries per cell addresses " +
-                    std::to_string(view_entries::MAX) + " entries, at most " +
+                    logging::count(view_entries::MAX) + " entries, at most " +
                     logging::count(r.view_max_local_cells, "cell") + " per rank: run on at least " +
                     std::to_string((target_cells + r.view_max_local_cells - 1) / r.view_max_local_cells) +
                     " times as many ranks");
