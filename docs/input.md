@@ -64,6 +64,25 @@ an error. Under `mpirun -n N` it checks the run on N ranks.
 
 Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
+## `[check]`
+
+What the [resolution report](guide/input_files.md#resolution) of `mallard check`
+(and of the check every run records at its setup) is made of. Every key is optional.
+
+| Key | Description |
+|---|---|
+| `regions` | Filled regions (names of `[regions]` or of the mesh's cell zones, or inline tables) the report also gives its values for, each on its own rows. Default: every cell zone of the mesh. Regions that move or are defined by the solution are errors |
+| `statistics` | A file of an earlier run of the case on this mesh (a restart file, or a VTKHDF or XDMF snapshot of the whole mesh) whose `[statistics]` averages give the dissipation, instead of the initial state's or the forcing's: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`) from `MEAN_STRAIN_RATE` and `COV_STRAIN_RATE_STRAIN_RATE` (`fields = ["STRAIN_RATE"]`, `products = ["STRAIN_RATE*STRAIN_RATE"]`), else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none |
+
+```toml
+[regions]
+wake = {type = "box", center = [3, 0, 0.5], size = [4, 2, 1]}
+
+[check]
+regions = ["wake"]
+statistics = "run1/restart_020000.restart"
+```
+
 ## `[run]`
 
 | Key | Description |
@@ -185,10 +204,12 @@ build reads a mesh one cell thick in z between `empty` patches (as for 2D
 OpenFOAM runs): each cell is its face at the lowest z, the other patches give
 the boundary edges, and the empty patches disappear.
 
-In a distributed run every rank reads a Gmsh, CGNS, Fluent or OpenFOAM mesh whole (keeping only its
-share), so large meshes should be converted to Mallard's HDF5 mesh format
-(builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
-share; generated meshes are also produced per rank:
+In a distributed run the ranks read a mesh file of any format together, each parsing its share,
+so no rank holds the whole mesh. ASCII Fluent node and face sections and ASCII OpenFOAM lists
+must hold one item per line (short OpenFOAM lists may be on one line), as Fluent and OpenFOAM
+write them. Mallard's HDF5 mesh format (builds with `-DMallard_ENABLE_HDF5=ON`), of which each
+rank reads only its share, needs no parsing, so large meshes used for many runs are best
+converted to it; generated meshes are also produced per rank:
 
 ```sh
 mallard mesh convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
@@ -459,11 +480,16 @@ for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed 
 | Key | Description |
 |---|---|
 | `model` | `tfles` |
-| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
-| `s_L` | Laminar flame speed (m/s) |
-| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `sensor` | `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
+| `delta_L` | `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | `temperature` only: laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | `temperature` only: temperatures of the fresh and burnt gas (K) |
+| `flame_table` | `reaction` only, required: CSV file of premixed flames against the mixture fraction, columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption rate of `sensor_species`); other columns are ignored. Linear in `Z`. Built by `tools/setup/flame_table.py` |
+| `fuel`, `oxidizer` | `reaction` only, required: the streams of the mixture fraction, as in [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform composition; those the table was built with |
+| `sensor_species` | `reaction` only: the species of `omega_max` and of the flame index; default the fuel stream's most abundant species with C or H |
+| `efficiency_max` | Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `efficiency` | `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
 | `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
 | `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
 | `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |

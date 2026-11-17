@@ -16,6 +16,7 @@
   "examples/premixed_flame/ch4/input.toml",
   "examples/premixed_flame/input.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml"
  ],
  "type": "string"

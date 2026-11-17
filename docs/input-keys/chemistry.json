@@ -20,6 +20,7 @@
   "examples/premixed_flame/input.toml",
   "examples/reactive_shock_tube/input.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml"
  ]
 }
