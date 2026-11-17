@@ -109,6 +109,16 @@ INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicMesh2D,
     ::testing::Values(MeshParam{"cartesian", "x"}, MeshParam{"cartesian", "xy"},
                       MeshParam{"cartesian_tri", "y"}, MeshParam{"cartesian_tri", "xy"}));
 
+TEST(PeriodicSetup2D, VertexNeighborShiftsAreStoredOnlyWithPeriodicPairs) {
+    for (const std::string type : {"cartesian", "cartesian_tri"}) {
+        const auto plain = periodic_mesh(type, 5, "");
+        EXPECT_GT(plain->cells_of_cell.extent(0), 0u) << type;
+        EXPECT_EQ(plain->cells_of_cell_shift.rows.extent(0), 0u) << type;
+        const auto periodic = periodic_mesh(type, 5, "x");
+        EXPECT_EQ(periodic->cells_of_cell_shift.rows.extent(0), periodic->cells_of_cell.extent(0)) << type;
+    }
+}
+
 TEST(PeriodicSetup2D, InvalidSetupsAreRejected) {
     // Two cells across a periodic direction touch both directly and across the seam
     EXPECT_THROW(periodic_mesh("cartesian", 2, "x"), std::runtime_error);

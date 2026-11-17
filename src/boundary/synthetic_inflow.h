@@ -52,23 +52,17 @@ class InletProfile {
         bool uniform() const { return uniform_; }
 
         /** @brief The mean velocity at x on a face of unit inward normal n_in (the direction of a speed without one). */
-        std::array<double, N_DIM> velocity(const Point & x, const Point & n_in) const;
+        std::array<double, N_DIM> velocity(const FacePoint & x, const Point & n_in) const;
 
         /** @brief Reynolds stress in N_STRESS order (zero without turbulence). */
-        std::array<double, N_STRESS> stress_at(const Point & x) const;
+        std::array<double, N_STRESS> stress_at(const FacePoint & x) const;
 
     private:
-        /** @brief A number, or an expression in x, y, z. */
-        struct Field {
-            double value = 0.0;
-            std::shared_ptr<Expression> expression;
-            double at(const Point & x) const;
-        };
         bool uniform_ = true;
-        std::vector<Field> u;       // per component, or the speed alone
+        std::vector<BoundaryValue> u;       // per component, or the speed alone
         bool speed = false, directed = false;
         DirectionKey direction;
-        std::vector<Field> stress;  // per N_STRESS component, empty without turbulence
+        std::vector<BoundaryValue> stress;  // per N_STRESS component, empty without turbulence
         // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
         int axis = -1;
         std::vector<double> coordinate;
@@ -105,10 +99,12 @@ class SyntheticInflow {
          * @param stream Random stream of the inlet (its index among the boundaries).
          * @param mesh Mesh.
          * @param faces The inlet's faces on this rank.
+         * @param points Their points for the inlet's expressions (centers and local coordinates).
          * @param char_index Index of each face into BoundaryData::char_*.
          */
         SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
-                        const std::vector<uint32_t> & faces, const std::vector<int32_t> & char_index);
+                        const std::vector<uint32_t> & faces, const std::vector<FacePoint> & points,
+                        const std::vector<int32_t> & char_index);
 
         /**
          * @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k).
