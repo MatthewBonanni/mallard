@@ -211,7 +211,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 51 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -264,7 +264,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 51 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -358,7 +358,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 51 more.
 
 | `riemann_solver` | Use |
 |---|---|

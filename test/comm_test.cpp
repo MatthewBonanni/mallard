@@ -14,15 +14,14 @@
 
 #include <array>
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 #include "comm.h"
 #include "device_comm.h"
 #include "exact_sums.h"
+#include "scratch.h"
 
 TEST(CommTest, RanksAreNumberedFromZero) {
     EXPECT_GE(comm::rank(), 0);
@@ -154,9 +153,7 @@ TEST(CommTest, FileWritesGoInPieces) {
         displacements[i] = MPI_Aint(2 * (first + i) * sizeof(double));
     }
     const std::string header = "head!";
-    const std::string filename =
-        (std::filesystem::temp_directory_path() / ("mallard_comm_test_" + comm::broadcast(std::to_string(getpid()))))
-            .string();
+    const std::string filename = (scratch_dir() / "pieces.bin").string();
     MPI_File fh;
     ASSERT_EQ(MPI_File_open(comm::communicator(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh),
               MPI_SUCCESS);
@@ -182,8 +179,6 @@ TEST(CommTest, FileWritesGoInPieces) {
             EXPECT_EQ(read_keys[g], 10 * g + 1);
             EXPECT_EQ(read_values[2 * g], 0.5 * double(g));
         }
-        std::filesystem::remove(filename);
     }
-    comm::barrier();
 }
 #endif

@@ -39,9 +39,9 @@ def reference(run):
     return phi, s_l, delta, np.genfromtxt(os.path.join(run, "reference.csv"), delimiter=",", names=True, skip_header=1)
 
 
-def profile(path):
-    pts, conn, offs, a = snapshots.read(path)
-    _, c = snapshots.cells(pts, conn, offs)
+def profile(f, snapshot=-1):
+    g, a = snapshots.read(f, snapshot)
+    c = g.vertex_averages()
     order = np.argsort(c[:, 0])
     return c[order, 0], {k: v[order] for k, v in a.items() if np.ndim(v) == 1 and v.size == len(order)}
 
@@ -57,9 +57,10 @@ def consumption_speed(x, a):
 
 def history(run):
     t, s = [], []
-    for time, path in snapshots.series(os.path.join(run, "solut", "flame")):
-        x, a = profile(path)
-        t.append(time)
+    f = snapshots.series(os.path.join(run, "solut", "flame"))
+    for k, snapshot in enumerate(f.snapshots):
+        x, a = profile(f, k)
+        t.append(snapshot.t)
         s.append(consumption_speed(x, a))
     return np.array(t), np.array(s)
 
@@ -73,7 +74,7 @@ def setup(args):
     run = args.runs[0]
     xyz, cells, zones = read_msh(os.path.join(run, "strip.msh"))
     phi, s_l, delta, ref = reference(run)
-    x, a = profile(snapshots.series(os.path.join(run, "solut", "flame"))[0][1])
+    x, a = profile(snapshots.series(os.path.join(run, "solut", "flame")), 0)
     L, h = xyz[:, 0].max(), xyz[:, 1].max()
 
     def draw(t):
@@ -117,7 +118,7 @@ def results(args):
     phi, s_l, delta, ref = reference(main_run)
     t, s = history(main_run)
     t_flame = delta / s_l
-    x, a = profile(snapshots.last(os.path.join(main_run, "solut", "flame")))
+    x, a = profile(snapshots.series(os.path.join(main_run, "solut", "flame")))
     last = t >= t[-1] - t_flame
     print(f"phi = {phi:g}: consumption speed {s[last].mean():.4f} m/s over the last flame time, "
           f"Cantera {s_l:.4f} ({100 * (s[last].mean() / s_l - 1):+.2f}%)")
