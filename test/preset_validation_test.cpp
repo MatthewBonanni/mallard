@@ -204,18 +204,19 @@ TEST(PresetValidation, LesLeavesTheTaylorGreenDecayToViscosity) {
 
 namespace {
 
-const double FLAME_SPEED = 9.7473;
+const double FLAME_SPEED = 9.666;
 
 /**
  * @brief Speed of a stoichiometric H2/air flame at 700 K and 1 atm (Cantera 3.2
- *        FreeFlame, mechanisms/h2o2.yaml, mixture-averaged: S_L = 9.7473 m/s,
- *        thermal thickness 0.4775 mm, T_b = 2574 K), from a tanh profile to
+ *        FreeFlame, mechanisms/h2o2.yaml, mixture-averaged, Cantera's grid of refine
+ *        criteria 0.01 bisected three times, extrapolated at first order:
+ *        S_L = 9.666 m/s, thermal thickness 0.4726 mm, T_b = 2574 K), from a tanh profile to
  *        Cantera's burnt state, burning toward a closed end through gas at
  *        rest: the speed of the 1000 K isotherm. 6 cells per thermal
  *        thickness, the reacting preset plus the numerics keys numerics_extra.
  */
 double flame_speed(const std::string & numerics_extra) {
-    const double S_L = FLAME_SPEED, delta = 4.775e-4, tau = delta / S_L;
+    const double S_L = FLAME_SPEED, delta = 4.726e-4, tau = delta / S_L;
     const int n = 60;
     const double dx = 10 * delta / n;
     const std::string s = "0.5 * (1 + tanh((x - 3.34e-3) / 1.2e-4))";
@@ -283,9 +284,9 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
 }
 
 TEST(PresetValidation, BoundPreservingTENOKeepsASmoothFlamesSpeed) {
-    // TENO3 alone is within 0.1% here. Bound preservation once clipped the
-    // pressure of troubled flame cells at smooth extrema 1e-4 of the pressure
-    // in size, and the flame ran 4% fast
+    // TENO3 alone gives the same speed here (+0.4%). Bound preservation once
+    // clipped the pressure of troubled flame cells at smooth extrema 1e-4 of
+    // the pressure in size, and the flame ran 4% fast
     const double speed =
         flame_speed("[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\nbound_preserving = true\n");
     EXPECT_NEAR(speed, FLAME_SPEED, 0.01 * FLAME_SPEED);

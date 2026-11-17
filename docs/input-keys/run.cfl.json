@@ -3,7 +3,6 @@
   2,
   3
  ],
- "required": true,
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/average_outlet/input.toml",
@@ -65,11 +64,18 @@
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml",
+  "tools/dev/catalog_inputs/3d/mesh_file.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml",
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"
  ],

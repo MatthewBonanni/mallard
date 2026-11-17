@@ -11,12 +11,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 #include <Kokkos_Core.hpp>
 
 #include "check.h"
 #include "log.h"
+#include "output_reader.h"
+#include "region_input.h"
 #include "wall_model.h"
 
 namespace {
@@ -44,12 +47,13 @@ std::string g3(const double v) { return logging::format("%.3g", v); }
 
 constexpr double NONE = std::numeric_limits<double>::quiet_NaN();
 
-/** @brief Adds an estimate to the report. */
+/** @brief Adds an estimate to the report; of a region, its id and quantity start with the region's name. */
 CheckEstimate & estimate(CheckReport & r, const std::string & id, const std::string & quantity, const double value,
-                         const std::string & units, const std::string & basis) {
+                         const std::string & units, const std::string & basis, const std::string & region = "") {
     CheckEstimate e;
-    e.id = id;
-    e.quantity = quantity;
+    e.id = region.empty() ? id : "region." + region + "." + id;
+    e.quantity = region.empty() ? quantity : region + ": " + quantity;
+    e.region = region;
     e.value = value;
     e.units = units;
     e.basis = basis;
@@ -95,6 +99,96 @@ struct WallFace {
     Point n_in, along;  // into the fluid; the first cell's velocity relative to the wall, along the wall
 };
 
+/** @brief What the values of a region are made of, per owned cell. */
+struct RegionInputs {
+    const std::vector<double> & delta;
+    std::function<double(uint32_t)> volume;
+    std::function<Point(uint32_t)> at;
+    const CheckCellScales * scales;  // null: inviscid
+    bool les;
+    double delta_L;  // TFLES, else 0
+};
+
+/** @brief The rows of a region with fractions f of the owned cells: cell sizes, and against them the region's
+ *         Kolmogorov length, wall units and flame thickness. Collective. */
+void region_rows(CheckReport & r, const std::string & name, const std::vector<double> & f, const RegionInputs & in) {
+    using logging::format;
+    const CheckCellScales * scales = in.scales;
+    const bool local = scales && !scales->epsilon.empty();
+    // Sums of f V, f V Delta, f rho V, f rho V epsilon, f rho V nu and of the cells touched
+    std::array<double, 6> sums{};
+    Worst coarsest, y_plus;
+    for (uint32_t c = 0; c < f.size(); c++) {
+        if (!(f[c] > 0.0)) continue;
+        const double V = f[c] * in.volume(c);
+        sums[0] += V;
+        sums[1] += V * in.delta[c];
+        sums[5] += 1.0;
+        coarsest.add(in.delta[c], in.at(c));
+        if (scales) {
+            const double m = scales->rho[c] * V;
+            sums[2] += m;
+            sums[3] += local ? m * scales->epsilon[c] : 0.0;
+            sums[4] += m * scales->nu[c];
+            y_plus.add(scales->y_plus[c], in.at(c));
+        }
+    }
+    sums = comm::allreduce(sums, comm::Op::SUM);
+    coarsest.reduce();
+    y_plus.reduce();
+    const std::string size = "cell size V^(1/" + std::to_string(N_DIM) + ")";
+    if (!(sums[5] > 0.0)) {
+        estimate(r, "cell_size_mean", size + ", mean", NONE, "m", "not estimated: the region touches no cell", name);
+        return;
+    }
+    const double delta_mean = sums[1] / sums[0];
+    estimate(r, "cell_size_mean", size + ", mean", delta_mean, "m",
+             "volume-weighted, by the region's fraction of each of its " + logging::count(uint64_t(sums[5]), "cell"),
+             name);
+    locate(estimate(r, "cell_size_max", size + ", largest", coarsest.value, "m", "over the region's cells", name),
+           coarsest.x);
+    if (in.delta_L > 0.0) {
+        estimate(r, "cells_per_delta_L_min", "cells across delta_L, fewest", in.delta_L / coarsest.value,
+                 "dimensionless", "delta_L over the region's largest cell size", name);
+    }
+    if (!scales) return;
+    const std::string regime = in.les ? "wall-resolved LES" : "DNS";
+    if (y_plus.value > 0.0) {
+        CheckEstimate & e = estimate(r, "y_plus_max", "first-cell y+, largest", y_plus.value, "wall units",
+                                     "the region's first cell centers of walls without a wall model", name);
+        locate(e, y_plus.x);
+        target(e, format("<= %.0f (%s)", WALL_Y_PLUS, regime.c_str()), y_plus.value <= WALL_Y_PLUS);
+    }
+    const double nu = sums[4] / sums[2], eps = local ? sums[3] / sums[2] : r.epsilon;
+    if (!(eps > 0.0)) {
+        estimate(r, "eta", "Kolmogorov length eta", NONE, "m",
+                 "not estimated: no forcing, no check.statistics, and the velocity has no gradients in the region",
+                 name);
+        return;
+    }
+    const double eta = std::pow(nu * nu * nu / eps, 0.25), ratio = delta_mean / eta;
+    estimate(r, "epsilon", "dissipation epsilon, mean", eps, "m^2/s^3",
+             local ? scales->epsilon_basis + ", mass-weighted over the region"
+                   : "the domain's, " + scales->epsilon_basis,
+             name);
+    estimate(r, "eta", "Kolmogorov length eta", eta, "m",
+             "(nu^3 / epsilon)^(1/4) with the region's mean nu " + g3(nu) + " m^2/s", name);
+    CheckEstimate & mean_ratio = estimate(r, "delta_over_eta_mean", "cell size / eta, mean", ratio, "dimensionless",
+                                          "the region's mean cell size over its eta", name);
+    if (!in.les) target(mean_ratio, format("<= %.0f (DNS)", DNS_DELTA_OVER_ETA), ratio <= DNS_DELTA_OVER_ETA);
+    locate(estimate(r, "delta_over_eta_max", "cell size / eta, largest", coarsest.value / eta, "dimensionless",
+                    "the region's largest cell size over its eta", name),
+           coarsest.x);
+    if (!in.les && ratio > DNS_DELTA_OVER_ETA) {
+        r.warning(diagnostic_code::DNS_ETA,
+                  format("DNS: cells of %.3g eta on average in region %s (eta %s m from %s): resolving the "
+                         "dissipation needs about %.0f eta or less: refine it to cells of %s m, or model the small "
+                         "scales with LES ([les])",
+                         ratio, name.c_str(), g3(eta).c_str(), scales->epsilon_basis.c_str(), DNS_DELTA_OVER_ETA,
+                         g3(DNS_DELTA_OVER_ETA * eta).c_str()));
+    }
+}
+
 } // namespace
 
 CheckFields Solver::check_resolution(CheckReport & r) {
@@ -130,17 +224,21 @@ CheckFields Solver::check_resolution(CheckReport & r) {
     estimate(r, "cell_size_mean", size + ", mean", delta_mean, "m", "volume-weighted");
     locate(estimate(r, "cell_size_max", size + ", largest", r.delta_max, "m", "over every cell"), coarsest.x);
 
+    CheckCellScales scales;
     if (!is_viscous()) {
         estimate(r, "viscous_scales", "Kolmogorov length, wall units", NONE, "", "not estimated: inviscid");
     } else {
-        check_viscous_scales(r, fields, delta, delta_mean, coarsest.x);
+        scales = check_viscous_scales(r, fields, delta, delta_mean, coarsest.x);
     }
 
     if (tfles_on) {
         const double delta_L = thickened_flame.delta_L;
         r.cells_per_delta_L_min = delta_L / r.delta_max;
         r.cells_per_delta_L_max = delta_L / r.delta_min;
-        estimate(r, "delta_L", "laminar flame thickness delta_L", delta_L, "m", "les.combustion.delta_L");
+        estimate(r, "delta_L", "laminar flame thickness delta_L", delta_L, "m",
+                 thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION
+                     ? "the thinnest flame of les.combustion.flame_table"
+                     : "les.combustion.delta_L");
         estimate(r, "cells_per_delta_L_min", "cells across delta_L, fewest", r.cells_per_delta_L_min,
                  "dimensionless", "delta_L over the largest cell size");
         estimate(r, "cells_per_delta_L_max", "cells across delta_L, most", r.cells_per_delta_L_max, "dimensionless",
@@ -169,11 +267,94 @@ CheckFields Solver::check_resolution(CheckReport & r) {
                  "not estimated: only les.combustion (TFLES) gives one; a resolved flame needs about 10 cells across "
                  "it");
     }
+
+    const RegionInputs in{delta, [&](const uint32_t c) { return double(volume(c)); }, at,
+                          is_viscous() ? &scales : nullptr, les_on, tfles_on ? double(thickened_flame.delta_L) : 0.0};
+    for (const auto & [name, f] : check_inputs.regions) region_rows(r, name, f, in);
     return fields;
 }
 
-void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const std::vector<double> & delta,
-                                  const double delta_mean, const Point & coarsest) {
+void Solver::init_check_inputs() {
+    check_inputs = {};
+    const uint32_t n_owned = mesh->n_owned();
+    const Input * check = input.contains("check") ? &input.at("check") : nullptr;
+    if (check && check->contains("regions")) {
+        const Input & list = check->at("regions");
+        if (!list.is_array() || list.as_array().empty()) {
+            throw InputError({.key = "check.regions",
+                              .line = line_of(*check, "regions"),
+                              .message = "must be a non-empty list of filled regions or their names",
+                              .fix = "For example regions = [\"flame_zone\", \"wake\"]"});
+        }
+        for (size_t i = 0; i < list.as_array().size(); i++) {
+            const Input & value = list.as_array()[i];
+            const std::string key = "check.regions[" + std::to_string(i) + "]";
+            const region::Region & region = used_regions->get(value, key);
+            region::require_full_dimension(region, value, key);
+            if (region.moving() || region.solution()) {
+                throw InputError({.key = key,
+                                  .line = line_of(value),
+                                  .message = "moves or is defined by the solution: the resolution report needs a "
+                                             "region of fixed cells",
+                                  .fix = "Give a region of shapes, a cell zone or a boolean of them"});
+            }
+            const std::vector<double> & f = used_regions->fractions(value, key);
+            check_inputs.regions.emplace_back(value.is_string() ? value.as_string() : key,
+                                              std::vector<double>(f.begin(), f.begin() + n_owned));
+        }
+    } else {
+        const region::MeshRegions & automatic = used_regions->automatic();
+        for (const std::string & zone : automatic.cell_zones) {
+            const Input value = parse_input_string("r = \"" + zone + "\"").at("r");
+            const std::vector<double> f = region::cell_fractions(*mesh, region::read(value, zone, nullptr, &automatic));
+            check_inputs.regions.emplace_back(zone, std::vector<double>(f.begin(), f.begin() + n_owned));
+        }
+    }
+
+    if (!check || !check->contains("statistics")) return;
+    const std::string file = find_value<std::string>(input, "check", "statistics");
+    auto fail = [&](const std::string & message, const std::string & fix) {
+        throw InputError({.key = "check.statistics", .line = line_of(*check, "statistics"), .message = message,
+                          .fix = fix});
+    };
+    output::Contents contents;
+    try {
+        contents = output::open(file);
+    } catch (const std::exception & e) {
+        fail(e.what(), "Give a restart file, or a snapshot of the whole mesh, of an earlier run of the case");
+    }
+    const uint64_t n_cells = comm::allreduce(uint64_t(n_owned), comm::Op::SUM);
+    if (!contents.global_order || contents.mesh.n_cells != n_cells || contents.snapshots.empty()) {
+        fail(file + " does not hold values on the " + logging::count(n_cells, "cell") +
+                 " of this mesh in its order (" + logging::count(contents.mesh.n_cells, "cell") + ")",
+             "Give a restart file, or a VTKHDF or XDMF snapshot of the whole mesh, written on this mesh");
+    }
+    const size_t last = contents.snapshots.size() - 1;
+    auto values = [&](const std::string & field) {
+        const std::vector<double> all = output::read(contents, field, last);
+        std::vector<double> mine(n_owned);
+        for (uint32_t c = 0; c < n_owned; c++) mine[c] = all[mesh->h_global_cell(c)];
+        return mine;
+    };
+    const std::string mean_s = "MEAN_STRAIN_RATE", cov_s = "COV_STRAIN_RATE_STRAIN_RATE", mean_w = "MEAN_ENSTROPHY";
+    if (contents.field(mean_s) && contents.field(cov_s)) {
+        check_inputs.strain = values(cov_s);
+        const std::vector<double> mean = values(mean_s);
+        for (uint32_t c = 0; c < n_owned; c++) check_inputs.strain[c] += mean[c] * mean[c];
+        check_inputs.statistics = "nu <|S|^2> (incompressible), from " + mean_s + " and " + cov_s + " of " + file;
+    } else if (contents.field(mean_w)) {
+        check_inputs.strain = values(mean_w);
+        for (double & w : check_inputs.strain) w *= 2.0;
+        check_inputs.statistics = "nu <omega^2> (homogeneous, incompressible), from " + mean_w + " of " + file;
+    } else {
+        fail(file + " holds neither " + mean_s + " with " + cov_s + " nor " + mean_w,
+             "Average them in the earlier run: [statistics] fields = [\"STRAIN_RATE\"], products = "
+             "[\"STRAIN_RATE*STRAIN_RATE\"]");
+    }
+}
+
+CheckCellScales Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const std::vector<double> & delta,
+                                             const double delta_mean, const Point & coarsest) {
     using logging::format;
     using logging::real;
     const uint32_t n_owned = mesh->n_owned();
@@ -198,8 +379,12 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     } else {
         for (uint32_t c = 0; c < n_owned; c++) mu[c] = double(physics.viscosity(P(c, N_DIM + 1)));
     }
-    // Sums of rho, mu, rho |u|^2, the dissipation 2 mu (S:S - (div u)^2 / 3), the volume and rho u
-    std::array<double, 5 + N_DIM> sums{};
+    // Sums of rho, mu, rho |u|^2, the dissipation 2 mu (S:S - (div u)^2 / 3), the volume, rho times the
+    // statistics' dissipation and rho u
+    const bool from_statistics = !check_inputs.statistics.empty();
+    CheckCellScales scales{std::vector<double>(n_owned), std::vector<double>(n_owned), std::vector<double>(n_owned),
+                           std::vector<double>(n_owned, 0.0), ""};
+    std::array<double, 6 + N_DIM> sums{};
     double u_max = 0.0;
     for (uint32_t c = 0; c < n_owned; c++) {
         const double V = double(volume(c)), rho = double(W(c, 0));
@@ -211,13 +396,18 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
                 const double s = 0.5 * (double(G(c, 1 + k, i)) + double(G(c, 1 + i, k)));
                 ss += s * s;
             }
-            sums[5 + i] += rho * double(W(c, 1 + i)) * V;
+            sums[6 + i] += rho * double(W(c, 1 + i)) * V;
         }
+        scales.rho[c] = rho;
+        scales.nu[c] = mu[c] / rho;
+        scales.epsilon[c] = from_statistics ? scales.nu[c] * check_inputs.strain[c]
+                                            : 2.0 * scales.nu[c] * (ss - div * div / 3.0);
         sums[0] += rho * V;
         sums[1] += mu[c] * V;
         sums[2] += rho * u2 * V;
         sums[3] += 2.0 * mu[c] * (ss - div * div / 3.0) * V;
         sums[4] += V;
+        sums[5] += from_statistics ? rho * scales.epsilon[c] * V : 0.0;
         u_max = std::max(u_max, std::sqrt(u2));
     }
     sums = comm::allreduce(sums, comm::Op::SUM);
@@ -226,7 +416,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     Point u_mean{};
     double u_mean2 = 0.0;
     for (size_t i = 0; i < N_DIM; i++) {
-        u_mean[i] = sums[5 + i] / mass;
+        u_mean[i] = sums[6 + i] / mass;
         u_mean2 += u_mean[i] * u_mean[i];
     }
     const double u_prime2 = std::max(0.0, sums[2] / mass - u_mean2) / double(N_DIM);
@@ -343,6 +533,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
         }
         resolved = 1;
         y_plus.add(yp, at(w.cell));
+        scales.y_plus[w.cell] = std::max(scales.y_plus[w.cell], yp);
         y1_fix = std::min(y1_fix, WALL_Y_PLUS * unit);
         // The face's extents along the flow and across it, in the wall's plane
         Point tangent{};
@@ -447,16 +638,19 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
         fields.emplace_back("Y_PLUS", cell_y_plus);
     }
 
-    // Kolmogorov and Taylor lengths from a dissipation rate
-    const bool from_forcing = hold_mass_flow && r.u_tau > 0.0;
-    const double eps_state = sums[3] / mass;
-    const double eps = from_forcing ? mean_tau * U_bulk / h : eps_state;
-    const std::string eps_source = from_forcing ? "the forcing's power, u_tau^2 U_b / h"
-                                                : state_name + " resolved dissipation";
+    // Kolmogorov and Taylor lengths from a dissipation rate: an earlier run's, the forcing's or the state's
+    const bool from_forcing = !from_statistics && hold_mass_flow && r.u_tau > 0.0;
+    const double eps = from_statistics ? sums[5] / mass : from_forcing ? mean_tau * U_bulk / h : sums[3] / mass;
+    const std::string eps_source = from_statistics ? check_inputs.statistics
+                                   : from_forcing  ? "the forcing's power, u_tau^2 U_b / h"
+                                                   : state_name + " resolved dissipation";
+    if (from_forcing) scales.epsilon.clear();
+    scales.epsilon_basis = eps_source;
     if (!(eps > 0.0)) {
         estimate(r, "eta", "Kolmogorov length eta", NONE, "m",
-                 "not estimated: no forcing, and " + state_name + " velocity has no gradients");
-        return;
+                 from_statistics ? "not estimated: the dissipation of check.statistics is zero"
+                                 : "not estimated: no forcing, and " + state_name + " velocity has no gradients");
+        return scales;
     }
     r.epsilon = eps;
     r.eta = std::pow(nu * nu * nu / eps, 0.25);
@@ -473,7 +667,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     locate(estimate(r, "delta_over_eta_max", "cell size / eta, largest", r.delta_max / r.eta, "dimensionless",
                     "the largest cell size over eta"),
            coarsest);
-    if (!from_forcing && u_prime2 > 0.0) {
+    if (!from_forcing && !from_statistics && u_prime2 > 0.0) {
         r.taylor = std::sqrt(15.0 * nu * u_prime2 / eps);
         estimate(r, "u_prime", "velocity fluctuation u'", std::sqrt(u_prime2), "m/s",
                  "root mean square per component about the mass-weighted mean velocity");
@@ -488,7 +682,12 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
                          r.delta_over_eta, g3(r.eta).c_str(), eps_source.c_str(), DNS_DELTA_OVER_ETA,
                          g3(DNS_DELTA_OVER_ETA * r.eta).c_str()));
     }
+    // With check.statistics, each cell's own Kolmogorov length
     std::vector<double> ratio(n_owned);
-    for (uint32_t c = 0; c < n_owned; c++) ratio[c] = delta[c] / r.eta;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        const double nu_c = scales.nu[c], eps_c = std::max(from_statistics ? scales.epsilon[c] : 0.0, 1e-300);
+        ratio[c] = delta[c] / (from_statistics ? std::pow(nu_c * nu_c * nu_c / eps_c, 0.25) : r.eta);
+    }
     fields.emplace_back("DELTA_OVER_ETA", ratio);
+    return scales;
 }

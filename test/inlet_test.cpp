@@ -704,7 +704,7 @@ TEST(MassFlowInletTest, ProfileOfTimeCarriesMdotAtEveryStage) {
                             std::make_shared<const kexpr::Program>("inlet.mdot", "0.7 * (1 + 0.5 * sin(30 * t))",
                                                                    BoundaryValue::variables()),
                             {}, {}};
-    std::vector<Point> x(n);
+    std::vector<FacePoint> x(n, FacePoint(Point{}));
     for (uint32_t k = 0; k < n; k++) {
         FOR_I_DIM x[k][i] = double(mesh->h_face_coords(zone->h_faces(k), i));
         profile.x.push_back(x[k]);
@@ -718,7 +718,7 @@ TEST(MassFlowInletTest, ProfileOfTimeCarriesMdotAtEveryStage) {
     whole.finish();
     for (uint32_t r = 0; r < 3; r++) {
         std::vector<uint32_t> own;
-        std::vector<Point> own_x;
+        std::vector<FacePoint> own_x;
         for (uint32_t k = n; k-- > 0;) {
             if (k % 3 != r) continue;
             own.push_back(k);

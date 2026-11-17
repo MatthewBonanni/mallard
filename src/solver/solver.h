@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "input.h"
@@ -420,8 +421,8 @@ class Solver {
         void act_on_triggers();
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
-        /** @brief Whether the step graph's triggers read a value of probe k, which the host reduces: the probe is
-         *         left to the host, so the queue stops at its writes and the device holds its values in between. */
+        /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
+         *         or, if it cannot stage it (Probes::can_stage), the probe is left to the host and the queue stops there. */
         bool triggers_read_probe(size_t k) const;
         bool triggers_read_probes() const;
         /** @brief Whether the step graph's triggers read a convergence value, which the host updates at its signals' rows. */
@@ -510,6 +511,9 @@ class Solver {
         void write_outputs(bool force);
         /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
         void decide_outputs();
+        /** @brief In the step graph: the covered cells of the staged moving probes due at the step, and a stop if one
+         *         outgrows its staging. */
+        void select_moving_probes();
         /** @brief Writes the outputs the record staged (collective), then frees the mirrors for the next. */
         void write_staged_outputs(const step_queue::Record & record);
         /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
@@ -522,8 +526,11 @@ class Solver {
         void write_staged_monitors(const step_queue::Record & record);
         /** @brief Writes the probes the record staged (collective). */
         void write_staged_probes(const step_queue::Record & record);
-        /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
-        void after_step(Kokkos::Timer & step_timer, bool on_device);
+        /**
+         * @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step):
+         *        the host's own, or a device step it stopped after (record), whose statistics the device sampled.
+         */
+        void after_step(Kokkos::Timer & step_timer, const step_queue::Record * record);
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -590,6 +597,13 @@ class Solver {
         void update_dynamic_efficiency();
         /** @brief Dynamic efficiency: the test filter's width per pass and number of passes. */
         void init_dynamic_efficiency();
+        /**
+         * @brief Thickened flame, sensor = "reaction": the sensor of each owned cell's consumption rate of the sensor
+         *        species against the largest of the flame of its mixture fraction, filtered (tfles_test).
+         */
+        void update_reaction_sensor();
+        /** @brief sensor = "reaction": the mixture fraction's streams and the sensor species of [les.combustion]. */
+        void init_reaction_sensor(const Input & combustion);
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
@@ -711,8 +725,9 @@ class Solver {
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
-            FENCE,         // fails while the stream captures
-            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            FENCE,             // fails while the stream captures
+            LEGACY_STREAM,     // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: no step graph
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
@@ -740,6 +755,7 @@ class Solver {
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        const FaceReconstruction & get_face_reconstruction() const { return *face_reconstruction; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
         /** @brief The numerics preset and the origin of each of its keys. */
@@ -811,8 +827,11 @@ class Solver {
         void init_mesh_fields();
         /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
         CheckFields check_resolution(CheckReport & report);
-        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
-                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
+        CheckCellScales check_viscous_scales(CheckReport & report, CheckFields & fields,
+                                             const std::vector<double> & delta, double delta_mean,
+                                             const std::array<double, N_DIM> & coarsest);
+        /** @brief Reads [check]: its regions' fractions and the dissipation of check.statistics. Collective. */
+        void init_check_inputs();
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
@@ -970,8 +989,10 @@ class Solver {
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint32_t *> chemistry_flush;  // [flush now, the current launch flushed]
         std::vector<size_t> staged_probes;       // probes the step graph evaluates
-        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint32_t *> probe_due;      // of the current launch, per staged probe (see device_step_body)
+        std::vector<uint32_t> probe_trigger_vars;  // of each staged probe the step graph reduces, its first trigger variable
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
+        Kokkos::View<int64_t *> probe_overflow;  // staged moving probe k outgrew its staging (unallocated: none moves)
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
         bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs
@@ -1140,6 +1161,7 @@ class Solver {
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
         std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
+        CheckInputs check_inputs;
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
@@ -1164,6 +1186,10 @@ class Solver {
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
         std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
         std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        // Boundary faces with local coordinates (of entries whose expressions read them), during init_boundaries
+        std::unordered_map<uint32_t, FacePoint> boundary_points;
+        /** @brief Face f's point for boundary expressions: its center and, where computed, its local coordinates. */
+        FacePoint boundary_point(uint32_t f) const;
         TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
@@ -1229,7 +1255,8 @@ class Solver {
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
-        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
+        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test
+                                                             // filter; sensor = "reaction": the sensor's filter passes
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
         Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
         ExactSums tfles_dynamic_sums;                  // of tfles_dynamic_terms over the ranks
@@ -1288,6 +1315,7 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
+        bool chemistry_explicit_step = false;
         CellChemistry cell_chemistry;
         double t_wall_chemistry = 0.0;    // this rank's
         Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks

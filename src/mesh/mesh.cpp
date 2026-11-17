@@ -149,7 +149,7 @@ std::string number_text(rtype x) {
 
 std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
-    if (!input.contains("periodic")) return pairs;
+    if (!contains_optional(input, "periodic")) return pairs;
     const auto entries = find_value<std::vector<Input>>(input, "periodic");
     for (size_t e = 0; e < entries.size(); e++) {
         const Input & entry = entries[e];
@@ -602,14 +602,17 @@ void Mesh::compute_cell_neighbors() {
     h_offsets_cells_of_cell = Kokkos::create_mirror_view(offsets_cells_of_cell);
     h_offsets_cells_of_cell(0) = 0;
     seen.assign(n_cells, ~uint64_t(0));
+    bool shifted = false;
     for (uint32_t c = 0; c < n_cells; c++) {
         neighbors(c);
         h_offsets_cells_of_cell(c + 1) = h_offsets_cells_of_cell(c) + static_cast<uint32_t>(nb.size());
+        for (const uint64_t e : nb) shifted = shifted || (e & 0xff) != 0;
     }
     cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", h_offsets_cells_of_cell(n_cells));
-    cells_of_cell_shift = Kokkos::View<uint8_t *>("cells_of_cell_shift", h_offsets_cells_of_cell(n_cells));
+    cells_of_cell_shift.rows =
+        Kokkos::View<uint8_t *>("cells_of_cell_shift", shifted ? h_offsets_cells_of_cell(n_cells) : 0);
     h_cells_of_cell = Kokkos::create_mirror_view(cells_of_cell);
-    h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
+    h_cells_of_cell_shift.rows = Kokkos::create_mirror_view(cells_of_cell_shift.rows);
     seen.assign(n_cells, ~uint64_t(0));
     for (uint32_t c = 0; c < n_cells; c++) {
         neighbors(c);
@@ -624,7 +627,7 @@ void Mesh::compute_cell_neighbors() {
         }
         for (size_t i = 0; i < nb.size(); i++) {
             h_cells_of_cell(h_offsets_cells_of_cell(c) + i) = static_cast<uint32_t>(nb[i] >> 8);
-            h_cells_of_cell_shift(h_offsets_cells_of_cell(c) + i) = nb[i] & 0xff;
+            if (shifted) h_cells_of_cell_shift.rows(h_offsets_cells_of_cell(c) + i) = nb[i] & 0xff;
         }
     }
 
@@ -645,7 +648,7 @@ void Mesh::compute_cell_neighbors() {
     }
     Kokkos::deep_copy(offsets_cells_of_cell, h_offsets_cells_of_cell);
     Kokkos::deep_copy(cells_of_cell, h_cells_of_cell);
-    Kokkos::deep_copy(cells_of_cell_shift, h_cells_of_cell_shift);
+    Kokkos::deep_copy(cells_of_cell_shift.rows, h_cells_of_cell_shift.rows);
     Kokkos::deep_copy(shifts, h_shifts);
     Kokkos::deep_copy(shift_rotations, h_shift_rotations);
     Kokkos::deep_copy(face_shift, h_face_shift);
