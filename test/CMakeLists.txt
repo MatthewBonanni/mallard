@@ -115,6 +115,8 @@ set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_
 
 # The compiled expressions round every operation on its own, and so must their hand-written references
 mallard_no_contraction(kexpr_test.cpp)
+# They inline the Riemann solvers, which src/CMakeLists.txt compiles without contraction
+mallard_no_contraction(riemann_solver_test.cpp riemann3d_test.cpp mixture_test.cpp)
 target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")
 add_dependencies(mallard-test mallard)
