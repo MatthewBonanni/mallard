@@ -40,10 +40,10 @@ MeshBlock read_cgns_block(const std::string & filename);
 /**
  * @brief An ANSYS Fluent mesh or case file (.msh, .cas), ASCII or binary:
  *        boundary zones are the face zones other than interior ones, named
- *        as the file's zone sections name them. ASCII sections hold one node
- *        or face per line, as Fluent writes them. Rank 0 records where every
- *        mark_spacing-th face of a binary section of mixed faces starts, and
- *        reads the file's structure in reads of cursor_bytes; tests make both
+ *        as the file's zone sections name them, ASCII sections in any
+ *        layout. The ranks record where every mark_spacing-th item of a
+ *        section (value of an ASCII section, face of a section of mixed
+ *        faces) starts, and read in reads of cursor_bytes; tests make both
  *        small.
  */
 MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing = 1024,
@@ -54,7 +54,7 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing 
  *        case (constant/polyMesh), ASCII or binary: each patch becomes a
  *        boundary zone. 2D builds read meshes one cell thick in z between
  *        empty patches, each cell as its face at the lowest z. ASCII lists
- *        hold one item per line, as OpenFOAM writes them.
+ *        may have any layout.
  */
 MeshBlock read_openfoam_block(const std::string & path);
 
