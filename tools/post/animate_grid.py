@@ -42,7 +42,6 @@ import argparse
 import glob
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -58,9 +57,10 @@ from matplotlib.colors import Normalize
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../examples/detonation_2d"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from animate import Rasterizer, pixel_to_cell, schlieren, write_gif, write_mp4  # noqa: E402
+import mallard  # noqa: E402
+from animate import (Rasterizer, grid_fields, pixel_to_cell, plane, schlieren, snapshot_fields, write_gif,  # noqa: E402
+                     write_mp4)
 from animate_detonation_2d import soot  # noqa: E402
-from mallard.vtu import grid_fields, read_vtu, series  # noqa: E402
 from soot_foil import front_position  # noqa: E402
 
 BG = "#101014"
@@ -69,16 +69,11 @@ DIM = "#9a9a9a"
 
 
 def snapshot_files(panel):
-    if panel.get("type") == "detonation":
-        if panel["series"].endswith((".series", ".vtkhdf")):
-            from mallard.vtkhdf import read_series
-            return [f for _, f in read_series(panel["series"])]
-        base = os.path.dirname(panel["series"])
-        return [os.path.join(base, f) for f in re.findall(r'file="([^"]+)"', open(panel["series"]).read())]
+    """The PNG files of a frames panel; the snapshots of other panels, as (open file, index) pairs."""
     if panel.get("type") == "frames":
         files = sorted(glob.glob(os.path.join(panel["series"], "*.png")))
     else:
-        files = series(panel["series"], panel.get("glob", "*"))
+        files = mallard.series(panel["series"], panel.get("glob", "*"))
     if not files:
         raise SystemExit(f"no snapshots in {panel['series']}")
     return files
@@ -88,13 +83,13 @@ def panel_aspect(panel):
     if panel.get("type", "field") in ("wall", "curve"):
         return panel.get("aspect", 1.0)
     if panel.get("type") == "detonation":
-        _, x, y, _ = grid_fields(snapshot_files(panel)[0], ["P"])
+        _, x, y, _ = grid_fields(*snapshot_files(panel)[0], ["P"])
         x0, x1 = panel.get("xlim") or (x[0], x[-1])
         return (x1 - x0) / ((y[-1] - y[0] + y[1] - y[0]) * (2 + DetonationPanel.GAP))
     if panel.get("type") == "frames":
         h, w = imageio.imread(snapshot_files(panel)[0]).shape[:2]
         return w / h
-    pts = read_vtu(snapshot_files(panel)[0])[0]
+    pts = plane(*snapshot_files(panel)[0])[0]
     x0, x1 = panel.get("xlim") or (pts[:, 0].min(), pts[:, 0].max())
     y0, y1 = panel.get("ylim") or (pts[:, 1].min(), pts[:, 1].max())
     return (x1 - x0) / (y1 - y0)
@@ -126,7 +121,7 @@ class FieldPanel:
     def __init__(self, panel, rect, fig_px):
         self.p = panel
         self.files = snapshot_files(panel)
-        pts, tris, tri_cell, _ = read_vtu(self.files[0])
+        pts, tris, tri_cell = plane(*self.files[0])
         px = max(rect[2] * fig_px[0], rect[3] * fig_px[1])
         res = int(panel.get("supersample", 1.5) * px)
         cell, self.valid, self.extent = pixel_to_cell(pts, tris, tri_cell, res, panel.get("xlim"), panel.get("ylim"))
@@ -134,14 +129,13 @@ class FieldPanel:
         var = panel.get("var", "RHO")
         lo, hi = np.inf, -np.inf
         for f in self.files[::max(1, len(self.files) // 20)] + [self.files[-1]]:
-            img = self.raster(read_vtu(f)[3][var])
+            img = self.raster(f[0].read(var, f[1]))
             lo, hi = min(lo, np.nanmin(img)), max(hi, np.nanmax(img))
         self.norm = Normalize(*(panel.get("range") or (lo, hi)))
         self.cmap = plt.get_cmap(panel.get("cmap", "turbo"))
 
     def draw(self, ax, k, n):
-        f = self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))]
-        d = read_vtu(f)[3]
+        d = snapshot_fields(*self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))])
         img = self.raster(d[self.p.get("var", "RHO")])
         rgb = self.cmap(self.norm(np.nan_to_num(img, nan=self.norm.vmin)))[..., :3]
         shade = schlieren(self.raster(d["RHO"]), self.valid)
@@ -156,7 +150,7 @@ class WallPanel:
     def __init__(self, panel, rect, fig_px):
         self.p = panel
         self.files = snapshot_files(panel)
-        pts, tris, tri_cell, _ = read_vtu(self.files[0])
+        pts, tris, tri_cell = plane(*self.files[0])
         n_cells = tri_cell.max() + 1
         c = np.zeros((n_cells, 2))
         np.add.at(c, tri_cell, pts[tris].mean(axis=1))
@@ -167,8 +161,7 @@ class WallPanel:
         self.x = c[self.cells, 0]
 
     def draw(self, ax, k, n):
-        f = self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))]
-        d = read_vtu(f)[3]
+        d = snapshot_fields(*self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))])
         ax.plot(self.x, d[self.p.get("var", "RHO")][self.cells], color="#f2b134", lw=1.0, label="Mallard")
         ref = self.p.get("reference")
         if ref:
@@ -244,14 +237,14 @@ class DetonationPanel:
     def __init__(self, panel, rect, fig_px):
         self.p = panel
         self.files = snapshot_files(panel)
-        _, x, y, fld = grid_fields(self.files[0], ["P"])
+        _, x, y, fld = grid_fields(*self.files[0], ["P"])
         self.p0 = fld["P"].min()
         dy = y[1] - y[0]
         self.xlim = panel.get("xlim") or (x[0], x[-1])
         self.ylim = (y[0] - dy / 2, y[-1] + dy / 2)
 
     def draw(self, ax, k, n):
-        t, x, y, fld = grid_fields(self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))], ["P", "P_MAX"])
+        t, x, y, fld = grid_fields(*self.files[round(k * (len(self.files) - 1) / max(n - 1, 1))], ["P", "P_MAX"])
         x_front = front_position(x, fld["P"], self.p0)
         win = (x >= self.xlim[0]) & (x <= self.xlim[1])
         ext = [*self.xlim, *self.ylim]
