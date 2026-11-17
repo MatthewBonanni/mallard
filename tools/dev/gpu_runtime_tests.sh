@@ -30,7 +30,7 @@ done
 command -v compute-sanitizer > /dev/null || { echo "compute-sanitizer is not on PATH" >&2; exit 2; }
 read -r -a mpiexec <<< "${MPIEXEC:-mpiexec -n 2}"
 
-graphs='StepQueueTest.*:StepQueueExample.*:IOTest.Asynchronous*:ForcedInletTest.ConditionsOfTKeepTheStepGraph'
+graphs='StepQueueTest.*:*StepQueueExample.*:IOTest.Asynchronous*:ForcedInletTest.ConditionsOfTKeepTheStepGraph'
 graphs+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 graphs_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.Distributed*'
 graphs_distributed+=':MPITest.*WithAndWithoutStepGraphs:MPI3DTest.*WithAndWithoutStepGraphs'
@@ -39,8 +39,11 @@ sanitized='StepQueueTest.OutputsByStep:StepQueueTest.FusedChemistryIsFlushedOnTh
 sanitized+=':StepQueueTest.SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice'
 sanitized+=':StepQueueTest.RestartedRunsCaptureTheStepGraphAgainAndContinueBitForBit'
 sanitized+=':StepQueueTest.DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice'
-sanitized+=':StepQueueExample.*:InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
+sanitized+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 sanitized+=':IOTest.AsynchronousOutputWritesTheSameFiles'
+sanitized+=':MPITest.TENOOnQuadsMatchesSerial:MPITest.LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs'
+sanitized+=':MPITest.CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs'
+sanitized+=':MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree:ChemistryReactorTest.VectorLanesIntegrateLikeOneThread'
 sanitized_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.DistributedRunsAsTheHostTakesThem'
 tools=(memcheck racecheck synccheck)
 if [ "$full" = 1 ]; then

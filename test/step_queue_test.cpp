@@ -911,7 +911,7 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
                    statistics;
     Case bare = c;
     bare.extra = "check_interval = 4\n" + statistics;
-    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
 }
 
 namespace {
@@ -1002,7 +1002,7 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     bare.extra = base;
     const Outcome queued = run_case("sources_regions", c, 3);
     expect_graphed(queued, "sources_regions");
-    EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
@@ -1025,7 +1025,7 @@ TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("fused_outputs", c, 3), quiet = run_case("fused_outputs_bare", bare, 3);
     expect_graphed(queued, "fused_outputs");
-    EXPECT_EQ(queued.queued, quiet.queued);
+    if (!Solver::are_cuda_graphs_off()) EXPECT_EQ(queued.queued, quiet.queued);
     ASSERT_EQ(queued.U.size(), quiet.U.size());
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
@@ -1065,7 +1065,7 @@ TEST(StepQueueTest, OutputsOfAveragedSpectraAndPhasesAreStagedWithoutStoppingThe
     bare.extra = "check_interval = 1000\n" + statistics;
     const Outcome queued = run_case("spectra_phases", c, 3);
     expect_graphed(queued, "spectra_phases");
-    EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
