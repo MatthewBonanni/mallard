@@ -111,7 +111,8 @@ int32_t Csv::column(const std::string & name) const {
     return it == names.end() ? -1 : static_cast<int32_t>(it - names.begin());
 }
 
-Csv read_csv(const std::string & file) {
+Csv read_csv(const std::string & file, const std::string & docs) {
+    const auto error = [&](const std::string & what) { return InputError(Diagnostic{.message = what, .docs = docs}); };
     std::ifstream in(file);
     if (!in) throw cannot_read("data file", file);
     provenance::read_file("table", file);
@@ -126,28 +127,28 @@ Csv read_csv(const std::string & file) {
         if (csv.names.empty()) {
             csv.names = items;
             for (const auto & name : csv.names) {
-                if (name.empty()) throw InputError(file + ":" + std::to_string(line_number) + ": a column has no name.");
+                if (name.empty()) throw error(file + ":" + std::to_string(line_number) + ": a column has no name");
                 if (std::count(csv.names.begin(), csv.names.end(), name) > 1) {
-                    throw InputError(file + ":" + std::to_string(line_number) + ": column " + name + " appears twice.");
+                    throw error(file + ":" + std::to_string(line_number) + ": column " + name + " appears twice");
                 }
             }
             csv.columns.resize(csv.names.size());
             continue;
         }
         if (items.size() != csv.names.size()) {
-            throw InputError(file + ":" + std::to_string(line_number) + ": " + logging::count(items.size(), "value") +
-                             " for " + logging::count(csv.names.size(), "column") + ".");
+            throw error(file + ":" + std::to_string(line_number) + ": " + logging::count(items.size(), "value") +
+                        " for " + logging::count(csv.names.size(), "column"));
         }
         for (size_t i = 0; i < items.size(); i++) {
             char * end = nullptr;
             const double v = std::strtod(items[i].c_str(), &end);
             if (items[i].empty() || end != items[i].c_str() + items[i].size()) {
-                throw InputError(file + ":" + std::to_string(line_number) + ": \"" + items[i] + "\" is not a number.");
+                throw error(file + ":" + std::to_string(line_number) + ": \"" + items[i] + "\" is not a number");
             }
             csv.columns[i].push_back(v);
         }
     }
-    if (csv.names.empty() || csv.columns[0].empty()) throw InputError("Data file " + file + " has no rows.");
+    if (csv.names.empty() || csv.columns[0].empty()) throw error("Data file " + file + " has no rows");
     return csv;
 }
 
@@ -181,7 +182,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
     record_options(where + ".type", {"table", "points"});
     if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
     const bool points = type == "points";
-    const Csv csv = read_csv(file);
+    const Csv csv = read_csv(file, docs);
     entry.coordinates = entry_coordinates(e, csv.names, points);
     const std::vector<std::string> & coordinates = entry.coordinates;
     if (coordinates.empty() || coordinates.size() > MAX_DIMS) {
