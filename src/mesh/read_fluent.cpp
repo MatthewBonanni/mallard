@@ -162,17 +162,6 @@ class Walker {
         if (n > cur.size() - cur.offset()) fail("binary section ends early.");
         cur.seek(cur.offset() + n);
     }
-    int32_t int32() {
-        char bytes[4];
-        for (char & b : bytes) {
-            const int c = cur.get();
-            if (c < 0) fail("binary section ends early.");
-            b = char(c);
-        }
-        int32_t v;
-        std::memcpy(&v, bytes, 4);
-        return v;
-    }
   private:
     FileCursor cur;
     std::string name;
