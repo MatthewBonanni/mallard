@@ -523,6 +523,36 @@ TEST(DistributedMeshTest, OwnedCellsAndFacesNearThePartitionComeLast) {
     }
 }
 
+TEST(DistributedMeshTest, StructuredBlocksContinueAcrossPeriodicSeamsWithinARank) {
+    // Bands along x shifted by a quarter of the box: the first rank's band
+    // straddles the x seam. Every rank's interior cells form one box, so the
+    // blocks hold them all, across the seams of the bands and the full y and z rings
+    constexpr uint32_t NX = 36;
+    const std::string input = std::string("[mesh]\ntype = \"cartesian\"\nNx = 36\nNy = 5\n") + (N_DIM == 3 ? "Nz = 5\n" : "") +
+                              "Lx = 36.0\nLy = 5.0\n" + (N_DIM == 3 ? "Lz = 5.0\n" : "") +
+                              "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" +
+                              (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "");
+    const Input parsed = parse_toml(input);
+    DistributedMesh distributed(read_mesh_block(parsed), Mesh::periodic_pairs(parsed));
+    std::vector<int> owner;
+    for (const auto & x : distributed.block_cell_centers()) {
+        const uint32_t shifted = (static_cast<uint32_t>(x[0]) + NX / 4) % NX;
+        owner.push_back(static_cast<int>(shifted * static_cast<uint32_t>(comm::size()) / NX));
+    }
+    distributed.distribute(owner);
+    Distribution dist;
+    const auto mesh = distributed.build_local_mesh(3, dist, CellNumbering{CellOrder::AUTO, 2, true});
+    uint32_t in_blocks = 0;
+    for (const StructuredBlock & block : mesh->structured_blocks) {
+        uint32_t size = 1;
+        for (uint32_t e : block.n) size *= e;
+        in_blocks += size;
+    }
+    EXPECT_EQ(mesh->structured_blocks.size(), 1u);
+    EXPECT_EQ(in_blocks, mesh->n_interior());
+    EXPECT_EQ(mesh->n_interior(), (comm::size() == 1 ? NX : NX / uint32_t(comm::size()) - 4) * (N_DIM == 3 ? 25u : 5u));
+}
+
 TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     // Each halo layer holds exactly the cells one vertex-neighbor step further,
     // including neighbors across the seams of a fully periodic box
