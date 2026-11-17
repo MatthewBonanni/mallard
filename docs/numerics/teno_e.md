@@ -788,10 +788,13 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
-    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
-    odd-even wall pressure at the closed trailing edge of the NACA 0012
-    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
-    times more than order 5 (#977).
+    outgoing acoustic wave on a radially stretched O-grid (#975),
+    undershoots ahead of shocks on quads about 10 times more than order 5
+    (#977), and grows acoustic modes on graded hexahedra from 5%
+    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    pressure it left at the closed trailing edge of the NACA 0012 tutorial
+    mesh (#976) came from mirror images past the far side of the body, which
+    the setup now rejects ([candidates](#candidates)).
 
 - **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
