@@ -5,6 +5,7 @@ Needs a build with -DMallard_ENABLE_PYTHON=ON and HDF5: MALLARD_EXECUTABLE (or m
 import os
 import shutil
 import subprocess
+import tarfile
 
 import numpy as np
 import pytest
@@ -119,3 +120,89 @@ def test_diff_reports_differences_as_a_result(run):
     assert same["exit_status"] == 0 and all(f["absolute"]["linf"] == 0 for f in same["fields"])
     changed = mallard.diff(run / "snapshots_vtkhdf_000000.vtkhdf", run / "snapshots_vtkhdf_000001.vtkhdf")
     assert changed["exit_status"] == 1 and changed["fields"][0]["absolute"]["linf"] > 0
+
+
+@pytest.fixture(scope="module")
+def logged_run(tmp_path_factory):
+    """The run of snapshots.toml with its run record in mallard.jsonl, as mallard pack and --html need."""
+    d = tmp_path_factory.mktemp("logged")
+    text = open(os.path.join(FORMATS, "snapshots.toml")).read()
+    (d / "input.toml").write_text(text.replace('run_log = "snapshots.jsonl"\n', ""))
+    subprocess.run([mallard._lib.executable(), "-i", "input.toml", "--kokkos-num-threads=2"], cwd=d, check=True,
+                   capture_output=True)
+    return d
+
+
+RESTARTS = ["snapshots_000000.restart", "snapshots_000001.restart"]
+
+
+def mach(restart, gamma=1.4):
+    r = mallard.open(restart)
+    rho = r.read("RHO")
+    u2 = (r.read("RHOU_X") ** 2 + r.read("RHOU_Y") ** 2) / rho**2
+    p = (gamma - 1) * (r.read("RHOE") - 0.5 * rho * u2)
+    return np.sqrt(u2 / (gamma * p / rho))
+
+
+def test_post_derive(run, tmp_path):
+    report = mallard.post.derive([run / f for f in RESTARTS], ["MACH"], latest=True, output=tmp_path, threads=2,
+                                 cwd=run)
+    assert len(report["snapshots"]) == 1
+    derived = mallard.open(report["written"][0]["path"])
+    assert len(derived.snapshots) == 1 and "MACH" in derived.fields and "RHO" not in derived.fields
+    np.testing.assert_allclose(derived.read("MACH"), mach(run / RESTARTS[1]), rtol=1e-12)
+    with_state = mallard.post.derive(run / RESTARTS[1], ["MACH"], with_state=True, output=tmp_path / "state",
+                                     threads=2, cwd=run)
+    assert "RHO" in mallard.open(with_state["written"][0]["path"]).fields
+
+
+def test_post_average(run, tmp_path):
+    report = mallard.post.average([run / f for f in RESTARTS], fields=["RHO"], products="none", output=tmp_path,
+                                  threads=2, cwd=run)
+    assert report["fields"] == ["RHO"] and report["products"] == []
+    averages = mallard.open(report["written"][0])
+    assert "MEAN_RHO" in averages.fields and "MEAN_P" not in averages.fields
+    assert not any(name.startswith("COV_") for name in averages.fields)
+    w = np.array([s["weight"] for s in report["snapshots"]])
+    rho = np.array([mallard.open(run / f).read("RHO") for f in RESTARTS])
+    np.testing.assert_allclose(averages.read("MEAN_RHO"), w @ rho / w.sum(), rtol=1e-12)
+    one = mallard.post.average([run / f for f in RESTARTS], fields=["RHO"], steps=[1], t_start=0,
+                               output=tmp_path / "one", threads=2, cwd=run)
+    assert [s["snapshot"]["step"] for s in one["snapshots"]] == [1]
+    assert one["window"]["start"] == 0 and one["snapshots"][0]["weight"] == pytest.approx(one["window"]["end"])
+
+
+def test_report(logged_run, tmp_path):
+    (logged_run / "report.html").unlink(missing_ok=True)
+    report = mallard.report(logged_run)
+    assert report["report"] == os.path.join(str(logged_run), "report.html")
+    assert "<html" in open(report["report"]).read().lower()
+    with pytest.raises(mallard.CommandError, match="has no mallard.jsonl") as e:
+        mallard.report(tmp_path)
+    assert e.value.returncode == 1
+
+
+def test_pack_and_verify(logged_run, tmp_path):
+    small = mallard.pack(logged_run, output=tmp_path / "small.tar")
+    assert os.path.exists(small["archive"]) and small["with_outputs"] == "small"
+    outputs = {f["path"] for f in small["files"] if f["role"] == "output"}
+    assert "output/snapshots_probe.csv" in outputs and not any(p.endswith(".restart") for p in outputs)
+    assert small["rerun"]["command"] == "mallard -i input.toml"
+    none = mallard.pack(logged_run, output=tmp_path / "none.tar", with_outputs="none")
+    assert not any(f["role"] == "output" for f in none["files"])
+
+    ok = mallard.pack(small["archive"], verify=True)
+    assert ok["result"] == "ok" and ok["exit_status"] == 0 and ok["problems"] == []
+    with tarfile.open(small["archive"]) as t:
+        t.extractall(tmp_path / "x", filter="data")
+    top = small["rerun"]["directory"].split("/")[0]
+    with open(tmp_path / "x" / top / "resolved.toml", "a") as f:
+        f.write("\n")
+    with tarfile.open(tmp_path / "tampered.tar", "w") as t:
+        t.add(tmp_path / "x" / top, arcname=top)
+    tampered = mallard.pack(tmp_path / "tampered.tar", verify=True)
+    assert tampered["result"] == "differs" and tampered["exit_status"] == 1
+    assert [p["path"] for p in tampered["problems"]] == ["resolved.toml"]
+
+    with pytest.raises(mallard.CommandError, match="not a run directory"):
+        mallard.pack(tmp_path / "tampered.tar")

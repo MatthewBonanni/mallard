@@ -154,6 +154,24 @@ and where they are; `remap=True` compares files on different meshes. Options: `f
 `snapshot`, `remap`, `mesh_a`, `mesh_b` (`mallard diff --help`). Differences beyond tolerance are a
 result, not an error: the report's `result` and `exit_status` give the verdict.
 
+### `mallard.report(run_dir)`
+
+`mallard info RUN_DIR --html`: writes the run report, `RUN_DIR/report.html`, from `RUN_DIR/mallard.jsonl`
+(for a run still going, killed, or of a Mallard before 0.10; a run writes its own). Returns
+`{"directory": ..., "report": path}`. Raises `CommandError` when the directory has no `mallard.jsonl`.
+
+### `mallard.pack(path, verify=False, **options)`
+
+`mallard pack RUN_DIR`: one archive that reproduces the run's last run, with a manifest of hashes. Options:
+`output` (the archive; default the directory's name with `.tar.gz`, in the current directory, or `cwd`),
+`with_outputs` (`"small"`, `"all"`, `"none"`). Returns the report: the archive, the rerun command and its
+directory in the archive, notes, and each file with its role, size and SHA-256. A file changed since the
+run read or wrote it raises `CommandError`.
+
+`verify=True` is `mallard pack --verify ARCHIVE`: `path` is an archive, and each file is checked against its
+manifest and the run's own hashes. Problems are a result, not an error: the report's `result` (`"ok"` or
+`"differs"`), `exit_status` and `problems` (each `path` and `problem`) give the verdict.
+
 ### `mallard.command(*args, nprocs=None, mpirun='mpirun', threads=None, cwd=None, verdicts=(), **options)`
 
 Runs `mallard ARGS... OPTIONS --format json` and returns its JSON output, parsed.
@@ -187,6 +205,25 @@ series). Options: `input`, `probe`, `region`, `name`, `fields`, `reductions`, `s
 `steps`, `times`, `every`, `latest`, `output` (`mallard post extract --help`). Returns the report: the
 files written (under `output`, default `extract/`, for `mallard.open`), their times and fields, and the
 reductions of the last snapshot.
+
+### `mallard.post.derive(files, fields, **options)`
+
+`mallard post derive FILE... --fields LIST`: snapshots of derived fields (`MACH`, `P0`, `Q_CRITERION`, ...)
+of existing output, as the run would have written them. `files` is a path or a list of them (restart files,
+snapshots, series); `fields` the fields to derive, as `mallard list fields` names them. Options: `input`,
+`reference`, `mixture`, `with_state`, `region`, `snapshot`, `name`, `steps`, `times`, `every`, `latest`,
+`output` (`mallard post derive --help`). Returns the report: the snapshots derived and the files written
+(under `output`, default `derived/`, for `mallard.open`), with their fields and units.
+
+### `mallard.post.average(files, **options)`
+
+`mallard post average FILE...`: means `MEAN_<a>`, `RMS_<a>` and covariances `COV_<a>_<b>` over saved
+snapshots, as `[statistics]` keeps them. `files` is a path or a list of them. Options: `fields`, `products`,
+`favre`, `t_start`, `homogeneous`, `conditional`, `statistics`, `rtol`, `region`, `reference`, `mixture`,
+`input`, `snapshot`, `name`, `steps`, `times`, `every`, `latest`, `output` (`mallard post average --help`);
+`conditional`, `region`, `reference` and `mixture` take inline TOML tables as strings. Returns the report:
+the averaging window, each snapshot with its weight, the fields and covariances, and the paths written
+(under `output`, default `average/`).
 
 ### `mallard.post.convergence(runs, **options)`
 

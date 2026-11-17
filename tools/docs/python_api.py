@@ -21,8 +21,8 @@ BEGIN, END = "<!-- BEGIN GENERATED reference -->", "<!-- END GENERATED reference
 SECTIONS = [
     ("Reading files", "reader", "mallard.", ["open", "File", "Field", "Snapshot", "Geometry", "run_files",
                                               "run_record"]),
-    ("Commands", "commands", "mallard.", ["info", "diff", "command", "CommandError"]),
-    ("`mallard.post`", "post", "mallard.post.", ["extract", "convergence"]),
+    ("Commands", "commands", "mallard.", ["info", "diff", "report", "pack", "command", "CommandError"]),
+    ("`mallard.post`", "post", "mallard.post.", ["extract", "derive", "average", "convergence"]),
 ]
 
 
