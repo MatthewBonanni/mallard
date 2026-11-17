@@ -772,11 +772,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     converge at any order ([curved boundaries](../design/curved_boundaries.md)).
     With curved walls (high-order Gmsh faces or `[[mesh.curved]]`) and the
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
-    fourth at the walls. The fine cylinder at order 5 keeps a small drag
-    noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
-    not known (#427).
+    fourth at the walls. On the fine cylinder with curved walls and far
+    field, order 5's drag is as smooth as order 3's
+    ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
 - **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
     at curved walls looks only at a stencil's first $n_0$ candidates
@@ -790,10 +788,13 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
-    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
-    odd-even wall pressure at the closed trailing edge of the NACA 0012
-    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
-    times more than order 5 (#977).
+    outgoing acoustic wave on a radially stretched O-grid (#975),
+    undershoots ahead of shocks on quads about 10 times more than order 5
+    (#977), and grows acoustic modes on graded hexahedra from 5%
+    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    pressure it left at the closed trailing edge of the NACA 0012 tutorial
+    mesh (#976) came from mirror images past the far side of the body, which
+    the setup now rejects ([candidates](#candidates)).
 
 - **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
