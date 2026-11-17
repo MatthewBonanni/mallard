@@ -227,6 +227,14 @@ std::vector<uint64_t> ask(const std::vector<uint64_t> & keys, size_t width, Owne
     return out;
 }
 
+/**
+ * @brief Range boundaries that split every rank's values into p ranges of
+ *        about equal count, whatever their distribution: value v is in range
+ *        lower_bound(boundaries, v) (collective). Equal values share a range,
+ *        so a range holds at most its share plus the copies of one value.
+ */
+std::vector<uint64_t> balanced_boundaries(std::vector<uint64_t> values);
+
 /** @brief Names in order of first appearance on rank 0, then rank 1, ... (collective). */
 std::vector<std::string> names_in_order(const std::vector<std::string> & local);
 
