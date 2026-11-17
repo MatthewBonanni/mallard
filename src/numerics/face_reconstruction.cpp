@@ -150,6 +150,22 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
     });
 }
 
+std::vector<uint32_t> FaceReconstruction::halo_image_cells() const {
+    const BoundaryData::HostImages images = boundaries.host_images();
+    const uint32_t n_owned = mesh->n_owned();
+    std::vector<uint32_t> cells;
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const int32_t c = mesh->h_cells_of_face(f, 0);
+        if (mesh->h_cells_of_face(f, 1) < 0 && c >= 0 && c < static_cast<int32_t>(n_owned) && images.cell[f] >= 0 &&
+            images.face[f] < 0 && images.cell[f] >= static_cast<int32_t>(n_owned)) {
+            cells.push_back(static_cast<uint32_t>(images.cell[f]));
+        }
+    }
+    std::sort(cells.begin(), cells.end());
+    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+    return cells;
+}
+
 void FaceReconstruction::set_boundaries(const BoundaryData & boundaries_in) {
     this->boundaries = boundaries_in;
     image_points_found = false;
