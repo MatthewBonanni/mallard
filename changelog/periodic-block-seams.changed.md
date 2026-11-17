@@ -1,0 +1,1 @@
+- Structured blocks continue across periodic boundaries: a rank that owns the cells on both sides of one (a part of the `graph` partitioner, for example) numbers them as one block, and their cells take the TENO block path. A periodic box keeps its numbering, and the cells along its periodic boundaries stay on the block path as before (#988).

@@ -64,6 +64,25 @@ an error. Under `mpirun -n N` it checks the run on N ranks.
 
 Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
+## `[check]`
+
+What the [resolution report](guide/input_files.md#resolution) of `mallard check`
+(and of the check every run records at its setup) is made of. Every key is optional.
+
+| Key | Description |
+|---|---|
+| `regions` | Filled regions (names of `[regions]` or of the mesh's cell zones, or inline tables) the report also gives its values for, each on its own rows. Default: every cell zone of the mesh. Regions that move or are defined by the solution are errors |
+| `statistics` | A file of an earlier run of the case on this mesh (a restart file, or a VTKHDF or XDMF snapshot of the whole mesh) whose `[statistics]` averages give the dissipation, instead of the initial state's or the forcing's: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`) from `MEAN_STRAIN_RATE` and `COV_STRAIN_RATE_STRAIN_RATE` (`fields = ["STRAIN_RATE"]`, `products = ["STRAIN_RATE*STRAIN_RATE"]`), else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none |
+
+```toml
+[regions]
+wake = {type = "box", center = [3, 0, 0.5], size = [4, 2, 1]}
+
+[check]
+regions = ["wake"]
+statistics = "run1/restart_020000.restart"
+```
+
 ## `[run]`
 
 | Key | Description |
@@ -76,8 +95,8 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel only with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL); the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
-| `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; HIP and SYCL builds, and CUDA runs without graphs, take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL), before CUDA 12.4, or where NCCL fails under a graph's conditional node (across a network); the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
+| `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, a moving region's probe outgrowing its staging, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; HIP and SYCL builds, and CUDA runs without graphs, take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
 At least one stop condition is required.
 
@@ -185,10 +204,12 @@ build reads a mesh one cell thick in z between `empty` patches (as for 2D
 OpenFOAM runs): each cell is its face at the lowest z, the other patches give
 the boundary edges, and the empty patches disappear.
 
-In a distributed run every rank reads a Gmsh, CGNS, Fluent or OpenFOAM mesh whole (keeping only its
-share), so large meshes should be converted to Mallard's HDF5 mesh format
-(builds with `-DMallard_ENABLE_HDF5=ON`), of which each rank reads only its
-share; generated meshes are also produced per rank:
+In a distributed run the ranks read a mesh file of any format together, each parsing its share,
+so no rank holds the whole mesh. ASCII Fluent node and face sections and ASCII OpenFOAM lists
+must hold one item per line (short OpenFOAM lists may be on one line), as Fluent and OpenFOAM
+write them. Mallard's HDF5 mesh format (builds with `-DMallard_ENABLE_HDF5=ON`), of which each
+rank reads only its share, needs no parsing, so large meshes used for many runs are best
+converted to it; generated meshes are also produced per rank:
 
 ```sh
 mallard mesh convert mesh.msh mesh.h5               # from Gmsh (or CGNS, Fluent, OpenFOAM)
@@ -459,11 +480,16 @@ for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed 
 | Key | Description |
 |---|---|
 | `model` | `tfles` |
-| `delta_L` | Laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
-| `s_L` | Laminar flame speed (m/s) |
-| `T_unburnt`, `T_burnt` | Temperatures of the fresh and burnt gas (K) |
+| `sensor` | `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
+| `delta_L` | `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | `temperature` only: laminar flame speed (m/s) |
+| `T_unburnt`, `T_burnt` | `temperature` only: temperatures of the fresh and burnt gas (K) |
+| `flame_table` | `reaction` only, required: CSV file of premixed flames against the mixture fraction, columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption rate of `sensor_species`); other columns are ignored. Linear in `Z`. Built by `tools/setup/flame_table.py` |
+| `fuel`, `oxidizer` | `reaction` only, required: the streams of the mixture fraction, as in [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform composition; those the table was built with |
+| `sensor_species` | `reaction` only: the species of `omega_max` and of the flame index; default the fuel stream's most abundant species with C or H |
+| `efficiency_max` | Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `dynamic` (default): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette`: Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `efficiency` | `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
 | `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
 | `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
 | `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
@@ -865,7 +891,7 @@ double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and chemistry call (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.9 times faster on an A100, 1.6 on CPUs) and costs where they are (`flame_3d`: 10-13% slower). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs |
+| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within 0.5%). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs |
 | `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). Each pair of ranks moves at most its capacity of cells per call, which starts at 0 and follows the cells the pair asked for (growing at once, shrinking after 256 steps of less than half); the rest stay with their owner, and a balanced run moves none. With NCCL the messages carry the whole capacity, so that the step's CUDA graph keeps its sizes; a change of the capacities records it again. The summary reports the time ranks wait for the slowest rank's chemistry with or without it |

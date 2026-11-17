@@ -5,6 +5,7 @@
   3
  ],
  "set_in": [
+  "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
