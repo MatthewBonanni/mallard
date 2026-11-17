@@ -1,8 +1,14 @@
 {
  "default": "1.35",
+ "defaults_by_dim": {
+  "2": "0.07"
+ },
  "dims": [
+  2,
   3
  ],
- "set_in": [],
+ "set_in": [
+  "examples/triple_flame/tfles/input.toml"
+ ],
  "type": "number"
 }

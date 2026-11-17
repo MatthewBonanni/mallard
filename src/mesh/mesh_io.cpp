@@ -77,7 +77,7 @@ void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, C
     view_entries::set_cells(n_cells);
     // A mesh without global ids is whole: its input order becomes the global order
     if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
-        const LocalityOrder numbered = locality_order(cell_order, nodes, cells, {n_cells});
+        const LocalityOrder numbered = locality_order(cell_order, nodes, cells, {n_cells}, classes.key);
         cell_order_choice = numbered.choice;
         structured_blocks = numbered.blocks;
         if (numbered.choice.order == CellOrder::HILBERT || !numbered.blocks.empty()) {
@@ -241,17 +241,28 @@ void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, C
     }
     release(partner);
 
-    // Faces renumbered in the order of the local cells, keeping their orientation
+    // Faces renumbered in the order of the local cells, keeping their orientation; with halo cells, those
+    // between an owned and a halo cell follow the other faces of owned cells, and faces of halo cells only come last
     {
         std::vector<uint32_t> new_face(n_faces, NO_NODE), old_face;
         old_face.reserve(n_faces);
-        for (uint32_t & f : cell_faces) {
+        for (const uint32_t f : cell_faces) {
             if (new_face[f] == NO_NODE) {
                 new_face[f] = static_cast<uint32_t>(old_face.size());
                 old_face.push_back(f);
             }
-            f = new_face[f];
         }
+        if (n_owned_cells) {
+            auto halo = [&](int32_t c) { return c >= static_cast<int32_t>(n_owned_cells); };
+            auto owned = [&](int32_t c) { return c >= 0 && !halo(c); };
+            const auto rest = std::stable_partition(old_face.begin(), old_face.end(), [&](uint32_t f) {
+                return owned(face_cells[f][0]) || owned(face_cells[f][1]);
+            });
+            std::stable_partition(old_face.begin(), rest,
+                                  [&](uint32_t f) { return !halo(face_cells[f][0]) && !halo(face_cells[f][1]); });
+            for (uint32_t f = 0; f < n_faces; f++) new_face[old_face[f]] = f;
+        }
+        for (uint32_t & f : cell_faces) f = new_face[f];
         std::vector<std::array<int32_t, 2>> cells_new(n_faces);
         std::vector<uint8_t> shifts_new(n_faces);
         std::vector<uint32_t> offsets_new{0}, nodes_new;
@@ -328,7 +339,7 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
                              std::vector<uint8_t> && face_shifts,
                              std::vector<uint32_t> && interior,
                              std::map<std::string, std::vector<uint32_t>> && zone_faces) {
-    // Each input is freed once copied, before the geometry is allocated
+    // Each input is freed once copied
     node_coords = Kokkos::View<rtype *[N_DIM]>("node_coords", n_nodes);
     h_node_coords = Kokkos::create_mirror_view(node_coords);
     for (uint32_t i_node = 0; i_node < n_nodes; i_node++) {
@@ -380,7 +391,9 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
     m_face_zones.clear();
     add_zone("interior", FaceZoneType::INTERIOR, interior);
     for (auto & [name, faces] : zone_faces) add_zone(name, FaceZoneType::BOUNDARY, faces);
+}
 
+void Mesh::allocate_geometry() {
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
     face_area = Kokkos::View<rtype *>("face_area", n_faces);
@@ -402,357 +415,28 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
 
 namespace {
 
-constexpr int BOUNDARY_DIM = N_DIM - 1;
-
-struct GmshElementType {
-    int dim;
-    int n_nodes;
-    int n_corners;
-};
-
-GmshElementType gmsh_element_type(int type, const std::string & filename) {
-    switch (type) {
-        case 15: return {0, 1, 1};     // Point
-        case 1: return {1, 2, 2};      // Line
-        case 8: return {1, 3, 2};      // Line, order 2
-        case 26: return {1, 4, 2};     // Line, order 3
-        case 2: return {2, 3, 3};      // Triangle
-        case 9: return {2, 6, 3};      // Triangle, order 2
-        case 20: return {2, 9, 3};     // Triangle, order 3 (incomplete)
-        case 21: return {2, 10, 3};    // Triangle, order 3
-        case 3: return {2, 4, 4};      // Quadrilateral
-        case 16: return {2, 8, 4};     // Quadrilateral, order 2 (incomplete)
-        case 10: return {2, 9, 4};     // Quadrilateral, order 2
-        case 36: return {2, 16, 4};    // Quadrilateral, order 3
-        case 4: return {3, 4, 4};      // Tetrahedron
-        case 11: return {3, 10, 4};
-        case 29: return {3, 20, 4};
-        case 5: return {3, 8, 8};      // Hexahedron
-        case 17: return {3, 20, 8};
-        case 12: return {3, 27, 8};
-        case 92: return {3, 64, 8};
-        case 6: return {3, 6, 6};      // Prism
-        case 18: return {3, 15, 6};
-        case 13: return {3, 18, 6};
-        case 90: return {3, 40, 6};
-        case 7: return {3, 5, 5};      // Pyramid
-        case 19: return {3, 13, 5};
-        case 14: return {3, 14, 5};
-        default:
-            throw std::runtime_error("Gmsh file " + filename + ": unsupported element type " + std::to_string(type) +
-                                     "; points, lines, triangles, quadrilaterals, tetrahedra, hexahedra, prisms "
-                                     "and pyramids of order 1 to 3 are supported.");
-    }
-}
-
-std::array<rtype, N_DIM> make_node(double x, double y, double z) {
-    const double xyz[3] = {x, y, z};
-    std::array<rtype, N_DIM> node;
-    FOR_I_DIM node[i] = static_cast<rtype>(xyz[i]);
-    return node;
-}
-
-/** @brief Read values from a Gmsh file, failing if it is malformed or ends early. */
-template <typename... T>
-void read_values(std::istream & in, const std::string & filename, T &... values) {
-    if (!(in >> ... >> values)) throw std::runtime_error("Gmsh file " + filename + " is malformed or ends early.");
-}
-
-void expect_section(std::istream & in, const std::string & name) {
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.rfind(name, 0) == 0) return;
-    }
-    throw std::runtime_error("Gmsh file: missing section " + name + ".");
-}
-
-} // namespace
-
-MeshFileData read_gmsh(const std::string & filename) {
-    std::ifstream in(filename);
-    if (!in.good()) {
-        throw cannot_read("the mesh file", filename);
-    }
-    MeshFileData data;
-    double version = 0.0;
-    int file_type = 0, data_size = 0;
-    expect_section(in, "$MeshFormat");
-    read_values(in, filename, version, file_type, data_size);
-    // Every item a count announces takes at least a byte of the file
-    const uintmax_t file_size = std::filesystem::file_size(filename);
-    auto read_count = [&](auto & n) {
-        read_values(in, filename, n);
-        if (std::cmp_less(n, 0) || std::cmp_greater(n, file_size)) {
-            throw std::runtime_error("Gmsh file " + filename + ": bad count " + std::to_string(n) + ".");
-        }
-    };
-    if (file_type != 0) {
-        throw std::runtime_error("Gmsh file " + filename + " is binary; Mallard reads ASCII files. Save it as "
-                                 "ASCII (in Gmsh: Mesh.Binary = 0, or uncheck Binary when exporting). See "
-                                 "docs/guide/meshes.md#mesh-files-gmsh.");
-    }
-    if (!(version == 2.2 || (version >= 4.1 && version < 5.0))) {
-        std::ostringstream v;
-        v << version;
-        throw std::runtime_error("Gmsh file " + filename + " has format version " + v.str() +
-                                 "; Mallard reads versions 2.2 and 4.1. Export it again as one of those (in Gmsh: "
-                                 "Mesh.MshFileVersion = 4.1, or gmsh -format msh41).");
-    }
-
-    std::map<int, std::string> physical_names;                  // Boundary-dimension groups only
-    std::map<int, std::string> cell_physical_names;             // Cell-dimension groups
-    std::map<int, std::vector<int>> boundary_entity_physicals;  // 4.x: entity -> physical tags
-    std::map<int, std::vector<int>> cell_entity_physicals;
-    std::map<size_t, uint32_t> node_index;                      // Gmsh node tag -> index
-    std::vector<curved::Vec3> coords;                           // every node, for high-order faces
-    bool high_order = false;
-
-    auto add_element = [&](int type, int physical, const std::vector<size_t> & tags) {
-        const GmshElementType et = gmsh_element_type(type, filename);
-        if (et.dim > N_DIM) {
-            throw std::runtime_error("Gmsh file " + filename + " has " + std::to_string(et.dim) +
-                                     "D elements, but this Mallard is the " + std::to_string(N_DIM) +
-                                     "D solver (built with Mallard_DIM = " + std::to_string(N_DIM) +
-                                     "). Run the " + std::to_string(et.dim) + "D solver (built with -DMallard_DIM=" +
-                                     std::to_string(et.dim) + "), or mesh only the " + std::to_string(N_DIM) +
-                                     "D geometry. See docs/guide/meshes.md#mesh-files-gmsh.");
-        }
-        if (et.dim < BOUNDARY_DIM || (et.dim == BOUNDARY_DIM && physical == 0)) return;
-        high_order |= et.n_nodes > et.n_corners;
-        std::vector<uint32_t> idx;
-        for (size_t k = 0; k < size_t(et.n_corners); k++) idx.push_back(node_index.at(tags[k]));
-        if (et.dim == N_DIM) {
-            if (physical != 0) {
-                auto it = cell_physical_names.find(physical);
-                data.set_cell_zone(data.cells.size(), it != cell_physical_names.end() ? it->second
-                                                                                     : "physical_" + std::to_string(physical));
-            }
-            data.cells.push_back(idx);
-        } else {
-            auto it = physical_names.find(physical);
-            data.boundary_faces.push_back(
-                {idx, it != physical_names.end() ? it->second : "physical_" + std::to_string(physical)});
-            std::vector<curved::Vec3> ho;
-            if (et.n_nodes > et.n_corners) {
-                for (size_t t : tags) ho.push_back(coords[node_index.at(t)]);
-            }
-            data.boundary_high_order.push_back(std::move(ho));
-        }
-    };
-
-    std::string token;
-    while (in >> token) {
-        if (token == "$PhysicalNames") {
-            int n;
-            read_count(n);
-            for (int i = 0; i < n; i++) {
-                int dim, tag;
-                std::string name;
-                read_values(in, filename, dim, tag);
-                std::getline(in, name);
-                const size_t a = name.find('"'), b = name.rfind('"');
-                const std::string unquoted = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
-                if (dim == BOUNDARY_DIM) physical_names[tag] = unquoted;
-                if (dim == N_DIM) cell_physical_names[tag] = unquoted;
-            }
-        } else if (token == "$Entities") {
-            size_t n_entities[4];
-            for (size_t & n : n_entities) read_count(n);
-            std::string line;
-            std::getline(in, line);
-            for (int dim = 0; dim < 4; dim++) {
-                for (size_t i = 0; i < n_entities[dim]; i++) {
-                    std::getline(in, line);
-                    if (dim != BOUNDARY_DIM && dim != N_DIM) continue;
-                    std::istringstream ls(line);
-                    int tag;
-                    double bounds[6];
-                    size_t n_phys;
-                    read_values(ls, filename, tag, bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], bounds[5],
-                                n_phys);
-                    for (size_t k = 0; k < n_phys; k++) {
-                        int p;
-                        read_values(ls, filename, p);
-                        (dim == N_DIM ? cell_entity_physicals : boundary_entity_physicals)[tag].push_back(std::abs(p));
-                    }
-                }
-            }
-        } else if (token == "$Nodes") {
-            if (version == 2.2) {
-                size_t n;
-                read_count(n);
-                for (size_t i = 0; i < n; i++) {
-                    size_t tag;
-                    double x, y, z;
-                    read_values(in, filename, tag, x, y, z);
-                    node_index[tag] = static_cast<uint32_t>(data.nodes.size());
-                    data.nodes.push_back(make_node(x, y, z));
-                    coords.push_back({x, y, N_DIM == 3 ? z : 0.0});
-                }
-            } else {
-                size_t n_blocks, n_nodes, min_tag, max_tag;
-                read_count(n_blocks);
-                read_values(in, filename, n_nodes, min_tag, max_tag);
-                for (size_t b = 0; b < n_blocks; b++) {
-                    int dim, entity, parametric;
-                    size_t n_in_block;
-                    read_values(in, filename, dim, entity, parametric);
-                    read_count(n_in_block);
-                    std::vector<size_t> tags(n_in_block);
-                    for (auto & t : tags) read_values(in, filename, t);
-                    for (size_t i = 0; i < n_in_block; i++) {
-                        double x, y, z;
-                        read_values(in, filename, x, y, z);
-                        if (parametric) {
-                            throw std::runtime_error("Gmsh file " + filename + ": parametric nodes are not supported.");
-                        }
-                        node_index[tags[i]] = static_cast<uint32_t>(data.nodes.size());
-                        data.nodes.push_back(make_node(x, y, z));
-                        coords.push_back({x, y, N_DIM == 3 ? z : 0.0});
-                    }
-                }
-            }
-        } else if (token == "$Elements") {
-            if (version == 2.2) {
-                size_t n;
-                read_count(n);
-                for (size_t i = 0; i < n; i++) {
-                    size_t tag;
-                    int type, n_tags;
-                    read_values(in, filename, tag, type);
-                    read_count(n_tags);
-                    std::vector<int> etags(static_cast<size_t>(n_tags));
-                    for (auto & t : etags) read_values(in, filename, t);
-                    std::vector<size_t> nodes(static_cast<size_t>(gmsh_element_type(type, filename).n_nodes));
-                    for (auto & v : nodes) read_values(in, filename, v);
-                    add_element(type, n_tags > 0 ? etags[0] : 0, nodes);
-                }
-            } else {
-                size_t n_blocks, n_elements, min_tag, max_tag;
-                read_count(n_blocks);
-                read_values(in, filename, n_elements, min_tag, max_tag);
-                for (size_t b = 0; b < n_blocks; b++) {
-                    int dim, entity, type;
-                    size_t n_in_block;
-                    read_values(in, filename, dim, entity, type);
-                    read_count(n_in_block);
-                    int physical = 0;
-                    if (dim == BOUNDARY_DIM || dim == N_DIM) {
-                        const auto & physicals = dim == N_DIM ? cell_entity_physicals : boundary_entity_physicals;
-                        auto it = physicals.find(entity);
-                        if (it != physicals.end() && !it->second.empty()) physical = it->second[0];
-                    }
-                    const int n_nodes_per_element = gmsh_element_type(type, filename).n_nodes;
-                    for (size_t i = 0; i < n_in_block; i++) {
-                        size_t tag;
-                        read_values(in, filename, tag);
-                        std::vector<size_t> nodes(static_cast<size_t>(n_nodes_per_element));
-                        for (auto & v : nodes) read_values(in, filename, v);
-                        add_element(type, physical, nodes);
-                    }
-                }
-            }
-        }
-    }
-    if (data.cells.empty()) {
-        throw std::runtime_error("Gmsh file " + filename + " contains no " + std::to_string(N_DIM) +
-                                 "D elements, the cells of the " + std::to_string(N_DIM) +
-                                 "D solver. Generate the " + std::to_string(N_DIM) + "D mesh (gmsh -" +
-                                 std::to_string(N_DIM) + "); if you saved only physical groups, include the " +
-                                 (N_DIM == 2 ? "surfaces" : "volumes") + " in one (or set Mesh.SaveAll = 1).");
-    }
-    if (high_order) drop_unused_nodes(data);
-    return data;
-}
-
-void drop_unused_nodes(MeshFileData & data) {
-    std::vector<uint32_t> index(data.nodes.size(), ~uint32_t(0));
-    for (const auto & c : data.cells) {
-        for (uint32_t n : c) index[n] = 0;
-    }
-    for (const auto & f : data.boundary_faces) {
-        for (uint32_t n : f.nodes) index[n] = 0;
-    }
-    std::vector<std::array<rtype, N_DIM>> kept;
-    for (uint32_t n = 0; n < data.nodes.size(); n++) {
-        if (index[n] == 0) {
-            index[n] = uint32_t(kept.size());
-            kept.push_back(data.nodes[n]);
-        }
-    }
-    data.nodes = std::move(kept);
-    for (auto & c : data.cells) {
-        for (uint32_t & n : c) n = index[n];
-    }
-    for (auto & f : data.boundary_faces) {
-        for (uint32_t & n : f.nodes) n = index[n];
-    }
-}
-
-void MeshFileData::set_cell_zone(const size_t c, const std::string & name) {
-    auto it = std::find(cell_zone_names.begin(), cell_zone_names.end(), name);
-    if (it == cell_zone_names.end()) it = cell_zone_names.insert(cell_zone_names.end(), name);
-    if (cell_zone.size() <= c) cell_zone.resize(c + 1, Mesh::NO_CELL_ZONE);
-    cell_zone[c] = static_cast<uint32_t>(it - cell_zone_names.begin());
-}
-
-MeshFileData read_mesh_file(const std::string & filename) {
-    if (std::filesystem::is_directory(filename)) return read_openfoam(filename);
+/** @brief Whether a mesh file is Gmsh: not a directory, .cgns or .cas, nor starting with '(' (Fluent). */
+bool is_gmsh_file(const std::string & filename) {
+    if (std::filesystem::is_directory(filename)) return false;
     const std::string ext = std::filesystem::path(filename).extension().string();
-    if (ext == ".cgns") return read_cgns(filename);
-    if (ext == ".cas") return read_fluent(filename);
+    if (ext == ".cgns" || ext == ".cas") return false;
     std::ifstream in(filename);
     char first = 0;
     in >> first;
-    return first == '(' ? read_fluent(filename) : read_gmsh(filename);
-}
-
-namespace {
-
-/** @brief Part r of p of a mesh file's contents (see MeshBlock). */
-MeshBlock file_block(const MeshFileData & data, int r, int p) {
-    MeshBlock block;
-    block.first_cell = block_begin(data.cells.size(), r, p);
-    block.first_node = block_begin(data.nodes.size(), r, p);
-    for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
-        block.add_cell(data.cells[c]);
-        if (!data.cell_zone_names.empty()) {
-            block.cell_zone.push_back(c < data.cell_zone.size() ? data.cell_zone[c] : Mesh::NO_CELL_ZONE);
-        }
-    }
-    block.cell_zone_names = data.cell_zone_names;
-    for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
-        std::array<double, N_DIM> x;
-        FOR_I_DIM x[i] = double(data.nodes[n][i]);
-        block.node_coords.push_back(x);
-    }
-    // Zones numbered in order of first appearance, the same on every rank
-    std::map<std::string, uint32_t> zone_index;
-    for (const auto & face : data.boundary_faces) {
-        if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
-    }
-    const uint64_t n_faces = data.boundary_faces.size();
-    bool high_order = false;
-    for (const auto & ho : data.boundary_high_order) high_order |= !ho.empty();
-    if (high_order) block.face_high_order_offsets.assign(1, 0);
-    for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
-        block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
-        if (!high_order) continue;
-        for (const curved::Vec3 & x : data.boundary_high_order[f]) {
-            std::array<double, N_DIM> node;
-            FOR_I_DIM node[i] = x[i];
-            block.face_high_order_nodes.push_back(node);
-        }
-        block.face_high_order_offsets.push_back(block.face_high_order_nodes.size());
-    }
-    return block;
+    return first != '(';
 }
 
 } // namespace
 
 void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic,
                      const MeshTransform & transform) {
-    MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename, true) : file_block(read_mesh_file(filename), 0, 1);
+    MeshBlock block;
+    if (is_hdf5_mesh(filename)) {
+        block = read_mesh_h5(filename, true);
+    } else {
+        comm::SelfScope self;
+        block = read_file_block(filename);
+    }
     transform_block(block, transform);
     init_from_block(std::move(block), periodic);
 }
@@ -800,5 +484,19 @@ void Mesh::init_from_block(MeshBlock block, const std::vector<PeriodicPair> & pe
 }
 
 MeshBlock read_file_block(const std::string & filename) {
-    return file_block(read_mesh_file(filename), comm::rank(), comm::size());
+    // Rank 0 decides, so that every rank takes the same (collective) path
+    std::string kind = "fluent";
+    if (comm::is_root()) {
+        if (is_gmsh_file(filename)) {
+            kind = "gmsh";
+        } else if (std::filesystem::is_directory(filename)) {
+            kind = "openfoam";
+        } else if (std::filesystem::path(filename).extension() == ".cgns") {
+            kind = "cgns";
+        }
+    }
+    kind = comm::broadcast(kind);
+    if (kind == "gmsh") return read_gmsh_block(filename);
+    if (kind == "openfoam") return read_openfoam_block(filename);
+    return kind == "cgns" ? read_cgns_block(filename) : read_fluent_block(filename);
 }

@@ -237,6 +237,9 @@ struct VorticityGradientFunctor {
  *        u' = 2 Delta^3 |lap(curl u)|, with the Laplacian of the vorticity the
  *        divergence of its face gradients (cell means corrected along the
  *        line of centroids, as the viscous fluxes); boundary faces carry none.
+ *        With the reaction sensor, Omega is SENSOR_GAIN times the filtered sensor
+ *        within the flame table's range of the cell's mixture fraction (0 outside),
+ *        and s_L, delta_L those of the table there.
  */
 struct ThickenedFlameFunctor {
     ThickenedFlame tf;
@@ -259,6 +262,8 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> time_scale;
     Kokkos::View<rtype *[3]> sgs;  // [mu_t, ...]
     Kokkos::View<double *> state;  // [..., beta] (Solver::les_state)
+    Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;  // sensor = "reaction": (cell, [Y, ...])
+    Kokkos::View<rtype *[3]> reaction;                     // sensor = "reaction": [filtered sensor, ., .]
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -303,11 +308,25 @@ struct ThickenedFlameFunctor {
         const double rho = static_cast<double>(W(c, 0));
         const double u_prime = tf.eddy_viscosity_velocity ? tf.C_u * static_cast<double>(sgs(c, 0)) / (rho * D)
                                                           : 2.0 * D * D * D * lap_norm;
-        const double omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
-        const double F = tf.thickening(D, omega);
+        double omega, s_L = tf.s_L, delta_L = tf.delta_L;
+        if (tf.sensor_type == ThickenedFlame::Sensor::REACTION) {
+            double Z = tf.z_offset;
+            for (uint32_t k = 0; k < tf.z_weights.extent(0); k++) Z += tf.z_weights(k) * static_cast<double>(scalars(c, k));
+            const ThickenedFlame::Flame flame = tf.flame_of(Z);
+            const double filtered = ThickenedFlame::SENSOR_GAIN * static_cast<double>(reaction(c, 0));
+            omega = flame.flammable ? Kokkos::fmin(1.0, filtered) : 0.0;
+            if (flame.flammable) {
+                s_L = flame.s_L;
+                delta_L = flame.delta_L;
+            }
+        } else {
+            omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
+        }
+        const double F = tf.thickening(D, omega, delta_L);
         const double nu = static_cast<double>(transport(c, MU)) / rho;
-        const double E = tf.efficiency == ThickenedFlame::Efficiency::DYNAMIC ? ThickenedFlame::dynamic_wrinkling(F, state(2))
-                                                                               : tf.wrinkling(F, u_prime, nu);
+        const double E = tf.capped(tf.efficiency == ThickenedFlame::Efficiency::DYNAMIC
+                                       ? ThickenedFlame::dynamic_wrinkling(F, state(2))
+                                       : tf.wrinkling(F, u_prime, nu, s_L, delta_L));
         fields(c, 0) = static_cast<rtype>(F);
         fields(c, 1) = static_cast<rtype>(E);
         fields(c, 2) = static_cast<rtype>(omega);
@@ -339,6 +358,35 @@ struct GradientNormFunctor {
         double norm2 = 0.0;
         FOR_I_DIM norm2 += g[i] * g[i];
         field(c, out) = static_cast<rtype>(Kokkos::sqrt(norm2));
+    }
+};
+
+/**
+ * @brief The reaction sensor (component 0) of an owned cell zeroed where the flame is not premixed: where the
+ *        least-squares gradients of the fuel (component 1) and oxidizer (component 2) mass fractions do not point
+ *        the same way (Yamashita, Shimada & Takeno 1996).
+ */
+struct FlameIndexFunctor {
+    LSQVertexGradientFunctor stencil;
+    Kokkos::View<rtype *[3]> field;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        double g[2][N_DIM] = {};
+        for (uint32_t n = 0; n < 2; n++) {
+            const double q_c = static_cast<double>(field(c, n + 1));
+            for (uint32_t k = stencil.offsets_cells_of_cell(c); k < stencil.offsets_cells_of_cell(c + 1); k++) {
+                const double dq = static_cast<double>(field(stencil.cells_of_cell(k), n + 1)) - q_c;
+                FOR_I_DIM g[n][i] += static_cast<double>(stencil.weights.cells(k, i)) * dq;
+            }
+            stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+                const double dq = static_cast<double>(field(j, n + 1)) - q_c;
+                FOR_I_DIM g[n][i] += static_cast<double>(stencil.weights.images(k, i)) * dq;
+            });
+        }
+        double index = 0.0;
+        FOR_I_DIM index += g[0][i] * g[1][i];
+        if (!(index > 0.0)) field(c, 0) = 0.0_r;
     }
 };
 
@@ -375,7 +423,7 @@ struct TestFilterFunctor {
 struct TestFilterWidthFunctor {
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
-    Kokkos::View<uint8_t *> neighbor_shift;
+    ShiftRows neighbor_shift;
     Kokkos::View<rtype *[N_DIM]> shifts;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
@@ -514,7 +562,7 @@ struct DynamicProcedureFunctor {
     SGSModel model;
     Kokkos::View<uint32_t *> offsets;
     Kokkos::View<uint32_t *> neighbors;
-    Kokkos::View<uint8_t *> neighbor_shift;
+    ShiftRows neighbor_shift;
     PeriodicMaps periodic;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *> volume;
@@ -738,6 +786,8 @@ void Solver::update_thickened_flame() {
         Kokkos::parallel_for("tfles_vorticity_gradient", mesh->n_cells,
                              VorticityGradientFunctor{viscous_gradient, tfles_vorticity, tfles_gradients});
     }
+    const bool reaction = thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION;
+    if (reaction) update_reaction_sensor();
     Kokkos::parallel_for("tfles_fields", mesh->n_owned(),
                          ThickenedFlameFunctor{thickened_flame, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                mesh->cells_of_face, mesh->face_normals, mesh->face_area,
@@ -745,9 +795,39 @@ void Solver::update_thickened_flame() {
                                                mesh->face_shift,
                                                tfles_vorticity, tfles_gradients, W_cells, transport_values,
                                                cell_transport, les_delta, tfles_fields, chem_time_scale,
-                                               les_coefficients, les_state});
+                                               les_coefficients, les_state, cell_scalars,
+                                               reaction ? tfles_test[ThickenedFlame::SENSOR_PASSES % 2]
+                                                        : Kokkos::View<rtype *[3]>()});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
+}
+
+void Solver::update_reaction_sensor() {
+    const uint32_t n_owned = mesh->n_owned();
+    cell_chemistry.heat_release(conservatives, species, T_seed, hrr, production, n_owned);
+    const ThickenedFlame tf = thickened_flame;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> Y = cell_scalars, w = production;
+    Kokkos::View<rtype *[3]> sensor = tfles_test[0], filtered = tfles_test[1];
+    Kokkos::parallel_for("tfles_reaction_sensor", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        sensor(c, 0) = 0.0_r;
+        sensor(c, 1) = Y(c, tf.sensor_species);
+        sensor(c, 2) = Y(c, tf.oxidizer_species);
+        if (c >= n_owned) return;
+        double Z = tf.z_offset;
+        for (uint32_t k = 0; k < tf.z_weights.extent(0); k++) Z += tf.z_weights(k) * static_cast<double>(Y(c, k));
+        const ThickenedFlame::Flame flame = tf.flame_of(Z);
+        const double rate = -static_cast<double>(w(c, tf.sensor_species));
+        sensor(c, 0) = static_cast<rtype>(flame.flammable ? ThickenedFlame::reaction_sensor(rate, flame.omega_max) : 0.0);
+    });
+    Kokkos::parallel_for("tfles_flame_index", n_owned, FlameIndexFunctor{viscous_gradient, sensor});
+    exchange_cell_vectors(sensor);
+    for (uint32_t pass = 0; pass < ThickenedFlame::SENSOR_PASSES; pass++) {
+        Kokkos::parallel_for("tfles_sensor_filter", n_owned,
+                             TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, sensor, filtered});
+        // The fields read the last pass on owned cells only
+        if (pass + 1 < ThickenedFlame::SENSOR_PASSES) exchange_cell_vectors(filtered);
+        std::swap(sensor, filtered);
+    }
 }
 
 void Solver::update_dynamic_efficiency() {
@@ -810,6 +890,32 @@ void Solver::init_dynamic_efficiency() {
     tfles_test_passes = thickened > 0.0 ? static_cast<uint32_t>(std::clamp(std::ceil(weighted / thickened), 1.0, 64.0)) : 0;
     tfles_test[0] = Kokkos::View<rtype *[3]>("tfles_test_a", mesh->n_cells);
     tfles_test[1] = Kokkos::View<rtype *[3]>("tfles_test_b", mesh->n_cells);
+}
+
+void Solver::init_reaction_sensor(const Input & combustion) {
+    const derived::MixtureFraction z = derived::mixture_fraction(
+        input, combustion, "les.combustion", *mixture_model, "docs/guide/les.md#non-premixed-and-partially-premixed-flames");
+    const std::string name = find_value_or<std::string>(
+        combustion, "sensor_species",
+        z.fuel_species >= 0 ? mixture_model->mechanism().species_names()[static_cast<uint32_t>(z.fuel_species)] : "");
+    const int32_t k = mixture_model->mechanism().species_index(name);
+    if (k < 0) throw mixture_model->unknown_species(combustion, "sensor_species", name);
+    thickened_flame.sensor_species = static_cast<uint32_t>(k);
+    if (z.oxidizer_species < 0)
+        throw InputError(Diagnostic{.key = "les.combustion.oxidizer",
+                                    .line = line_of(combustion, "oxidizer"),
+                                    .message = "the oxidizer stream has no species with O and without C or H, "
+                                               "whose gradient the flame index compares with the fuel's",
+                                    .fix = "Give an oxidizer stream with O2 (or another oxidizer)",
+                                    .docs = "docs/guide/les.md#non-premixed-and-partially-premixed-flames"});
+    thickened_flame.oxidizer_species = static_cast<uint32_t>(z.oxidizer_species);
+    thickened_flame.z_offset = z.offset;
+    thickened_flame.z_weights = Kokkos::View<double *>("tfles_z_weights", z.weights.size());
+    auto h = Kokkos::create_mirror_view(thickened_flame.z_weights);
+    for (size_t i = 0; i < z.weights.size(); i++) h(i) = z.weights[i];
+    Kokkos::deep_copy(thickened_flame.z_weights, h);
+    tfles_test[0] = Kokkos::View<rtype *[3]>("tfles_sensor_a", mesh->n_cells);
+    tfles_test[1] = Kokkos::View<rtype *[3]>("tfles_sensor_b", mesh->n_cells);
 }
 
 void Solver::update_partially_stirred_reactor() {
@@ -902,7 +1008,6 @@ void Solver::thicken_transport() {
 }
 
 void Solver::init_les() {
-    les_on = LES::in_input(input);
     if (!les_on) return;
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");
@@ -974,6 +1079,7 @@ void Solver::init_les() {
     }
     thickened_flame = ThickenedFlame::from_input(input.at("les").at("combustion"));
     tfles_on = true;
+    if (thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION) init_reaction_sensor(combustion);
     Kokkos::deep_copy(Kokkos::subview(les_state, 2), thickened_flame.beta);
     tfles_fields = Kokkos::View<rtype *[3]>("tfles_fields", mesh->n_cells);
     h_tfles_fields = pinned_mirrors(tfles_fields);

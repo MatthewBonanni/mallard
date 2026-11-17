@@ -1,68 +1,91 @@
 /**
  * @file read_openfoam.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief OpenFOAM polyMesh directories, ASCII and binary.
- * @version 0.9
- * @date 2026-10-15
+ * @brief OpenFOAM polyMesh directories, ASCII and binary, each rank reading
+ *        its own part of every list.
+ * @version 0.10
+ * @date 2026-11-15
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
  */
 
 #include "mesh_file.h"
+#include "read_parallel.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
-#include <sstream>
+#include <memory>
 #include <stdexcept>
 #include <string_view>
+
+#include "comm.h"
 
 namespace fs = std::filesystem;
 
 namespace {
 
-/** @brief One polyMesh file: its FoamFile header entries, then its data, read token by token. */
+using parallel_read::collectively;
+using parallel_read::FileCursor;
+using parallel_read::Marks;
+using parallel_read::part_of;
+using parallel_read::Records;
+using parallel_read::Tokens;
+using parallel_read::Unit;
+
+/** @brief A list in a polyMesh file: n items from byte `start`, binary or ASCII (where its units start). */
+struct FoamList {
+    uint64_t n = 0, start = 0;
+    Unit unit = Unit::TOKEN;
+    Marks marks;
+};
+
+/**
+ * @brief One polyMesh file, which every rank opens (collective): its FoamFile
+ *        header entries, then its data, read token by token.
+ */
 class FoamFile {
   public:
     explicit FoamFile(const fs::path & path) : name(path.string()) {
-        if (!fs::exists(path)) {
-            if (fs::exists(path.string() + ".gz")) {
-                fail("is compressed (" + path.filename().string() + ".gz); decompress the polyMesh files with gunzip.");
-            }
-            fail("is missing.");
-        }
-        std::ifstream in(path, std::ios::binary);
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        s = buffer.str();
-        if (token() != "FoamFile") fail("has no FoamFile header.");
-        expect("{");
-        while (true) {
-            const std::string key = token();
-            if (key == "}") break;
-            std::string value;
-            for (std::string t = token(); t != ";"; t = token()) {
-                if (t == "{") {
-                    // A sub-dictionary (meta): skipped
-                    for (int depth = 1; depth > 0;) {
-                        const std::string u = token();
-                        depth += u == "{" ? 1 : u == "}" ? -1 : 0;
-                    }
-                    break;
+        collectively([&] {
+            if (!fs::exists(path)) {
+                if (fs::exists(path.string() + ".gz")) {
+                    fail("is compressed (" + path.filename().string() + ".gz); decompress the polyMesh files with gunzip.");
                 }
-                value += (value.empty() ? "" : " ") + t;
+                fail("is missing.");
             }
-            header[key] = value;
-        }
+            cur = std::make_unique<FileCursor>(name);
+            if (token() != "FoamFile") fail("has no FoamFile header.");
+            expect("{");
+            while (true) {
+                const std::string key = token();
+                if (key == "}") break;
+                std::string value;
+                for (std::string t = token(); t != ";"; t = token()) {
+                    if (t == "{") {
+                        // A sub-dictionary (meta): skipped
+                        for (int depth = 1; depth > 0;) {
+                            const std::string u = token();
+                            depth += u == "{" ? 1 : u == "}" ? -1 : 0;
+                        }
+                        break;
+                    }
+                    value += (value.empty() ? "" : " ") + t;
+                }
+                header[key] = value;
+            }
+        });
         binary = header["format"] == "binary";
         const std::string arch = header.count("arch") ? header["arch"] : "";
         if (arch.find("label=64") != std::string::npos) label_size = 8;
         if (arch.find("scalar=32") != std::string::npos) scalar_size = 4;
+        in.open(name, std::ios::binary);
     }
 
     [[noreturn]] void fail(const std::string & what) const {
@@ -70,15 +93,17 @@ class FoamFile {
     }
 
     void skip_space_and_comments() {
-        while (pos < s.size()) {
-            if (std::isspace(static_cast<unsigned char>(s[pos]))) {
-                pos++;
-            } else if (s.compare(pos, 2, "//") == 0) {
-                pos = s.find('\n', pos);
-                if (pos == std::string::npos) pos = s.size();
-            } else if (s.compare(pos, 2, "/*") == 0) {
-                pos = s.find("*/", pos + 2);
-                pos = pos == std::string::npos ? s.size() : pos + 2;
+        while (cur->peek() >= 0) {
+            if (std::isspace(cur->peek())) {
+                cur->get();
+            } else if (cur->peek() == '/' && cur->peek(1) == '/') {
+                while (cur->peek() >= 0 && cur->peek() != '\n') cur->get();
+            } else if (cur->peek() == '/' && cur->peek(1) == '*') {
+                cur->get();
+                cur->get();
+                while (cur->peek() >= 0 && !(cur->peek() == '*' && cur->peek(1) == '/')) cur->get();
+                cur->get();
+                cur->get();
             } else {
                 break;
             }
@@ -87,25 +112,26 @@ class FoamFile {
 
     std::string token() {
         skip_space_and_comments();
-        if (pos >= s.size()) fail("ends early.");
-        const char c = s[pos];
+        const int c = cur->peek();
+        if (c < 0) fail("ends early.");
         if (c == '(' || c == ')' || c == '{' || c == '}' || c == ';') {
-            pos++;
-            return std::string(1, c);
+            cur->get();
+            return std::string(1, char(c));
         }
+        std::string t;
         if (c == '"') {
-            const size_t end = s.find('"', pos + 1);
-            if (end == std::string::npos) fail("has an unterminated string.");
-            std::string t = s.substr(pos + 1, end - pos - 1);
-            pos = end + 1;
+            cur->get();
+            for (int d = cur->get(); d != '"'; d = cur->get()) {
+                if (d < 0) fail("has an unterminated string.");
+                t += char(d);
+            }
             return t;
         }
-        const size_t start = pos;
-        while (pos < s.size() && !std::isspace(static_cast<unsigned char>(s[pos])) &&
-               std::string_view("(){};").find(s[pos]) == std::string_view::npos) {
-            pos++;
+        for (int d = c; d >= 0 && !std::isspace(d) && std::string_view("(){};").find(char(d)) == std::string_view::npos;
+             d = cur->peek()) {
+            t += char(cur->get());
         }
-        return s.substr(start, pos - start);
+        return t;
     }
 
     void expect(const std::string & t) {
@@ -121,50 +147,99 @@ class FoamFile {
         return v;
     }
 
-    double real() {
-        const std::string t = token();
-        char * end = nullptr;
-        const double v = std::strtod(t.c_str(), &end);
-        if (t.empty() || *end != '\0') fail("has '" + t + "' where a number belongs.");
-        return v;
-    }
-
-    /** @brief Start of a list of n items: the opening parenthesis (binary data follows it directly). */
-    size_t list_start() {
+    /**
+     * @brief A list of items of item_bytes bytes if binary, each a token or
+     *        ending with a ')' (unit) if ASCII, skipped over to its closing
+     *        parenthesis (collective).
+     */
+    FoamList list(uint64_t item_bytes, Unit unit) {
         const int64_t n = integer();
         if (n < 0) fail("has a negative list size.");
         skip_space_and_comments();
-        if (uint64_t(n) > s.size() - pos) fail("has a list longer than the file.");
-        if (pos < s.size() && s[pos] == '{') fail("has a uniform list, which Mallard does not read.");
+        if (uint64_t(n) > cur->size() - cur->offset()) fail("has a list longer than the file.");
+        if (cur->peek() == '{') fail("has a uniform list, which Mallard does not read.");
         expect("(");
-        return size_t(n);
+        FoamList l;
+        l.n = uint64_t(n);
+        l.start = cur->offset();
+        l.unit = unit;
+        if (binary) {
+            if (l.n * item_bytes > cur->size() - l.start) fail("ends inside binary data.");
+            cur->seek(l.start + l.n * item_bytes);
+            return l;
+        }
+        const uint64_t close = parallel_read::find_nth(name, l.start, ')', unit == Unit::TOKEN ? 1 : l.n + 1);
+        if (close == parallel_read::NONE) fail("ends early.");
+        l.marks = parallel_read::mark_units(name, l.start, close, unit);
+        if (l.marks.n != l.n) {
+            fail("has a list of " + std::to_string(l.n) + " items that holds " + std::to_string(l.marks.n) + ".");
+        }
+        cur->seek(close);
+        return l;
     }
 
-    template <typename T>
-    T raw() {
-        if (pos + sizeof(T) > s.size()) fail("ends inside binary data.");
-        T v;
-        std::memcpy(&v, s.data() + pos, sizeof(T));
-        pos += sizeof(T);
-        return v;
+    /** @brief Parse items [from, to) of an ASCII list, each with parse(tokens). */
+    template <typename Parse>
+    void items(const FoamList & l, uint64_t from, uint64_t to, Parse parse) {
+        if (from >= to) return;
+        Tokens t(name, "OpenFOAM file " + name);
+        const size_t k = l.marks.before(from);
+        t.seek(l.marks.offset[k]);
+        for (uint64_t u = l.marks.unit[k]; u < from; u++) {
+            if (l.unit == Unit::TOKEN) {
+                t.next();
+                continue;
+            }
+            for (std::string_view v = t.next(); v != ")"; v = t.next()) {
+                if (v.empty()) throw t.malformed();
+            }
+        }
+        for (uint64_t i = from; i < to; i++) parse(t);
     }
 
-    int64_t label() { return binary ? (label_size == 8 ? raw<int64_t>() : int64_t(raw<int32_t>())) : integer(); }
-    double scalar() { return binary ? (scalar_size == 4 ? double(raw<float>()) : raw<double>()) : real(); }
-
-    std::vector<int64_t> labels() {
-        const size_t n = list_start();
-        std::vector<int64_t> v(n);
-        for (auto & x : v) x = label();
+    FoamList labels() {
+        const FoamList l = list(label_size, Unit::TOKEN);
         expect(")");
-        return v;
+        return l;
+    }
+
+    /** @brief Items [from, to) of a list of labels. */
+    std::vector<int64_t> read_labels(const FoamList & l, uint64_t from, uint64_t to) {
+        std::vector<int64_t> out(to - from);
+        if (from >= to) return out;
+        if (!binary) {
+            size_t k = 0;
+            items(l, from, to, [&](Tokens & t) { out[k++] = t.integer<int64_t>(); });
+            return out;
+        }
+        const std::vector<char> bytes = read(l.start + from * label_size, (to - from) * label_size);
+        for (uint64_t k = 0; k < out.size(); k++) {
+            if (label_size == 8) {
+                std::memcpy(&out[k], bytes.data() + 8 * k, 8);
+            } else {
+                int32_t v;
+                std::memcpy(&v, bytes.data() + 4 * k, 4);
+                out[k] = v;
+            }
+        }
+        return out;
+    }
+
+    std::vector<char> read(uint64_t at, uint64_t n) {
+        std::vector<char> bytes(n);
+        in.clear();
+        in.seekg(static_cast<std::streamoff>(at));
+        in.read(bytes.data(), static_cast<std::streamsize>(n));
+        if (uint64_t(in.gcount()) != n) fail("ends inside binary data.");
+        return bytes;
     }
 
     std::map<std::string, std::string> header;
-    std::string s, name;
-    size_t pos = 0;
+    std::string name;
     bool binary = false;
-    size_t label_size = 4, scalar_size = 8;
+    uint64_t label_size = 4, scalar_size = 8;
+    std::unique_ptr<FileCursor> cur;
+    std::ifstream in;
 };
 
 struct Patch {
@@ -180,86 +255,18 @@ fs::path poly_mesh_dir(const std::string & path) {
     throw std::runtime_error("OpenFOAM mesh " + path + ": no polyMesh (faces, owner, ...) in it, its polyMesh/ or its constant/polyMesh/.");
 }
 
-} // namespace
-
-MeshFileData read_openfoam(const std::string & path) {
-    const fs::path dir = poly_mesh_dir(path);
-    const std::string where = "OpenFOAM mesh " + dir.string();
-
-    std::vector<std::array<double, 3>> points;
-    {
-        FoamFile f(dir / "points");
-        const size_t n = f.list_start();
-        points.resize(n);
-        for (auto & x : points) {
-            if (!f.binary) f.expect("(");
-            for (double & c : x) c = f.scalar();
-            if (!f.binary) f.expect(")");
-        }
-        f.expect(")");
-    }
-
-    std::vector<std::vector<uint32_t>> faces;
-    {
-        FoamFile f(dir / "faces");
-        auto node = [&](int64_t v) {
-            if (v < 0 || size_t(v) >= points.size()) f.fail("refers to a missing point.");
-            return uint32_t(v);
-        };
-        if (f.header["class"] == "faceCompactList") {
-            const std::vector<int64_t> offsets = f.labels(), nodes = f.labels();
-            if (offsets.empty()) f.fail("has no faces.");
-            for (size_t i = 0; i + 1 < offsets.size(); i++) {
-                if (offsets[i] < 0 || offsets[i + 1] < offsets[i] || size_t(offsets[i + 1]) > nodes.size()) {
-                    f.fail("has bad face offsets.");
-                }
-                faces.emplace_back();
-                for (int64_t k = offsets[i]; k < offsets[i + 1]; k++) faces.back().push_back(node(nodes[size_t(k)]));
-            }
-        } else {
-            if (f.binary) f.fail("is a binary faceList; Mallard reads binary faceCompactList (as OpenFOAM writes).");
-            const size_t n = f.list_start();
-            faces.resize(n);
-            for (auto & face : faces) {
-                const int64_t n_nodes = f.integer();
-                if (n_nodes < 0 || uint64_t(n_nodes) > f.s.size() - f.pos) f.fail("has a bad face size.");
-                face.resize(size_t(n_nodes));
-                f.expect("(");
-                for (auto & v : face) v = node(f.integer());
-                f.expect(")");
-            }
-            f.expect(")");
-        }
-    }
-
-    std::vector<int64_t> owner, neighbour;
-    {
-        FoamFile f(dir / "owner");
-        owner = f.labels();
-    }
-    {
-        FoamFile f(dir / "neighbour");
-        neighbour = f.labels();
-    }
-    if (owner.size() != faces.size() || neighbour.size() > faces.size()) {
-        throw std::runtime_error(where + ": owner, neighbour and faces do not match in size.");
-    }
-    for (const auto * cells : {&owner, &neighbour}) {
-        for (int64_t c : *cells) {
-            if (c < 0 || uint64_t(c) >= faces.size()) throw std::runtime_error(where + ": a face refers to a missing cell.");
-        }
-    }
-
+std::vector<Patch> read_patches(const fs::path & dir, const std::string & where, uint64_t n_faces, uint64_t n_internal) {
+    FoamFile f(dir / "boundary");
     std::vector<Patch> patches;
-    {
-        FoamFile f(dir / "boundary");
-        const size_t n = f.list_start();
-        for (size_t i = 0; i < n; i++) {
+    collectively([&] {
+        const int64_t n = f.integer();
+        if (n < 0) f.fail("has a negative list size.");
+        f.expect("(");
+        for (int64_t i = 0; i < n; i++) {
             Patch p;
             p.name = f.token();
             f.expect("{");
             int depth = 1;
-            std::string key;
             std::vector<std::string> entry;
             while (depth > 0) {
                 const std::string t = f.token();
@@ -281,109 +288,335 @@ MeshFileData read_openfoam(const std::string & path) {
             if (p.type == "processor" || p.type == "processorCyclic") {
                 throw std::runtime_error(where + " is decomposed (patch " + p.name + "); run reconstructParMesh first.");
             }
-            if (p.start < int64_t(neighbour.size()) || p.size < 0 || p.size > int64_t(faces.size()) - p.start) {
+            if (p.start < int64_t(n_internal) || p.size < 0 || p.size > int64_t(n_faces) - p.start) {
                 throw std::runtime_error(where + ": patch " + p.name + " has faces out of the boundary range.");
             }
             patches.push_back(p);
         }
+    });
+    return patches;
+}
+
+void add_record(Records & records, std::initializer_list<uint64_t> head, std::span<const uint64_t> nodes) {
+    records.words.insert(records.words.end(), head);
+    records.words.insert(records.words.end(), nodes.begin(), nodes.end());
+    records.end_record();
+}
+
+} // namespace
+
+MeshBlock read_openfoam_block(const std::string & path) {
+    const int p = comm::size(), r = comm::rank();
+    fs::path dir;
+    collectively([&] { dir = poly_mesh_dir(path); });
+    const std::string where = "OpenFOAM mesh " + dir.string();
+
+    // This rank's share of the points
+    FoamFile points(dir / "points");
+    FoamList point_list;
+    collectively([&] {
+        point_list = points.list(3 * points.scalar_size, Unit::CLOSED);
+        points.expect(")");
+    });
+    const uint64_t n_points = point_list.n;
+    const uint64_t first_point = block_begin(n_points, r, p), end_point = block_begin(n_points, r + 1, p);
+    std::vector<std::array<double, 3>> xyz(end_point - first_point);
+    collectively([&] {
+        if (xyz.empty()) return;
+        if (!points.binary) {
+            size_t k = 0;
+            points.items(point_list, first_point, end_point, [&](Tokens & t) {
+                t.expect('(');
+                for (double & c : xyz[k]) c = t.real();
+                t.expect(')');
+                k++;
+            });
+            return;
+        }
+        const uint64_t ss = points.scalar_size;
+        const std::vector<char> bytes = points.read(point_list.start + first_point * 3 * ss, xyz.size() * 3 * ss);
+        for (size_t k = 0; k < 3 * xyz.size(); k++) {
+            double & c = xyz[k / 3][k % 3];
+            if (ss == 4) {
+                float v;
+                std::memcpy(&v, bytes.data() + 4 * k, 4);
+                c = double(v);
+            } else {
+                std::memcpy(&c, bytes.data() + 8 * k, 8);
+            }
+        }
+    });
+
+    // This rank's share of the faces
+    uint64_t n_faces = 0, first_face = 0, end_face = 0;
+    Records faces;
+    {
+        FoamFile f(dir / "faces");
+        auto node = [&](int64_t v) {
+            if (v < 0 || uint64_t(v) >= n_points) f.fail("refers to a missing point.");
+            return uint64_t(v);
+        };
+        if (f.header["class"] == "faceCompactList") {
+            FoamList offsets, nodes;
+            collectively([&] {
+                offsets = f.labels();
+                nodes = f.labels();
+                if (offsets.n == 0) f.fail("has no faces.");
+            });
+            n_faces = offsets.n - 1;
+            first_face = block_begin(n_faces, r, p);
+            end_face = block_begin(n_faces, r + 1, p);
+            collectively([&] {
+                if (end_face == first_face) return;
+                const std::vector<int64_t> o = f.read_labels(offsets, first_face, end_face + 1);
+                for (size_t i = 0; i + 1 < o.size(); i++) {
+                    if (o[i] < 0 || o[i + 1] < o[i] || uint64_t(o[i + 1]) > nodes.n) f.fail("has bad face offsets.");
+                }
+                const std::vector<int64_t> v = f.read_labels(nodes, uint64_t(o.front()), uint64_t(o.back()));
+                faces.words.reserve(v.size());
+                for (size_t i = 0; i + 1 < o.size(); i++) {
+                    for (int64_t k = o[i]; k < o[i + 1]; k++) faces.words.push_back(node(v[size_t(k - o.front())]));
+                    faces.end_record();
+                }
+            });
+        } else {
+            FoamList list;
+            collectively([&] {
+                if (f.binary) f.fail("is a binary faceList; Mallard reads binary faceCompactList (as OpenFOAM writes).");
+                list = f.list(0, Unit::CLOSED);
+                f.expect(")");
+            });
+            n_faces = list.n;
+            first_face = block_begin(n_faces, r, p);
+            end_face = block_begin(n_faces, r + 1, p);
+            collectively([&] {
+                f.items(list, first_face, end_face, [&](Tokens & t) {
+                    const int64_t n_nodes = t.integer<int64_t>();
+                    if (n_nodes < 3) f.fail("has a bad face size.");
+                    if (n_nodes > 4) {
+                        f.fail("has a face of " + std::to_string(n_nodes) + " points (line " +
+                               std::to_string(parallel_read::line_of(f.name, t.start())) + "); " +
+                               (N_DIM == 3 ? "Mallard reads tetrahedra, pyramids, prisms and hexahedra, not polyhedra."
+                                           : "Mallard reads 2D meshes of triangles and quadrilaterals."));
+                    }
+                    t.expect('(');
+                    for (int64_t i = 0; i < n_nodes; i++) faces.words.push_back(node(t.integer<int64_t>()));
+                    t.expect(')');
+                    faces.end_record();
+                });
+            });
+        }
     }
 
-    int64_t n_cells = 0;
-    for (int64_t c : owner) n_cells = std::max(n_cells, c + 1);
-    for (int64_t c : neighbour) n_cells = std::max(n_cells, c + 1);
+    // Their cells
+    std::vector<int64_t> owner, neighbour;
+    uint64_t n_internal = 0;
+    {
+        FoamFile o(dir / "owner"), nb(dir / "neighbour");
+        FoamList owners, neighbours;
+        collectively([&] {
+            owners = o.labels();
+            neighbours = nb.labels();
+            if (owners.n != n_faces || neighbours.n > n_faces) {
+                throw std::runtime_error(where + ": owner, neighbour and faces do not match in size.");
+            }
+        });
+        n_internal = neighbours.n;
+        collectively([&] {
+            owner = o.read_labels(owners, first_face, end_face);
+            neighbour = nb.read_labels(neighbours, std::min(first_face, n_internal), std::min(end_face, n_internal));
+            for (const auto * cells : {&owner, &neighbour}) {
+                for (int64_t c : *cells) {
+                    if (c < 0 || uint64_t(c) >= n_faces) throw std::runtime_error(where + ": a face refers to a missing cell.");
+                }
+            }
+        });
+    }
+    const std::vector<Patch> patches = read_patches(dir, where, n_faces, n_internal);
+    int64_t max_cell = -1;
+    for (int64_t c : owner) max_cell = std::max(max_cell, c);
+    for (int64_t c : neighbour) max_cell = std::max(max_cell, c);
+    const uint64_t n_cells = uint64_t(comm::allreduce(max_cell, comm::Op::MAX) + 1);
     if (n_cells == 0) throw std::runtime_error(where + " has no cells.");
 
-    MeshFileData data;
-    auto add_nodes = [&]() {
-        for (const auto & x : points) {
-            std::array<rtype, N_DIM> p;
-            for (size_t d = 0; d < N_DIM; d++) p[d] = static_cast<rtype>(x[d]);
-            data.nodes.push_back(p);
+    // Boundary faces: the patches' faces (2D: but the empty ones'), in patch order
+    std::vector<std::string> zone_names;
+    std::vector<uint32_t> patch_zone(patches.size(), 0);
+    std::vector<uint64_t> patch_first(patches.size(), 0);  // the position of a patch's first face among the boundary faces
+    uint64_t n_boundary = 0;
+    for (size_t k = 0; k < patches.size(); k++) {
+        if (N_DIM == 2 && patches[k].type == "empty") continue;
+        patch_first[k] = n_boundary;
+        n_boundary += uint64_t(patches[k].size);
+        if (patches[k].size == 0) continue;
+        const auto it = std::find(zone_names.begin(), zone_names.end(), patches[k].name);
+        patch_zone[k] = uint32_t(it - zone_names.begin());
+        if (it == zone_names.end()) zone_names.push_back(patches[k].name);
+    }
+    auto patch_of = [&](uint64_t f) {
+        for (size_t k = 0; k < patches.size(); k++) {
+            if (int64_t(f) >= patches[k].start && int64_t(f) < patches[k].start + patches[k].size) return int(k);
         }
+        return -1;
     };
+    auto position_of = [&](uint64_t f, int k) { return patch_first[size_t(k)] + uint64_t(int64_t(f) - patches[size_t(k)].start); };
 
+    MeshBlock block;
+    block.zone_names = zone_names;
+    std::vector<uint64_t> position;
+    Records boundary;
     if constexpr (N_DIM == 3) {
+        std::vector<uint64_t> face_ids(faces.size());
         std::vector<std::array<int64_t, 2>> face_cells(faces.size());
-        for (size_t f = 0; f < faces.size(); f++) face_cells[f] = {owner[f], f < neighbour.size() ? neighbour[f] : -1};
-        data.cells = cells_from_faces(uint32_t(n_cells), faces, face_cells, where);
-        add_nodes();
-        for (const Patch & p : patches) {
-            for (int64_t f = p.start; f < p.start + p.size; f++) {
-                data.boundary_faces.push_back({faces[size_t(f)], p.name});
-                data.boundary_high_order.emplace_back();
-            }
+        for (uint64_t f = first_face; f < end_face; f++) {
+            face_ids[f - first_face] = f;
+            face_cells[f - first_face] = {owner[f - first_face], f < n_internal ? neighbour[f - first_face] : -1};
+        }
+        parallel_read::cells_of_faces(n_cells, face_ids, faces, face_cells, where, block);
+        for (uint64_t f = std::max(first_face, n_internal); f < end_face; f++) {
+            const int k = patch_of(f);
+            if (k < 0) continue;
+            position.push_back(position_of(f, k));
+            add_record(boundary, {patch_zone[size_t(k)], uint64_t(faces[f - first_face].size())}, faces[f - first_face]);
         }
     } else {
         // A 2D mesh is one cell thick between the faces of empty patches, normal to z: each cell is its face at the lower z
+        if (std::none_of(patches.begin(), patches.end(), [](const Patch & q) { return q.type == "empty"; })) {
+            throw std::runtime_error(where + " is 3D (no empty patches), but Mallard was built with Mallard_DIM = 2; a 2D mesh is one cell thick in z between empty patches.");
+        }
         double z_min = std::numeric_limits<double>::max(), z_max = -z_min;
-        for (const auto & x : points) {
+        for (const auto & x : xyz) {
             z_min = std::min(z_min, x[2]);
             z_max = std::max(z_max, x[2]);
         }
+        z_min = comm::allreduce(z_min, comm::Op::MIN);
+        z_max = comm::allreduce(z_max, comm::Op::MAX);
         const double tol = 1e-6 * std::max(z_max - z_min, 1e-300);
-        auto on_back = [&](uint32_t n) { return std::abs(points[n][2] - z_min) <= tol; };
-        std::vector<std::vector<uint32_t>> cells(static_cast<size_t>(n_cells));
-        bool any_empty = false;
-        for (const Patch & p : patches) {
-            if (p.type != "empty") continue;
-            any_empty = true;
-            for (int64_t f = p.start; f < p.start + p.size; f++) {
-                const auto & face = faces[size_t(f)];
-                if (!std::all_of(face.begin(), face.end(), on_back)) continue;
-                auto & cell = cells[size_t(owner[size_t(f)])];
-                if (!cell.empty()) throw std::runtime_error(where + ": a cell has two faces at the lowest z.");
-                cell = face;
-            }
+        std::vector<uint64_t> asked;
+        for (uint64_t f = std::max(first_face, n_internal); f < end_face; f++) {
+            if (patch_of(f) < 0) continue;
+            asked.insert(asked.end(), faces[f - first_face].begin(), faces[f - first_face].end());
         }
-        if (!any_empty) {
-            throw std::runtime_error(where + " is 3D (no empty patches), but Mallard was built with Mallard_DIM = 2; a 2D mesh is one cell thick in z between empty patches.");
-        }
-        for (size_t c = 0; c < cells.size(); c++) {
-            if (cells[c].empty()) {
-                throw std::runtime_error(where + ": cell " + std::to_string(c + 1) + " has no empty face at the lowest z; a 2D mesh is one cell thick in z between empty patches.");
-            }
-            if (cells[c].size() != 3 && cells[c].size() != 4) {
-                throw std::runtime_error(where + ": cell " + std::to_string(c + 1) + " has " + std::to_string(cells[c].size()) + " sides; Mallard supports triangles and quadrilaterals.");
-            }
-        }
-        data.cells = std::move(cells);
-        add_nodes();
-        for (const Patch & p : patches) {
-            if (p.type == "empty") continue;
-            for (int64_t f = p.start; f < p.start + p.size; f++) {
-                std::vector<uint32_t> edge;
-                for (uint32_t n : faces[size_t(f)]) {
-                    if (on_back(n)) edge.push_back(n);
+        const std::vector<uint64_t> z = parallel_read::ask(
+            asked, 1, [&](uint64_t n) { return part_of(n, n_points, p); },
+            [&](uint64_t n, uint64_t * out) { *out = std::bit_cast<uint64_t>(xyz[n - first_point][2]); });
+        auto on_back = [&](size_t k) { return std::abs(std::bit_cast<double>(z[k]) - z_min) <= tol; };
+        std::vector<uint64_t> cell_of_face;
+        Records back_faces;  // the cell, then the face's nodes
+        collectively([&] {
+            size_t k = 0;
+            for (uint64_t f = std::max(first_face, n_internal); f < end_face; f++) {
+                const int q = patch_of(f);
+                if (q < 0) continue;
+                const auto nodes = faces[f - first_face];
+                const size_t first_k = k;
+                k += nodes.size();
+                if (patches[size_t(q)].type == "empty") {
+                    bool back = true;
+                    for (size_t i = 0; i < nodes.size(); i++) back = back && on_back(first_k + i);
+                    if (!back) continue;
+                    cell_of_face.push_back(uint64_t(owner[f - first_face]));
+                    add_record(back_faces, {cell_of_face.back()}, nodes);
+                    continue;
                 }
-                if (edge.size() != 2) throw std::runtime_error(where + ": a face of patch " + p.name + " does not span the mesh's thickness.");
-                data.boundary_faces.push_back({edge, p.name});
-                data.boundary_high_order.emplace_back();
+                std::vector<uint64_t> edge;
+                for (size_t i = 0; i < nodes.size(); i++) {
+                    if (on_back(first_k + i)) edge.push_back(nodes[i]);
+                }
+                if (edge.size() != 2) {
+                    throw std::runtime_error(where + ": a face of patch " + patches[size_t(q)].name + " does not span the mesh's thickness.");
+                }
+                position.push_back(position_of(f, q));
+                add_record(boundary, {patch_zone[size_t(q)], 2}, edge);
             }
-        }
+        });
+        const Records mine = parallel_read::to_owners(cell_of_face, back_faces, n_cells);
+        block.first_cell = block_begin(n_cells, r, p);
+        const uint64_t end_cell = block_begin(n_cells, r + 1, p);
+        collectively([&] {
+            for (size_t k = 0; k + 1 < mine.size(); k++) {
+                if (mine[k][0] == mine[k + 1][0]) throw std::runtime_error(where + ": a cell has two faces at the lowest z.");
+            }
+        });
+        collectively([&] {
+            size_t k = 0;
+            for (uint64_t c = block.first_cell; c < end_cell; c++, k++) {
+                if (k >= mine.size() || mine[k][0] != c) {
+                    throw std::runtime_error(where + ": cell " + std::to_string(c + 1) + " has no empty face at the lowest z; a 2D mesh is one cell thick in z between empty patches.");
+                }
+                const auto cell = mine[k].subspan(1);
+                if (cell.size() != 3 && cell.size() != 4) {
+                    throw std::runtime_error(where + ": cell " + std::to_string(c + 1) + " has " + std::to_string(cell.size()) + " sides; Mallard supports triangles and quadrilaterals.");
+                }
+                block.add_cell(cell);
+            }
+        });
     }
+    release(faces.words);
+    release(faces.offsets);
+    parallel_read::place_faces(position, boundary, n_boundary, false, block);
+
+    // Cell zones: the last zone that lists a cell
     if (fs::exists(dir / "cellZones")) {
         FoamFile f(dir / "cellZones");
-        const size_t n = f.list_start();
-        for (size_t i = 0; i < n; i++) {
-            const std::string name = f.token();
-            f.expect("{");
-            for (int depth = 1; depth > 0;) {
-                const std::string t = f.token();
-                if (t == "{") {
-                    depth++;
-                } else if (t == "}") {
-                    depth--;
-                } else if (t == "cellLabels" && depth == 1) {
-                    const size_t mark = f.pos;
-                    if (f.token().rfind("List", 0) != 0) f.pos = mark;
-                    for (const int64_t c : f.labels()) {
-                        if (c < 0 || c >= n_cells) f.fail("refers to a missing cell in zone " + name + ".");
-                        data.set_cell_zone(size_t(c), name);
+        std::vector<std::pair<std::string, FoamList>> zones;
+        collectively([&] {
+            const int64_t n = f.integer();
+            if (n < 0) f.fail("has a negative list size.");
+            f.expect("(");
+            for (int64_t i = 0; i < n; i++) {
+                const std::string name = f.token();
+                f.expect("{");
+                for (int depth = 1; depth > 0;) {
+                    const std::string t = f.token();
+                    if (t == "{") {
+                        depth++;
+                    } else if (t == "}") {
+                        depth--;
+                    } else if (t == "cellLabels" && depth == 1) {
+                        const uint64_t mark = f.cur->offset();
+                        if (f.token().rfind("List", 0) != 0) f.cur->seek(mark);
+                        zones.emplace_back(name, f.labels());
                     }
                 }
             }
+        });
+        std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
+        collectively([&] {
+            for (size_t z = 0; z < zones.size(); z++) {
+                const FoamList & l = zones[z].second;
+                for (const int64_t c : f.read_labels(l, block_begin(l.n, r, p), block_begin(l.n, r + 1, p))) {
+                    if (c < 0 || uint64_t(c) >= n_cells) f.fail("refers to a missing cell in zone " + zones[z].first + ".");
+                    std::vector<uint64_t> & to = send[size_t(part_of(uint64_t(c), n_cells, p))];
+                    to.push_back(uint64_t(c));
+                    to.push_back(z);
+                }
+            }
+        });
+        std::vector<uint32_t> zone_index(zones.size(), 0);
+        for (size_t z = 0; z < zones.size(); z++) {
+            if (zones[z].second.n == 0) continue;
+            const auto it = std::find(block.cell_zone_names.begin(), block.cell_zone_names.end(), zones[z].first);
+            zone_index[z] = uint32_t(it - block.cell_zone_names.begin());
+            if (it == block.cell_zone_names.end()) block.cell_zone_names.push_back(zones[z].first);
+        }
+        const std::vector<uint64_t> got = comm::exchange(std::move(send)).data;
+        if (!block.cell_zone_names.empty()) {
+            std::vector<int64_t> last(block.n_cells(), -1);
+            for (size_t k = 0; k + 1 < got.size(); k += 2) {
+                int64_t & z = last[got[k] - block.first_cell];
+                z = std::max(z, int64_t(got[k + 1]));
+            }
+            block.cell_zone.resize(block.n_cells());
+            for (uint64_t c = 0; c < block.n_cells(); c++) {
+                block.cell_zone[c] = last[c] < 0 ? Mesh::NO_CELL_ZONE : zone_index[size_t(last[c])];
+            }
         }
     }
-    drop_unused_nodes(data);
-    return data;
+
+    std::vector<std::array<double, N_DIM>> coords(xyz.size());
+    for (size_t k = 0; k < xyz.size(); k++) FOR_I_DIM coords[k][i] = xyz[k][i];
+    release(xyz);
+    parallel_read::place_used_nodes(n_points, std::move(coords), {&block.cell_nodes, &block.face_nodes}, block);
+    return block;
 }

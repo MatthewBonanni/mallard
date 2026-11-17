@@ -1,10 +1,9 @@
 {
- "default": "\"vtkhdf\"",
+ "default": "\"vtu\"",
  "dims": [
   2,
   3
  ],
- "required": true,
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/average_outlet/input.toml",
@@ -34,8 +33,11 @@
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml"
  ],
  "type": "string",
  "values": [

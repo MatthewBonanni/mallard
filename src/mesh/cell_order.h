@@ -48,9 +48,8 @@ static const std::unordered_map<std::string, CellOrder> CELL_ORDERS = {
     {"auto", CellOrder::AUTO}, {"input", CellOrder::INPUT}, {"hilbert", CellOrder::HILBERT}};
 
 /**
- * @brief A cell order and, for auto, the vertex layers around a cell that its
- *        reconstruction reads, and whether structured blocks of owned cells
- *        come first.
+ * @brief A cell order, the vertex layers around a cell that its reconstruction
+ *        reads, and whether structured blocks of owned cells come first.
  */
 struct CellNumbering {
     CellOrder order = CellOrder::INPUT;
@@ -72,6 +71,7 @@ struct LocalityOrder {
     std::vector<uint32_t> order;  // new -> old
     CellOrderChoice choice;
     std::vector<StructuredBlock> blocks;  // in the new numbering
+    uint32_t n_interior = 0;              // owned cells farther than numbering.layers from the halo, first
 };
 
 /**
@@ -81,12 +81,17 @@ struct LocalityOrder {
  *        orders, the 128-byte lines of a cell field that blocks of 256
  *        consecutive owned cells (group 0) read when each reads the cells
  *        within numbering.layers vertex layers, and takes the Hilbert order
- *        only if it needs a tenth fewer. With numbering.blocks, the structured
- *        blocks of the owned cells at least 2 layers + 1 cells long come first,
- *        each numbered i fastest, then the other owned cells in the chosen
- *        order.
+ *        only if it needs a tenth fewer. With halo groups, the owned cells
+ *        within numbering.layers vertex layers of a halo cell go last among the
+ *        owned cells (nodes with the same node_key, periodic images, are one
+ *        vertex), so that the others, whose reconstruction reads no halo cell,
+ *        form the range [0, n_interior). With numbering.blocks, the
+ *        structured blocks of those interior cells at least 2 layers + 1 cells
+ *        long (continuing across periodic boundaries, by node_key) come first, each numbered i fastest, then the other owned cells
+ *        in the chosen order.
  */
 LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const CellNodes & cells, const std::vector<uint32_t> & group_ends);
+                             const CellNodes & cells, const std::vector<uint32_t> & group_ends,
+                             const std::vector<uint32_t> & node_key = {});
 
 #endif // CELL_ORDER_H

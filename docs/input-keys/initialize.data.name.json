@@ -1,10 +1,13 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
  "required": true,
  "set_in": [
-  "examples/shock_bubble_2d/input.toml"
+  "examples/shock_bubble_2d/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml"
  ],
  "type": "string"
 }

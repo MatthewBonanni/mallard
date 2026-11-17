@@ -24,14 +24,11 @@ CellNumbering cell_numbering_of_input(const Input & input) {
     numbering.order = find_option(CELL_ORDERS, "mesh.cell_order", name,
                                   input.contains("mesh") ? line_of(input.at("mesh"), "cell_order") : size_t(0))
                           ->second;
-    if (numbering.order == CellOrder::AUTO) {
-        numbering.blocks = true;
-        // TENO of order p reads about (p - 1) / 2 layers around a cell; MUSCL's gradients and fluxes, one
-        const Input reconstruction =
-            toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
-        if (find_value_or<std::string>(reconstruction, "type", "FO") == "TENO") {
-            numbering.layers = static_cast<uint32_t>(std::max(1, (find_value_or<int>(reconstruction, "order", 5) - 1) / 2));
-        }
+    numbering.blocks = numbering.order == CellOrder::AUTO;
+    // TENO of order p reads about (p - 1) / 2 layers around a cell; MUSCL's gradients and fluxes, one
+    const Input reconstruction = toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+    if (find_value_or<std::string>(reconstruction, "type", "FO") == "TENO") {
+        numbering.layers = static_cast<uint32_t>(std::max(1, (find_value_or<int>(reconstruction, "order", 5) - 1) / 2));
     }
     return numbering;
 }
@@ -153,19 +150,81 @@ LocalityOrder curve_or_input_order(const CellNumbering & numbering, const std::v
 
 } // namespace
 
+namespace {
+
+/**
+ * Owned cells (below n_owned) within `layers` vertex layers of a cell at or
+ * above n_owned; nodes with the same node_key (periodic images) are one vertex.
+ */
+std::vector<uint8_t> near_halo(const CellNodes & cells, size_t n_nodes, const std::vector<uint32_t> & node_key,
+                               uint32_t n_owned, uint32_t layers) {
+    CellNodes keyed;
+    if (!node_key.empty()) {
+        keyed = cells;
+        for (uint32_t & v : keyed.nodes) v = node_key[v];
+    }
+    const CellNodes & by_key = node_key.empty() ? cells : keyed;
+    const NodeCells around(by_key, n_nodes);
+    std::vector<uint8_t> near(cells.size(), 0);
+    std::vector<uint32_t> frontier, next;
+    for (uint32_t c = n_owned; c < cells.size(); c++) frontier.push_back(c);
+    for (uint32_t l = 0; l < layers && !frontier.empty(); l++) {
+        next.clear();
+        for (uint32_t c : frontier) {
+            for (uint32_t v : by_key[c]) {
+                for (uint32_t k = around.offsets[v]; k < around.offsets[v + 1]; k++) {
+                    const uint32_t d = around.cells[k];
+                    if (d >= n_owned || near[d]) continue;
+                    near[d] = 1;
+                    next.push_back(d);
+                }
+            }
+        }
+        frontier.swap(next);
+    }
+    near.resize(n_owned);
+    return near;
+}
+
+} // namespace
+
 LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
-                             const CellNodes & cells, const std::vector<uint32_t> & group_ends) {
+                             const CellNodes & cells, const std::vector<uint32_t> & group_ends,
+                             const std::vector<uint32_t> & node_key) {
     LocalityOrder result = curve_or_input_order(numbering, nodes, cells, group_ends);
-    if (!numbering.blocks || group_ends.empty()) return result;
+    if (group_ends.empty()) return result;
     const uint32_t n_owned = group_ends[0];
+    std::vector<uint32_t> & order = result.order;
+    std::vector<uint8_t> near;
+    result.n_interior = n_owned;
+    if (group_ends.size() > 1) {
+        near = near_halo(cells, nodes.size(), node_key, n_owned, numbering.layers);
+        result.n_interior = static_cast<uint32_t>(
+            std::stable_partition(order.begin(), order.begin() + n_owned, [&](uint32_t c) { return !near[c]; }) -
+            order.begin());
+    }
+    if (!numbering.blocks) return result;
+    // Blocks among the interior cells, in the given order
     std::vector<uint32_t> block_cells;
-    result.blocks = structured_blocks(cells, n_owned, 2 * numbering.layers + 1, block_cells);
+    if (result.n_interior == n_owned) {
+        result.blocks = structured_blocks(cells, n_owned, 2 * numbering.layers + 1, block_cells, node_key);
+    } else {
+        std::vector<uint32_t> interior;
+        CellNodes interior_cells;
+        for (uint32_t c = 0; c < n_owned; c++) {
+            if (near[c]) continue;
+            interior.push_back(c);
+            interior_cells.add(cells[c]);
+        }
+        result.blocks = structured_blocks(interior_cells, result.n_interior, 2 * numbering.layers + 1, block_cells, node_key);
+        for (uint32_t & c : block_cells) c = interior[c];
+    }
     if (result.blocks.empty()) return result;
     std::vector<uint8_t> in_block(n_owned, 0);
     for (uint32_t c : block_cells) in_block[c] = 1;
-    std::vector<uint32_t> & order = result.order;
-    const auto rest = std::stable_partition(order.begin(), order.begin() + n_owned, [&](uint32_t c) { return !in_block[c]; });
-    std::rotate(order.begin(), rest, order.begin() + n_owned);
+    const auto rest = std::stable_partition(order.begin(), order.begin() + result.n_interior,
+                                            [&](uint32_t c) { return !in_block[c]; });
+    std::rotate(order.begin(), rest, order.begin() + result.n_interior);
     std::copy(block_cells.begin(), block_cells.end(), order.begin());
     return result;
 }
