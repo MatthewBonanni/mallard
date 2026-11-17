@@ -48,9 +48,10 @@ struct Coordinates {
     std::string summary;        // the shape and what fixes its coordinates, for the run log
 };
 
-/** @brief Where the patch's corners are: found from its outline, or given. */
+/** @brief Where the patch's corners are, and where u starts around a ring or a disk: found from the patch, or given. */
 struct Corners {
     std::optional<std::vector<Vec3>> points;  // none (a disk) or four, in the order (u, v) = (0, 0), (1, 0), (1, 1), (0, 1)
+    std::optional<Vec3> seam;                 // ring, disk: u = 0 at the face nearest to this point
     std::string key;                          // of the [[boundaries]] entry, for errors
     size_t line = 0;
 };
@@ -63,9 +64,10 @@ struct Corners {
  *        0 on one side to 1 on the opposite one and linear in arc length
  *        along the other two, v likewise. Ring: v is harmonic from 0 on one
  *        rim to 1 on the other and u, in [0, 1), is its harmonic conjugate
- *        around the ring. Disk: v = exp(-2 pi G) with G the surface's Green's
- *        function of its center (the radius of the conformal map to the unit
- *        disk), u its conjugate angle.
+ *        around the ring. Disk: v and 2 pi u are the radius and the angle of
+ *        the conformal map of the patch to the unit disk that sends its
+ *        center to 0, f = exp(-2 pi (G + i G*)) with G the surface's Green's
+ *        function of the center.
  *
  *        v_m is the distance along the surface from v = 0 and u_m that from
  *        u = 0 (four-sided) or the arc length around the patch (ring, disk).

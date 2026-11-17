@@ -168,6 +168,17 @@ TEST(BoundaryCoordinatesTest, RingsOfTheAnnulusMeshHaveTheirRadiusHeightAndAngle
         EXPECT_EQ(x[bv::THETA], 2.0 * M_PI * x[bv::U]);
         EXPECT_NEAR(x[bv::U_M], x[bv::U] * 2.0 * M_PI * r, 0.02);
     }
+    // A seam of its own: theta from -y
+    const Input seamed = parse_toml("name = \"zone\"\nseam = [0.0, -1.5, 0.0]\n");
+    double least = 1.0;
+    for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"back"}), seamed, "zone", {bv::THETA},
+                                                 WallDistance(), false, summary)) {
+        const double from_seam = std::remainder(x[bv::THETA] - (angle(x) + 0.5 * M_PI), 2.0 * M_PI);
+        EXPECT_NEAR(from_seam, 0.0, 0.5 * 2.0 * M_PI / 48 + 1e-6);
+        least = std::min(least, x[bv::THETA]);
+    }
+    EXPECT_EQ(least, 0.0);
+    EXPECT_NE(summary.find("u = 0 at (0."), std::string::npos) << summary;
     const std::vector<FacePoint> inner =
         local_coordinates(*mesh, zone_faces(*mesh, {"inner"}), entry, "zone", used, WallDistance(), false, summary);
     ASSERT_FALSE(inner.empty());
@@ -353,7 +364,7 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
                  "the list of zones is empty");
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = [\"bottom\"]\n"
                          "corners = []\n", run),
-                 N_DIM == 2 ? "has ends and no corners" : "so corners has no effect");
+                 N_DIM == 2 ? "has two ends and no corners" : "so corners has no effect");
     // A wall reading n measures from itself by default
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = 1.0\n", run,
                          "wall_isothermal\"\nT = \"1 + n", ns_state()),

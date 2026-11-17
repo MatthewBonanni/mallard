@@ -34,6 +34,22 @@ Vec3 center(const std::vector<Vec3> & face) {
     return c;
 }
 
+/** @brief The centroid of a flat face's area. */
+Vec3 centroid(const std::vector<Vec3> & face) {
+    Vec3 c{};
+    double area = 0.0;
+    for (size_t k = 1; k + 1 < face.size(); k++) {
+        const Vec3 a{face[k][0] - face[0][0], face[k][1] - face[0][1], face[k][2] - face[0][2]};
+        const Vec3 b{face[k + 1][0] - face[0][0], face[k + 1][1] - face[0][1], face[k + 1][2] - face[0][2]};
+        const double w = std::sqrt(std::pow(a[1] * b[2] - a[2] * b[1], 2) + std::pow(a[2] * b[0] - a[0] * b[2], 2) +
+                                   std::pow(a[0] * b[1] - a[1] * b[0], 2));
+        for (size_t d = 0; d < 3; d++) c[d] += w * (face[0][d] + face[k][d] + face[k + 1][d]) / 3.0;
+        area += w;
+    }
+    for (double & x : c) x /= area;
+    return c;
+}
+
 /**
  * @brief na x nb quadrilaterals (or their halves) over the unit square mapped
  *        by X, joined around a if `wrap`; `inward` gives the side of the domain.
@@ -232,8 +248,10 @@ TEST(PatchCoordinatesTest, SidesOfATubeAndOfAConeFollowTheirSlantAndAzimuth) {
 }
 
 TEST(PatchCoordinatesTest, DiskHasTheRadiusAndTheAngleAboutItsCenter) {
-    // v = exp(-2 pi G) of a circle is r / R, u the angle; the center is the
-    // patch's own, wherever the circle lies. Quadrilaterals around a fan
+    // The conformal map of a circle to the unit disk is (x - center) / R,
+    // which linear elements hold: v = r / R and u the angle to round-off,
+    // through the center too, wherever the circle lies. Quadrilaterals
+    // around a fan
     const Vec3 o{1.0, -1.0, 0.5};
     const double R = 2.0;
     const int n = 16, na = 4 * n;
@@ -253,11 +271,11 @@ TEST(PatchCoordinatesTest, DiskHasTheRadiusAndTheAngleAboutItsCenter) {
     const patch::Coordinates c = patch::coordinates(s, {});
     ASSERT_EQ(c.shape, patch::Shape::DISK);
     for (size_t f = 0; f < s.faces.size(); f++) {
-        const Vec3 x = center(s.faces[f]);
+        const Vec3 x = centroid(s.faces[f]);
         const Vec3 offset{x[0] - o[0], x[1] - o[1], 0.0};
         const double r = std::hypot(offset[0], offset[1]);
-        ASSERT_NEAR(c.faces[f].v, r / R, r > 0.25 * R ? 3e-3 : 8e-3) << r;
-        ASSERT_LT(around(c.faces[f].u, azimuth(offset)), 1e-9);
+        ASSERT_NEAR(c.faces[f].v, r / R, 1e-10) << r;
+        ASSERT_LT(around(c.faces[f].u, azimuth(offset)), 1e-10) << r;
         ASSERT_NEAR(c.faces[f].v_m, r, 0.01 * R);
         ASSERT_NEAR(c.faces[f].u_m, c.faces[f].u * 2 * PI * r, 0.03 * R);
     }
@@ -265,6 +283,37 @@ TEST(PatchCoordinatesTest, DiskHasTheRadiusAndTheAngleAboutItsCenter) {
     patch::Corners at;
     at.points = std::vector<Vec3>{P(0, n), P(n, n), P(2 * n, n), P(3 * n, n)};
     EXPECT_EQ(patch::coordinates(s, at).shape, patch::Shape::FOUR_SIDED);
+}
+
+TEST(PatchCoordinatesTest, SeamSetsWhereUStartsAroundRingsAndDisks) {
+    // By default u is 0 toward the axis after the ring's (+x around z); a
+    // seam turns it to the face nearest to a point, on a tube as on a disk
+    const Vec3 point{-0.1, 1.3, 0.7};
+    patch::Corners at;
+    at.seam = point;
+    for (const patch::Surface & s : {ring(8, 1.0, 1.0, 1.5), ring(8, 0.5, 2.0, 0.0)}) {
+        const patch::Coordinates c = patch::coordinates(s, at);
+        size_t nearest = 0;
+        auto distance = [&](size_t f) {
+            const Vec3 x = centroid(s.faces[f]);
+            return std::hypot(x[0] - point[0], x[1] - point[1], x[2] - point[2]);
+        };
+        for (size_t f = 1; f < s.faces.size(); f++) {
+            if (distance(f) < distance(nearest)) nearest = f;
+        }
+        EXPECT_EQ(c.faces[nearest].u, 0.0);
+        const double start = azimuth(center(s.faces[nearest]));
+        for (size_t f = 0; f < s.faces.size(); f++) {
+            ASSERT_LT(around(c.faces[f].u, azimuth(center(s.faces[f])) - start), 1e-10);
+            ASSERT_GE(c.faces[f].u, 0.0);
+            ASSERT_LT(c.faces[f].u, 1.0);
+        }
+    }
+    const patch::Surface square = grid(4, 4, false, [](double p, double q) { return Vec3{p, q, 0.0}; }, up);
+    EXPECT_NE(error_of(square, at).find("seam is given, but the patch is four-sided"), std::string::npos);
+    at.points = std::vector<Vec3>{};
+    EXPECT_EQ(patch::coordinates(grid(6, 6, false, [](double p, double q) { return Vec3{p, q, 0.0}; }, up), at).shape,
+              patch::Shape::DISK);
 }
 
 TEST(PatchCoordinatesTest, FacesThatAreNotOnePatchAreInputErrorsWithAFix) {

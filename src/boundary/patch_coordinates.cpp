@@ -413,14 +413,13 @@ std::vector<double> distance(const Triangulation & m, std::vector<double> d) {
 
 /**
  * @brief The harmonic conjugate of the nodal function g at the centroid of
- *        each triangle, up to multiples of its period around a hole of the
- *        surface (or around the triangle `pole`, where g has its source).
+ *        each triangle, up to multiples of its period around the hole of a ring.
  */
-std::vector<double> conjugate(const Triangulation & m, const std::vector<double> & g, const uint32_t pole) {
+std::vector<double> conjugate(const Triangulation & m, const std::vector<double> & g) {
     const double unset = std::numeric_limits<double>::quiet_NaN();
     std::vector<double> at_edge(m.edge_tri.size(), unset), at_tri(m.tri.size(), unset);
     // The conjugate is linear on a triangle, continuous at the middle of its edges
-    auto place = [&](const uint32_t t, const bool spread) {
+    auto place = [&](const uint32_t t) {
         const auto & n = m.tri[t];
         Vec3 gradient{};
         for (size_t k = 0; k < 3; k++) {
@@ -439,26 +438,25 @@ std::vector<double> conjugate(const Triangulation & m, const std::vector<double>
             }
         }
         at_tri[t] = center;
-        for (size_t k = 0; spread && k < 3; k++) {
+        for (size_t k = 0; k < 3; k++) {
             if (std::isnan(at_edge[m.edge[t][k]])) at_edge[m.edge[t][k]] = center + offset[k];
         }
     };
-    std::vector<uint32_t> queue{pole == 0 && m.tri.size() > 1 ? 1u : 0u};
+    std::vector<uint32_t> queue{0};
     std::vector<bool> seen(m.tri.size(), false);
-    seen[queue[0]] = true;
-    place(queue[0], true);
+    seen[0] = true;
+    place(0);
     for (size_t head = 0; head < queue.size(); head++) {
         const uint32_t t = queue[head];
         for (const uint32_t e : m.edge[t]) {
             for (const uint32_t other : m.edge_tri[e]) {
-                if (other == NONE || other == pole || seen[other]) continue;
+                if (other == NONE || seen[other]) continue;
                 seen[other] = true;
-                place(other, true);
+                place(other);
                 queue.push_back(other);
             }
         }
     }
-    if (pole != NONE && !seen[pole]) place(pole, false);
     return at_tri;
 }
 
@@ -493,14 +491,37 @@ std::array<double, 3> nearest_weights(const Vec3 & p, const Vec3 & a, const Vec3
 }
 
 /**
- * @brief u of the faces of a ring or a disk from the conjugate of its v: in
- *        [0, 1) around the patch, counterclockwise from `first` toward
- *        `second` about the patch's center on average.
+ * @brief u of the faces of a ring or a disk from their angles `turns` (in
+ *        turns, up to a start and a direction): in [0, 1) around the patch,
+ *        counterclockwise from `first` toward `second` about the patch's
+ *        center on average.
  */
-std::vector<double> around(const Triangulation & m, const std::vector<double> & at_tri, const double period,
-                           const Reference & reference) {
-    std::vector<double> raw(m.n_faces());
+std::vector<double> around(const Triangulation & m, std::vector<double> turns, const Reference & reference) {
     std::array<double, 2> re{}, im{};
+    for (size_t f = 0; f < m.n_faces(); f++) {
+        double a = 0.0;
+        for (uint32_t t = m.first[f]; t < m.first[f + 1]; t++) a += m.area[t];
+        const Vec3 offset = sub(m.face_center(f), m.center);
+        const double theta = std::atan2(dot(offset, reference.second), dot(offset, reference.first));
+        for (size_t s = 0; s < 2; s++) {
+            const double phase = (s == 0 ? TWO_PI : -TWO_PI) * turns[f] - theta;
+            re[s] += a * std::cos(phase);
+            im[s] += a * std::sin(phase);
+        }
+    }
+    const size_t s = std::hypot(re[0], im[0]) >= std::hypot(re[1], im[1]) ? 0 : 1;
+    const double shift = std::atan2(im[s], re[s]) / TWO_PI;
+    for (double & u : turns) {
+        u = (s == 0 ? u : -u) - shift;
+        u -= std::floor(u);
+        if (!(u < 1.0)) u = 0.0;
+    }
+    return turns;
+}
+
+/** @brief The conjugate at_tri of a ring's v (conjugate) at its faces, in turns of its period. */
+std::vector<double> turns_of(const Triangulation & m, const std::vector<double> & at_tri, const double period) {
+    std::vector<double> turns(m.n_faces());
     for (size_t f = 0; f < m.n_faces(); f++) {
         const double base = at_tri[m.first[f]];
         double sum = 0.0, a = 0.0;
@@ -509,23 +530,24 @@ std::vector<double> around(const Triangulation & m, const std::vector<double> & 
             sum += m.area[t] * (d - period * std::round(d / period));
             a += m.area[t];
         }
-        raw[f] = (base + sum / a) / period;
-        const Vec3 offset = sub(m.face_center(f), m.center);
-        const double theta = std::atan2(dot(offset, reference.second), dot(offset, reference.first));
-        for (size_t s = 0; s < 2; s++) {
-            const double phase = (s == 0 ? TWO_PI : -TWO_PI) * raw[f] - theta;
-            re[s] += a * std::cos(phase);
-            im[s] += a * std::sin(phase);
-        }
+        turns[f] = (base + sum / a) / period;
     }
-    const size_t s = std::hypot(re[0], im[0]) >= std::hypot(re[1], im[1]) ? 0 : 1;
-    const double shift = std::atan2(im[s], re[s]) / TWO_PI;
-    for (double & u : raw) {
-        u = (s == 0 ? u : -u) - shift;
-        u -= std::floor(u);
-        if (!(u < 1.0)) u = 0.0;
+    return turns;
+}
+
+/** @brief Turns u of a ring or a disk so that it is 0 at the face nearest to the seam; that face's center. */
+Vec3 start_at(const Triangulation & m, Coordinates & out, const Vec3 & seam) {
+    size_t nearest = 0;
+    for (size_t f = 1; f < m.n_faces(); f++) {
+        if (length(sub(m.face_center(f), seam)) < length(sub(m.face_center(nearest), seam))) nearest = f;
     }
-    return raw;
+    const double start = out.faces[nearest].u;
+    for (Values & f : out.faces) {
+        f.u -= start;
+        f.u -= std::floor(f.u);
+        if (!(f.u < 1.0)) f.u = 0.0;
+    }
+    return m.face_center(nearest);
 }
 
 /** @brief Position on the loop of its node nearest to p. */
@@ -549,6 +571,10 @@ std::vector<uint32_t> side(const std::vector<uint32_t> & loop, const size_t a, c
 
 Coordinates four_sided(const Triangulation & m, const Laplacian & K, const Corners & at,
                        const std::vector<size_t> & found) {
+    if (at.seam) {
+        fail(at, "seam is given, but the patch is four-sided: u runs from one side to the opposite one",
+             "Remove seam; corners = [[x, y, z], ...] sets where u and v start on a four-sided patch");
+    }
     const std::vector<uint32_t> & loop = m.loops[0];
     const size_t n = loop.size();
     // sides[0] has v = 0 and u from 0 to 1; sides[1] u = 1; sides[2] v = 1; sides[3] u = 0
@@ -673,21 +699,22 @@ Coordinates ring(const Triangulation & m, const Laplacian & K, const Corners & a
     double period = 0.0;
     for (const uint32_t i : last) period += K.row(i, v);
     if (!(period > 0.0)) fail(at, "Laplace's equation on the ring has no flux between its rims", SPLIT);
-    const std::vector<double> u = around(m, conjugate(m, v, NONE), period, Reference(axis));
+    const std::vector<double> u = around(m, turns_of(m, conjugate(m, v), period), Reference(axis));
 
     Coordinates out{Shape::RING, std::vector<Values>(m.n_faces()), ""};
     for (size_t f = 0; f < m.n_faces(); f++) {
         out.faces[f] = {u[f], std::clamp(m.at_center(f, v), 0.0, 1.0), 0.0, m.at_center(f, from_v)};
     }
+    const std::string start = at.seam ? "at " + text(start_at(m, out, *at.seam)) : "toward " + text(Reference(axis).first);
     set_arc_lengths(out, from_v, last, rim[inner], rim[1 - inner]);
     out.summary = "ring, v = 0 on the rim around " + text(center[inner]) + ", 1 on the rim around " +
-                  text(center[1 - inner]) + ", u = 0 toward " + text(Reference(axis).first);
+                  text(center[1 - inner]) + ", u = 0 " + start;
     return out;
 }
 
 Coordinates disk(const Triangulation & m, const Laplacian & K, const Corners & at) {
     // The source of the Green's function: the surface's point nearest to its center
-    uint32_t pole = 0;
+    uint32_t pole = 0;  // the triangle that holds it
     std::array<double, 3> weights{};
     double nearest = std::numeric_limits<double>::infinity();
     Vec3 center{};
@@ -717,17 +744,42 @@ Coordinates disk(const Triangulation & m, const Laplacian & K, const Corners & a
         load[i] = weights[k];
         from_v[i] = length(sub(m.x[i], center));
     }
-    std::vector<double> v = K.solve(fixed, std::vector<double>(m.x.size(), 0.0), load, at);
-    const std::vector<double> u = around(m, conjugate(m, v, pole), 1.0, Reference(unit(m.mean_normal)));
-    for (double & value : v) value = std::exp(-TWO_PI * value);
+    const std::vector<double> none(m.x.size(), 0.0);
+    const std::vector<double> green = K.solve(fixed, none, load, at);
+
+    // The conformal map f of the patch to the unit disk is exp(-2 pi (G + i G*)): smooth, and linear in the
+    // position near the center, where the angle G* alone is singular. On the outline |f| = 1 and G* grows by
+    // the flux of G through it, so f is the harmonic function with those values
+    const std::vector<uint32_t> & loop = m.loops[0];
+    std::vector<double> flux(loop.size());
+    double total = 0.0;
+    for (size_t k = 0; k < loop.size(); k++) total += flux[k] = -K.row(loop[k], green);
+    if (!(total > 0.0)) fail(at, "Laplace's equation on the patch has no flux to its outline", SPLIT);
+    std::vector<double> re(m.x.size(), 0.0), im(m.x.size(), 0.0);
+    double passed = 0.0;
+    for (size_t k = 0; k < loop.size(); k++) {
+        const double angle = TWO_PI * (passed + 0.5 * flux[k]) / total;
+        re[loop[k]] = std::cos(angle);
+        im[loop[k]] = std::sin(angle);
+        passed += flux[k];
+    }
+    re = K.solve(fixed, re, none, at);
+    im = K.solve(fixed, im, none, at);
     from_v = distance(m, from_v);
 
     Coordinates out{Shape::DISK, std::vector<Values>(m.n_faces()), ""};
+    std::vector<double> turns(m.n_faces());
     for (size_t f = 0; f < m.n_faces(); f++) {
-        out.faces[f] = {u[f], std::clamp(m.at_center(f, v), 0.0, 1.0), 0.0, m.at_center(f, from_v)};
+        const double x = m.at_center(f, re), y = m.at_center(f, im);
+        turns[f] = std::atan2(y, x) / TWO_PI;
+        out.faces[f] = {0.0, std::min(std::hypot(x, y), 1.0), 0.0, m.at_center(f, from_v)};
     }
+    turns = around(m, turns, Reference(unit(m.mean_normal)));
+    for (size_t f = 0; f < m.n_faces(); f++) out.faces[f].u = turns[f];
+    const std::string start = at.seam ? "at " + text(start_at(m, out, *at.seam))
+                                      : "toward " + text(Reference(unit(m.mean_normal)).first);
     set_arc_lengths(out, from_v, m.loops[0], 0.0, m.loop_length(m.loops[0]));
-    out.summary = "disk, v = 0 at " + text(center) + ", u = 0 toward " + text(Reference(unit(m.mean_normal)).first);
+    out.summary = "disk, v = 0 at " + text(center) + ", u = 0 " + start;
     return out;
 }
 

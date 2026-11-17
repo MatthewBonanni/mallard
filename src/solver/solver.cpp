@@ -1040,14 +1040,16 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            if (bound.contains("corners")) {
+            for (const char * key : {"corners", "seam"}) {
+                if (!bound.contains(key)) continue;
                 if (N_DIM == 2) {
-                    throw InputError({.key = where_name + ".corners", .line = line_of(bound, "corners"),
-                                      .message = "a 2D boundary is a curve, which has ends and no corners",
-                                      .fix = "Remove corners: u runs along the boundary from 0 to 1",
+                    throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                      .message = "a 2D boundary is a curve, which has two ends and no " +
+                                                 std::string(key),
+                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1",
                                       .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
                 }
-                if (!reads_patch) throw unused_key("corners", "u or v");
+                if (!reads_patch) throw unused_key(key, "u or v");
             }
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
             if (!used.empty() && n_entry > 0) {

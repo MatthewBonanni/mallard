@@ -26,8 +26,8 @@ one from the walls (`n`); the rest are other names for these.
 
 | Name | Four-sided | Ring | Disk | Curve (2D) |
 |---|---|---|---|---|
-| `u` | harmonic, 0 and 1 on two opposite sides | conjugate of `v` around the ring, in [0, 1) | conjugate angle around the center, in [0, 1) | arc length / length |
-| `v` | harmonic, 0 and 1 on the other two sides | harmonic, 0 and 1 on the rims | `exp(-2 pi G)`: 0 at the center, 1 on the edge | |
+| `u` | harmonic, 0 and 1 on two opposite sides | conjugate of `v` around the ring, in [0, 1) | angle of the conformal map to the unit disk, in [0, 1) | arc length / length |
+| `v` | harmonic, 0 and 1 on the other two sides | harmonic, 0 and 1 on the rims | radius of that map: 0 at the center, 1 on the edge | |
 | `u_m` | distance on the surface from the side `u = 0` | `u` times the length around at the face | as the ring | arc length |
 | `v_m` | distance on the surface from the side `v = 0` | distance on the surface from the rim `v = 0` | distance on the surface from the center | |
 | `n`, `n_m` | wall distance | wall distance | wall distance | wall distance |
@@ -63,10 +63,16 @@ Decisions:
 - **No length constants.** The lengths of the patch along `u` and `v` are the
   upper ends of the ranges of `u_m` and `v_m` in the run log; expressions
   that need a fraction have `u` and `v`.
-- **One override, `corners`.** Four points fix the corners of a four-sided
-  patch and, by their order, where `u` and `v` start; `[]` makes a disk.
-  Turning a coordinate around is `1 - u` in the expression. The frame's
-  three keys are gone.
+- **Two overrides, both points in meters.** `corners`: four points fix the
+  corners of a four-sided patch and, by their order, where `u` and `v`
+  start; `[]` makes a disk. `seam`: one point, and `u` of a ring or a disk
+  is 0 at the face nearest to it. A point is what a user can read off the
+  mesh or the CAD, it needs no notion of the ring's axis (which a cone, a
+  bent pipe or an off-center hole make ambiguous), and it reads the same on
+  a flat annulus and on a tube; an angle offset would need the default
+  start to be known first. Turning a coordinate around is `1 - u` in the
+  expression, which leaves the seam where it is. The frame's three keys are
+  gone.
 
 ## Shapes
 
@@ -109,18 +115,32 @@ surface (piecewise linear elements).
   the disk uses the Green's function of its center instead: `K G = delta`
   with `G = 0` on the edge and the unit source at the surface's point
   nearest to the centroid of its area, spread over the nodes of the triangle
-  that holds it. `exp(-2 pi (G + i G*))` is the conformal map of the patch
-  to the unit disk that sends the center to 0, so `v = exp(-2 pi G)` is the
-  radius fraction of a circle (`r / R` exactly in the continuum), 1 on the
-  edge of any outline, and the conjugate `G*` has period 1 around the center:
-  `u` directly. Near the source the discrete `G` is finite where the exact
-  one is infinite, so within about two faces of the center `v` is off by the
-  size of a face over the radius.
-- **Where `u` starts on rings and disks.** The conjugate is defined up to a
+  that holds it. `f = exp(-2 pi (G + i G*))`, with `G*` the conjugate of
+  `G`, is the conformal map of the patch to the unit disk that sends the
+  center to 0: `v = |f|` is the radius fraction (`r / R` on a circle), 1 on
+  the edge of any outline, and `u = arg(f) / 2 pi` the angle. `G` and `G*`
+  are singular at the center (a logarithm and an angle), and a first version
+  that took `u` from the discrete conjugate there gave lines of constant `u`
+  that were parallel within each triangle at the center instead of rays. `f`
+  itself is smooth, and linear in the position near the center, so it is
+  what is discretized: on the edge `|f| = 1` and its angle grows from node to
+  node by the flux of the discrete `G` through the edge (the reactions `(K
+  G)_i`, which sum to 1), and inside `Re f` and `Im f` solve Laplace's
+  equation with those values. Face values are those of the linear `f` at the
+  centroid. For a circle the edge values are those of `(x - center) / R`,
+  which linear elements hold, so `v` and `u` are exact to round-off through
+  the center too (tested).
+- **Where `u` starts on rings and disks.** The angle is defined up to a
   constant and a direction. Both are set so that `u` is, on area-weighted
-  average, the angle about the patch's center from the axis after the ring's
-  own (x to y to z to x) toward the next, over `2 pi`. On surfaces of
-  revolution the two then agree to round-off.
+  average, the angle about the patch's center from a first direction toward
+  a second, over `2 pi`. With `a` the ring's axis (the mean normal of a disk
+  or a flat ring, the line between the rims' centers of a tube) and `k` the
+  coordinate with the largest `|a_k|` (the lowest of equal ones), the first
+  direction is the coordinate axis `k + 1` (cyclic) minus its part along
+  `a`, which cannot vanish, and the second `a` x first, turned so that its
+  largest component is positive. On surfaces of revolution `u` is then the
+  geometric angle to round-off. `seam` replaces the constant: `u` minus its
+  value at the face nearest to the point.
 - **Lengths.** Fast marching on the triangles from the nodes where `v` (or
   `u`) is 0, with the planar-front update where the front enters a triangle
   through its far edge and the edge lengths otherwise; first order, exact for
@@ -142,7 +162,8 @@ their coordinates, and runs the same serial solves, so each face's values
 are the same bits on any rank count (tested on 1 and 3 ranks). Only entries
 whose expressions read `u`, `v` or their other names pay for it. The solves
 are Jacobi-preconditioned conjugate gradients to a relative residual of
-1e-14, once at setup: two for a four-sided patch, one for a ring or a disk.
+1e-14, once at setup: two for a four-sided patch, one for a ring, three for
+a disk.
 The iteration count grows with the number of faces across the patch, which
 is acceptable for inlets (10^5 faces in seconds); a multigrid preconditioner
 is the next step if patches of 10^7 faces appear.

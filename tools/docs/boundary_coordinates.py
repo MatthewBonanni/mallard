@@ -380,16 +380,16 @@ class Patch:
         w0, w1 = q00 * (da - t) + q01 * (db - t), q01 * (da - t) + q11 * (db - t)
         return min(edge, t) if w0 <= 0 and w1 <= 0 and t >= max(da, db) else edge
 
-    def conjugate(self, g, pole=None):
-        """The harmonic conjugate of g at the triangles' centroids, up to its period."""
+    def conjugate(self, g):
+        """The harmonic conjugate of g, linear on each triangle: at its centroid and at its nodes, up to its period."""
         x, tri = self.x, self.tri
         edge_tris = {}
         for t, nodes in enumerate(tri):
             for k in range(3):
                 edge_tris.setdefault(frozenset((int(nodes[(k + 1) % 3]), int(nodes[(k + 2) % 3]))), []).append(t)
-        at_edge, at_tri = {}, np.full(len(tri), np.nan)
+        at_edge, at_tri, at_nodes = {}, np.full(len(tri), np.nan), np.zeros((len(tri), 3))
 
-        def place(t, spread=True):
+        def place(t):
             n = tri[t]
             gradient = sum(g[n[k]] / (2 * self.area[t]) * np.cross(self.normal[t], x[n[(k + 2) % 3]] - x[n[(k + 1) % 3]])
                            for k in range(3))
@@ -398,39 +398,40 @@ class Patch:
             offset = [0.5 * turned @ (self.centroid[t] - x[n[k]]) for k in range(3)]
             known = next((k for k in range(3) if keys[k] in at_edge), None)
             at_tri[t] = 0.0 if known is None else at_edge[keys[known]] - offset[known]
-            if spread:
-                for k in range(3):
-                    at_edge.setdefault(keys[k], at_tri[t] + offset[k])
-            return keys
+            at_nodes[t] = at_tri[t] + (x[n] - self.centroid[t]) @ turned
+            for k in range(3):
+                at_edge.setdefault(keys[k], at_tri[t] + offset[k])
 
-        start = 1 if pole == 0 else 0
-        queue, seen = [start], {start}
+        queue, seen = [0], {0}
         while queue:
             t = queue.pop(0)
             n = tri[t]
             for k in range(3):
                 for other in edge_tris[frozenset((int(n[(k + 1) % 3]), int(n[(k + 2) % 3])))]:
-                    if other != pole and other not in seen:
+                    if other not in seen:
                         seen.add(other)
                         queue.append(other)
             place(t)
-        if pole is not None:
-            place(pole, False)
-        return at_tri
+        return at_tri, at_nodes
 
-    def around(self, at_tri, period, normal):
-        first, second = self.reference(normal)
+    def turns_of(self, at_tri, period):
         base = at_tri[self.first[:-1]]
         d = at_tri - np.repeat(base, np.diff(self.first))
         d -= period * np.round(d / period)
         area = np.add.reduceat(self.area, self.first[:-1])
-        raw = (base + np.add.reduceat(self.area * d, self.first[:-1]) / area) / period
+        return (base + np.add.reduceat(self.area * d, self.first[:-1]) / area) / period
+
+    def around(self, turns, normal):
+        """u of the faces from their angles in turns, and the direction and start that were applied."""
+        first, second = self.reference(normal)
+        area = np.add.reduceat(self.area, self.first[:-1])
         off = self.face_centers() - self.center
         theta = np.arctan2(off @ second, off @ first)
-        z = [(area * np.exp(1j * (s * 2 * np.pi * raw - theta))).sum() for s in (1, -1)]
+        z = [(area * np.exp(1j * (s * 2 * np.pi * turns - theta))).sum() for s in (1, -1)]
         s = 0 if abs(z[0]) >= abs(z[1]) else 1
-        u = (raw if s == 0 else -raw) - np.angle(z[s]) / (2 * np.pi)
-        return u - np.floor(u)
+        sign, shift = (1.0, -1.0)[s], np.angle(z[s]) / (2 * np.pi)
+        u = sign * turns - shift
+        return u - np.floor(u), sign, shift
 
     def _four_sided(self, found, corners):
         x, loop = self.x, self.loops[0]
@@ -504,9 +505,14 @@ class Patch:
         v = self.solve(fixed, v)
         from_v = self.distance(from_v)
         period = (self.K @ v)[last].sum()
+        at_tri, at_nodes = self.conjugate(v)
+        u, sign, shift = self.around(self.turns_of(at_tri, period), axis)
         self.nodal = dict(v=v)
-        self.faces = dict(u=self.around(self.conjugate(v), period, axis), v=np.clip(self.at_faces(v), 0, 1),
-                          v_m=self.at_faces(from_v))
+        # At the nodes: the mean of the triangles' linear conjugates there, which differ between triangles
+        turn = np.zeros(len(x), complex)
+        np.add.at(turn, self.tri, np.exp(2j * np.pi * (sign * at_nodes / period - shift)))
+        self.nodal["u"] = np.angle(turn) / (2 * np.pi)
+        self.faces = dict(u=u, v=np.clip(self.at_faces(v), 0, 1), v_m=self.at_faces(from_v))
         self._arc_lengths(from_v, last, rim[inner], rim[1 - inner])
 
     def _disk(self):
@@ -527,12 +533,20 @@ class Patch:
         load[tri[pole]] = weights
         from_v[tri[pole]] = np.linalg.norm(x[tri[pole]] - center, axis=1)
         g = self.solve(fixed, np.zeros(len(x)), load)
-        u = self.around(self.conjugate(g, pole), 1.0, self.mean_normal / np.linalg.norm(self.mean_normal))
-        v = np.exp(-2 * np.pi * g)
+        # f = exp(-2 pi (G + i G*)) maps the patch to the unit disk; on the outline its angle grows by the flux of G
+        loop = self.loops[0]
+        flux = -(self.K @ g)[loop]
+        angle = 2 * np.pi * (np.cumsum(flux) - 0.5 * flux) / flux.sum()
+        f = np.zeros(len(x), complex)
+        f[loop] = np.exp(1j * angle)
+        f = self.solve(fixed, f.real) + 1j * self.solve(fixed, f.imag)
+        at = self.at_faces(f.real) + 1j * self.at_faces(f.imag)
+        u, sign, shift = self.around(np.angle(at) / (2 * np.pi), self.mean_normal / np.linalg.norm(self.mean_normal))
         from_v = self.distance(from_v)
-        self.nodal = dict(v=v)
+        self.map = (f if sign > 0 else f.conj()) * np.exp(-2j * np.pi * shift)
+        self.nodal = dict(v=np.abs(f))
         self.pole = center
-        self.faces = dict(u=u, v=np.clip(self.at_faces(v), 0, 1), v_m=self.at_faces(from_v))
+        self.faces = dict(u=u, v=np.minimum(np.abs(at), 1.0), v_m=self.at_faces(from_v))
         self._arc_lengths(from_v, self.loops[0], 0.0, self.loop_length(self.loops[0]))
 
 
@@ -697,6 +711,7 @@ def _isolines(x, tri, values, levels, wrap=False):
         if wrap:
             g = g - np.round(g - g[0])
         for level in levels:
+            level = level + 1e-9  # a level on a mesh line crosses the triangles on one side of it
             for shift in ((-1.0, 0.0, 1.0) if wrap else (0.0,)):
                 pts = []
                 for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -708,18 +723,16 @@ def _isolines(x, tri, values, levels, wrap=False):
     return segments
 
 
-def _nodal_u(patch):
-    """u at the three nodes of each triangle of a ring or a disk (it wraps), from the faces' u and theta of the nodes."""
-    first, second = patch.reference(patch.mean_normal / np.linalg.norm(patch.mean_normal)
-                                    if np.linalg.norm(patch.mean_normal) > 0.1 * patch.area.sum() else _axis(patch))
-    off = patch.x - patch.center
-    theta = np.arctan2(off @ second, off @ first) / (2 * np.pi)
-    return (theta - np.floor(theta))[patch.tri]
-
-
-def _axis(patch):
-    c = [patch.chain_center(loop, True) for loop in patch.loops]
-    return (c[1] - c[0]) / np.linalg.norm(c[1] - c[0])
+def _rays(patch, levels):
+    """Lines of constant u of a disk: where its map f, linear on each triangle, has the angle 2 pi u."""
+    segments = []
+    for level in levels:
+        g = patch.map * np.exp(-2j * np.pi * level)
+        for seg in _isolines(patch.x, patch.tri, g.imag, [0.0]):
+            w = np.linalg.lstsq(np.vstack([patch.x.T, np.ones(len(patch.x))]).T, g.real, rcond=None)[0]
+            if np.append(0.5 * (seg[0] + seg[1]), 1.0) @ w > 0:
+                segments.append(seg)
+    return segments
 
 
 def _draw_patch(ax, P, data, key, flat, levels):
@@ -727,8 +740,10 @@ def _draw_patch(ax, P, data, key, flat, levels):
     patch, cmap = data["patch"], plt.get_cmap(P["cmap"])
     values = data["coords"][key]
     polys3 = [data["nodes"][f] for f in data["faces"]]
-    if key == "u" and patch.shape != "four-sided":
-        lines = _isolines(patch.x, patch.tri, _nodal_u(patch), levels, wrap=True)
+    if key == "u" and patch.shape == "disk":
+        lines = _rays(patch, levels)
+    elif key == "u" and patch.shape == "ring":
+        lines = _isolines(patch.x, patch.tri, patch.nodal["u"][patch.tri], levels, wrap=True)
     else:
         lines = _isolines(patch.x, patch.tri, patch.nodal[key], levels)
     colors = cmap(plt.Normalize(0, 1)(values))
@@ -745,7 +760,7 @@ def _draw_patch(ax, P, data, key, flat, levels):
         ax.set_xlim(lo[0], hi[0])
         ax.set_ylim(lo[1], hi[1])
         ax.set_zlim(lo[2], hi[2])
-        ax.set_box_aspect(hi - lo, zoom=1.35)
+        ax.set_box_aspect(hi - lo, zoom=0.95)
         ax.set_axis_off()
 
 
@@ -780,7 +795,8 @@ def boundary_patch(P):
     x = data["centers"][target]
     wall = wall_closest(nodes, zones["wall"], x)[0]
     ax.plot(*np.array([x, wall]).T, color=P["teal"], lw=2.6)
-    ax.text(*(0.5 * (x + wall) + [0, -0.07, 0.03]), r"$n_m$", color=P["teal"], fontsize=13, ha="left")
+    ax.text(*(0.5 * (x + wall) + [0, -0.07, 0.03]), r"$n_m$", color=P["fg"], fontsize=13, ha="left", zorder=10,
+            bbox=dict(boxstyle="round,pad=0.12", facecolor=P["bg"], edgecolor="none", alpha=0.8))
     ax.text(0.7 * L, 0.45 * W, 0.0, "wall", color=P["muted"], fontsize=12, ha="center")
     ax.text(0.0, 0.5 * W, -0.5 * H, "inlet, colored by $u$", color=P["fg"], fontsize=12, ha="center", va="top")
     ax.set_xlim(-0.1, L)
@@ -834,7 +850,9 @@ def boundary_coordinates(P):
         for row, key in enumerate(("u", "v")):
             box = [0.035 + col * 0.138, 0.50 - row * 0.46, 0.13, 0.40]
             if flat is None:
-                ax = fig.add_axes(box, projection="3d", computed_zorder=False)
+                # Room around the box for the perspective: nothing of the patch is cut at the axes' edge
+                wide = [box[0] - 0.03, box[1] - 0.09, box[2] + 0.06, box[3] + 0.18]
+                ax = fig.add_axes(wide, projection="3d", computed_zorder=False)
                 ax.view_init(elev=view[0], azim=view[1])
             else:
                 ax = fig.add_axes(box)
@@ -874,8 +892,9 @@ def boundary_arc_length(P):
     ax.plot(2.22 * np.cos(a[-1]), 2.22 * np.sin(a[-1]), "o", color=P["gold"], ms=4)
     label(ax, 2.42 * np.cos(a.mean()), 2.42 * np.sin(a.mean()), r"$u_m$", P, size=13, color=P["gold"])
     ax.plot(*x, "o", color=P["fg"], ms=5, zorder=5)
-    label(ax, 2.2 * np.cos(a[0]) + 0.1, 2.2 * np.sin(a[0]) - 0.18, "$u$ = 0", P, size=11, color=P["fg"], ha="left")
-    label(ax, -2.3, -0.18, "$u$ = 1", P, size=11, color=P["fg"], ha="right")
+    for end, value in ((np.argmin(c["u"]), 0), (np.argmax(c["u"]), 1)):
+        side = np.sign(data["centers"][end][0])
+        label(ax, 2.3 * side, -0.18, f"$u$ = {value}", P, size=11, color=P["fg"], ha="left" if side > 0 else "right")
     label(ax, -1.5, -0.15, "wall", P, size=11, color=P["muted"], va="top")
     label(ax, 1.5, -0.15, "wall", P, size=11, color=P["muted"], va="top")
     label(ax, 2.2, 1.25, "inlet,\ncolored\nby $u$", P, size=11, color=P["fg"], ha="left")

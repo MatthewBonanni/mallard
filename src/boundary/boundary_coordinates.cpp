@@ -257,7 +257,17 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
         std::sort(nodes.begin(), nodes.end());
         index[nodes] = k / W;
     }
-    patch::Corners corners{.points = std::nullopt, .key = where, .line = line_of(entry)};
+    patch::Corners corners{.points = std::nullopt, .seam = std::nullopt, .key = where, .line = line_of(entry)};
+    auto point = [&](const Input & item, const std::string & key) {
+        const std::vector<rtype> p = as_real_vector(item, key, dim::length);
+        if (p.size() != 3) {
+            throw InputError({.key = key, .line = line_of(entry, key.substr(where.size() + 1)),
+                              .message = "a point has 3 components",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        return patch::Vec3{static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])};
+    };
+    if (entry.contains("seam")) corners.seam = point(entry.at("seam"), where + ".seam");
     if (entry.contains("corners")) {
         const std::string key = where + ".corners";
         corners.key = key;
@@ -269,14 +279,7 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
         }
         corners.points.emplace();
-        for (const Input & item : list.as_array()) {
-            const std::vector<rtype> p = as_real_vector(item, key, dim::length);
-            if (p.size() != 3) {
-                throw InputError({.key = key, .line = corners.line, .message = "each corner has 3 components",
-                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-            }
-            corners.points->push_back({static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])});
-        }
+        for (const Input & item : list.as_array()) corners.points->push_back(point(item, key));
     }
     const patch::Coordinates global = patch::coordinates(surface, corners);
     patch::Coordinates local{global.shape, std::vector<patch::Values>(faces.size()), global.summary};

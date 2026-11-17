@@ -344,9 +344,12 @@ Where `u` and `v` start:
   is the pair of sides nearest to that.
 - **Ring.** `v` is 0 on the shorter rim (the inner circle of an annulus, the
   narrow end of a cone) and, between rims as long as each other (a pipe), on
-  the lower one along the ring's axis. `u` is 0 on the side of the axis after
-  the one the ring is around, and grows toward the next: around z, `theta` is
-  the angle from +x toward +y.
+  the lower one along the ring's axis. `u` is 0 on the side of the coordinate
+  axis after the one the ring is around, and grows toward the next (x to y
+  to z to x): around z, `theta` is the angle from +x toward +y; around x,
+  from +y toward +z. A ring around no coordinate axis counts as around the
+  one its own axis is nearest to (of two as near, the first), and `u` is 0
+  toward the next axis as seen across the ring's own.
 - **Disk.** `v` is 0 at the center of the faces' area; `u` as on a ring.
 - **Curve (2D).** `u` is 0 at the end with the lower coordinate along the axis
   the boundary mostly runs along (the lower y on an inlet across x).
@@ -356,6 +359,20 @@ four-sided patch instead, in the order `(u, v)` = (0, 0), (1, 0), (1, 1),
 (0, 1): for a patch whose outline has no clear corners or more than four
 (each point is moved to the nearest node of the outline), or to choose where
 `u` and `v` start. `corners = []` treats a patch with corners as a disk.
+
+`seam` sets where `u` starts around a ring or a disk: a point, and `u` is 0
+(and `theta` 0) at the face nearest to it. Fuel holes, struts and hot
+streaks then sit where the expression puts them, whatever the axes are:
+
+```toml
+[[boundaries]]
+name = "annular_inlet"
+type = "inlet_state"
+u = 30.0
+p = 1.0e5
+T = "300 + 50 * cos(8 * theta)"   # eight streaks, the first at the seam
+seam = [0.0, 0.0, 0.12]           # any point on the side where u should start [m]
+```
 
 ```toml
 [[boundaries]]
@@ -429,6 +446,7 @@ walls = ["slot_wall"]
 | Key | Default | Meaning |
 |---|---|---|
 | `corners` | found from the patch's outline | 3D: the four corners of the patch [m], where `(u, v)` is (0, 0), (1, 0), (1, 1), (0, 1); `[]` for a disk |
+| `seam` | toward the axis after the ring's own | 3D, rings and disks: a point [m]; `u` is 0 at the face nearest to it |
 | `walls` | every wall entry's faces | Zones `n` and `n_m` measure the distance from |
 
 Pitfalls:
@@ -448,8 +466,9 @@ Pitfalls:
   are an error (use `u`, `v` or `n`). On a ring `r` is 0 on the rim `v = 0`,
   not on the axis, and `v` varies as the logarithm of the radius across a
   flat annulus (`r_m` is the distance from the inner rim in meters).
-- Near the center of a disk (within about two faces) `v` and `u` are
-  accurate to the size of a face.
+- The center of a disk, where `v` is 0, is the center of the faces' area to
+  within a face, and the lengths `u_m`, `v_m` are accurate to first order in
+  the face size (`u`, `v` to second).
 - `n` reaches 1 only if a face center or node lies at the point farthest
   from the walls; otherwise it is `n_m` over the largest distance the mesh
   holds.
@@ -457,8 +476,11 @@ Pitfalls:
   hides it inside that expression.
 - On a wall entry that reads `n`, the default walls include the entry
   itself, so `n_m` is 0 on every face, which is an error: name the other walls
-  in `walls`. `walls` and `corners` are errors on an entry whose expressions
-  don't read the coordinates they set.
+  in `walls`. `walls`, `corners` and `seam` are errors on an entry whose
+  expressions don't read the coordinates they set, and `seam` on a four-sided
+  patch.
+- `u` jumps from 1 back to 0 across the seam: write profiles around a ring
+  in `sin` and `cos` of `theta`, which do not.
 - 2D runs have `u`, `n` and their lengths only: the error says so.
 
 ## Walls
