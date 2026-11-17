@@ -783,8 +783,31 @@ InputError wrong_type(const Input & v, const std::string & key, const std::strin
         d.fix = "For a list of tables, write each one's header with double brackets: [[" + key + "]]";
     } else if (wanted.rfind("an array", 0) == 0 && !v.is_array()) {
         d.fix = "Write it in square brackets, e.g. [a, b]";
+    } else if (wanted == "a table" && v.is_array_of_tables()) {
+        d.fix = "For one table, write its header with single brackets: [" + key + "]";
+    } else if (wanted == "a table") {
+        d.fix = "Write it as a table: " + key + " = { ... }";
     }
     return InputError(d);
+}
+
+const Input * holder(const Input & v, const std::string & key) {
+    if (v.is_table()) return &v;
+    if (v.is_empty()) return nullptr;
+    Diagnostic d;
+    d.key = key;
+    d.line = line_of(v);
+    d.message = "is looked up in " + value_text(v) + ", which is not a table";
+    d.fix = "Write the entry as a table, e.g. { " + key + " = ... }";
+    throw InputError(d);
+}
+
+const Input * holder(const Input & v, const std::string & table, const std::string & key) {
+    const Input * outer = holder(v, table + "." + key);
+    if (!outer || !outer->as_table().contains(table)) return nullptr;
+    const Input & inner = outer->as_table().at(table);
+    if (!inner.is_table()) throw wrong_type(inner, table, "a table", 0, 0);
+    return &inner;
 }
 
 } // namespace input_detail
@@ -826,7 +849,8 @@ double quantity(const Input & v, const std::string & key, const Dimension & dime
     if (v.is_integer()) return static_cast<double>(v.as_integer());
     if (!v.is_string()) {
         value_error(v, key, dimension,
-                    dimension.same_as(dim::none) ? "must be a number" : "must be a number, or a string of a number and a unit");
+                    "is " + input_detail::value_text(v) + ", but must be a number" +
+                        (dimension.same_as(dim::none) ? "" : ", or a string of a number and a unit"));
     }
     const std::string & text = v.as_string();
     Quantity q;

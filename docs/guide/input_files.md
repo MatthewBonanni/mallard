@@ -501,7 +501,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="w-wall-y-plus"></a>`W-WALL-Y-PLUS` | First cells of walls without a wall model above y+ 1, which DNS and wall-resolved LES need. The message gives the first-cell distance to aim for | Refine toward the walls, or model them (`wall_model`) ([Resolution](#resolution)) |
 | <a id="w-wall-spacing"></a>`W-WALL-SPACING` | Wall cells longer along the flow (x+) or wider across it (z+) than the regime needs: 15 and 8 for DNS, 150 and 40 for wall-resolved LES | Refine along the walls ([Resolution](#resolution)) |
 | <a id="w-wall-model-exchange"></a>`W-WALL-MODEL-EXCHANGE` | A wall model's exchange points reach below the log layer (y+ 30) that its law assumes | Raise `exchange_distance` or `exchange_cells` |
-| <a id="w-dns-eta"></a>`W-DNS-ETA` | A case without `[les]` (DNS) whose mean cell is more than 2 Kolmogorov lengths. The dissipation is not resolved | Refine to the cell size the message gives, or model the small scales (`[les]`) ([Resolution](#resolution)) |
+| <a id="w-dns-eta"></a>`W-DNS-ETA` | A case without `[les]` (DNS) whose mean cell is more than 2 Kolmogorov lengths, over the domain or over a [region](#values-per-region). The dissipation is not resolved | Refine to the cell size the message gives, or model the small scales (`[les]`) ([Resolution](#resolution)) |
 | <a id="w-sizing-fixed"></a>`W-SIZING-FIXED` | With `--memory` (or a GPU's own), even the memory that does not grow with the cells does not fit in the memory per rank | Size for a larger memory |
 | <a id="w-sizing-parts"></a>`W-SIZING-PARTS` | No partition into a few thousand parts fits in the memory per rank | Size for a larger memory, or coarsen the mesh |
 | <a id="e-env-gpu-aware-mpi"></a>`E-ENV-GPU-AWARE-MPI` | The build passes device buffers to MPI (`-DMallard_GPU_AWARE_MPI=ON`), but the MPI library says it cannot read device memory (Open MPI's `MPIX_Query_cuda_support`, `MPIX_Query_rocm_support`): the run would crash or read garbage | Load an MPI built with CUDA or ROCm support, or rebuild with `-DMallard_GPU_AWARE_MPI=OFF` ([MPI](parallel.md#mpi)) |
@@ -522,7 +522,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
-| `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
+| `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |
 | `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
 | `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
@@ -589,7 +589,7 @@ laminar profile:
 | Friction velocity `u_tau` (walls of viscous cases) | A restart's (or remap's) first-cell velocity, by the linear law or the log law; else, with `source.mass_flow`, Dean's channel correlation `C_f = 0.073 Re_b^(-1/4)` at the bulk velocity `U_b` and `h` = volume / wall area (the half-height of a channel); else a flat plate's mean skin friction (laminar, or turbulent above `Re_L = 5e5`) over the walls' length along the mean flow at the largest initial speed |
 | y+, x+, z+ | The first cell center's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
 | Wall model's exchange point | `exchange_distance`, or `exchange_cells` wall-cell heights, in wall units |
-| Dissipation `epsilon` | With `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field, mass-weighted over the domain |
+| Dissipation `epsilon` | With [`check.statistics`](../input.md#check), an earlier run's averages: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`, the incompressible dissipation, mean and fluctuations) per cell, or `nu <omega^2>` from `MEAN_ENSTROPHY` (equal over a periodic box or between walls, not locally); else with `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field. Mass-weighted over the domain, or the region |
 | Kolmogorov length `eta` | `(nu^3 / epsilon)^(1/4)` with the domain's mean `nu` |
 | Taylor microscale `lambda` | `(15 nu u'^2 / epsilon)^(1/2)`, `u'` the velocity's fluctuation about its mean (from the field, not the forcing) |
 | Flame thickness | `les.combustion.delta_L` (TFLES): cells across it. Otherwise not estimated |
@@ -604,12 +604,43 @@ otherwise; walls with a `wall_model` are wall-modeled):
 | Wall-modeled LES | Exchange points in the log layer, `y+ >= 30` |
 | TFLES | Thickening `F = n_res Delta / delta_L` at most 5 |
 
+#### Values per region
+
+The domain's rows come first, then the same values for each region of
+[`check.regions`](../input.md#check) (by default every cell zone of the mesh),
+each quantity named after its region (`wake: cell size / eta, mean`) and its
+id prefixed by `region.<name>.` (`region.wake.delta_over_eta_mean`, with
+`"region": "wake"` in the JSON): the region's cell sizes (weighted by its volume
+fraction in each cell), first-cell y+ of its wall cells, cells across `delta_L`
+(TFLES), and its own dissipation, mean `nu`, `eta` and cell size over `eta`.
+A region short of the DNS target is a `W-DNS-ETA` warning of its own. The
+dissipation of a region is its own share of the field's (the statistics', or the
+initial state's); with the forcing's power, which only balances over the whole
+domain, it is the domain's.
+
+The initial state of a turbulent case seldom has the dissipation the run will
+reach. An earlier run, on a coarser mesh or for a shorter time, gives a better
+one: average the strain rate in it, write a restart file, and give that file to
+`check.statistics` (on this mesh):
+
+```toml
+# The earlier run
+[statistics]
+fields = ["STRAIN_RATE"]
+products = ["STRAIN_RATE*STRAIN_RATE"]
+
+# The checked case
+[check]
+statistics = "run1/restart_020000.restart"
+regions = ["wake"]
+```
+
 `--mesh-fields PREFIX` also writes the estimates' fields with the mesh-quality
-ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the mean
-Kolmogorov length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where
-the mesh is short. The mean `eta` stands for the whole domain, so
+ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the Kolmogorov
+length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where the mesh is
+short. Without `check.statistics` the mean `eta` stands for the whole domain, so
 `DELTA_OVER_ETA` is pessimistic where the flow dissipates less than its mean
-(far from walls, in a free stream).
+(far from walls, in a free stream); with it, each cell has its own `eta`.
 
 ### The key catalog
 
@@ -620,9 +651,12 @@ required, and the values it accepts, by path
 (`numerics.riemann_solver`, `boundaries.type`). It is written even when the
 setup stops on an error, with the keys read up to there. The setup's accessors
 (`find_value`, `find_value_or`, `find_real_or` and `find_option` in
-`src/common/input.h`) record these, so the catalog is what the code does.
+`src/common/input.h`) record these, so the catalog is what the code does; a key
+the setup reads only when present, which it tests with `contains_optional`, is
+optional.
 `tools/dev/input_catalog.py build` merges the catalogs of every example and
-tutorial, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
+tutorial, and of the inputs of `tools/dev/catalog_inputs/` for the keys none of
+them sets, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
 key named by its path (percent-encoded outside lowercase letters, digits, `_`, `.`
 and `-`), which the website's input builder reads; CI checks that it is up to
 date, and `tools/dev/input_catalog.py docs`

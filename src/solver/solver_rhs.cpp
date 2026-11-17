@@ -24,26 +24,6 @@
 
 namespace {
 
-/** @brief Applies a per-face functor to the entries of a list. */
-template <typename F>
-struct OverList {
-    F f;
-    Kokkos::View<uint32_t *> items;
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t k) const { f(items(k)); }
-};
-
-/** @brief Applies f to the faces of owned cells: all faces if the list is empty. */
-template <typename F>
-void parallel_for_faces(const char * label, const F & f, Kokkos::View<uint32_t *> list, uint32_t n_faces) {
-    if (list.extent(0) == 0) {
-        Kokkos::parallel_for(label, HeavyRange<>(0, n_faces), f);
-    } else {
-        Kokkos::parallel_for(label, HeavyRange<>(0, list.extent(0)), OverList<F>{f, list});
-    }
-}
-
 struct CellWFunctor {
     Euler physics;
     StateView solution;
@@ -408,40 +388,26 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     const CellWFunctor w_functor{physics, solution, W_cells};
     const bool own_faces = halo.active() && exchanges_partition_faces();
     if (own_faces) {
-        // Owned cells only: the halo sides of partition faces come from their
-        // owners. The cells that read the halo run on the high-priority instance,
-        // as soon as the halo arrives, rather than in a tail after the others
-        if (!started) start_reconstruction(solution);
+        // Owned cells only: the halo sides of partition faces come from their owners
+        if (!started) {
+            start_reconstruction(solution);
+            reconstruct_near_partition(state, exchange);
+        }
         reconstruction_started = false;
-        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
-        if (exchange) {
-            halo.start(state, comm_space);
-            halo.finish(state, comm_space);
-        }
-        Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(comm_space, n_owned, mesh->n_cells), w_functor);
-        const uint32_t n_cells_rhs = static_cast<uint32_t>(rhs_cells.extent(0));
-        if (n_cells_rhs > n_early_cells) {
-            face_reconstruction->calc_cell_face_values(
-                comm_space, W_cells, face_solution,
-                Kokkos::subview(rhs_cells, Kokkos::make_pair(n_early_cells, n_cells_rhs)));
-        }
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
-    } else if (exchange && n_early_cells > 0) {
+    } else if (exchange && early_cells.size() > 0) {
         // Cells whose reconstruction reads no halo cell go first, on their own
         // instance, while the halo is exchanged; the rest follow on the default
         // one and fill the device as the first ones drain
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, n_owned), w_functor);
         halo.start(state);
         comm::enqueue_wait(overlap_space, Kokkos::DefaultExecutionSpace());
-        face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
-                                                   Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
+        face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution, early_cells);
         halo.finish(state);
         Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(n_owned, mesh->n_cells), w_functor);
-        face_reconstruction->calc_cell_face_values(
-            Kokkos::DefaultExecutionSpace(), W_cells, face_solution,
-            Kokkos::subview(rhs_cells, Kokkos::make_pair(n_early_cells, uint32_t(rhs_cells.extent(0)))));
+        face_reconstruction->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W_cells, face_solution, late_cells);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
     } else {
@@ -454,7 +420,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
-    auto convective_flux = [&](Kokkos::View<uint32_t *> faces) {
+    auto convective_flux = [&](const IndexSet & faces) {
         switch (riemann_solver_type) {
             case RiemannSolverType::RUSANOV:
                 launch_flux_functor<riemann::Rusanov>(faces);
@@ -477,14 +443,14 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     if (own_faces) {
         // The face states travel while the other faces' fluxes are computed
         comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
-        if (local_faces.extent(0) > 0) convective_flux(local_faces);
+        if (local_faces.size() > 0) convective_flux(local_faces);
         face_exchange.start(comm_space, face_solution);
         if (viscous_gradients_due) {
             Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
         }
         face_exchange.finish(comm_space, face_solution);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
-        if (partition_faces.extent(0) > 0) convective_flux(partition_faces);
+        if (partition_faces.size() > 0) convective_flux(partition_faces);
     } else {
         convective_flux(rhs_faces);
     }
@@ -514,7 +480,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
                                              viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
                                              mesh->cell_covariance, les_coefficients};
         viscous_functor.wall_model = wall_model.out;
-        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        parallel_for_set<HeavyBounds>("viscous_flux", rhs_faces, viscous_functor);
         if (budget_pass) budget_rates_of_fluxes(1);
     }
 
@@ -553,30 +519,35 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
         Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), face_flux, 0.0_r);
         viscous_functor.sgs_only = true;
-        parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
+        parallel_for_set<HeavyBounds>("viscous_flux", rhs_faces, viscous_functor);
         budget_rates_of_fluxes(2);
     }
 }
 
 void Solver::start_reconstruction(StateView solution) {
     Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(0, mesh->n_owned()), CellWFunctor{physics, solution, W_cells});
-    if (n_early_cells == 0) return;
+    if (early_cells.size() == 0) return;
     comm::enqueue_wait(overlap_space, Kokkos::DefaultExecutionSpace());
-    face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution,
-                                               Kokkos::subview(rhs_cells, Kokkos::make_pair(0u, n_early_cells)));
+    face_reconstruction->calc_cell_face_values(overlap_space, W_cells, face_solution, early_cells);
 }
 
 void Solver::discard_reconstruction() {
     comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), overlap_space);
+    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
     face_reconstruction->discard_cell_face_values();
     reconstruction_started = false;
 }
 
-void Solver::exchange_halo(const State & state) {
+void Solver::reconstruct_near_partition(const State & state, const bool exchange) {
+    // On the high-priority instance, as soon as the halo arrives, rather than in a tail after the other cells
     comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
-    halo.start(state, comm_space);
-    halo.finish(state, comm_space);
-    comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+    if (exchange) {
+        halo.start(state, comm_space);
+        halo.finish(state, comm_space);
+    }
+    Kokkos::parallel_for("rhs_W", Kokkos::RangePolicy<>(comm_space, mesh->n_owned(), mesh->n_cells),
+                         CellWFunctor{physics, state.flow, W_cells});
+    if (late_cells.size() > 0) face_reconstruction->calc_cell_face_values(comm_space, W_cells, face_solution, late_cells);
 }
 
 void Solver::exchange_for_first_stage() {
@@ -595,7 +566,12 @@ void Solver::exchange_for_first_stage() {
         update_boundary_states(t);
         start_reconstruction(conservatives);
         reconstruction_started = true;
-        exchange_halo(state());
+        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+        halo.start(state(), comm_space);
+        halo.finish(state(), comm_space);
+        // The default instance waits for the halo, not for the reconstruction that follows it
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+        reconstruct_near_partition(state(), false);
     } else {
         halo.exchange(state());
     }
@@ -609,8 +585,7 @@ void Solver::limit_flux_positivity(StateView solution) {
                          PositivityKappaFunctor{g, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
                                                 mesh->cell_measure, positivity_kappa,
                                                 recording_step ? step_dt_device() : nullptr, dt});
-    parallel_for_faces("positivity_flux", PositivityFluxFunctor{g, solution, positivity_kappa, face_flux}, rhs_faces,
-                       mesh->n_faces);
+    parallel_for_set<HeavyBounds>("positivity_flux", rhs_faces, PositivityFluxFunctor{g, solution, positivity_kappa, face_flux});
 }
 
 void Solver::update_cell_fields(const State & solution) {
@@ -687,6 +662,6 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_flux_functor(Kokkos::View<uint32_t *> faces) {
-    parallel_for_faces("convective_flux", flux_functor<T_riemann_solver>(), faces, mesh->n_faces);
+void Solver::launch_flux_functor(const IndexSet & faces) {
+    parallel_for_set<HeavyBounds>("convective_flux", faces, flux_functor<T_riemann_solver>());
 }

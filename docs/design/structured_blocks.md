@@ -60,8 +60,8 @@ Pairs are strict / with mirror images. The Volvo mesh (four planar blocks,
 graded, extruded over 64 periodic cells) is one structured block, but no two of
 its cells share a stencil shape except along the span: the index arithmetic
 applies everywhere, the shared tables only per spanwise column. A periodic box
-counts fully only if its block wraps its index across the periodic faces
-(below). The other 3D examples on generated boxes
+counts fully: the cells along its periodic faces read the cells across them by
+offsets too (below). The other 3D examples on generated boxes
 (`explosion_3d`, `sedov_3d`, `detonation_3d`, `shock_bubble_3d`) are uniform
 boxes like `teno5_3d`.
 
@@ -159,7 +159,12 @@ reconstruction's setup, each rank finds its blocks among its owned cells:
 3. **Boxes.** A block is a box of lattice indices $[0, N_a) \times [0, N_b)
    \times [0, N_c)$ of owned cells; a labeled region that is not a box splits into
    boxes. On generated meshes and multi-jagged parts, each rank has one box per
-   generated block.
+   generated block. Faces match by the periodic classes of their nodes, as the
+   mesh matches them, so a box continues across a periodic boundary where a
+   rank owns the cells on both sides (a graph partition's part, for example).
+   The search crosses periodic boundaries only once it reaches no further cell
+   without, so a box that a periodic direction closes on itself is cut at its
+   periodic boundary and keeps the numbering it has without periodicity.
 4. **Stencil shapes.** A cell's shape is the geometry of the cells its
    reconstruction reads: their offsets and volumes in the frame of the cell,
    rounded to $10^{-9}h$. Rounding keeps the coordinates' round-off
@@ -193,8 +198,8 @@ faces rely on.
 
 - Cells within $R$ of a box face go unstructured, including at partition faces,
   since halo cells are numbered after owned cells (the partition counts
-  above). A block that spans a periodic direction on one rank can wrap its
-  index along that axis (one comparison per entry) and lose no cells there.
+  above). The cells along a periodic boundary inside a rank stay on the block
+  path: their offsets reach the cells across it ([block shapes](#implementation)).
 - Faces keep the numbering of the cells' order and their global orientation;
   the block kernels write face states through `faces_of_cell`, as the
   prototype does. Implicit face indices would need block faces numbered by
@@ -386,7 +391,28 @@ One pull request per step, as a stack on #431:
 
 1. Detection and the block numbering.
 2. The $(i, j, k)$ to stencil shape map, on #431's table store.
-3. The TENO and MUSCL block kernels.
+3. The TENO block kernel (below). The MUSCL block kernel, which needs a
+   least-squares table per stencil shape, is #1035; keyed tables and one fit
+   per shape at setup are #986.
 4. Mirror images at straight walls.
 5. `mallard check` reporting.
 6. The documentation of [Documentation](#documentation).
+
+**Block shapes (step 3).** The TENO smooth pass takes the block path for the
+cells of a block whose packed central stencil holds no mirror image. Each such
+cell's slots are the cell plus a list of offsets, and the cells with one list
+form a block shape (`teno::BlockStencils`: the per-cell shape and the shapes'
+offsets). The kernel reads cell $c$'s entry $s$ as $c + o_s$, with the
+pseudo-inverse it would read anyway (#994's shared table, through the cell's
+index). Only the source of the entries changes, so the two paths are bitwise
+equal by construction, and the shapes need no agreement over the ranks: a
+partition changes which cells take the block path, never what they compute.
+A periodic box that is one block on its rank keeps its cells along the seams on
+the block path too: their offsets wrap the index, and each position along the
+seam is one more block shape. The shapes are found from the packed stencils at
+setup and after `rebuild_cells`. They do not use the keys of step 2, which
+depend on the partition near partition faces (#986).
+
+On GPUs the team pass gives each thread its own cell's row, by offsets or
+packed, so a team that straddles the edge of the block path stays on it for
+its block cells.

@@ -3,7 +3,6 @@
  "dims": [
   3
  ],
- "required": true,
  "set_in": [
   "examples/channel_wmles/lm2000.toml",
   "examples/channel_wmles/lm5200.toml",

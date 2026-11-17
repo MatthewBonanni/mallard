@@ -10,14 +10,17 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "check.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "mixture.h"
 #include "scratch.h"
 #include "solver.h"
@@ -96,6 +99,90 @@ TEST(ErrorMessages, ArrayOfTablesWrittenAsATableSaysToDoubleTheBrackets) {
         FAIL() << "no error";
     } catch (const InputError & e) {
         expect_parts(e.what(), {"line 1: boundaries: is a table, but must be an array", "double brackets: [[boundaries]]"});
+    }
+}
+
+TEST(ErrorMessages, EveryAccessorReportsAValueOfTheWrongTypeWithItsKeyAndLine) {
+    using Read = std::function<void(const Input &)>;
+    const auto first = [](const Input & in) { return find_value<std::vector<Input>>(in, "boundaries")[0]; };
+    const std::string element = "x = 0\nboundaries = [1]\n";
+    const std::string not_in_a_table = "is looked up in 1 (an integer), which is not a table";
+    const std::string mesh_number = "x = 0\nmesh = 1\n";
+    const std::string not_a_table = "line 2: mesh: is 1 (an integer), but must be a table";
+    struct Case {
+        std::string name, input;
+        Read read;
+        std::vector<std::string> parts;
+    };
+    const std::vector<Case> cases = {
+        {"find_value in a non-table", element, [&](const Input & in) { find_value<std::string>(first(in), "name"); },
+         {"line 2: name: " + not_in_a_table, "{ name = ... }"}},
+        {"find_value_or in a non-table", element,
+         [&](const Input & in) { find_value_or<std::string>(first(in), "name", ""); }, {"line 2: name: " + not_in_a_table}},
+        {"find_real in a non-table", element, [&](const Input & in) { find_real(first(in), "p", dim::pressure); },
+         {"line 2: p: " + not_in_a_table}},
+        {"find_real_or in a non-table", element,
+         [&](const Input & in) { find_real_or(first(in), "p", dim::pressure, 1.0_r); }, {"line 2: p: " + not_in_a_table}},
+        {"find_double in a non-table", element, [&](const Input & in) { find_double(first(in), "T", dim::temperature); },
+         {"line 2: T: " + not_in_a_table}},
+        {"find_double_or in a non-table", element,
+         [&](const Input & in) { find_double_or(first(in), "T", dim::temperature, 1.0); }, {"line 2: T: " + not_in_a_table}},
+        {"find_real_vector in a non-table", element,
+         [&](const Input & in) { find_real_vector(first(in), "axis", dim::none); }, {"line 2: axis: " + not_in_a_table}},
+        {"find_value of a table that is a number", mesh_number,
+         [](const Input & in) { find_value<int>(in, "mesh", "Nx"); }, {not_a_table, "mesh = { ... }"}},
+        {"find_value_or of a table that is a number", mesh_number,
+         [](const Input & in) { find_value_or<int>(in, "mesh", "Nx", 4); }, {not_a_table}},
+        {"find_real of a table that is a number", mesh_number,
+         [](const Input & in) { find_real(in, "mesh", "Lx", dim::length); }, {not_a_table}},
+        {"find_real_or of an array of tables", "x = 0\n[[mesh]]\nLx = 1.0\n",
+         [](const Input & in) { find_real_or(in, "mesh", "Lx", dim::length, 1.0_r); },
+         {"mesh: is an array, but must be a table", "single brackets: [mesh]", "See docs/input.md#mesh"}},
+        {"find_real_vector of a table that is a number", mesh_number,
+         [](const Input & in) { find_real_vector(in, "mesh", "stretching", dim::none); }, {not_a_table}},
+        {"find_real_vector of a number", "x = 0\ntranslation = 2.5\n",
+         [](const Input & in) { find_real_vector(in, "translation", dim::length); },
+         {"line 2: translation: is 2.5 (a float), but must be an array of numbers", "square brackets"}},
+        {"find_real_vector in a table, of a number", "[mesh]\nstretching = 2.5\n",
+         [](const Input & in) { find_real_vector(in, "mesh", "stretching", dim::none); },
+         {"line 2: mesh.stretching: is 2.5 (a float), but must be an array of numbers"}},
+        {"as_real_vector of a string", "x = 0\naxis = \"z\"\n",
+         [](const Input & in) { as_real_vector(in.at("axis"), "axis", dim::none); },
+         {"line 2: axis: is \"z\" (a string), but must be an array of numbers"}},
+        {"find_real of an array", "x = 0\np = [1.0]\n", [](const Input & in) { find_real(in, "p", dim::pressure); },
+         {"line 2: p: is an array, but must be a number, or a string of a number and a unit"}},
+        {"find_double_or of a boolean", "x = 0\nT = true\n",
+         [](const Input & in) { find_double_or(in, "T", dim::none, 1.0); }, {"line 2: T: is true, but must be a number."}},
+        {"find_value of an integer out of range", "x = 0\nn = 5000000000\n",
+         [](const Input & in) { find_value<int>(in, "n"); }, {"line 2: n: 5000000000 is out of range"}},
+    };
+    for (const Case & c : cases) {
+        SCOPED_TRACE(c.name);
+        const Input input = parse_input_string(c.input);
+        try {
+            c.read(input);
+            ADD_FAILURE() << "no error";
+        } catch (const InputError & e) {
+            for (const auto & part : c.parts) EXPECT_NE(std::string(e.what()).find(part), std::string::npos) << e.what();
+        } catch (const std::exception & e) {
+            ADD_FAILURE() << "not an InputError: " << e.what();
+        }
+    }
+}
+
+TEST(ErrorMessages, ARemovedKeyWhoseValueCannotBeConvertedNamesTheKey) {
+    for (const std::string value : {"\"two\"", "2.5", "true"}) {
+        SCOPED_TRACE(value);
+        Input input = parse_input_string("[numerics.face_reconstruction]\nbasis_order = " + value + "\n");
+        try {
+            input_upgrade::apply(input);
+            ADD_FAILURE() << "no error";
+        } catch (const InputError & e) {
+            expect_parts(e.what(), {"line 2: numerics.face_reconstruction.basis_order: is " + value +
+                                    ", but must be an integer"});
+        } catch (const std::exception & e) {
+            ADD_FAILURE() << "not an InputError: " << e.what();
+        }
     }
 }
 
@@ -255,7 +342,7 @@ TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
     expect_parts(error("type = \"wall_adiabatic\"\nu = 1.0\n"),
                  {".u: is a speed, so the wall needs a direction", "Add direction = [...], or give u as a vector"});
     expect_parts(error("type = \"outlet_pressure\"\np = \"1 + 0.1 * y\"\naverage = true\n"),
-                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
+                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y, z or the local coordinates"});
     expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
                  {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
 }
