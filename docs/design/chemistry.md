@@ -553,10 +553,11 @@ Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
   side), so SIMPLER at `cfl` 1.0 takes 60 s where Strang at 0.35 takes 222 s
   (3.7x).
 - **V8 premixed flames** (H2/air, mixture-averaged, $\phi$ 0.6, 1.0, 1.4, 20
-  cells per thermal thickness, two flame times): consumption speeds against
-  Cantera at `cfl` 0.2 / 1.0 / 2.0, Strang +0.60 / +0.53 / +0.50%, +0.24 /
-  +0.24 / +0.24%, -0.20 / -0.20 / -0.21%; SIMPLER +0.53 / +0.48 / +0.46%,
-  +0.24 / +0.24 / +0.23%, -0.20% at all three. Neither splitting error is
+  cells per thermal thickness, two flame times): consumption speeds at
+  `cfl` 1.0 / 2.0 differ from those at 0.2 by -0.07 / -0.10%, 0.00 /
+  0.00% and 0.00 / -0.01% (Strang), and SIMPLER's differ from Strang's at
+  0.2 / 1.0 / 2.0 by -0.07 / -0.05 / -0.04%, 0.00 / 0.00 / -0.01% and
+  0.00 / 0.00 / +0.01%. Neither splitting error is
   measurable on these steady flames (at most 0.1%, within the runs' spread),
   so SIMPLER brings no accuracy here; a step is 9-15% cheaper (chemistry 34%
   of the step instead of 53%).
@@ -1593,12 +1594,20 @@ double flux (inert), are bitwise identical on 1-4 ranks.
 V8 (`examples/premixed_flame`, `tools/setup/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
 the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
-and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
+and transport model) shifted to 6 thermal
 thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
 outlet; 20 cells per `delta_T` (cells ten times taller than wide, so that the
 cross-stream faces do not limit the time step); fresh mixture entering at
 Cantera's flame speed through `inlet_state` and a pressure outlet at 1 atm; MUSCL,
-HLLC, SSPRK3, CFL 0.2 (and 0.1), two flame times `delta_T / S_L`. Why this
+HLLC, SSPRK3, CFL 0.2 (and 0.1), six flame times `delta_T / S_L`. Cantera
+discretizes convection with first-order upwind differences, so its flame speed
+depends on its grid: on its usual adaptive grid of `slope = curve = 0.02`,
+`S_L` is up to 3.6% off (lean H2/air most), and adaptive refinement converges
+erratically. `flame_reference.py` solves each flame on the adaptive grid of
+0.01, then on that grid doubled uniformly twice, where the error halves with
+each doubling, and extrapolates `S_L` from the two (Richardson); a third
+doubling changes the extrapolated `S_L` by at most 0.01% (`--convergence`; H2/air at $\phi$ = 0.4-4).
+Why this
 setup: a frame moving with the flame would need moving-frame terms the solver
 does not have, and a flame propagating into gas at rest needs a domain many
 flame lengths long; holding it near its Cantera position keeps the domain at
@@ -1615,23 +1624,30 @@ Cantera's discretization to Mallard's.
 
 | H2/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
 |---|---|---|---|---|---|
-| Cantera `S_L` [m/s], mixture-averaged | 0.8075 | 1.6567 | 2.3317 | 2.7806 | 3.0341 |
-| Mallard `S_c` error | +0.60% | +0.31% | +0.24% | +0.32% | -0.20% |
-| Mallard `S_d` error | +0.44% | +0.11% | +0.21% | +0.21% | -0.01% |
-| Cantera `S_L` [m/s], unity Lewis | 0.9575 | 1.3716 | 1.6431 | 1.8013 | 1.8713 |
-| Mallard `S_c` error | -0.81% | -0.72% | -0.68% | -0.65% | -0.56% |
-| Mallard `S_d` error | -0.84% | -0.74% | -0.81% | -0.72% | -0.61% |
+| Cantera `S_L` [m/s], mixture-averaged | 0.8198 | 1.6611 | 2.3311 | 2.7772 | 3.0287 |
+| Mallard `S_c` error | -0.23% | -0.17% | -0.03% | +0.32% | +0.04% |
+| Mallard `S_d` error | -0.30% | -0.16% | -0.01% | +0.27% | +0.11% |
+| Cantera `S_L` [m/s], unity Lewis | 0.9531 | 1.3664 | 1.6370 | 1.7950 | 1.8648 |
+| Mallard `S_c` error | -0.44% | -0.40% | -0.26% | -0.18% | -0.15% |
+| Mallard `S_d` error | -0.48% | -0.37% | -0.29% | -0.20% | -0.15% |
 
-All within the 2% criterion at 20 cells per `delta_T`. CFL 0.1 against 0.2
+All within the 2% criterion at 20 cells per `delta_T`; the mixture-averaged
+consumption speeds oscillate around their means by up to ±0.65% (from
+output to output, at $\phi \ge 0.8$), the unity-Lewis ones by up to ±0.2%.
+CFL 0.1 against 0.2
 ($\phi$ 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
 0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
 error at these steps. Temperature and heat-release profiles overlay
 Cantera's (`examples/premixed_flame/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
-release within 2%, temperature within 10-30 K where the profile is steepest
-(a fraction of a cell of offset). The unity-Lewis flames are consistently
-0.6-0.8% slow; Cantera's "unity-Lewis-number" model with its default
-mole-fraction flux basis (as Mallard's) is not exactly unity Lewis, so this is
-not a modeling difference, but its source has not been isolated.
+release within 0.1%, temperature within 45 K where the profile is steepest
+(less than half a cell of offset). The slow lean and unity-Lewis flames
+(0.15-0.45%, most at the lean end) are the second-order spatial error, which
+falls fourfold per doubling: at 40 cells H2/air at $\phi = 0.6$ is 0.08% slow
+(0.31% at 20, mixture-averaged, the
+[tutorial](../tutorials/premixed_flame.md)) and the unity-Lewis flame at
+$\phi = 0.4$, 700 K 0.07% (0.29% at 20). Below about 15 cells the MUSCL
+limiter's response to where the front sits within a cell adds scatter of up
+to 0.5% from run to run.
 
 ![H2/air flame, phi = 1](../images/premixed_flame_h2.png)
 
@@ -1646,24 +1662,27 @@ of main); `S_c` and `S_d` are taken over the last flame time:
 
 | CH4/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
 |---|---|---|---|---|---|
-| Cantera `S_L` [m/s], mixture-averaged | 0.1144 | 0.2711 | 0.3758 | 0.3325 | 0.1388 |
-| Mallard `S_c` error, 10 cells per `delta_T` | -2.42% | -2.50% | -3.08% | -4.19% | -3.53% |
-| Mallard `S_c` error, 20 cells | -0.97% | -1.17% | -1.31% | -1.82% | -1.11% |
-| Mallard `S_c` error, 40 cells | -0.37% (2.2 flame times) | -0.70% (3.4 flame times) | -0.78% (4.0 flame times) | -1.01% (3.4 flame times) | -0.60% (2.2 flame times) |
-| Mallard `S_d` error, 20 cells | -1.12% | -1.48% | -1.62% | -2.08% | -1.38% |
-| Cantera `S_L` [m/s], unity Lewis | 0.1177 | 0.2460 | 0.2865 | 0.2132 | 0.1048 |
-| Mallard `S_c` error, 10 cells | -2.29% | -1.14% | -1.00% | -2.07% | -2.82% |
-| Mallard `S_c` error, 20 cells | -0.69% | -0.45% | -0.42% | -0.72% | -0.80% |
-| Mallard `S_c` error, 40 cells | -0.61% (4.1 flame times) | -0.40% | -0.30% | -0.35% | -0.32% (3.3 flame times) |
-| Mallard `S_d` error, 20 cells | -0.77% | -0.79% | -0.82% | -1.05% | -0.94% |
+| Cantera `S_L` [m/s], mixture-averaged | 0.1139 | 0.2692 | 0.3731 | 0.3302 | 0.1383 |
+| Mallard `S_c` error, 10 cells per `delta_T` | -1.99% | -1.83% | -2.39% | -3.51% | -3.17% |
+| Mallard `S_c` error, 20 cells | -0.54% | -0.49% | -0.61% | -1.13% | -0.74% |
+| Mallard `S_c` error, 40 cells | +0.07% (2.2 flame times) | -0.02% (3.4 flame times) | -0.08% (4.0 flame times) | -0.31% (3.4 flame times) | -0.23% (2.2 flame times) |
+| Mallard `S_d` error, 20 cells | -0.69% | -0.80% | -0.92% | -1.39% | -1.01% |
+| Cantera `S_L` [m/s], unity Lewis | 0.1170 | 0.2449 | 0.2855 | 0.2126 | 0.1046 |
+| Mallard `S_c` error, 10 cells | -1.70% | -0.68% | -0.65% | -1.77% | -2.61% |
+| Mallard `S_c` error, 20 cells | -0.09% | +0.01% | -0.06% | -0.42% | -0.59% |
+| Mallard `S_c` error, 40 cells | -0.01% (4.1 flame times) | +0.06% | +0.06% | -0.05% | -0.11% (3.3 flame times) |
+| Mallard `S_d` error, 20 cells | -0.17% | -0.33% | -0.47% | -0.75% | -0.73% |
 
 At 20 cells per `delta_T` every consumption speed is within the 2% criterion:
-mixture-averaged 1.0-1.8% slow, unity Lewis 0.4-0.8% slow; 10 cells is not
-enough (1.0-4.2% slow). At 40 cells
-the mixture-averaged errors roughly halve (0.4-1.0% slow; the runs marked
-with fewer than five flame times are still settling, slowly downward), while
-the unity-Lewis ones level off at 0.3-0.6% slow, like the H2 flames' offset. The displacement speeds are 0.1-0.4% below
-the consumption speeds (mixture-averaged $\phi = 1.2$: 2.1% slow). The flames
+mixture-averaged 0.5-1.1% slow, unity Lewis within 0.6%; 10 cells is not
+enough (0.7-3.5% slow). At 40 cells the mixture-averaged errors fall to
+-0.3 to +0.1% (the runs marked with fewer than five flame times are still
+settling, slowly downward) and the unity-Lewis ones to -0.1 to +0.1%. These
+are the runs of the sweep, which started from Cantera's flames on the grid of
+`slope = curve = 0.02` (0.2-0.7% faster than the references above), against
+the references above; the flame speed they settle to does not depend on the
+initial state. The displacement speeds are 0.1-0.4% below
+the consumption speeds (mixture-averaged $\phi = 1.2$: 1.4% slow). The flames
 take about two flame times to relax from Cantera's discretization to
 Mallard's, longer than the H2 flames' half flame time, which is why the
 earlier 1.5-flame-time run at $\phi = 1$ was still drifting; over the last two
@@ -1674,7 +1693,7 @@ within 3.1% of Cantera's and the temperature within 6-19 K at 20 cells. CFL
 flame times): the consumption speeds differ by at most 0.05%, against the
 0.5% criterion.
 
-![CH4/air flame speeds against phi](../images/premixed_flame_ch4.png)
+![CH4/air flame speeds against phi, against Cantera on the grid of `slope = curve = 0.02` (rerun from the converged references: #1137)](../images/premixed_flame_ch4.png)
 
 On a CPU core, chemistry is 68% of the H2 flame's step (h2o2) and 75% of the
 CH4 flame's (GRI-3.0); transport is most of the rest of the latter.
@@ -1739,27 +1758,33 @@ Fickian relaxation, `-D^T k^2 dT_0 / (rho T_0) (exp(-a k^2 t) - exp(-D_12 k^2 t)
 Validation against Cantera's `FreeFlame` with the same model
 (`soret_enabled`, mixture-averaged; `tools/setup/flame_reference.py --soret`,
 `examples/premixed_flame/reference/soret_flames.csv`): the V8 setup above
-(20 cells per `delta_T`, CFL 0.2, two flame times, consumption speed over the
-last third), H2/air at 300 K and 1 atm:
+(20 cells per `delta_T`, started from Cantera's flame) at CFL 1, eight flame
+times at $\phi$ 0.4 and 0.5 and six at 0.6 and 1.0, consumption speed over
+the last third, H2/air at 300 K and 1 atm:
 
 | H2/air, phi | 0.4 | 0.5 | 0.6 | 1.0 |
 |---|---|---|---|---|
-| Cantera `S_L` [m/s], mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
-| Mallard `S_c` error | +0.40% | +0.19% | +0.28% | +0.21% |
-| Cantera `S_L` [m/s], with Soret | 0.15516 | 0.39969 | 0.73527 | 2.13546 |
-| Mallard `S_c` error | -0.58% | -0.07% | +0.34% | +0.41% |
-| Mallard `S_d` error | -0.16% | -0.01% | +0.24% | +0.23% |
-| Soret effect on `S_L`, Cantera | -3.10% | -6.98% | -9.04% | -8.44% |
-| Soret effect on `S_L`, Mallard (`S_c`) | -4.05% | -7.23% | -8.98% | -8.26% |
-| Peak `Y_H` with Soret, Mallard / Cantera | 1.013 | 1.016 | 1.014 | 1.006 |
+| Cantera `S_L` [m/s], mixture-averaged | 0.16616 | 0.44005 | 0.81983 | 2.33108 |
+| Mallard `S_c` error | -0.28% | -0.43% | -0.27% | -0.00% |
+| Cantera `S_L` [m/s], with Soret | 0.16013 | 0.41048 | 0.74616 | 2.13937 |
+| Mallard `S_c` error | -0.17% | -0.48% | -0.22% | -0.10% |
+| Mallard `S_d` error | -0.32% | -0.75% | -0.29% | -0.03% |
+| Soret effect on `S_L`, Cantera | -3.63% | -6.72% | -8.99% | -8.22% |
+| Soret effect on `S_L`, Mallard (`S_c`) | -3.52% | -6.77% | -8.94% | -8.32% |
+| Peak `Y_H` with Soret, Mallard / Cantera | 1.009 | 1.003 | 1.001 | 0.997 |
 
-All within the 2% criterion; the Soret effect, 3-9% here, is reproduced to
-within a point (at $\phi = 0.4$, the slowest flame, over two flame times, its
-two errors of +0.4% and -0.6% add up). Profiles aligned at the maximum of `dT/dx`
-differ from Cantera's by at most 0.3-1.5% of the peak for `T` and `Y_H2`
-and 1.3-5% for H, O and OH at $\phi = 0.4$–0.6, up to 3-9% at $\phi = 1$, where
-the profiles are steepest (as without thermal diffusion, see above). Runs: 300 cells, OpenMP, 3 threads,
-4.3-5.1 ms per step (thermal diffusion +11%), up to 1.3M steps at $\phi = 0.4$.
+All within 0.5%, against the 2% criterion, and the Soret effect, 3.6-9%
+here, is reproduced to within 0.11 points. At 40 cells per `delta_T`
+($\phi = 0.5$, eight flame times) the errors are -0.14% and -0.18% (with
+Soret). The lean flames forget their initial state slowly: started from
+Cantera's flame on its usual grid of `slope = curve = 0.02` (3.6% slow at
+$\phi = 0.4$), the flame at $\phi = 0.4$ is still 3.3% slow over the last
+third of two flame times at CFL 0.2 and 1.3% slow over the last third of
+eight at CFL 1, against 0.28% from the converged flame. Profiles aligned at
+the maximum of `dT/dx` differ from Cantera's by at most 0.2-0.9% of the peak
+for `T` and `Y_H2` and 0.8-1.9% for H, O and OH at $\phi = 0.4$–0.6, up to
+1.6-3.2% at $\phi = 1$, where the profiles are steepest (as without thermal
+diffusion, see above). Runs: 300 cells, one A100 shared by several runs.
 
 ### Multicomponent transport: assessment
 
@@ -1788,15 +1813,15 @@ multicomponent properties alone, at three RK stages, would add 640 ns
 per cell they need (100 doubles for h2o2, 2,809 for GRI-3.0: 22 GB for a
 million cells). For GRI-3.0 one thread per cell also holds 300 KB of local
 arrays. What it buys, from Cantera's flames (`soret_flames.csv`): flame
-speeds within 0.1-3% of the mixture-averaged ones, and the same Soret effect to
+speeds within 0.07-2.8% of the mixture-averaged ones, and the same Soret effect to
 within a point:
 
 | H2/air, `S_L` [m/s] | phi 0.4 | 0.5 | 0.6 | 1.0 |
 |---|---|---|---|---|
-| mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
-| + Soret | 0.15516 (-3.1%) | 0.39969 (-7.0%) | 0.73527 (-9.0%) | 2.13546 (-8.4%) |
-| multicomponent | 0.16520 | 0.43639 | 0.80862 | 2.28956 |
-| + Soret | 0.16095 (-2.6%) | 0.40929 (-6.2%) | 0.74458 (-7.9%) | 2.11317 (-7.7%) |
+| mixture-averaged | 0.16616 | 0.44005 | 0.81983 | 2.33108 |
+| + Soret | 0.16013 (-3.6%) | 0.41048 (-6.7%) | 0.74616 (-9.0%) | 2.13937 (-8.2%) |
+| multicomponent | 0.17080 | 0.44606 | 0.81928 | 2.28781 |
+| + Soret | 0.16531 (-3.2%) | 0.41952 (-5.9%) | 0.75425 (-7.9%) | 2.11700 (-7.5%) |
 
 **Decision: not now.** Thermal diffusion is the larger effect (3-9% here)
 and the mixture-averaged model carries it at +9% of a flame's step; the
@@ -2059,10 +2084,10 @@ oxidizer stream `K_ox` (the first maximum of `-du/dx` ahead of the flame)
 and as the spread rate `V_T = v / r` at the peak temperature. From
 `U_o` = 1 to 4.6 m/s (`K_ox` 344-1640 1/s, up to 91% of Cantera's
 extinction strain rate of 1811 1/s) the steady peak temperature is within
-2% of Cantera's at the same `K_ox` (+0.35% to +1.93%), so V10 passes, but
+2% of Cantera's at the same `K_ox` (+0.35% to +1.92%), so V10 passes, but
 the excess grows with strain and is mostly not a resolution error (at 4 m/s
-it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.68% to
-0.28% between 10 and 22). The finite jets give the flame less strain for
+it is the same at 10 and 15 cells per FWHM; at 2 m/s it falls from 0.67% to
+0.26% between 10 and 22). The finite jets give the flame less strain for
 the same `K_ox` than the similarity solution (`V_T / K_ox` 0.89 against
 0.95 at 4 m/s), by an amount that depends on the jets: with 7.5 mm jets the
 excess at 4 m/s reaches 1.9% and was still rising. At matched `V_T` the
@@ -2086,16 +2111,16 @@ mechanism and mixture-averaged transport, marched in x in von Mises and
 similarity variables with Cantera; it has no streamwise diffusion and stays
 steady. With 201 to 801 points across the layer and tolerances of 1e-6 and
 1e-7 its lift-off length changes by less than 0.03 mm. Mallard's 2D runs
-(30 mm by 20 mm, inlet steps and pressure outlets, started from the
-reference) put the lift-off length, where the peak `Y_OH` reaches 2e-3,
-6.9%, 2.6% and 0.5% short of the reference's 15.26 mm on cells of 200 x 60,
-100 x 30 and 50 x 15 um (where the peak temperature exceeds the air's by 250
-K: 6.6%, 2.9%, 1.0%), close to second-order convergence, mostly from the
-resolution across the layer; so V11 passes. Downstream of the flame base the
-layer carries Kelvin-Helmholtz waves that grow under refinement and lower
-the time-averaged peak temperature at 25-30 mm by up to 2.4% against the
-steady reference
-([#1051](https://github.com/MatthewBonanni/mallard/issues/1051)). The
+(30 mm by 20 mm and a 10 mm outlet buffer, inlet steps and characteristic
+pressure outlets, started from the reference) put the lift-off length, where
+the peak `Y_OH` reaches 2e-3, 6.1% and 2.2% short of the reference's 15.26
+mm and 0.6% beyond it on cells of 200 x 60, 100 x 30 and 50 x 15 um (where
+the peak temperature exceeds the air's by 250 K: -5.8%, -2.1%, +0.5%), and
+the layer stays steady with its profiles on the reference's; so V11 passes.
+The layer is convectively unstable (Kelvin-Helmholtz), so no disturbance may
+return to the plate: reflecting pressure outlets, or waves making sound at an
+outlet without a buffer, keep re-seeding waves that roll the flame into the
+fuel side. The
 example's README has the table and the profiles.
 
 ![Peak temperature, Y_OH and heat release rate along the mixing layer](../images/guide/mixing_layer_peaks-light.svg#gh-light-mode-only)
