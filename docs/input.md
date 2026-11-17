@@ -64,6 +64,25 @@ an error. Under `mpirun -n N` it checks the run on N ranks.
 
 Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
+## `[check]`
+
+What the [resolution report](guide/input_files.md#resolution) of `mallard check`
+(and of the check every run records at its setup) is made of. Every key is optional.
+
+| Key | Description |
+|---|---|
+| `regions` | Filled regions (names of `[regions]` or of the mesh's cell zones, or inline tables) the report also gives its values for, each on its own rows. Default: every cell zone of the mesh. Regions that move or are defined by the solution are errors |
+| `statistics` | A file of an earlier run of the case on this mesh (a restart file, or a VTKHDF or XDMF snapshot of the whole mesh) whose `[statistics]` averages give the dissipation, instead of the initial state's or the forcing's: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`) from `MEAN_STRAIN_RATE` and `COV_STRAIN_RATE_STRAIN_RATE` (`fields = ["STRAIN_RATE"]`, `products = ["STRAIN_RATE*STRAIN_RATE"]`), else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none |
+
+```toml
+[regions]
+wake = {type = "box", center = [3, 0, 0.5], size = [4, 2, 1]}
+
+[check]
+regions = ["wake"]
+statistics = "run1/restart_020000.restart"
+```
+
 ## `[run]`
 
 | Key | Description |
