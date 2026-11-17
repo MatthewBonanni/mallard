@@ -83,3 +83,23 @@ def diff(a, b, **options):
     `snapshot`, `remap`, `mesh_a`, `mesh_b` (`mallard diff --help`). Differences beyond tolerance are a
     result, not an error: the report's `result` and `exit_status` give the verdict."""
     return command("diff", a, b, verdicts=(1,), **options)
+
+
+def report(run_dir):
+    """`mallard info RUN_DIR --html`: writes the run report, `RUN_DIR/report.html`, from `RUN_DIR/mallard.jsonl`
+    (for a run still going, killed, or of a Mallard before 0.10; a run writes its own). Returns
+    `{"directory": ..., "report": path}`. Raises `CommandError` when the directory has no `mallard.jsonl`."""
+    return command("info", run_dir, html=True)
+
+
+def pack(path, verify=False, **options):
+    """`mallard pack RUN_DIR`: one archive that reproduces the run's last run, with a manifest of hashes. Options:
+    `output` (the archive; default the directory's name with `.tar.gz`, in the current directory, or `cwd`),
+    `with_outputs` (`"small"`, `"all"`, `"none"`). Returns the report: the archive, the rerun command and its
+    directory in the archive, notes, and each file with its role, size and SHA-256. A file changed since the
+    run read or wrote it raises `CommandError`.
+
+    `verify=True` is `mallard pack --verify ARCHIVE`: `path` is an archive, and each file is checked against its
+    manifest and the run's own hashes. Problems are a result, not an error: the report's `result` (`"ok"` or
+    `"differs"`), `exit_status` and `problems` (each `path` and `problem`) give the verdict."""
+    return command("pack", path, verify=verify, verdicts=(1,) if verify else (), **options)
