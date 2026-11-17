@@ -11,6 +11,7 @@ set(MALLARD_TEST_SOURCES
     region_test.cpp
     region_mesh_test.cpp
     region_motion_test.cpp
+    region_sampler_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
@@ -28,6 +29,7 @@ set(MALLARD_TEST_SOURCES
     radiation_test.cpp
     mixture_transport_test.cpp
     mesh_block_test.cpp
+    mesh_file_formats_test.cpp
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     structured_blocks_test.cpp

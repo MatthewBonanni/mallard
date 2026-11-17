@@ -28,14 +28,21 @@ transport. Writes to OUT_DIR (default examples/counterflow_diffusion/reference):
 
 z runs from the fuel nozzle (z = 0) to the oxidizer nozzle (z = L).
 
-Grid: refine criteria slope 0.006, curve 0.01 (1300-3100 points). Cantera's
-upwind convection converges at first order. T_max at the same K_ox differs
-by under 0.02% from that of criteria twice as coarse, and against the
-extrapolation of four grids (0.05 / 0.08 down to these) K_ox at the same U_o
-is low by about 0.1% above 344 1/s, 0.2% at 160 1/s, 0.8% at 50 1/s and 4%
-at the first row (14 1/s).
+Grid: refine criteria slope 0.006, curve 0.01 (1300-3100 points) for the
+profiles and the sweep's continuation. Cantera's upwind convection converges
+at first order, so each row of strain.csv is solved again on that grid and
+on it bisected (2600-6200 points), refinement off and tolerances 1e-9 /
+1e-15, and its strains, peak temperature and spread rate are extrapolated at
+first order from the two (the positions and the point count are the bisected
+grid's). At U_o = 0.1 and 0.5 m/s it agrees with the extrapolation from one
+more bisection to 0.01% (K_ox, T_max) and 0.03% (V_T); near extinction that
+finer grid does not converge. The adaptive grid alone has K_ox low by 0.1%
+at 325 1/s down to 0.02% at extinction, 0.2% at 150 1/s and 4% at the first
+row (14 1/s). The profiles (U*.csv, K*.csv) are the adaptive grid's: K*.csv's
+K_ox is that low, which moves T_max by under 0.01%.
 """
 import argparse
+import multiprocessing
 import os
 
 import cantera as ct
@@ -102,20 +109,68 @@ def row(f, U_o, U_f):
     return (U_o, U_f, (U_o + U_f) / GAP, K_ox, K_f, T[i_T], z[i_T], z[i_s], f.spread_rate[i_T], z.size)
 
 
-def sweep(out):
+def on_grid(grid, U_o, U_f, x, prof):
+    """The flame at U_o on a fixed grid (refinement off, tolerances 1e-9 /
+    1e-15), from the solution prof on the grid x."""
+    gas = ct.Solution(MECH, PHASE, transport_model=TRANSPORT)
+    gas.TP = T_IN, P
+    f = ct.CounterflowDiffusionFlame(gas, grid=grid)
+    f.fuel_inlet.X, f.fuel_inlet.T = FUEL, T_IN
+    f.oxidizer_inlet.X, f.oxidizer_inlet.T = OXIDIZER, T_IN
+    f.set_max_grid_points(f.flame, 2 * grid.size)
+    rho_f, rho_o = densities(gas)
+    f.fuel_inlet.mdot = rho_f * U_f
+    f.oxidizer_inlet.mdot = rho_o * U_o
+    f.set_initial_guess()
+    xr = (x - x[0]) / (x[-1] - x[0])
+    for comp, values in prof.items():
+        f.set_profile(comp, xr, values)
+    f.flame.set_steady_tolerances(default=(1e-9, 1e-15))
+    f.flame.set_transient_tolerances(default=(1e-9, 1e-15))
+    f.solve(loglevel=0, refine_grid=False, auto=False)
+    if f.extinct():
+        raise RuntimeError(f"extinct at U_o = {U_o} on {grid.size} points")
+    return f
+
+
+def bisected(state):
+    """Strain.csv's row of the adaptive solution state = (U_o, U_f, grid,
+    profiles): on that grid and on it bisected, extrapolated at first order."""
+    U_o, U_f, x, prof = state
+    fine = np.empty(2 * x.size - 1)
+    fine[0::2], fine[1::2] = x, 0.5 * (x[1:] + x[:-1])
+    coarse = row(on_grid(x, U_o, U_f, x, prof), U_o, U_f)
+    finest = row(on_grid(fine, U_o, U_f, x, prof), U_o, U_f)
+    r = list(finest)
+    for k in (3, 4, 5, 8):  # K_ox, K_f, T_max, V_T
+        r[k] = 2 * finest[k] - coarse[k]
+    print("U_o = %.4f m/s: K_ox = %.2f 1/s (adaptive grid %.2f), T_max = %.2f K" % (U_o, r[3], prof_K(state), r[5]),
+          flush=True)
+    return tuple(r)
+
+
+def prof_K(state):
+    return local_strains(state[2], state[3]["velocity"])[0]
+
+
+def sweep(out, workers):
     f = make_flame()
-    rows = []
+    states = []
     U = 0.1
     last = None
+
+    def keep(U_o, U_f):
+        states.append((U_o, U_f, f.grid.copy(), {c: f.profile(f.flame, c) for c in f.flame.component_names}))
+        print("U_o = %.4f m/s: adaptive K_ox = %.1f 1/s" % (U_o, prof_K(states[-1])), flush=True)
+
     while True:
         U_f = solve(f, U, first=last is None)
         if f.extinct():
             break
         last = f.to_array()
-        rows.append(row(f, U, U_f))
-        print("U_o = %.4f m/s: K_ox = %.1f 1/s, T_max = %.1f K" % (U, rows[-1][3], rows[-1][5]), flush=True)
+        keep(U, U_f)
         U *= 1.25 if U < 3.0 else 1.08
-    lo, hi = rows[-1][0], U
+    lo, hi = states[-1][0], U
     while (hi - lo) / lo > 0.005:
         mid = 0.5 * (lo + hi)
         U_f = solve(f, mid, last)
@@ -124,9 +179,10 @@ def sweep(out):
         else:
             last = f.to_array()
             lo = mid
-            rows.append(row(f, mid, U_f))
-            print("U_o = %.4f m/s: K_ox = %.1f 1/s, T_max = %.1f K" % (mid, rows[-1][3], rows[-1][5]), flush=True)
-    rows.sort()
+            keep(mid, U_f)
+    states.sort(key=lambda st: st[0])
+    with multiprocessing.Pool(workers) as pool:
+        rows = pool.map(bisected, states)
     with open(os.path.join(out, "strain.csv"), "w") as fh:
         fh.write(f"# Cantera {ct.__version__} CounterflowDiffusionFlame, h2o2.yaml/{PHASE}, {TRANSPORT}; "
                  f"fuel H2:N2 = 0.25:0.75, air O2:N2 = 0.21:0.79, {T_IN} K, {P} Pa, gap {GAP} m; "
@@ -190,6 +246,8 @@ def main():
                     help="write the full solutions at these oxidizer velocities instead of the sweep")
     ap.add_argument("--match", type=float, nargs="+", metavar="K_OX",
                     help="write the full solutions with these local strain rates K_ox (from strain.csv)")
+    ap.add_argument("--workers", type=int, default=os.cpu_count(),
+                    help="processes for the sweep's bisected grids (default: all CPUs)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     for U_o in args.profile or []:
@@ -197,7 +255,7 @@ def main():
     for K in args.match or []:
         match(K, args.out)
     if not args.profile and not args.match:
-        sweep(args.out)
+        sweep(args.out, args.workers)
 
 
 if __name__ == "__main__":

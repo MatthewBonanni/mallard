@@ -1,0 +1,45 @@
+# For the key catalog only (tools/dev/input_catalog.py): the resolution report of
+# a Taylor-Green box in a region, with the dissipation of the [statistics] averages
+# of an earlier run (check_statistics.restart, from check_statistics.sh).
+
+[run]
+n_steps = 1
+dt = 1.0e-7
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+p = "100.0"
+u = ["sin(x) * cos(y)", "-cos(x) * sin(y)"]
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 100.0
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.01
+Pr = 0.72
+
+[numerics]
+riemann_solver = "HLLC"
+
+[regions]
+corner = { type = "rectangle", center = [1.0, 1.0], size = [2.0, 2.0] }
+
+[check]
+regions = ["corner"]
+statistics = "check_statistics.restart"

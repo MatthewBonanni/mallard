@@ -17,15 +17,21 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_index, read_vtu_cells  # noqa: E402
+import mallard  # noqa: E402
 
 
-def profile(path):
-    pts, conn, offs, _, arrays = read_vtu_cells(path)
-    starts = np.concatenate([[0], offs[:-1]])
-    x = np.array([pts[conn[s:e], 0].mean() for s, e in zip(starts, offs)])
+def profile(f, snapshot):
+    x = f.geometry(snapshot).vertex_averages()[:, 0]
     order = np.argsort(x)
-    return arrays["TIME"], x[order], {k: v[order] for k, v in arrays.items() if np.ndim(v) == 1 and v.size == x.size}
+    arrays = {k: f.read(k, snapshot) for k in f.fields}
+    return f.snapshots[snapshot].t, x[order], {k: v[order] for k, v in arrays.items() if v.ndim == 1 and v.size == x.size}
+
+
+def series_path(prefix):
+    for ext in (".vtkhdf", ".vtkhdf.series", ".pvd"):
+        if os.path.exists(prefix + ext):
+            return prefix + ext
+    raise SystemExit(f"no series {prefix}.vtkhdf (or .vtkhdf.series, .pvd)")
 
 
 def deficient(a):
@@ -38,8 +44,8 @@ def deficient(a):
 
 def analyze(run_dir):
     rows = []
-    for _, f in read_index(os.path.join(run_dir, "solut", "flame")):
-        t, x, a = profile(f)
+    for f, k in mallard.series(series_path(os.path.join(run_dir, "solut", "flame"))):
+        t, x, a = profile(f, k)
         k = deficient(a)
         dx = np.diff(np.concatenate([[0.0], 0.5 * (x[1:] + x[:-1]), [x[-1] + 0.5 * (x[-1] - x[-2])]]))
         consumed = -(a["OMEGA_" + k] * dx).sum()

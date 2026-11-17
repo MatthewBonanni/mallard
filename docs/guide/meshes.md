@@ -31,7 +31,7 @@ Ly = 1.0
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 41 more.
+and 42 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -123,8 +123,8 @@ zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
-[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d)
-and 12 more.
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
+and 13 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -335,9 +335,11 @@ filename = "mesh.h5"   # from mallard mesh convert
 
 *Used in:* any example, after `mallard mesh convert input.toml mesh.h5`.
 
-Every rank of a distributed run reads a Gmsh or other mesh file whole,
-keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
-which each rank reads only its own part (builds with
+In a distributed run, the ranks read a mesh file of any format together, each
+parsing its share of the nodes, elements or faces, so no rank holds the whole
+mesh. Mallard's HDF5 mesh format, of which each rank reads only its own part,
+needs no parsing and no exchange between ranks, so a large mesh used for many
+runs is still best converted to it once (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 
 ```sh

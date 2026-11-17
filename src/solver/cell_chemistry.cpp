@@ -18,8 +18,12 @@
 #include <type_traits>
 
 #include <Kokkos_Sort.hpp>
-#ifdef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_CUDA)
 #include <cub/device/device_radix_sort.cuh>
+#define MALLARD_RADIX_SORT 1
+#elif defined(KOKKOS_ENABLE_HIP)
+#include <hipcub/device/device_radix_sort.hpp>
+#define MALLARD_RADIX_SORT 1
 #endif
 
 #include "chemistry_balance.h"
@@ -324,7 +328,8 @@ struct AdvanceFunctor {
         double T;
         const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
         const double rho = static_cast<double>(U(c, 0));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         chemistry::RosenbrockResult r;
         if (forcing_offset > 0) {
             double * g = Y + forcing_offset;
@@ -350,7 +355,7 @@ struct AdvanceFunctor {
                                                            nullptr, nullptr, clipped);
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
-        chem_h(c) = static_cast<rtype>(h);
+        chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
         chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
         previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
@@ -360,13 +365,24 @@ struct AdvanceFunctor {
     /**
      * @brief Whether cell c's chemistry may take an explicit step over the
      *        call: its last sub-step covered a call of this length, or there
-     *        was none.
+     *        was none, and no explicit step failed since its sub-steps last
+     *        fell short of a call (chem_h < 0).
      */
     KOKKOS_INLINE_FUNCTION
     bool explicit_candidate(const uint32_t c) const {
         const double h = static_cast<double>(chem_h(c));
-        return !(h > 0.0 && h < cell_dt(c));
+        return h == 0.0 || !(h < cell_dt(c));
     }
+
+    /** @brief What cell c keeps of RODAS's proposal h: negated while its failed explicit step (h_last < 0) stands. */
+    KOKKOS_INLINE_FUNCTION
+    double proposal(const uint32_t c, const double h_last, const double h) const {
+        return h_last < 0.0 && h >= cell_dt(c) ? -h : h;
+    }
+
+    /** @brief After cell c's failed explicit step: no other until its sub-steps fall short of a call. */
+    KOKKOS_INLINE_FUNCTION
+    void explicit_failed(const uint32_t c) const { chem_h(c) = -chem_h(c); }
 
     /** @brief After cell c's accepted explicit step: one sub-step, and the cell leaves the queue. */
     KOKKOS_INLINE_FUNCTION
@@ -394,6 +410,7 @@ struct AdvanceFunctor {
         }
         if (!chemistry::explicit_reactor_step(chemistry::SerialLanes(), gas.thermo, kinetics, rho, cell_dt(c), Y, T,
                                               options, Y + ns, g)) {
+            explicit_failed(c);
             return;
         }
         if (forcing_offset > 0) {
@@ -429,6 +446,7 @@ struct AdvanceFunctor {
             team.sync();
         }
         if (!chemistry::explicit_reactor_step(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, options, Y + ns, g)) {
+            team.single([&]() { explicit_failed(c); });
             return;
         }
         if (forcing_offset > 0) {
@@ -457,7 +475,8 @@ struct AdvanceFunctor {
         FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
         const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
         double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         double * g = nullptr;
         if (forcing_offset > 0) {
             g = &work(slot, forcing_offset);
@@ -475,7 +494,7 @@ struct AdvanceFunctor {
             team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
         }
         team.single([&]() {
-            chem_h(c) = static_cast<rtype>(h);
+            chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
             chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
             previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         });
@@ -746,17 +765,36 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
     }
 }
 
+#ifdef MALLARD_RADIX_SORT
+namespace {
+
+/** @brief CUB's (hipCUB's) stable radix sort of n (key, value) pairs; with no scratch, the scratch bytes it needs. */
+void radix_sort_pairs(void * scratch, size_t & bytes, const float * keys_in, float * keys_out, const uint32_t * values_in,
+                      uint32_t * values_out, const uint32_t n) {
+    const Kokkos::DefaultExecutionSpace exec;
+#if defined(KOKKOS_ENABLE_CUDA)
+    const cudaError_t err = cub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                            static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                            exec.cuda_stream());
+    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+#else
+    const hipError_t err = hipcub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                              static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                              exec.hip_stream());
+    if (err != hipSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + hipGetErrorString(err));
+#endif
+}
+
+} // namespace
+#endif
+
 void CellChemistry::size_sort_scratch(const size_t n) {
-#ifdef KOKKOS_ENABLE_CUDA
+#ifdef MALLARD_RADIX_SORT
     if (sorted_queue.extent(0) >= n) return;
     sorted_queue = Kokkos::View<uint32_t *>("chem_sorted_queue", n);
     sorted_cost = Kokkos::View<float *>("chem_sorted_cost", n);
     size_t bytes = 0;
-    const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-        nullptr, bytes, static_cast<const float *>(nullptr), static_cast<float *>(nullptr),
-        static_cast<const uint32_t *>(nullptr), static_cast<uint32_t *>(nullptr), static_cast<int>(n), 0,
-        static_cast<int>(8 * sizeof(float)));
-    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+    radix_sort_pairs(nullptr, bytes, nullptr, nullptr, nullptr, nullptr, static_cast<uint32_t>(n));
     sort_scratch = Kokkos::View<uint8_t *>("chem_sort_scratch", bytes);
 #else
     (void)n;
@@ -774,18 +812,15 @@ void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Ko
         if (i >= r(2)) key(i) = Kokkos::Experimental::finite_max_v<float>;
     });
     if (n > 0) {
-#ifdef KOKKOS_ENABLE_CUDA
-        // Into scratch sized beforehand: captured in a step's graph
+#ifdef MALLARD_RADIX_SORT
+        // Into scratch sized beforehand: no allocation or fence, so a step's graph captures it
         if (sorted_queue.extent(0) < n) {
             throw std::logic_error("CellChemistry::sort_queue: more cells than its scratch holds.");
         }
         const Kokkos::View<uint32_t *> q_out = sorted_queue;
         const Kokkos::View<float *> key_out = sorted_cost;
         size_t bytes = sort_scratch.extent(0);
-        const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-            sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), static_cast<int>(n), 0,
-            static_cast<int>(8 * sizeof(float)), Kokkos::DefaultExecutionSpace().cuda_stream());
-        if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+        radix_sort_pairs(sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), n);
         Kokkos::parallel_for("chemistry_sort_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
             if (i >= r(2)) return;
             q(i) = q_out(i);
