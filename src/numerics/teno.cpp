@@ -3458,7 +3458,7 @@ void TENO::round_to_single() {
 
 void TENO::allocate_scratch() {
     const uint32_t n_reconstructed = mesh->n_reconstructed();
-    troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
+    troubled = Kokkos::View<rtype *>("teno_sigma", n_reconstructed);
     const uint32_t capacity = std::min<uint32_t>(
         n_reconstructed, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_reconstructed))));
     troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);

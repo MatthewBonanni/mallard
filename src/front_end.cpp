@@ -47,7 +47,7 @@ Dimension openfoam_dimension(const fs::path & path) {
         if (!in.good()) continue;
         std::stringstream text;
         text << in.rdbuf();
-        // A 2D mesh is one cell thick between empty patches (see read_openfoam)
+        // A 2D mesh is one cell thick between empty patches (see read_openfoam_block)
         std::istringstream tokens(text.str());
         std::string previous, token;
         while (tokens >> token) {

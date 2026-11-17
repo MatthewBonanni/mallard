@@ -1,8 +1,10 @@
 {
  "dims": [
+  2,
   3
  ],
  "set_in": [
-  "examples/flame_turbulence/les.toml"
+  "examples/flame_turbulence/les.toml",
+  "examples/triple_flame/tfles/input.toml"
  ]
 }

@@ -1,0 +1,1 @@
+- CUDA runs where NCCL fails under a CUDA graph's conditional node (NCCL across a network) take their steps kernel by kernel. Previously they ran a step graph without conditional nodes, which sampled `[statistics]`, flushed fused chemistry and evaluated probes at every step instead of at their intervals (#1153).

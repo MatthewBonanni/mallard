@@ -87,7 +87,7 @@ struct LocalityOrder {
  *        vertex), so that the others, whose reconstruction reads no halo cell,
  *        form the range [0, n_interior). With numbering.blocks, the
  *        structured blocks of those interior cells at least 2 layers + 1 cells
- *        long come first, each numbered i fastest, then the other owned cells
+ *        long (continuing across periodic boundaries, by node_key) come first, each numbered i fastest, then the other owned cells
  *        in the chosen order.
  */
 LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<std::array<rtype, N_DIM>> & nodes,
