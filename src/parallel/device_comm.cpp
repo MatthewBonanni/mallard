@@ -190,6 +190,14 @@ void send_receive_device([[maybe_unused]] const std::vector<DeviceMessage> & sen
 #endif
 }
 
+namespace {
+
+[[maybe_unused]] uint64_t wait_delay = 0;
+
+} // namespace
+
+void set_wait_delay(const uint64_t cycles) { wait_delay = cycles; }
+
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done) {
 #ifdef KOKKOS_ENABLE_CUDA
     // A stream waits for the event's state when cudaStreamWaitEvent is called,
@@ -201,6 +209,13 @@ void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::De
     }();
     cudaEventRecord(event, done.cuda_stream());
     cudaStreamWaitEvent(waiter.cuda_stream(), event, 0);
+    if (wait_delay > 0) {
+        const long long cycles = static_cast<long long>(wait_delay);
+        Kokkos::parallel_for("wait_delay", Kokkos::RangePolicy<>(waiter, 0, 1), KOKKOS_LAMBDA(const int) {
+            KOKKOS_IF_ON_DEVICE((for (const long long start = clock64(); clock64() - start < cycles;) {}))
+            KOKKOS_IF_ON_HOST(((void)cycles;))
+        });
+    }
 #else
     (void)waiter;
     const HostStaged staged;

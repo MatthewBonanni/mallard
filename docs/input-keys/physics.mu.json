@@ -16,6 +16,7 @@
   "examples/channel_wmles/tl_m1.7.toml",
   "examples/channel_wmles/tl_m3.0.toml",
   "examples/flame_turbulence/hit.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/heated_wall/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/poiseuille_pipe/input.toml",
@@ -25,7 +26,10 @@
   "examples/taylor_green_3d/remap.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
-  "examples/viscous_shock_tube/input.toml"
+  "examples/viscous_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml"
  ],
  "type": "number"
 }
