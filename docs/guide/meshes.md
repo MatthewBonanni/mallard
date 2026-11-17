@@ -123,8 +123,8 @@ zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
-[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d)
-and 12 more.
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
+and 13 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from

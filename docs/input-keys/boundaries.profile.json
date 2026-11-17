@@ -3,7 +3,6 @@
   2
  ],
  "set_in": [
-  "examples/channel_inlet/input.toml",
-  "examples/channel_inlet_data/input.toml"
+  "examples/channel_inlet/input.toml"
  ]
 }

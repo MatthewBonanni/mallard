@@ -8,7 +8,6 @@
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",
   "examples/channel_inlet/input.toml",
-  "examples/channel_inlet_data/input.toml",
   "examples/channel_les/input.toml",
   "examples/channel_les/input_590.toml",
   "examples/channel_retau180/input.toml",
@@ -27,6 +26,8 @@
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml",
   "tools/dev/catalog_inputs/2d/check.toml"
  ],
  "type": "number"
