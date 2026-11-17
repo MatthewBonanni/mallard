@@ -1,0 +1,5 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "3d"
+demonstrates = ["vortex rings", "azimuthal (Widnall) instability", "axisymmetric table in 3D", "against theory"]
+validation = [{anchor = "vortex-ring-instability", regime = "elliptic (Widnall) instability of a Gaussian vortex ring at Re = 5000 and Mach 0.3, against linear theory"}]
