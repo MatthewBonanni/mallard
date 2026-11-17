@@ -762,9 +762,27 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     fourth at the walls. The fine cylinder at order 5 keeps a small drag
     noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
     along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not.
+    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
+    not known (#427).
 
-- **Thin cells.** Before the ranking metric, a 1% pressure pulse at rest in
+- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
+    at curved walls looks only at a stencil's first $n_0$ candidates
+    ([central stencil](#central-stencil)). When the Lebesgue search grows
+    the stencil past them, the entries it adds can be cells at a curved wall,
+    and the stencil keeps the full degree, one-sided there. On a $6^3$
+    `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
+    28 at order 6 do so. The 2D and 3D setups both check only the first
+    $n_0$ entries, for every cell type.
+
+- **Order 4.** `high_order` stays at order 5 because order 4 fails three
+    robustness checks that order 5 passes
+    ([order-4 study](../design/teno4_robustness.md)): it amplifies an
+    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
+    odd-even wall pressure at the closed trailing edge of the NACA 0012
+    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
+    times more than order 5 (#977).
+
+- **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
     $0.0625\times 0.0625\times 0.01$ (symmetry walls) reached Mach 0.8 by
     $t = 2$ at order 3, and `cartesian_tet` cells of the same size Mach 1.2.

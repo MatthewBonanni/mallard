@@ -658,6 +658,7 @@ std::string resolution_json(const CheckReport & r) {
                                  .add("status", std::string(report::status_name(e.status)))
                                  .add("basis", e.basis)
                                  .raw("x", e.located ? point_json(e.x) : "null")
+                                 .raw("region", e.region.empty() ? "null" : json::quote(e.region))
                                  .str());
     }
     return resolution.str();
