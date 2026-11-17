@@ -136,8 +136,10 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
 
             // Step 0 holds the analytical initial state, which 2D builds compute the same since 0.5 up
             // to the quadrature error of quadrilaterals (averaged from their vertex average since 0.9,
-            // #436); step 2 the two steps this build takes from it, up to scheme changes since (species bounds of
-            // the cell's own face points, #1169, move the mixture by up to 1e-7 on GPUs).
+            // #436); step 2 the two steps this build takes from it, up to the round-off of scheme changes.
+            // The mixture of releases before 0.11.0 ran with every species bound on the cell's shared
+            // limiter: bounds on the species' own slopes (#1169) put the cells at its ignition front back at
+            // second order, which moves the energy by 2.1e-5 and the momentum by 1.2e-5.
             // Running to step 2 from step 2 applies a pending chemistry half step (fused since 0.10.0).
             const auto analytical = solver_state(fixture_input(f.name), false);
             const auto from_first = solver_state(fixture_input(f.name, first), false);
@@ -149,13 +151,14 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
                 for (double value : x) m = std::max(m, std::abs(value));
                 return m;
             };
+            const double tolerance = f.name == "mixture" && older(f.release, "v0.11.0") ? 1e-4 : 1e-10;
             bool moved = false;
             for (size_t v = 0; v < analytical.size(); v++) {
                 // Species densities, some zero everywhere, compare with the density
                 const double size = std::max(size_of(analytical[v]), v < N_CONSERVATIVE ? 0.0 : size_of(analytical[0]));
                 for (size_t i = 0; i < analytical[v].size(); i++) {
                     ASSERT_NEAR(from_first[v][i], analytical[v][i], 1e-7 * size) << "variable " << v << ", cell " << i;
-                    ASSERT_NEAR(from_last[v][i], rerun[v][i], 1e-6 * size) << "variable " << v << ", cell " << i;
+                    ASSERT_NEAR(from_last[v][i], rerun[v][i], tolerance * size) << "variable " << v << ", cell " << i;
                     moved = moved || from_last[v][i] != from_first[v][i];
                 }
             }
