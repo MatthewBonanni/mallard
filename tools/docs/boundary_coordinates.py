@@ -348,7 +348,7 @@ p_ref = 1.0
 T_ref = 1.0
 rho_ref = 1.0
 """)
-        log = subprocess.run([str(binary), "check", "input.toml", "--kokkos-num-threads=2"], cwd=work,
+        log = subprocess.run([str(Path(binary).resolve()), "check", "input.toml", "--kokkos-num-threads=2"], cwd=work,
                              capture_output=True, text=True, check=True).stdout
     lines = log.splitlines()
     start = next((i for i, line in enumerate(lines) if "local coordinates:" in line), None)
