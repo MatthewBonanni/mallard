@@ -535,33 +535,60 @@ std::vector<double> turns_of(const Triangulation & m, const std::vector<double> 
     return turns;
 }
 
-size_t nearest_face(const Triangulation & m, const Vec3 & p) {
+/** @brief Two candidates nearer to each other than this from a point given are a tie: 1% of the patch's size. */
+double tie(const Triangulation & m) { return 0.01 * std::sqrt(m.total_area); }
+
+/**
+ * @brief The face nearest to the point of the key `name`; an error if a face elsewhere around the patch (u more
+ *        than an eighth of a turn away) is as near, as from a point on a ring's axis or at a disk's center.
+ */
+size_t nearest_face(const Triangulation & m, const Coordinates & out, const Corners & at, const Vec3 & p,
+                    const std::string & name) {
     size_t nearest = 0;
-    for (size_t f = 1; f < m.n_faces(); f++) {
-        if (length(sub(m.face_center(f), p)) < length(sub(m.face_center(nearest), p))) nearest = f;
+    std::vector<double> away(m.n_faces());
+    for (size_t f = 0; f < m.n_faces(); f++) {
+        away[f] = length(sub(m.face_center(f), p));
+        if (away[f] < away[nearest]) nearest = f;
+    }
+    for (size_t f = 0; f < m.n_faces(); f++) {
+        const double turn = out.faces[f].u - out.faces[nearest].u;
+        if (away[f] < away[nearest] + tie(m) && std::abs(turn - std::round(turn)) > 0.125) {
+            fail(at, name + " " + text(p) + " is as near to the face at " + text(m.face_center(f)) + " as to the one at " +
+                         text(m.face_center(nearest)) + ", on another side of the patch",
+                 "Move " + name + " toward the side of the patch it should pick (it need not lie on the patch)");
+        }
     }
     return nearest;
 }
 
 /**
  * @brief Turns u of a ring or a disk so that it is 0 at the face nearest to the origin given and grows the way
- *        that reaches `toward` sooner; where u is 0, for the log.
+ *        that reaches `toward` sooner; where u is 0 and how it grows, for the log.
  */
 std::string start_of(const Triangulation & m, Coordinates & out, const Corners & at, const Vec3 & fallback) {
     if (!at.origin) return "toward " + text(fallback);
-    const size_t first = nearest_face(m, *at.origin);
+    const size_t first = nearest_face(m, out, at, *at.origin, "origin");
     const double start = out.faces[first].u;
     bool reverse = false;
+    std::string way;
     if (at.toward) {
-        const double ahead = out.faces[nearest_face(m, *at.toward)].u - start;
-        reverse = ahead - std::floor(ahead) > 0.5;
+        const size_t next = nearest_face(m, out, at, *at.toward, "toward");
+        double ahead = out.faces[next].u - start;
+        ahead -= std::floor(ahead);
+        if (std::abs(ahead - 0.5) < 0.01 || ahead < 0.01 || ahead > 0.99) {
+            fail(at, "toward " + text(*at.toward) + " is " + (std::abs(ahead - 0.5) < 0.01 ? "opposite the origin" : "at the origin") +
+                         " (nearest to the face at " + text(m.face_center(next)) + "), so both ways around reach it as soon",
+                 "Move toward to the side of the origin that u should grow to, less than half way around");
+        }
+        reverse = ahead > 0.5;
+        way = ", growing toward " + text(m.face_center(next));
     }
     for (Values & f : out.faces) {
         f.u = reverse ? start - f.u : f.u - start;
         f.u -= std::floor(f.u);
         if (!(f.u < 1.0)) f.u = 0.0;
     }
-    return "at " + text(m.face_center(first));
+    return "at " + text(m.face_center(first)) + way;
 }
 
 /** @brief Position on the loop of its node nearest to p. */
@@ -616,20 +643,30 @@ Coordinates four_sided(const Triangulation & m, const Laplacian & K, const Corne
             segment[i] = side(loop, found[i], found[(i + 1) % 4], 1);
             center[i] = m.chain_center(segment[i], false);
         }
-        auto corner_near = [&](const Vec3 & p, const std::array<size_t, 2> & among) {
-            return length(sub(m.x[loop[found[among[0]]]], p)) <= length(sub(m.x[loop[found[among[1]]]], p)) ? among[0]
-                                                                                                           : among[1];
+        // The corner of `among` nearest to the point of the key `name`; an error if another is as near
+        auto corner_near = [&](const Vec3 & p, const std::vector<size_t> & among, const std::string & name) {
+            auto away = [&](const size_t c) { return length(sub(m.x[loop[found[c]]], p)); };
+            size_t nearest = among[0];
+            for (const size_t c : among) {
+                if (away(c) < away(nearest)) nearest = c;
+            }
+            for (const size_t c : among) {
+                if (c != nearest && away(c) < away(nearest) + tie(m)) {
+                    fail(at, name + " " + text(p) + " is as near to the corner " + text(m.x[loop[found[c]]]) + " as to " +
+                                 text(m.x[loop[found[nearest]]]),
+                         "Move " + name + " toward the corner it should pick (it need not lie on the patch)");
+                }
+            }
+            return nearest;
         };
-        size_t origin = 4;
-        if (at.origin) origin = corner_near(*at.origin, {corner_near(*at.origin, {0, 1}), corner_near(*at.origin, {2, 3})});
+        const size_t origin = at.origin ? corner_near(*at.origin, {0, 1, 2, 3}, "origin") : 4;
+        const size_t next = at.toward ? corner_near(*at.toward, {(origin + 1) % 4, (origin + 3) % 4}, "toward") : 4;
         double best = -std::numeric_limits<double>::infinity();
         for (size_t start = 0; start < 4; start++) {
             if (at.origin && start != origin) continue;
             for (const bool forward : {true, false}) {
                 // u runs from the corner `start` to the next one around the outline, or to the one before
-                if (at.toward && forward != (corner_near(*at.toward, {(start + 1) % 4, (start + 3) % 4}) == (start + 1) % 4)) {
-                    continue;
-                }
+                if (at.toward && forward != (next == (start + 1) % 4)) continue;
                 std::array<size_t, 4> order{};
                 for (size_t i = 0; i < 4; i++) order[i] = forward ? (start + i) % 4 : (start + 7 - i) % 4;
                 const double along = dot(unit(sub(center[order[1]], center[order[3]])), reference.first);

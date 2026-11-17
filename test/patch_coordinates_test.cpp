@@ -341,6 +341,28 @@ TEST(PatchCoordinatesTest, OriginAndTowardSetWhereUStartsAndWhichWayItGrows) {
         }
     }
 
+    // Points that do not decide are errors naming the candidates: within 1% of the patch's size of two corners,
+    // on a ring's axis, at a disk's center, or half way around from the origin
+    patch::Corners tied;
+    tied.origin = Vec3{1.0, -4.0, 0.0};
+    EXPECT_NE(error_of(s, tied).find("is as near to the corner (2, 0, 0) as to (0, 0, 0)"), std::string::npos)
+        << error_of(s, tied);
+    tied.origin = Vec3{1.1, -4.0, 0.0};  // far off, and nearer to (2, 0, 0): u from there along -x
+    EXPECT_NEAR(patch::coordinates(s, tied).faces.back().u, patch::coordinates(s, {}).faces.front().u, 1e-12);
+    tied.origin = Vec3{0.0, 0.0, 0.0};
+    tied.toward = Vec3{1.5, 1.5, 0.0};
+    EXPECT_NE(error_of(s, tied).find("toward (1.5, 1.5, 0) is as near to the corner"), std::string::npos)
+        << error_of(s, tied);
+    const patch::Surface tube = ring(8, 1.0, 1.0, 1.5);
+    tied.toward.reset();
+    tied.origin = Vec3{0.0, 0.0, 0.3};
+    EXPECT_NE(error_of(tube, tied).find("on another side of the patch"), std::string::npos) << error_of(tube, tied);
+    tied.origin = Vec3{3.0, 0.3, 0.3};
+    tied.toward = Vec3{-3.0, -0.3, 0.3};
+    EXPECT_NE(error_of(tube, tied).find("is opposite the origin"), std::string::npos) << error_of(tube, tied);
+    tied.toward = Vec3{0.1, 2.0, 0.3};
+    EXPECT_NE(patch::coordinates(tube, tied).summary.find(", growing toward ("), std::string::npos);
+
     patch::Corners at;
     at.toward = point;
     EXPECT_NE(error_of(s, at).find("toward is given without origin"), std::string::npos);

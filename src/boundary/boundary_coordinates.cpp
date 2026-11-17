@@ -163,9 +163,10 @@ size_t dominant(const Point & v) {
  * @brief Arc length at the center of each of this rank's faces along the curve that all faces of the entry form,
  *        from its end with the lower coordinate along the dominant axis of the line between its ends.
  * @param length Set to the length of the curve.
+ * @param start Set to the end u_m is measured from.
  */
 std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
-                               const std::string & where, const bool distributed, double & length) {
+                               const std::string & where, const bool distributed, double & length, Point & start) {
     using Ends = std::array<Vertex, 2>;
     auto ends_of = [&](const uint32_t f) {
         Ends e{node(mesh, mesh.h_node_of_face(f, 0)), node(mesh, mesh.h_node_of_face(f, 1))};
@@ -211,7 +212,17 @@ std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & 
         }
         auto away = [&](const Vertex & v) { return std::hypot(v[0] - double(p[0]), v[1] - double(p[1])); };
         at = away(tips[1]) < away(tips[0]) ? tips[1] : tips[0];
+        double total = 0.0;
+        for (const Ends & e : ends) total += std::hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]);
+        if (std::abs(away(tips[1]) - away(tips[0])) < 0.01 * total) {
+            throw InputError({.key = where + ".origin", .line = line_of(entry, "origin"),
+                              .message = "u: origin is as near to the end " + vector_text(Point{tips[0][0], tips[0][1]}) +
+                                         " of the boundary as to the end " + vector_text(Point{tips[1][0], tips[1][1]}),
+                              .fix = "Move origin toward the end u should start from (it need not lie on the boundary)",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
     }
+    start = Point{at[0], at[1]};
     std::map<Ends, double> s_of;
     std::vector<bool> visited(n, false);
     length = 0.0;
@@ -430,7 +441,9 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
     if (along) {
 #if N_DIM == 2
         double length = 0.0;
-        const std::vector<double> s = arc_length(mesh, faces, entry, where, distributed, length);
+        Point start{};
+        const std::vector<double> s = arc_length(mesh, faces, entry, where, distributed, length, start);
+        summary = "u = 0 at " + vector_text(start);
         for (size_t k = 0; k < faces.size(); k++) {
             points[k][bv::U_M] = s[k];
             points[k][bv::U] = s[k] / length;

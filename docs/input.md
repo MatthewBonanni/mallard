@@ -680,7 +680,7 @@ entry that reads no coordinate they set. Guide:
 | Key | Default | Meaning |
 |---|---|---|
 | `corners` | found from the patch's outline, where it turns by more than 30 degrees | 3D: the four corners of the patch [m], where `(u, v)` is (0, 0), (1, 0), (1, 1) and (0, 1), each moved to the nearest node of the outline; `[]` for a patch without corners (a disk) |
-| `origin` | from the coordinate axes ([guide](guide/boundary_conditions.md#local-coordinates)) | A point [m] where `u` starts: `(u, v)` is (0, 0) at the corner of a four-sided patch nearest to it, `u` is 0 at the face of a ring or a disk nearest to it, or at the end of a 2D boundary nearest to it. Not with four `corners` |
+| `origin` | from the coordinate axes ([guide](guide/boundary_conditions.md#local-coordinates)) | A point [m] where `u` starts: `(u, v)` is (0, 0) at the corner of a four-sided patch nearest to it, `u` is 0 at the face of a ring or a disk nearest to it, or at the end of a 2D boundary nearest to it, at any distance; a point as near to two of them (within 1% of the patch's size) is an error. Not with four `corners` |
 | `toward` | from the coordinate axes | 3D, with `origin`: a point [m] `u` grows toward: along the side to the corner next to the origin's that is nearest to it, or around a ring or a disk the way that reaches it sooner |
 | `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` and `n_m` measure the distance from, of any type (a non-empty list) |
 

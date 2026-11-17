@@ -232,6 +232,15 @@ TEST(BoundaryCoordinatesTest, UNeedsOneOpenCurve) {
     for (const FacePoint & x : local_coordinates(*mesh, corner, reversed, "zone", {bv::U}, WallDistance(), false, summary)) {
         EXPECT_NEAR(x[bv::U], 1.0 - 0.5 * (x[0] < 1.0 ? x[0] : 1.0 + x[1]), tol(1e-15, 1e-6));
     }
+    EXPECT_NE(summary.find("u = 0 at (1, 1)"), std::string::npos) << summary;
+    try {
+        local_coordinates(*mesh, corner, parse_toml("name = \"zone\"\norigin = [0.5, 0.5]\n"), "zone", {bv::U},
+                          WallDistance(), false, summary);
+        ADD_FAILURE() << "an origin as near to both ends is an error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("is as near to the end (0, 0) of the boundary as to the end (1, 1)"),
+                  std::string::npos) << e.what();
+    }
     // The top alone runs along +x, the right side along +y
     for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"top"}), entry, "zone", {bv::U},
                                                  WallDistance(), false, summary)) {

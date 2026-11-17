@@ -72,7 +72,13 @@ Decisions:
   user reads off the mesh or the CAD, they need no notion of an axis (which
   a cone, a bent pipe or an oblique panel make ambiguous) or of the default
   start (which an angle offset would), they need not lie on the patch, and
-  one sentence covers all shapes. `toward` is optional: without it the side
+  one sentence covers all shapes. The nearest candidate is taken at any
+  distance (a far point is a legitimate way to say "the corner on that
+  side") and logged; two candidates within 1% of the patch's size (the
+  square root of its area) of each other are an error that lists them, as
+  are a ring's or disk's faces on different sides (more than an eighth of a
+  turn apart) and a `toward` within 1% of a turn of the origin or of half
+  way around. `toward` is optional: without it the side
   `u` runs along by default is kept. `corners` remains for the other
   question, which nodes of an outline without four clear corners are the
   corners: four points, whose order then also fixes the start; `[]` makes a

@@ -366,6 +366,16 @@ In 2D `origin = [x, y]` picks the end of the boundary `u` starts from.
 along by default, starting at the origin's corner, and a ring or a disk its
 default direction.
 
+The points only have to say which: the nearest corner, face or end is taken
+however far the point is, so `origin = [0, -1, 0]` is a fine way to say "the
+corner on the -y side". The run log shows what was picked, as `(u, v) = (0,
+0) at (0, 0, 0), (1, 0) at (0, 0.3, 0)` or `u = 0 at (0.07, 0, 0.11), growing
+toward (0, 0.12, 0.05)`. A point that does not decide is an error listing
+the candidates: one as near to two corners (or ends) as each other, on the
+axis of a ring or at the center of a disk, or a `toward` at the origin or
+half way around from it. "As near" is within 1% of the patch's size (the
+square root of its area; the length of a 2D boundary).
+
 Without either:
 
 - **Four-sided.** `u` grows along the coordinate axis after the one the patch
