@@ -294,11 +294,11 @@ T = 0.7142857142857143
 | `theta` | 3D | Angle from the tangent toward the span: `atan2(eta, xi)`, in (-pi, pi] | rad |
 | `s` | 2D | Arc length along the boundary, from its end with the lowest `xi` | m |
 
-![The local coordinates of an inlet: its frame (origin, inward normal, tangent), a face's wall distance n, xi and arc length s; in 3D, xi, eta, r and theta in the inlet's plane](../images/guide/boundary_frame-light.svg#gh-light-mode-only)
-![The local coordinates of an inlet: its frame (origin, inward normal, tangent), a face's wall distance n, xi and arc length s; in 3D, xi, eta, r and theta in the inlet's plane](../images/guide/boundary_frame-dark.svg#gh-dark-mode-only)
+![The inlet of a pipe in its 3D mesh: the frame's origin at the inlet's center, the normal into the pipe, the tangent and the span in the inlet's plane, and one face's n to the wall, xi, eta, r and theta](../images/guide/boundary_frame-light.svg#gh-light-mode-only)
+![The inlet of a pipe in its 3D mesh: the frame's origin at the inlet's center, the normal into the pipe, the tangent and the span in the inlet's plane, and one face's n to the wall, xi, eta, r and theta](../images/guide/boundary_frame-dark.svg#gh-dark-mode-only)
 
-*The frame of an inlet and the coordinates of one of its faces
-(`tools/docs/inlets.py`).*
+*The inlet of a pipe in its mesh, the inlet's frame and the local coordinates
+of one of its faces (`tools/docs/boundary_coordinates.py`).*
 
 They are available in every value of the entry (`u`, `direction`, `p`, `T`,
 `p0`, `T0`, `mass_flux`, `profile`, `q`, `X` and `Y`, `dirichlet` states and
@@ -337,6 +337,18 @@ a wall. By default the walls are the faces of every `wall_adiabatic`,
 zones instead, of any type (a symmetry plane too). A curved wall counts by
 its straight faces.
 
+![n, xi, eta, r and theta over the inlet faces of a rectangular duct, a circular pipe and an annulus, as face colors and contour lines](../images/guide/boundary_coordinates-light.svg#gh-light-mode-only)
+![n, xi, eta, r and theta over the inlet faces of a rectangular duct, a circular pipe and an annulus, as face colors and contour lines](../images/guide/boundary_coordinates-dark.svg#gh-dark-mode-only)
+
+*The local coordinates over three inlets with the default frame, seen along
+the normal (tangent to the right, span up, + at the origin): each face in the
+color of its value, the lines those of the coordinate between the faces, and
+the range of the faces' values as the run log prints it. `n` follows every
+wall, the inner one of the annulus too; the annulus's origin, the center of
+its faces, lies in its hole, so `r` is the radius and `theta` goes around it
+(`tools/docs/boundary_coordinates.py`, which checks the frame and the ranges
+against Mallard's).*
+
 **The arc length** `s` (2D) runs along the faces from their end with the
 lowest `xi` (of two ends at the same `xi`, the one with the lower x, then
 y), so it is the distance along the boundary on a curved inlet. It
@@ -344,6 +356,13 @@ needs the faces to form one open curve; a closed curve or several pieces
 are an error naming the entry (split it with `where`, or use `xi` or `n`).
 In 3D a curved surface has no single arc length: use `xi`, `eta` or `r`,
 `theta`.
+
+![A 2D inlet on the outer arc of half a ring: s along the arc, xi along the frame's straight tangent, n to the nearer straight wall, and the three along the inlet](../images/guide/boundary_arc_length-light.svg#gh-light-mode-only)
+![A 2D inlet on the outer arc of half a ring: s along the arc, xi along the frame's straight tangent, n to the nearer straight wall, and the three along the inlet](../images/guide/boundary_arc_length-dark.svg#gh-dark-mode-only)
+
+*A curved 2D inlet, colored by `s`: `s` grows evenly along the faces, while
+`xi`, their position along the frame's straight tangent, flattens toward the
+ends where the inlet turns along the normal (`tools/docs/boundary_coordinates.py`).*
 
 A 1/7 power-law boundary layer of thickness 0.01 m on every wall an inlet
 touches, a fully developed pipe flow of bulk velocity 10 m/s on a circular inlet of
