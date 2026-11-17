@@ -1,0 +1,1 @@
+- A run started from a restart file writes the header and units lines of a probe CSV file that does not exist yet (or is empty), instead of rows with no header.

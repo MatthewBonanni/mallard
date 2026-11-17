@@ -1,0 +1,12 @@
+{
+ "default": "\"mesh.msh\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/3d/mesh_file.toml"
+ ],
+ "type": "string"
+}

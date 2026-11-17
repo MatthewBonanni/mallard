@@ -1826,6 +1826,31 @@ TEST(ProbesTest, RestartedRunsContinueTheTimeAveragesBitwise) {
     EXPECT_THROW(other.init(parse_toml(input)), InputError);
 }
 
+TEST(ProbesTest, RestartedRunsWriteTheHeaderOfFilesThatDoNotExist) {
+    const std::string dir = fresh_dir("restart_new_probe_file");
+    auto probe = [&](const std::string & file) {
+        return "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/" + file + "\"\nboundary_type = \"wall\"\n"
+               "fields = [\"MASS_FLUX\"]\ninterval = 3\n";
+    };
+    Solver first;
+    first.init(parse_toml(started_couette(
+        probe("first.csv") + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 5\n", 8)));
+    run(first);
+    std::string input = started_couette(probe("second.csv"), 8);
+    const size_t from = input.find("[initialize]\n"), to = input.find("[[boundaries]]");
+    input.replace(from, to - from, "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000005.restart\"\n");
+    Solver second;
+    second.init(parse_toml(input));
+    run(second);
+    if (comm::is_root()) {
+        std::ifstream in(dir + "/second.csv");
+        std::string line;
+        while (std::getline(in, line) && line.rfind("#", 0) == 0) {}
+        EXPECT_EQ(line.rfind("step,t,", 0), 0u) << line;
+    }
+    comm::barrier();
+}
+
 TEST(ProbesTest, RejectsAveragesOfAverages) {
     const std::string extra = "[statistics]\nfields = [\"P\"]\n[[probes]]\nname = \"p\"\ntype = \"point\"\npoint = " +
                               numbers3("0.3", "0.3", "0.3") + "\nfields = [\"MEAN_P\"]\naverage = true\n";

@@ -338,6 +338,9 @@ class MUSCL : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
         LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
+        // Measured on A100s: one fused kernel per cell is faster from about 2^17 cells, separate kernels (more
+        // parallel, shorter chains) below. Tests lower it to run the fused kernel on small meshes
+        static inline uint32_t fused_cells = 1u << 17;
 };
 
 /**
@@ -415,6 +418,17 @@ class TENO : public FaceReconstruction {
         uint32_t cell_of_row(const uint32_t r) const { return r < n_direct_rows ? r : extra_cells[r - n_direct_rows]; }
         /** @brief The table row of local cell c, or -1 if it has none. */
         int64_t row_of_cell(uint32_t c) const;
+        // The cells of structured blocks with a block shape read their central stencils by offsets
+        // (teno::BlockStencils); false (tests only) reads every cell's slots
+        bool block_path = true;
+        teno::BlockStencils block_stencils;
+        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
+        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
+        /**
+         * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
+         *        (after the tables are set up or rebuilt; a no-op unless block_path).
+         */
+        void find_block_stencils();
         /** @brief Each table row's global id, or null if the mesh is not distributed (its row then). */
         const uint64_t * global_cell_ids() const {
             if (mesh->h_global_cell_id.empty()) return nullptr;

@@ -378,7 +378,7 @@ struct Geometry {
     V<rtype *[N_DIM]> cell_coords;
     R<double *> cell_h;  // cube root of the volume
     V<uint32_t *> offsets_cells_of_cell, cells_of_cell;
-    V<uint8_t *> cells_of_cell_shift;
+    ShiftRowsOf<V<uint8_t *>> cells_of_cell_shift;
     R<int8_t *[3]> shift_lattice;
     R<double *[3]> translations;  // periodic translation of each lattice direction
     uint32_t n_translations = 0;
@@ -900,6 +900,8 @@ struct CellSetup {
     uint16_t wall_ns = 0;
     // Central stencil size per fitted monomial, for fits that drop the monomials of flat axes
     double stencil_factor = 2.0;
+    // Central stencil sizes to start from on pyramids, at the full and the wall degree (PYRAMID_ODD_FACTOR)
+    uint16_t pyramid_ns = 0, pyramid_wall_ns = 0;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1580,10 +1582,14 @@ struct CellSetup {
         }
         const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images fit a lower degree
-        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
+        const bool pyramid = g.offsets_nodes_of_cell(i + 1) - g.offsets_nodes_of_cell(i) == 5;
+        const uint32_t n_full = pyramid ? pyramid_ns : ns;
+        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
         const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
         const int nf = fit.n;
-        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf)) : at_wall ? wall_ns : ns;
+        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
+                                 : at_wall ? (pyramid ? pyramid_wall_ns : wall_ns)
+                                           : (pyramid ? pyramid_ns : ns);
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
@@ -2745,16 +2751,19 @@ struct CellTeam {
             axes = spanned.axes();
         }, flat);
         // Stencils reaching a curved wall without mirror images fit a lower degree
+        const bool pyramid = c.g.offsets_nodes_of_cell(i + 1) - c.g.offsets_nodes_of_cell(i) == 5;
+        const uint32_t n_full = pyramid ? c.pyramid_ns : c.ns;
         bool at_wall = false;
         if (c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
             Kokkos::single(Kokkos::PerTeam(tm), [&](bool & reached) {
-                reached = c.reaches_wall(w, uint32_t(n_entries) < c.ns ? uint32_t(n_entries) : c.ns);
+                reached = c.reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
             }, at_wall);
         }
         const FitColumns fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
         const int nf = fit.n;
-        const uint16_t n_first =
-            flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf)) : at_wall ? c.wall_ns : c.ns;
+        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
+                                 : at_wall ? (pyramid ? c.pyramid_wall_ns : c.wall_ns)
+                                           : (pyramid ? c.pyramid_ns : c.ns);
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
             const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
@@ -3379,13 +3388,15 @@ class Setup3D {
             nss = opt.nss;
             ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
             nss_max = 2 * nss;
+            pyramid_ns = pyramid_start(opt.degree, ns);
+            pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);
             const uint32_t n_cells = mesh.n_cells;
 
             Geometry<HostMem> & h = host;
             h.cell_coords = mesh.h_cell_coords;
             h.offsets_cells_of_cell = mesh.h_offsets_cells_of_cell;
             h.cells_of_cell = mesh.h_cells_of_cell;
-            h.cells_of_cell_shift = mesh.h_cells_of_cell_shift;
+            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
             h.offsets_faces_of_cell = mesh.h_offsets_faces_of_cell;
             h.faces_of_cell = mesh.h_faces_of_cell;
             h.offsets_nodes_of_face = mesh.h_offsets_nodes_of_face;
@@ -3488,7 +3499,7 @@ class Setup3D {
             d.cell_coords = mesh.cell_coords;
             d.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
             d.cells_of_cell = mesh.cells_of_cell;
-            d.cells_of_cell_shift = mesh.cells_of_cell_shift;
+            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
             d.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
             d.faces_of_cell = mesh.faces_of_cell;
             d.offsets_nodes_of_face = mesh.offsets_nodes_of_face;
@@ -3663,7 +3674,7 @@ class Setup3D {
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                              double(options.stencil_factor)};
+                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3676,7 +3687,7 @@ class Setup3D {
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                    double(options.stencil_factor)},
+                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3754,7 +3765,7 @@ class Setup3D {
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                                  double(options.stencil_factor)};
+                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -3804,7 +3815,7 @@ class Setup3D {
         Tables tables;
         Kokkos::View<Tables, DefaultMem> d_tables;
         uint8_t wall_nk = 0;
-        uint16_t wall_ns = 0;
+        uint16_t wall_ns = 0, pyramid_ns = 0, pyramid_wall_ns = 0;
         uint8_t r = 0, nk = 0;
         uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
         Caps caps;
@@ -3837,7 +3848,8 @@ struct Geometry2D {
     V<rtype *> face_area;
     V<uint32_t *> offsets_cells_of_cell, cells_of_cell, offsets_faces_of_cell, faces_of_cell, offsets_nodes_of_face,
         nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
-    V<uint8_t *> cells_of_cell_shift, face_shift;
+    V<uint8_t *> face_shift;
+    ShiftRowsOf<V<uint8_t *>> cells_of_cell_shift;
     V<int32_t *[2]> cells_of_face;
     V<rtype ***> quad_points;  // (face, q, d): curved meshes
     R<int8_t *[3]> shift_lattice;
@@ -3851,6 +3863,8 @@ struct Geometry2D {
     R<int32_t *> boundary_ordinal;  // (face): teno::entry_code
     R<double *> cell_h;             // square root of the area
     R<uint8_t *> mirror_face;       // (face): mirrors stencil entries
+    R<uint32_t *> far_start;        // (face + 1): its rows of far_pieces
+    R<double *[4]> far_pieces;      // the boundary behind a mirror face (boundary_behind_faces)
     R<uint8_t *> wall_cell;         // (cell): has a curved wall face without mirror images (empty if none)
     R<double *[9]> metric;          // (reconstructed cell)
     R<double *[3]> triangle_rule;   // (q, [xi, eta, w]) on the reference triangle
@@ -4085,6 +4099,29 @@ struct CellSetup2D {
         return true;
     }
 
+    /**
+     * @brief Whether a point at depth behind line p, with its foot at (fx, fy),
+     *        lies past the boundary behind the line's face under the foot: in
+     *        the flow beyond a body thinner than that depth.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool past_far_side(const Lanes2D & w, const uint32_t p, const uint32_t n_lf, const double fx, const double fy,
+                       const double depth, const double tol) const {
+        for (uint32_t k = 0; k < n_lf; k++) {
+            if (w.lf_line[k] != p) continue;
+            const uint32_t f = uint32_t(w.lf_face[k]);
+            const double s = -(fx - w.lf[4 * k]) * w.lf[4 * k + 3] + (fy - w.lf[4 * k + 1]) * w.lf[4 * k + 2];
+            if (Kokkos::fabs(s) > 0.5 * double(g.face_area(f)) + tol) continue;
+            for (uint32_t q = g.far_start(f); q < g.far_start(f + 1); q++) {
+                const double s0 = g.far_pieces(q, 0), s1 = g.far_pieces(q, 2);
+                if (s < s0 - tol || s > s1 + tol) continue;
+                const double t = Kokkos::fmin(Kokkos::fmax((s - s0) / (s1 - s0), 0.0), 1.0);
+                if (depth > g.far_pieces(q, 1) + t * (g.far_pieces(q, 3) - g.far_pieces(q, 1)) + tol) return true;
+            }
+        }
+        return false;
+    }
+
     KOKKOS_INLINE_FUNCTION
     double distance2(const uint32_t i, const double dx, const double dy) const {
         return g.metric(i, 0) * dx * dx + (g.metric(i, 1) + g.metric(i, 3)) * dx * dy + g.metric(i, 4) * dy * dy;
@@ -4162,8 +4199,10 @@ struct CellSetup2D {
      *        the side of the domain that the target cell is on: across the
      *        extension of a facet of a curved wall, or across the far side of
      *        a thin body, it lands on another part of the flow. Images that
-     *        land inside the domain (non-convex boundaries) are not ghosts.
-     *        Returns their number, or -1 when the scratch is full.
+     *        land inside the domain (non-convex boundaries), or deeper behind
+     *        the line than the body under their foot (past the far side of a
+     *        closed trailing edge), are not ghosts. Returns their number, or
+     *        -1 when the scratch is full.
      */
     KOKKOS_INLINE_FUNCTION
     int gather(const Lanes2D & w, const uint32_t i, const uint32_t n_visits, const double x0, const double y0,
@@ -4206,7 +4245,7 @@ struct CellSetup2D {
                 const double ey = cy - 2.0 * d * lny;
                 bool inside = false;
                 for (uint32_t o = 0; o < n_visits && !inside; o++) inside = point_in_cell(w, o, ex, ey, h);
-                if (inside) continue;
+                if (inside || past_far_side(w, p, n_lf, cx - d * lnx, cy - d * lny, 2.0 * d, tol)) continue;
                 // The ghost state comes from the line's face nearest to the image
                 double best = Kokkos::Experimental::finite_max_v<double>;
                 int32_t nearest = -1;
@@ -4636,6 +4675,71 @@ struct CellSetup2D {
     }
 };
 
+/**
+ * @brief The boundary behind each mirror face of a 2D mesh, which bounds the
+ *        body under it: the parts of the other boundary faces of the domain
+ *        (not between ranks) in the strip behind the face, each as (s0, d0,
+ *        s1, d1) with s along the face from its center (along the inward
+ *        normal turned by a quarter turn counterclockwise) and d the depth
+ *        behind its line, in rows start[f] to start[f + 1]. A ray from the
+ *        face into the body leaves it at the least depth of the pieces over
+ *        its foot.
+ */
+void boundary_behind_faces(const Mesh & mesh, const std::vector<uint8_t> & boundary,
+                           const Geometry2D<HostMem>::R<uint8_t *> & mirror_face, std::vector<uint32_t> & start,
+                           std::vector<std::array<double, 4>> & pieces) {
+    std::vector<uint32_t> faces;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        if (boundary[f]) faces.push_back(f);
+    }
+    auto node = [&](const uint32_t f, const uint32_t a, const uint32_t d) {
+        return double(mesh.h_node_coords(mesh.h_node_of_face(f, a), d));
+    };
+    start.assign(size_t(mesh.n_faces) + 1, 0);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        start[f] = uint32_t(pieces.size());
+        if (!mirror_face(f)) continue;
+        const double half = 0.5 * double(mesh.h_face_area(f));
+        const double cx = double(mesh.h_face_coords(f, 0)), cy = double(mesh.h_face_coords(f, 1));
+        double nx = double(mesh.h_face_normals(f, 0)) / (2.0 * half), ny = double(mesh.h_face_normals(f, 1)) / (2.0 * half);
+        const uint32_t cell = uint32_t(mesh.h_cells_of_face(f, 0));
+        if ((double(mesh.h_cell_coords(cell, 0)) - cx) * nx + (double(mesh.h_cell_coords(cell, 1)) - cy) * ny < 0.0) {
+            nx = -nx;
+            ny = -ny;
+        }
+        const double tol = GEOMETRY_TOL * half;
+        for (const uint32_t b : faces) {
+            if (b == f) continue;
+            double s[2], d[2];
+            for (uint32_t a = 0; a < 2; a++) {
+                const double x = node(b, a, 0) - cx, y = node(b, a, 1) - cy;
+                s[a] = -x * ny + y * nx;
+                d[a] = -(x * nx + y * ny);
+            }
+            if (s[0] > s[1]) {
+                std::swap(s[0], s[1]);
+                std::swap(d[0], d[1]);
+            }
+            // Outside the strip, or across it (meets it at one point)
+            if (s[1] - s[0] <= tol || s[1] <= -half || s[0] >= half) continue;
+            auto depth = [&](const double t) { return d[0] + (d[1] - d[0]) * (t - s[0]) / (s[1] - s[0]); };
+            double s0 = std::max(s[0], -half), s1 = std::min(s[1], half);
+            double d0 = depth(s0), d1 = depth(s1);
+            // In front of the face or along its line
+            if (d0 <= tol && d1 <= tol) continue;
+            if (d0 < 0.0) {
+                s0 += (s1 - s0) * -d0 / (d1 - d0);
+                d0 = 0.0;
+            } else if (d1 < 0.0) {
+                s1 = s0 + (s1 - s0) * d0 / (d0 - d1);
+                d1 = 0.0;
+            }
+            pieces.push_back({s0, d0, s1, d1});
+        }
+    }
+    start[mesh.n_faces] = uint32_t(pieces.size());
+}
+
 }  // namespace
 
 /** @brief The 2D setup of one mesh. */
@@ -4671,7 +4775,7 @@ class Setup2D {
             h.nodes_of_face = mesh.h_nodes_of_face;
             h.offsets_nodes_of_cell = mesh.h_offsets_nodes_of_cell;
             h.nodes_of_cell = mesh.h_nodes_of_cell;
-            h.cells_of_cell_shift = mesh.h_cells_of_cell_shift;
+            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
             h.face_shift = mesh.h_face_shift;
             h.cells_of_face = mesh.h_cells_of_face;
             h.n_complete = mesh.n_complete();
@@ -4710,11 +4814,23 @@ class Setup2D {
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
+            std::vector<uint8_t> boundary(mesh.n_faces);
             Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
-                h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
-                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
-                                   !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
+                boundary[f] = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                              h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+                h.mirror_face(f) = boundary[f] && !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
             });
+            {
+                std::vector<uint32_t> start;
+                std::vector<std::array<double, 4>> pieces;
+                boundary_behind_faces(mesh, boundary, h.mirror_face, start, pieces);
+                h.far_start = Geometry2D<HostMem>::R<uint32_t *>("teno_setup_far_start", start.size());
+                h.far_pieces = Geometry2D<HostMem>::R<double *[4]>("teno_setup_far_pieces", pieces.size());
+                for (size_t f = 0; f < start.size(); f++) h.far_start(f) = start[f];
+                for (size_t q = 0; q < pieces.size(); q++) {
+                    for (size_t a = 0; a < 4; a++) h.far_pieces(q, a) = pieces[q][a];
+                }
+            }
             if (mesh.curved_geometry && !opt.curved_mirrors && opt.curved_wall_degree < opt.degree) {
                 h.wall_cell = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_wall_cell", n_cells);
                 for (uint32_t f = 0; f < mesh.n_faces; f++) {
@@ -4792,7 +4908,7 @@ class Setup2D {
             d.nodes_of_face = mesh.nodes_of_face;
             d.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
             d.nodes_of_cell = mesh.nodes_of_cell;
-            d.cells_of_cell_shift = mesh.cells_of_cell_shift;
+            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
             d.face_shift = mesh.face_shift;
             d.cells_of_face = mesh.cells_of_face;
             d.quad_points = quad_points;
@@ -4807,6 +4923,8 @@ class Setup2D {
             d.boundary_ordinal = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.boundary_ordinal);
             d.cell_h = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.cell_h);
             d.mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.mirror_face);
+            d.far_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.far_start);
+            d.far_pieces = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.far_pieces);
             if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
             d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
             d.triangle_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.triangle_rule);
