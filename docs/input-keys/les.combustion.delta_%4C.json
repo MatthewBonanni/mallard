@@ -1,6 +1,7 @@
 {
  "dimension": "length (m)",
  "dims": [
+  2,
   3
  ],
  "required": true,

@@ -60,8 +60,8 @@ Pairs are strict / with mirror images. The Volvo mesh (four planar blocks,
 graded, extruded over 64 periodic cells) is one structured block, but no two of
 its cells share a stencil shape except along the span: the index arithmetic
 applies everywhere, the shared tables only per spanwise column. A periodic box
-counts fully only if its block wraps its index across the periodic faces
-(below). The other 3D examples on generated boxes
+counts fully: the cells along its periodic faces read the cells across them by
+offsets too (below). The other 3D examples on generated boxes
 (`explosion_3d`, `sedov_3d`, `detonation_3d`, `shock_bubble_3d`) are uniform
 boxes like `teno5_3d`.
 
@@ -159,7 +159,12 @@ reconstruction's setup, each rank finds its blocks among its owned cells:
 3. **Boxes.** A block is a box of lattice indices $[0, N_a) \times [0, N_b)
    \times [0, N_c)$ of owned cells; a labeled region that is not a box splits into
    boxes. On generated meshes and multi-jagged parts, each rank has one box per
-   generated block.
+   generated block. Faces match by the periodic classes of their nodes, as the
+   mesh matches them, so a box continues across a periodic boundary where a
+   rank owns the cells on both sides (a graph partition's part, for example).
+   The search crosses periodic boundaries only once it reaches no further cell
+   without, so a box that a periodic direction closes on itself is cut at its
+   periodic boundary and keeps the numbering it has without periodicity.
 4. **Stencil shapes.** A cell's shape is the geometry of the cells its
    reconstruction reads: their offsets and volumes in the frame of the cell,
    rounded to $10^{-9}h$. Rounding keeps the coordinates' round-off
@@ -193,8 +198,8 @@ faces rely on.
 
 - Cells within $R$ of a box face go unstructured, including at partition faces,
   since halo cells are numbered after owned cells (the partition counts
-  above). A block that spans a periodic direction on one rank can wrap its
-  index along that axis (one comparison per entry) and lose no cells there.
+  above). The cells along a periodic boundary inside a rank stay on the block
+  path: their offsets reach the cells across it ([block shapes](#implementation)).
 - Faces keep the numbering of the cells' order and their global orientation;
   the block kernels write face states through `faces_of_cell`, as the
   prototype does. Implicit face indices would need block faces numbered by

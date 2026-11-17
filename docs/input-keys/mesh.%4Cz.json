@@ -27,7 +27,9 @@
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml"
  ],
  "type": "number"
 }

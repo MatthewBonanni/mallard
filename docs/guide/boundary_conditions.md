@@ -966,8 +966,8 @@ axis = [0.0, 0.0, 1.0]
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
-[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d)
-and 12 more.
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
+and 13 more.
 
 Rules: zone B must match zone A node for node (to 1e-6 of the zones' shortest
 edge) after the translation or rotation, and a node without a partner is
@@ -995,7 +995,7 @@ nscbc = { L = 0.1 }        # a length of the domain [m]; sigma = 0.25 by default
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body)
-and 1 more.
+and 2 more.
 
 `nscbc` makes `outlet_pressure` and `inlet_state` Navier–Stokes
 characteristic boundary conditions, partially non-reflecting (Poinsot & Lele
