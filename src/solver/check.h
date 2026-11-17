@@ -103,6 +103,23 @@ struct CheckEstimate {
     std::string basis;     // what it is estimated from
     bool located = false;  // x: where the value is
     std::array<double, N_DIM> x{};
+    std::string region;    // the region it is of (check.regions, or a cell zone of the mesh); empty: the domain
+};
+
+/** @brief The viscous scales of each owned cell that the values per region read (check_viscous_scales). */
+struct CheckCellScales {
+    std::vector<double> rho, nu;  // the state's
+    std::vector<double> epsilon;  // dissipation per unit mass: the statistics', or the state's; empty: domain only
+    std::vector<double> y_plus;   // first-cell y+ of walls without a wall model, 0 elsewhere
+    std::string epsilon_basis;
+};
+
+/** @brief [check] of the input: the regions the resolution report gives values for, and an earlier run's
+ *         dissipation. */
+struct CheckInputs {
+    std::vector<std::pair<std::string, std::vector<double>>> regions;  // name, fractions of the owned cells
+    std::vector<double> strain;  // per owned cell, check.statistics' <|S|^2> = 2 <S_ij S_ij> (or <omega^2>)
+    std::string statistics;      // what strain is, from which file; empty without check.statistics
 };
 
 /** @brief What a run would run on: the build, where each rank runs, MPI and NCCL (check_environment). */

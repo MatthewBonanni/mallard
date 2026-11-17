@@ -1,0 +1,8 @@
+{
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/3d/mesh_file.toml"
+ ]
+}

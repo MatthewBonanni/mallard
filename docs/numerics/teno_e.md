@@ -157,6 +157,20 @@ touches, except:
     across the other side land next to the cells on the first. Both gave an
     odd-even mode in the wall pressure of the NACA 0012 tutorial mesh at
     order 3;
+- in 2D, images deeper behind the line than the body under their foot: the
+    path from the foot to the image crosses another boundary face, so the
+    image lands past the far side of the body, among the flow there (#976).
+    Near a closed trailing edge the body is thinner than the stencils, and
+    the cells on one side mirrored across their own side land beyond the
+    other side, where cells of the other side and of the wake are also in
+    the stencil. On the NACA 0012 tutorial mesh this gave an odd-even mode
+    in the wall pressure at order 4 from x = 0.9 to the trailing edge,
+    largest at x = 0.975 (6% of the dynamic pressure at t = 20, against 1%
+    for order 5 anywhere on the wall). The setup finds, for each mirror face,
+    the parts of the other boundary faces in the strip behind it
+    (`boundary_behind_faces`), whose least depth over the foot bounds the
+    body; it searches every boundary face of the rank's mesh, so the far side
+    must lie within its halo;
 - boundaries between MPI ranks (`PARTITION` faces), which are not boundaries
     of the domain;
 - curved wall and symmetry faces, which take no images unless
@@ -710,9 +724,27 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     fourth at the walls. The fine cylinder at order 5 keeps a small drag
     noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
     along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not.
+    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
+    not known (#427).
 
-- **Thin cells.** Before the ranking metric, a 1% pressure pulse at rest in
+- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
+    at curved walls looks only at a stencil's first $n_0$ candidates
+    ([central stencil](#central-stencil)). When the Lebesgue search grows
+    the stencil past them, the entries it adds can be cells at a curved wall,
+    and the stencil keeps the full degree, one-sided there. On a $6^3$
+    `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
+    28 at order 6 do so. The 2D and 3D setups both check only the first
+    $n_0$ entries, for every cell type.
+
+- **Order 4.** `high_order` stays at order 5 because order 4 fails three
+    robustness checks that order 5 passes
+    ([order-4 study](../design/teno4_robustness.md)): it amplifies an
+    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
+    odd-even wall pressure at the closed trailing edge of the NACA 0012
+    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
+    times more than order 5 (#977).
+
+- **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
     $0.0625\times 0.0625\times 0.01$ (symmetry walls) reached Mach 0.8 by
     $t = 2$ at order 3, and `cartesian_tet` cells of the same size Mach 1.2.
