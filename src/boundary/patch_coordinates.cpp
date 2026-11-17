@@ -535,19 +535,33 @@ std::vector<double> turns_of(const Triangulation & m, const std::vector<double> 
     return turns;
 }
 
-/** @brief Turns u of a ring or a disk so that it is 0 at the face nearest to the seam; that face's center. */
-Vec3 start_at(const Triangulation & m, Coordinates & out, const Vec3 & seam) {
+size_t nearest_face(const Triangulation & m, const Vec3 & p) {
     size_t nearest = 0;
     for (size_t f = 1; f < m.n_faces(); f++) {
-        if (length(sub(m.face_center(f), seam)) < length(sub(m.face_center(nearest), seam))) nearest = f;
+        if (length(sub(m.face_center(f), p)) < length(sub(m.face_center(nearest), p))) nearest = f;
     }
-    const double start = out.faces[nearest].u;
+    return nearest;
+}
+
+/**
+ * @brief Turns u of a ring or a disk so that it is 0 at the face nearest to the origin given and grows the way
+ *        that reaches `toward` sooner; where u is 0, for the log.
+ */
+std::string start_of(const Triangulation & m, Coordinates & out, const Corners & at, const Vec3 & fallback) {
+    if (!at.origin) return "toward " + text(fallback);
+    const size_t first = nearest_face(m, *at.origin);
+    const double start = out.faces[first].u;
+    bool reverse = false;
+    if (at.toward) {
+        const double ahead = out.faces[nearest_face(m, *at.toward)].u - start;
+        reverse = ahead - std::floor(ahead) > 0.5;
+    }
     for (Values & f : out.faces) {
-        f.u -= start;
+        f.u = reverse ? start - f.u : f.u - start;
         f.u -= std::floor(f.u);
         if (!(f.u < 1.0)) f.u = 0.0;
     }
-    return m.face_center(nearest);
+    return "at " + text(m.face_center(first));
 }
 
 /** @brief Position on the loop of its node nearest to p. */
@@ -571,15 +585,15 @@ std::vector<uint32_t> side(const std::vector<uint32_t> & loop, const size_t a, c
 
 Coordinates four_sided(const Triangulation & m, const Laplacian & K, const Corners & at,
                        const std::vector<size_t> & found) {
-    if (at.seam) {
-        fail(at, "seam is given, but the patch is four-sided: u runs from one side to the opposite one",
-             "Remove seam; corners = [[x, y, z], ...] sets where u and v start on a four-sided patch");
-    }
     const std::vector<uint32_t> & loop = m.loops[0];
     const size_t n = loop.size();
     // sides[0] has v = 0 and u from 0 to 1; sides[1] u = 1; sides[2] v = 1; sides[3] u = 0
     std::array<std::vector<uint32_t>, 4> sides;
     if (at.points) {
+        if (at.origin) {
+            fail(at, "corners already says where u and v start: its first point is (u, v) = (0, 0)",
+                 "Remove origin and toward, or remove corners if the outline has four clear corners");
+        }
         std::array<size_t, 4> q{};
         for (size_t i = 0; i < 4; i++) q[i] = nearest_on_loop(m, loop, (*at.points)[i]);
         std::array<size_t, 4> ahead{};
@@ -602,13 +616,26 @@ Coordinates four_sided(const Triangulation & m, const Laplacian & K, const Corne
             segment[i] = side(loop, found[i], found[(i + 1) % 4], 1);
             center[i] = m.chain_center(segment[i], false);
         }
+        auto corner_near = [&](const Vec3 & p, const std::array<size_t, 2> & among) {
+            return length(sub(m.x[loop[found[among[0]]]], p)) <= length(sub(m.x[loop[found[among[1]]]], p)) ? among[0]
+                                                                                                           : among[1];
+        };
+        size_t origin = 4;
+        if (at.origin) origin = corner_near(*at.origin, {corner_near(*at.origin, {0, 1}), corner_near(*at.origin, {2, 3})});
         double best = -std::numeric_limits<double>::infinity();
         for (size_t start = 0; start < 4; start++) {
+            if (at.origin && start != origin) continue;
             for (const bool forward : {true, false}) {
+                // u runs from the corner `start` to the next one around the outline, or to the one before
+                if (at.toward && forward != (corner_near(*at.toward, {(start + 1) % 4, (start + 3) % 4}) == (start + 1) % 4)) {
+                    continue;
+                }
                 std::array<size_t, 4> order{};
                 for (size_t i = 0; i < 4; i++) order[i] = forward ? (start + i) % 4 : (start + 7 - i) % 4;
-                const double score = dot(unit(sub(center[order[1]], center[order[3]])), reference.first) +
-                                     dot(unit(sub(center[order[2]], center[order[0]])), reference.second);
+                const double along = dot(unit(sub(center[order[1]], center[order[3]])), reference.first);
+                const double across = dot(unit(sub(center[order[2]], center[order[0]])), reference.second);
+                // From a given corner u keeps the side it runs along by default, in either direction
+                const double score = at.origin ? std::abs(along) + std::abs(across) : along + across;
                 if (!(score > best + 1e-12)) continue;
                 best = score;
                 for (size_t i = 0; i < 4; i++) {
@@ -705,7 +732,7 @@ Coordinates ring(const Triangulation & m, const Laplacian & K, const Corners & a
     for (size_t f = 0; f < m.n_faces(); f++) {
         out.faces[f] = {u[f], std::clamp(m.at_center(f, v), 0.0, 1.0), 0.0, m.at_center(f, from_v)};
     }
-    const std::string start = at.seam ? "at " + text(start_at(m, out, *at.seam)) : "toward " + text(Reference(axis).first);
+    const std::string start = start_of(m, out, at, Reference(axis).first);
     set_arc_lengths(out, from_v, last, rim[inner], rim[1 - inner]);
     out.summary = "ring, v = 0 on the rim around " + text(center[inner]) + ", 1 on the rim around " +
                   text(center[1 - inner]) + ", u = 0 " + start;
@@ -776,8 +803,7 @@ Coordinates disk(const Triangulation & m, const Laplacian & K, const Corners & a
     }
     turns = around(m, turns, Reference(unit(m.mean_normal)));
     for (size_t f = 0; f < m.n_faces(); f++) out.faces[f].u = turns[f];
-    const std::string start = at.seam ? "at " + text(start_at(m, out, *at.seam))
-                                      : "toward " + text(Reference(unit(m.mean_normal)).first);
+    const std::string start = start_of(m, out, at, Reference(unit(m.mean_normal)).first);
     set_arc_lengths(out, from_v, m.loops[0], 0.0, m.loop_length(m.loops[0]));
     out.summary = "disk, v = 0 at " + text(center) + ", u = 0 " + start;
     return out;
@@ -789,6 +815,9 @@ Coordinates coordinates(const Surface & surface, const Corners & at) {
     if (at.points && !at.points->empty() && at.points->size() != 4) {
         fail(at, "corners has " + std::to_string(at.points->size()) + " points",
              "Give the four corners of the patch, or corners = [] for a patch without corners (a disk)");
+    }
+    if (at.toward && !at.origin) {
+        fail(at, "toward is given without origin", "Give origin = [x, y, z], the point where u starts; u grows toward `toward`");
     }
     const Triangulation m = triangulate(surface, at);
     const Laplacian K(m);

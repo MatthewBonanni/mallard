@@ -1040,13 +1040,16 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            for (const char * key : {"corners", "seam"}) {
+            for (const char * key : {"corners", "origin", "toward"}) {
                 if (!bound.contains(key)) continue;
-                if (N_DIM == 2) {
+                if (N_DIM == 2 && std::string(key) != "origin") {
                     throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
-                                      .message = "a 2D boundary is a curve, which has two ends and no " +
-                                                 std::string(key),
-                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1",
+                                      .message = std::string(key) == "corners"
+                                                     ? "a 2D boundary is a curve, which has two ends and no corners"
+                                                     : "a 2D boundary is a curve: origin alone says which end u "
+                                                       "starts from",
+                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
+                                             "the end nearest to origin = [x, y] if that is given",
                                       .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
                 }
                 if (!reads_patch) throw unused_key(key, "u or v");

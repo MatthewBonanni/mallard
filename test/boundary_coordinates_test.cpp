@@ -168,8 +168,8 @@ TEST(BoundaryCoordinatesTest, RingsOfTheAnnulusMeshHaveTheirRadiusHeightAndAngle
         EXPECT_EQ(x[bv::THETA], 2.0 * M_PI * x[bv::U]);
         EXPECT_NEAR(x[bv::U_M], x[bv::U] * 2.0 * M_PI * r, 0.02);
     }
-    // A seam of its own: theta from -y
-    const Input seamed = parse_toml("name = \"zone\"\nseam = [0.0, -1.5, 0.0]\n");
+    // A start of its own: theta from -y
+    const Input seamed = parse_toml("name = \"zone\"\norigin = [0.0, -1.5, 0.0]\n");
     double least = 1.0;
     for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"back"}), seamed, "zone", {bv::THETA},
                                                  WallDistance(), false, summary)) {
@@ -226,6 +226,11 @@ TEST(BoundaryCoordinatesTest, UNeedsOneOpenCurve) {
         const double expected = x[0] < 1.0 ? x[0] : 1.0 + x[1];
         EXPECT_NEAR(x[bv::U_M], expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
         EXPECT_NEAR(x[bv::U], 0.5 * expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
+    }
+    // From the end nearest to origin instead
+    const Input reversed = parse_toml("name = \"zone\"\norigin = [0.9, 1.2]\n");
+    for (const FacePoint & x : local_coordinates(*mesh, corner, reversed, "zone", {bv::U}, WallDistance(), false, summary)) {
+        EXPECT_NEAR(x[bv::U], 1.0 - 0.5 * (x[0] < 1.0 ? x[0] : 1.0 + x[1]), tol(1e-15, 1e-6));
     }
     // The top alone runs along +x, the right side along +y
     for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"top"}), entry, "zone", {bv::U},
@@ -365,6 +370,9 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = [\"bottom\"]\n"
                          "corners = []\n", run),
                  N_DIM == 2 ? "has two ends and no corners" : "so corners has no effect");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + u\"\ntoward = " +
+                         vec("0.0", "0.5") + "\n", run),
+                 N_DIM == 2 ? "origin alone says which end" : "toward is given without origin");
     // A wall reading n measures from itself by default
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = 1.0\n", run,
                          "wall_isothermal\"\nT = \"1 + n", ns_state()),

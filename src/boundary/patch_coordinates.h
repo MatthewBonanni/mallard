@@ -48,10 +48,12 @@ struct Coordinates {
     std::string summary;        // the shape and what fixes its coordinates, for the run log
 };
 
-/** @brief Where the patch's corners are, and where u starts around a ring or a disk: found from the patch, or given. */
+/** @brief Where the patch's corners are, where u starts and which way it grows: found from the patch, or given. */
 struct Corners {
     std::optional<std::vector<Vec3>> points;  // none (a disk) or four, in the order (u, v) = (0, 0), (1, 0), (1, 1), (0, 1)
-    std::optional<Vec3> seam;                 // ring, disk: u = 0 at the face nearest to this point
+    // u (and v) is 0 at the corner (four-sided) or the face (ring, disk) nearest to `origin`, and u grows toward
+    // the adjacent corner nearest to `toward`, or around the patch the way that reaches `toward` sooner
+    std::optional<Vec3> origin, toward;
     std::string key;                          // of the [[boundaries]] entry, for errors
     size_t line = 0;
 };

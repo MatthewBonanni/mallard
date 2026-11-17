@@ -335,13 +335,46 @@ coordinates that Laplace's equation on the patch's own surface gives
 ([design note](../design/patch_coordinates.md)). They are computed once at
 setup from all of the entry's faces, the same on any number of ranks.
 
-Where `u` and `v` start:
+**Where `u` starts and which way it grows.** Two optional points say it,
+the same way on every patch: `origin`, where `u` (and `v`) is 0, and
+`toward`, where `u` grows to. Neither has to lie exactly on the patch.
+
+```toml
+# Four-sided: (u, v) = (0, 0) at the corner nearest to origin; u runs along the
+# side to the next corner nearest to toward, v along the other side
+[[boundaries]]
+name = "panel"
+type = "wall_isothermal"
+T = "300 + 200 * u"
+origin = [0.0, 0.0, 0.0]
+toward = [0.0, 0.3, 0.0]
+
+# Ring or disk: u (and theta) is 0 at the face nearest to origin, and grows
+# around the way that reaches toward sooner
+[[boundaries]]
+name = "annular_inlet"
+type = "inlet_state"
+u = 30.0
+p = 1.0e5
+T = "300 + 50 * cos(8 * theta)"   # eight streaks, the first at the origin
+origin = [0.0, 0.0, 0.12]
+toward = [0.0, 0.12, 0.0]
+```
+
+In 2D `origin = [x, y]` picks the end of the boundary `u` starts from.
+`toward` is optional: without it a four-sided patch keeps the side `u` runs
+along by default, starting at the origin's corner, and a ring or a disk its
+default direction.
+
+Without either:
 
 - **Four-sided.** `u` grows along the coordinate axis after the one the patch
   faces, and `v` along the next (x to y to z to x): on an inlet across x, `u`
   runs along +y and `v` along +z; across y, `u` along +z and `v` along +x;
-  across z, `u` along +x and `v` along +y. On a patch oblique to the axes it
-  is the pair of sides nearest to that.
+  across z, `u` along +x and `v` along +y. A patch across no coordinate axis
+  counts as across the one its mean normal is nearest to (of two as near,
+  the first), and `u` runs between the pair of opposite sides most nearly
+  along the next axis as seen across the normal.
 - **Ring.** `v` is 0 on the shorter rim (the inner circle of an annulus, the
   narrow end of a cone) and, between rims as long as each other (a pipe), on
   the lower one along the ring's axis. `u` is 0 on the side of the coordinate
@@ -354,29 +387,17 @@ Where `u` and `v` start:
 - **Curve (2D).** `u` is 0 at the end with the lower coordinate along the axis
   the boundary mostly runs along (the lower y on an inlet across x).
 
-Write `1 - u` to turn a coordinate around. `corners` sets the corners of a
-four-sided patch instead, in the order `(u, v)` = (0, 0), (1, 0), (1, 1),
-(0, 1): for a patch whose outline has no clear corners or more than four
-(each point is moved to the nearest node of the outline), or to choose where
-`u` and `v` start. `corners = []` treats a patch with corners as a disk.
+`1 - u` in an expression also turns a coordinate around.
 
-`seam` sets where `u` starts around a ring or a disk: a point, and `u` is 0
-(and `theta` 0) at the face nearest to it. Fuel holes, struts and hot
-streaks then sit where the expression puts them, whatever the axes are:
+**Corners.** A four-sided patch is found by the four corners of its outline.
+For an outline with no clear corners or more than four, `corners` lists the
+four to use, in the order `(u, v)` = (0, 0), (1, 0), (1, 1), (0, 1) (each is
+moved to the nearest node of the outline; `origin` and `toward` are then not
+needed). `corners = []` treats a patch with corners as a disk.
 
 ```toml
 [[boundaries]]
-name = "annular_inlet"
-type = "inlet_state"
-u = 30.0
-p = 1.0e5
-T = "300 + 50 * cos(8 * theta)"   # eight streaks, the first at the seam
-seam = [0.0, 0.0, 0.12]           # any point on the side where u should start [m]
-```
-
-```toml
-[[boundaries]]
-name = "panel"
+name = "curved_panel"
 type = "wall_isothermal"
 T = "300 + 200 * u"   # from the side through the first and last corner to the opposite one
 corners = [[0, 0, 0], [0.4, 0, 0.1], [0.4, 0.3, 0.1], [0, 0.3, 0]]
@@ -446,7 +467,8 @@ walls = ["slot_wall"]
 | Key | Default | Meaning |
 |---|---|---|
 | `corners` | found from the patch's outline | 3D: the four corners of the patch [m], where `(u, v)` is (0, 0), (1, 0), (1, 1), (0, 1); `[]` for a disk |
-| `seam` | toward the axis after the ring's own | 3D, rings and disks: a point [m]; `u` is 0 at the face nearest to it |
+| `origin` | from the axes, as above | A point [m]: `u` (and `v`) is 0 at the corner (four-sided), the face (ring, disk) or the end (2D) nearest to it |
+| `toward` | from the axes, as above | 3D, with `origin`: a point [m] that `u` grows toward: the next corner nearest to it, or the way around that reaches it sooner |
 | `walls` | every wall entry's faces | Zones `n` and `n_m` measure the distance from |
 
 Pitfalls:
@@ -476,11 +498,10 @@ Pitfalls:
   hides it inside that expression.
 - On a wall entry that reads `n`, the default walls include the entry
   itself, so `n_m` is 0 on every face, which is an error: name the other walls
-  in `walls`. `walls`, `corners` and `seam` are errors on an entry whose
-  expressions don't read the coordinates they set, and `seam` on a four-sided
-  patch.
-- `u` jumps from 1 back to 0 across the seam: write profiles around a ring
-  in `sin` and `cos` of `theta`, which do not.
+  in `walls`. `walls`, `corners`, `origin` and `toward` are errors on an entry
+  whose expressions don't read the coordinates they set.
+- Around a ring or a disk `u` jumps from 1 back to 0 where it starts: write
+  profiles around it in `sin` and `cos` of `theta`, which do not.
 - 2D runs have `u`, `n` and their lengths only: the error says so.
 
 ## Walls

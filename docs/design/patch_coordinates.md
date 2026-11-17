@@ -63,16 +63,20 @@ Decisions:
 - **No length constants.** The lengths of the patch along `u` and `v` are the
   upper ends of the ranges of `u_m` and `v_m` in the run log; expressions
   that need a fraction have `u` and `v`.
-- **Two overrides, both points in meters.** `corners`: four points fix the
-  corners of a four-sided patch and, by their order, where `u` and `v`
-  start; `[]` makes a disk. `seam`: one point, and `u` of a ring or a disk
-  is 0 at the face nearest to it. A point is what a user can read off the
-  mesh or the CAD, it needs no notion of the ring's axis (which a cone, a
-  bent pipe or an off-center hole make ambiguous), and it reads the same on
-  a flat annulus and on a tube; an angle offset would need the default
-  start to be known first. Turning a coordinate around is `1 - u` in the
-  expression, which leaves the seam where it is. The frame's three keys are
-  gone.
+- **One way to say where `u` starts: two points in meters.** `origin` is
+  where `u` (and `v`) is 0 and `toward` where `u` grows to, on every patch:
+  the corner of a four-sided patch nearest to `origin` becomes (0, 0) and
+  `u` runs to the adjacent corner nearest to `toward`; on a ring or a disk
+  `u` is 0 at the face nearest to `origin` and grows the way around that
+  reaches `toward` sooner; in 2D `origin` picks the end. Points are what a
+  user reads off the mesh or the CAD, they need no notion of an axis (which
+  a cone, a bent pipe or an oblique panel make ambiguous) or of the default
+  start (which an angle offset would), they need not lie on the patch, and
+  one sentence covers all shapes. `toward` is optional: without it the side
+  `u` runs along by default is kept. `corners` remains for the other
+  question, which nodes of an outline without four clear corners are the
+  corners: four points, whose order then also fixes the start; `[]` makes a
+  disk. The frame's three keys are gone.
 
 ## Shapes
 
@@ -102,7 +106,12 @@ surface (piecewise linear elements).
   reproduced to round-off (tested). Of the eight ways to label the sides,
   the one whose `u` and `v` directions (between the centers of opposite
   sides) are nearest to the axis after the patch's mean normal's dominant
-  one, and the one after that, is taken.
+  one, and the one after that, is taken (the sum of the two cosines; the
+  first labeling of equal ones, in the order of the corners around the
+  outline from its lowest node). `origin` keeps the labelings that start at
+  its corner and `toward` the one of those whose `u` side ends nearest to
+  it; with `origin` alone the absolute cosines decide, so `u` keeps its
+  default pair of sides.
 - **Ring.** `v` solves `K v = 0` with 0 on one rim and 1 on the other. Its
   harmonic conjugate is computed on the triangles (linear on each, continuous
   at edge midpoints, gradient that of `v` turned by 90 degrees in the
@@ -139,8 +148,9 @@ surface (piecewise linear elements).
   direction is the coordinate axis `k + 1` (cyclic) minus its part along
   `a`, which cannot vanish, and the second `a` x first, turned so that its
   largest component is positive. On surfaces of revolution `u` is then the
-  geometric angle to round-off. `seam` replaces the constant: `u` minus its
-  value at the face nearest to the point.
+  geometric angle to round-off. `origin` replaces the constant (`u` minus its
+  value at the face nearest to the point) and `toward` the direction (`u` is
+  reversed if the face nearest to it is more than half way around).
 - **Lengths.** Fast marching on the triangles from the nodes where `v` (or
   `u`) is 0, with the planar-front update where the front enters a triangle
   through its far edge and the edge lengths otherwise; first order, exact for

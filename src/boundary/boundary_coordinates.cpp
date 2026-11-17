@@ -202,6 +202,16 @@ std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & 
     if (tips.size() > 2) throw fail("the faces form more than one curve");
     const size_t axis = dominant(Point{tips[1][0] - tips[0][0], tips[1][1] - tips[0][1]});
     Vertex at = tips[1][axis] < tips[0][axis] ? tips[1] : tips[0];
+    if (entry.contains("origin")) {
+        const std::vector<rtype> p = find_real_vector(entry, "origin", dim::length);
+        if (p.size() != 2) {
+            throw InputError({.key = where + ".origin", .line = line_of(entry, "origin"),
+                              .message = "a point has 2 components",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        auto away = [&](const Vertex & v) { return std::hypot(v[0] - double(p[0]), v[1] - double(p[1])); };
+        at = away(tips[1]) < away(tips[0]) ? tips[1] : tips[0];
+    }
     std::map<Ends, double> s_of;
     std::vector<bool> visited(n, false);
     length = 0.0;
@@ -257,7 +267,8 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
         std::sort(nodes.begin(), nodes.end());
         index[nodes] = k / W;
     }
-    patch::Corners corners{.points = std::nullopt, .seam = std::nullopt, .key = where, .line = line_of(entry)};
+    patch::Corners corners{.points = std::nullopt, .origin = std::nullopt, .toward = std::nullopt, .key = where,
+                           .line = line_of(entry)};
     auto point = [&](const Input & item, const std::string & key) {
         const std::vector<rtype> p = as_real_vector(item, key, dim::length);
         if (p.size() != 3) {
@@ -267,7 +278,8 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
         }
         return patch::Vec3{static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])};
     };
-    if (entry.contains("seam")) corners.seam = point(entry.at("seam"), where + ".seam");
+    if (entry.contains("origin")) corners.origin = point(entry.at("origin"), where + ".origin");
+    if (entry.contains("toward")) corners.toward = point(entry.at("toward"), where + ".toward");
     if (entry.contains("corners")) {
         const std::string key = where + ".corners";
         corners.key = key;

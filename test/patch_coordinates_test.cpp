@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -285,35 +286,67 @@ TEST(PatchCoordinatesTest, DiskHasTheRadiusAndTheAngleAboutItsCenter) {
     EXPECT_EQ(patch::coordinates(s, at).shape, patch::Shape::FOUR_SIDED);
 }
 
-TEST(PatchCoordinatesTest, SeamSetsWhereUStartsAroundRingsAndDisks) {
-    // By default u is 0 toward the axis after the ring's (+x around z); a
-    // seam turns it to the face nearest to a point, on a tube as on a disk
-    const Vec3 point{-0.1, 1.3, 0.7};
-    patch::Corners at;
-    at.seam = point;
-    for (const patch::Surface & s : {ring(8, 1.0, 1.0, 1.5), ring(8, 0.5, 2.0, 0.0)}) {
-        const patch::Coordinates c = patch::coordinates(s, at);
-        size_t nearest = 0;
-        auto distance = [&](size_t f) {
-            const Vec3 x = centroid(s.faces[f]);
-            return std::hypot(x[0] - point[0], x[1] - point[1], x[2] - point[2]);
-        };
-        for (size_t f = 1; f < s.faces.size(); f++) {
-            if (distance(f) < distance(nearest)) nearest = f;
-        }
-        EXPECT_EQ(c.faces[nearest].u, 0.0);
-        const double start = azimuth(center(s.faces[nearest]));
+TEST(PatchCoordinatesTest, OriginAndTowardSetWhereUStartsAndWhichWayItGrows) {
+    // Four-sided: (u, v) = (0, 0) at the corner nearest to origin, u along
+    // the side to the adjacent corner nearest to toward (or, without it,
+    // along the default direction: +x across z), v along the other side
+    const patch::Surface s = grid(8, 6, false, [](double p, double q) { return Vec3{2.0 * p, q, 0.0}; }, up);
+    struct Case {
+        Vec3 origin;
+        std::optional<Vec3> toward;
+        std::function<double(const Vec3 &)> u, v;
+    };
+    const std::vector<Case> cases{
+        {{2.2, 0.9, 0.1}, std::nullopt, [](const Vec3 & x) { return 1.0 - 0.5 * x[0]; }, [](const Vec3 & x) { return 1.0 - x[1]; }},
+        {{2.2, 0.9, 0.1}, Vec3{2.0, -3.0, 0.0}, [](const Vec3 & x) { return 1.0 - x[1]; }, [](const Vec3 & x) { return 1.0 - 0.5 * x[0]; }},
+        {{-1.0, -1.0, 0.0}, Vec3{0.0, 0.4, 0.0}, [](const Vec3 & x) { return x[1]; }, [](const Vec3 & x) { return 0.5 * x[0]; }},
+        {{-1.0, 2.0, 0.0}, Vec3{5.0, 5.0, 0.0}, [](const Vec3 & x) { return 0.5 * x[0]; }, [](const Vec3 & x) { return 1.0 - x[1]; }},
+    };
+    for (const Case & c : cases) {
+        patch::Corners at;
+        at.origin = c.origin;
+        at.toward = c.toward;
+        const patch::Coordinates got = patch::coordinates(s, at);
         for (size_t f = 0; f < s.faces.size(); f++) {
-            ASSERT_LT(around(c.faces[f].u, azimuth(center(s.faces[f])) - start), 1e-10);
-            ASSERT_GE(c.faces[f].u, 0.0);
-            ASSERT_LT(c.faces[f].u, 1.0);
+            const Vec3 x = center(s.faces[f]);
+            ASSERT_NEAR(got.faces[f].u, c.u(x), 1e-12) << c.origin[0] << ", " << c.origin[1];
+            ASSERT_NEAR(got.faces[f].v, c.v(x), 1e-12) << c.origin[0] << ", " << c.origin[1];
         }
     }
-    const patch::Surface square = grid(4, 4, false, [](double p, double q) { return Vec3{p, q, 0.0}; }, up);
-    EXPECT_NE(error_of(square, at).find("seam is given, but the patch is four-sided"), std::string::npos);
-    at.points = std::vector<Vec3>{};
-    EXPECT_EQ(patch::coordinates(grid(6, 6, false, [](double p, double q) { return Vec3{p, q, 0.0}; }, up), at).shape,
-              patch::Shape::DISK);
+
+    // Rings and disks: u = 0 at the face nearest to origin, growing the default way (from +x toward +y around
+    // z) or the way that reaches toward sooner
+    const Vec3 point{-0.1, 1.3, 0.7};
+    for (const patch::Surface & r : {ring(8, 1.0, 1.0, 1.5), ring(8, 0.5, 2.0, 0.0)}) {
+        size_t nearest = 0;
+        auto distance = [&](size_t f) {
+            const Vec3 x = centroid(r.faces[f]);
+            return std::hypot(x[0] - point[0], x[1] - point[1], x[2] - point[2]);
+        };
+        for (size_t f = 1; f < r.faces.size(); f++) {
+            if (distance(f) < distance(nearest)) nearest = f;
+        }
+        const double start = azimuth(center(r.faces[nearest]));
+        for (const double way : {1.0, -1.0}) {
+            patch::Corners at;
+            at.origin = point;
+            if (way < 0.0) at.toward = Vec3{1.5, 0.2, 0.7};  // clockwise from the origin, near +y
+            const patch::Coordinates c = patch::coordinates(r, at);
+            EXPECT_EQ(c.faces[nearest].u, 0.0);
+            for (size_t f = 0; f < r.faces.size(); f++) {
+                ASSERT_LT(around(c.faces[f].u, way * (azimuth(center(r.faces[f])) - start)), 1e-10) << way;
+                ASSERT_GE(c.faces[f].u, 0.0);
+                ASSERT_LT(c.faces[f].u, 1.0);
+            }
+        }
+    }
+
+    patch::Corners at;
+    at.toward = point;
+    EXPECT_NE(error_of(s, at).find("toward is given without origin"), std::string::npos);
+    at.origin = point;
+    at.points = std::vector<Vec3>{{0.0, 0.0, 0.0}, {2.0, 0.0, 0.0}, {2.0, 1.0, 0.0}, {0.0, 1.0, 0.0}};
+    EXPECT_NE(error_of(s, at).find("corners already says where u and v start"), std::string::npos);
 }
 
 TEST(PatchCoordinatesTest, FacesThatAreNotOnePatchAreInputErrorsWithAFix) {
