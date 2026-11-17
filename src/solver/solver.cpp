@@ -609,14 +609,7 @@ void Solver::trim_halo() {
     std::vector<uint8_t> reconstructed(mesh->n_cells, 0);
     std::fill_n(reconstructed.begin(), own_faces ? mesh->n_owned() : mesh->n_reconstructed(), uint8_t(1));
     if (own_faces) {
-        const BoundaryData::HostImages images = boundary_data.host_images();
-        for (uint32_t f = 0; f < mesh->n_faces; f++) {
-            const int32_t c0 = mesh->h_cells_of_face(f, 0);
-            if (mesh->h_cells_of_face(f, 1) < 0 && c0 >= 0 && c0 < static_cast<int32_t>(mesh->n_owned()) &&
-                images.cell[f] >= 0 && images.face[f] < 0) {
-                reconstructed[static_cast<size_t>(images.cell[f])] = 1;
-            }
-        }
+        for (const uint32_t c : face_reconstruction->halo_image_cells()) reconstructed[c] = 1;
     }
     std::vector<uint8_t> needed = teno->stencil_cells(reconstructed);
     const int base = base_halo_layers();
@@ -670,11 +663,11 @@ bool Solver::halo_too_shallow() {
     // Every rank takes part in the reduction below, also those without image neighbors
     const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
     if (teno == nullptr && !wall_model_on && !images) return false;
-    // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
-    // see every layer they visited, so stencils match the serial ones exactly
+    // The stencil searches of the cells with TENO tables must see every layer
+    // they visited, so stencils match the serial ones exactly
     int needed = 0;
-    for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
-        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    for (uint32_t r = 0; teno && r < teno->n_rows(); r++) {
+        needed = std::max(needed, distribution.layer[teno->cell_of_row(r)] + teno->gather_depth[r] + 1);
     }
     // The same for the gradient stencils that continue across extrapolation boundaries
     for (uint32_t c = 0; !image_reach.empty() && c < mesh->n_cells; c++) {
@@ -1583,6 +1576,9 @@ void Solver::init_numerics() {
 
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+        teno->partition_faces_exchanged = exchanges_partition_faces();
+    }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
