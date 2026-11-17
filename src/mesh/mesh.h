@@ -332,6 +332,8 @@ class Mesh {
          *        straight edges), and cell_coords become the r-weighted
          *        centroids, where linear functions equal their r-weighted
          *        averages. Planar areas, lengths and normals are kept.
+         *        Curved cells and faces (after apply_curved) are integrated
+         *        over their curved geometry.
          */
         void make_axisymmetric();
 
@@ -627,6 +629,12 @@ class Mesh {
         uint8_t shift_index(const std::array<int8_t, 3> & lattice);
     protected:
     private:
+        /**
+         * @brief make_axisymmetric of the curved cells and faces: measures,
+         *        centroids and covariances by the cells' curved rules, and
+         *        int r dS of the curved faces.
+         */
+        void revolve_curved();
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
         /** @brief Orient 3D cells positively (Gmsh/VTK convention), in place. */
         static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells);

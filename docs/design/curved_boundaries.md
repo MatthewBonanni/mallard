@@ -247,7 +247,6 @@ the sphere's facets are mirror planes of their own, beyond that limit.
 ## Limitations
 
 - Orders 5 and 6 are fourth order at curved walls (degree cap, above).
-- Axisymmetric runs reject curved boundaries.
 - A face that spans a crease of a region's surface (a box's edge, where the
   members of a union meet) is curved onto one side of it; zones should meet
   at creases.

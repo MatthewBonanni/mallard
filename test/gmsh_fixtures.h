@@ -158,6 +158,70 @@ inline std::string annulus_gmsh(uint32_t n_r, uint32_t n_t, int order = 1, bool 
 }
 
 /**
+ * @brief Gmsh 2.2 file of the upper half of the annulus r_in <= r <= r_out
+ *        (y >= 0; revolved about the x axis, a spherical shell), zones
+ *        "inner", "outer" and "axis": n_r rings of n_t quadrilaterals, or
+ *        pairs of triangles, with interior nodes jittered by a fixed pattern.
+ *        With order 2 or 3 the arcs are high-order lines (line3, line4).
+ */
+inline std::string half_annulus_gmsh(uint32_t n_r, uint32_t n_t, double r_in, double r_out, int order = 1,
+                                     bool triangles = false) {
+    const double pi = 3.14159265358979323846;
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> jitter(-0.15, 0.15);
+    std::vector<std::array<double, 2>> nodes;
+    auto add = [&](double r, double t) {
+        nodes.push_back({r * std::cos(t), t == pi ? 0.0 : r * std::sin(t)});
+        return std::to_string(nodes.size());
+    };
+    std::vector<std::string> id((n_r + 1) * (n_t + 1));
+    for (uint32_t j = 0; j <= n_r; j++) {
+        for (uint32_t i = 0; i <= n_t; i++) {
+            const bool interior = j > 0 && j < n_r && i > 0 && i < n_t;
+            const double jitter_r = interior ? jitter(rng) : 0.0;
+            const double jitter_t = interior ? jitter(rng) : 0.0;
+            const double t = i == n_t ? pi : pi * (i + jitter_t) / n_t;
+            id[j * (n_t + 1) + i] = add(r_in + (r_out - r_in) * (j + jitter_r) / n_r, t);
+        }
+    }
+    auto c = [&](uint32_t i, uint32_t j) { return id[j * (n_t + 1) + i]; };
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < n_t; i++) {
+        for (const auto & [j, tag, r] : {std::tuple{0u, "1", r_in}, std::tuple{n_r, "2", r_out}}) {
+            std::string e = std::string(order == 1 ? "1" : order == 2 ? "8" : "26") + " 2 " + tag + " " + tag + " " +
+                            c(i, j) + " " + c(i + 1, j);
+            for (int k = 1; k < order; k++) e += " " + add(r, pi * (i + double(k) / order) / n_t);
+            elements.push_back(e);
+        }
+    }
+    for (uint32_t j = 0; j < n_r; j++) {
+        elements.push_back("1 2 3 3 " + c(0, j) + " " + c(0, j + 1));
+        elements.push_back("1 2 3 3 " + c(n_t, j) + " " + c(n_t, j + 1));
+    }
+    for (uint32_t j = 0; j < n_r; j++) {
+        for (uint32_t i = 0; i < n_t; i++) {
+            const std::string q[4] = {c(i, j), c(i + 1, j), c(i + 1, j + 1), c(i, j + 1)};
+            if (!triangles) {
+                elements.push_back("3 2 0 1 " + q[0] + " " + q[1] + " " + q[2] + " " + q[3]);
+            } else {
+                elements.push_back("2 2 0 1 " + q[0] + " " + q[1] + " " + q[2]);
+                elements.push_back("2 2 0 1 " + q[0] + " " + q[2] + " " + q[3]);
+            }
+        }
+    }
+    std::ostringstream s;
+    s.precision(17);
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n3\n1 1 \"inner\"\n1 2 \"outer\"\n1 3 \"axis\"\n"
+         "$EndPhysicalNames\n";
+    s << "$Nodes\n" << nodes.size() << "\n";
+    for (size_t k = 0; k < nodes.size(); k++) s << k + 1 << " " << nodes[k][0] << " " << nodes[k][1] << " 0\n";
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+/**
  * @brief Gmsh 2.2 file of the unit square with zones left/right (x) and
  *        bottom/top (y): columns alternate between quads and pairs of
  *        triangles. Every node moves by a random displacement that depends on
