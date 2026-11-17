@@ -1,7 +1,7 @@
 # channel_inlet with its profile from a data file: poiseuille.csv tabulates
-# the developed velocity u / U = 6 n (1 - n) against the wall distance n up to
-# the channel's center, and [[boundaries.data]] reads it at each inlet face's
-# own n (cubic interpolation is exact for the parabola), so the flow enters
+# the developed velocity u / U = 6 d (1 - d) against the wall distance d in
+# meters up to the channel's center, and [[boundaries.data]] reads it at each
+# inlet face's own n_m (cubic interpolation is exact for the parabola), so the flow enters
 # developed and stays so, as in channel_inlet: U = 0.1, Mach 0.1, Re = 200.
 # Check the profile near x = 3.5 against the exact one with
 #   python ../channel_inlet/plot_channel_inlet.py channel_inlet_data.png solut/channel_<step>.vtkhdf
@@ -32,8 +32,8 @@ T = 0.7142857142857143
 
 [[boundaries.data]]
 name = "dev"                 # columns other than the coordinate become dev_<column>
-file = "poiseuille.csv"      # n,u
-at = ["n"]                   # the table's coordinate n is the inlet's wall distance
+file = "poiseuille.csv"      # n_m,u
+at = ["n_m"]                 # the table's coordinate is the inlet's wall distance in meters
 interpolation = "cubic"
 
 [[boundaries]]

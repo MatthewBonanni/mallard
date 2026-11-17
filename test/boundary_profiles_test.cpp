@@ -73,7 +73,7 @@ std::string sides(const std::string & type) {
 
 TEST(BoundaryProfilesTest, RotatedInletReadsTheProfileAtItsWallDistance) {
     // A box turned by [mesh.transform]: supersonic inflow along the turned x
-    // axis, T from a table of the wall distance n to the turned bottom wall
+    // axis, T from a table of the wall distance n_m to the turned bottom wall
     // (in mm, cubic). The steady flow carries the inlet's profile along the
     // rows of cells, so rho = 1 / T(Y) with Y the cell's distance from the
     // bottom, held at the table's last value above its range.
@@ -99,7 +99,7 @@ TEST(BoundaryProfilesTest, RotatedInletReadsTheProfileAtItsWallDistance) {
           << "[output]\ncheck_interval = 1000000\n"
           << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = 3.0\np = 1.0\nT = \"bl_T\"\n"
           << "walls = [\"bottom\"]\n"
-          << "[[boundaries.data]]\nname = \"bl\"\nfile = \"" << csv << "\"\ncoordinates = [\"d\"]\nat = [\"n\"]\n"
+          << "[[boundaries.data]]\nname = \"bl\"\nfile = \"" << csv << "\"\ncoordinates = [\"d\"]\nat = [\"n_m\"]\n"
           << "interpolation = \"cubic\"\nunits = {d = \"mm\"}\n"
           << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n" << sides("symmetry");
     Solver solver;
@@ -144,25 +144,25 @@ std::string error_of(const std::string & input) {
 } // namespace
 
 TEST(BoundaryProfilesTest, DataTimesExpressionsOfTimeMatchSerialAndKeepTheStepGraph) {
-    // A table of n and a point cloud of xi, stored with the faces at setup and
+    // A table of n_m and a point cloud of u, stored with the faces at setup and
     // combined with t on the device: bit for bit on any rank count, with the
     // step graph and without
     const std::string table = write_temp_shared("bl.csv", profile_csv(0.25));
     std::ostringstream cloud;
-    cloud << "xi, du\n";
-    for (int k = 0; k < 9; k++) cloud << number(-0.3 + 0.075 * k) << ", " << number(0.1 * std::sin(k)) << "\n";
+    cloud << "u, du\n";
+    for (int k = 0; k < 9; k++) cloud << number(0.125 * k) << ", " << number(0.1 * std::sin(k)) << "\n";
     const std::string points = write_temp_shared("jet.csv", cloud.str());
     const std::string inlet = "type = \"inlet_state\"\nu = " + vec("\"3 + jet_du * (1 + 0.5 * cos(40 * t))\"", "0.0") +
                               "\np = 1.0\nT = \"bl_T * (1 + 0.1 * sin(60 * t))\"\n"
-                              "[[boundaries.data]]\nname = \"bl\"\nfile = \"" + table + "\"\nat = [\"n\"]\n"
+                              "[[boundaries.data]]\nname = \"bl\"\nfile = \"" + table + "\"\nat = [\"n_m\"]\n"
                               "units = {d = \"mm\"}\n"
                               "[[boundaries.data]]\nname = \"jet\"\nfile = \"" + points + "\"\ntype = \"points\"\n"
-                              "coordinates = [\"xi\"]\nneighbors = 2\n";
+                              "coordinates = [\"u\"]\nneighbors = 2\n";
     expect_matches_serial_with_and_without_step_graphs(channel(inlet, "t_stop = 0.05\ncfl = 0.5\n"));
 }
 
 TEST(BoundaryProfilesTest, ProfileOutsideItsTableIsReported) {
-    // n = y on the left side of a box between walls at y = 0 and 0.5 (10
+    // n_m = y on the left side of a box between walls at y = 0 and 0.5 (10
     // faces across): a table to n = 0.2 leaves the 6 faces above it at its
     // last value, and the run log says so
     auto mesh = std::make_shared<Mesh>();
@@ -177,9 +177,9 @@ TEST(BoundaryProfilesTest, ProfileOutsideItsTableIsReported) {
     }
     const std::string csv = write_temp("bl.csv", profile_csv(0.2));
     const Input entry = parse_toml("name = \"left\"\nT = \"bl_T\"\n[[data]]\nname = \"bl\"\nfile = \"" + csv +
-                                   "\"\nat = [\"n\"]\nunits = {d = \"mm\"}\n");
+                                   "\"\nat = [\"n_m\"]\nunits = {d = \"mm\"}\n");
     const BoundaryProfiles data(entry, "left");
-    ASSERT_EQ(data.coordinates_used(), std::vector<uint16_t>{boundary_variable::N});
+    ASSERT_EQ(data.coordinates_used(), std::vector<uint16_t>{boundary_variable::N_M});
     std::string summary;
     std::vector<FacePoint> points = local_coordinates(*mesh, faces, entry, "left", data.coordinates_used(),
                                                       WallDistance(*mesh, walls, false), false, summary);
@@ -199,9 +199,9 @@ TEST(BoundaryProfilesTest, MisplacedDataAreInputErrors) {
                            "\n[[boundaries.data]]\nname = \"bl\"\nfile = \"" + csv + "\"\n" + data_keys,
                        run);
     };
-    EXPECT_NE(error_of(inlet("1.25", "at = [\"n\"]\n")).find("no expression of the boundary reads its variables"),
+    EXPECT_NE(error_of(inlet("1.25", "at = [\"n_m\"]\n")).find("no expression of the boundary reads its variables"),
               std::string::npos);
-    EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n + t\"]\n")).find("depends on t"), std::string::npos);
+    EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n_m + t\"]\n")).find("depends on t"), std::string::npos);
     EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the coordinate d is not x, y, z or a local coordinate"),
               std::string::npos);
 }

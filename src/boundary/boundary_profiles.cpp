@@ -66,7 +66,7 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
                     throw invalid(e, key + ".at", "at",
                                   "is missing, and the coordinate " + c + " is not x, y, z or a local coordinate",
                                   "Add at = [...], an expression of x, y, z and the local coordinates for each "
-                                  "coordinate, e.g. at = [\"n\"] for the distance to the wall");
+                                  "coordinate, e.g. at = [\"n_m\"] for the distance to the wall in meters");
                 }
             }
             at = coordinates;

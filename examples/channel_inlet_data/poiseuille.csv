@@ -1,6 +1,6 @@
-# Plane Poiseuille flow across a channel of height 1: the wall distance n and
-# the velocity over the bulk velocity, u / U = 6 n (1 - n), up to the center
-n,u
+# Plane Poiseuille flow across a channel of height 1: the wall distance n_m in
+# meters and the velocity over the bulk velocity, u / U = 6 n_m (1 - n_m), up to the center
+n_m,u
 0.00,0.0000
 0.05,0.2850
 0.10,0.5400

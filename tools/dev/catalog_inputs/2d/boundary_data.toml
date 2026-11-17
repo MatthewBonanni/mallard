@@ -34,9 +34,9 @@ T = "300 + 10 * wall_u"
 name = "wall"
 file = "../../../../examples/channel_inlet_data/poiseuille.csv"
 type = "points"
-coordinates = ["n"]
+coordinates = ["n_m"]
 neighbors = 2
-units = { n = "mm" }
+units = { n_m = "mm" }
 
 [[boundaries]]
 name = "right"

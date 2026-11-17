@@ -537,10 +537,15 @@ T = "bl_T"
 [[boundaries.data]]
 name = "bl"
 file = "boundary_layer.csv"  # y,u,T: wall distance in mm
-at = ["n"]                   # the distance to the nearest wall
+at = ["n_m"]                 # the distance to the nearest wall, in meters
 units = { y = "mm" }
 interpolation = "cubic"
 ```
+
+A coordinate in meters (`n_m`, `u_m`, `v_m`) keeps the table's own lengths,
+whatever the inlet's size; a normalized one (`n`, `u`, `v`, from 0 to 1)
+stretches the table over the boundary, so `at = ["u"]` with a table from 0 to
+1 fits a profile across an inlet of any width.
 
 The data are read once at setup, at each face center, and stored with the
 face like its coordinates: an expression of the data and `t` is evaluated on
@@ -549,7 +554,7 @@ the same bits on every rank count. A table holds its end values beyond its
 range (a boundary-layer table up to its edge gives the free stream above
 it). The run log shows, per entry, each coordinate's range at the faces, how
 many faces fall outside the table, and each variable's range, e.g. `data bl
-(boundary_layer.csv: table 41, cubic; y = n 0.000625 to 0.05, 24 faces
+(boundary_layer.csv: table 41, cubic; y = n_m 0.000625 to 0.05, 24 faces
 outside the table's 0 to 0.02 take its end values): bl_u 0 to 30, bl_T 300 to
 340`, and the run block records the file's hash.
 
