@@ -183,6 +183,7 @@ struct Case {
     std::string numerics;         // [numerics] keys
     std::string integrator = "SSPRK3";
     std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
+    std::string cells = "Nx = 14\nNy = 10\n";  // the box's cells in x and y
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
     Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
@@ -195,7 +196,7 @@ std::string box_input(const Case & c, const std::string & dir, int depth) {
     if (!c.body.empty()) {
         s << c.body;
     } else {
-        s << "[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 10\nLx = 1.0\nLy = 1.0\n";
+        s << "[mesh]\ntype = \"cartesian\"\n" << c.cells << "Lx = 1.0\nLy = 1.0\n";
         if (N_DIM == 3) s << "Nz = 4\nLz = 0.4\n";
         s << "[initialize]\ntype = \"analytical\"\n"
           << "rho = \"1.0 + 0.5 * exp(-40 * ((x - 0.4)^2 + (y - 0.5)^2))\"\nu = " << vector_of("0.3", "0.1", "0.05")
@@ -462,6 +463,18 @@ TEST(StepQueueTest, OutputsByStep) {
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     const Outcome o = expect_queue_invariant("by_step", c);
     EXPECT_EQ(o.step, 30u);
+    // Where conditional nodes fail (NCCL across a network), the steps run kernel by kernel to the same results
+    Case unconditional = c;
+    unconditional.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("by_step_unconditional", unconditional, false);
+#ifdef KOKKOS_ENABLE_CUDA
+    const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
+    EXPECT_EQ(fallback.graph_steps, 0u);
+    if (comm::is_root()) {
+        ASSERT_EQ(fallback.warnings.size(), 1u);
+        EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
+    }
+#endif
     // Serial runs on several ranks write their files and log on the root rank only
     if (!comm::is_root()) return;
     EXPECT_TRUE(o.files.count("forces.csv"));
@@ -656,6 +669,9 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+    // Without conditional nodes the flushes and samples happen at the same steps
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("fused_unconditional", c, false);
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -732,6 +748,63 @@ TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("time_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
+    // A disk (sphere) leaving the box: its reductions, and its time averages kept per cell, which the restart carries
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 10 * t", "0.5", "0.2") + ", radius = 0.3}";
+    const std::string restart = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 24\n";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + restart +
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\ninterval = 3\n"
+              "reductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n"
+              "[[probes]]\nname = \"mean_disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/mean_disk.csv\"\n"
+              "[[probes]]\nname = \"disk_t\"\nregion = " + disk + "\nfields = [\"T\", \"U\"]\n"
+              "time_interval = 0.013\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/disk_t.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("moving_probes", c);
+    if (comm::is_root()) {
+        EXPECT_GT(std::count(o.files.at("disk.csv").begin(), o.files.at("disk.csv").end(), '\n'), 8);
+        EXPECT_GT(std::count(o.files.at("mean_disk.csv").begin(), o.files.at("mean_disk.csv").end(), '\n'), 4);
+        EXPECT_GT(std::count(o.files.at("disk_t.csv").begin(), o.files.at("disk_t.csv").end(), '\n'), 8);
+        // The last writes find it outside the box: no cell covered on any rank
+        const std::string & rows = o.files.at("disk.csv");
+        const size_t last = rows.find_last_of('\n', rows.size() - 2) + 1;
+        std::istringstream row(rows.substr(last));
+        std::string step, t, measure;
+        std::getline(row, step, ',');
+        std::getline(row, t, ',');
+        std::getline(row, measure, ',');
+        EXPECT_EQ(std::stod(measure), 0.0) << rows.substr(last);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + restart;
+    EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
+    // A disk (sphere) growing from a corner covers more cells than its staging holds, at first on the ranks that
+    // own the corner alone: every rank's host writes those steps and the device stages it anew
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.1", "0.1", "0.2") + ", radius = \"0.05 + 2 * t\"}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.cells = "Nx = 40\nNy = 30\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\ninterval = 2\n"
+              "reductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/disk.csv\"\n";
+    c.distributed = comm::size() > 1;
+    expect_queue_invariant("growing_probe", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    const uint64_t queued = run_case("growing_probe", c, 3).queued, unstopped = run_case("bare", bare, 3).queued;
+    EXPECT_LT(queued, unstopped);
+    // Each stop regrows the staging to twice the cells covered then
+    EXPECT_GE(queued + 3, unstopped);
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
@@ -1114,11 +1187,16 @@ TEST(StepQueueTest, TriggersOfProbeValuesAreEvaluatedOnTheDevice) {
 
 TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
     // A line's reductions and a point's value, written every 3 steps, reduced on the device at its writes: the queue
-    // stops only at the step after the write whose every value the condition equals, as a stop at that step does
+    // stops only at the step after the write whose every value the condition equals, as a stop at that step does. A
+    // moving region's probe, written every 2 steps, has its own flags beside theirs
     Case c;
     c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 10 * t", "0.5", "0.2") + ", radius = 0.3}";
     const std::string probes =
         "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\"]\ninterval = 2\n"
+        "reductions = [\"integral\"]\nreductions_file = \"{dir}/disk.csv\"\n" +
         "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
         "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
         "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"

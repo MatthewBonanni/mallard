@@ -1,6 +1,10 @@
 {
  "default": "\"sigma\"",
+ "defaults_by_dim": {
+  "2": "\"wale\""
+ },
  "dims": [
+  2,
   3
  ],
  "set_in": [
@@ -11,7 +15,8 @@
   "examples/channel_wmles/lm5200.toml",
   "examples/channel_wmles/tl_m1.7.toml",
   "examples/channel_wmles/tl_m3.0.toml",
-  "examples/flame_turbulence/les.toml"
+  "examples/flame_turbulence/les.toml",
+  "examples/triple_flame/tfles/input.toml"
  ],
  "type": "string",
  "values": [

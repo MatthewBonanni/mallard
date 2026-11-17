@@ -564,7 +564,8 @@ Options:
   --html                Run directories: write RUN_DIR/report.html, the run
                         report, from RUN_DIR/mallard.jsonl, the page the run
                         writes itself: for a run still going, killed, or of a
-                        Mallard before 0.10. Default: off.
+                        Mallard before 0.10; with --format json, prints its path
+                        as {"directory", "report"}. Default: off.
   --kokkos-*            Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                         rank) or --kokkos-device-id=1 (the GPU; by default each
                         rank gets its own).
@@ -842,8 +843,8 @@ Writes a mesh as a Mallard HDF5 mesh file, which large runs read in parallel.
 INPUT is a mesh file (Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns, OpenFOAM
 polyMesh directory), or an input file (.toml) whose [mesh] table describes the
 mesh (with its [mesh.transform]). Under MPI, the ranks write in parallel (needs
-parallel HDF5); each reads the whole mesh file but generates only its block.
-Needs a build with HDF5.
+parallel HDF5), and read a mesh file together or generate the input's mesh, each
+only its block. Needs a build with HDF5.
 
 Options:
   -h, --help  Show this page.
@@ -1378,8 +1379,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard pack
 
 ```text
-Usage: mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]
-       mallard pack --verify FILE
+Usage: mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none] [--format text|json]
+       mallard pack --verify FILE [--format text|json]
 
 Packs the last run of a run directory into one tar archive, for a paper's
 supplement or a bug report: what it needs to run again and what it wrote. What
@@ -1409,6 +1410,11 @@ gzip-compressed in builds with zlib (Mallard_ENABLE_ZLIB), else plain tar; any
 tar reads both.
 
 Options:
+  --format text|json        text: sections and tables; json: the same as one
+                            JSON object, for scripts: the archive, the rerun
+                            command and each file with its role, size and
+                            SHA-256 (--verify: each problem, and the result).
+                            Default: text.
   -o, --output FILE         The archive: .tar.gz (gzip-compressed, in builds
                             with zlib) or .tar. Default: the run directory's
                             name with .tar.gz (.tar in builds without zlib), in
