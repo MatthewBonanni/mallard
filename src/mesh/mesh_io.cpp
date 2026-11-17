@@ -14,12 +14,14 @@
 #include "mesh_file.h"
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 #include "cell_order.h"
@@ -540,7 +542,7 @@ MeshFileData read_gmsh(const std::string & filename) {
                 data.set_cell_zone(data.cells.size(), it != cell_physical_names.end() ? it->second
                                                                                      : "physical_" + std::to_string(physical));
             }
-            data.cells.push_back(idx);
+            data.cells.add(idx);
         } else {
             auto it = physical_names.find(physical);
             data.boundary_faces.push_back(
@@ -680,9 +682,7 @@ MeshFileData read_gmsh(const std::string & filename) {
 
 void drop_unused_nodes(MeshFileData & data) {
     std::vector<uint32_t> index(data.nodes.size(), ~uint32_t(0));
-    for (const auto & c : data.cells) {
-        for (uint32_t n : c) index[n] = 0;
-    }
+    for (uint32_t n : data.cells.nodes) index[n] = 0;
     for (const auto & f : data.boundary_faces) {
         for (uint32_t n : f.nodes) index[n] = 0;
     }
@@ -694,9 +694,7 @@ void drop_unused_nodes(MeshFileData & data) {
         }
     }
     data.nodes = std::move(kept);
-    for (auto & c : data.cells) {
-        for (uint32_t & n : c) n = index[n];
-    }
+    for (uint32_t & n : data.cells.nodes) n = index[n];
     for (auto & f : data.boundary_faces) {
         for (uint32_t & n : f.nodes) n = index[n];
     }
@@ -722,12 +720,32 @@ MeshFileData read_mesh_file(const std::string & filename) {
 
 namespace {
 
+/** @brief What every part of a mesh file shares: zone names in order of first appearance. */
+struct FileZones {
+    std::vector<std::string> names;
+    std::map<std::string, uint32_t> index;
+    bool high_order = false;
+};
+
+FileZones file_zones(const MeshFileData & data) {
+    FileZones zones;
+    for (const auto & face : data.boundary_faces) {
+        if (zones.index.emplace(face.zone, zones.names.size()).second) zones.names.push_back(face.zone);
+    }
+    for (const auto & ho : data.boundary_high_order) zones.high_order |= !ho.empty();
+    return zones;
+}
+
 /** @brief Part r of p of a mesh file's contents (see MeshBlock). */
-MeshBlock file_block(const MeshFileData & data, int r, int p) {
+MeshBlock file_block(const MeshFileData & data, const FileZones & zones, int r, int p) {
     MeshBlock block;
     block.first_cell = block_begin(data.cells.size(), r, p);
     block.first_node = block_begin(data.nodes.size(), r, p);
-    for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
+    const uint64_t end_cell = block_begin(data.cells.size(), r + 1, p);
+    block.cell_offsets.reserve(end_cell - block.first_cell + 1);
+    block.cell_nodes.reserve(data.cells.offsets[end_cell] - data.cells.offsets[block.first_cell]);
+    block.node_coords.reserve(block_begin(data.nodes.size(), r + 1, p) - block.first_node);
+    for (uint64_t c = block.first_cell; c < end_cell; c++) {
         block.add_cell(data.cells[c]);
         if (!data.cell_zone_names.empty()) {
             block.cell_zone.push_back(c < data.cell_zone.size() ? data.cell_zone[c] : Mesh::NO_CELL_ZONE);
@@ -739,18 +757,12 @@ MeshBlock file_block(const MeshFileData & data, int r, int p) {
         FOR_I_DIM x[i] = double(data.nodes[n][i]);
         block.node_coords.push_back(x);
     }
-    // Zones numbered in order of first appearance, the same on every rank
-    std::map<std::string, uint32_t> zone_index;
-    for (const auto & face : data.boundary_faces) {
-        if (zone_index.emplace(face.zone, block.zone_names.size()).second) block.zone_names.push_back(face.zone);
-    }
+    block.zone_names = zones.names;
     const uint64_t n_faces = data.boundary_faces.size();
-    bool high_order = false;
-    for (const auto & ho : data.boundary_high_order) high_order |= !ho.empty();
-    if (high_order) block.face_high_order_offsets.assign(1, 0);
+    if (zones.high_order) block.face_high_order_offsets.assign(1, 0);
     for (uint64_t f = block_begin(n_faces, r, p); f < block_begin(n_faces, r + 1, p); f++) {
-        block.add_face(data.boundary_faces[f].nodes, zone_index.at(data.boundary_faces[f].zone));
-        if (!high_order) continue;
+        block.add_face(data.boundary_faces[f].nodes, zones.index.at(data.boundary_faces[f].zone));
+        if (!zones.high_order) continue;
         for (const curved::Vec3 & x : data.boundary_high_order[f]) {
             std::array<double, N_DIM> node;
             FOR_I_DIM node[i] = x[i];
@@ -758,6 +770,74 @@ MeshBlock file_block(const MeshFileData & data, int r, int p) {
         }
         block.face_high_order_offsets.push_back(block.face_high_order_nodes.size());
     }
+    return block;
+}
+
+MeshBlock file_block(const MeshFileData & data, int r, int p) { return file_block(data, file_zones(data), r, p); }
+
+template <typename T>
+void pack(std::vector<uint64_t> & out, const std::vector<T> & values) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    out.push_back(values.size());
+    const size_t at = out.size();
+    out.resize(at + (values.size() * sizeof(T) + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
+    if (!values.empty()) std::memcpy(out.data() + at, values.data(), values.size() * sizeof(T));
+}
+
+template <typename T>
+void unpack(const uint64_t *& in, std::vector<T> & values) {
+    values.resize(*in++);
+    if (!values.empty()) std::memcpy(values.data(), in, values.size() * sizeof(T));
+    in += (values.size() * sizeof(T) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+}
+
+void pack(std::vector<uint64_t> & out, const std::vector<std::string> & names) {
+    out.push_back(names.size());
+    for (const std::string & name : names) pack(out, std::vector<char>(name.begin(), name.end()));
+}
+
+void unpack(const uint64_t *& in, std::vector<std::string> & names) {
+    names.resize(*in++);
+    std::vector<char> chars;
+    for (std::string & name : names) {
+        unpack(in, chars);
+        name.assign(chars.begin(), chars.end());
+    }
+}
+
+/** @brief A block as one array of words, to send it whole. */
+std::vector<uint64_t> pack(const MeshBlock & block) {
+    std::vector<uint64_t> out = {block.first_cell, block.first_node};
+    pack(out, block.cell_offsets);
+    pack(out, block.cell_nodes);
+    pack(out, block.node_coords);
+    pack(out, block.face_offsets);
+    pack(out, block.face_nodes);
+    pack(out, block.face_zone);
+    pack(out, block.zone_names);
+    pack(out, block.cell_zone);
+    pack(out, block.cell_zone_names);
+    pack(out, block.face_high_order_offsets);
+    pack(out, block.face_high_order_nodes);
+    return out;
+}
+
+MeshBlock unpack(const std::vector<uint64_t> & words) {
+    MeshBlock block;
+    const uint64_t * in = words.data();
+    block.first_cell = *in++;
+    block.first_node = *in++;
+    unpack(in, block.cell_offsets);
+    unpack(in, block.cell_nodes);
+    unpack(in, block.node_coords);
+    unpack(in, block.face_offsets);
+    unpack(in, block.face_nodes);
+    unpack(in, block.face_zone);
+    unpack(in, block.zone_names);
+    unpack(in, block.cell_zone);
+    unpack(in, block.cell_zone_names);
+    unpack(in, block.face_high_order_offsets);
+    unpack(in, block.face_high_order_nodes);
     return block;
 }
 
@@ -813,5 +893,31 @@ void Mesh::init_from_block(MeshBlock block, const std::vector<PeriodicPair> & pe
 }
 
 MeshBlock read_file_block(const std::string & filename) {
-    return file_block(read_mesh_file(filename), comm::rank(), comm::size());
+    const int p = comm::size(), me = comm::rank();
+    if (p == 1) return file_block(read_mesh_file(filename), 0, 1);
+    // Rank 0 reads the file and sends the other ranks their blocks, a group of ranks at a time
+    MeshFileData data;
+    std::string error;
+    if (me == 0) {
+        try {
+            data = read_mesh_file(filename);
+        } catch (const std::exception & e) {
+            error = e.what();
+        }
+    }
+    error = comm::broadcast(error);
+    if (!error.empty()) throw std::runtime_error(error);
+    const FileZones zones = me == 0 ? file_zones(data) : FileZones();
+    constexpr int ROUNDS = 8;
+    const int per_round = (p + ROUNDS - 1) / ROUNDS;
+    MeshBlock block;
+    for (int first = 0; first < p; first += per_round) {
+        const int end = std::min(first + per_round, p);
+        std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
+        for (int q = std::max(first, 1); me == 0 && q < end; q++) send[static_cast<size_t>(q)] = pack(file_block(data, zones, q, p));
+        const std::vector<uint64_t> received = comm::exchange(std::move(send)).data;
+        if (me != 0 && me >= first && me < end) block = unpack(received);
+    }
+    if (me == 0) block = file_block(data, zones, 0, p);
+    return block;
 }

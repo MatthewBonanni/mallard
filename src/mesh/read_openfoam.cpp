@@ -346,7 +346,10 @@ MeshFileData read_openfoam(const std::string & path) {
                 throw std::runtime_error(where + ": cell " + std::to_string(c + 1) + " has " + std::to_string(cells[c].size()) + " sides; Mallard supports triangles and quadrilaterals.");
             }
         }
-        data.cells = std::move(cells);
+        for (auto & cell : cells) {
+            data.cells.add(cell);
+            release(cell);
+        }
         add_nodes();
         for (const Patch & p : patches) {
             if (p.type == "empty") continue;

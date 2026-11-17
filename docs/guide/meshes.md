@@ -335,8 +335,8 @@ filename = "mesh.h5"   # from mallard mesh convert
 
 *Used in:* any example, after `mallard mesh convert input.toml mesh.h5`.
 
-Every rank of a distributed run reads a Gmsh or other mesh file whole,
-keeping only its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
+In a distributed run, rank 0 reads a Gmsh or other mesh file whole and
+sends each rank its share. Large meshes should be converted once to Mallard's HDF5 mesh format, of
 which each rank reads only its own part (builds with
 `-DMallard_ENABLE_HDF5=ON`):
 

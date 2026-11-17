@@ -417,7 +417,7 @@ MeshFileData read_cgns(const std::string & filename) {
         for (uint64_t n : nodes) out.push_back(index[n]);
         return out;
     };
-    for (const auto & c : cell_nodes) data.cells.push_back(renumber(c));
+    for (const auto & c : cell_nodes) data.cells.add(renumber(c));
     for (size_t c = 0; c < cell_section.size(); c++) {
         const std::string & family = zones[cell_section[c].first].section_families[cell_section[c].second];
         if (!family.empty()) {

@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -29,8 +30,23 @@
  *        boundary face's corner are dropped.
  */
 struct MeshFileData {
+    /** @brief The cells' corners (CSR). */
+    struct Cells {
+        std::vector<uint64_t> offsets{0};
+        std::vector<uint32_t> nodes;
+
+        size_t size() const { return offsets.size() - 1; }
+        bool empty() const { return size() == 0; }
+        std::span<const uint32_t> operator[](size_t c) const { return {nodes.data() + offsets[c], offsets[c + 1] - offsets[c]}; }
+        template <typename Range>
+        void add(const Range & cell) {
+            nodes.insert(nodes.end(), std::begin(cell), std::end(cell));
+            offsets.push_back(nodes.size());
+        }
+    };
+
     std::vector<std::array<rtype, N_DIM>> nodes;
-    std::vector<std::vector<uint32_t>> cells;
+    Cells cells;
     std::vector<Mesh::BoundaryFace> boundary_faces;
     std::vector<std::vector<curved::Vec3>> boundary_high_order;
     // Cell zones: the zone of each cell (Mesh::NO_CELL_ZONE: none), empty if the file has none
@@ -76,9 +92,8 @@ MeshFileData read_openfoam(const std::string & path);
  *        for a cell that is not a triangle or quadrilateral (2D; faces of two
  *        nodes) or a tetrahedron, pyramid, prism or hexahedron (3D).
  */
-std::vector<std::vector<uint32_t>> cells_from_faces(uint32_t n_cells, const std::vector<std::vector<uint32_t>> & faces,
-                                                    const std::vector<std::array<int64_t, 2>> & face_cells,
-                                                    const std::string & source);
+MeshFileData::Cells cells_from_faces(uint32_t n_cells, const std::vector<std::vector<uint32_t>> & faces,
+                                     const std::vector<std::array<int64_t, 2>> & face_cells, const std::string & source);
 
 /** @brief The cell dimension of a CGNS file's base. */
 int cgns_dimension(const std::string & filename);
