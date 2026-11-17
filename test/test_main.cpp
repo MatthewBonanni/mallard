@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     if (const char * graphs = std::getenv("MALLARD_TEST_CUDA_GRAPHS"); graphs && std::string_view(graphs) == "off") {
         Solver::set_cuda_graphs_off(true);
     }
-    install_scratch_directories();
+    if (!install_scratch_directories()) return 1;
     Kokkos::initialize(argc, argv);
     int result = RUN_ALL_TESTS();
     Kokkos::finalize();
