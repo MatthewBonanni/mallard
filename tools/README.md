@@ -13,7 +13,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
 | [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
-| [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
+| [Performance](#performance): benchmarks and baselines, work-precision study | `perf/perf_suite.py`, `perf/work_precision.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
 
@@ -382,6 +382,17 @@ Runs the performance set of `benchmarks/perf/` (flow solver in 2D and 3D, reacti
 ![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-light.svg#gh-light-mode-only)
 ![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-dark.svg#gh-dark-mode-only)
 
+### `work_precision.py`: error against cost
+
+```sh
+python tools/perf/work_precision.py run --mallard-2d build/src/mallard --mallard-3d build-3d/src/mallard --out cpu --threads 2 [--jobs 6 --cpus 0-11]
+python tools/perf/work_precision.py reference --mallard-2d build/src/mallard --out cpu
+python tools/perf/work_precision.py collect cpu gpu
+python tools/docs/work_precision.py --table
+```
+
+Runs the [work-precision study](../docs/design/work_precision.md): the isentropic vortex on 2D squares and irregular triangles and on 3D hexahedra and tetrahedra, and the Shu-Osher problem, each with MUSCL and TENO-E 3 to 6 on meshes from coarse to fine, until the next mesh would take longer than `--max-wall` seconds. Each run's record (its run id, steps, wall time and its parts, peak memory, build and device, all read from its `mallard.jsonl`) and error (from `mallard post convergence --exact`, or against the Shu-Osher reference) go to `results.jsonl` in the output directory; `collect` merges directories, one per platform, into `tools/docs/work_precision.json`, from which `tools/docs/work_precision.py` draws the figures and prints the cost of reaching each target error. Runs already in the output directory are read back, not repeated. On a GPU, `--defer-errors` keeps the snapshots and writes no records, so that the same `run` command on a copy of the directory, on a CPU machine, computes the errors (`post convergence` runs on one host thread) without holding the GPU.
+
 ## Case scripts
 
 These set up or analyze one example each, and live in its directory (`examples/<case>/`) unless they also serve others (`tools/setup/`, `tools/post/`); their figures are on the [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) and [Validation](https://matthewbonanni.github.io/mallard/validation/) pages, and `--help` gives each one's usage.
@@ -429,6 +440,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/gpu_runtime_tests.sh [--full] BUILD` | GPU runtime checks of a CUDA build: the step graph and stream ordering tests under NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) on one GPU and on 2 ranks; `--full` adds initcheck, more tests under each tool and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL across the network). The GPU CI runs it |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard`'s h5py readers that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases by dispatch on `main`); the first job of `ci.yml` runs it |

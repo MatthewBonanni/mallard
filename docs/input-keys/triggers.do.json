@@ -1,10 +1,12 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
  "required": true,
  "set_in": [
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/source_regions/input.toml"
  ],
- "type": "array"
+ "type": "array|string"
 }

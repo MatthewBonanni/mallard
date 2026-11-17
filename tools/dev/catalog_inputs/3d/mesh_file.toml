@@ -1,0 +1,56 @@
+# For the key catalog only (tools/dev/input_catalog.py): a transformed mesh file.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "file"
+filename = "../../../../test/data/meshes/cyl3d.msh"
+
+[mesh.transform]
+scale = [0.01, 0.01, 0.02]
+rotate = {axis = [0.0, 0.0, 1.0], angle = 90.0}
+translate = [0.0, 0.1, 0.0]
+
+[initialize]
+p = 101325.0
+T = 300.0
+u = [10.0, 0.0, 0.0]
+
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = [10.0, 0.0, 0.0]
+p = 101325.0
+T = 300.0
+
+[[boundaries]]
+name = "outlet"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "walls"
+type = "symmetry"
+
+[[boundaries]]
+name = "cylinder"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 300.0
+rho_ref = 1.1766

@@ -245,7 +245,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-format-vtu"></a>`W-FORMAT-VTU` | `[[write_data]]` without a `format` writes VTU files: the default, VTKHDF, needs HDF5 (parallel HDF5 on several ranks) | Set `format = "vtu"`, or build with HDF5 ([Which format](output.md#which-format)) |
 | <a id="w-key-ignored"></a>`W-KEY-IGNORED` | A key that is read but has no effect: `source.time_dependent` (expressions of `t` are evaluated at every stage) | Remove it |
 | <a id="w-spectra-restarted"></a>`W-SPECTRA-RESTARTED` | A probe's time spectra got a sample that is not `dt` after the last one (a resumed run, a changed interval): its history starts afresh | Keep the probe's interval fixed over a run and its restarts ([Time spectra](probes.md#time-spectra)) |
-| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel; or NCCL failed under a graph's conditional node, so the graph runs one step per launch. Slower, with the same results | Report it with the message: every step is meant to be graphed |
+| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel; or NCCL failed under a graph's conditional node (as across a network), so steps run kernel by kernel too. Slower, with the same results | Report it with the message: every step is meant to be graphed |
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
@@ -273,6 +273,29 @@ command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)
 | <a id="e-convergence"></a>`E-CONVERGENCE` | `mallard post convergence` cannot read a run or compare the runs | The message names the run ([Grid convergence](convergence.md)) |
 | <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
 | <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
+
+## compute-sanitizer
+
+To check a CUDA build's kernels with NVIDIA's `compute-sanitizer` (`memcheck`, `racecheck`, `synccheck`,
+`initcheck`), turn the step graphs off so that the steps run kernel by kernel, with the same results:
+
+```toml
+[run]
+cuda_graphs = false
+```
+
+```bash
+compute-sanitizer --tool memcheck mallard2d -i input.toml   # mallard3d in 3D
+```
+
+With step graphs on, each step runs in the body of a CUDA graph conditional node, and compute-sanitizer
+(tested with 2026.4 on driver 595) misreports kernels there: `synccheck` and `initcheck` stop correct kernels
+with an illegal memory access or report divergent barriers, `racecheck` reports hazards across `__syncthreads()`
+or aborts with heap corruption in its own library, and `memcheck` reports reads of a kernel's own parameters.
+A body of two kernels is enough; the same kernels in a graph without conditional nodes, or launched one by one,
+are clean ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)). Reports on the step graph's
+kernels (a host backtrace through `cuGraphLaunch`) are therefore not to be trusted: check those kernels with
+`cuda_graphs = false`.
 
 ## Kubernetes
 

@@ -999,15 +999,16 @@ chemistry stays bitwise independent of rank count and team width.
 - The SGS model in 2D builds should be Vreman for flames: WALE's eddy
   viscosity is not zero for the one-dimensional dilatation across a flame.
 - Results, one-dimensional stoichiometric H2/air flame (h2o2.yaml,
-  mixture-averaged, `s_L = 2.3324` m/s, `delta_L = 0.330` mm from
-  Cantera), MUSCL and HLLC, strip cells of aspect ratio 10 (`Delta = 3.16
+  mixture-averaged; the runs' inputs took `s_L = 2.3324` m/s and `delta_L
+  = 0.330` mm from Cantera at refine criteria 0.02, and the errors are against
+  its grid-converged 2.3311 m/s), MUSCL and HLLC, strip cells of aspect ratio 10 (`Delta = 3.16
   dx`), `n_res = 5`:
 
   | Mesh | Model | `F` | Consumption speed | Displacement speed | Thermal thickness |
   |---|---|---|---|---|---|
-  | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.8%) | 2.615 mm (`F delta_L` = 2.610 mm) |
-  | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.2%) | 2.251 m/s (-3.5%) | |
-  | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-4.0%) | one cell (numerical) |
+  | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.7%) | 2.615 mm (`F delta_L` = 2.610 mm) |
+  | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.1%) | 2.251 m/s (-3.4%) | |
+  | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-3.9%) | one cell (numerical) |
 
   The thickened flame keeps the laminar speed and has the thickness `F
   delta_L` it is designed to have; the quasi-laminar flame's speed is also

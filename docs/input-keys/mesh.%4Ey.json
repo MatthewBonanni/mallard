@@ -32,6 +32,7 @@
   "examples/flame_vortex/input.toml",
   "examples/flame_vortex_quenching/input.toml",
   "examples/forced_inlet/input.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/heated_duct/closed.toml",
   "examples/heated_duct/closed_upt.toml",
   "examples/heated_duct/input.toml",
@@ -66,6 +67,8 @@
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml",
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"
  ],

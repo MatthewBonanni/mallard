@@ -147,6 +147,12 @@ std::string Solver::step_graph_unsupported() const {
     if (!uncaptured_step_graphs) return "not a CUDA build";
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
+#if defined(KOKKOS_ENABLE_CUDA) && !defined(MALLARD_CONDITIONAL_NODES)
+    constexpr bool conditional_nodes = false;
+#else
+    constexpr bool conditional_nodes = true;
+#endif
+    if (!conditional_nodes) return "no conditional nodes before CUDA 12.4";
 #ifdef KOKKOS_ENABLE_CUDA
     // MPI calls cannot be captured; uncaptured step graphs exist only off CUDA
     if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
@@ -310,11 +316,6 @@ template <typename F>
 void Solver::device_if(const uint32_t * flag, F && body) {
 #ifdef MALLARD_CONDITIONAL_NODES
     if (capture_graph) {
-        if (!conditional_steps) {
-            // One step per launch: the body (of pure reductions, or a step that is due) runs every time
-            body();
-            return;
-        }
         cudaGraph_t graph = static_cast<cudaGraph_t>(capture_graph);
         cudaGraphConditionalHandle handle;
         cuda_check(cudaGraphConditionalHandleCreate(&handle, graph, 0, cudaGraphCondAssignDefault),
@@ -522,7 +523,8 @@ void Solver::device_step_body() {
     // Probes of steps the device goes on from, staged for the host's writes; boundary states at the step's end. Those
     // the triggers read are reduced into their variables before the triggers, the others after them. probe_due holds
     // for each staged probe whether it is evaluated, then whether any other or any reduced one is, then whether its
-    // values change (reduced for the triggers), then whether it adds a sample to its time averages
+    // values change (reduced for the triggers), then whether it adds a sample to its time averages, and last, with a
+    // moving region among them, whether any moving one is evaluated
     const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
     const auto evaluate_probes = [&](const bool reduced) {
         recording_step = true;
@@ -607,6 +609,9 @@ void Solver::device_step_body() {
                 due(2 * n_probes + 2 + k) = sampled;
             }
         });
+        // A moving region covering more cells than its staging holds stops the device before any probe is evaluated:
+        // the host writes the step's probes, and stages them anew
+        if (probe_overflow.is_allocated()) select_moving_probes();
         if (reduced != 0) evaluate_probes(true);
     }
     // Before the other probes, so that a step a trigger fires at is the host's alone
@@ -767,6 +772,8 @@ void Solver::decide_outputs() {
     const Kokkos::View<OutputClock *> clocks = output_clocks;
     const Kokkos::View<uint32_t *> due = output_due;
     const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
+    const Kokkos::View<uint32_t *> probes_due = probe_due;
+    const uint32_t n_probe_flags = static_cast<uint32_t>(probe_due.extent(0));
     uint64_t solution_bits = 0;
     for (uint32_t k = 0; k < n_writers; k++) {
         if (data_writers[k]->follows_solution()) solution_bits |= uint64_t(1) << k;
@@ -787,6 +794,8 @@ void Solver::decide_outputs() {
             record.reasons |= step_queue::OUTPUT;
             L.active = 0;
             L.progress = 0;
+            // The host writes the step's probes
+            for (uint32_t k = 0; k < n_probe_flags; k++) probes_due(k) = 0;
             return;
         }
         for (uint32_t k = 0; k < n_writers; k++) {
@@ -798,6 +807,47 @@ void Solver::decide_outputs() {
         record.outputs = bits;
         due(n_writers) = 1;
         due(n_writers + 1) = (bits & solution_bits) != 0;
+    });
+}
+
+void Solver::select_moving_probes() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<uint32_t *> due = probe_due;
+    const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
+    const uint32_t any_moving = static_cast<uint32_t>(probe_due.extent(0)) - 1;
+    const Kokkos::View<int64_t *> overflow = probe_overflow;
+    uint64_t moving = 0;
+    for (uint32_t k = 0; k < n_probes; k++) {
+        if (probes.moves(staged_probes[k])) moving |= uint64_t(1) << k;
+    }
+    Kokkos::parallel_for("probes_moving_due", 1, KOKKOS_LAMBDA(const int) {
+        due(any_moving) = 0;
+        for (uint32_t k = 0; k < n_probes; k++) {
+            overflow(k) = 0;
+            if (moving >> k & 1) due(any_moving) |= due(k);
+        }
+    });
+    for (uint32_t k = 0; k < n_probes; k++) {
+        if (!(moving >> k & 1)) continue;
+        device_if(&probe_due.data()[k], [&] {
+            probes.select_staged(staged_probes[k], Kokkos::View<const rtype>(step_time_device()), overflow.data() + k);
+        });
+    }
+    device_if(&probe_due.data()[any_moving], [&] {
+        if (is_distributed()) comm::allreduce_device(overflow, comm::Op::MAX, halo.uses_nccl());
+        Kokkos::parallel_for("probes_overflow", 1, KOKKOS_LAMBDA(const int) {
+            bool over = false;
+            for (uint32_t k = 0; k < n_probes; k++) over = over || overflow(k) > 0;
+            if (!over) return;
+            step_queue::Loop & L = loop();
+            step_queue::Record & record = records((L.seq - 1) % n_records);
+            record.reasons |= step_queue::PROBES;
+            for (uint32_t k = 0; k <= any_moving; k++) due(k) = 0;
+            L.active = 0;
+            L.progress = 0;
+        });
     });
 }
 
@@ -940,6 +990,10 @@ void Solver::capture_step_graph() {
 
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
+    if (capture_fault == CaptureFault::CONDITIONAL_NODES) {
+        logging::warning(diagnostic_code::CUDA_GRAPH, "CUDA graph conditional nodes failed (test fault); steps run kernel by kernel");
+        return false;
+    }
     // A step under a conditional node captures its NCCL operations there, which fails where NCCL communicates
     // over a network (it then adds host nodes): try one first, on every rank
     bool works = true;
@@ -962,7 +1016,7 @@ bool Solver::conditional_nodes_work() {
             if (abandon_capture(e)) graph = nullptr;
             works = false;
             logging::warning(diagnostic_code::CUDA_GRAPH, std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
-                             "); one step per launch");
+                             "); steps run kernel by kernel");
         }
         capture_graph = nullptr;
         works = comm::allreduce(static_cast<int>(works), comm::Op::MIN) > 0;
@@ -1048,16 +1102,19 @@ void Solver::begin_device_steps() {
                                                     : 0;
     staged_probes.clear();
     probe_trigger_vars.clear();
+    bool moving = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
         const bool reduced = triggers_read_probe(k);
-        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k)) continue;
-        probes.stage(k, n_records, statistics, reduced, halo.uses_nccl());
+        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k) || (reduced && probes.moves(k))) continue;
+        probes.stage(k, n_records, statistics, static_cast<double>(t), reduced, halo.uses_nccl());
+        moving = moving || probes.moves(k);
         staged_probes.push_back(k);
         const size_t j = static_cast<size_t>(std::find(value_probes.begin(), value_probes.end(), k) - value_probes.begin());
         probe_trigger_vars.push_back(reduced ? static_cast<uint32_t>(first_value + j) : NO_TRIGGER_VARS);
     }
+    probe_overflow = moving ? Kokkos::View<int64_t *>("step_probe_overflow", staged_probes.size()) : Kokkos::View<int64_t *>();
     if (!staged_probes.empty()) {
-        probe_due = Kokkos::View<uint32_t *>("step_probe_due", 3 * staged_probes.size() + 2);
+        probe_due = Kokkos::View<uint32_t *>("step_probe_due", 3 * staged_probes.size() + (moving ? 3 : 2));
         probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
     }
     n_launched = n_taken = 0;
@@ -1068,14 +1125,13 @@ void Solver::begin_device_steps() {
         step_events.push_back(event);
     }
     // Launches that are not graphs read the device's decision on the host: one at a time
-    conditional_steps = use_step_graph;
-    if (conditional_steps) conditional_steps = conditional_nodes_work();
-    queue_depth = conditional_steps ? n_records : 1;
+    conditional_steps = use_step_graph && conditional_nodes_work();
 #else
-    conditional_steps = true;
-    queue_depth = n_records;
+    conditional_steps = capture_fault != CaptureFault::CONDITIONAL_NODES;
 #endif
-    // Graphs without conditional nodes run every IF body: outputs are then the host's
+    // A graph without conditional nodes would run every IF body (samples, chemistry flushes, probes) at every step
+    if (!conditional_steps) use_step_graph = false;
+    queue_depth = conditional_steps ? n_records : 1;
     staged_outputs = conditional_steps && outputs_stageable();
     staged_time_outputs = false;
     requests_posted(OUTPUTS - 1) = static_cast<rtype>(n_staged_outputs);
