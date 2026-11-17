@@ -21,6 +21,7 @@
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
+#include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -74,6 +75,22 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     // interface; a halo that cuts the stencil search short must be deepened
     // rather than reported as a rank-deficient stencil
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
+}
+
+TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
+    // With owner-computes partition faces no halo cell is reconstructed, and every
+    // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
+    memory::Tracker tracker;
+    Solver solver;
+    solver.init(parse_toml(blast_input("cartesian", "type = \"TENO\"\norder = 3\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    constexpr bool device = !Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+    const auto live = tracker.live(device);
+    EXPECT_EQ(live.at("teno_scale"), sizeof(rtype) * mesh.n_owned());
+    EXPECT_EQ(live.at("teno_stencil_large_size"), sizeof(uint16_t) * mesh.n_owned());
+    if (comm::size() > 1) {
+        EXPECT_GT(mesh.n_reconstructed(), mesh.n_owned());
+    }
 }
 
 TEST(MPI3DTest, TENOBlockPathAcrossPeriodicSeamsMatchesSerial) {
@@ -146,18 +163,53 @@ TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
 }
 
-TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
-    // Global ids in random order carry no locality: partitions, halos and the
-    // global orders of faces and stencils must not lean on them
+namespace {
+
+/** @brief TENO Navier-Stokes on a jittered mixed mesh whose global ids are in random order. */
+std::string renumbered_teno_input() {
     const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_MIXED, {6, 4, 3}, {1.0, 0.8, 0.6}), 2026);
     const std::string file = write_temp_shared("mallard_mpi3d_renumbered.msh", mesh.gmsh);
     std::string input = box_input("cartesian_mixed", "type = \"TENO\"\norder = 3\n",
                                   "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
     const std::string generated = "type = \"cartesian_mixed\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    return input;
+}
+
+} // namespace
+
+TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const std::string input = renumbered_teno_input();
     for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
         if (partitioner == "graph" && !have_graph_partitioner()) continue;
         expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
+}
+
+TEST(MPI3DTest, TENOTableRowsOfHaloCellsCarryTheirCellsGlobalIds) {
+    // Halo cells whose polynomials transmissive faces of prisms read get rows after the owned cells;
+    // shared tables give a stencil shape the table of its cell with the lowest global id
+    const std::string input = renumbered_teno_input();
+    uint64_t n_extra = 0;
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        Solver solver;
+        solver.init(parse_toml(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n"));
+        const auto & teno = dynamic_cast<const TENO &>(solver.get_face_reconstruction());
+        const Mesh & mesh = *solver.get_mesh();
+        n_extra += comm::allreduce(uint64_t(teno.extra_cells.size()), comm::Op::SUM);
+        const uint64_t * ids = teno.global_cell_ids();
+        if (comm::size() == 1) continue;
+        ASSERT_NE(ids, nullptr);
+        for (uint32_t r = 0; r < teno.n_rows(); r++) {
+            EXPECT_EQ(ids[r], mesh.h_global_cell_id[teno.cell_of_row(r)]) << partitioner << " row " << r;
+        }
+    }
+    if (comm::size() > 1) {
+        EXPECT_GT(n_extra, 0u);
     }
     comm::barrier();
 }
