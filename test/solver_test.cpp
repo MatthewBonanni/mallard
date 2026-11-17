@@ -295,6 +295,8 @@ TEST(SolverRegression, BoundPreservingTENOKeepsAMach14NearVacuumPositive) {
     SKIP_IN_SINGLE_PRECISION("the near-vacuum pressures are below single precision's resolution of the energy");
     const std::string dir = source_dir() + "/test/data/positivity/";
     auto solver = std::make_unique<Solver>();
+    // Each rank holds the whole mesh, whose every cell the state below sets
+    solver->set_distributed(false);
     solver->init(parse_toml(
         "[run]\nn_steps = 1\ndt = 6.977e-6\n"
         "[mesh]\ntype = \"file\"\nfilename = \"" + dir + "mallard_lee.msh\"\n"
