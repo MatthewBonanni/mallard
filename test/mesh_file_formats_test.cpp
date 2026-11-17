@@ -361,11 +361,12 @@ std::string edit_line(std::string text, const std::string & marker, size_t k, Ed
     return text.substr(0, begin) + edit(text.substr(begin, end - begin)) + text.substr(end);
 }
 
-/** @brief text with lines k and k + 1 (0-based) after the first line that contains marker joined. */
-std::string join_lines(std::string text, const std::string & marker, size_t k) {
-    size_t at = text.find('\n', text.find(marker) + marker.size());
-    for (size_t i = 0; i <= k; i++) at = text.find('\n', at + 1);
-    text[at] = ' ';
+/** @brief text with every third whitespace character a newline and the others spaces: several items per line, items split over lines. */
+std::string rewrapped(std::string text) {
+    size_t k = 0;
+    for (char & c : text) {
+        if (c == ' ' || c == '\n') c = k++ % 3 == 0 ? '\n' : ' ';
+    }
     return text;
 }
 
@@ -416,42 +417,46 @@ TEST(MeshFileFormatsTest, EachRankGetsItsPartOfAnOpenFoamMesh) {
 }
 
 /**
- * @brief The ranks split ASCII lists by line, so a list that is not one item
- *        per line is an error naming the line, not a different mesh.
+ * @brief ASCII Fluent and OpenFOAM files read the same whatever their layout:
+ *        with several nodes, faces and labels on a line and items split over
+ *        lines; files with an item too many, or a polyhedral face, are errors.
  */
-TEST(MeshFileFormatsTest, AsciiListsNotOnePerLineAreRejected) {
+TEST(MeshFileFormatsTest, AsciiFilesReadTheSameInAnyLayout) {
+    for (const MeshType type : test_types()) {
+        const TestMesh t = test_mesh(type);
+        SCOPED_TRACE(type == MeshType::CARTESIAN_TET ? "tetrahedra" : "mixed");
+        std::vector<uint32_t> fluent_zone(t.mesh.n_cells());
+        for (uint64_t c = 0; c < fluent_zone.size(); c++) fluent_zone[c] = c < fluid_cells(t) ? 0 : 1;
+        const std::string fluent = rewrapped(fluent_file(t, false));
+        const std::string file = (write_shared("mallard_formats_fluent_wrapped", {{"mesh.msh", fluent}}) / "mesh.msh").string();
+        expect_part(t, read_file_block(file), false, {"fluid", "solid"}, fluent_zone);
+        expect_part(t, read_fluent_block(file, 3, 7), false, {"fluid", "solid"}, fluent_zone);
+        std::vector<uint32_t> foam_zone(t.mesh.n_cells(), Mesh::NO_CELL_ZONE);
+        for (uint64_t c = 0; c < foam_zone.size(); c++) foam_zone[c] = c < 5 ? 1 : c % 3 == 0 ? 0 : Mesh::NO_CELL_ZONE;
+        std::map<std::string, std::string> foam = foam_files(t, false);
+        for (const char * name : {"points", "faces", "owner", "neighbour", "cellZones"}) foam[name] = rewrapped(foam[name]);
+        expect_part(t, read_file_block(write_shared("mallard_formats_foam_wrapped", foam).string()), N_DIM == 2,
+                    {"third", "early"}, foam_zone);
+    }
+
     const TestMesh t = test_mesh();
     const std::string fluent = fluent_file(t, false), marker = "(13 (2 ";
-    auto fluent_with = [&](const std::string & name, const std::string & text) {
-        return write_shared("mallard_formats_fluent_" + name, {{"mesh.msh", text}}) / "mesh.msh";
-    };
-    // Two faces on a line, and a face split over two lines: found where the section should end
-    expect_rejected(fluent_with("wrapped", join_lines(fluent, marker, 0)), {"of the face section of zone 2", "binary"});
-    expect_rejected(fluent_with("split", edit_line(fluent, marker, 0, [](const std::string & line) {
-                        const size_t space = line.find(' ');
-                        return line.substr(0, space) + "\n" + line.substr(space + 1);
-                    })),
-                    {"face section of zone 2", "one node or face per line"});
-    // A value too many on the last interior face: found by the rank that reads it
     const Faces faces = faces_of(t);
     const size_t n_interior = size_t(std::count(faces.zone.begin(), faces.zone.end(), -1));
-    expect_rejected(fluent_with("extra", edit_line(fluent, marker, n_interior - 1, [](const std::string & line) { return line + " 1"; })),
-                    {"face section of zone 2", "one node or face per line"});
-
+    expect_rejected(write_shared("mallard_formats_fluent_extra",
+                                 {{"mesh.msh", edit_line(fluent, marker, n_interior - 1, [](const std::string & line) { return line + " 1"; })}}) /
+                        "mesh.msh",
+                    {"face section of zone 2", "does not hold its faces"});
     const std::map<std::string, std::string> foam = foam_files(t, false);
-    const std::string & owner = foam.at("owner");
     auto foam_with = [&](const std::string & name, const std::string & file, const std::string & text) {
         std::map<std::string, std::string> files = foam;
         files[file] = text;
         return write_shared("mallard_formats_foam_" + name, files);
     };
-    expect_rejected(foam_with("wrapped", "owner", join_lines(owner, "\n(", 0)), {"one item per line", "foamFormatConvert"});
-    // A value too many on the last owner: found by the last rank, which names its line
     const size_t n_faces = faces.nodes.size() + (N_DIM == 2 ? 2 * t.mesh.n_cells() : 0);
-    const size_t lines_before = size_t(std::count(owner.begin(), owner.begin() + std::ptrdiff_t(owner.find("\n(") + 3), '\n'));
-    expect_rejected(foam_with("extra", "owner", edit_line(owner, "\n(", n_faces - 1, [](const std::string & line) { return line + " 0"; })),
-                    {"line " + std::to_string(lines_before + n_faces) + " ", "one item per line"});
-    // A face of 12 points, which OpenFOAM writes over lines
+    expect_rejected(foam_with("extra", "owner", edit_line(foam.at("owner"), "\n(", n_faces - 1, [](const std::string & line) { return line + " 0"; })),
+                    {"list of " + std::to_string(n_faces) + " items that holds " + std::to_string(n_faces + 1)});
+    // A face of 12 points, as OpenFOAM writes it over lines
     expect_rejected(foam_with("long_face", "faces", edit_line(foam.at("faces"), "\n(", 0, [](const std::string &) {
                         std::string face = "12\n(\n";
                         for (int k = 0; k < 12; k++) face += std::to_string(k) + "\n";

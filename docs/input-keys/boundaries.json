@@ -7,6 +7,7 @@
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
   "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_inlet/input.toml",
   "examples/channel_les/input.toml",
   "examples/channel_les/input_590.toml",
   "examples/channel_retau180/input.toml",
