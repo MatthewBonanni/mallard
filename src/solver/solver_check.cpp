@@ -33,6 +33,7 @@
 #include "region_motion.h"
 #include "run_status.h"
 #include "units.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -373,6 +374,21 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
 }
 
 void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
+    r.view_entries_per_cell = comm::allreduce(view_entries::entries_per_cell(), comm::Op::MAX);
+    if (r.view_entries_per_cell > 0.0) {
+        r.view_max_local_cells = static_cast<uint64_t>(static_cast<double>(view_entries::MAX) / r.view_entries_per_cell);
+    }
+    const uint64_t target_cells = r.target_owned + r.target_halo;
+    if (r.view_max_local_cells > 0 && target_cells > r.view_max_local_cells) {
+        r.error(diagnostic_code::VIEW_ENTRIES,
+                "the largest part on " + std::to_string(r.target_ranks) + " ranks holds " +
+                    logging::count(target_cells, "cell") + ", halo included, and a multi-dimensional View of " +
+                    logging::format("%.0f", r.view_entries_per_cell) + " entries per cell addresses " +
+                    logging::count(view_entries::MAX) + " entries, at most " +
+                    logging::count(r.view_max_local_cells, "cell") + " per rank: run on at least " +
+                    std::to_string((target_cells + r.view_max_local_cells - 1) / r.view_max_local_cells) +
+                    " times as many ranks");
+    }
     if (options.memory > 0) {
         r.sizing_name = options.memory_name;
         r.sizing_memory = options.memory;
@@ -411,9 +427,16 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
                                                 ": size the run for a larger memory (--memory)");
         return;
     }
+    if (r.view_max_local_cells > 0 && static_cast<double>(r.view_max_local_cells) < n_max) {
+        n_max = static_cast<double>(r.view_max_local_cells);
+        r.sizing_view_entries = true;
+    }
     r.max_local_cells = static_cast<uint64_t>(n_max);
 
-    auto fits = [&](const PartSize & p) { return peak(double(p.owned + p.halo)) <= usable; };
+    auto fits = [&](const PartSize & p) {
+        return peak(double(p.owned + p.halo)) <= usable &&
+               (r.view_max_local_cells == 0 || p.owned + p.halo <= r.view_max_local_cells);
+    };
     auto record = [&](const int n, const PartSize & p) {
         r.min_ranks = n;
         r.min_owned = p.owned;
