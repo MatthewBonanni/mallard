@@ -207,7 +207,7 @@ LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<
     // Blocks among the interior cells, in the given order
     std::vector<uint32_t> block_cells;
     if (result.n_interior == n_owned) {
-        result.blocks = structured_blocks(cells, n_owned, 2 * numbering.layers + 1, block_cells);
+        result.blocks = structured_blocks(cells, n_owned, 2 * numbering.layers + 1, block_cells, node_key);
     } else {
         std::vector<uint32_t> interior;
         CellNodes interior_cells;
@@ -216,7 +216,7 @@ LocalityOrder locality_order(const CellNumbering & numbering, const std::vector<
             interior.push_back(c);
             interior_cells.add(cells[c]);
         }
-        result.blocks = structured_blocks(interior_cells, result.n_interior, 2 * numbering.layers + 1, block_cells);
+        result.blocks = structured_blocks(interior_cells, result.n_interior, 2 * numbering.layers + 1, block_cells, node_key);
         for (uint32_t & c : block_cells) c = interior[c];
     }
     if (result.blocks.empty()) return result;
