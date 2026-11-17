@@ -192,9 +192,15 @@ TEST(PatchCoordinatesTest, WarpedPatchWithCurvedSidesIsCoveredMonotonically) {
             ASSERT_LT(at(i, j).u, 1.0);
             ASSERT_GT(at(i, j).v, 0.0);
             ASSERT_LT(at(i, j).v, 1.0);
-            if (i > 0) ASSERT_GT(at(i, j).u, at(i - 1, j).u) << i << ", " << j;
-            if (j > 0) ASSERT_GT(at(i, j).v, at(i, j - 1).v) << i << ", " << j;
-            if (i > 0) ASSERT_GT(at(i, j).u_m, at(i - 1, j).u_m) << i << ", " << j;
+            if (i > 0) {
+                ASSERT_GT(at(i, j).u, at(i - 1, j).u) << i << ", " << j;
+            }
+            if (j > 0) {
+                ASSERT_GT(at(i, j).v, at(i, j - 1).v) << i << ", " << j;
+            }
+            if (i > 0) {
+                ASSERT_GT(at(i, j).u_m, at(i - 1, j).u_m) << i << ", " << j;
+            }
         }
     }
 }
@@ -243,7 +249,9 @@ TEST(PatchCoordinatesTest, SidesOfATubeAndOfAConeFollowTheirSlantAndAzimuth) {
             ASSERT_NEAR(c.faces[f].v, exact, r1 == 1.0 ? 1e-10 : 5e-4) << r1;
             ASSERT_LT(around(c.faces[f].u, azimuth(x)), 1e-10) << r1;
             ASSERT_NEAR(c.faces[f].v_m, from_small * slant, r1 == 1.0 ? 1e-10 : 2e-3) << r1;
-            if (r1 == 1.0) ASSERT_NEAR(c.faces[f].u_m, c.faces[f].u * circumference, 1e-10);
+            if (r1 == 1.0) {
+                ASSERT_NEAR(c.faces[f].u_m, c.faces[f].u * circumference, 1e-10);
+            }
         }
     }
 }
