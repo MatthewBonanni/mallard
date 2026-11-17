@@ -1,6 +1,5 @@
 numpy
 scipy
 matplotlib
-h5py
 gmsh
 cantera

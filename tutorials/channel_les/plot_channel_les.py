@@ -99,7 +99,7 @@ def mesh(args):
 def results(args):
     run = args.path
     ref = mkm(os.path.expanduser("~/.cache/mallard/mkm"), args.retau)
-    stats = os.path.abspath(snapshots.last(os.path.join(run, "stats", "channel")))
+    stats = os.path.abspath(snapshots.series(os.path.join(run, "stats", "channel")).snapshots[-1].file)
     # Where the run ran, so that the mesh file its input names resolves
     subprocess.run([args.mallard, "post", "average", stats, "--latest", "--statistics", "--homogeneous", "x,z",
                     "--name", "profile", "-o", "."], cwd=run, check=True, stdout=subprocess.DEVNULL)
@@ -160,8 +160,8 @@ def results(args):
         fig.tight_layout()
         return fig
 
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow")))
-    polys, c = snapshots.cells(pts, conn, offs)
+    g, a = snapshots.read(snapshots.series(os.path.join(run, "solut", "flow")))
+    polys, c = snapshots.cells(g)
     ux = a["U"][:, 0]
     y_cells = np.unique(np.round(c[:, 1], 10))
     y15 = y_cells[np.argmin(np.abs(y_cells * u_tau / nu_w - 15))]

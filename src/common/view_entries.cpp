@@ -10,18 +10,31 @@
 #include <string>
 
 #include "diagnostic_code.h"
+#include "memory_tracker.h"
 
 namespace view_entries {
 
 namespace {
 
 uint64_t cells = 0;
+double largest_per_cell = 0.0;
 
 } // namespace
 
-void set_cells(const uint64_t n) { cells = n; }
+void set_cells(const uint64_t n) {
+    cells = n;
+    largest_per_cell = 0.0;
+}
+
+double entries_per_cell() { return largest_per_cell; }
 
 void check(const std::string_view label, const uint64_t entries) {
+    if (cells > 0) {
+        const double per_cell = static_cast<double>(entries) / static_cast<double>(cells);
+        if (per_cell > largest_per_cell && memory::scales_with_cells(memory::category(label))) {
+            largest_per_cell = per_cell;
+        }
+    }
     if (entries <= MAX) return;
     std::string message = "the Kokkos View \"" + std::string(label) + "\" needs " + std::to_string(entries) +
                           " entries on this rank, more than the " + std::to_string(MAX) +
