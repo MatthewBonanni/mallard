@@ -251,9 +251,7 @@ TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
     implicit.implicit = true;
     std::vector<Case> cases = {{"sharp", {ball, 0.0, true}, false},
                                {"smooth", {ball, 0.06, true}, false},
-                               {"implicit", {implicit, 0.0, false}, false},
-                               // Subdivided everywhere: more subdivided simplices on a level than team_classify lists
-                               {"implicit smooth", {implicit, 0.06, false}, false}};
+                               {"implicit", {implicit, 0.0, false}, false}};
     if (N_DIM == 2) cases.push_back({"axisymmetric", {ball, 0.0, true}, true});
     for (const Case & c : cases) {
         const Shape<Ball> shape = c.shape;
@@ -261,7 +259,11 @@ TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
         Sums cell;
         region::sampler::straight_cell(shape, axi, Cell::n, Cell{}, cell.inside, cell.total);
         const Sums team_cell = by_teams([=](const auto & member, const auto & scratch, double & inside, double & total) {
-            region::sampler::team_straight_cell(member, scratch, shape, axi, Cell::n, Cell{}, inside, total);
+            if (axi || shape.edge > 0.0) {
+                region::sampler::team_straight_cell<true>(member, scratch, shape, axi, Cell::n, Cell{}, inside, total);
+            } else {
+                region::sampler::team_straight_cell<false>(member, scratch, shape, axi, Cell::n, Cell{}, inside, total);
+            }
         });
         EXPECT_GT(cell.inside, 0.0) << c.name;
         EXPECT_LT(cell.inside, cell.total) << c.name;
