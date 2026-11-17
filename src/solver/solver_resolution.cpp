@@ -140,7 +140,10 @@ CheckFields Solver::check_resolution(CheckReport & r) {
         const double delta_L = thickened_flame.delta_L;
         r.cells_per_delta_L_min = delta_L / r.delta_max;
         r.cells_per_delta_L_max = delta_L / r.delta_min;
-        estimate(r, "delta_L", "laminar flame thickness delta_L", delta_L, "m", "les.combustion.delta_L");
+        estimate(r, "delta_L", "laminar flame thickness delta_L", delta_L, "m",
+                 thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION
+                     ? "the thinnest flame of les.combustion.flame_table"
+                     : "les.combustion.delta_L");
         estimate(r, "cells_per_delta_L_min", "cells across delta_L, fewest", r.cells_per_delta_L_min,
                  "dimensionless", "delta_L over the largest cell size");
         estimate(r, "cells_per_delta_L_max", "cells across delta_L, most", r.cells_per_delta_L_max, "dimensionless",
