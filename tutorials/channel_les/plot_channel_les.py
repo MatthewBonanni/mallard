@@ -64,8 +64,10 @@ def mesh(args):
         ax.set_ylim(0, LZ)
         ax.set_zlim(0, 2)
         ax.set_box_aspect((LX, LZ, 2))
-        ax.set_xlabel("x (streamwise)")
-        ax.set_ylabel("z (spanwise)")
+        ax.set_yticks([0, 1, 2, 3])
+        ax.set_zticks([0, 1, 2])
+        ax.set_xlabel("x (streamwise)", labelpad=22)
+        ax.set_ylabel("z (spanwise)", labelpad=16)
         ax.set_zlabel("y")
         ax.view_init(elev=18, azim=-62)
         for a in (ax.xaxis, ax.yaxis, ax.zaxis):
