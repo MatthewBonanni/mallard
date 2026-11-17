@@ -105,6 +105,14 @@ void send_receive_device(const std::vector<DeviceMessage> & sends, const std::ve
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done);
 
 /**
+ * @brief Tests only: in CUDA builds each enqueue_wait then also enqueues on
+ *        waiter a kernel that spins for this many clock cycles, so that work a
+ *        missing enqueue_wait leaves unordered runs in the wrong order; 0 (the
+ *        default) enqueues none.
+ */
+void set_wait_delay(uint64_t cycles);
+
+/**
  * @brief A new execution space instance whose kernels the device schedules
  *        ahead of other instances' (CUDA stream priority), for short work that
  *        communication waits for; the default instance on other backends.

@@ -72,7 +72,7 @@ More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallard-rea
 
 ### `mallard mesh convert`: meshes for large parallel runs
 
-Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
+Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; HDF5 meshes need no parsing, so convert a large mesh used for many runs once.
 
 ```sh
 mallard mesh convert mesh.msh mesh.h5                # from any mesh file
@@ -226,6 +226,15 @@ python examples/premixed_flame/plot_flame.py run/ examples/premixed_flame/refere
 
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-light.svg#gh-light-mode-only)
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-dark.svg#gh-dark-mode-only)
+
+### `flame_table.py`: premixed flames against the mixture fraction
+
+```sh
+python tools/setup/flame_table.py mechanisms/h2o2.yaml ohmech h2n2_air.csv --fuel H2:0.5,N2:0.5 \
+    [--oxidizer O2:1,N2:3.76] [--species H2] [--T 300] [--p 101325] [--dz 0.01] [--full full/]
+```
+
+Cantera flames of the mixtures of two streams, from the stoichiometric mixture fraction towards each side in steps of `--dz`, each from its neighbor's solution, until a flame fails or burns slower than `--min-speed` (0.02 m/s): one row per flame of `Z`, `s_L`, `delta_L` (thermal thickness), `omega_max` (the largest consumption rate of `--species`, by default the fuel's most abundant species with C or H), `phi` and `T_b`. It is the `flame_table` of `[les.combustion] sensor = "reaction"` ([thickened flames of non-premixed and partially premixed combustion](../docs/guide/les.md#non-premixed-and-partially-premixed-flames)); `--full` also writes each flame's solution for `flame_restart.py`.
 
 ### `detonation_reference.py` and `znd_restart.py`: detonations
 
@@ -431,6 +440,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/gpu_runtime_tests.sh [--full] BUILD` | GPU runtime checks of a CUDA build: the step graph and stream ordering tests under NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) on one GPU and on 2 ranks; `--full` adds initcheck, more tests under each tool and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL across the network). The GPU CI runs it |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard`'s h5py readers that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases by dispatch on `main`); the first job of `ci.yml` runs it |

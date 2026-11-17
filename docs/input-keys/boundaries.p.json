@@ -28,9 +28,13 @@
   "examples/shock_bubble_3d/input.toml",
   "examples/shu_osher/input.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/3d/mesh_file.toml",
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"
  ],

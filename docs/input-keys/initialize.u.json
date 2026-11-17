@@ -11,6 +11,7 @@
   "examples/explosion_3d/input.toml",
   "examples/flame_outflow/input.toml",
   "examples/forced_inlet/input.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/heated_duct/closed.toml",
   "examples/heated_duct/closed_upt.toml",
   "examples/heated_duct/input.toml",
@@ -38,6 +39,13 @@
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/2d/statistics.toml",
+  "tools/dev/catalog_inputs/3d/mesh_file.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml",
   "tutorials/wedge/input.toml"
  ],
  "type": "array"

@@ -2976,7 +2976,7 @@ void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos
     primitive = true;
     cell_gamma = gamma;
     cell_molar_mass = molar_mass;
-    selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_faces, 2);
+    selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_state_faces(), 2);
 }
 
 bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -3124,8 +3124,9 @@ namespace {
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436);
 // version 14 has 2D tables from the device setup (#776), which differ from version 13's at round-off;
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
-// starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-16";
+// starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236);
+// version 21 keeps 2D mirror images no deeper than the body under their foot (#976)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-21";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -3271,7 +3272,7 @@ void TENO::round_to_single() {
 
 void TENO::allocate_scratch() {
     const uint32_t n_reconstructed = mesh->n_reconstructed();
-    troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_cells);
+    troubled = Kokkos::View<rtype *>("teno_sigma", n_reconstructed);
     const uint32_t capacity = !sector_stencils ? 0u : std::min<uint32_t>(
         n_reconstructed, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_reconstructed))));
     troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);
