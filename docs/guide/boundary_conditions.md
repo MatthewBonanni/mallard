@@ -995,7 +995,7 @@ nscbc = { L = 0.1 }        # a length of the domain [m]; sigma = 0.25 by default
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body)
-and 1 more.
+and 2 more.
 
 `nscbc` makes `outlet_pressure` and `inlet_state` Navier–Stokes
 characteristic boundary conditions, partially non-reflecting (Poinsot & Lele

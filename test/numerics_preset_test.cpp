@@ -239,6 +239,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"triple_flame/input.toml", "reacting", 2, "", {}, ""},
     {"turbulent_hot_spot_2d/input.toml", "high_order", 2, "", {}, ""},
     {"triple_flame/thick/input.toml", "reacting", 2, "", {}, ""},
+    {"triple_flame/tfles/input.toml", "reacting", 2, "", {}, ""},
     {"viscous_shock_tube/input.toml", "second_order", 2, "", {}, ""},
     {"wedge/input.toml", "second_order", 2, "", {}, ""},
     {"cbc_les/input.toml", "les", 3, "", {}, ""},

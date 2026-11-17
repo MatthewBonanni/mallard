@@ -148,7 +148,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="volpiani-2016"></a>P. S. Volpiani, T. Schmitt and D. Veynante, A posteriori tests of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 174, 166–178 (2016). [doi:10.1016/j.combustflame.2016.08.007](https://doi.org/10.1016/j.combustflame.2016.08.007)
   Used in: the dynamic efficiency as the default, and its a posteriori test against filtered DNS over several filter widths ([design/les.md](design/les.md), section 8.3).
 - <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
-  Used in: thickening only where the flame sensor is on (dynamic thickening).
+  Used in: thickening only where the flame sensor is on (dynamic thickening), and the reaction-rate sensor for non-premixed and partially premixed flames ([design/les.md](design/les.md), section 6.7).
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
   Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
@@ -327,7 +327,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="bilger-starner-kee-1990"></a>R. W. Bilger, S. H. Stårner and R. J. Kee, On reduced mechanisms for methane-air combustion in nonpremixed flames, *Combust. Flame* 80, 135–149 (1990). [doi:10.1016/0010-2180(90)90122-8](https://doi.org/10.1016/0010-2180%2890%2990122-8)
   Used in: the `MIXTURE_FRACTION` output field, Bilger's element-based mixture fraction (`src/solver/derived_fields.cpp`).
 - <a id="yamashita-shimada-takeno-1996"></a>H. Yamashita, M. Shimada and T. Takeno, A numerical study on flame stability at the transition point of jet diffusion flames, *Proc. Combust. Inst.* 26, 27–34 (1996). [doi:10.1016/S0082-0784(96)80196-2](https://doi.org/10.1016/S0082-0784%2896%2980196-2)
-  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`).
+  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`); the premixed-only reaction sensor of thickened flames ([design/les.md](design/les.md), section 6.7).
 - <a id="peters-2000"></a>N. Peters, *Turbulent Combustion*, Cambridge University Press (2000). [doi:10.1017/CBO9780511612701](https://doi.org/10.1017/CBO9780511612701)
   Used in: the `SCALAR_DISSIPATION` output field, χ = 2 D \|∇Z\|² of the mixture fraction (`src/solver/derived_fields.cpp`).
 

@@ -19,6 +19,7 @@
   "examples/shock_bubble_2d/input.toml",
   "examples/shu_osher/input.toml",
   "examples/sod/input.toml",
-  "examples/viscous_shock_tube/input.toml"
+  "examples/viscous_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml"
  ]
 }

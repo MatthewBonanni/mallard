@@ -55,6 +55,7 @@
   "examples/sod/input.toml",
   "examples/source_regions/input.toml",
   "examples/triple_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
