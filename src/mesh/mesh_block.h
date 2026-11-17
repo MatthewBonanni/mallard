@@ -135,8 +135,9 @@ inline uint64_t block_begin(uint64_t n, int r, int p) { return n * uint64_t(r) /
  * @brief This rank's block of the mesh described by the [mesh] table
  *        (collective): an HDF5 mesh file (.h5), another mesh file (see
  *        read_mesh_file), or a generated mesh. Generated meshes number cells
- *        and nodes exactly as Mesh::init. Other mesh files are read whole by
- *        every rank, so large meshes should be converted to HDF5 first.
+ *        and nodes exactly as Mesh::init. Mesh files other than HDF5 and
+ *        Gmsh are read whole by rank 0, so large ones should be converted to
+ *        HDF5 first.
  */
 MeshBlock read_mesh_block(const Input & input);
 
@@ -149,8 +150,9 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axis
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see
- *        read_mesh_file): rank 0 reads the file and sends the other ranks
- *        their blocks (collective).
+ *        read_mesh_file), collective: the ranks read a Gmsh file together
+ *        (read_gmsh_block); rank 0 reads any other file and sends the other
+ *        ranks their blocks.
  */
 MeshBlock read_file_block(const std::string & filename);
 

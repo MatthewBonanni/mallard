@@ -14,8 +14,12 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <iomanip>
 #include <map>
+#include <numeric>
+#include <random>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,6 +29,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "mesh_file.h"
+#include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "scratch.h"
 
@@ -297,6 +302,254 @@ TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshFile) {
         for (uint64_t c = 0; c < block.cell_zone.size(); c++) {
             const uint64_t g = block.first_cell + c;
             EXPECT_EQ(block.cell_zone[c], g < data.cell_zone.size() ? data.cell_zone[g] : Mesh::NO_CELL_ZONE);
+        }
+    }
+}
+
+namespace {
+
+/** @brief A whole block's boundary faces in order of zone, in block order within a zone. */
+std::vector<uint64_t> sorted_faces(const MeshBlock & block) {
+    std::vector<uint64_t> faces(block.n_faces());
+    std::iota(faces.begin(), faces.end(), 0);
+    std::stable_sort(faces.begin(), faces.end(), [&](uint64_t a, uint64_t b) { return block.face_zone[a] < block.face_zone[b]; });
+    return faces;
+}
+
+/**
+ * @brief A whole block as a Gmsh file, its nodes in order with tags 1, 2, ...
+ *        or a random permutation of 5, 7, 9, ... (sparse), its boundary faces
+ *        sorted by zone, and every third cell in the cell zone "third". Gmsh
+ *        4.1 splits the nodes into three blocks, and the cells into a block
+ *        per run of cells with the same zone.
+ */
+std::string block_gmsh(const MeshBlock & block, bool v41, bool sparse) {
+    const uint64_t n_nodes = block.n_nodes(), n_cells = block.n_cells();
+    std::vector<uint64_t> tag(n_nodes);
+    std::iota(tag.begin(), tag.end(), 1);
+    if (sparse) {
+        std::shuffle(tag.begin(), tag.end(), std::mt19937(11));
+        for (uint64_t & t : tag) t = 2 * t + 3;
+    }
+    const auto faces = sorted_faces(block);
+    const uint64_t n_zones = block.zone_names.size(), third = n_zones + 1;
+    auto type = [](int dim, size_t n) {
+        if (dim == 1) return 1;
+        if (dim == 2) return n == 3 ? 2 : 3;
+        return n == 4 ? 4 : n == 5 ? 7 : n == 6 ? 6 : 5;
+    };
+    auto nodes = [&](std::ostringstream & s, const std::vector<uint64_t> & offsets, const std::vector<uint64_t> & all, uint64_t e) {
+        for (uint64_t k = offsets[e]; k < offsets[e + 1]; k++) s << " " << tag[all[k]];
+        s << "\n";
+    };
+    std::ostringstream s;
+    s << std::setprecision(17) << "$MeshFormat\n" << (v41 ? "4.1" : "2.2") << " 0 8\n$EndMeshFormat\n$PhysicalNames\n"
+      << n_zones + 1 << "\n";
+    for (uint64_t z = 0; z < n_zones; z++) s << N_DIM - 1 << " " << z + 1 << " \"" << block.zone_names[z] << "\"\n";
+    s << N_DIM << " " << third << " \"third\"\n$EndPhysicalNames\n";
+    auto coordinates = [&](uint64_t n) {
+        const auto & x = block.node_coords[n];
+        s << x[0] << " " << x[1] << " " << (N_DIM == 3 ? x[N_DIM - 1] : 0.0) << "\n";
+    };
+    if (!v41) {
+        s << "$Nodes\n" << n_nodes << "\n";
+        for (uint64_t n = 0; n < n_nodes; n++) {
+            s << tag[n] << " ";
+            coordinates(n);
+        }
+        s << "$EndNodes\n$Elements\n" << faces.size() + n_cells << "\n";
+        uint64_t id = 1;
+        for (uint64_t f : faces) {
+            s << id++ << " " << type(N_DIM - 1, block.face_offsets[f + 1] - block.face_offsets[f]) << " 2 "
+              << block.face_zone[f] + 1 << " 1";
+            nodes(s, block.face_offsets, block.face_nodes, f);
+        }
+        for (uint64_t c = 0; c < n_cells; c++) {
+            s << id++ << " " << type(N_DIM, block.cell_offsets[c + 1] - block.cell_offsets[c]) << " 2 "
+              << (c % 3 == 0 ? third : 0) << " 1";
+            nodes(s, block.cell_offsets, block.cell_nodes, c);
+        }
+        s << "$EndElements\n";
+        return s.str();
+    }
+    s << "$Entities\n0 " << (N_DIM == 2 ? n_zones : 0) << " " << (N_DIM == 2 ? 2 : n_zones) << " "
+      << (N_DIM == 2 ? 0 : 2) << "\n";
+    for (uint64_t z = 0; z < n_zones; z++) s << z + 1 << " 0 0 0 1 1 1 1 " << z + 1 << " 0\n";
+    s << "1 0 0 0 1 1 1 1 " << third << " 0\n2 0 0 0 1 1 1 0 0\n$EndEntities\n";
+    const uint64_t splits[] = {0, n_nodes / 3, n_nodes / 2, n_nodes};
+    s << "$Nodes\n3 " << n_nodes << " 1 " << *std::max_element(tag.begin(), tag.end()) << "\n";
+    for (int b = 0; b < 3; b++) {
+        s << N_DIM << " 1 0 " << splits[b + 1] - splits[b] << "\n";
+        for (uint64_t n = splits[b]; n < splits[b + 1]; n++) s << tag[n] << "\n";
+        for (uint64_t n = splits[b]; n < splits[b + 1]; n++) coordinates(n);
+    }
+    // One block per zone of faces, of cell type and of zoned or unzoned cells, in file order
+    std::vector<std::array<uint64_t, 4>> runs;  // dim, entity, type, first element (index into faces or cells)
+    for (uint64_t k = 0; k < faces.size(); k++) {
+        const uint64_t f = faces[k];
+        const std::array<uint64_t, 3> key = {uint64_t(N_DIM - 1), block.face_zone[f] + 1,
+                                             uint64_t(type(N_DIM - 1, block.face_offsets[f + 1] - block.face_offsets[f]))};
+        if (runs.empty() || runs.back()[0] != key[0] || runs.back()[1] != key[1] || runs.back()[2] != key[2]) {
+            runs.push_back({key[0], key[1], key[2], k});
+        }
+    }
+    const size_t n_face_runs = runs.size();
+    for (uint64_t c = 0; c < n_cells; c++) {
+        const std::array<uint64_t, 3> key = {uint64_t(N_DIM), c % 3 == 0 ? 1u : 2u,
+                                             uint64_t(type(N_DIM, block.cell_offsets[c + 1] - block.cell_offsets[c]))};
+        if (runs.size() == n_face_runs || runs.back()[1] != key[1] || runs.back()[2] != key[2]) {
+            runs.push_back({key[0], key[1], key[2], c});
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << runs.size() << " " << faces.size() + n_cells << " 1 " << faces.size() + n_cells << "\n";
+    uint64_t id = 1;
+    for (size_t b = 0; b < runs.size(); b++) {
+        const bool cells = b >= n_face_runs;
+        const uint64_t end = b + 1 < runs.size() && (b + 1 < n_face_runs) == !cells ? runs[b + 1][3]
+                                                                                   : (cells ? n_cells : faces.size());
+        s << runs[b][0] << " " << runs[b][1] << " " << runs[b][2] << " " << end - runs[b][3] << "\n";
+        for (uint64_t k = runs[b][3]; k < end; k++) {
+            s << id++;
+            if (cells) {
+                nodes(s, block.cell_offsets, block.cell_nodes, k);
+            } else {
+                nodes(s, block.face_offsets, block.face_nodes, faces[k]);
+            }
+        }
+    }
+    s << "$EndElements\n";
+    return s.str();
+}
+
+} // namespace
+
+/**
+ * @brief Each rank's block of a Gmsh file, which the ranks parse together, is
+ *        its part of the mesh written to the file, whatever the file's format
+ *        and node tags: consecutive or sparse and shuffled tags, nodes and
+ *        elements split into many Gmsh 4.1 blocks, cell zones that leave some
+ *        cells out, a section marker after spaces. Reading the file in chunks
+ *        of 64 bytes, with lines and markers across chunks, and indexing every
+ *        other line changes nothing.
+ */
+TEST(MeshBlockTest, EachRankGetsItsPartOfTheMeshWrittenToAGmshFile) {
+#if N_DIM == 2
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_MIXED, {7, 5}, {1.0, 0.8});
+#else
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_MIXED, {4, 3, 3}, {1.0, 0.8, 0.6});
+#endif
+    const std::vector<uint64_t> faces = sorted_faces(mesh);
+    const int r = comm::rank(), p = comm::size();
+    for (const bool v41 : {false, true}) {
+        for (const bool sparse : {false, true}) {
+            const std::string name = std::string("mallard_written_") + (v41 ? "41" : "22") + (sparse ? "_sparse" : "") + ".msh";
+            SCOPED_TRACE(name);
+            std::string text = block_gmsh(mesh, v41, sparse);
+            if (v41 && sparse) text.replace(text.find("\n$Elements\n"), 11, "\n  $Elements\n");
+            const std::string file = write_temp_shared(name, text);
+            const MeshBlock block = read_file_block(file), chunked = read_gmsh_block(file, 64, 2);
+            EXPECT_EQ(chunked.first_cell, block.first_cell);
+            EXPECT_EQ(chunked.cell_offsets, block.cell_offsets);
+            EXPECT_EQ(chunked.cell_nodes, block.cell_nodes);
+            EXPECT_EQ(chunked.cell_zone, block.cell_zone);
+            EXPECT_EQ(chunked.first_node, block.first_node);
+            EXPECT_EQ(chunked.node_coords, block.node_coords);
+            EXPECT_EQ(chunked.face_offsets, block.face_offsets);
+            EXPECT_EQ(chunked.face_nodes, block.face_nodes);
+            EXPECT_EQ(chunked.face_zone, block.face_zone);
+            EXPECT_EQ(chunked.zone_names, block.zone_names);
+            ASSERT_EQ(block.first_cell, block_begin(mesh.n_cells(), r, p));
+            ASSERT_EQ(block.n_cells(), block_begin(mesh.n_cells(), r + 1, p) - block.first_cell);
+            for (uint64_t c = 0; c < block.n_cells(); c++) {
+                const uint64_t g = block.first_cell + c;
+                ASSERT_EQ(std::vector<uint64_t>(block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c]),
+                                                block.cell_nodes.begin() + std::ptrdiff_t(block.cell_offsets[c + 1])),
+                          std::vector<uint64_t>(mesh.cell_nodes.begin() + std::ptrdiff_t(mesh.cell_offsets[g]),
+                                                mesh.cell_nodes.begin() + std::ptrdiff_t(mesh.cell_offsets[g + 1])))
+                    << "cell " << g;
+            }
+            EXPECT_EQ(block.cell_zone_names, std::vector<std::string>{"third"});
+            ASSERT_EQ(block.cell_zone.size(), block.n_cells());
+            for (uint64_t c = 0; c < block.n_cells(); c++) {
+                EXPECT_EQ(block.cell_zone[c], (block.first_cell + c) % 3 == 0 ? 0u : Mesh::NO_CELL_ZONE);
+            }
+            ASSERT_EQ(block.first_node, block_begin(mesh.n_nodes(), r, p));
+            ASSERT_EQ(block.n_nodes(), block_begin(mesh.n_nodes(), r + 1, p) - block.first_node);
+            for (uint64_t n = 0; n < block.n_nodes(); n++) {
+                FOR_I_DIM EXPECT_EQ(block.node_coords[n][i],
+                                    double(static_cast<rtype>(mesh.node_coords[block.first_node + n][i])));
+            }
+            const uint64_t first_face = block_begin(faces.size(), r, p);
+            ASSERT_EQ(block.n_faces(), block_begin(faces.size(), r + 1, p) - first_face);
+            for (uint64_t f = 0; f < block.n_faces(); f++) {
+                const uint64_t g = faces[first_face + f];
+                EXPECT_EQ(block.zone_names[block.face_zone[f]], mesh.zone_names[mesh.face_zone[g]]);
+                EXPECT_EQ(std::vector<uint64_t>(block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f]),
+                                                block.face_nodes.begin() + std::ptrdiff_t(block.face_offsets[f + 1])),
+                          std::vector<uint64_t>(mesh.face_nodes.begin() + std::ptrdiff_t(mesh.face_offsets[g]),
+                                                mesh.face_nodes.begin() + std::ptrdiff_t(mesh.face_offsets[g + 1])));
+            }
+            EXPECT_TRUE(block.face_high_order_offsets.empty());
+        }
+    }
+}
+
+/**
+ * @brief An element whose node no other rank parses, in the last line of
+ *        $Elements, fails the read on every rank with the same message,
+ *        naming the node, whether node tags map to positions directly
+ *        (consecutive tags) or through other ranks (sparse tags).
+ */
+TEST(MeshBlockTest, AnUnlistedNodeFailsTheReadOnEveryRank) {
+#if N_DIM == 2
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_TRI, {4, 3}, {1.0, 0.8});
+#else
+    const MeshBlock mesh = jittered_box(MeshType::CARTESIAN_TET, {2, 2, 2}, {1.0, 0.8, 0.6});
+#endif
+    for (const bool sparse : {false, true}) {
+        std::string text = block_gmsh(mesh, false, sparse);
+        const size_t end = text.find("\n$EndElements"), last = text.rfind(' ', end);
+        text.replace(last + 1, end - last - 1, "999999");
+        const std::string file = write_temp_shared(sparse ? "mallard_unlisted_sparse.msh" : "mallard_unlisted.msh", text);
+        std::string error;
+        try {
+            read_file_block(file);
+        } catch (const std::runtime_error & e) {
+            error = e.what();
+        }
+        EXPECT_NE(error.find("node 999999, which $Nodes does not list"), std::string::npos) << error;
+        for (const std::string & other : comm::allgather(error)) EXPECT_EQ(other, error);
+    }
+}
+
+/**
+ * @brief Node tags anywhere in 0 ... 2^64 - 1 find their nodes, and a tag
+ *        listed twice is its last node, as when the nodes were read in order.
+ */
+TEST(MeshBlockTest, NodeTagsFindTheirNodesAcrossTheirWholeRange) {
+    constexpr uint64_t MAX = ~uint64_t(0);
+    struct Case {
+        std::vector<uint64_t> tags, corners, expected;
+    };
+#if N_DIM == 2
+    const int type = 2;
+    const std::vector<Case> cases = {{{MAX, 0, 7}, {0, 7, MAX}, {1, 2, 0}}, {{1, 2, 3, 1}, {1, 2, 3}, {3, 1, 2}}};
+#else
+    const int type = 4;
+    const std::vector<Case> cases = {{{MAX, 0, 7, 9}, {0, 7, MAX, 9}, {1, 2, 0, 3}},
+                                     {{1, 2, 3, 4, 1}, {1, 2, 3, 4}, {4, 1, 2, 3}}};
+#endif
+    for (size_t k = 0; k < cases.size(); k++) {
+        std::ostringstream s;
+        s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n" << cases[k].tags.size() << "\n";
+        for (size_t n = 0; n < cases[k].tags.size(); n++) s << cases[k].tags[n] << " " << n << " " << n * n << " " << (N_DIM == 3 ? n % 2 : 0) << "\n";
+        s << "$EndNodes\n$Elements\n1\n1 " << type << " 2 0 1";
+        for (uint64_t t : cases[k].corners) s << " " << t;
+        s << "\n$EndElements\n";
+        const MeshBlock block = read_file_block(write_temp_shared("mallard_tags_" + std::to_string(k) + ".msh", s.str()));
+        EXPECT_EQ(comm::allreduce(block.n_cells(), comm::Op::SUM), 1u);
+        if (block.n_cells() == 1) {
+            EXPECT_EQ(block.cell_nodes, cases[k].expected) << "case " << k;
         }
     }
 }
