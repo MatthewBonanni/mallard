@@ -53,6 +53,7 @@ add_library(MallardCore STATIC
     boundary/boundary.cpp
     boundary/boundary_coordinates.cpp
     boundary/boundary_profiles.cpp
+    boundary/patch_coordinates.cpp
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp

@@ -1,6 +1,6 @@
 # Plane Poiseuille flow fed by its own profile: an inlet_mass_flow whose
-# profile is written in the inlet's wall distance n, the distance of each
-# inlet face to the nearer of the two walls. n (1 - n) is the parabola
+# profile is written in the inlet's own coordinate u, which runs from 0 at
+# one end of the inlet to 1 at the other. u (1 - u) is the parabola
 # y (1 - y) of the developed flow, so the flow enters developed and stays so:
 # u = 6 U y (1 - y) with the bulk velocity U = 0.1 (Mach 0.1, Re = 200: a uniform inlet would still be 13% off at x = 3.5).
 # Check the profile near x = 3.5 against the exact one (6.6e-3 U at 16 cells) with
@@ -27,7 +27,7 @@ T = 0.7142857142857143
 name = "left"
 type = "inlet_mass_flow"
 mdot = 0.1               # bulk velocity 0.1 across the channel of height 1
-profile = "n * (1 - n)"  # zero on both walls (n = 0), largest at the center (n = 0.5)
+profile = "u * (1 - u)"  # zero at both ends of the inlet (u = 0 and 1), largest at its middle
 T = 0.7142857142857143
 
 [[boundaries]]

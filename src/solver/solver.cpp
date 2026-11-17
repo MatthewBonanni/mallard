@@ -1004,8 +1004,12 @@ void Solver::init_boundaries() {
                 if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
             }
             std::sort(used.begin(), used.end());
-            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
-            const bool reads_frame = !used.empty() && used.back() != boundary_variable::N;
+            bool reads_n = false, reads_patch = false;
+            for (const uint16_t i : used) {
+                const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
+                reads_n = reads_n || wall;
+                reads_patch = reads_patch || !wall;
+            }
             auto unused_key = [&](const std::string & key, const std::string & what) {
                 return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
                                    .message = "no expression of the entry reads " + what + ", so " + key +
@@ -1042,10 +1046,20 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            if (bound.contains("frame") && !reads_frame) {
-                throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+            for (const char * key : {"corners", "origin", "toward"}) {
+                if (!bound.contains(key)) continue;
+                if (N_DIM == 2 && std::string(key) != "origin") {
+                    throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                      .message = std::string(key) == "corners"
+                                                     ? "a 2D boundary is a curve, which has two ends and no corners"
+                                                     : "a 2D boundary is a curve: origin alone says which end u "
+                                                       "starts from",
+                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
+                                             "the end nearest to origin = [x, y] if that is given",
+                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                }
+                if (!reads_patch) throw unused_key(key, "u or v");
             }
-            [[maybe_unused]] const FrameKey frame_key(bound, where_name);
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
             if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
                 const WallDistance none;

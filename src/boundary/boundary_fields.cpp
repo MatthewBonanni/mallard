@@ -39,9 +39,10 @@ std::string real(const double v) {
 
 const std::vector<std::string> & BoundaryValue::variables() {
 #if N_DIM == 2
-    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "s"};
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "n_m", "u", "u_m"};
 #else
-    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "eta", "r", "theta"};
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n",   "n_m", "u",
+                                                   "u_m", "v", "v_m", "r", "r_m", "theta"};
 #endif
     return names;
 }
@@ -65,12 +66,11 @@ std::vector<std::string> BoundaryValue::variables(const Input & entry) {
 
 std::string BoundaryValue::hint(const std::string & symbol) {
 #if N_DIM == 2
-    if (symbol == "eta" || symbol == "r" || symbol == "theta") {
-        return " (" + symbol + " is a local coordinate of 3D boundaries; 2D boundaries have n, xi and s)";
-    }
-#else
-    if (symbol == "s") {
-        return " (s, the arc length along a boundary, exists in 2D only; 3D boundaries have n, xi, eta, r and theta)";
+    for (const char * name : {"v", "v_m", "r", "r_m", "theta"}) {
+        if (symbol == name) {
+            return " (" + symbol + " is a local coordinate of 3D boundaries; a 2D boundary is a curve, with n and u "
+                   "and their lengths n_m and u_m)";
+        }
     }
 #endif
     return expression_unit_hint(symbol);

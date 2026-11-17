@@ -1,9 +1,9 @@
 /**
  * @file boundary_coordinates.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Local coordinates of boundary faces for boundary expressions: the
- *        distance to the nearest wall, coordinates in the frame of the
- *        boundary's faces, and (2D) the arc length along them.
+ * @brief Local coordinates of boundary faces for boundary expressions: u and
+ *        v, which follow the shape of the boundary's patch, the distance to
+ *        the nearest wall, and each one's twin in meters.
  * @version 0.1
  * @date 2026-11-15
  *
@@ -15,7 +15,6 @@
 #define BOUNDARY_COORDINATES_H
 
 #include <array>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -61,37 +60,20 @@ class WallDistance {
         BoxTree tree;
 };
 
-/** @brief The frame of a [[boundaries]] entry's faces: an origin, the inward normal and the tangent axes. */
-struct LocalFrame {
-    Point origin{}, normal{}, tangent{};
-    Point span{};  // 3D: the second tangent axis
-};
-
-/** @brief The `frame` of a [[boundaries]] entry: each part given, or derived from the faces. */
-struct FrameKey {
-    std::optional<Point> origin, normal, tangent;
-
-    /** @brief Read entry.frame (if present), recording its keys. */
-    FrameKey(const Input & entry, const std::string & where);
-};
-
 /**
  * @brief Local coordinates of this rank's faces of a [[boundaries]] entry.
- *        The frame and the arc length come from every face of the entry on
- *        every rank, summed in the order of global cells, so each face's
- *        values are the same bits on any rank count or partition.
+ *        u, v (patch_coordinates.h; in 2D u is the arc length over the
+ *        boundary's length) come from every face of the entry on every rank,
+ *        gathered in the order of global cells, so each face's values are
+ *        the same bits on any rank count or partition.
  * @param faces This rank's faces of the entry.
  * @param used The local coordinates to compute (local_coordinates_used); the others stay NaN.
- * @param walls Faces n measures from; may be empty if `used` has no n.
- * @param summary Set to the frame and the range of each coordinate computed, for the run log.
+ * @param walls Faces n measures from; may be empty if `used` has no n or n_m.
+ * @param summary Set to the patch and the range of each coordinate computed, for the run log.
  * @return The faces' points: x, y, z and their local coordinates.
  */
 std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
                                          const std::string & where, const std::vector<uint16_t> & used,
                                          const WallDistance & walls, bool distributed, std::string & summary);
-
-/** @brief The frame of the faces: frame from their gathered centers and normals (exposed for tests). */
-LocalFrame local_frame(const Mesh & mesh, const std::vector<uint32_t> & faces, const FrameKey & key,
-                       const std::string & where, bool distributed);
 
 #endif // BOUNDARY_COORDINATES_H
