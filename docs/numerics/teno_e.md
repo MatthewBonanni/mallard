@@ -770,11 +770,9 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     converge at any order ([curved boundaries](../design/curved_boundaries.md)).
     With curved walls (high-order Gmsh faces or `[[mesh.curved]]`) and the
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
-    fourth at the walls. The fine cylinder at order 5 keeps a small drag
-    noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
-    not known (#427).
+    fourth at the walls. On the fine cylinder with curved walls and far
+    field, order 5's drag is as smooth as order 3's
+    ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
 - **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
     at curved walls looks only at a stencil's first $n_0$ candidates
