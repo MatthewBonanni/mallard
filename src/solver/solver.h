@@ -528,6 +528,9 @@ class Solver {
         void write_outputs(bool force);
         /** @brief In the step graph: which writers are due at the step, and a stop if the last staged output is pending. */
         void decide_outputs();
+        /** @brief In the step graph: the covered cells of the staged moving probes due at the step, and a stop if one
+         *         outgrows its staging. */
+        void select_moving_probes();
         /** @brief Writes the outputs the record staged (collective), then frees the mirrors for the next. */
         void write_staged_outputs(const step_queue::Record & record);
         /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
@@ -732,8 +735,9 @@ class Solver {
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
-            FENCE,         // fails while the stream captures
-            LEGACY_STREAM  // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            FENCE,             // fails while the stream captures
+            LEGACY_STREAM,     // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: no step graph
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
 
@@ -994,6 +998,7 @@ class Solver {
         Kokkos::View<uint32_t *> probe_due;      // of the current launch, per staged probe (see device_step_body)
         std::vector<uint32_t> probe_trigger_vars;  // of each staged probe the step graph reduces, its first trigger variable
         Kokkos::View<Probes::StagedClock *> probe_clocks;  // of the staged probes, on the device
+        Kokkos::View<int64_t *> probe_overflow;  // staged moving probe k outgrew its staging (unallocated: none moves)
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
         bool staged_intervals = false;           // some staged probe reads CI_<average>
@@ -1315,6 +1320,7 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight> production;  // W_k omega_k, for output
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
+        bool chemistry_explicit_step = false;
         CellChemistry cell_chemistry;
         double t_wall_chemistry = 0.0;    // this rank's
         Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks

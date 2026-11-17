@@ -452,7 +452,9 @@ a step the host must act on (or a divergence, or the last allowed rejection), th
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
 before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
-launch one step at a time with the IF bodies always run.
+take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
+would run every IF body at every step: the statistics' samples, the fused chemistry's flushes and the staged
+probes would then happen at steps that are not due.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
@@ -544,13 +546,25 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that move or follow the solution. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of regions that follow the solution. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
 from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
+
+A moving region's fractions are updated at the device's `t`, and a scan selects the owned cells it covers, with
+their count, on the device. That happens before the outputs and the statistics' samples are staged, at the steps the probe is due: if on
+some rank the count is above the capacity of the probe's staging, the device stops at that step (reason
+`PROBES`, reduced over the ranks), the host writes it as it writes unstaged probes, and the step graph is built
+anew with each moving probe's staging at twice the cells it covers then (at least 64, at most the owned cells).
+Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
+returning at once, and
+the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
+them by global cell, as it does for the samples it selects itself, as it takes the record. On one A100
+(`air_3d.toml`, a sphere of radius 0.03 written every 10 steps) the sampling of the cells its surface crosses
+is nearly all of the region's work; the selection, evaluation and copies take under 0.1 ms per write.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
