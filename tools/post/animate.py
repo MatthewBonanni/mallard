@@ -3,6 +3,9 @@
 
     animate.py SERIES_DIR OUTPUT_STEM [--var RHO] [--res 1000] [--fps 20]
 
+SERIES_DIR is a directory (its series and snapshot files matching --glob, in
+time order) or a series file.
+
 Frames are rasterized by mapping every pixel to the cell containing it, which
 works for any mesh (triangles, quads, mixed).
 """
@@ -22,7 +25,42 @@ from matplotlib.tri import Triangulation
 from scipy.ndimage import gaussian_filter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_vtu, series  # noqa: E402
+import mallard  # noqa: E402
+
+
+def plane(f, k):
+    """2D points, triangles (a fan of each cell) and the cell of each triangle of snapshot k of an open file.
+    The points the pieces of a PVTU file share are merged, so that the triangles form one triangulation."""
+    g = f.geometry(k)
+    tris, cell = g.triangles()
+    pts, inverse = np.unique(g.points, axis=0, return_inverse=True)
+    if len(pts) == len(g.points):
+        return g.points[:, :2], tris, cell
+    return pts[:, :2], inverse.ravel()[tris], cell
+
+
+def snapshot_fields(f, k):
+    """{field: cell values} of snapshot k of an open file, with its time as "TIME"."""
+    d = {name: f.read(name, k) for name in f.fields}
+    d["TIME"] = f.snapshots[k].t
+    return d
+
+
+def grid_fields(f, k, names):
+    """Cell fields of snapshot k of a generated quad mesh as (nx, ny) arrays: its time, the x and y of the cell
+    centers, and {name: values}."""
+    g = f.geometry(k)
+    if not np.all(np.diff(g.offsets) == 4):
+        raise ValueError(f"{f.path}: expected a quad mesh")
+    c = g.vertex_averages()
+    xs, ys = np.unique(np.round(c[:, 0], 12)), np.unique(np.round(c[:, 1], 12))
+    i = np.rint((c[:, 0] - xs[0]) / (xs[1] - xs[0])).astype(int)
+    j = np.rint((c[:, 1] - ys[0]) / (ys[1] - ys[0])).astype(int)
+    out = {}
+    for name in names:
+        out[name] = np.empty((xs.size, ys.size))
+        out[name][i, j] = f.read(name, k)
+    return f.snapshots[k].t, xs, ys, out
 
 
 def pixel_to_cell(pts, tris, tri_cell, res, xlim=None, ylim=None):
@@ -164,7 +202,7 @@ def main():
     ap.add_argument("--vmin", type=float, help="Color range minimum (default: the series minimum)")
     ap.add_argument("--vmax", type=float, help="Color range maximum (default: the series maximum)")
     ap.add_argument("--glob", default="*",
-                    help="Snapshot file pattern within the series directory (VTKHDF files, else the PVTU files of MPI runs, are preferred)")
+                    help="Pattern of the series files and snapshot files within the series directory")
     ap.add_argument("--width", type=float, default=14.0, help="Figure width in inches; text scales with it")
     ap.add_argument("--dpi", type=int, default=100)
     ap.add_argument("--layout", choices=["auto", "stacked", "side", "single"], default="auto",
@@ -178,9 +216,10 @@ def main():
     ap.add_argument("--frames-dir", help="Keep the PNG frames in this directory")
     args = ap.parse_args()
 
-    all_files = series(args.series_dir, args.glob)
-    files = all_files[::-1][::args.every][::-1]
-    pts, tris, tri_cell, data = read_vtu(files[0])
+    files = mallard.series(args.series_dir, args.glob)[::-1][::args.every][::-1]
+    if not files:
+        raise SystemExit(f"no snapshots in {args.series_dir} matching {args.glob}")
+    pts, tris, tri_cell = plane(*files[0])
     cell, valid, extent = pixel_to_cell(pts, tris, tri_cell, args.res, args.xlim, args.ylim)
     raster = Rasterizer(pts, tris, tri_cell, cell, valid, extent, args.interp)
     aspect = (extent[1] - extent[0]) / (extent[3] - extent[2])
@@ -203,7 +242,7 @@ def main():
     # Fixed color range over the whole series (within the displayed region)
     lo, hi = np.inf, -np.inf
     for f in files if args.vmin is None or args.vmax is None else []:
-        img = field(read_vtu(f)[3])
+        img = field(snapshot_fields(*f))
         if args.var == "VORTICITY":
             m = np.nanpercentile(np.abs(img), 99.5)
             lo, hi = min(lo, -m), max(hi, m)
@@ -215,7 +254,7 @@ def main():
     hi = args.vmax if args.vmax is not None else hi
     second_range = None
     if args.second != "schlieren":
-        vals = [raster(read_vtu(f)[3][args.second]) for f in files[len(files) // 2:]]
+        vals = [raster(f.read(args.second, k)) for f, k in files[len(files) // 2:]]
         second_range = (np.nanpercentile(vals, 0.5), np.nanpercentile(vals, 99.5))
 
     k = args.width / 14.0
@@ -227,7 +266,7 @@ def main():
     frame_dir = args.frames_dir or tmp.name
     frame_files = []
     for f in files:
-        d = read_vtu(f)[3]
+        d = snapshot_fields(*f)
         img = field(d)
         if layout == "single":
             fig, ax = plt.subplots(figsize=(14 * k, (12.6 / aspect + 1.0) * k), facecolor="#101014", dpi=args.dpi)
@@ -294,7 +333,7 @@ def main():
         plt.close(fig)
         frame_files.append(os.path.join(frame_dir, f"frame_{len(frame_files):05d}.png"))
         imageio.imwrite(frame_files[-1], frame)
-        print(f"rendered {os.path.basename(f)} (t = {t:.3f})", flush=True)
+        print(f"rendered {os.path.basename(f[0].snapshots[f[1]].file)} (t = {t:.3f})", flush=True)
 
     # Both animations hold the final frame for a second
     gif_fps = args.gif_fps or args.fps

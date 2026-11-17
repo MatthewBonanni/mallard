@@ -3,7 +3,9 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Steps decided on the device and enqueued ahead of it: in CUDA builds
  *        each one CUDA graph (time-step reduction, halo exchanges, stages, the
- *        step's end), launched without waiting for the previous one.
+ *        step's end), launched without waiting for the previous one. HIP and
+ *        SYCL graphs have no conditional nodes: there the host reads each IF
+ *        node's flag, one step at a time.
  * @version 0.2
  * @date 2026-10-05
  *
@@ -143,7 +145,13 @@ std::string Solver::device_steps_unsupported() const {
 }
 
 std::string Solver::step_graph_unsupported() const {
-#ifndef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_HIP)
+    // Neither HIP's graphs nor SYCL's (sycl_ext_oneapi_graph) have conditional nodes: a graph without them would run
+    // every IF body at every step, and the launches ahead of the host would not stop at a step it must act on
+    if (!uncaptured_step_graphs) return "HIP graphs have no conditional nodes";
+#elif defined(KOKKOS_ENABLE_SYCL)
+    if (!uncaptured_step_graphs) return "SYCL graphs have no conditional nodes";
+#elif !defined(KOKKOS_ENABLE_CUDA)
     if (!uncaptured_step_graphs) return "not a CUDA build";
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";

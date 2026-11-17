@@ -582,7 +582,7 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
 }
 
 /** @brief Writes DIR/report.html from DIR/mallard.jsonl. */
-int run_report(const std::string & dir) {
+int run_report(const std::string & dir, const bool json) {
     const fs::path log = fs::path(dir) / "mallard.jsonl";
     if (!fs::exists(log)) {
         logging::error(diagnostic_code::INFO, "mallard info: " + dir +
@@ -593,12 +593,16 @@ int run_report(const std::string & dir) {
     }
     const std::string page = (fs::path(dir) / "report.html").string();
     run_page::write(page, run_page::from_file(log.string()).html());
-    std::cout << "Wrote " << page << "\n";
+    if (json) {
+        std::cout << json::Object().add("directory", dir).add("report", page).str() << "\n";
+    } else {
+        std::cout << "Wrote " << page << "\n";
+    }
     return 0;
 }
 
 int run_directory(const std::string & dir, const cli::Args & args) {
-    if (args.has("--html")) return run_report(dir);
+    if (args.has("--html")) return run_report(dir, args.value_or("--format", "text") == "json");
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
