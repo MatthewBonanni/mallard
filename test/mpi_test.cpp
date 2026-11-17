@@ -179,7 +179,7 @@ TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
 TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
-    // wherever it runs, also with fused half steps, the thickened flame's
+    // wherever it runs, also with fused half steps, explicit steps, the thickened flame's
     // multiplier of dt and SIMPLER's forcing. The capacities grow after the
     // first step, which records the step graph again
     const std::string balanced = "[chemistry]\nload_balance = true\n";
@@ -187,6 +187,8 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "explicit_step = true\n",
                                                 "navier_stokes"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
@@ -229,6 +231,20 @@ TEST(MPITest, MUSCLMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
+}
+
+TEST(MPITest, FusedMUSCLMatchesSerial) {
+    // Large meshes reconstruct in one kernel per cell, over every local cell: the halo cells past layer 1 fill
+    // the outer sides of layer 1's faces but have faces without face states. Mixtures take that path every stage
+    struct Fused {
+        const uint32_t saved = MUSCL::fused_cells;
+        Fused() { MUSCL::fused_cells = 1; }
+        ~Fused() { MUSCL::fused_cells = saved; }
+    } fused;
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 10));
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "euler"));
 }
 
 TEST(MPITest, TENOOnQuadsMatchesSerial) {
@@ -656,6 +672,26 @@ TEST(MPITest, ThickenedFlameMatchesSerial) {
     }
     expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
                           "efficiency = \"charlette\"\n");
+}
+
+TEST(MPITest, ReactionSensorMatchesSerialWithAndWithoutStepGraphs) {
+    // The consumption rates, the mixture fraction and the flame table are local; the sensor's filter passes exchange
+    // the filtered field. The table's small omega_max lets the slow reactions of the hot H2/O2 half fire the sensor,
+    // the N2 half not
+    const std::string table = (rank_scratch_dir() / "flames.csv").string();
+    std::ofstream(table) << "Z,s_L,delta_L,omega_max\n0,2,0.001,0.001\n1,2,0.001,0.001\n";
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\nsensor = \"reaction\"\n"
+                              "flame_table = \"" + table + "\"\n"
+                              "fuel = {X = {H2 = 1.0}}\noxidizer = {X = {O2 = 1.0}}\nefficiency_max = 1.5\n";
+    expect_matches_serial_with_and_without_step_graphs(
+        mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame, [](const Solver & s) {
+            const auto & fields = s.get_tfles_fields();
+            uint32_t thickened = 0;
+            for (uint32_t c = 0; c < s.get_mesh()->n_owned(); c++) thickened += fields(c, 2) > 0.0_r;
+            const uint32_t n = s.get_mesh()->n_owned();
+            EXPECT_GT(comm::allreduce(thickened, comm::Op::SUM), 0u);
+            EXPECT_LT(comm::allreduce(thickened, comm::Op::SUM), comm::allreduce(n, comm::Op::SUM));
+        });
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {

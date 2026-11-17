@@ -451,7 +451,7 @@ void Solver::update_transport() {
                          MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                  transport_values});
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
-        Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+        Kokkos::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
                                  viscous_gradient, transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport});
