@@ -38,10 +38,10 @@ double bilger_coefficient(const chemistry::Species & s) {
     return (2.0 * atoms(s, "C") + 0.5 * atoms(s, "H") - atoms(s, "O")) / s.molecular_weight;
 }
 
-/** @brief The mass fractions of a stream of [output.mixture]: a composition table, or a [[boundaries]] name. */
-std::vector<double> stream(const Input & input, const Input & table, const std::string & key,
-                           const MixtureModel & mixture) {
-    const std::string path = "output.mixture." + key;
+/** @brief The mass fractions of the stream `key` of a table at `where`: a composition table, or a [[boundaries]] name. */
+std::vector<double> stream(const Input & input, const Input & table, const std::string & where, const std::string & key,
+                           const MixtureModel & mixture, const char * docs) {
+    const std::string path = where + "." + key;
     const Input & value = table.at(key);
     if (!value.is_string()) {
         if (!value.is_table() || (!value.contains("X") && !value.contains("Y"))) {
@@ -50,7 +50,7 @@ std::vector<double> stream(const Input & input, const Input & table, const std::
                                         .message = "is a composition {X = {...}} or {Y = {...}}, or the name of a "
                                                    "[[boundaries]] entry whose composition it takes",
                                         .fix = "e.g. " + key + (key == "fuel" ? " = {X = {CH4 = 1}}" : " = {X = {O2 = 1, N2 = 3.76}}"),
-                                        .docs = DOCS});
+                                        .docs = docs});
         }
         if (MixtureModel::composition_varies(value)) throw InputError(path + " must be uniform: give numbers.");
         return mixture.mass_fractions(value, path);
@@ -85,7 +85,7 @@ std::vector<double> stream(const Input & input, const Input & table, const std::
                                 .message = "no [[boundaries]] entry is named \"" + name + "\"",
                                 .valid = names,
                                 .suggestion = suggest_value(name, names),
-                                .docs = DOCS});
+                                .docs = docs});
 }
 
 /** @brief The species of a stream that counts most by mass among those that qualify(species), or -1. */
@@ -116,6 +116,46 @@ struct CellY {
 };
 
 } // namespace
+
+MixtureFraction mixture_fraction(const Input & input, const Input & table, const std::string & where,
+                                 const MixtureModel & mixture, const char * docs) {
+    const bool fuel = table.contains("fuel"), oxidizer = table.contains("oxidizer");
+    if (!fuel || !oxidizer) {
+        throw missing_key(table, where + "." + (fuel ? "oxidizer" : "fuel"),
+                          "The mixture fraction needs both streams, fuel and oxidizer");
+    }
+    const chemistry::Mechanism & mech = mixture.mechanism();
+    const uint32_t n = mech.n_species();
+    const std::vector<double> Y_F = stream(input, table, where, "fuel", mixture, docs);
+    const std::vector<double> Y_O = stream(input, table, where, "oxidizer", mixture, docs);
+    double beta_F = 0.0, beta_O = 0.0, scale = 0.0;
+    std::vector<double> b(n);
+    for (uint32_t k = 0; k < n; k++) {
+        b[k] = bilger_coefficient(mech.species[k]);
+        beta_F += b[k] * Y_F[k];
+        beta_O += b[k] * Y_O[k];
+        scale = std::max(scale, std::abs(b[k]));
+    }
+    if (!(std::abs(beta_F - beta_O) > 1e-6 * scale)) {
+        throw InputError(Diagnostic{.key = where,
+                                    .line = line_of(table),
+                                    .message = "the fuel and oxidizer streams have the same Bilger coupling "
+                                               "function (2 C + H/2 - O per unit mass), so no mixture fraction "
+                                               "separates them",
+                                    .fix = "Give the fuel stream (C and H) and the oxidizer stream (O)",
+                                    .docs = docs});
+    }
+    MixtureFraction z;
+    z.weights.resize(n);
+    for (uint32_t k = 0; k < n; k++) z.weights[k] = b[k] / (beta_F - beta_O);
+    z.offset = -beta_O / (beta_F - beta_O);
+    const auto burns = [](const chemistry::Species & sp) { return atoms(sp, "C") + atoms(sp, "H") > 0.0; };
+    z.fuel_species = most_abundant(mech, Y_F, burns);
+    z.oxidizer_species = most_abundant(mech, Y_O, [&](const chemistry::Species & sp) {
+        return atoms(sp, "O") > 0.0 && !burns(sp);
+    });
+    return z;
+}
 
 Settings Settings::from_input(const Input & input, const Euler & physics, const MixtureModel * mixture,
                               const bool viscous) {
@@ -151,39 +191,14 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
     auto weights = Kokkos::create_mirror_view(s.scalar_weights);
 
     const bool fuel = table.contains("fuel"), oxidizer = table.contains("oxidizer");
-    if (fuel != oxidizer) {
-        throw missing_key(table, std::string("output.mixture.") + (fuel ? "oxidizer" : "fuel"),
-                          "The mixture fraction needs both streams, fuel and oxidizer");
-    }
     int32_t fuel_default = -1, oxidizer_default = -1;
-    if (fuel) {
-        const std::vector<double> Y_F = stream(input, table, "fuel", *mixture);
-        const std::vector<double> Y_O = stream(input, table, "oxidizer", *mixture);
-        double beta_F = 0.0, beta_O = 0.0, scale = 0.0;
-        std::vector<double> b(n);
-        for (uint32_t k = 0; k < n; k++) {
-            b[k] = bilger_coefficient(mech.species[k]);
-            beta_F += b[k] * Y_F[k];
-            beta_O += b[k] * Y_O[k];
-            scale = std::max(scale, std::abs(b[k]));
-        }
-        if (!(std::abs(beta_F - beta_O) > 1e-6 * scale)) {
-            throw InputError(Diagnostic{.key = "output.mixture",
-                                        .line = line_of(output->at("mixture")),
-                                        .message = "the fuel and oxidizer streams have the same Bilger coupling "
-                                                   "function (2 C + H/2 - O per unit mass), so no mixture fraction "
-                                                   "separates them",
-                                        .fix = "Give the fuel stream (C and H) and the oxidizer stream (O)",
-                                        .docs = DOCS});
-        }
+    if (fuel || oxidizer) {
+        const MixtureFraction z = mixture_fraction(input, table, "output.mixture", *mixture, DOCS);
         s.streams = true;
-        for (uint32_t k = 0; k < n; k++) weights(Z, k) = static_cast<rtype>(b[k] / (beta_F - beta_O));
-        s.z_offset = static_cast<rtype>(-beta_O / (beta_F - beta_O));
-        const auto burns = [](const chemistry::Species & sp) { return atoms(sp, "C") + atoms(sp, "H") > 0.0; };
-        fuel_default = most_abundant(mech, Y_F, burns);
-        oxidizer_default = most_abundant(mech, Y_O, [&](const chemistry::Species & sp) {
-            return atoms(sp, "O") > 0.0 && !burns(sp);
-        });
+        for (uint32_t k = 0; k < n; k++) weights(Z, k) = static_cast<rtype>(z.weights[k]);
+        s.z_offset = static_cast<rtype>(z.offset);
+        fuel_default = z.fuel_species;
+        oxidizer_default = z.oxidizer_species;
     }
     s.fuel_species = species_of(table, "fuel_species", *mixture, fuel_default);
     s.oxidizer_species = species_of(table, "oxidizer_species", *mixture, oxidizer_default);

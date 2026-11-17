@@ -77,7 +77,7 @@ void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, C
     view_entries::set_cells(n_cells);
     // A mesh without global ids is whole: its input order becomes the global order
     if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
-        const LocalityOrder numbered = locality_order(cell_order, nodes, cells, {n_cells});
+        const LocalityOrder numbered = locality_order(cell_order, nodes, cells, {n_cells}, classes.key);
         cell_order_choice = numbered.choice;
         structured_blocks = numbered.blocks;
         if (numbered.choice.order == CellOrder::HILBERT || !numbered.blocks.empty()) {
