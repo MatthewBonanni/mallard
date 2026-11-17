@@ -300,6 +300,7 @@ struct Outcome {
  *        host copy.
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
+    if (Solver::are_cuda_graphs_off()) return;
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
     if (solver.get_step() > 1) {
         EXPECT_GT(guard.captures(), 0u);
@@ -470,7 +471,7 @@ TEST(StepQueueTest, OutputsByStep) {
 #ifdef KOKKOS_ENABLE_CUDA
     const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
     EXPECT_EQ(fallback.graph_steps, 0u);
-    if (comm::is_root()) {
+    if (comm::is_root() && !Solver::are_cuda_graphs_off()) {
         ASSERT_EQ(fallback.warnings.size(), 1u);
         EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
     }
@@ -570,6 +571,7 @@ namespace {
 
 /** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
 void expect_graphed(const Outcome & o, const std::string & what) {
+    if (Solver::are_cuda_graphs_off()) return;
 #ifdef KOKKOS_ENABLE_CUDA
     EXPECT_GT(o.graph_steps, 0u) << what;
 #endif
@@ -1295,6 +1297,7 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
     // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
     // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;

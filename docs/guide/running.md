@@ -297,6 +297,9 @@ are clean ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)). Repo
 kernels (a host backtrace through `cuGraphLaunch`) are therefore not to be trusted: check those kernels with
 `cuda_graphs = false`.
 
+The test suite takes `MALLARD_TEST_CUDA_GRAPHS=off` to run every test's solver this way;
+`tools/dev/gpu_runtime_tests.sh` checks a CUDA build so ([Contributing](../../CONTRIBUTING.md)).
+
 ## Kubernetes
 
 The [container images](https://matthewbonanni.github.io/mallard/docs/installation/#container) run as Kubernetes workloads. Manifests, in [`docs/guide/k8s`](k8s):

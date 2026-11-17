@@ -263,14 +263,22 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph path), the MPI tests on 2 ranks with NCCL's and MPI's
-  halo exchanges, the step graph and stream ordering tests under compute-sanitizer
-  (`tools/dev/gpu_runtime_tests.sh`; `--full`, with every MPI test across nodes, when GPU
-  time allows), and the [performance suite](benchmarks/README.md) against per-hardware baselines. It
+  halo exchanges, and the [performance suite](benchmarks/README.md) against per-hardware baselines. It
   posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
   its results show on the PR next to `CI`. A PR that changes device code merges only
   with both passing. You do not need a GPU to contribute: say in the PR template
   whether device code changed, and a maintainer runs it. Performance claims need
   numbers from the performance suite or a real case, before and after.
+- **GPU runtime checks**, run on demand when A100 time is available, with one command:
+  `tools/dev/gpu_runtime_tests.sh [--full] BUILD` on a CUDA build. It runs the step graph and
+  stream ordering tests, then NVIDIA's compute-sanitizer (`memcheck`, `racecheck`, `synccheck`)
+  on a representative set of tests, on one GPU and on 2 ranks (`MPIEXEC=none` on one GPU).
+  compute-sanitizer misreports kernels in step graphs
+  ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)), so the sanitized tests run
+  with `MALLARD_TEST_CUDA_GRAPHS=off`: every solver as with `[run] cuda_graphs = false`, and
+  the assertions that steps were graphed are skipped. `--full` adds `initcheck`, `memcheck` on
+  the whole suite, and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
+  across the network).
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
 - **Support matrix.** [Supported platforms](docs/guide/support.md) lists every CI job and
