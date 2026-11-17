@@ -88,10 +88,14 @@ class DistributedMesh {
          *        of vertex neighbors, each numbered by cell_order. Faces on the
          *        global boundary keep their zones; faces towards cells not on
          *        this rank go to PARTITION_ZONE. Fills dist, including the
-         *        exchange plan (collective; after distribute()).
+         *        exchange plan (collective; after distribute()). On an rvalue,
+         *        the last use of the setup, it also frees the block before
+         *        building the Mesh.
          */
         std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist,
-                                               const CellNumbering & cell_order = {});
+                                               const CellNumbering & cell_order = {}) &;
+        std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist,
+                                               const CellNumbering & cell_order = {}) &&;
 
     private:
         /** @brief The cells this rank holds: owned cells, then halo layers. */
@@ -130,6 +134,8 @@ class DistributedMesh {
         void read_records(const std::vector<uint64_t> & in, uint8_t layer);
         std::vector<std::array<double, N_DIM>> fetch_nodes(const std::vector<uint64_t> & sorted_ids) const;
         void grow_layer();
+        std::shared_ptr<Mesh> local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order,
+                                         bool last);
 
         MeshBlock block;
         std::vector<uint64_t> cell_dist, node_dist;

@@ -263,6 +263,7 @@ void Solver::setup_from_input() {
         init_mesh_fields();
         register_data();
         init_output(*used_regions);
+        init_check_inputs();
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
