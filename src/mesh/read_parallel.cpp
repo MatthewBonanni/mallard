@@ -15,6 +15,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -434,6 +436,299 @@ void cells_of_faces(uint64_t n_cells, const std::vector<uint64_t> & face_ids, co
             block.add_cell(cell_corners(cell_faces, block.first_cell + c, source));
         }
     });
+}
+
+uint64_t line_of(const std::string & filename, uint64_t offset) {
+    std::ifstream in(filename, std::ios::binary);
+    std::vector<char> buffer(1 << 16);
+    uint64_t line = 1;
+    for (uint64_t left = offset; left > 0 && in;) {
+        in.read(buffer.data(), static_cast<std::streamsize>(std::min<uint64_t>(left, buffer.size())));
+        const uint64_t n = uint64_t(in.gcount());
+        line += uint64_t(std::count(buffer.data(), buffer.data() + n, '\n'));
+        left -= std::min(left, n);
+        if (n == 0) break;
+    }
+    return line;
+}
+
+namespace {
+
+bool is_space(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+
+bool ends_token(int c) { return c < 0 || is_space(c) || c == '(' || c == ')'; }
+
+} // namespace
+
+void Tokens::seek(uint64_t offset, uint64_t from) {
+    if (offset <= from) {
+        cur.seek(offset);
+        return;
+    }
+    cur.seek(offset - 1);
+    if (!ends_token(cur.get())) {
+        while (!ends_token(cur.peek())) cur.get();
+    }
+}
+
+std::string_view Tokens::next() {
+    std::string_view v = cur.ahead();
+    while (true) {
+        size_t i = 0;
+        while (i < v.size() && is_space(static_cast<unsigned char>(v[i]))) i++;
+        cur.skip(i);
+        if (i < v.size()) break;
+        v = cur.ahead();
+        if (v.empty()) {
+            at = cur.offset();
+            return {};
+        }
+    }
+    v = cur.ahead();
+    at = cur.offset();
+    if (v[0] == '(' || v[0] == ')') {
+        cur.skip(1);
+        return v.substr(0, 1);
+    }
+    size_t i = 0;
+    while (i < v.size() && !ends_token(static_cast<unsigned char>(v[i]))) i++;
+    if (i < v.size()) {
+        cur.skip(i);
+        return v.substr(0, i);
+    }
+    text.assign(v);
+    cur.skip(v.size());
+    while (!ends_token(cur.peek())) text += char(cur.get());
+    return text;
+}
+
+double Tokens::real() {
+    const std::string t(next());
+    char * end = nullptr;
+    const double value = std::strtod(t.c_str(), &end);
+    if (t.empty() || end != t.c_str() + t.size()) throw malformed();
+    if (!std::isfinite(value)) {
+        throw std::runtime_error(what + ", line " + std::to_string(line_of(file, at)) + ": " + t + " is not a finite number.");
+    }
+    return value;
+}
+
+void Tokens::expect(char c) {
+    if (next() != std::string_view(&c, 1)) throw malformed();
+}
+
+std::runtime_error Tokens::malformed() const { return parallel_read::malformed(what, line_of(file, at)); }
+
+uint64_t find_nth(const std::string & filename, uint64_t from, char c, uint64_t k, uint64_t chunk) {
+    const int p = comm::size(), r = comm::rank();
+    chunk = std::max<uint64_t>(chunk, 1);
+    const uint64_t size = std::filesystem::file_size(filename);
+    std::ifstream in(filename, std::ios::binary);
+    std::vector<char> buffer(chunk);
+    for (uint64_t round = from; round < size; round += chunk * uint64_t(p)) {
+        const uint64_t at = round + chunk * uint64_t(r);
+        std::vector<uint64_t> found;
+        collectively([&] {
+            if (at >= size) return;
+            const uint64_t n = std::min(chunk, size - at);
+            in.seekg(static_cast<std::streamoff>(at));
+            in.read(buffer.data(), static_cast<std::streamsize>(n));
+            if (!in) throw cannot_read("the mesh file", filename);
+            for (uint64_t i = 0; i < n; i++) {
+                if (buffer[i] == c) found.push_back(at + i);
+            }
+        });
+        const std::vector<uint64_t> counts = comm::allgatherv(std::vector<uint64_t>{found.size()});
+        for (int q = 0; q < p; q++) {
+            if (k <= counts[size_t(q)]) return comm::allreduce(q == r ? found[k - 1] : NONE, comm::Op::MIN);
+            k -= counts[size_t(q)];
+        }
+    }
+    return NONE;
+}
+
+namespace {
+
+/** @brief Marks from each rank's (local unit, offset) pairs and count of units. */
+Marks gather_marks(std::vector<uint64_t> local, uint64_t count) {
+    const std::vector<uint64_t> counts = comm::allgatherv(std::vector<uint64_t>{count});
+    Marks marks;
+    uint64_t first = 0;
+    for (int q = 0; q < comm::size(); q++) {
+        if (q < comm::rank()) first += counts[size_t(q)];
+        marks.n += counts[size_t(q)];
+    }
+    for (size_t k = 0; k < local.size(); k += 2) local[k] += first;
+    const std::vector<uint64_t> all = comm::allgatherv(local);
+    std::vector<std::pair<uint64_t, uint64_t>> points;
+    for (size_t k = 0; k + 1 < all.size(); k += 2) points.emplace_back(all[k], all[k + 1]);
+    std::sort(points.begin(), points.end());
+    for (const auto & [u, o] : points) {
+        if (!marks.unit.empty() && marks.unit.back() == u) continue;
+        marks.unit.push_back(u);
+        marks.offset.push_back(o);
+    }
+    return marks;
+}
+
+/** @brief The units of this rank's share of bytes [begin, end) of a file: tokens, or 4-byte integers if binary. */
+class ShareUnits {
+  public:
+    ShareUnits(const std::string & filename, const std::string & source, uint64_t begin, uint64_t end, bool binary,
+               uint64_t chunk)
+        : what(source), span_begin(begin), is_binary(binary), cur(filename, chunk), tokens(filename, source, chunk) {
+        const int p = comm::size(), r = comm::rank();
+        const uint64_t step = binary ? 4 : 1, n = (end - begin) / step;
+        first = begin + step * block_begin(n, r, p);
+        last = begin + step * block_begin(n, r + 1, p);
+        rewind();
+    }
+
+    void rewind() {
+        if (is_binary) {
+            cur.seek(first);
+        } else {
+            tokens.seek(first, span_begin);
+        }
+    }
+
+    /** @brief The next unit, its value (NONE if not one) and offset; false past the share. */
+    bool next(uint64_t & value, uint64_t & offset) {
+        if (is_binary) {
+            offset = cur.offset();
+            if (offset >= last) return false;
+            uint32_t word = 0;
+            for (int i = 0; i < 4; i++) {
+                const int c = cur.get();
+                if (c < 0) throw malformed(what, NONE);
+                word |= uint32_t(c) << (8 * i);
+            }
+            value = int32_t(word) < 0 ? NONE : uint64_t(word);
+            return true;
+        }
+        const std::string_view t = tokens.next();
+        offset = tokens.start();
+        if (t.empty() || offset >= last) return false;
+        const auto [end, ec] = std::from_chars(t.data(), t.data() + t.size(), value, 16);
+        if (ec != std::errc() || end != t.data() + t.size()) value = NONE;
+        return true;
+    }
+
+  private:
+    const std::string & what;
+    uint64_t span_begin, first = 0, last = 0;
+    bool is_binary;
+    FileCursor cur;
+    Tokens tokens;
+};
+
+} // namespace
+
+Marks mark_units(const std::string & filename, uint64_t begin, uint64_t end, Unit unit, uint64_t spacing, uint64_t chunk) {
+    const int p = comm::size(), r = comm::rank();
+    spacing = std::max<uint64_t>(spacing, 1);
+    const uint64_t first = begin + block_begin(end - begin, r, p), last = begin + block_begin(end - begin, r + 1, p);
+    std::vector<uint64_t> local;  // (local unit, offset)
+    uint64_t count = 0;
+    collectively([&] {
+        if (first >= last) return;
+        Tokens tokens(filename, "", chunk);
+        tokens.seek(first, begin);
+        for (std::string_view t = tokens.next(); !t.empty() && tokens.start() < last; t = tokens.next()) {
+            if (unit == Unit::TOKEN) {
+                if (count % spacing == 0) local.insert(local.end(), {count, tokens.start()});
+                count++;
+            } else if (t == ")") {
+                count++;
+                if (count % spacing == 0) local.insert(local.end(), {count, tokens.start() + 1});
+            }
+        }
+    });
+    if (r == 0) local.insert(local.begin(), {0, begin});
+    return gather_marks(std::move(local), count);
+}
+
+Chain chain_items(const std::string & filename, const std::string & source, uint64_t begin, uint64_t end, bool binary,
+                  uint64_t max_length, uint64_t (*length)(uint64_t), uint64_t spacing, uint64_t chunk) {
+    const int r = comm::rank();
+    spacing = std::max<uint64_t>(spacing, 1);
+    const size_t L = size_t(max_length);
+    size_t ring = 1;
+    while (ring <= L) ring *= 2;
+    std::unique_ptr<ShareUnits> units;
+    // The chains from this rank's first L units, as groups that merge where two chains meet: each candidate's
+    // first unit past the share (relative to its end), NONE where its chain has an item of length 0
+    std::vector<uint64_t> mine;
+    collectively([&] {
+        units = std::make_unique<ShareUnits>(filename, source, begin, end, binary, chunk);
+        std::vector<int64_t> arrive(ring, -1);  // the group whose chain reaches a unit, by unit mod ring
+        std::vector<size_t> parent(L);
+        std::vector<uint8_t> dead(L, 0);
+        auto find = [&](size_t g) {
+            while (parent[g] != g) g = parent[g] = parent[parent[g]];
+            return g;
+        };
+        uint64_t value = 0, offset = 0, u = 0;
+        for (; units->next(value, offset); u++) {
+            const int64_t arrived = arrive[u % ring];
+            arrive[u % ring] = -1;
+            int64_t g = arrived;
+            if (u < L) {
+                parent[u] = arrived >= 0 ? find(size_t(arrived)) : u;
+                g = int64_t(u);
+            }
+            if (g < 0) continue;
+            const size_t root = find(size_t(g));
+            const uint64_t n = length(value);
+            if (n == 0 || n > L) {
+                dead[root] = 1;
+                continue;
+            }
+            int64_t & slot = arrive[(u + n) % ring];
+            if (slot >= 0 && find(size_t(slot)) != root) parent[root] = find(size_t(slot));
+            slot = int64_t(find(root));
+        }
+        const uint64_t n_units = u, m = std::min<uint64_t>(L, n_units);
+        std::vector<uint64_t> exit(L, NONE);
+        for (size_t i = 0; i < ring; i++) {
+            if (arrive[i] >= 0) exit[find(size_t(arrive[i]))] = (i + ring - n_units % ring) % ring;
+        }
+        mine = {n_units, m};
+        for (size_t c = 0; c < m; c++) mine.push_back(dead[find(c)] ? NONE : exit[find(c)]);
+    });
+    const std::vector<uint64_t> all = comm::allgatherv(mine);
+    Chain chain;
+    uint64_t start = NONE;
+    for (size_t i = 0, q = 0; i < all.size(); q++) {
+        const uint64_t n_units = all[i], m = all[i + 1];
+        if (chain.end < chain.units + n_units) {
+            const uint64_t c = chain.end - chain.units;
+            if (c >= m || all[i + 2 + c] == NONE) {
+                chain.end = NONE;
+                return chain;
+            }
+            if (int(q) == r) start = c;
+            chain.end = chain.units + n_units + all[i + 2 + c];
+        }
+        chain.units += n_units;
+        i += 2 + m;
+    }
+    std::vector<uint64_t> local;  // (local item, offset)
+    uint64_t count = 0;
+    collectively([&] {
+        if (start == NONE) return;
+        units->rewind();
+        uint64_t value = 0, offset = 0, next = start;
+        for (uint64_t u = 0; units->next(value, offset); u++) {
+            if (u != next) continue;
+            if (count % spacing == 0) local.insert(local.end(), {count, offset});
+            count++;
+            next = u + length(value);
+        }
+    });
+    chain.marks = gather_marks(std::move(local), count);
+    if (binary) chain.end = begin + 4 * chain.end;
+    return chain;
 }
 
 } // namespace parallel_read

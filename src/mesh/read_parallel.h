@@ -22,6 +22,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "comm.h"
@@ -167,6 +168,13 @@ class FileCursor {
     }
     /** @brief Read n bytes; false if the file ends first. */
     bool read(char * out, uint64_t n);
+    /** @brief The bytes read ahead from the offset on, reading more if there are none; empty at the end. */
+    std::string_view ahead() {
+        if (peek() < 0) return {};
+        return {buffer.data() + pos, buffer.size() - pos};
+    }
+    /** @brief Move on by n <= ahead().size() bytes. */
+    void skip(size_t n) { pos += n; }
 
   private:
     std::ifstream in;
@@ -174,6 +182,101 @@ class FileCursor {
     std::vector<char> buffer;
     size_t pos = 0;
 };
+
+/** @brief The (1-based) line of a file that holds the byte at offset (reads the file up to it). */
+uint64_t line_of(const std::string & filename, uint64_t offset);
+
+/**
+ * @brief Reads the whitespace-separated tokens of a file from any offset,
+ *        each parenthesis a token of its own; errors name source and the
+ *        line of the token.
+ */
+class Tokens {
+  public:
+    Tokens(const std::string & filename, std::string source, uint64_t chunk = uint64_t(1) << 16)
+        : cur(filename, chunk), file(filename), what(std::move(source)) {}
+
+    /** @brief Go to offset, past the rest of a token that starts before it at or after `from`. */
+    void seek(uint64_t offset, uint64_t from);
+    void seek(uint64_t offset) { seek(offset, offset); }
+
+    /** @brief The next token, empty at the end of the file. */
+    std::string_view next();
+
+    /** @brief The offset of the last token. */
+    uint64_t start() const { return at; }
+
+    /** @brief The offset where the next token's search starts. */
+    uint64_t offset() const { return cur.offset(); }
+
+    template <typename T>
+    T integer(int base = 10) {
+        std::string_view t = next();
+        if (!t.empty() && t[0] == '+') t.remove_prefix(1);
+        T value{};
+        const auto [end, ec] = std::from_chars(t.data(), t.data() + t.size(), value, base);
+        if (ec != std::errc() || end != t.data() + t.size()) throw malformed();
+        return value;
+    }
+
+    double real();
+
+    /** @brief Read the token c, an error if it is another. */
+    void expect(char c);
+
+    /** @brief The error of the file being malformed at the last token. */
+    std::runtime_error malformed() const;
+
+  private:
+    FileCursor cur;
+    std::string file, what, text;
+    uint64_t at = 0;
+};
+
+/**
+ * @brief Where the units of a span of a file start (by Unit, items or by
+ *        chain_items): unit unit[k] at byte offset[k], unit 0 at the span's
+ *        start and then at least every spacing-th unit; n units in all.
+ */
+struct Marks {
+    std::vector<uint64_t> unit, offset;
+    uint64_t n = 0;
+
+    /** @brief The last mark at or before unit u. */
+    size_t before(uint64_t u) const { return size_t(std::upper_bound(unit.begin(), unit.end(), u) - unit.begin()) - 1; }
+};
+
+/** @brief Units of a span of text: tokens (see Tokens), or the items that each end with a ')'. */
+enum class Unit { TOKEN, CLOSED };
+
+/**
+ * @brief The offset of the k-th (k >= 1) byte c at or after offset from, or
+ *        NONE if the file has fewer, each rank scanning reads of chunk bytes
+ *        in turn (collective).
+ */
+uint64_t find_nth(const std::string & filename, uint64_t from, char c, uint64_t k, uint64_t chunk = uint64_t(1) << 20);
+
+/** @brief The marks of the units of bytes [begin, end) of a file, each rank scanning its share (collective). */
+Marks mark_units(const std::string & filename, uint64_t begin, uint64_t end, Unit unit, uint64_t spacing = 1024,
+                 uint64_t chunk = uint64_t(1) << 16);
+
+/**
+ * @brief The items of bytes [begin, end) of a file, the first at begin, each
+ *        length(v) <= max_length units long, v its first unit: a token read in
+ *        base 16 or, if binary, a 4-byte integer (NONE if neither); length 0
+ *        is not an item. Each rank finds the items of its share by
+ *        following, from each of its first max_length units, the chain of
+ *        items to the end of its share; the chains join up across the ranks
+ *        (collective).
+ */
+struct Chain {
+    Marks marks;       // of the items
+    uint64_t end = 0;  // the first unit at or after end that starts an item (binary: its offset); NONE if an item has length 0
+    uint64_t units = 0;  // the units in the span
+};
+Chain chain_items(const std::string & filename, const std::string & source, uint64_t begin, uint64_t end, bool binary,
+                  uint64_t max_length, uint64_t (*length)(uint64_t), uint64_t spacing = 1024,
+                  uint64_t chunk = uint64_t(1) << 16);
 
 /**
  * @brief Send each distinct key to rank owner(key), which writes the width
