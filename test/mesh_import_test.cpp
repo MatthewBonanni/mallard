@@ -17,6 +17,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -131,14 +132,17 @@ TEST(MeshImportTest, CgnsHighOrderFacesMatchGmsh) {
     if (!have_cgns()) GTEST_SKIP() << "built without CGNS";
     if (N_DIM != 2) GTEST_SKIP() << "2D fixture";
     expect_same_mesh("cyl2d_o2.msh", "cyl2d_o2.cgns", TOL);
-    const MeshFileData a = read_mesh_file(fixture("cyl2d_o2.msh")), b = read_mesh_file(fixture("cyl2d_o2.cgns"));
+    comm::SelfScope self;
+    const MeshBlock a = read_file_block(fixture("cyl2d_o2.msh")), b = read_file_block(fixture("cyl2d_o2.cgns"));
     // Every curved face's full node list (corners first, Gmsh order), any face order
-    auto curved = [](const MeshFileData & d) {
+    auto curved = [](const MeshBlock & d) {
         std::vector<std::vector<double>> out;
-        for (const auto & ho : d.boundary_high_order) {
-            if (ho.empty()) continue;
+        for (uint64_t f = 0; f < d.n_faces(); f++) {
+            if (d.face_high_order_offsets[f + 1] == d.face_high_order_offsets[f]) continue;
             std::vector<double> x;
-            for (const auto & p : ho) x.insert(x.end(), p.begin(), p.end());
+            for (uint64_t k = d.face_high_order_offsets[f]; k < d.face_high_order_offsets[f + 1]; k++) {
+                x.insert(x.end(), d.face_high_order_nodes[k].begin(), d.face_high_order_nodes[k].end());
+            }
             out.push_back(x);
         }
         std::sort(out.begin(), out.end());
@@ -156,7 +160,7 @@ TEST(MeshImportTest, CgnsHighOrderFacesMatchGmsh) {
 TEST(MeshImportTest, CgnsOfTheOtherDimensionIsRejected) {
     if (!have_cgns()) GTEST_SKIP() << "built without CGNS";
     try {
-        read_mesh_file(fixture(N_DIM == 2 ? "cyl3d.cgns" : "cyl2d.cgns"));
+        read_file_block(fixture(N_DIM == 2 ? "cyl3d.cgns" : "cyl2d.cgns"));
         FAIL() << "read a mesh of the other dimension";
     } catch (const std::runtime_error & e) {
         EXPECT_NE(std::string(e.what()).find("Mallard_DIM"), std::string::npos) << e.what();
@@ -181,16 +185,16 @@ TEST(MeshImportTest, OpenFoamMatchesGmsh) {
 
 TEST(MeshImportTest, PolygonsAndPolyhedraAreRejected) {
     // A pentagon (2D) or pentagonal prism (3D), by its faces
-    std::vector<std::vector<uint32_t>> faces;
+    std::vector<std::vector<uint64_t>> faces;
     if constexpr (N_DIM == 2) {
-        for (uint32_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5});
+        for (uint64_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5});
     } else {
         faces = {{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}};
-        for (uint32_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5, (k + 1) % 5 + 5, k + 5});
+        for (uint64_t k = 0; k < 5; k++) faces.push_back({k, (k + 1) % 5, (k + 1) % 5 + 5, k + 5});
     }
-    const std::vector<std::array<int64_t, 2>> face_cells(faces.size(), {0, -1});
+    const std::vector<std::span<const uint64_t>> spans(faces.begin(), faces.end());
     try {
-        cells_from_faces(1, faces, face_cells, "test");
+        cell_corners(spans, 0, "test");
         FAIL() << "accepted a polygon or polyhedron";
     } catch (const std::runtime_error & e) {
         EXPECT_NE(std::string(e.what()).find("no general polygons or polyhedra"), std::string::npos) << e.what();

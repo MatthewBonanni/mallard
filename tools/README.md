@@ -72,7 +72,7 @@ More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallard-rea
 
 ### `mallard mesh convert`: meshes for large parallel runs
 
-Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
+Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; HDF5 meshes need no parsing, so convert a large mesh used for many runs once.
 
 ```sh
 mallard mesh convert mesh.msh mesh.h5                # from any mesh file
