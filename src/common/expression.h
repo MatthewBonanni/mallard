@@ -35,8 +35,9 @@
 class Expression {
     public:
         Expression(const std::string & name, const std::string & text,
-                   const std::vector<std::string> & variables = {"x", "y", "z", "t"}) :
-            m_program(check(name, text, variables)), n_variables(variables.size()) {
+                   const std::vector<std::string> & variables = {"x", "y", "z", "t"},
+                   const size_t first_shadowable = SIZE_MAX) :
+            m_program(check(name, text, variables, first_shadowable)), n_variables(variables.size()) {
             for (uint16_t i = 0; i < variables.size(); i++) {
                 if (variables[i] == "t" && m_program.uses(i)) time_dependent = true;
             }
@@ -111,9 +112,9 @@ class Expression {
         }
 
         static kexpr::Program check(const std::string & name, const std::string & text,
-                                   const std::vector<std::string> & variables) {
+                                   const std::vector<std::string> & variables, const size_t first_shadowable) {
             try {
-                return kexpr::Program(name, text, variables, expression_unit_hint);
+                return kexpr::Program(name, text, variables, expression_unit_hint, first_shadowable);
             } catch (const std::invalid_argument & e) {
                 throw std::runtime_error(e.what());
             }

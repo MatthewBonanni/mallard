@@ -187,9 +187,14 @@ interval = 200
 
 
 def read_probe(path):
-    """Rows step, t, point, x, y, T, P, Y_k (the order setup lists them in)."""
-    rows = np.loadtxt(path, delimiter=",", ndmin=2)
-    return rows[:, 1], rows[:, 3], rows[:, 5], rows[:, 6], rows[:, 7:]
+    """Columns t, x, T, P and the Y_k, found by header name."""
+    with open(path) as fh:
+        lines = [line for line in fh if not line.startswith("#")]
+    header = lines[0].strip().split(",")
+    rows = np.loadtxt(lines[1:], delimiter=",", ndmin=2)
+    first_Y = next(i for i, name in enumerate(header) if name.startswith("Y_"))
+    col = header.index
+    return rows[:, col("t")], rows[:, col("x")], rows[:, col("T")], rows[:, col("P")], rows[:, first_Y:]
 
 
 def analyze(run_dir):

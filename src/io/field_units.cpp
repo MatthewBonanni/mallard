@@ -74,7 +74,7 @@ const Entry NAMED[] = {
      "a mixture with navier_stokes"},
     {"T_SEED", dim::temperature, "temperature guess of the thermodynamic state", MIXTURE, "a mixture"},
     {"HRR", dim::power_density, "heat release rate", CHEMISTRY, "a mixture with [chemistry]"},
-    {"CHEM_H", dim::time, "last chemistry sub-step", CHEMISTRY, "a mixture with [chemistry]"},
+    {"CHEM_H", dim::time, "last chemistry sub-step, negated after a failed explicit step", CHEMISTRY, "a mixture with [chemistry]"},
     {"CHEM_COST", dim::none, "chemistry sub-steps in the last step", CHEMISTRY, "a mixture with [chemistry]"},
     {"QRAD", dim::power_density, "radiative heat source", CHEMISTRY, "[radiation]"},
     {"MU_T", dim::dynamic_viscosity, "eddy viscosity", LES, "[les]"},

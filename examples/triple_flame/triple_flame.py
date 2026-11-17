@@ -16,7 +16,11 @@ midline, with the mixing thickness delta_M = 1 / (dZ/dy at Z_st) =
 D0 delta_L (Ruetsch, Vervisch & Linan 1995, whose overall change of Z is
 also 1). S_L, delta_L (the thermal thickness (T_b - T_u) / max dT/dx) and
 rho_u / rho_b are those of the planar Cantera flame at Z_st, computed here
-(or read from --planar, a full solution as tools/setup/flame_reference.py writes,
+on Cantera's grid of refine criteria 0.01 bisected twice, S_L extrapolated
+from the last two grids (first order: 1.194445 / 1.195188 / 1.195559 /
+1.195744 m/s on 1801 / 3601 / 7201 / 14401 points extrapolate to 1.19593
+m/s, which refine criteria 0.02 miss by 0.38% and 0.0025 by 0.13%), or read from
+--planar (a full solution as tools/setup/flame_reference.py writes,
 which this tool also writes as RUN_DIR/planar_full.csv for 1D runs of
 tools/setup/flame_restart.py). The sides are symmetry planes --width delta_L apart
 (default 3 delta_M + 24 delta_L), and the burnt gas leaves through a pressure
@@ -44,13 +48,39 @@ import numpy as np
 P = ct.one_atm
 
 
-def planar_flame(gas, T, fuel, oxidizer, Z, width=0.03):
+def planar_flame(gas, T, fuel, oxidizer, Z, width=0.03, bisections=2):
+    """The flame on Cantera's grid of refine criteria 0.01, then on that grid bisected
+    `bisections` times with refinement off; S_L Richardson-extrapolated (first order,
+    Cantera's upwind convection) from the last two."""
     gas.TP = T, P
     gas.set_mixture_fraction(Z, fuel, oxidizer)
+    state = gas.TPY
     flame = ct.FreeFlame(gas, width=width)
-    flame.set_refine_criteria(ratio=2.0, slope=0.02, curve=0.02, prune=0.002)
+    flame.set_max_grid_points(flame.flame, 30000)
+    flame.set_refine_criteria(ratio=2.0, slope=0.01, curve=0.01, prune=0.001)
     flame.solve(loglevel=0, auto=True)
-    return flame
+    speeds = [flame.velocity[0]]
+    for _ in range(bisections):
+        x = flame.grid
+        fine = np.empty(2 * x.size - 1)
+        fine[0::2], fine[1::2] = x, 0.5 * (x[1:] + x[:-1])
+        gas.TPY = state
+        f = ct.FreeFlame(gas, grid=fine)
+        f.set_max_grid_points(f.flame, 30000)
+        f.set_initial_guess()
+        xr = (x - x[0]) / (x[-1] - x[0])
+        f.flame.set_profile("velocity", xr, flame.velocity)
+        f.flame.set_profile("T", xr, flame.T)
+        for k, name in enumerate(gas.species_names):
+            f.flame.set_profile(name, xr, flame.Y[k])
+        f.inlet.mdot = flame.density[0] * flame.velocity[0]
+        f.fixed_temperature = flame.fixed_temperature
+        f.flame.set_steady_tolerances(default=(1e-9, 1e-15))
+        f.flame.set_transient_tolerances(default=(1e-9, 1e-15))
+        f.solve(loglevel=0, refine_grid=False, auto=False)
+        flame = f
+        speeds.append(flame.velocity[0])
+    return flame, 2 * speeds[-1] - speeds[-2]
 
 
 def read_full(path):
@@ -96,8 +126,8 @@ def main():
     if args.planar:
         names, d = read_full(args.planar)
     else:
-        f = planar_flame(gas, args.T, args.fuel, args.oxidizer, Z_st)
-        d = np.column_stack([f.grid, f.velocity, f.T, f.density, f.Y.T])
+        f, S_L = planar_flame(gas, args.T, args.fuel, args.oxidizer, Z_st)
+        d = np.column_stack([f.grid, f.velocity * S_L / f.velocity[0], f.T, f.density, f.Y.T])
         names = ["x", "u", "T", "rho"] + ["Y_" + s for s in species]
     np.savetxt(planar, d, delimiter=",", header=",".join(names), comments="")
     x, u, T = d[:, 0], d[:, 1], d[:, 2]
