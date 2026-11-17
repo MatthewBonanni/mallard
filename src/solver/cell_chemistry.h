@@ -46,6 +46,7 @@ struct CellChemistryOptions {
     int shared = 0;
     bool bin_by_cost = true;
     bool forced = false;  // calls may take a ChemistryForcing
+    bool explicit_step = false;  // first try chemistry::explicit_reactor_step in cells whose last sub-step covered the call
 };
 
 /**
@@ -92,7 +93,8 @@ class ChemistryBalance;
  *
  * A kernel flags the cells that need chemistry (T >= T_frozen and a mass
  * fraction that would change by more than 1e-2 atol over dt at the current
- * rates), a scan compacts them into a queue, and the queued cells are
+ * rates), a scan compacts them into a queue (with explicit_step, without
+ * the cells whose explicit step is accepted), and the queued cells are
  * integrated in batches that bound the work memory, after the ranks have
  * balanced the queues if asked to (ChemistryBalance). Each cell's result
  * depends only on its own state, so neither the order of the queue, the
@@ -218,9 +220,12 @@ class CellChemistry {
         /**
          * @brief Integrates the queued cells [range(0), range(2)) of `cells`, of the slots [0, n), in
          *        batches of the work memory, with their forcing if any; adds the failures to the tallies.
+         *        With explicit_steps, only takes the explicit steps (CellChemistryOptions::explicit_step)
+         *        and clears the flags of the cells whose step is accepted.
          */
         void integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued, uint32_t n,
-                       const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt);
+                       const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt,
+                       bool explicit_steps = false);
 
     public:
         // Public because nvcc rejects device lambdas in non-public member functions
