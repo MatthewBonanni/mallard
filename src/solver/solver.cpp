@@ -262,6 +262,7 @@ void Solver::setup_from_input() {
         init_mesh_fields();
         register_data();
         init_output(*used_regions);
+        init_check_inputs();
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
@@ -2606,6 +2607,7 @@ int Solver::run_loop() {
                     // The steps enqueued after this one do nothing
                     drain_device_steps();
                     after_step(step_timer, &record);
+                    if (record.reasons & step_queue::PROBES) destroy_step_graph();
                     continue;
                 }
                 n_queued_steps++;
@@ -2932,14 +2934,15 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
     numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     if (step_controller.enabled()) numerics.add(step_controller.summary());
+    std::string on_device = "decided on the device, up to " + logging::count(step_queue_depth) + " ahead";
 #ifdef KOKKOS_ENABLE_CUDA
     const std::string no_graph = step_graph_unsupported();
     numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+    // Steps ahead of the host need the step graph's conditional nodes
+    if (!no_graph.empty()) on_device = "decided on the device, one at a time";
 #endif
     const std::string by_host = device_steps_unsupported();
-    numerical.emplace_back("Steps", by_host.empty() ? "decided on the device, up to " +
-                                                          logging::count(step_queue_depth) + " ahead"
-                                                    : "taken by the host: " + by_host);
+    numerical.emplace_back("Steps", by_host.empty() ? on_device : "taken by the host: " + by_host);
     if (check_nan) numerical.emplace_back("NaN check", "every step");
     numerical.emplace_back("Divergence", std::string("stop at the first non-finite value") +
                                              (keep_last_good ? ", writing the last valid state" : ""));

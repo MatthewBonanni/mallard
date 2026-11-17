@@ -69,30 +69,35 @@ uint64_t pack(const Coord & x) {
     return key;
 }
 
-using Across = std::array<std::pair<uint32_t, uint32_t>, N_SIDES>;
+struct Side {
+    uint32_t cell, side;
+    bool seam;  // across a periodic boundary: the two faces' nodes differ, their keys agree
+};
+using Across = std::array<Side, N_SIDES>;
 
-/** The cell across each local side of every candidate cell, and the neighbor's side there. */
-std::vector<Across> neighbors_across(const CellNodes & cells, uint32_t n_cells) {
+/** The cell across each local side of every candidate cell (faces matched by their keyed nodes), and the neighbor's side there. */
+std::vector<Across> neighbors_across(const CellNodes & cells, const CellNodes & keyed, uint32_t n_cells) {
     struct Entry {
-        FaceKey key;
+        FaceKey key, nodes;
         uint32_t cell, side;
     };
     std::vector<Entry> faces;
     for (uint32_t c = 0; c < n_cells; c++) {
         if (cells[c].size() != N_CORNERS) continue;
-        for (uint32_t s = 0; s < N_SIDES; s++) faces.push_back({face_key(cells[c], s), c, s});
+        for (uint32_t s = 0; s < N_SIDES; s++) faces.push_back({face_key(keyed[c], s), face_key(cells[c], s), c, s});
     }
     std::sort(faces.begin(), faces.end(), [](const Entry & a, const Entry & b) {
         return a.key < b.key || (a.key == b.key && a.cell < b.cell);
     });
     std::vector<Across> across(n_cells);
-    for (auto & a : across) a.fill({NONE, 0});
+    for (auto & a : across) a.fill({NONE, 0, false});
     for (size_t i = 0; i < faces.size();) {
         size_t j = i + 1;
         while (j < faces.size() && faces[j].key == faces[i].key) j++;
         if (j - i == 2 && faces[i].cell != faces[i + 1].cell) {
-            across[faces[i].cell][faces[i].side] = {faces[i + 1].cell, faces[i + 1].side};
-            across[faces[i + 1].cell][faces[i + 1].side] = {faces[i].cell, faces[i].side};
+            const bool seam = faces[i].nodes != faces[i + 1].nodes;
+            across[faces[i].cell][faces[i].side] = {faces[i + 1].cell, faces[i + 1].side, seam};
+            across[faces[i + 1].cell][faces[i + 1].side] = {faces[i].cell, faces[i].side, seam};
         }
         i = j;
     }
@@ -128,9 +133,16 @@ bool frame_across(std::span<const uint32_t> c, const Frame & fc, std::span<const
 } // namespace
 
 std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, const uint32_t n_cells,
-                                               const uint32_t min_extent, std::vector<uint32_t> & block_cells) {
+                                               const uint32_t min_extent, std::vector<uint32_t> & block_cells,
+                                               const std::vector<uint32_t> & node_key) {
     std::vector<std::pair<std::array<uint32_t, N_DIM>, std::vector<uint32_t>>> boxes;
-    const std::vector<Across> across = neighbors_across(cells, n_cells);
+    CellNodes keyed_cells;
+    if (!node_key.empty()) {
+        keyed_cells = cells;
+        for (uint32_t & v : keyed_cells.nodes) v = node_key[v];
+    }
+    const CellNodes & keyed = node_key.empty() ? cells : keyed_cells;
+    const std::vector<Across> across = neighbors_across(cells, keyed, n_cells);
     std::vector<uint8_t> labeled(n_cells, 0), used(n_cells, 0);
     std::vector<Frame> frame(n_cells);
     std::vector<Coord> coord(n_cells);
@@ -138,6 +150,7 @@ std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, const ui
     // neighbor[member[c]][2 g + up]: the cell one away from c along axis g, where their faces agree
     std::vector<std::array<uint32_t, N_SIDES>> neighbor;
     std::unordered_map<uint64_t, uint32_t> at;
+    std::vector<std::array<uint32_t, 3>> deferred;
     for (uint32_t seed = 0; seed < n_cells; seed++) {
         if (cells[seed].size() != N_CORNERS || labeled[seed]) continue;
         // Indices from the seed along its local axes, across faces whose nodes agree
@@ -151,32 +164,45 @@ std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, const ui
         frame[seed].grows.fill(true);
         coord[seed] = Coord{};
         at[pack(coord[seed])] = seed;
-        for (size_t q = 0; q < members.size(); q++) {
+        // Across periodic boundaries only once no cell is left to reach without, so that a box
+        // that a periodic direction closes on itself is cut at its periodic boundary
+        auto visit = [&](const uint32_t q, const uint32_t g, const uint32_t up, const bool defer) {
             const uint32_t c = members[q];
-            for (uint32_t g = 0; g < N_DIM; g++) {
-                for (uint32_t up = 0; up < 2; up++) {
-                    const uint32_t side = 2 * frame[c].axis[g] + (frame[c].grows[g] == (up == 1) ? 1 : 0);
-                    const auto [o, o_side] = across[c][side];
-                    if (o == NONE) continue;
-                    Frame fo;
-                    if (!frame_across(cells[c], frame[c], cells[o], o_side, g, up == 1, fo)) continue;
-                    Coord x = coord[c];
-                    x[g] += up ? 1 : -1;
-                    if (!labeled[o]) {
-                        // A second cell at one index (an O-grid's seam) ends the block there
-                        if (!at.emplace(pack(x), o).second) continue;
-                        labeled[o] = 1;
-                        frame[o] = fo;
-                        coord[o] = x;
-                        member[o] = static_cast<uint32_t>(members.size());
-                        members.push_back(o);
-                        neighbor.emplace_back().fill(NONE);
-                    } else if (member[o] == NONE || coord[o] != x || !(frame[o] == fo)) {
-                        continue;
-                    }
-                    neighbor[q][2 * g + up] = o;
+            const uint32_t side = 2 * frame[c].axis[g] + (frame[c].grows[g] == (up == 1) ? 1 : 0);
+            const auto [o, o_side, seam] = across[c][side];
+            if (o == NONE) return;
+            if (seam && defer && !labeled[o]) {
+                deferred.push_back({q, g, up});
+                return;
+            }
+            Frame fo;
+            if (!frame_across(keyed[c], frame[c], keyed[o], o_side, g, up == 1, fo)) return;
+            Coord x = coord[c];
+            x[g] += up ? 1 : -1;
+            if (!labeled[o]) {
+                // A second cell at one index (an O-grid's seam) ends the block there
+                if (!at.emplace(pack(x), o).second) return;
+                labeled[o] = 1;
+                frame[o] = fo;
+                coord[o] = x;
+                member[o] = static_cast<uint32_t>(members.size());
+                members.push_back(o);
+                neighbor.emplace_back().fill(NONE);
+            } else if (member[o] == NONE || coord[o] != x || !(frame[o] == fo)) {
+                return;
+            }
+            neighbor[q][2 * g + up] = o;
+        };
+        deferred.clear();
+        for (size_t q = 0, d = 0;;) {
+            for (; q < members.size(); q++) {
+                for (uint32_t g = 0; g < N_DIM; g++) {
+                    for (uint32_t up = 0; up < 2; up++) visit(static_cast<uint32_t>(q), g, up, true);
                 }
             }
+            if (d == deferred.size()) break;
+            const auto [dq, g, up] = deferred[d++];
+            visit(dq, g, up, false);
         }
         // Block axes in the order of the seed's nearest neighbor along each in the given numbering, indices growing with it
         std::array<uint32_t, N_DIM> gap, axes;

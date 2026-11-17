@@ -4,6 +4,7 @@
  ],
  "set_in": [
   "examples/moving_heaters/input.toml",
-  "examples/source_regions/input.toml"
+  "examples/source_regions/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml"
  ]
 }

@@ -204,13 +204,13 @@ TEST(PresetValidation, LesLeavesTheTaylorGreenDecayToViscosity) {
 
 namespace {
 
-const double FLAME_SPEED = 9.667;
+const double FLAME_SPEED = 9.666;
 
 /**
  * @brief Speed of a stoichiometric H2/air flame at 700 K and 1 atm (Cantera 3.2
- *        FreeFlame, mechanisms/h2o2.yaml, mixture-averaged, extrapolated from
- *        refine criteria slope = curve = 0.0025, 0.00125, 0.000625: S_L = 9.667
- *        m/s, thermal thickness 0.4726 mm, T_b = 2574 K), from a tanh profile to
+ *        FreeFlame, mechanisms/h2o2.yaml, mixture-averaged, Cantera's grid of refine
+ *        criteria 0.01 bisected three times, extrapolated at first order:
+ *        S_L = 9.666 m/s, thermal thickness 0.4726 mm, T_b = 2574 K), from a tanh profile to
  *        Cantera's burnt state, burning toward a closed end through gas at
  *        rest: the speed of the 1000 K isotherm. 6 cells per thermal
  *        thickness, the reacting preset plus the numerics keys numerics_extra.
