@@ -48,7 +48,7 @@ double profile(double n) { return 1.0 + 2.0 * n * n - 3.0 * n * n * n; }
 /** @brief The profile at uneven wall distances from 0 to n_max, given in mm. */
 std::string profile_csv(double n_max) {
     std::ostringstream s;
-    s << "# wall distance [mm], temperature\neta, T\n";
+    s << "# wall distance [mm], temperature\nd, T\n";
     for (int k = 0; k <= 12; k++) {
         const double n = n_max * std::pow(k / 12.0, 1.3);
         s << number(1000.0 * n) << ", " << number(profile(n)) << "\n";
@@ -99,8 +99,8 @@ TEST(BoundaryProfilesTest, RotatedInletReadsTheProfileAtItsWallDistance) {
           << "[output]\ncheck_interval = 1000000\n"
           << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = 3.0\np = 1.0\nT = \"bl_T\"\n"
           << "walls = [\"bottom\"]\n"
-          << "[[boundaries.data]]\nname = \"bl\"\nfile = \"" << csv << "\"\ncoordinates = [\"eta\"]\nat = [\"n\"]\n"
-          << "interpolation = \"cubic\"\nunits = {eta = \"mm\"}\n"
+          << "[[boundaries.data]]\nname = \"bl\"\nfile = \"" << csv << "\"\ncoordinates = [\"d\"]\nat = [\"n\"]\n"
+          << "interpolation = \"cubic\"\nunits = {d = \"mm\"}\n"
           << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n" << sides("symmetry");
     Solver solver;
     solver.set_distributed(false);
@@ -155,7 +155,7 @@ TEST(BoundaryProfilesTest, DataTimesExpressionsOfTimeMatchSerialAndKeepTheStepGr
     const std::string inlet = "type = \"inlet_state\"\nu = " + vec("\"3 + jet_du * (1 + 0.5 * cos(40 * t))\"", "0.0") +
                               "\np = 1.0\nT = \"bl_T * (1 + 0.1 * sin(60 * t))\"\n"
                               "[[boundaries.data]]\nname = \"bl\"\nfile = \"" + table + "\"\nat = [\"n\"]\n"
-                              "units = {eta = \"mm\"}\n"
+                              "units = {d = \"mm\"}\n"
                               "[[boundaries.data]]\nname = \"jet\"\nfile = \"" + points + "\"\ntype = \"points\"\n"
                               "coordinates = [\"xi\"]\nneighbors = 2\n";
     expect_matches_serial_with_and_without_step_graphs(channel(inlet, "t_stop = 0.05\ncfl = 0.5\n"));
@@ -177,7 +177,7 @@ TEST(BoundaryProfilesTest, ProfileOutsideItsTableIsReported) {
     }
     const std::string csv = write_temp("bl.csv", profile_csv(0.2));
     const Input entry = parse_toml("name = \"left\"\nT = \"bl_T\"\n[[data]]\nname = \"bl\"\nfile = \"" + csv +
-                                   "\"\nat = [\"n\"]\nunits = {eta = \"mm\"}\n");
+                                   "\"\nat = [\"n\"]\nunits = {d = \"mm\"}\n");
     const BoundaryProfiles data(entry, "left");
     ASSERT_EQ(data.coordinates_used(), std::vector<uint16_t>{boundary_variable::N});
     std::string summary;
@@ -202,6 +202,6 @@ TEST(BoundaryProfilesTest, MisplacedDataAreInputErrors) {
     EXPECT_NE(error_of(inlet("1.25", "at = [\"n\"]\n")).find("no expression of the boundary reads its variables"),
               std::string::npos);
     EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n + t\"]\n")).find("depends on t"), std::string::npos);
-    EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the coordinate eta is not x, y, z or a local coordinate"),
+    EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the coordinate d is not x, y, z or a local coordinate"),
               std::string::npos);
 }

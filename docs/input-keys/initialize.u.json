@@ -8,6 +8,8 @@
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
+  "examples/channel_inlet/input.toml",
+  "examples/channel_inlet_data/input.toml",
   "examples/explosion_3d/input.toml",
   "examples/flame_outflow/input.toml",
   "examples/forced_inlet/input.toml",
@@ -39,6 +41,7 @@
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
