@@ -1,0 +1,1 @@
+- TENO's troubled-cell indicator is kept for the owned cells and the first halo layer only, like its stencil tables: 8 bytes less device memory per outer halo cell in MPI runs; results are bitwise unchanged (#1100).

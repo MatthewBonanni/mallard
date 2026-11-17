@@ -11,6 +11,8 @@
 #define DERIVED_FIELDS_H
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
@@ -237,6 +239,25 @@ struct Settings {
      */
     void require(Field f, const Input & input) const;
 };
+
+/**
+ * @brief Bilger's mixture fraction of two streams, Z = offset + sum_k weights[k] Y_k (1 in the fuel, 0 in the
+ *        oxidizer), and the streams' most abundant fuel species (with C or H) and oxidizer species (with O and
+ *        neither C nor H), -1 if none.
+ */
+struct MixtureFraction {
+    std::vector<double> weights;
+    double offset = 0.0;
+    int32_t fuel_species = -1, oxidizer_species = -1;
+};
+
+/**
+ * @brief The mixture fraction of the keys fuel and oxidizer of `table` (at `where`, e.g. "output.mixture"): each a
+ *        composition {X = {...}} or {Y = {...}}, or the name of a [[boundaries]] entry of uniform composition. Errors
+ *        point to `docs`.
+ */
+MixtureFraction mixture_fraction(const Input & input, const Input & table, const std::string & where,
+                                 const MixtureModel & mixture, const char * docs);
 
 /** @brief Scratch of the mass-fraction gradients (allocated if the selection needs them). */
 struct Workspace {

@@ -318,9 +318,10 @@ class Mesh {
         void compute_face_centroids();
 
         /**
-         * @brief Compute all derived geometry (face areas and normals, cell
-         *        volumes and centroids, face centroids) and the vertex-neighbor
-         *        adjacency from the node coordinates and connectivity.
+         * @brief Compute the vertex-neighbor adjacency, then allocate and
+         *        compute all derived geometry (face areas and normals, cell
+         *        volumes and centroids, face centroids) from the node
+         *        coordinates and connectivity.
          */
         void compute_geometry();
 
@@ -482,7 +483,7 @@ class Mesh {
 
         /**
          * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5) or another mesh
-         *        file (see read_mesh_file), and map its nodes by transform.
+         *        file (see read_file_block), and map its nodes by transform.
          */
         void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {},
                        const MeshTransform & transform = MeshTransform());
@@ -525,6 +526,11 @@ class Mesh {
         // Cells [0, n_reconstructed()) need face values: owned cells and halo layer 1
         uint32_t n_reconstructed_cells = 0;
         uint32_t n_reconstructed() const { return n_reconstructed_cells ? n_reconstructed_cells : n_cells; }
+        // Faces [0, n_state_faces()) hold face states: the faces of cells [0, n_reconstructed()), which come
+        // first since faces are numbered in the order of the local cells, and the image faces they read, which
+        // Solver::init_boundaries adds once the boundary data has found them
+        uint32_t n_state_faces_count = 0;
+        uint32_t n_state_faces() const { return n_state_faces_count ? n_state_faces_count : n_faces; }
         // Cells [0, n_complete()) have all their vertex neighbors: all but the outermost halo layer
         uint32_t n_complete_cells = 0;
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
@@ -577,11 +583,12 @@ class Mesh {
         // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)); vertex
         // neighbor k of a cell is at Q cell_coords(cells_of_cell(k)) +
         // shifts(cells_of_cell_shift(k)), with Q that row of shift_rotations
-        // (empty, and Q the identity, without rotational pairs)
+        // (empty, and Q the identity, without rotational pairs).
+        // cells_of_cell_shift holds no rows when no neighbor crosses a periodic boundary
         Kokkos::View<rtype *[N_DIM]> shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]> shift_rotations;
         Kokkos::View<uint8_t *> face_shift;
-        Kokkos::View<uint8_t *> cells_of_cell_shift;
+        ShiftRows cells_of_cell_shift;
 
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
@@ -601,7 +608,7 @@ class Mesh {
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]>::host_mirror_type h_shift_rotations;
         Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
-        Kokkos::View<uint8_t *>::host_mirror_type h_cells_of_cell_shift;
+        HostShiftRows h_cells_of_cell_shift;
 
         // Periodicity (host): the translation of each lattice direction (zero
         // for the rotation's), the rotation, the zones the pairs joined, and
@@ -623,6 +630,9 @@ class Mesh {
         void init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge);
         /** @brief Orient 3D cells positively (Gmsh/VTK convention), in place. */
         static void orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes, CellNodes & cells);
+
+        /** @brief Allocate the cell and face geometry views (planar measures, no covariance). */
+        void allocate_geometry();
 
         /** @brief Copy the connectivity into the mesh's views, freeing each vector once copied. */
         void allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, CellNodes && cells,
