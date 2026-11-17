@@ -29,8 +29,8 @@ def load_pieces(pvtu):
     polys, cents, rho, rank = [], [], [], []
     pieces = re.findall(r'Source="([^"]+)"', open(pvtu).read())
     for r, piece in enumerate(pieces):
-        pts, conn, offs, a = snapshots.read(os.path.join(os.path.dirname(pvtu), piece))
-        p, c = snapshots.cells(pts, conn, offs)
+        g, a = snapshots.read(snapshots.mallard.open(os.path.join(os.path.dirname(pvtu), piece)))
+        p, c = snapshots.cells(g)
         polys += [q[:, :2] for q in p]
         cents.append(c[:, :2])
         rho.append(a["RHO"])
@@ -59,7 +59,7 @@ def main():
     ap.add_argument("run")
     ap.add_argument("--out", help="output directory (default: docs/images/tutorials)")
     args = ap.parse_args()
-    polys, c, rho, rank, n_ranks = load_pieces(snapshots.last(os.path.join(args.run, "solut", "dmr")))
+    polys, c, rho, rank, n_ranks = load_pieces(snapshots.series(os.path.join(args.run, "solut", "dmr")).snapshots[-1].file)
     jobs = load_jobs(os.path.join(args.run, "mallard.jsonl"))
     for k, j in enumerate(jobs):
         e = j["end"] or {}
