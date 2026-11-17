@@ -998,8 +998,12 @@ void Solver::init_boundaries() {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
             const std::vector<uint16_t> used = local_coordinates_used(bound);
-            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
-            const bool reads_frame = !used.empty() && used.back() != boundary_variable::N;
+            bool reads_n = false, reads_patch = false;
+            for (const uint16_t i : used) {
+                const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
+                reads_n = reads_n || wall;
+                reads_patch = reads_patch || !wall;
+            }
             auto unused_key = [&](const std::string & key, const std::string & what) {
                 return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
                                    .message = "no expression of the entry reads " + what + ", so " + key +
@@ -1036,10 +1040,15 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            if (bound.contains("frame") && !reads_frame) {
-                throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+            if (bound.contains("corners")) {
+                if (N_DIM == 2) {
+                    throw InputError({.key = where_name + ".corners", .line = line_of(bound, "corners"),
+                                      .message = "a 2D boundary is a curve, which has ends and no corners",
+                                      .fix = "Remove corners: u runs along the boundary from 0 to 1",
+                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                }
+                if (!reads_patch) throw unused_key("corners", "u or v");
             }
-            [[maybe_unused]] const FrameKey frame_key(bound, where_name);
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
             if (!used.empty() && n_entry > 0) {
                 const WallDistance none;

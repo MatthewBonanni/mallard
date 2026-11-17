@@ -103,6 +103,7 @@ else()
     teno3d_test.cpp
     riemann3d_test.cpp
     boundary3d_test.cpp
+    patch_coordinates_test.cpp
     gradient3d_test.cpp
     solver3d_test.cpp
     io3d_test.cpp

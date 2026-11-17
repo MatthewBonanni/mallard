@@ -23,6 +23,7 @@
 #include "kexpr.h"
 #include "log.h"
 #include "mesh.h"
+#include "patch_coordinates.h"
 #include "units.h"
 
 namespace {
@@ -33,18 +34,6 @@ std::string real(const double v) {
     std::ostringstream s;
     s << std::setprecision(6) << v;
     return s.str();
-}
-
-std::string vector_text(const Point & v) {
-    std::string text;
-    for (size_t d = 0; d < N_DIM; d++) text += (d ? ", " : "(") + real(v[d]);
-    return text + ")";
-}
-
-double dot(const Point & a, const Point & b) {
-    double s = 0.0;
-    for (size_t d = 0; d < N_DIM; d++) s += a[d] * b[d];
-    return s;
 }
 
 /** @brief The local coordinates read by the strings of v, a value of a [[boundaries]] entry or below. */
@@ -62,7 +51,7 @@ void collect_used(const Input & v, std::vector<bool> & used) {
         for (const Input & item : v.as_array()) collect_used(item, used);
     } else if (v.is_table()) {
         for (const auto & [key, item] : v.as_table().entries()) {
-            if (key != "frame" && key != "walls" && key != "where" && key != "name" && key != "type") {
+            if (key != "corners" && key != "walls" && key != "where" && key != "name" && key != "type") {
                 collect_used(item, used);
             }
         }
@@ -154,6 +143,13 @@ std::vector<double> gather_sorted(std::vector<uint64_t> keys, std::vector<double
     return sorted;
 }
 
+#if N_DIM == 2
+std::string vector_text(const Point & v) {
+    std::string text;
+    for (size_t d = 0; d < N_DIM; d++) text += (d ? ", " : "(") + real(v[d]);
+    return text + ")";
+}
+
 /** @brief Index of the largest |v[d]|, ties to the lower d. */
 size_t dominant(const Point & v) {
     size_t k = 0;
@@ -163,23 +159,13 @@ size_t dominant(const Point & v) {
     return k;
 }
 
-/** @brief v without its part along the unit vector n, normalized; zero if nothing is left. */
-Point perpendicular(Point v, const Point & n) {
-    const double along = dot(v, n);
-    for (size_t d = 0; d < N_DIM; d++) v[d] -= along * n[d];
-    const double norm = std::sqrt(dot(v, v));
-    if (!(norm > 1e-9)) return Point{};
-    for (double & c : v) c /= norm;
-    return v;
-}
-
-#if N_DIM == 2
 /**
  * @brief Arc length at the center of each of this rank's faces along the curve that all faces of the entry form,
- *        from its end with the lowest coordinate along tangent (then the lowest x, y).
+ *        from its end with the lower coordinate along the dominant axis of the line between its ends.
+ * @param length Set to the length of the curve.
  */
-std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & faces, const Point & tangent,
-                               const std::string & where, const bool distributed) {
+std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
+                               const std::string & where, const bool distributed, double & length) {
     using Ends = std::array<Vertex, 2>;
     auto ends_of = [&](const uint32_t f) {
         Ends e{node(mesh, mesh.h_node_of_face(f, 0)), node(mesh, mesh.h_node_of_face(f, 1))};
@@ -201,29 +187,24 @@ std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & 
         ends[k] = {Vertex{all[4 * k], all[4 * k + 1]}, Vertex{all[4 * k + 2], all[4 * k + 3]}};
         for (const Vertex & v : ends[k]) at_node[v].push_back(k);
     }
-    const std::string fix = "s needs the faces to form one open curve: split the zone into entries with where = \"...\", "
-                            "or use xi or n";
-    std::optional<Vertex> start;
+    auto fail = [&](const std::string & message) {
+        return InputError({.key = where, .line = line_of(entry), .message = "u: " + message,
+                           .fix = "u runs along one open curve: split the zone into entries with where = \"...\", or "
+                                  "use n",
+                           .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+    };
+    std::vector<Vertex> tips;
     for (const auto & [v, list] : at_node) {
-        if (list.size() > 2) {
-            throw InputError({.key = where, .message = "s: more than two faces meet at the node " +
-                              vector_text(Point{v[0], v[1]}), .fix = fix,
-                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-        }
-        if (list.size() == 1) {
-            const double a = v[0] * tangent[0] + v[1] * tangent[1];
-            const double b = start ? (*start)[0] * tangent[0] + (*start)[1] * tangent[1] : 0.0;
-            if (!start || a < b) start = v;
-        }
+        if (list.size() > 2) throw fail("more than two faces meet at the node " + vector_text(Point{v[0], v[1]}));
+        if (list.size() == 1) tips.push_back(v);
     }
-    if (!start) {
-        throw InputError({.key = where, .message = "s: the faces form a closed curve, which has no start", .fix = fix,
-                          .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-    }
+    if (tips.empty()) throw fail("the faces form a closed curve, which has no start");
+    if (tips.size() > 2) throw fail("the faces form more than one curve");
+    const size_t axis = dominant(Point{tips[1][0] - tips[0][0], tips[1][1] - tips[0][1]});
+    Vertex at = tips[1][axis] < tips[0][axis] ? tips[1] : tips[0];
     std::map<Ends, double> s_of;
     std::vector<bool> visited(n, false);
-    Vertex at = *start;
-    double length = 0.0;
+    length = 0.0;
     for (size_t step = 0; step < n; step++) {
         size_t next = n;
         for (const size_t k : at_node[at]) {
@@ -237,13 +218,74 @@ std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & 
         length += l;
         at = other;
     }
-    if (s_of.size() != n) {
-        throw InputError({.key = where, .message = "s: the faces form more than one curve",
-                          .fix = fix, .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-    }
+    if (s_of.size() != n) throw fail("the faces form more than one curve");
     std::vector<double> s(faces.size());
     for (size_t k = 0; k < faces.size(); k++) s[k] = s_of.at(ends_of(faces[k]));
     return s;
+}
+#else
+/** @brief The patch coordinates of each of this rank's faces, from all faces of the entry (patch_coordinates.h). */
+patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
+                                     const std::string & where, const bool distributed) {
+    constexpr size_t MAX_NODES = 4, W = 1 + 3 * MAX_NODES + 3;  // node count, nodes, inward area vector
+    auto nodes_of = [&](const uint32_t f) {
+        std::vector<Vertex> nodes(mesh.h_n_nodes_of_face(f));
+        for (uint32_t j = 0; j < nodes.size(); j++) nodes[j] = node(mesh, mesh.h_node_of_face(f, j));
+        return nodes;
+    };
+    std::vector<uint64_t> keys;
+    std::vector<double> values;
+    for (const uint32_t f : faces) {
+        if (!owned(mesh, f)) continue;
+        const std::vector<Vertex> nodes = nodes_of(f);
+        if (nodes.size() > MAX_NODES) throw std::logic_error("patch coordinates: a boundary face has more than 4 nodes");
+        keys.push_back(face_key(mesh, f));
+        values.push_back(static_cast<double>(nodes.size()));
+        for (size_t j = 0; j < MAX_NODES; j++) {
+            for (size_t d = 0; d < 3; d++) values.push_back(j < nodes.size() ? nodes[j][d] : 0.0);
+        }
+        for (size_t d = 0; d < 3; d++) values.push_back(-static_cast<double>(mesh.h_face_normals(f, d)));
+    }
+    const std::vector<double> all = gather_sorted(keys, values, W, distributed);
+    patch::Surface surface;
+    std::map<std::vector<Vertex>, size_t> index;
+    for (size_t k = 0; k < all.size(); k += W) {
+        std::vector<Vertex> nodes(static_cast<size_t>(all[k]));
+        for (size_t j = 0; j < nodes.size(); j++) nodes[j] = {all[k + 1 + 3 * j], all[k + 2 + 3 * j], all[k + 3 + 3 * j]};
+        surface.faces.push_back(nodes);
+        surface.inward.push_back({all[k + W - 3], all[k + W - 2], all[k + W - 1]});
+        std::sort(nodes.begin(), nodes.end());
+        index[nodes] = k / W;
+    }
+    patch::Corners corners{.points = std::nullopt, .key = where, .line = line_of(entry)};
+    if (entry.contains("corners")) {
+        const std::string key = where + ".corners";
+        corners.key = key;
+        corners.line = line_of(entry, "corners");
+        const Input & list = entry.at("corners");
+        if (!list.is_array()) {
+            throw InputError({.key = key, .line = corners.line, .message = "must be a list of points",
+                              .fix = "Write corners = [[x, y, z], [x, y, z], [x, y, z], [x, y, z]]",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        corners.points.emplace();
+        for (const Input & item : list.as_array()) {
+            const std::vector<rtype> p = as_real_vector(item, key, dim::length);
+            if (p.size() != 3) {
+                throw InputError({.key = key, .line = corners.line, .message = "each corner has 3 components",
+                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            }
+            corners.points->push_back({static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])});
+        }
+    }
+    const patch::Coordinates global = patch::coordinates(surface, corners);
+    patch::Coordinates local{global.shape, std::vector<patch::Values>(faces.size()), global.summary};
+    for (size_t k = 0; k < faces.size(); k++) {
+        std::vector<Vertex> nodes = nodes_of(faces[k]);
+        std::sort(nodes.begin(), nodes.end());
+        local.faces[k] = global.faces[index.at(nodes)];
+    }
+    return local;
 }
 #endif
 
@@ -317,100 +359,10 @@ double WallDistance::operator()(const Point & x) const {
     return std::sqrt(d2);
 }
 
-FrameKey::FrameKey(const Input & entry, const std::string & where) {
-    if (!entry.contains("frame")) return;
-    const Input & frame = entry.at("frame");
-    if (!frame.is_table()) {
-        throw InputError({.key = where + ".frame", .line = line_of(entry, "frame"),
-                          .message = "must be a table", .fix = "Write frame = { origin = [...], tangent = [...] }",
-                          .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-    }
-    auto read = [&](const char * key, const Dimension & dimension, std::optional<Point> & out) {
-        if (!frame.contains(key)) return;
-        const std::vector<rtype> v = find_real_vector(frame, key, dimension);
-        if (v.size() != N_DIM) {
-            throw InputError({.key = where + ".frame." + key, .line = line_of(frame, key),
-                              .message = "must have " + std::to_string(N_DIM) + " components",
-                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-        }
-        Point p{};
-        for (size_t d = 0; d < N_DIM; d++) p[d] = static_cast<double>(v[d]);
-        out = p;
-    };
-    read("origin", dim::length, origin);
-    read("normal", dim::none, normal);
-    read("tangent", dim::none, tangent);
-}
-
-LocalFrame local_frame(const Mesh & mesh, const std::vector<uint32_t> & faces, const FrameKey & key,
-                       const std::string & where, const bool distributed) {
-    constexpr size_t W = 1 + 2 * N_DIM;  // area, area x center, inward area vector
-    std::vector<uint64_t> keys;
-    std::vector<double> values;
-    for (const uint32_t f : faces) {
-        if (!owned(mesh, f)) continue;
-        keys.push_back(face_key(mesh, f));
-        const double area = static_cast<double>(mesh.h_face_area(f));
-        values.push_back(area);
-        for (size_t d = 0; d < N_DIM; d++) values.push_back(area * static_cast<double>(mesh.h_face_coords(f, d)));
-        for (size_t d = 0; d < N_DIM; d++) values.push_back(-static_cast<double>(mesh.h_face_normals(f, d)));
-    }
-    const std::vector<double> all = gather_sorted(keys, values, W, distributed);
-    double area = 0.0;
-    Point center{}, normal{};
-    for (size_t k = 0; k < all.size(); k += W) {
-        area += all[k];
-        for (size_t d = 0; d < N_DIM; d++) {
-            center[d] += all[k + 1 + d];
-            normal[d] += all[k + 1 + N_DIM + d];
-        }
-    }
-    LocalFrame frame;
-    const std::string docs = "docs/guide/boundary_conditions.md#local-coordinates";
-    if (key.origin) {
-        frame.origin = *key.origin;
-    } else {
-        for (size_t d = 0; d < N_DIM; d++) frame.origin[d] = center[d] / area;
-    }
-    if (key.normal) normal = *key.normal;
-    const double norm = std::sqrt(dot(normal, normal));
-    if (!(norm > (key.normal ? 0.0 : 1e-9 * area))) {
-        throw InputError({.key = where + (key.normal ? ".frame.normal" : ""),
-                          .message = key.normal ? "frame.normal is zero"
-                                                : "the faces' normals cancel (a closed surface?), so their frame has "
-                                                  "no normal",
-                          .fix = "Give frame = { normal = [...] }, or split the zone with where = \"...\"",
-                          .docs = docs});
-    }
-    for (size_t d = 0; d < N_DIM; d++) frame.normal[d] = normal[d] / norm;
-    Point axis{};
-    if (key.tangent) {
-        axis = *key.tangent;
-    } else {
-        axis[(dominant(frame.normal) + 1) % N_DIM] = 1.0;
-    }
-    frame.tangent = perpendicular(axis, frame.normal);
-    if (dot(frame.tangent, frame.tangent) == 0.0) {
-        throw InputError({.key = where + ".frame.tangent",
-                          .message = "frame.tangent " + vector_text(axis) + " is along the normal " +
-                                     vector_text(frame.normal),
-                          .fix = "Give a tangent that is not parallel to the normal", .docs = docs});
-    }
-#if N_DIM == 3
-    const Point & n = frame.normal, & t = frame.tangent;
-    frame.span = {n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]};
-    if (frame.span[dominant(frame.span)] < 0.0) {
-        for (double & c : frame.span) c = -c;
-    }
-#endif
-    return frame;
-}
-
 std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
                                          const std::string & where, const std::vector<uint16_t> & used,
                                          const WallDistance & walls, const bool distributed, std::string & summary) {
     namespace bv = boundary_variable;
-    const FrameKey key(entry, where);
     std::vector<FacePoint> points(faces.size());
     for (size_t k = 0; k < faces.size(); k++) {
         Point x{};
@@ -420,7 +372,7 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
     summary.clear();
     if (used.empty()) return points;
     auto uses = [&](const uint16_t i) { return std::find(used.begin(), used.end(), i) != used.end(); };
-    if (uses(bv::N)) {
+    if (uses(bv::N) || uses(bv::N_M)) {
         if (walls.empty()) {
             throw InputError({.key = where, .line = line_of(entry),
                               .message = "an expression reads n, the distance to the nearest wall, but the mesh has "
@@ -429,17 +381,24 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
                                      "condition",
                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
         }
-        for (size_t k = 0; k < faces.size(); k++) points[k][bv::N] = walls(points[k].point());
-        // Faces on the walls come out at round-off, not exactly 0
+        // n is n_m over the largest distance on the boundary, at its face centers and nodes
         double farthest = 0.0, scale = 0.0;
-        for (const FacePoint & p : points) {
-            farthest = std::max(farthest, p[bv::N]);
-            for (size_t d = 0; d < N_DIM; d++) scale = std::max(scale, std::abs(p[d]));
+        for (size_t k = 0; k < faces.size(); k++) {
+            points[k][bv::N_M] = walls(points[k].point());
+            farthest = std::max(farthest, points[k][bv::N_M]);
+            for (uint32_t j = 0; j < mesh.h_n_nodes_of_face(faces[k]); j++) {
+                const Vertex v = node(mesh, mesh.h_node_of_face(faces[k], j));
+                Point x{};
+                for (size_t d = 0; d < N_DIM; d++) x[d] = v[d];
+                farthest = std::max(farthest, walls(x));
+            }
+            for (size_t d = 0; d < N_DIM; d++) scale = std::max(scale, std::abs(points[k][d]));
         }
         if (distributed) {
             farthest = comm::allreduce(farthest, comm::Op::MAX);
             scale = comm::allreduce(scale, comm::Op::MAX);
         }
+        // Faces on the walls come out at round-off, not exactly 0
         const double round_off = (sizeof(rtype) == sizeof(double) ? 1e-10 : 1e-5) * std::max(scale, 1e-300);
         if (!(farthest > round_off)) {
             throw InputError({.key = where, .line = line_of(entry),
@@ -449,30 +408,43 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
                               .fix = "Name the zones to measure from in walls = [\"...\"]",
                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
         }
+        for (FacePoint & p : points) p[bv::N] = p[bv::N_M] / farthest;
     }
-    bool framed = false;
-    for (const uint16_t i : used) framed = framed || i != bv::N;
-    if (framed) {
-        const LocalFrame frame = local_frame(mesh, faces, key, where, distributed);
-        summary = "frame origin " + vector_text(frame.origin) + ", normal " + vector_text(frame.normal) +
-                  ", tangent " + vector_text(frame.tangent);
-#if N_DIM == 3
-        summary += ", span " + vector_text(frame.span);
-#endif
-        for (FacePoint & p : points) {
-            Point offset = p.point();
-            for (size_t d = 0; d < N_DIM; d++) offset[d] -= frame.origin[d];
-            p[bv::XI] = dot(offset, frame.tangent);
-#if N_DIM == 3
-            p[bv::ETA] = dot(offset, frame.span);
-            p[bv::R] = std::hypot(p[bv::XI], p[bv::ETA]);
-            p[bv::THETA] = std::atan2(p[bv::ETA], p[bv::XI]);
-#endif
-        }
+    bool along = false;
+    for (const uint16_t i : used) along = along || (i != bv::N && i != bv::N_M);
+    if (along) {
 #if N_DIM == 2
-        if (uses(bv::S)) {
-            const std::vector<double> s = arc_length(mesh, faces, frame.tangent, where, distributed);
-            for (size_t k = 0; k < faces.size(); k++) points[k][bv::S] = s[k];
+        double length = 0.0;
+        const std::vector<double> s = arc_length(mesh, faces, entry, where, distributed, length);
+        for (size_t k = 0; k < faces.size(); k++) {
+            points[k][bv::U_M] = s[k];
+            points[k][bv::U] = s[k] / length;
+        }
+#else
+        const patch::Coordinates c = patch_coordinates(mesh, faces, entry, where, distributed);
+        summary = c.summary;
+        const bool round = c.shape != patch::Shape::FOUR_SIDED;
+        for (const uint16_t i : {bv::R, bv::R_M, bv::THETA}) {
+            if (!round && uses(i)) {
+                throw InputError({.key = where, .line = line_of(entry),
+                                  .message = "an expression reads " + BoundaryValue::variables()[i] + ", which rings "
+                                             "and disks have, but this is a " + c.summary,
+                                  .fix = "Write the condition in u and v, or in the wall distance n",
+                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            }
+        }
+        for (size_t k = 0; k < faces.size(); k++) {
+            const patch::Values & f = c.faces[k];
+            FacePoint & p = points[k];
+            p[bv::U] = f.u;
+            p[bv::U_M] = f.u_m;
+            p[bv::V] = f.v;
+            p[bv::V_M] = f.v_m;
+            if (round) {
+                p[bv::R] = f.v;
+                p[bv::R_M] = f.v_m;
+                p[bv::THETA] = 2.0 * 3.14159265358979323846 * f.u;
+            }
         }
 #endif
     }
