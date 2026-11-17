@@ -597,6 +597,13 @@ class Solver {
         void update_dynamic_efficiency();
         /** @brief Dynamic efficiency: the test filter's width per pass and number of passes. */
         void init_dynamic_efficiency();
+        /**
+         * @brief Thickened flame, sensor = "reaction": the sensor of each owned cell's consumption rate of the sensor
+         *        species against the largest of the flame of its mixture fraction, filtered (tfles_test).
+         */
+        void update_reaction_sensor();
+        /** @brief sensor = "reaction": the mixture fraction's streams and the sensor species of [les.combustion]. */
+        void init_reaction_sensor(const Input & combustion);
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
@@ -749,6 +756,7 @@ class Solver {
         const Euler & get_physics() const { return physics; }
         const FaceReconstruction & get_face_reconstruction() const { return *face_reconstruction; }
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
+        const FaceReconstruction & get_face_reconstruction() const { return *face_reconstruction; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
         /** @brief The numerics preset and the origin of each of its keys. */
@@ -820,8 +828,11 @@ class Solver {
         void init_mesh_fields();
         /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
         CheckFields check_resolution(CheckReport & report);
-        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
-                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
+        CheckCellScales check_viscous_scales(CheckReport & report, CheckFields & fields,
+                                             const std::vector<double> & delta, double delta_mean,
+                                             const std::array<double, N_DIM> & coarsest);
+        /** @brief Reads [check]: its regions' fractions and the dissipation of check.statistics. Collective. */
+        void init_check_inputs();
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
@@ -1151,6 +1162,7 @@ class Solver {
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
         std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
+        CheckInputs check_inputs;
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
@@ -1244,7 +1256,8 @@ class Solver {
         Kokkos::View<rtype *[3]> tfles_vorticity;
         Kokkos::View<rtype *[3][N_DIM]> tfles_gradients;
         State tfles_halo;                              // [F, E, Omega] as species, for the halo exchange
-        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
+        std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test
+                                                             // filter; sensor = "reaction": the sensor's filter passes
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
         Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
         ExactSums tfles_dynamic_sums;                  // of tfles_dynamic_terms over the ranks
