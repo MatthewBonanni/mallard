@@ -17,6 +17,7 @@
   "examples/flame_turbulence/hit.toml",
   "examples/flame_turbulence/input.toml",
   "examples/flame_turbulence/les.toml",
+  "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",

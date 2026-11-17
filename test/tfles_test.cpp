@@ -12,15 +12,21 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "data_paths.h"
 #include "input.h"
 #include "pasr.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "tfles.h"
@@ -259,28 +265,14 @@ TEST(ThickenedFlame, InputErrors) {
     }
 }
 
-TEST(PartiallyStirredReactor, FractionOfTheChemicalAndMixingTimes) {
-    PartiallyStirredReactor pasr;
-    const double rho_cp_T = 5e5, q = 2e9, nu = 2e-4;
-    // kappa = tau_c / (tau_c + tau_mix), tau_c = rho cp T / |q|, tau_mix = Delta^2 / (nu + nu_t)
-    const double tau_c = rho_cp_T / q, tau_mix = 1e-8 / (nu + 3e-4);
-    EXPECT_NEAR(pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4), tau_c / (tau_c + tau_mix), 1e-14);
-    EXPECT_EQ(pasr.fraction(rho_cp_T, -q, 1e-4, nu, 3e-4), pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4));
-    // Resolved mixing (the DNS limit) or no reaction: the rates of the filtered state
-    EXPECT_GT(pasr.fraction(rho_cp_T, q, 1e-9, nu, 0.0), 1.0 - 1e-9);
-    EXPECT_EQ(pasr.fraction(rho_cp_T, 0.0, 1e-2, nu, 0.0), 1.0);
-    // Fast chemistry: the heat release kappa q tends to the mixing-limited rho cp T / tau_mix
-    const double limited = rho_cp_T / (1e-6 / nu);
-    EXPECT_NEAR(pasr.fraction(rho_cp_T, 1e20, 1e-3, nu, 0.0) * 1e20, limited, 1e-6 * limited);
-    pasr.C_mix = 2.0;
-    EXPECT_NEAR(1.0 / pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4) - 1.0, 2.0 * tau_mix / tau_c, 1e-12 * tau_mix / tau_c);
-}
-
 namespace {
 
-/** @brief The uniform box with cells of side h, run as given and copied to the host. */
-std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, const std::string & combustion) {
+/** @brief The uniform box with cells of side h (or of composition X), run as given and copied to the host. */
+std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, const std::string & combustion,
+                                      const std::string & X = "") {
     std::string input = uniform_box(run, combustion);
+    const std::string uniform = "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
+    if (!X.empty()) input.replace(input.find(uniform), uniform.size(), X);
     auto set = [&](const std::string & key, const double value) {
         const size_t at = input.find(key + " = ");
         const size_t end = input.find('\n', at);
@@ -299,6 +291,150 @@ std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, c
 }
 
 } // namespace
+
+namespace {
+
+/** @brief A flame table of rows (Z, s_L, delta_L, omega_max) in this rank's scratch directory. */
+std::string flame_table(const std::string & name, const std::vector<std::array<double, 4>> & rows) {
+    const std::string path = (rank_scratch_dir() / (name + ".csv")).string();
+    std::ofstream f(path);
+    f << std::setprecision(17) << "# test table\nZ,s_L,delta_L,omega_max,T_b\n";
+    for (const auto & r : rows) f << r[0] << "," << r[1] << "," << r[2] << "," << r[3] << ",2000\n";
+    return path;
+}
+
+/** @brief [les.combustion] with the reaction sensor, H2 against air, no efficiency. */
+std::string reaction_combustion(const std::string & table, const std::string & extra = "") {
+    return "[les.combustion]\nmodel = \"tfles\"\nsensor = \"reaction\"\nflame_table = \"" + table +
+           "\"\nfuel = {X = {H2 = 1.0}}\noxidizer = {X = {O2 = 1.0, N2 = 3.76}}\n" + extra;
+}
+
+} // namespace
+
+TEST(ThickenedFlame, ReactionSensorRampsWithTheConsumptionRate) {
+    EXPECT_EQ(ThickenedFlame::reaction_sensor(0.0, 2.0), 0.0);
+    EXPECT_EQ(ThickenedFlame::reaction_sensor(-5.0, 2.0), 0.0);
+    EXPECT_EQ(ThickenedFlame::reaction_sensor(0.02, 2.0), 0.0);
+    EXPECT_NEAR(ThickenedFlame::reaction_sensor(0.06, 2.0), 0.5, 1e-12);
+    EXPECT_EQ(ThickenedFlame::reaction_sensor(0.1, 2.0), 1.0);
+    EXPECT_EQ(ThickenedFlame::reaction_sensor(3.0, 2.0), 1.0);
+}
+
+TEST(ThickenedFlame, ReactionSensorThickensTheLocalPremixedFlameWithinTheFlammableRangeOnly) {
+    // Stoichiometric H2/air at 1500 K, diluted with N2 along x so that H2 and O2 fall together (a premixed flame's
+    // gradients), reacts in every cell (Delta = 1 cm, n_res = 5) at its Bilger Z (about 0.03) of the streams. The flame
+    // of the cell's Z comes from the table: delta_L interpolated between its rows. A reference rate far below the
+    // cell's makes the sensor 1, one far above it 0, and a table that starts above Z (the mixture is outside the
+    // flammable range) leaves it at 0 however fast the cell burns; so do opposed gradients of H2 and O2 (a
+    // diffusion flame's)
+    const std::string run = "n_steps = 1\ndt = 1e-13\n";
+    const std::string none = "efficiency = \"none\"\n";
+    const std::string slow = flame_table("slow", {{{0.0, 2.0, 1e-3, 1e-6}, {0.1, 1.0, 3e-3, 1e-6}}});
+    const std::string fast = flame_table("fast", {{{0.0, 2.0, 1e-3, 1e12}, {0.1, 1.0, 3e-3, 1e12}}});
+    const std::string rich = flame_table("rich", {{{0.05, 2.0, 1e-3, 1e-6}, {0.1, 1.0, 3e-3, 1e-6}}});
+    const std::string premixed = "X = { H2 = \"2 * (1 + 0.2 * sin(157.08 * x))\", O2 = \"1 + 0.2 * sin(157.08 * x)\", N2 = 3.76 }\n";
+    const std::string opposed = "X = { H2 = \"2 * (1 + 0.2 * sin(157.08 * x))\", O2 = \"1 - 0.2 * sin(157.08 * x)\", N2 = 3.76 }\n";
+    auto burning = uniform_cells(0.01, run, reaction_combustion(slow, none), premixed);
+    const auto names = burning->get_species_names();
+    const auto index = [&](const char * name) {
+        return static_cast<uint32_t>(std::find(names.begin(), names.end(), name) - names.begin());
+    };
+    const uint32_t h2 = index("H2"), o2 = index("O2");
+    // Bilger's coupling function 2 C + H/2 - O per unit mass of H2 and O2, and of the streams H2 and air
+    const double W_H2 = 2.016, W_O2 = 31.998, Y_O2_air = W_O2 / (W_O2 + 3.76 * 28.014);
+    const double beta_F = 1.0 / W_H2, beta_O = -2.0 * Y_O2_air / W_O2;
+    const auto m = burning->get_mesh();
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
+        const double rho = double(burning->h_conservatives(c, 0));
+        const double beta = (double(burning->h_species(c, h2)) / W_H2 - 2.0 * double(burning->h_species(c, o2)) / W_O2) / rho;
+        const double Z = (beta - beta_O) / (beta_F - beta_O);
+        const double F = 5.0 * 0.01 / (1e-3 + 2e-3 * Z / 0.1);
+        EXPECT_NEAR(double(burning->get_tfles_fields()(c, 0)), F, precision_tol<double>(1e-9, 1e-5) * F) << c;
+        EXPECT_EQ(double(burning->get_tfles_fields()(c, 1)), 1.0);
+        EXPECT_EQ(double(burning->get_tfles_fields()(c, 2)), 1.0);
+    }
+    for (const auto & [table, X] : {std::pair{fast, premixed}, std::pair{rich, premixed}, std::pair{slow, opposed}}) {
+        auto cold = uniform_cells(0.01, run, reaction_combustion(table, none), X);
+        for (uint32_t c = 0; c < m->n_owned(); c++) {
+            EXPECT_EQ(double(cold->get_tfles_fields()(c, 0)), 1.0) << table << X;
+            EXPECT_EQ(double(cold->get_tfles_fields()(c, 2)), 0.0) << table << X;
+        }
+    }
+}
+
+TEST(ThickenedFlame, EfficiencyCapHolds) {
+    // The swirling box of EddyViscosityVelocitySetsTheEfficiency: Charlette's efficiency clipped at efficiency_max
+    std::string input = uniform_box("n_steps = 1\ndt = 1e-13\n",
+                                    "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 0.0\n"
+                                    "T_burnt = 4000.0\nefficiency = \"charlette\"\n"
+                                    "subgrid_velocity = \"eddy_viscosity\"\nC_u = 26.0\nefficiency_max = 1.01\n");
+    const std::string still = N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n";
+    input.replace(input.find(still), still.size(),
+                  N_DIM == 3 ? "u = [\"30 * sin(157.08 * y) * cos(78.54 * z)\", \"25 * sin(157.08 * z + 0.4) * cos(157.08 * x)\", "
+                               "\"20 * sin(157.08 * x + 1.1)\"]\n"
+                             : "u = [\"30 * sin(157.08 * y)\", \"25 * sin(157.08 * x + 0.4) + 10 * cos(157.08 * y)\"]\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    ThickenedFlame tf = flame();
+    tf.delta_L = 2e-3;
+    tf.T_u = 0.0;
+    tf.T_b = 4000.0;
+    const auto & fields = solver.get_tfles_fields();
+    const auto & sgs = solver.get_les_coefficients();
+    const auto & transport = solver.get_cell_transport();
+    const auto m = solver.get_mesh();
+    uint32_t capped = 0;
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0)), delta = std::pow(double(m->h_cell_volume(c)), 1.0 / N_DIM);
+        const double E = tf.wrinkling(double(fields(c, 0)), 26.0 * double(sgs(c, 0)) / (rho * delta),
+                                      double(transport(c, 0)) / rho);
+        EXPECT_LE(double(fields(c, 1)), 1.01 * (1.0 + precision_tol<double>(1e-15, 1e-7))) << c;
+        EXPECT_NEAR(double(fields(c, 1)), std::min(E, 1.01), precision_tol<double>(1e-7, 1e-5)) << c;
+        capped += E > 1.01;
+    }
+    EXPECT_GT(capped, m->n_owned() / 2);
+}
+
+TEST(ThickenedFlame, ReactionSensorInputErrors) {
+    const std::string table = flame_table("errors", {{{0.0, 2.0, 1e-3, 1.0}, {0.1, 1.0, 3e-3, 1.0}}});
+    const std::string unordered = flame_table("unordered", {{{0.1, 2.0, 1e-3, 1.0}, {0.0, 1.0, 3e-3, 1.0}}});
+    const std::string base = "[les.combustion]\nmodel = \"tfles\"\nsensor = \"reaction\"\n";
+    const std::string streams = "fuel = {X = {H2 = 1.0}}\noxidizer = {X = {O2 = 1.0, N2 = 3.76}}\n";
+    const std::string bad[] = {
+        reaction_combustion(table, "efficiency = \"dynamic\"\n"),  // the dynamic procedure needs one fresh gas
+        reaction_combustion(table, "delta_L = 1e-3\n"),            // the table gives the flames
+        reaction_combustion(table, "efficiency_max = 0.5\n"),
+        reaction_combustion(table, "sensor_species = \"XX\"\n"),
+        reaction_combustion(unordered),
+        base + streams,                                          // no flame_table
+        base + "flame_table = \"" + table + "\"\nfuel = {X = {H2 = 1.0}}\n",  // one stream
+        "[les.combustion]\nmodel = \"tfles\"\nsensor = \"pressure\"\n",
+    };
+    for (const std::string & combustion : bad) {
+        Solver s;
+        EXPECT_THROW(s.init(parse_toml(uniform_box("n_steps = 1\ndt = 1e-6\n", combustion))), InputError) << combustion;
+    }
+}
+
+TEST(PartiallyStirredReactor, FractionOfTheChemicalAndMixingTimes) {
+    PartiallyStirredReactor pasr;
+    const double rho_cp_T = 5e5, q = 2e9, nu = 2e-4;
+    // kappa = tau_c / (tau_c + tau_mix), tau_c = rho cp T / |q|, tau_mix = Delta^2 / (nu + nu_t)
+    const double tau_c = rho_cp_T / q, tau_mix = 1e-8 / (nu + 3e-4);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4), tau_c / (tau_c + tau_mix), 1e-14);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, -q, 1e-4, nu, 3e-4), pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4));
+    // Resolved mixing (the DNS limit) or no reaction: the rates of the filtered state
+    EXPECT_GT(pasr.fraction(rho_cp_T, q, 1e-9, nu, 0.0), 1.0 - 1e-9);
+    EXPECT_EQ(pasr.fraction(rho_cp_T, 0.0, 1e-2, nu, 0.0), 1.0);
+    // Fast chemistry: the heat release kappa q tends to the mixing-limited rho cp T / tau_mix
+    const double limited = rho_cp_T / (1e-6 / nu);
+    EXPECT_NEAR(pasr.fraction(rho_cp_T, 1e20, 1e-3, nu, 0.0) * 1e20, limited, 1e-6 * limited);
+    pasr.C_mix = 2.0;
+    EXPECT_NEAR(1.0 / pasr.fraction(rho_cp_T, q, 1e-4, nu, 3e-4) - 1.0, 2.0 * tau_mix / tau_c, 1e-12 * tau_mix / tau_c);
+}
+
 
 TEST(PartiallyStirredReactor, ReactionRatesAreScaledByTheReactingFraction) {
     // A step of dt with PaSR is the chemistry of a step of kappa dt without it; kappa follows

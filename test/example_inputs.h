@@ -142,6 +142,12 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
+    if (input.contains("les") && input.at("les").contains("combustion") &&
+        input.at("les").at("combustion").contains("flame_table")) {
+        auto & combustion = table["les"].as_table().at("combustion").as_table();
+        combustion["flame_table"] = (dir / combustion.at("flame_table").as_string()).string();
+    }
+
     if (input.contains("initialize") && input.at("initialize").contains("data")) {
         for (auto & d : table["initialize"].as_table().at("data").as_array()) {
             d.as_table()["file"] = (dir / d.at("file").as_string()).string();
