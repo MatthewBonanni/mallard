@@ -452,7 +452,7 @@ void Solver::update_transport() {
                          MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                  transport_values});
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
-        Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+        Kokkos::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
                                  viscous_gradient, transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport});
@@ -495,7 +495,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     face_reconstruction->rotate_periodic_faces(face_solution);
     face_reconstruction->image_point_values(W_cells, face_solution);
     // The characteristic faces read the reconstructed gamma of this stage
-    scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
+    scalar_reconstruction.calc(cell_scalars, W_cells, face_solution, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
 

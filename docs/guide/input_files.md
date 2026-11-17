@@ -473,7 +473,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 | Time step | At the initial state (its time `t`): the time step and what sets it (`run.cfl`, `run.dt`, or the sponges), its CFL number against the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), the time step at CFL 1, the cell that sets it, and the box of the cells within 10% of its time step |
 | Resolution | Cell sizes, and the physical scales the case sets against them. Kolmogorov and Taylor lengths, wall units, cells across the flame, and TFLES's thickening, each with its basis and its regime's target ([Resolution](#resolution)) |
 | Memory | Kokkos allocations per rank (device memory on GPUs) of the rank with the largest peak: after setup, once the data only the setup reads is freed (what the time steps hold), and at the peak (the setup's, and the timed steps' with `--steps`), with that rank's owned and halo cells. With `--ranks N` in a serial check, a second row is scaled to the owned and halo cells of the largest part the run's partitioner would make. On a GPU, the peak as a share of the device's memory. Then the same rank by category, at the setup's peak and after setup (at the steps' peak with `--steps`), in total and per owned and halo cell; the setup's workspace and work memory sized by the device are not proportional to the cells. On GPUs, also the device memory outside Kokkos: CUDA's context and the local memory of kernels with large stacks, 1.5 GB (2D) to 2.1 GB (3D) on an A100 |
-| GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU, the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's. The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
+| GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU (the fewer of those that fit in the memory and those that fit in the most entries a Kokkos View of rank 2 or more addresses, from its most entries per cell; the basis says which limits them), the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's. The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): simulated time, steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude), to `run.t_stop` and for `run.n_steps`. It assumes the throughput per rank and the initial time step hold on N ranks |
 | Environment | What the run runs on, with or without an input: the build (dimension, precision, build type, compiler, from the same `build` block as every output file's [run block](output.md#run-block)) and the solvers installed with it; Kokkos and its execution spaces; MPI (the library, ranks, hosts, the most ranks on one host); GPU-aware MPI (built or not, whether the MPI library says it reads device memory, whether this run uses it); NCCL (built or not, whether halo exchanges use it: `[parallel] halo_exchange`, on several ranks); HDF5 (serial or parallel), CGNS, zlib and KaMinPar. Then a row per rank: host, device (GPU and memory, else the CPU), the GPU's index among those it sees, its CPUs, threads and whether OpenMP binds them. The placement checks are the run's own (`Ranks` at the start of a run on several ranks) |
 | Diagnostics | Every error, then every warning: its code, what is wrong with its numbers and the fix, then the anchor below that explains it |
@@ -491,6 +491,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="e-catalog-write"></a>`E-CATALOG-WRITE` | `--catalog FILE` cannot be written | Check the path and its permissions |
 | <a id="e-ranks"></a>`E-RANKS` | `--ranks N` in a check run under `mpirun` on another number of ranks | Check serially (memory is then scaled to N ranks) or on N ranks |
 | <a id="e-memory-device"></a>`E-MEMORY-DEVICE` | The estimated peak per rank exceeds the device's memory | Run on more ranks or GPUs, or on a coarser mesh; GPU sizing says how many fit |
+| <a id="e-view-entries"></a>`E-VIEW-ENTRIES` | With `--ranks N`, the largest part holds more cells than fit in the most entries a Kokkos View of rank 2 or more addresses (from the check's View with the most entries per cell); the run would stop at setup | Run on as many times more ranks as the message says |
 | <a id="e-region-empty"></a>`E-REGION-EMPTY` | A region the case uses overlaps the domain's bounding box but touches no cell: too thin, or in a hole of the mesh | Enlarge or move it; `--view` shows it with the mesh's zones ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
 | <a id="e-region-outside"></a>`E-REGION-OUTSIDE` | A region the case uses lies outside the domain. The message gives both extents | Move it inside: often a unit or a sign ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
 | <a id="w-probe-outside"></a>`W-PROBE-OUTSIDE` | Part of a probe lies outside the domain: samples of a line or surface outside the mesh, or part of a filled region, which it leaves out. The message gives how much and where | Move the probe inside the domain, or accept the part it samples ([Probes](probes.md#probes-probes)) |
@@ -501,7 +502,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="w-wall-y-plus"></a>`W-WALL-Y-PLUS` | First cells of walls without a wall model above y+ 1, which DNS and wall-resolved LES need. The message gives the first-cell distance to aim for | Refine toward the walls, or model them (`wall_model`) ([Resolution](#resolution)) |
 | <a id="w-wall-spacing"></a>`W-WALL-SPACING` | Wall cells longer along the flow (x+) or wider across it (z+) than the regime needs: 15 and 8 for DNS, 150 and 40 for wall-resolved LES | Refine along the walls ([Resolution](#resolution)) |
 | <a id="w-wall-model-exchange"></a>`W-WALL-MODEL-EXCHANGE` | A wall model's exchange points reach below the log layer (y+ 30) that its law assumes | Raise `exchange_distance` or `exchange_cells` |
-| <a id="w-dns-eta"></a>`W-DNS-ETA` | A case without `[les]` (DNS) whose mean cell is more than 2 Kolmogorov lengths. The dissipation is not resolved | Refine to the cell size the message gives, or model the small scales (`[les]`) ([Resolution](#resolution)) |
+| <a id="w-dns-eta"></a>`W-DNS-ETA` | A case without `[les]` (DNS) whose mean cell is more than 2 Kolmogorov lengths, over the domain or over a [region](#values-per-region). The dissipation is not resolved | Refine to the cell size the message gives, or model the small scales (`[les]`) ([Resolution](#resolution)) |
 | <a id="w-sizing-fixed"></a>`W-SIZING-FIXED` | With `--memory` (or a GPU's own), even the memory that does not grow with the cells does not fit in the memory per rank | Size for a larger memory |
 | <a id="w-sizing-parts"></a>`W-SIZING-PARTS` | No partition into a few thousand parts fits in the memory per rank | Size for a larger memory, or coarsen the mesh |
 | <a id="e-env-gpu-aware-mpi"></a>`E-ENV-GPU-AWARE-MPI` | The build passes device buffers to MPI (`-DMallard_GPU_AWARE_MPI=ON`), but the MPI library says it cannot read device memory (Open MPI's `MPIX_Query_cuda_support`, `MPIX_Query_rocm_support`): the run would crash or read garbage | Load an MPI built with CUDA or ROCm support, or rebuild with `-DMallard_GPU_AWARE_MPI=OFF` ([MPI](parallel.md#mpi)) |
@@ -522,9 +523,9 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
-| `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
-| `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |
-| `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
+| `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
+| `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak` and `steady` |
+| `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `limit` (`memory` or `view_entries`: what limits `max_local_cells`), `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
 | `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
 | `cost` | `cells`, `ranks`, `throughput` (cells/s per rank), `wall_per_time` (wall seconds per unit simulated time), `flow_through_time`, `t_stop`, `n_steps` |
 
@@ -589,7 +590,7 @@ laminar profile:
 | Friction velocity `u_tau` (walls of viscous cases) | A restart's (or remap's) first-cell velocity, by the linear law or the log law; else, with `source.mass_flow`, Dean's channel correlation `C_f = 0.073 Re_b^(-1/4)` at the bulk velocity `U_b` and `h` = volume / wall area (the half-height of a channel); else a flat plate's mean skin friction (laminar, or turbulent above `Re_L = 5e5`) over the walls' length along the mean flow at the largest initial speed |
 | y+, x+, z+ | The first cell center's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
 | Wall model's exchange point | `exchange_distance`, or `exchange_cells` wall-cell heights, in wall units |
-| Dissipation `epsilon` | With `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field, mass-weighted over the domain |
+| Dissipation `epsilon` | With [`check.statistics`](../input.md#check), an earlier run's averages: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`, the incompressible dissipation, mean and fluctuations) per cell, or `nu <omega^2>` from `MEAN_ENSTROPHY` (equal over a periodic box or between walls, not locally); else with `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field. Mass-weighted over the domain, or the region |
 | Kolmogorov length `eta` | `(nu^3 / epsilon)^(1/4)` with the domain's mean `nu` |
 | Taylor microscale `lambda` | `(15 nu u'^2 / epsilon)^(1/2)`, `u'` the velocity's fluctuation about its mean (from the field, not the forcing) |
 | Flame thickness | `les.combustion.delta_L` (TFLES): cells across it. Otherwise not estimated |
@@ -604,12 +605,43 @@ otherwise; walls with a `wall_model` are wall-modeled):
 | Wall-modeled LES | Exchange points in the log layer, `y+ >= 30` |
 | TFLES | Thickening `F = n_res Delta / delta_L` at most 5 |
 
+#### Values per region
+
+The domain's rows come first, then the same values for each region of
+[`check.regions`](../input.md#check) (by default every cell zone of the mesh),
+each quantity named after its region (`wake: cell size / eta, mean`) and its
+id prefixed by `region.<name>.` (`region.wake.delta_over_eta_mean`, with
+`"region": "wake"` in the JSON): the region's cell sizes (weighted by its volume
+fraction in each cell), first-cell y+ of its wall cells, cells across `delta_L`
+(TFLES), and its own dissipation, mean `nu`, `eta` and cell size over `eta`.
+A region short of the DNS target is a `W-DNS-ETA` warning of its own. The
+dissipation of a region is its own share of the field's (the statistics', or the
+initial state's); with the forcing's power, which only balances over the whole
+domain, it is the domain's.
+
+The initial state of a turbulent case seldom has the dissipation the run will
+reach. An earlier run, on a coarser mesh or for a shorter time, gives a better
+one: average the strain rate in it, write a restart file, and give that file to
+`check.statistics` (on this mesh):
+
+```toml
+# The earlier run
+[statistics]
+fields = ["STRAIN_RATE"]
+products = ["STRAIN_RATE*STRAIN_RATE"]
+
+# The checked case
+[check]
+statistics = "run1/restart_020000.restart"
+regions = ["wake"]
+```
+
 `--mesh-fields PREFIX` also writes the estimates' fields with the mesh-quality
-ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the mean
-Kolmogorov length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where
-the mesh is short. The mean `eta` stands for the whole domain, so
+ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the Kolmogorov
+length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where the mesh is
+short. Without `check.statistics` the mean `eta` stands for the whole domain, so
 `DELTA_OVER_ETA` is pessimistic where the flow dissipates less than its mean
-(far from walls, in a free stream).
+(far from walls, in a free stream); with it, each cell has its own `eta`.
 
 ### The key catalog
 

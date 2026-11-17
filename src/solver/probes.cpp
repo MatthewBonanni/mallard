@@ -1125,6 +1125,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                                const ProbeReference & reference, bool need_gradients, bool diffusive) {
     const uint32_t n = static_cast<uint32_t>(cells.extent(0));
     const uint32_t n_vars = static_cast<uint32_t>(codes.extent(0));
+    const uint32_t * counted = count.data();
     const auto cell = cells;
     const auto code = codes;
     const auto out = values;
@@ -1133,6 +1134,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const bool has_normals = normals.extent(0) > 0;
     if (sampling == Sampling::CELL && !has_normals) {
         Kokkos::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
+            if (counted && i >= *counted) return;
             for (uint32_t v = 0; v < n_vars; v++) out(i, v) = sampler(cell(i), code(v));
         });
         return;
@@ -1382,7 +1384,7 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
             host_values = Kokkos::create_mirror_view(values);
         }
         // The first rows: the samples (a moving region's covered cells, of all its owned ones)
-        const auto rows = Kokkos::make_pair(size_t(0), size_t(cells.extent(0)));
+        const auto rows = Kokkos::make_pair(size_t(0), this->rows());
         Kokkos::deep_copy(Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
         for (const auto & [column, data] : columns) {
             for (size_t i = 0; i < host_cells.size(); i++) host_values(i, column) = (*data)[host_cells[i]];
@@ -1390,7 +1392,7 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
         h = host_values.data();
     }
     const size_t n_vars = values.extent(1);
-    const size_t n_local = cells.extent(0) * n_vars;
+    const size_t n_local = rows() * n_vars;
     std::vector<double> all;
     if (distributed) {
         std::vector<double> local(n_local);
@@ -1428,20 +1430,23 @@ std::vector<double> Probes::Samples::scatter(const std::vector<double> & global,
                                rows.begin() + static_cast<std::ptrdiff_t>((first + n_local) * width));
 }
 
-void Probes::Samples::allocate_staging(const uint64_t n_records) {
+void Probes::Samples::allocate_staging(const uint64_t n_records, const size_t n_rows) {
     staging = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
-        "probe_staging", n_records, values.extent(0) * values.extent(1));
+        "probe_staging", n_records, n_rows * values.extent(1));
 }
 
 void Probes::Samples::fill_columns(
     const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const {
     const auto v = values;
     const auto c = cells;
+    const uint32_t * counted = count.data();
     for (const auto & entry : columns) {
         const uint32_t column = entry.first;
         const auto field = entry.second;
-        Kokkos::parallel_for("probe_cell_field", c.extent(0),
-                             KOKKOS_LAMBDA(const size_t i) { v(i, column) = field(c(i)); });
+        Kokkos::parallel_for("probe_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            if (counted && i >= *counted) return;
+            v(i, column) = field(c(i));
+        });
     }
 }
 
@@ -1450,7 +1455,10 @@ void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
     const auto st = staging;
     const uint64_t n_records = staging.extent(0);
     const uint32_t n_vars = static_cast<uint32_t>(values.extent(1));
-    Kokkos::parallel_for("probe_staged", values.extent(0), KOKKOS_LAMBDA(const size_t i) {
+    const uint32_t * counted = count.data();
+    const size_t n_rows = n_vars > 0 ? staging.extent(1) / n_vars : 0;
+    Kokkos::parallel_for("probe_staged", n_rows, KOKKOS_LAMBDA(const size_t i) {
+        if (counted && i >= *counted) return;
         const uint64_t slot = (*seq - 1) % n_records;
         for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
     });
@@ -1896,7 +1904,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             motion->volumes = to_device(weights, "probe_motion_volumes");
             motion->covered = Kokkos::View<uint32_t *>("probe_motion_cells", mesh.n_owned());
             motion->weights = Kokkos::View<double *>("probe_motion_weights", mesh.n_owned());
+            motion->count = Kokkos::View<uint32_t>("probe_motion_count");
             select_region(p, mesh, r, weights, n_evaluated);
+            p.quadrature.cells = motion->covered;
+            p.quadrature.count = motion->count;
             p.motion = std::move(motion);
             // Its own measures hold while it keeps its shape; the part in the domain is the measure of each write
             const auto [volume, surface] = measure_names(mesh.axisymmetric);
@@ -2473,20 +2484,36 @@ bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
         return statistics.device_average(c.second->name()).data() != nullptr;
     });
-    return !p.snapshot && !p.motion && !p.isosurface && !p.solution && device_columns &&
+    return !p.snapshot && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
-void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const bool reduce,
-                   const bool use_nccl) {
+bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr; }
+
+void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const double t,
+                   const bool reduce, const bool use_nccl) {
     Probe & p = *probes[k];
     p.staged = true;
     p.device_columns.clear();
     for (const auto & [column, data] : p.cell_columns) {
         p.device_columns.emplace_back(column, statistics.device_average(data->name()));
     }
-    if (p.samples_nodes()) p.nodes.allocate_staging(n_records);
-    if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
+    if (p.motion) {
+        // Twice the cells it covers at t (a write it outgrows stops the device, which stages it anew)
+        Probe::Motion & m = *p.motion;
+        const size_t n_owned = m.covered.extent(0);
+        m.capacity = static_cast<uint32_t>(std::min<size_t>(n_owned, std::max<size_t>(2 * size_t(p.cover(t)), 64)));
+        using Pinned = Kokkos::SharedHostPinnedSpace;
+        m.staged_cells =
+            Kokkos::View<uint32_t **, Kokkos::LayoutRight, Pinned>("probe_staged_cells", n_records, m.capacity);
+        m.staged_weights =
+            Kokkos::View<double **, Kokkos::LayoutRight, Pinned>("probe_staged_weights", n_records, m.capacity);
+        m.staged_count = Kokkos::View<uint32_t *, Pinned>("probe_staged_count", n_records);
+    }
+    if (p.samples_nodes()) p.nodes.allocate_staging(n_records, p.nodes.values.extent(0));
+    if (p.samples_quadrature()) {
+        p.quadrature.allocate_staging(n_records, p.motion ? p.motion->capacity : p.quadrature.values.extent(0));
+    }
     if (!reduce) return;
     // The samples Probe::reduce sums: of point sets and boundaries, the nodes; of curves and regions, the quadrature
     auto r = std::make_shared<Probe::DeviceReduction>();
@@ -2504,7 +2531,7 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     r->summed = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
         return o.kind != ProbeOutput::MIN && o.kind != ProbeOutput::MAX;
     });
-    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & t) { return t.kind == ProbeTerm::MOMENT; });
+    const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & term) { return term.kind == ProbeTerm::MOMENT; });
     int weighted = r->summed && holds && (!points || !p.geometry.node_weights.empty()) ? 1 : 0;
     if (S.distributed) weighted = comm::allreduce(weighted, comm::Op::MAX);
     if (weighted) {
@@ -2676,6 +2703,14 @@ std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_model) const {
     return {cell_W, transport, all_gradients};
 }
 
+void Probes::select_staged(const size_t k, const Kokkos::View<const rtype> & time, int64_t * const overflow) const {
+    const Probe & p = *probes[k];
+    p.select_covered(time);
+    const Kokkos::View<const uint32_t> count = p.motion->count;
+    const uint32_t capacity = p.motion->capacity;
+    Kokkos::parallel_for("probe_staged_capacity", 1, KOKKOS_LAMBDA(const int) { *overflow = count() > capacity ? 1 : 0; });
+}
+
 void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const uint64_t * seq) {
     Probe & p = *probes[k];
     if (p.samples_nodes()) {
@@ -2688,6 +2723,7 @@ void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const u
         p.quadrature.fill_columns(p.device_columns);
         p.quadrature.copy_to_staging(seq);
     }
+    if (p.motion) p.stage_covered(seq);
 }
 
 void Probes::write_staged(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
@@ -2711,7 +2747,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
             p.mean_fields(sampled_quad);
         } else {
             Kokkos::Timer timer;
-            if (p.motion) p.move(double(t));
+            if (p.motion) slot < 0 ? p.move(double(t)) : p.moved(static_cast<uint64_t>(slot));
             if (p.isosurface) p.extract(double(t));
             if (p.solution) m_region_seconds += timer.seconds();
             if (!p.average) p.sample(fields, sampled_nodes, sampled_quad, slot);
@@ -2897,7 +2933,7 @@ bool Probes::Probe::samples_nodes() const {
            (write_samples || extrema || quadrature.n_global == 0 || (spectra && spectra->needs_samples()));
 }
 
-bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && quadrature.n_global > 0; }
+bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && (motion || quadrature.n_global > 0); }
 
 void Probes::Probe::sample(const ProbeFields * fields, std::vector<double> & node_values,
                            std::vector<double> & quad_values, const int64_t slot) {
@@ -2988,7 +3024,7 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
     if (!(w > 0.0)) return;
     std::vector<double> nodes, quad;
     Kokkos::Timer timer;
-    if (p.motion) p.move(static_cast<double>(t));
+    if (p.motion) slot < 0 ? p.move(static_cast<double>(t)) : p.moved(static_cast<uint64_t>(slot));
     if (p.isosurface) p.extract(static_cast<double>(t));
     if (p.solution) m_region_seconds += timer.seconds();
     p.sample(fields, nodes, quad, slot);
@@ -3427,39 +3463,84 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
 
 namespace {
 
-/** @brief The cells c with w = f(c) V(c) > 0, in order, into the first of cells, with w into weights; their count. */
-uint32_t covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<const double *> & volumes,
-                       const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights) {
-    uint32_t n = 0;
-    Kokkos::parallel_scan("probe_covered_cells", static_cast<uint32_t>(volumes.extent(0)),
-                          KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
+/** @brief The cells c with w = f(c) V(c) > 0, in order, into the first count() of cells, with w into weights. */
+void covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<const double *> & volumes,
+                   const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights,
+                   const Kokkos::View<uint32_t> & count) {
+    const uint32_t n = static_cast<uint32_t>(volumes.extent(0));
+    Kokkos::parallel_scan("probe_covered_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
         const double w = f(c) * volumes(c);
-        if (!(w > 0.0)) return;
-        if (final) {
+        const bool covered = w > 0.0;
+        if (final && covered) {
             cells(k) = c;
             weights(k) = w;
         }
-        k++;
-    }, n);
-    return n;
+        k += covered ? 1 : 0;
+        if (final && c + 1 == n) count() = k;
+    });
+}
+
+using PinnedCells = Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>;
+using PinnedWeights = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>;
+
+/** @brief The first count() of cells and weights (at most the staging's), and count(), into record slot
+ *         (*seq - 1) % n_records. */
+void stage_cells(const Kokkos::View<const uint32_t *> & cells, const Kokkos::View<const double *> & weights,
+                 const Kokkos::View<const uint32_t> & count, const PinnedCells & st_cells,
+                 const PinnedWeights & st_weights, const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st_count,
+                 const uint64_t * seq) {
+    const uint64_t n_records = st_count.extent(0);
+    Kokkos::parallel_for("probe_staged_covered", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
+        const uint64_t slot = (*seq - 1) % n_records;
+        if (i == 0) st_count(slot) = count();
+        if (i >= count()) return;
+        st_cells(slot, i) = cells(i);
+        st_weights(slot, i) = weights(i);
+    });
 }
 
 } // namespace
 
-void Probes::Probe::move(const double t) {
+void Probes::Probe::select_covered(const Kokkos::View<const rtype> & time) const {
+    motion->fractions->update(time);
+    covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights, motion->count);
+}
+
+uint32_t Probes::Probe::cover(const double t) const {
     motion->fractions->update(t);
-    const uint32_t n = covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights);
+    covered_cells(motion->fractions->fractions(), motion->volumes, motion->covered, motion->weights, motion->count);
+    uint32_t n = 0;
+    Kokkos::deep_copy(Kokkos::View<uint32_t, Kokkos::HostSpace>(&n), motion->count);
+    return n;
+}
+
+void Probes::Probe::move(const double t) {
+    const uint32_t n = cover(t);
     const auto rows = Kokkos::make_pair(uint32_t(0), n);
-    quadrature.cells = Kokkos::subview(motion->covered, rows);
-    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), quadrature.cells);
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->covered, rows));
     const auto h_weights =
         Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->weights, rows));
-    quadrature.host_cells.assign(h_cells.data(), h_cells.data() + n);
+    order_covered(n, h_cells.data(), h_weights.data());
+}
+
+void Probes::Probe::moved(const uint64_t slot) {
+    const Motion & m = *motion;
+    order_covered(m.staged_count(slot), m.staged_cells.data() + slot * m.staged_cells.extent(1),
+                  m.staged_weights.data() + slot * m.staged_weights.extent(1));
+}
+
+void Probes::Probe::stage_covered(const uint64_t * seq) const {
+    const Motion & m = *motion;
+    stage_cells(m.covered, m.weights, m.count, m.staged_cells, m.staged_weights, m.staged_count, seq);
+}
+
+void Probes::Probe::order_covered(const uint32_t n, const uint32_t * cells, const double * weights) {
+    quadrature.host_cells.assign(cells, cells + n);
     std::vector<double> local;  // global cell, f V
     local.reserve(2 * size_t(n));
     for (uint32_t i = 0; i < n; i++) {
-        local.push_back(double(motion->mesh->h_global_cell(h_cells(i))));
-        local.push_back(h_weights(i));
+        local.push_back(double(motion->mesh->h_global_cell(cells[i])));
+        local.push_back(weights[i]);
     }
     const std::vector<double> all = motion->distributed ? comm::gatherv(local) : local;
     quadrature.n_global = motion->distributed ? comm::allreduce(uint64_t(n), comm::Op::SUM) : n;

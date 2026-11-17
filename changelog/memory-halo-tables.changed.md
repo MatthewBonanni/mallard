@@ -1,0 +1,1 @@
+- Distributed runs store face states, fluxes, face quadrature and the viscous gradients' weights only for the owned cells and halo layer 1, not for the deeper halo layers that TENO's stencil searches need: a halo cell takes 43% less device memory (3D TENO5 on an A100, 7.0 to 4.0 kB), so more cells fit per GPU at high rank counts. Results are unchanged bit for bit.

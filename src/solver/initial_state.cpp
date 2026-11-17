@@ -1180,7 +1180,7 @@ struct InitialState::Impl {
         record_options(where + ".type", {"table", "points"});
         if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
         const bool points = type == "points";
-        const tabulated::Csv csv = tabulated::read_csv(file);
+        const tabulated::Csv csv = tabulated::read_csv(file, DATA_DOCS);
         std::vector<std::string> coordinates;
         if (e.contains("coordinates")) {
             coordinates = find_value<std::vector<std::string>>(e, "coordinates");
