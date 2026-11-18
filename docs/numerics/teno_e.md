@@ -286,7 +286,9 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged.
+it are zero, so the run-time kernels are unchanged. A 2D stencil that the
+search grows past $n_0$ to such a cell is searched again at that degree
+(#1202; 3D: [known limitations](#known-limitations)).
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -587,7 +589,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 16; one file per MPI rank). The file is used
+on later runs (format version 24; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -776,14 +778,13 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     field, order 5's drag is as smooth as order 3's
     ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
-- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
-    at curved walls looks only at a stencil's first $n_0$ candidates
-    ([central stencil](#central-stencil)). When the Lebesgue search grows
-    the stencil past them, the entries it adds can be cells at a curved wall,
-    and the stencil keeps the full degree, one-sided there. On a $6^3$
+- **Curved walls past the first $n_0$ candidates in 3D** (#1202). The 3D
+    degree cap at curved walls looks only at a stencil's first $n_0$
+    candidates ([central stencil](#central-stencil)). When the Lebesgue search
+    grows the stencil past them, the entries it adds can be cells at a curved
+    wall, and the stencil keeps the full degree, one-sided there. On a $6^3$
     `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
-    28 at order 6 do so. The 2D and 3D setups both check only the first
-    $n_0$ entries, for every cell type.
+    28 at order 6 do so. The 2D setup checks the whole stencil.
 
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
