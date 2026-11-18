@@ -70,7 +70,8 @@ uint64_t pack(const Coord & x) {
 }
 
 struct Side {
-    uint32_t cell, side;
+    uint32_t cell;
+    uint8_t side;
     bool seam;  // across a periodic boundary: the two faces' nodes differ, their keys agree
 };
 using Across = std::array<Side, N_SIDES>;
@@ -78,13 +79,16 @@ using Across = std::array<Side, N_SIDES>;
 /** The cell across each local side of every candidate cell (faces matched by their keyed nodes), and the neighbor's side there. */
 std::vector<Across> neighbors_across(const CellNodes & cells, const CellNodes & keyed, uint32_t n_cells) {
     struct Entry {
-        FaceKey key, nodes;
+        FaceKey key;
         uint32_t cell, side;
     };
+    size_t n_candidates = 0;
+    for (uint32_t c = 0; c < n_cells; c++) n_candidates += cells[c].size() == N_CORNERS;
     std::vector<Entry> faces;
+    faces.reserve(N_SIDES * n_candidates);
     for (uint32_t c = 0; c < n_cells; c++) {
         if (cells[c].size() != N_CORNERS) continue;
-        for (uint32_t s = 0; s < N_SIDES; s++) faces.push_back({face_key(keyed[c], s), face_key(cells[c], s), c, s});
+        for (uint32_t s = 0; s < N_SIDES; s++) faces.push_back({face_key(keyed[c], s), c, s});
     }
     std::sort(faces.begin(), faces.end(), [](const Entry & a, const Entry & b) {
         return a.key < b.key || (a.key == b.key && a.cell < b.cell);
@@ -95,9 +99,10 @@ std::vector<Across> neighbors_across(const CellNodes & cells, const CellNodes & 
         size_t j = i + 1;
         while (j < faces.size() && faces[j].key == faces[i].key) j++;
         if (j - i == 2 && faces[i].cell != faces[i + 1].cell) {
-            const bool seam = faces[i].nodes != faces[i + 1].nodes;
-            across[faces[i].cell][faces[i].side] = {faces[i + 1].cell, faces[i + 1].side, seam};
-            across[faces[i + 1].cell][faces[i + 1].side] = {faces[i].cell, faces[i].side, seam};
+            const Entry & a = faces[i], & b = faces[i + 1];
+            const bool seam = &keyed != &cells && face_key(cells[a.cell], a.side) != face_key(cells[b.cell], b.side);
+            across[a.cell][a.side] = {b.cell, static_cast<uint8_t>(b.side), seam};
+            across[b.cell][b.side] = {a.cell, static_cast<uint8_t>(a.side), seam};
         }
         i = j;
     }

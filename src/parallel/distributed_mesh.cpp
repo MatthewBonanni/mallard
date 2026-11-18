@@ -657,6 +657,12 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
 
 void DistributedMesh::release_cells() {
     cells = Cells();
+    release_search();
+    layers = 0;
+    sent = false;
+}
+
+void DistributedMesh::release_search() {
     release(halo_index);
     release(owned_nodes);
     release(searched_nodes);
@@ -664,8 +670,6 @@ void DistributedMesh::release_cells() {
     release(directory_offsets);
     release(directory_cells);
     release(directory_owners);
-    layers = 0;
-    sent = false;
 }
 
 void DistributedMesh::send_to_owners() {
@@ -803,6 +807,7 @@ std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution 
                                                   bool last) {
     if (!sent) send_to_owners();
     while (layers < halo_layers) grow_layer();
+    release_search();
     const uint32_t n_local = static_cast<uint32_t>(std::count_if(cells.layer.begin(), cells.layer.end(),
                                            [&](uint8_t l) { return l <= halo_layers; }));
 
@@ -875,7 +880,7 @@ std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution 
     for (uint32_t i = 0; i < n_local; i++) {
         if (i + 1 == n_local || cells.layer[i + 1] != cells.layer[i]) group_ends.push_back(i + 1);
     }
-    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends, classes.key);
+    LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends, classes.key);
     const std::vector<uint32_t> & order = numbered.order;
     CellNodes ordered_cells;
     ordered_cells.offsets.reserve(n_local + 1);
@@ -894,12 +899,14 @@ std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution 
     local_cells = {};
     dist.n_owned = static_cast<uint32_t>(std::count(dist.layer.begin(), dist.layer.end(), 0));
     plan_halo_exchange(dist, std::vector<int>(owners.begin() + dist.n_owned, owners.end()));
+    release(owners);
 
     std::vector<uint32_t> cell_zone;
     if (!block.cell_zone_names.empty()) {
         cell_zone.resize(n_local);
         for (uint32_t i = 0; i < n_local; i++) cell_zone[i] = cells.zone[order[i]];
     }
+    release(numbered.order);
     // Deeper halos later start again from the block and the owners
     release_cells();
     if (last) {
@@ -922,7 +929,7 @@ std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution 
     mesh->n_global_nodes = node_dist.back();
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_interior_cells = numbered.n_interior;
-    mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, classes);
+    mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, std::move(classes));
     if (!block.cell_zone_names.empty()) {
         mesh->cell_zone_names = block.cell_zone_names;
         mesh->h_cell_zone = std::move(cell_zone);
