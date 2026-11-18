@@ -36,6 +36,7 @@
 namespace {
 
 using parallel_read::ask;
+using parallel_read::balanced_boundaries;
 using parallel_read::collectively;
 using parallel_read::Fields;
 using parallel_read::FileLines;
@@ -270,15 +271,8 @@ class NodePositions {
         }
         n_nodes = comm::allreduce(uint64_t(tags.size()), comm::Op::SUM);
         if (dense) return;
-        // Otherwise rank q holds the tags of the q-th of p equal ranges of tags
-        uint64_t lowest = NONE, highest = 0;
-        for (uint64_t t : tags) {
-            lowest = std::min(lowest, t);
-            highest = std::max(highest, t);
-        }
-        min_tag = comm::allreduce(lowest, comm::Op::MIN);
-        const uint64_t width = (comm::allreduce(highest, comm::Op::MAX) - min_tag) / uint64_t(comm::size());
-        chunk = width == NONE ? width : width + 1;
+        // Otherwise rank q holds the tags of the q-th of p ranges of about equal counts of tags
+        boundaries = balanced_boundaries(tags);
         std::vector<std::vector<uint64_t>> send(static_cast<size_t>(comm::size()));
         for (size_t k = 0; k < tags.size(); k++) send[size_t(owner(tags[k]))].insert(send[size_t(owner(tags[k]))].end(), {tags[k], first + k});
         const comm::Received<uint64_t> got = comm::exchange(std::move(send));
@@ -325,12 +319,12 @@ class NodePositions {
 
   private:
     int owner(uint64_t tag) const {
-        if (tag < min_tag) return 0;
-        return static_cast<int>(std::min((tag - min_tag) / chunk, uint64_t(comm::size() - 1)));
+        return static_cast<int>(std::lower_bound(boundaries.begin(), boundaries.end(), tag) - boundaries.begin());
     }
 
     bool dense = true;  // position = tag - base
-    uint64_t base = 0, n_nodes = 0, min_tag = 0, chunk = 1;
+    uint64_t base = 0, n_nodes = 0;
+    std::vector<uint64_t> boundaries;
     std::vector<std::array<uint64_t, 2>> entries;  // (tag, position), by tag
 };
 
