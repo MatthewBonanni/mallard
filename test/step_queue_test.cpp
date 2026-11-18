@@ -1287,6 +1287,47 @@ TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) 
     EXPECT_EQ(run_case("averaged_reductions", c, 3).queued, run_case("averaged_reductions_at_step", at_step, 3).queued);
 }
 
+TEST(StepQueueTest, SpectraTheDeviceSampledAtAStopOfTheQueueAreWrittenOnce) {
+    // The trigger stops the queue at step 20, whose statistics and spectra the device sampled: the host writes the
+    // staged sample there, once, and does not sample the statistics again
+    std::ostringstream body;
+    body << "[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 10\nLx = 6.283185307179586\nLy = 3.0\n";
+    if (N_DIM == 3) body << "Nz = 6\nLz = 5.0\n";
+    body << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    if (N_DIM == 3) body << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    body << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(x + 2.1 * y)\"\n"
+         << "u = " << vector_of("0.3 * sin(2 * x + 0.5) * cos(1.3 * y)", "0.2 * cos(3 * x - y)", "0.1 * sin(y)")
+         << "\np = \"1.0 + 0.05 * cos(x - y)\"\n"
+         << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+         << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.4\n";
+    c.body = body.str();
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[statistics]\ninterval = 2\nfields = [\"P\"]\n"
+              "[statistics.spectra]\naverage = false\nfields = [\"U_X\", \"P\"]\ninterval = 4\nfile = \"{dir}/spectra.csv\"\n"
+              "[[triggers]]\nname = \"at\"\nwhen = \"step == 20\"\ndo = \"checkpoint\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("staged_spectra_at_stop", c);
+    if (!comm::is_root()) return;
+    EXPECT_TRUE(o.files.count("restart_000020.restart"));
+    EXPECT_TRUE(o.files.count("spectra_000020.csv"));
+    // A file written twice has the same bytes: the run log records each write
+    const auto spectra_writes = [&](const int depth) {
+        std::vector<uint64_t> steps;
+        const fs::path root = c.distributed ? scratch_dir() : rank_scratch_dir();
+        std::ifstream in(root / ("staged_spectra_at_stop_" + std::to_string(depth)) / "mallard.jsonl");
+        for (std::string line; std::getline(in, line);) {
+            const json::Value v = json::parse(line);
+            if (v["type"].string == "output" && v["kind"].string == "spectra") steps.push_back(uint64_t(v["step"].number));
+        }
+        return steps;
+    };
+    const std::vector<uint64_t> host = spectra_writes(0);
+    EXPECT_EQ(std::count(host.begin(), host.end(), 20u), 1);
+    for (const int depth : {1, 3}) EXPECT_EQ(spectra_writes(depth), host) << "step_queue = " << depth;
+}
+
 TEST(StepQueueTest, TriggersOfTheWallTimeAreEvaluatedOnTheDevice) {
     // The wall time rides along the step's reduction: the device stops for the host only at the step one fires at
     Case c;
