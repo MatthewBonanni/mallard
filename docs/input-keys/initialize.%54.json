@@ -6,6 +6,7 @@
  ],
  "required": true,
  "set_in": [
+  "examples/channel_inlet/input.toml",
   "examples/flame_outflow/input.toml",
   "examples/forced_inlet/input.toml",
   "examples/heated_duct/closed.toml",

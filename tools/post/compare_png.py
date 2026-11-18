@@ -6,14 +6,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_vtu  # noqa: E402
+import mallard  # noqa: E402
 
 out, var, files = sys.argv[1], sys.argv[2], sys.argv[3:]
 fig, axs = plt.subplots(1, len(files), figsize=(6 * len(files), 5.5), squeeze=False)
 for ax, f in zip(axs[0], files):
-    pts, tris, tc, d = read_vtu(f)
-    v = d[var][tc]
-    tpc = ax.tripcolor(pts[:, 0], pts[:, 1], tris, facecolors=v, cmap="viridis")
+    snapshot = mallard.open(f)
+    g = snapshot.geometry()
+    tris, tc = g.triangles()
+    v = snapshot.read(var)[tc]
+    tpc = ax.tripcolor(g.points[:, 0], g.points[:, 1], tris, facecolors=v, cmap="viridis")
     fig.colorbar(tpc, ax=ax)
     ax.set_aspect("equal")
     ax.set_title(f"{f.split('/')[-2]}  {var} [{v.min():.3f}, {v.max():.3f}]")

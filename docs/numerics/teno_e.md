@@ -286,7 +286,9 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged.
+it are zero, so the run-time kernels are unchanged. A 2D stencil that the
+search grows past $n_0$ to such a cell is searched again at that degree
+(#1202; 3D: [known limitations](#known-limitations)).
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -585,7 +587,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 16; one file per MPI rank). The file is used
+on later runs (format version 24; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -627,17 +629,15 @@ with the best stencil).
 
 **Pyramids at odd degrees** (#236). On the `cartesian_pyramid` lattice the
 odd degrees grow with every stencil within the Lebesgue bound below a size
-found empirically, about $2.5\,N_{r+1}$ entries. Cell symmetry says only where
-the leading error of an odd-degree fit, of the even degree $r + 1$, jumps
-across a face: not across faces whose two cells are point images of each
-other through the face's center, which every face of the hexahedral and prism
-tilings is, and so are the bases of the pyramid tiling, but across the
-pyramids' side faces, where the image of a centroid lies $0.75\,h_i$ from the
-neighbor's. It does not explain the threshold: the face-averaged jump grows
-with the stable sizes, and even degrees jump as much and are stable. On the
-infinite lattice, the largest real part of the eigenvalues of the linearized
-operator (acoustics at rest, HLLC; sound speeds over the block size), by the
-size of the central stencil:
+found empirically, about $2.5\,N_{r+1}$ entries. The face jump of the
+leading error of an odd-degree fit (of the even degree $r + 1$, which cancels
+between cells that are point images of each other through the face) does not
+explain it: the face-averaged jump grows with the stable sizes, and the
+`cartesian_tri` lattice, whose faces are all point-symmetric, grows as well.
+What decides is the sign of the scheme's lowest even term (see odd degrees on
+other lattices, below). On the infinite lattice, the largest real part of the
+eigenvalues of the linearized operator (acoustics at rest, HLLC; sound speeds
+over the block size), by the size of the central stencil:
 
 | Order 4: entries | 57 | 65 | 77 | 85 | 89 |
 |---|---|---|---|---|---|
@@ -657,10 +657,10 @@ order 4 are 2.5 $N_4$, hence the start from $2.5\,N_{r+1}$
 leads the search to 185 entries, which leave slow modes: $2.0\times10^{-7}$ on
 the lattice and $6.8\times10^{-7}$ (sound speed over the box size) on the
 walled 4³ box, against $3\times10^{-9}$ from 209.
-The Lebesgue constants of the stable and the unstable stencils overlap: Kuhn
-tetrahedra are stable at order 4 from 58 entries with $\Lambda = 3.84$, and
-the hexahedral and prism lattices are stable at orders 4 and 6 with their
-default stencils. With the pyramids' start from $2.5\,N_{r+1}$, the largest
+The Lebesgue constants of the stable and the unstable stencils overlap (Kuhn
+tetrahedra at order 4 still grow with 58 entries, $\Lambda = 3.84$; see below). A
+finer scan of the wavevectors confirms 85 and 209 entries (largest real part
+below $4\times10^{-9}$). With the pyramids' start from $2.5\,N_{r+1}$, the largest
 real part on whole boxes (sound speed over the box size):
 
 | Case | From $\lceil f N_r\rceil$ | From $2.5\,N_{r+1}$ |
@@ -678,6 +678,57 @@ and 209 instead of 145 at order 6. A pyramid needs at least 85 or 208 cells
 and mirror images within reach of its search, against 38 and 110 for other
 cells; on smaller meshes setup stops with "could not build a full-rank large
 stencil (mesh too small for this order?)".
+
+**Odd degrees on other lattices** (#1136). Scanning the Bloch symbol finely
+near $k = 0$ and near the grid scale, rather than at the box's own
+wavevectors, shows slow growing modes on other lattices at the even orders.
+Largest real part (sound speeds over the block size), by central stencil
+size; the defaults are the first entries:
+
+| Lattice | Order | Entries: largest real part |
+|---|---|---|
+| Kuhn tetrahedra | 4 | 46: 1.3e-5; 58: 5.0e-7; 66: 5.2e-7; 78 and 86: < 2e-9 |
+| `cartesian_tri` (squares split in two) | 4 | 18: 1.25e-5; 24 to 30: < 2e-9 |
+| squares split into four triangles at their centers | 4 | 18: 1.0e-6; 23: 1.6e-7; 27: < 1e-9 |
+| hexahedra | 6 | 122: 5.25e-5 |
+| squares split into four triangles | 6 | 42: 2.8e-8 |
+
+Hexahedra at order 4, prisms at orders 4 and 6, Kuhn tetrahedra at order 6,
+pyramids with the start above, and 2D quadrilaterals and `cartesian_tri` at
+order 6 stay below $4\times10^{-9}$.
+
+The order-4 modes are long acoustic waves. The eigenvalue's imaginary part is
+the exact $2\pi\lvert k\rvert$, and its real part grows as $(kh)^6$ up to a
+cut-off of 0.06 to 0.13 cycles per block, beyond which the mode is damped.
+The scheme's lowest even term, $h^5\partial^6$, is then anti-dissipative. An
+odd-degree fit's even error of degree $r + 1$ cancels in the face jump
+only between point images, but the `cartesian_tri` lattice, where it cancels
+at every face, grows as much as the Kuhn lattice: the sign of that term is a
+sum over the whole lattice, which no check of one face or one stencil
+decides. Larger stencils shrink both the growth and the cut-off before the
+term changes sign, so the band of growing waves moves toward $k = 0$.
+
+The hexahedral mode at order 6 is a vortical mode: transverse velocity
+alternating cell by cell along one axis ($k = 1/2$ there) and slowly varying
+across it, growing as the square of the transverse wavenumber up to about
+0.07 cycles per block. HLLC at rest does not damp shear, so only the
+reconstruction can.
+
+Both bands are narrow: the analysis behind the
+[pyramid tables](#3d-stability) sampled $12^3$ wavevectors, multiples of
+$1/12$, which fall outside them, and a test of
+$\max\lVert\exp(5000\,S)\rVert$ sees $1.3\times10^{-5}$ only as a 6% rise.
+Detecting them takes the eigenvalues at wavevectors interpolated between the
+box's (the Jacobian's columns reach only a few blocks), down to about $0.02$
+cycles per block. The growth is slow: $1.3\times10^{-5}$ e-folds once in
+$8\times10^4\,h/c$, about 800 acoustic crossings of a 100-cell domain, and
+the hexahedral order-6 mode ($5.25\times10^{-5}$) in about 190.
+
+Starting the order-4 stencils of tetrahedra and triangles larger, like the
+pyramids' (86 entries on Kuhn tetrahedra; about 28 on triangles, where the
+2D cap is 32), removes the order-4 modes at +87% and +50% central stencil
+size on those cells, but not the hexahedral one. A criterion tied to the sign
+of the dissipation, covering every cell shape, is the planned fix (0.12.0).
 
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
@@ -721,28 +772,28 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     converge at any order ([curved boundaries](../design/curved_boundaries.md)).
     With curved walls (high-order Gmsh faces or `[[mesh.curved]]`) and the
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
-    fourth at the walls. The fine cylinder at order 5 keeps a small drag
-    noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
-    not known (#427).
+    fourth at the walls. On the fine cylinder with curved walls and far
+    field, order 5's drag is as smooth as order 3's
+    ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
-- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
-    at curved walls looks only at a stencil's first $n_0$ candidates
-    ([central stencil](#central-stencil)). When the Lebesgue search grows
-    the stencil past them, the entries it adds can be cells at a curved wall,
-    and the stencil keeps the full degree, one-sided there. On a $6^3$
+- **Curved walls past the first $n_0$ candidates in 3D** (#1202). The 3D
+    degree cap at curved walls looks only at a stencil's first $n_0$
+    candidates ([central stencil](#central-stencil)). When the Lebesgue search
+    grows the stencil past them, the entries it adds can be cells at a curved
+    wall, and the stencil keeps the full degree, one-sided there. On a $6^3$
     `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
-    28 at order 6 do so. The 2D and 3D setups both check only the first
-    $n_0$ entries, for every cell type.
+    28 at order 6 do so. The 2D setup checks the whole stencil.
 
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
-    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
-    odd-even wall pressure at the closed trailing edge of the NACA 0012
-    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
-    times more than order 5 (#977).
+    outgoing acoustic wave on a radially stretched O-grid (#975),
+    undershoots ahead of shocks on quads about 10 times more than order 5
+    (#977), and grows acoustic modes on graded hexahedra from 5%
+    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    pressure it left at the closed trailing edge of the NACA 0012 tutorial
+    mesh (#976) came from mirror images past the far side of the body, which
+    the setup now rejects ([candidates](#candidates)).
 
 - **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
@@ -762,11 +813,10 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     6.25:1, since a ball holds the same density in every direction, so its
     radius would need to follow the spacing.
 
-- **Odd degrees on other cells whose faces are not point-symmetric.** The
-    pyramid rule above is tied to the cell type. The infinite Kuhn
-    tetrahedral lattice at order 4 keeps a slow growing mode with its default
-    stencil (46 entries, $\Lambda = 3.87$: $+1.3\times 10^{-5}$ sound speeds
-    over the block size; 58 entries, $\Lambda = 3.84$, are stable), and a 2D
-    tiling of squares split into four triangles at their centers grows at
-    order 4 (#1136). A criterion computed from a stencil and its face
-    neighbors would cover every cell shape.
+- **Slow growing modes at the even orders on lattices.** The pyramid rule
+    above is tied to the cell type. With their default stencils, Kuhn
+    tetrahedra and `cartesian_tri` triangles at order 4 grow at about
+    $1.3\times 10^{-5}$ sound speeds over the block size, squares split into
+    four triangles at $10^{-6}$, and hexahedra at order 6 at
+    $5.25\times10^{-5}$ (#1136;
+    [3D stability](#3d-stability)).
