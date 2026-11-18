@@ -788,6 +788,7 @@ hexahedra in the default and in Hilbert order, $40^3 \times 6$ tetrahedra):
 | GRI-Mech, hexahedra | 14,517 | 14,215 (+2.1%) |
 | $96^3$ hexahedra, blocks / Hilbert | 7,347 / 7,343 | 7,002 / 7,034 (+4.9 / 4.4%) |
 | $40^3 \times 6$ tetrahedra | 6,978 | 6,636 (+0%) |
+| `sphere_3d` (Gmsh tetrahedra and prisms, Hilbert), TENO5 | 47,195 | 46,882 (+0.7%) |
 | 2D quadrilaterals, TENO3 / 5 / 6 | 1,923 / 2,410 / 2,681 | 1,823 / 2,281 / 2,521 |
 | 2D triangles, TENO3 / 5 / 6 | 1,730 / 2,220 / 2,442 | 1,658 / 2,101 / 2,313 |
 
