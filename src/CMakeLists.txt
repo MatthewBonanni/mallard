@@ -225,8 +225,9 @@ endforeach()
 # and on the device, and the reconstruction stages its stencil loads on GPUs
 # only: contracting multiplies and adds into FMAs would round each differently
 # by where the compiler fuses, so neither file contracts and the hot loops
-# write their FMAs explicitly
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp)
+# write their FMAs explicitly. [statistics.convergence] updates its estimate on
+# the device as the host does, bit for bit
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
