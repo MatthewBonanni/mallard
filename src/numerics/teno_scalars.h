@@ -52,6 +52,7 @@ struct TENOScalarValues {
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;
     Kokkos::View<rtype **> face_quad_weights;
+    Kokkos::View<rtype *[4]> face_rule;
     Kokkos::View<rtype *> scale;
     Kokkos::View<uint32_t *> cell_shape;
     Kokkos::View<rtype **> basis_mean;
@@ -119,7 +120,11 @@ struct TENOScalarValues {
             teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
         } else {
             if (face_quad_weights(f, q) == 0.0_r) return false;
-            FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            if (face_quad_points.extent(0) > 0) {
+                FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            } else {
+                planar_face_point(offsets_nodes_of_face, nodes_of_face, node_coords, face_rule, f, q, x);
+            }
             periodic.backward(s, x, p);
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = (p[i] - cell_coords(c, i)) / h;
@@ -244,7 +249,7 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
     return TENOScalarValues<DEG>{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face,
                                  teno.offsets_nodes_of_face, teno.nodes_of_face, teno.node_coords,
                                  mesh.cell_coords, mesh.face_coords, mesh.periodic_maps(), mesh.face_shift,
-                                 teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
+                                 teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights, teno.face_rule,
                                  teno.scale, teno.cell_shape, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
                                  teno.stencil_small_size, teno.stencil_small, teno.troubled,
                                  teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species,
