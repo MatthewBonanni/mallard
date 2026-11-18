@@ -307,7 +307,7 @@ allocations; with CUDA the pseudo-inverses live outside Kokkos, change 2 in
 
 | | TENO5, today | TENO5, block cell | MUSCL |
 |---|---:|---:|---:|
-| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 8 B (row indices; 0.29 kB per distinct row) |
+| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 12 B (row indices and block shape; 0.29 kB per distinct row) |
 | faces and gradients (face states 2.2 kB, troubled-pass scratch) | 4.20 kB | 4.20 kB | 0.65 kB |
 | mesh and geometry | 2.29 kB | 2.29 kB | 2.26 kB |
 | solution and stages, boundaries | 0.28 kB | 0.28 kB | 0.28 kB |
@@ -320,7 +320,8 @@ TENO5 box at about 1.8M cells on 80 GB; at 6.8 kB per block cell, about
 fluxes on block faces, and dropping per-face geometry inside blocks, is
 filed as a follow-up (#965). MUSCL's rows add 8 B per cell and 0.29 kB per
 distinct row (hexahedra); on meshes where fewer than 8 cells share each row
-(no lattice), MUSCL keeps no rows and fits every step as before.
+(no lattice), MUSCL keeps no rows and fits every step as before. Its block shapes add 4 B per cell with a row
+when the mesh has blocks.
 
 ## Documentation
 
