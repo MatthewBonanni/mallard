@@ -19,6 +19,7 @@
 #include "json.h"
 #include "log.h"
 #include "report.h"
+#include "view_entries.h"
 
 using report::Row;
 using report::Status;
@@ -312,6 +313,7 @@ void memory_section(report::Text & text, const CheckReport & r) {
         device = format("%.0f%% of %s", 100.0 * double(r.target_bytes_peak) / double(r.device_capacity),
                         bytes(double(r.device_capacity)).c_str());
     }
+    if (n_of(r, diagnostic_code::VIEW_ENTRIES)) s = Status::ERROR;
     std::vector<Row> rows = {{target ? Status::NONE : s,
                               {"this check", std::to_string(r.ranks), count(r.local_owned),
                                count(r.local_cells - r.local_owned), bytes(double(r.bytes)), bytes(double(r.bytes_peak)),
@@ -383,9 +385,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     } else {
         rows.push_back({fixed,
                         {"most cells per " + unit, count(r.max_local_cells), "owned and halo cells", "",
-                         bytes(r.bytes_per_cell) + " per cell" +
-                             (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
-                             (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});
+                         r.sizing_view_entries
+                             ? format("%.0f", r.view_entries_per_cell) + " entries per cell in a View of rank 2 or "
+                                   "more, which addresses " + count(view_entries::MAX)
+                             : bytes(r.bytes_per_cell) + " per cell" +
+                                   (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
+                                   (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});
         if (r.min_ranks == 0) {
             rows.push_back({Status::WARNING,
                             {"fewest " + units, "-", units, "", "see " + std::string(diagnostic_code::SIZING_PARTS)}});
@@ -776,6 +781,8 @@ std::string check_json(const CheckReport & r) {
                             .add("target_bytes_peak", r.target_bytes_peak)
                             .add("device_capacity", r.device_capacity)
                             .add("outside_kokkos", r.outside_kokkos)
+                            .add("view_entries_per_cell", r.view_entries_per_cell)
+                            .add("view_max_local_cells", r.view_max_local_cells)
                             .add("steps_timed", r.steps_timed)
                             .raw("at_setup_peak", bytes_json(r.setup_bytes))
                             .raw("steady", bytes_json(r.steady_bytes))
@@ -795,6 +802,7 @@ std::string check_json(const CheckReport & r) {
                             .add("fixed_bytes", r.fixed_bytes)
                             .add("at_setup_peak", r.sizing_setup)
                             .add("max_local_cells", r.max_local_cells)
+                            .add("limit", r.sizing_view_entries ? "view_entries" : "memory")
                             .add("min_ranks", r.min_ranks)
                             .add("min_owned", r.min_owned)
                             .add("min_halo", r.min_halo)

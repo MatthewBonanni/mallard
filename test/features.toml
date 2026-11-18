@@ -88,6 +88,7 @@
 "MixtureTest.BudgetWithDoubleFluxLeavesTheSolutionUnchanged" = ["mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.DoubleFluxKeepsPressureAndVelocityUniformAtContacts" = ["mixture", "euler", "double_flux", "muscl", "teno5", "hllc", "roe", "rhll", "ssprk3"]
 "MixtureTest.DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError" = ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"]
+"MixtureTest.InertContactKeepsTemperatureAndPressureUniformWhereMassFractionsAreBounded" = ["mixture", "euler", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree" = [
     ["mixture", "euler", "fo", "roe", "ssprk3"],
     ["mixture", "euler", "fo", "rhll", "ssprk3"],

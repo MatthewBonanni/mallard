@@ -35,7 +35,9 @@
   "examples/triple_flame/input.toml",
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml"
  ],
  "type": "string",
  "values": [

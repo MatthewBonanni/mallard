@@ -173,6 +173,13 @@ class FaceReconstruction {
                                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Halo cells whose polynomials image_point_values() reads: the
+         *        image cells of owned cells' transmissive faces without an image
+         *        face (sorted, distinct).
+         */
+        std::vector<uint32_t> halo_image_cells() const;
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -397,6 +404,20 @@ class TENO : public FaceReconstruction {
         // cells of a cell shape one row of basis_mean and si_matrix or moments
         // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // Set before init() when distributed runs get the halo side of partition faces from their owners
+        // (Solver::exchanges_partition_faces): the tables then cover only the owned cells and the halo cells
+        // of halo_image_cells(), which are all whose reconstruction is evaluated
+        bool partition_faces_exchanged = false;
+        // Rows of the per-cell tables: cells [0, n_direct_rows) in order, then extra_cells (halo cells, sorted)
+        uint32_t n_direct_rows = 0;
+        std::vector<uint32_t> extra_cells;
+        Kokkos::View<uint32_t *> extra_cells_device;
+        /** @brief Rows of the per-cell tables. */
+        uint32_t n_rows() const { return n_direct_rows + static_cast<uint32_t>(extra_cells.size()); }
+        /** @brief The local cell of table row r. */
+        uint32_t cell_of_row(const uint32_t r) const { return r < n_direct_rows ? r : extra_cells[r - n_direct_rows]; }
+        /** @brief The table row of local cell c, or -1 if it has none. */
+        int64_t row_of_cell(uint32_t c) const;
         // The cells of structured blocks with a block shape read their central stencils by offsets
         // (teno::BlockStencils); false (tests only) reads every cell's slots
         bool block_path = true;
@@ -408,15 +429,16 @@ class TENO : public FaceReconstruction {
          *        (after the tables are set up or rebuilt; a no-op unless block_path).
          */
         void find_block_stencils();
-        /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
+        /** @brief Each table row's global id, or null if the mesh is not distributed (its row then). */
         const uint64_t * global_cell_ids() const {
-            return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();
+            if (mesh->h_global_cell_id.empty()) return nullptr;
+            return extra_cells.empty() ? mesh->h_global_cell_id.data() : row_global_ids.data();
         }
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
 
-        // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
+        // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
         // Rotational periodicity: (turns + teno::TURN_BIAS, i, j) the rotation
         // by turns times the periodic angle, and the boundary faces in
@@ -443,8 +465,8 @@ class TENO : public FaceReconstruction {
         rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
-        // Vertex-neighbor layers each reconstructed cell's stencil search visited
-        // (host); a distributed run needs this many complete layers around the cell
+        // Vertex-neighbor layers each table row's stencil search visited (host);
+        // a distributed run needs this many complete layers around the row's cell
         std::vector<uint8_t> gather_depth;
         // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
         Kokkos::View<rtype *[3]> cell_rule;
@@ -476,12 +498,12 @@ class TENO : public FaceReconstruction {
         };
 
         /**
-         * @brief Calls visit(c, stencils of c) for every reconstructed cell c in
-         *        increasing order, copying the tables to the host chunk by chunk.
+         * @brief Calls visit(c, stencils of c) for every cell c with tables, in
+         *        the order of their rows, copying the tables to the host chunk by chunk.
          */
         void for_each_stencil(const std::function<void(uint32_t, const CellStencils &)> & visit, bool pinv) const;
 
-        /** @brief Local cells that some stencil (central or sector) of the reconstructed cells flagged in cells reads. */
+        /** @brief Local cells that some stencil (central or sector) of the cells with tables flagged in cells reads. */
         std::vector<uint8_t> stencil_cells(const std::vector<uint8_t> & cells) const;
 
         /**
@@ -506,7 +528,7 @@ class TENO : public FaceReconstruction {
         void save_cache(uint8_t halo_layers = 0);
 
         /**
-         * @brief Recompute the tables of the given reconstructed cells and keep
+         * @brief Recompute the tables of the given cells with tables and keep
          *        every other cell's, after the mesh geometry changed (node
          *        coordinates moved, geometry recomputed and on the device).
          *        Each cell's tables are a function of the mesh alone, so with
@@ -516,7 +538,7 @@ class TENO : public FaceReconstruction {
         void rebuild_cells(const std::vector<uint32_t> & cells);
 
         /**
-         * @brief Reconstructed cells whose stencil searches reach any of the
+         * @brief Cells with tables whose stencil searches reach any of the
          *        given cells (within their gather_depth vertex-neighbor layers),
          *        i.e. whose tables depend on those cells' geometry.
          */
@@ -568,6 +590,9 @@ class TENO : public FaceReconstruction {
         bool load_cache();
         void round_to_single();
 
+        void choose_rows();
+
+        std::vector<uint64_t> row_global_ids;  // with extra_cells: global_cell_ids()
         std::string cache_file;  // this rank's
         bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices (3D: moments) cached in single precision
         bool cache_loaded = false;

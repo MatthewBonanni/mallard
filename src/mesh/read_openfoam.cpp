@@ -32,35 +32,23 @@ namespace fs = std::filesystem;
 namespace {
 
 using parallel_read::collectively;
-using parallel_read::Fields;
 using parallel_read::FileCursor;
-using parallel_read::FileLines;
-using parallel_read::LineReader;
+using parallel_read::Marks;
 using parallel_read::part_of;
 using parallel_read::Records;
+using parallel_read::Tokens;
+using parallel_read::Unit;
 
-/** @brief The error of an ASCII list that does not hold one item per line, at line `line` (1-based). */
-std::string not_one_per_line(uint64_t line) {
-    return "has more or less than one item on line " + std::to_string(line) +
-           " of a list. Mallard reads ASCII lists with one item per line, as OpenFOAM writes them; write the mesh "
-           "again with OpenFOAM (foamFormatConvert), or in binary (writeFormat binary in system/controlDict).";
-}
-
-/**
- * @brief A list in a polyMesh file: n items, binary (from byte `start`) or
- *        ASCII: one per line from line `start`, or a short list on one line
- *        (text, as OpenFOAM writes lists of up to 10 labels).
- */
+/** @brief A list in a polyMesh file: n items from byte `start`, binary or ASCII (where its units start). */
 struct FoamList {
-    static constexpr uint64_t MAX_SHORT = 100;
     uint64_t n = 0, start = 0;
-    std::string text;
+    Unit unit = Unit::TOKEN;
+    Marks marks;
 };
 
 /**
  * @brief One polyMesh file, which every rank opens (collective): its FoamFile
- *        header entries, then its data, read token by token, and where its
- *        lines start if it is ASCII.
+ *        header entries, then its data, read token by token.
  */
 class FoamFile {
   public:
@@ -97,10 +85,6 @@ class FoamFile {
         const std::string arch = header.count("arch") ? header["arch"] : "";
         if (arch.find("label=64") != std::string::npos) label_size = 8;
         if (arch.find("scalar=32") != std::string::npos) scalar_size = 4;
-        if (!binary) {
-            lines = parallel_read::index_lines(name, cur->size());
-            reader = std::make_unique<LineReader>(name, lines, "OpenFOAM file " + name);
-        }
         in.open(name, std::ios::binary);
     }
 
@@ -163,8 +147,12 @@ class FoamFile {
         return v;
     }
 
-    /** @brief A list (of items of item_bytes bytes if binary), skipped over to its closing parenthesis. */
-    FoamList list(uint64_t item_bytes) {
+    /**
+     * @brief A list of items of item_bytes bytes if binary, each a token or
+     *        ending with a ')' (unit) if ASCII, skipped over to its closing
+     *        parenthesis (collective).
+     */
+    FoamList list(uint64_t item_bytes, Unit unit) {
         const int64_t n = integer();
         if (n < 0) fail("has a negative list size.");
         skip_space_and_comments();
@@ -173,73 +161,44 @@ class FoamFile {
         expect("(");
         FoamList l;
         l.n = uint64_t(n);
+        l.start = cur->offset();
+        l.unit = unit;
         if (binary) {
-            l.start = cur->offset();
             if (l.n * item_bytes > cur->size() - l.start) fail("ends inside binary data.");
             cur->seek(l.start + l.n * item_bytes);
-        } else {
-            while (cur->peek() == ' ' || cur->peek() == '\t' || cur->peek() == '\r') cur->get();
-            if (cur->peek() != '\n') {
-                if (l.n > FoamList::MAX_SHORT) fail(not_one_per_line(reader->line_at(cur->offset()) + 1));
-                for (int depth = 1, c = cur->peek(); depth > 1 || c != ')'; c = cur->peek()) {
-                    if (c < 0) fail("ends early.");
-                    depth += c == '(' ? 1 : c == ')' ? -1 : 0;
-                    l.text += c == '\n' ? ' ' : char(cur->get());
-                    if (c == '\n') cur->get();
-                }
-                return l;
-            }
-            cur->get();
-            l.start = reader->line_at(cur->offset());
-            cur->seek(reader->offset(l.start + l.n));
-            skip_space_and_comments();
-            if (cur->peek() != ')') {
-                if (item_bytes == 0) fail_on_long_face(l.start);
-                fail(not_one_per_line(l.start + l.n + 1));
-            }
+            return l;
         }
+        const uint64_t close = parallel_read::find_nth(name, l.start, ')', unit == Unit::TOKEN ? 1 : l.n + 1);
+        if (close == parallel_read::NONE) fail("ends early.");
+        l.marks = parallel_read::mark_units(name, l.start, close, unit);
+        if (l.marks.n != l.n) {
+            fail("has a list of " + std::to_string(l.n) + " items that holds " + std::to_string(l.marks.n) + ".");
+        }
+        cur->seek(close);
         return l;
     }
 
-    /**
-     * @brief Fail if a faceList from line `first` on has a face of more than
-     *        10 points, which OpenFOAM writes over lines.
-     */
-    void fail_on_long_face(uint64_t first) {
-        cur->seek(reader->offset(first));
-        for (uint64_t l = first + 1; cur->peek() >= 0; l++) {
-            std::string text;
-            for (int c = cur->get(); c >= 0 && c != '\n'; c = cur->get()) text += char(c);
-            const size_t b = text.find_first_not_of(" \t\r"), e = text.find_last_not_of(" \t\r");
-            if (b == std::string::npos || e + 1 - b > 18 || text.find_first_not_of("0123456789", b) <= e) continue;
-            const std::string n = text.substr(b, e + 1 - b);
-            if (std::stoull(n) <= 10) return;
-            fail("has a face of " + n + " points (line " + std::to_string(l) + "); " +
-                 (N_DIM == 3 ? "Mallard reads tetrahedra, pyramids, prisms and hexahedra, not polyhedra."
-                             : "Mallard reads 2D meshes of triangles and quadrilaterals."));
-        }
-    }
-
-    /** @brief Parse items [from, to) of an ASCII list, each with parse(fields). */
+    /** @brief Parse items [from, to) of an ASCII list, each with parse(tokens). */
     template <typename Parse>
     void items(const FoamList & l, uint64_t from, uint64_t to, Parse parse) {
         if (from >= to) return;
-        if (!l.text.empty()) {
-            const std::string source = "OpenFOAM file " + name;
-            Fields f(l.text, source, parallel_read::NONE);
-            for (uint64_t k = 0; k < to; k++) parse(f, k >= from);
-            return;
+        Tokens t(name, "OpenFOAM file " + name);
+        const size_t k = l.marks.before(from);
+        t.seek(l.marks.offset[k]);
+        for (uint64_t u = l.marks.unit[k]; u < from; u++) {
+            if (l.unit == Unit::TOKEN) {
+                t.next();
+                continue;
+            }
+            for (std::string_view v = t.next(); v != ")"; v = t.next()) {
+                if (v.empty()) throw t.malformed();
+            }
         }
-        reader->seek(l.start + from);
-        for (uint64_t k = from; k < to; k++) {
-            Fields f = reader->next();
-            parse(f, true);
-            if (!f.done()) fail(not_one_per_line(f.number()));
-        }
+        for (uint64_t i = from; i < to; i++) parse(t);
     }
 
     FoamList labels() {
-        const FoamList l = list(label_size);
+        const FoamList l = list(label_size, Unit::TOKEN);
         expect(")");
         return l;
     }
@@ -250,10 +209,7 @@ class FoamFile {
         if (from >= to) return out;
         if (!binary) {
             size_t k = 0;
-            items(l, from, to, [&](Fields & f, bool kept) {
-                const int64_t v = f.integer<int64_t>();
-                if (kept) out[k++] = v;
-            });
+            items(l, from, to, [&](Tokens & t) { out[k++] = t.integer<int64_t>(); });
             return out;
         }
         const std::vector<char> bytes = read(l.start + from * label_size, (to - from) * label_size);
@@ -283,8 +239,6 @@ class FoamFile {
     bool binary = false;
     uint64_t label_size = 4, scalar_size = 8;
     std::unique_ptr<FileCursor> cur;
-    FileLines lines;
-    std::unique_ptr<LineReader> reader;
     std::ifstream in;
 };
 
@@ -361,7 +315,7 @@ MeshBlock read_openfoam_block(const std::string & path) {
     FoamFile points(dir / "points");
     FoamList point_list;
     collectively([&] {
-        point_list = points.list(3 * points.scalar_size);
+        point_list = points.list(3 * points.scalar_size, Unit::CLOSED);
         points.expect(")");
     });
     const uint64_t n_points = point_list.n;
@@ -371,12 +325,11 @@ MeshBlock read_openfoam_block(const std::string & path) {
         if (xyz.empty()) return;
         if (!points.binary) {
             size_t k = 0;
-            points.items(point_list, first_point, end_point, [&](Fields & f, bool kept) {
-                f.expect('(');
-                std::array<double, 3> x;
-                for (double & c : x) c = f.real();
-                f.expect(')');
-                if (kept) xyz[k++] = x;
+            points.items(point_list, first_point, end_point, [&](Tokens & t) {
+                t.expect('(');
+                for (double & c : xyz[k]) c = t.real();
+                t.expect(')');
+                k++;
             });
             return;
         }
@@ -430,23 +383,26 @@ MeshBlock read_openfoam_block(const std::string & path) {
             FoamList list;
             collectively([&] {
                 if (f.binary) f.fail("is a binary faceList; Mallard reads binary faceCompactList (as OpenFOAM writes).");
-                list = f.list(0);
+                list = f.list(0, Unit::CLOSED);
                 f.expect(")");
             });
             n_faces = list.n;
             first_face = block_begin(n_faces, r, p);
             end_face = block_begin(n_faces, r + 1, p);
             collectively([&] {
-                f.items(list, first_face, end_face, [&](Fields & line, bool kept) {
-                    const int64_t n_nodes = line.integer<int64_t>();
-                    if (n_nodes < 0 || uint64_t(n_nodes) > f.cur->size()) f.fail("has a bad face size.");
-                    line.expect('(');
-                    for (int64_t i = 0; i < n_nodes; i++) {
-                        const int64_t v = line.integer<int64_t>();
-                        if (kept) faces.words.push_back(node(v));
+                f.items(list, first_face, end_face, [&](Tokens & t) {
+                    const int64_t n_nodes = t.integer<int64_t>();
+                    if (n_nodes < 3) f.fail("has a bad face size.");
+                    if (n_nodes > 4) {
+                        f.fail("has a face of " + std::to_string(n_nodes) + " points (line " +
+                               std::to_string(parallel_read::line_of(f.name, t.start())) + "); " +
+                               (N_DIM == 3 ? "Mallard reads tetrahedra, pyramids, prisms and hexahedra, not polyhedra."
+                                           : "Mallard reads 2D meshes of triangles and quadrilaterals."));
                     }
-                    line.expect(')');
-                    if (kept) faces.end_record();
+                    t.expect('(');
+                    for (int64_t i = 0; i < n_nodes; i++) faces.words.push_back(node(t.integer<int64_t>()));
+                    t.expect(')');
+                    faces.end_record();
                 });
             });
         }
