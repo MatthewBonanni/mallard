@@ -758,6 +758,26 @@ TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemU
     EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
 }
 
+TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
+    // Output of states read from files sets up only what cell_gradients and point_values read: scale,
+    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses. With
+    // share_tables, cells share basis means on the means alone, without smoothness matrices
+    auto mesh = make_mesh("cartesian_tri", 12, 10);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    for (const bool share : {true, false}) {
+        const auto full = tables_with(mesh, bd, 5, [&](TENO & t) { t.share_tables = share; });
+        const auto central = tables_with(mesh, bd, 5, [&](TENO & t) {
+            t.share_tables = share;
+            t.sector_stencils = false;
+        });
+        std::vector<size_t> same = {0u, 4u, 6u, 7u, 8u, 9u};
+        if (!share) same.insert(same.end(), {1u, 2u});
+        for (const size_t k : same) EXPECT_TRUE(central[k] == full[k]) << "table " << k << (share ? ", shared" : "");
+        EXPECT_TRUE(central[3].empty()) << "smoothness matrices";
+        EXPECT_TRUE(central[13].empty()) << "sector pseudo-inverses";
+    }
+}
+
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
     // A thin annulus with symmetry walls: each search reaches more straight wall faces than the scratch
     // holds mirror lines, so every cell is redone on the host with a larger scratch
