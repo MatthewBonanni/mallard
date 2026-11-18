@@ -227,8 +227,11 @@ endforeach()
 # by where the compiler fuses, so neither file contracts and the hot loops
 # write their FMAs explicitly. MUSCL's fused cell kernel inlines the functions
 # of its separate gradient, limiter and face kernels, which nvcc would fuse
-# differently in each, so that file does not contract either
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp)
+# differently in each, so that file does not contract either.
+# [statistics.convergence] updates its estimate on the device as the host does,
+# bit for bit
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+                       solver/statistical_convergence.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")

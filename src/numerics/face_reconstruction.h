@@ -457,6 +457,9 @@ class TENO : public FaceReconstruction {
         // cells of a cell shape one row of basis_mean and si_matrix or moments
         // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // false: the central stencils alone, which cell_gradients and point_values read, and no
+        // face values (output of states read from files); such tables are never written to the cache
+        bool sector_stencils = true;
         // Set before init() when distributed runs get the halo side of partition faces from their owners
         // (Solver::exchanges_partition_faces): the tables then cover only the owned cells and the halo cells
         // of halo_image_cells(), which are all whose reconstruction is evaluated
