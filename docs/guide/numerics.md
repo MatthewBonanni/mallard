@@ -177,8 +177,8 @@ Read off the curves (interpolated between the measured meshes):
   times its memory, at the same or lower error). It is not as robust, though:
   - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
     (Mach 1 in a Mach 0.2 flow);
-  - it keeps an odd-even wall-pressure mode at the NACA 0012 trailing edge;
-  - it undershoots ahead of shocks on quads about 10 times as much as order 5.
+  - it undershoots ahead of shocks on quads about 10 times as much as order 5;
+  - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
   Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
   For smooth flow, setting `order = 4` under
