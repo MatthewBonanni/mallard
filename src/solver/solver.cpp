@@ -1658,7 +1658,8 @@ void Solver::init_numerics() {
 
 void Solver::describe_block_path() {
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    if (teno == nullptr) return;
+    // The setup report of states read from files is not shown
+    if (teno == nullptr || state_reader) return;
     const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
     if (cells == 0) return;
     const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);

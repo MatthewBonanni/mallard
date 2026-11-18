@@ -719,29 +719,32 @@ TEST(TENO3DSetup, PyramidsWhoseOddDegreeStencilsReachACurvedWallFitTheWallDegree
 }
 
 TEST(TENO3DSetup, CentralStencilsAloneAreTheFullSetupsBitForBit) {
-    // Output of states read from files sets up only what cell_gradients and point_values read. With
-    // share_tables, cells share basis means on the means alone, without moments
+    // Output of states read from files sets up only what cell_gradients and point_values read, from moments
+    // of the central stencils' degree alone. With share_tables, cells share basis means on the means alone,
+    // without moments. Orders 4 and 6 take the pyramids' larger odd-degree stencils
     auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    for (const bool share : {true, false}) {
-        const auto full = teno_tables(*make_teno_with(mesh, bd, 5, [&](TENO & t) { t.share_tables = share; }));
-        for (const bool on_host : {false, true}) {
-            auto central = make_teno_with(mesh, bd, 5, [&](TENO & t) {
-                t.share_tables = share;
-                t.sector_stencils = false;
-                t.setup_on_host = on_host;
-            });
-            const auto tables = teno_tables(*central);
-            for (size_t k = 0; k < full.size(); k++) {
-                const std::string & name = full[k].first;
-                if (name == "scale" || name.starts_with("large") || (!share && (name == "basis_mean" || name == "cell shapes"))) {
-                    EXPECT_TRUE(tables[k].second == full[k].second)
-                        << name << (share ? ", shared" : "") << (on_host ? ", host setup" : "");
+    for (const int order : {4, 5, 6}) {
+        for (const bool share : {true, false}) {
+            const auto full = teno_tables(*make_teno_with(mesh, bd, order, [&](TENO & t) { t.share_tables = share; }));
+            for (const bool on_host : {false, true}) {
+                auto central = make_teno_with(mesh, bd, order, [&](TENO & t) {
+                    t.share_tables = share;
+                    t.sector_stencils = false;
+                    t.setup_on_host = on_host;
+                });
+                const auto tables = teno_tables(*central);
+                for (size_t k = 0; k < full.size(); k++) {
+                    const std::string & name = full[k].first;
+                    if (name == "scale" || name.starts_with("large") || (!share && (name == "basis_mean" || name == "cell shapes"))) {
+                        EXPECT_TRUE(tables[k].second == full[k].second) << name << ", order " << order
+                                                                        << (share ? ", shared" : "") << (on_host ? ", host setup" : "");
+                    }
                 }
+                EXPECT_EQ(central->stencil_small.pinv.extent(0), 0u);
+                EXPECT_FALSE(central->moments.is_allocated());
+                EXPECT_EQ(central->troubled_coeffs.extent(0), 0u);
             }
-            EXPECT_EQ(central->stencil_small.pinv.extent(0), 0u);
-            EXPECT_FALSE(central->moments.is_allocated());
-            EXPECT_EQ(central->troubled_coeffs.extent(0), 0u);
         }
     }
 }
