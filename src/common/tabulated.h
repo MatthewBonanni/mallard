@@ -214,8 +214,8 @@ struct Csv {
     int32_t column(const std::string & name) const;
 };
 
-/** @brief Read a CSV file; errors name the file and line. */
-Csv read_csv(const std::string & file);
+/** @brief Read a CSV file; errors name the file and line, and link docs (page#anchor of the key that reads it). */
+Csv read_csv(const std::string & file, const std::string & docs);
 
 /** @brief Data sets on the host, gathered for the device. */
 class Data {

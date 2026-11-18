@@ -24,7 +24,7 @@ python3 -m venv .venv
 .venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -285,9 +285,12 @@ import mallard
 f = mallard.open("solut/flow.vtkhdf")
 p = f.read_all("P")                           # (snapshots, cells)
 g = f.geometry()                              # points, connectivity, offsets, VTK types
+triangles, cell = g.triangles()               # 2D: a triangle fan of every cell, for tripcolor
+for f, k in mallard.series("solut", "flow*"): # every snapshot of the series and snapshot files matching, in time order
+    rho = f.read("RHO", k)
 ```
 
-Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h5py alone, for the scripts below, which run without the library:
+Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h5py alone, for the example, documentation and setup scripts not yet moved onto `mallard.open`, which run without the library:
 
 ```python
 import sys; sys.path.insert(0, "tools")
@@ -325,10 +328,10 @@ The same field of several snapshots side by side, each titled with its run direc
 ### `animate.py`: movies of a 2D run
 
 ```sh
-python tools/post/animate.py solut riemann [--var RHO] [--res 1000] [--fps 20] [--xlim 0 1] [--glob "flow_[0-9]*.h5"]
+python tools/post/animate.py solut riemann [--var RHO] [--res 1000] [--fps 20] [--xlim 0 1] [--glob "flow*"]
 ```
 
-An MP4 and a GIF of a 2D series: the field (density, or `--var`, including the derived `VORTICITY` and `MACH`) with contours, beside a numerical schlieren. Frames map every pixel to the cell holding it, so any mesh works; `--frames-dir` keeps the PNG frames, and `--help` lists the layout, color and size options.
+An MP4 and a GIF of a 2D series (the series and snapshot files of a directory matching `--glob`, in time order, or one series file): the field (density, or `--var`, including the derived `VORTICITY` and `MACH`) with contours, beside a numerical schlieren. Frames map every pixel to the cell holding it, so any mesh works; `--frames-dir` keeps the PNG frames, and `--help` lists the layout, color and size options.
 
 ![The last frame: density and numerical schlieren](../docs/images/tools/animate-light.svg#gh-light-mode-only)
 ![The last frame: density and numerical schlieren](../docs/images/tools/animate-dark.svg#gh-dark-mode-only)
@@ -463,7 +466,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/python.py --mallard build/src/mallard` | The figure of the [Python](../docs/guide/python.md) page, drawn with the package from the Sod example (a build with HDF5; `make_figures.py` runs it) |
 | `docs/used_in.py [--check]` | The "Used in" line of each feature section of the user guide, from the example inputs; `--check` fails on stale lines (first job of `ci.yml`); standard library only |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
-| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |
+| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots, through the Python package) |
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |

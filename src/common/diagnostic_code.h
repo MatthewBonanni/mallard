@@ -25,6 +25,7 @@ inline constexpr const char * CATALOG_WRITE = "E-CATALOG-WRITE";
 inline constexpr const char * MESH_FIELDS = "E-MESH-FIELDS";      // --mesh-fields or its stencils not written
 inline constexpr const char * RANKS = "E-RANKS";                  // --ranks under mpirun on other ranks
 inline constexpr const char * MEMORY_DEVICE = "E-MEMORY-DEVICE";  // the peak exceeds the device's memory
+inline constexpr const char * VIEW_ENTRIES = "E-VIEW-ENTRIES";    // a part needs more entries than a View addresses
 inline constexpr const char * REGION_EMPTY = "E-REGION-EMPTY";
 inline constexpr const char * REGION_OUTSIDE = "E-REGION-OUTSIDE";
 inline constexpr const char * PROBE_OUTSIDE = "W-PROBE-OUTSIDE";  // part of a probe outside the domain, not sampled
@@ -89,9 +90,10 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 57> ALL = {{
+inline constexpr std::array<Entry, 58> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
-    {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
+    {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
+    {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
     {REGION_OUTSIDE, CHECK_PAGE}, {PROBE_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
     {QUALITY_ASPECT_RATIO, CHECK_PAGE}, {QUALITY_VOLUME_RATIO, CHECK_PAGE}, {CFL_LIMIT, CHECK_PAGE},
     {TFLES_THICKENING, CHECK_PAGE}, {WALL_Y_PLUS, CHECK_PAGE}, {WALL_SPACING, CHECK_PAGE},
