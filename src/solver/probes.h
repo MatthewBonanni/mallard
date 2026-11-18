@@ -280,8 +280,10 @@ class Probes {
 
         size_t size() const { return probes.size(); }
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
-         *         fields and statistics' device averages only. */
+         *         fields and statistics' device columns only. */
         bool can_stage(size_t k, const Statistics & statistics) const;
+        /** @brief Whether staged probe k reads intervals CI_<average> (see Statistics::refresh_intervals). */
+        bool reads_intervals(size_t k) const;
         /** @brief Probe k samples a moving region. */
         bool moves(size_t k) const;
         /**
@@ -440,8 +442,7 @@ class Probes {
             void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
             void allocate_staging(uint64_t n_records, size_t n_rows);
             /** @brief gather's cell columns into values: each sample's cell's value of the column's device field. */
-            void fill_columns(
-                const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const;
+            void fill_columns(const std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> & columns) const;
             /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
             void copy_to_staging(const uint64_t * seq) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
@@ -517,7 +518,7 @@ class Probes {
             bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
             // Staged: the device columns of cell_columns' fields
-            std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> device_columns;
+            std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> device_columns;
             /** @brief A staged probe's reductions on the device, of its local samples (see reduce_staged). */
             struct DeviceReduction {
                 Kokkos::View<ProbeTerm *> terms;
