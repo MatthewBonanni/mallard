@@ -50,9 +50,11 @@ uint32_t whole_slices(const uint32_t n) {
     return (n + slice - 1) / slice * slice;
 }
 
+// Cells whose moments a host thread computes at once (MomentsTask)
+constexpr size_t MOMENT_LANES = 4;
+
 // The largest stencil degree's moment tables
 constexpr int MAX_NM = 2 * teno::MAX_DEGREE - 1;
-constexpr int MAX_MOMENTS = MAX_NM * (MAX_NM + 1) * (MAX_NM + 2) / 6;
 constexpr int MAX_LOW = (teno::MAX_DEGREE + 1) * (teno::MAX_DEGREE + 2) * (teno::MAX_DEGREE + 3) / 6;
 constexpr int MAX_PSI_ROWS = teno::MAX_FACES * teno::MAX_FACE_QUAD;
 
@@ -3036,10 +3038,13 @@ struct CellTeam {
  * @brief Central moments of every cell, mean of ((x - x_c) / h_c)^a ... (see
  *        teno.cpp), up to degree D; the slots of higher degrees are left zero.
  */
-template <int NM, int D, class Space>
+template <int NM, int D, size_t W, class Space>
 struct MomentsTask {
+    static constexpr size_t NMOM = size_t(NM) * size_t(NM + 1) * size_t(NM + 2) / 6;
+    static constexpr size_t NP = size_t(D) + 1;  // powers 0..D
     Geometry<Space> g;
     int n_moments = 0;
+    uint32_t n_cells = 0;
 
     /** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
     KOKKOS_INLINE_FUNCTION
@@ -3067,79 +3072,127 @@ struct MomentsTask {
         return j < 2 ? 3 : 4;
     }
 
-    KOKKOS_INLINE_FUNCTION
-    void add(const double w, const double * x, double * m) const {
-        double px[static_cast<size_t>(NM)], py[static_cast<size_t>(NM)], pz[static_cast<size_t>(NM)];
-        px[0] = py[0] = pz[0] = 1.0;
-        for (int k = 1; k < NM; k++) {
-            px[k] = px[k - 1] * x[0];
-            py[k] = py[k - 1] * x[1];
-            pz[k] = pz[k - 1] * x[2];
-        }
-        int k = 0;
-        for (int a = 0; a < NM; a++) {
-            for (int b = 0; a + b < NM; b++) {
-                for (int c = 0; a + b + c <= D; c++) m[k + c] += w * px[a] * py[b] * pz[c];
-                k += NM - a - b;
+    /** @brief Adds ((w x^a) y^b) z^c to moment (a, b, c), of degree at most D, of each lane. */
+    template <size_t L>
+    KOKKOS_FORCEINLINE_FUNCTION static void add(const double (&w)[L], const double (&x)[3][L], double (&m)[NMOM][L]) {
+        double px[NP][L], py[NP][L], pz[NP][L];
+        for (size_t l = 0; l < L; l++) px[0][l] = py[0][l] = pz[0][l] = 1.0;
+        for (size_t k = 1; k < NP; k++) {
+            for (size_t l = 0; l < L; l++) {
+                px[k][l] = px[k - 1][l] * x[0][l];
+                py[k][l] = py[k - 1][l] * x[1][l];
+                pz[k][l] = pz[k - 1][l] * x[2][l];
             }
+        }
+        size_t k = 0;
+        for (size_t a = 0; a < NP; a++) {
+            for (size_t b = 0; a + b < NP; b++) {
+                double wab[L];
+                for (size_t l = 0; l < L; l++) wab[l] = w[l] * px[a][l] * py[b][l];
+                for (size_t c = 0; a + b + c < NP; c++) {
+                    for (size_t l = 0; l < L; l++) m[k + c][l] += wab[l] * pz[c][l];
+                }
+                k += size_t(NM) - a - b;
+            }
+            for (size_t b = NP - a; a + b < size_t(NM); b++) k += size_t(NM) - a - b;
         }
     }
 
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t c) const {
-        double xc[3];
-        for (uint32_t d = 0; d < 3; d++) xc[d] = double(g.cell_coords(c, d));
-        const double hc = g.cell_h(c);
-        const uint32_t n = g.offsets_nodes_of_cell(c + 1) - g.offsets_nodes_of_cell(c);
-        double p[8][3];
-        for (uint32_t k = 0; k < n; k++) {
-            const uint32_t node = g.nodes_of_cell(g.offsets_nodes_of_cell(c) + k);
-            for (uint32_t d = 0; d < 3; d++) p[k][d] = (double(g.node_coords(node, d)) - xc[d]) / hc;
+    /**
+     * @brief Moments of cells c0, ..., c0 + L - 1, all of n nodes, one per lane. Each lane does the
+     *        operations of its cell alone (L = 1), so the moments do not depend on L.
+     */
+    template <size_t L>
+    KOKKOS_INLINE_FUNCTION void lanes(const uint32_t c0, const uint32_t n) const {
+        double hc[L], p[8][3][L];
+        for (size_t l = 0; l < L; l++) {
+            const uint32_t c = c0 + static_cast<uint32_t>(l);
+            hc[l] = g.cell_h(c);
+            for (uint32_t k = 0; k < n; k++) {
+                const uint32_t node = g.nodes_of_cell(g.offsets_nodes_of_cell(c) + k);
+                for (uint32_t d = 0; d < 3; d++) {
+                    p[k][d][l] = (double(g.node_coords(node, d)) - double(g.cell_coords(c, d))) / hc[l];
+                }
+            }
         }
         // The cell's tetrahedra (cell_tetrahedra in mesh_3d.cpp)
-        double o[3] = {0.0, 0.0, 0.0};
-        for (uint32_t k = 0; k < n; k++) {
-            for (uint32_t d = 0; d < 3; d++) o[d] += p[k][d];
-        }
-        for (uint32_t d = 0; d < 3; d++) o[d] /= double(n);
-        double sums[MAX_MOMENTS] = {};
-        double vol = 0.0;
-        auto integrate = [&](const double * t0, const double * t1, const double * t2, const double * t3) {
-            double e[3][3];
-            for (uint32_t d = 0; d < 3; d++) {
-                e[0][d] = t1[d] - t0[d];
-                e[1][d] = t2[d] - t0[d];
-                e[2][d] = t3[d] - t0[d];
+        double o[3][L];
+        for (uint32_t d = 0; d < 3; d++) {
+            for (size_t l = 0; l < L; l++) o[d][l] = 0.0;
+            for (uint32_t k = 0; k < n; k++) {
+                for (size_t l = 0; l < L; l++) o[d][l] += p[k][d][l];
             }
-            const double det = Kokkos::fabs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
-                                            e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
-                                            e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
-            for (uint32_t q = 0; q < g.tet_rule.extent(0); q++) {
-                double x[3];
-                for (uint32_t d = 0; d < 3; d++) {
-                    x[d] = t0[d] + g.tet_rule(q, 0) * e[0][d] + g.tet_rule(q, 1) * e[1][d] + g.tet_rule(q, 2) * e[2][d];
+            for (size_t l = 0; l < L; l++) o[d][l] /= double(n);
+        }
+        double sums[NMOM][L], vol[L];
+        for (size_t k = 0; k < NMOM; k++) {
+            for (size_t l = 0; l < L; l++) sums[k][l] = 0.0;
+        }
+        for (size_t l = 0; l < L; l++) vol[l] = 0.0;
+        using Point = double[3][L];
+        auto integrate = [&](const Point & t0, const Point & t1, const Point & t2, const Point & t3) {
+            double e[3][3][L], det[L];
+            for (uint32_t d = 0; d < 3; d++) {
+                for (size_t l = 0; l < L; l++) {
+                    e[0][d][l] = t1[d][l] - t0[d][l];
+                    e[1][d][l] = t2[d][l] - t0[d][l];
+                    e[2][d][l] = t3[d][l] - t0[d][l];
                 }
-                const double w = g.tet_rule(q, 3) * det;
-                add(w, x, sums);
-                vol += w;
+            }
+            for (size_t l = 0; l < L; l++) {
+                det[l] = Kokkos::fabs(e[0][0][l] * (e[1][1][l] * e[2][2][l] - e[1][2][l] * e[2][1][l]) -
+                                      e[0][1][l] * (e[1][0][l] * e[2][2][l] - e[1][2][l] * e[2][0][l]) +
+                                      e[0][2][l] * (e[1][0][l] * e[2][1][l] - e[1][1][l] * e[2][0][l]));
+            }
+            for (uint32_t q = 0; q < g.tet_rule.extent(0); q++) {
+                const double r0 = g.tet_rule(q, 0), r1 = g.tet_rule(q, 1), r2 = g.tet_rule(q, 2), rw = g.tet_rule(q, 3);
+                double x[3][L], w[L];
+                for (uint32_t d = 0; d < 3; d++) {
+                    for (size_t l = 0; l < L; l++) x[d][l] = t0[d][l] + r0 * e[0][d][l] + r1 * e[1][d][l] + r2 * e[2][d][l];
+                }
+                for (size_t l = 0; l < L; l++) w[l] = rw * det[l];
+                add<L>(w, x, sums);
+                for (size_t l = 0; l < L; l++) vol[l] += w[l];
             }
         };
         for (int j = 0; j < local_face_count(n); j++) {
             const int nf = local_face_size(n, j);
-            const double * q[4];
-            for (int k = 0; k < nf; k++) q[k] = p[local_face_node(n, j, k)];
+            const Point * q[4];
+            for (int k = 0; k < nf; k++) q[k] = &p[local_face_node(n, j, k)];
             if (nf == 3) {
-                integrate(o, q[0], q[1], q[2]);
+                integrate(o, *q[0], *q[1], *q[2]);
                 continue;
             }
-            double cf[3] = {0.0, 0.0, 0.0};
-            for (int k = 0; k < nf; k++) {
-                for (uint32_t d = 0; d < 3; d++) cf[d] += q[k][d];
+            double cf[3][L];
+            for (uint32_t d = 0; d < 3; d++) {
+                for (size_t l = 0; l < L; l++) cf[d][l] = 0.0;
+                for (int k = 0; k < nf; k++) {
+                    for (size_t l = 0; l < L; l++) cf[d][l] += (*q[k])[d][l];
+                }
+                for (size_t l = 0; l < L; l++) cf[d][l] /= double(nf);
             }
-            for (uint32_t d = 0; d < 3; d++) cf[d] /= double(nf);
-            for (int k = 0; k < nf; k++) integrate(o, cf, q[k], q[(k + 1) % nf]);
+            for (int k = 0; k < nf; k++) integrate(o, cf, *q[k], *q[(k + 1) % nf]);
         }
-        for (int k = 0; k < n_moments; k++) g.moments(c, k) = sums[k] / vol;
+        for (size_t l = 0; l < L; l++) {
+            for (int k = 0; k < n_moments; k++) g.moments(c0 + static_cast<uint32_t>(l), k) = sums[size_t(k)][l] / vol[l];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    uint32_t n_nodes(const uint32_t c) const { return g.offsets_nodes_of_cell(c + 1) - g.offsets_nodes_of_cell(c); }
+
+    /** @brief Cells [W t, W t + W): side by side if they are all there and of one cell type, else one by one. */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t t) const {
+        const uint32_t c0 = uint32_t(W) * t;
+        const uint32_t n = n_nodes(c0);
+        bool same = c0 + uint32_t(W) <= n_cells;
+        for (uint32_t c = c0 + 1; same && c < c0 + uint32_t(W); c++) same = n_nodes(c) == n;
+        if (same) {
+            lanes<W>(c0, n);
+            return;
+        }
+        for (uint32_t c = c0; c < c0 + uint32_t(W) && c < n_cells; c++) lanes<1>(c, n_nodes(c));
     }
 };
 
@@ -3151,11 +3204,13 @@ template <int NM>
 void launch_moments(const Geometry<Kokkos::DefaultExecutionSpace::memory_space> & g, const uint32_t n_cells,
                     const int n_moments, const bool smoothness) {
     using Space = Kokkos::DefaultExecutionSpace::memory_space;
-    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, n_cells);
+    // Host cores take MOMENT_LANES cells side by side in their vector registers
+    constexpr size_t W = DEVICE_IS_HOST ? MOMENT_LANES : 1;
+    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, (n_cells + uint32_t(W) - 1) / uint32_t(W));
     if (smoothness) {
-        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, Space>{g, n_moments});
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, W, Space>{g, n_moments, n_cells});
     } else {
-        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, Space>{g, n_moments});
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, W, Space>{g, n_moments, n_cells});
     }
 }
 
