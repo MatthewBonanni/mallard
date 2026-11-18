@@ -18,6 +18,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1059,7 +1060,7 @@ class Solver {
 
         bool distribute = true;
         int halo_layers = 0;
-        std::unique_ptr<DistributedMesh> setup;  // during init only
+        std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;
