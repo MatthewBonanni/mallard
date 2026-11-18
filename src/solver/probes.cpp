@@ -1436,8 +1436,7 @@ void Probes::Samples::allocate_staging(const uint64_t n_records, const size_t n_
         "probe_staging", n_records, n_rows * values.extent(1));
 }
 
-void Probes::Samples::fill_columns(
-    const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const {
+void Probes::Samples::fill_columns(const std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> & columns) const {
     const auto v = values;
     const auto c = cells;
     const uint32_t * counted = count.data();
@@ -2483,10 +2482,15 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
 bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const Probe & p = *probes[k];
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
-        return statistics.device_average(c.second->name()).data() != nullptr;
+        return statistics.device_column(c.second->name()).exists();
     });
     return !p.snapshot && !p.isosurface && !p.solution && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
+}
+
+bool Probes::reads_intervals(const size_t k) const {
+    const auto & columns = probes[k]->device_columns;
+    return std::any_of(columns.begin(), columns.end(), [](const auto & c) { return c.second.interval(); });
 }
 
 bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr; }
@@ -2497,7 +2501,7 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     p.staged = true;
     p.device_columns.clear();
     for (const auto & [column, data] : p.cell_columns) {
-        p.device_columns.emplace_back(column, statistics.device_average(data->name()));
+        p.device_columns.emplace_back(column, statistics.device_column(data->name()));
     }
     if (p.motion) {
         // Twice the cells it covers at t (a write it outgrows stops the device, which stages it anew)

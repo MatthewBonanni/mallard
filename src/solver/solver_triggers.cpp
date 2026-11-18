@@ -140,20 +140,6 @@ bool Solver::convergence_on_device() const {
     return false;
 }
 
-void Solver::convergence_due_limits(step_queue::Horizon & h) const {
-    if (!convergence_on_device()) return;
-    const size_t n_integrals = integral_monitor.interval > 0 ? integral_columns().size() : 0;
-    for (const size_t source : convergence.sources()) {
-        if (source < n_integrals) h.at_multiple(step, integral_monitor.interval);
-        size_t first = n_integrals;
-        for (const auto & monitor : force_monitors) {
-            const size_t n = 2 * N_DIM + (monitor.modeled ? 1 : 0);
-            if (source >= first && source < first + n) h.at_multiple(step, monitor.interval);
-            first += n;
-        }
-    }
-}
-
 bool Solver::convergence_reads_probe(const size_t k) const {
     if (!convergence_on_device()) return false;
     const std::vector<size_t> from = probes.value_probes();
@@ -162,27 +148,23 @@ bool Solver::convergence_reads_probe(const size_t k) const {
                        [&](size_t source) { return source >= first && from[source - first] == k; });
 }
 
-void Solver::evaluate_triggers() {
+void Solver::load_trigger_values() {
     const Kokkos::View<step_queue::Loop> loop = step_loop;
     const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
     const uint64_t n_records = step_records.extent(0);
     const Kokkos::View<double *> vars = trigger_vars;
-    const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
     const Kokkos::View<TriggerSource *> sources = trigger_sources;
     const Kokkos::View<double *> results = monitor_results;
-    const kexpr::ProgramTable<> table = trigger_conditions;
     const rtype * const scalars = step_time_device();
     const rtype * const step_dt = step_dt_device();
     const rtype * const wall = step_wall_device();
-    const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
     const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
-    gated::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
-        step_queue::Loop & L = loop();
+    gated::parallel_for("step_trigger_values", 1, KOKKOS_LAMBDA(const int) {
+        const step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
-        step_queue::Record & record = records((L.seq - 1) % n_records);
+        const step_queue::Record & record = records((L.seq - 1) % n_records);
         // trigger_values at the step: t, step, dt, wall, and the rows the monitors wrote
-        const double t_now = static_cast<double>(*scalars);
-        vars(0) = t_now;
+        vars(0) = static_cast<double>(*scalars);
         vars(1) = static_cast<double>(L.step);
         vars(2) = static_cast<double>(*step_dt);
         vars(3) = -static_cast<double>(*wall);
@@ -192,6 +174,22 @@ void Solver::evaluate_triggers() {
             const double v = results(src.column);
             vars(src.variable) = src.rounded ? static_cast<double>(static_cast<rtype>(v)) : v;
         }
+    });
+}
+
+void Solver::evaluate_triggers() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<double *> vars = trigger_vars;
+    const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
+    const kexpr::ProgramTable<> table = trigger_conditions;
+    const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
+    gated::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        if (!(L.active && L.advanced)) return;
+        step_queue::Record & record = records((L.seq - 1) % n_records);
+        const double t_now = vars(0);
         // Triggers::evaluate and advance, kept only if none fires: the host then takes that step itself
         bool fires = false;
         Triggers::DeviceState next[64];
@@ -231,7 +229,7 @@ double Solver::averages_start() const {
     return statistics.samples() > 0 ? statistics.average_start() : -std::numeric_limits<double>::infinity();
 }
 
-void Solver::update_convergence() {
+void Solver::update_convergence(const step_queue::Record * record) {
     if (!convergence.enabled()) return;
     bool written = (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || probes.wrote_values(step);
     for (const auto & monitor : force_monitors) written = written || step % monitor.interval == 0;
@@ -255,7 +253,8 @@ void Solver::update_convergence() {
     }
     if (is_distributed() && from_probes) fresh = comm::allgatherv(comm::is_root() ? fresh : std::vector<double>{});
     for (size_t k = 0; k < samples.size(); k++) samples[k].second = fresh[k];
-    convergence.add(step, double(t), samples, averages_start());
+    // The device holds the statistics' clock, which the record read at the step
+    convergence.add(step, double(t), samples, record ? record->window_start : averages_start());
 }
 
 void Solver::act_on_triggers() {

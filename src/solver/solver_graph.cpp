@@ -645,6 +645,8 @@ void Solver::device_step_body() {
         if (reduced != 0) evaluate_probes(true);
     }
     // Before the other probes, so that a step a trigger fires at is the host's alone
+    if (triggers_on_device()) load_trigger_values();
+    if (convergence.enabled()) sample_convergence();
     if (triggers_on_device()) evaluate_triggers();
     if (staged_outputs) decide_outputs();
     if (static_cast<uint32_t>(std::popcount(reduced)) < n_probes) evaluate_probes(false);
@@ -712,6 +714,62 @@ void Solver::device_step_body() {
         });
     });
     unflush_chemistry_on_device();
+}
+
+void Solver::sample_convergence() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<const Statistics::Clock> clock = statistics.device_clock();
+    const bool averaging = clock.is_allocated();
+    const bool on_device = convergence_on_device();
+    const Kokkos::View<ConvergenceSource *> sources = convergence_sources;
+    const Kokkos::View<uint32_t> any = convergence_due;
+    const Kokkos::View<uint32_t *> written = convergence.staged_written();
+    const Kokkos::View<double *> staged = convergence.staged_input();
+    const Kokkos::View<Convergence::DeviceSignal *> signals = convergence.staged_signals();
+    const uint64_t capacity = convergence.staged_capacity();
+    const Kokkos::View<uint32_t *> probes_changed = probe_due;
+    const Kokkos::View<double *> vars = trigger_vars;
+    const uint32_t n_signals = static_cast<uint32_t>(convergence_sources.extent(0));
+    gated::parallel_for("convergence_due", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        step_queue::Record & record = records((L.seq - 1) % n_records);
+        // averages_start() after the step's samples
+        const double window_start = averaging && clock().n_samples > 0
+                                        ? static_cast<double>(clock().t_last - clock().weight)
+                                        : -Kokkos::Experimental::infinity_v<double>;
+        record.window_start = window_start;
+        if (!on_device) return;
+        any() = 0;
+        for (uint32_t i = 0; i < n_signals; i++) written(i) = 0;
+        if (!(L.active && L.advanced)) return;
+        // update_convergence's samples: the signals whose monitor or probe wrote at the step
+        bool due = false, full = false;
+        for (uint32_t i = 0; i < n_signals; i++) {
+            const ConvergenceSource & src = sources(i);
+            const bool w = (src.monitor != NO_SOURCE && (record.monitors >> src.monitor & 1)) ||
+                           (src.probe != NO_SOURCE && probes_changed(src.probe) != 0);
+            written(i) = w;
+            if (!w) continue;
+            staged(i) = vars(src.variable);
+            due = true;
+            full = full || signals(i).n >= capacity;
+        }
+        if (full) {
+            for (uint32_t i = 0; i < n_signals; i++) written(i) = 0;
+            record.reasons |= step_queue::CONVERGENCE;
+            L.active = 0;
+            L.progress = 0;
+            return;
+        }
+        staged(n_signals) = vars(0);
+        staged(n_signals + 1) = window_start;
+        any() = due;
+    });
+    if (!on_device) return;
+    double * const out = trigger_vars.data() + (triggers.variables().size() - convergence.columns().size());
+    device_if(convergence_due.data(), [&] { convergence.add_staged(convergence_due.data(), out); });
 }
 
 void Solver::flush_chemistry_if(const uint32_t * flags, const uint32_t n) {
@@ -1097,9 +1155,12 @@ void Solver::begin_device_steps() {
         chemistry_flush = Kokkos::View<uint32_t *>("step_chemistry_flush", 2);
         allocate_unflushed();
     }
+    allocate_monitors();
     if (triggers_on_device()) {
         trigger_vars = Kokkos::View<double *>("step_trigger_vars", triggers.variables().size());
         trigger_states = Kokkos::View<Triggers::DeviceState *>("step_trigger_states", triggers.size());
+        // New arrays: resume_device_steps copies the host's values and states (pulled by destroy_step_graph)
+        triggers_evaluated_by_host = true;
         trigger_conditions = kexpr::ProgramTable<>(triggers.conditions());
         // trigger_values' monitor columns in monitor_results, as write_integral_row and write_force_row order them
         std::vector<TriggerSource> sources;
@@ -1125,7 +1186,6 @@ void Solver::begin_device_steps() {
         Kokkos::deep_copy(trigger_sources, Kokkos::View<const TriggerSource *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                                sources.data(), sources.size()));
     }
-    allocate_monitors();
     if (monitors_on_device()) {
         const size_t n_monitors = force_monitors.size() + 1;
         monitor_due = Kokkos::View<uint32_t *>("step_monitor_due", n_monitors);
@@ -1143,14 +1203,16 @@ void Solver::begin_device_steps() {
                                                           (convergence.enabled() ? convergence.columns().size() : 0)
                                                     : 0;
     staged_probes.clear();
+    staged_intervals = false;
     probe_trigger_vars.clear();
     bool moving = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
-        const bool reduced = triggers_read_probe(k);
-        if (!probes.can_stage(k, statistics) || convergence_reads_probe(k) || (reduced && probes.moves(k))) continue;
+        const bool reduced = triggers_read_probe(k) || convergence_reads_probe(k);
+        if (!probes.can_stage(k, statistics) || (reduced && probes.moves(k))) continue;
         probes.stage(k, n_records, statistics, static_cast<double>(t), reduced, halo.uses_nccl());
         moving = moving || probes.moves(k);
         staged_probes.push_back(k);
+        staged_intervals = staged_intervals || probes.reads_intervals(k);
         const size_t j = static_cast<size_t>(std::find(value_probes.begin(), value_probes.end(), k) - value_probes.begin());
         probe_trigger_vars.push_back(reduced ? static_cast<uint32_t>(first_value + j) : NO_TRIGGER_VARS);
     }
@@ -1158,6 +1220,36 @@ void Solver::begin_device_steps() {
     if (!staged_probes.empty()) {
         probe_due = Kokkos::View<uint32_t *>("step_probe_due", 3 * staged_probes.size() + (moving ? 3 : 2));
         probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
+    }
+    if (convergence_on_device()) {
+        // update_convergence's sources: the monitors' bits and the staged probes' probe_due entries of their values
+        convergence.stage();
+        const size_t n_integrals = integral_monitor.interval > 0 ? integral_columns().size() : 0;
+        const size_t first_probe = monitored_steps().size() - value_probes.size();
+        std::vector<ConvergenceSource> sources;
+        for (const size_t source : convergence.sources()) {
+            ConvergenceSource src{static_cast<uint32_t>(4 + source), NO_SOURCE, NO_SOURCE};
+            if (source < first_probe) {
+                size_t monitor = force_monitors.size(), first = n_integrals;
+                for (size_t k = 0; k < force_monitors.size() && source >= n_integrals; k++) {
+                    const size_t n = 2 * N_DIM + (force_monitors[k].modeled ? 1 : 0);
+                    if (source >= first && source < first + n) monitor = k;
+                    first += n;
+                }
+                if (monitors_on_device()) src.monitor = static_cast<uint32_t>(monitor);
+            } else {
+                const auto k = std::find(staged_probes.begin(), staged_probes.end(), value_probes[source - first_probe]);
+                if (k != staged_probes.end()) {
+                    src.probe = static_cast<uint32_t>(staged_probes.size() + 2 + static_cast<size_t>(k - staged_probes.begin()));
+                }
+            }
+            sources.push_back(src);
+        }
+        convergence_sources = Kokkos::View<ConvergenceSource *>("step_convergence_sources", sources.size());
+        Kokkos::deep_copy(convergence_sources,
+                          Kokkos::View<const ConvergenceSource *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
+                              sources.data(), sources.size()));
+        convergence_due = Kokkos::View<uint32_t>("step_convergence_due");
     }
     n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
@@ -1204,7 +1296,6 @@ step_queue::Horizon Solver::step_horizon() const {
     }
     probes.due_limits(step, h.step_limit, h.t_limit);
     if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
-    convergence_due_limits(h);
     // The chemistry balancing's window ends after a step the host takes
     const uint64_t window = reacting ? cell_chemistry.steps_to_balance_window() : 0;
     if (reacting && window != std::numeric_limits<uint64_t>::max()) h.at_step(step + window);
@@ -1212,13 +1303,17 @@ step_queue::Horizon Solver::step_horizon() const {
 }
 
 void Solver::resume_device_steps() {
+    // The step graph reads the histories where they are: room for more is a new graph
+    if (convergence_on_device() && step_loop.is_allocated() && convergence.staged_room_low()) destroy_step_graph();
     if (!step_loop.is_allocated()) begin_device_steps();
+    if (convergence_on_device()) convergence.resume_staged();
     step_queue::Loop loop = {};
     loop.seq = n_launched;
     loop.step = step;
     loop.active = 1;
     loop.check_interval = check_interval;
     loop.horizon = step_horizon();
+    if (staged_intervals) statistics.refresh_intervals(step, loop.horizon.step_limit);
     loop.outputs_staged = n_staged_outputs;
     if (reacting) {
         loop.chemistry_failures = static_cast<double>(chem_failures_seen);
