@@ -287,10 +287,10 @@ cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged. A stencil that the
-search grows past $n_0$ to such a cell is searched again below that cell's
-position, at the full degree, and only if no size there fits, at the wall
-degree (#1202), so no other stencil changes and the full degree is kept
-where it can be.
+search grows past $n_0$ to such a cell is searched again (#1202): in 2D at
+that degree; in 3D below that cell's position at the full degree, and only if
+no size there fits, at the wall degree, so the full degree is kept where it
+can be. No other stencil changes.
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -589,7 +589,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 23; one file per MPI rank). The file is used
+on later runs (format version 25; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
