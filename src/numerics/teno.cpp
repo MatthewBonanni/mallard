@@ -239,6 +239,135 @@ Kokkos::View<uint64_t *> own_pinv_index(const std::vector<uint64_t> & slice_star
     return out;
 }
 
+/** @brief The entry of slot k of row `row`, from the setup's int32 entries or the 16-bit slots. */
+struct SlotEntries {
+    teno::PackedStencils p;
+
+    KOKKOS_INLINE_FUNCTION
+    int32_t operator()(const uint64_t k, const uint32_t row) const {
+        return p.cells.extent(0) > 0 ? p.cells(k) : p.entry(k, row);
+    }
+};
+
+/**
+ * @brief The entries of the slots of slices [sl0, sl1) as int32, from slot
+ *        slice_start[sl0] << shift on (padding slots: their row).
+ */
+Kokkos::View<int32_t *> slot_entries(const teno::PackedStencils & p, const uint32_t sl0, const uint32_t sl1) {
+    const uint8_t sh = p.shift;
+    uint64_t first = 0, last = 0;
+    Kokkos::deep_copy(first, Kokkos::subview(p.slice_start, sl0));
+    Kokkos::deep_copy(last, Kokkos::subview(p.slice_start, sl1));
+    Kokkos::View<int32_t *> out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_slot_entries"), (last - first) << sh);
+    const SlotEntries read{p};
+    auto start = p.slice_start;
+    Kokkos::parallel_for("teno_slot_entries", Kokkos::RangePolicy<>(uint64_t(sl0) << sh, uint64_t(sl1) << sh),
+                         KOKKOS_LAMBDA(const uint64_t r) {
+        const uint64_t sl = r >> sh, lane = r & ((1u << sh) - 1);
+        for (uint64_t s = start(sl); s < start(sl + 1); s++) {
+            const uint64_t k = (s << sh) + lane;
+            out(k - (first << sh)) = read(k, static_cast<uint32_t>(r));
+        }
+    });
+    return out;
+}
+
+/** @brief Far entries of each slice (count) and in all, of packed stencils' int32 entries held with stride. */
+uint64_t count_far_slots(const teno::PackedStencils & p, const Kokkos::View<const uint32_t *> & size, const int32_t stride,
+                         const Kokkos::View<uint64_t *> & count) {
+    using P = teno::PackedStencils;
+    const uint32_t n_rows = static_cast<uint32_t>(size.extent(0));
+    const uint8_t sh = p.shift;
+    const uint32_t n_slices = static_cast<uint32_t>(p.slice_start.extent(0) - 1);
+    auto start = p.slice_start;
+    auto cells = p.cells;
+    Kokkos::parallel_for("teno_pack_far_count", Kokkos::RangePolicy<>(0, n_slices), KOKKOS_LAMBDA(const uint32_t sl) {
+        uint64_t n = 0;
+        for (uint32_t lane = 0; lane < (1u << sh); lane++) {
+            const uint32_t r = (sl << sh) + lane;
+            const uint64_t m = r < n_rows ? size(r) : 0;
+            for (uint64_t s = 0; s < m; s++) n += P::slot_of(cells(((start(sl) + s) << sh) + lane), r, stride) == P::FAR ? 1u : 0u;
+        }
+        count(sl) = n;
+    });
+    uint64_t total = 0;
+    Kokkos::parallel_reduce("teno_pack_far_total", Kokkos::RangePolicy<>(0, n_slices),
+                            KOKKOS_LAMBDA(const uint32_t sl, uint64_t & t) { t += count(sl); }, total);
+    return total;
+}
+
+} // namespace
+
+void teno::compact_slots(PackedStencils & p, const Kokkos::View<const uint32_t *> & size,
+                         const std::vector<int32_t> & strides, const std::string & label) {
+    using P = PackedStencils;
+    const uint32_t n_rows = static_cast<uint32_t>(size.extent(0));
+    const uint8_t sh = p.shift;
+    const uint32_t n_slices = static_cast<uint32_t>(p.slice_start.extent(0) - 1);
+    auto start = p.slice_start;
+    auto cells = p.cells;
+    Kokkos::View<uint64_t *> count("teno_pack_far_count", n_slices + 1);
+    const auto count_far = [&](const int32_t stride) { return count_far_slots(p, size, stride, count); };
+    int32_t stride = P::SPAN;
+    uint64_t fewest = count_far(stride);
+    for (const int32_t candidate : strides) {
+        if (candidate <= P::SPAN || candidate > (1 << 28) || fewest == 0) continue;
+        const uint64_t n = count_far(candidate);
+        if (n < fewest) {
+            fewest = n;
+            stride = candidate;
+        }
+    }
+    count_far(stride);
+    uint64_t total = 0, most = 0;
+    Kokkos::parallel_reduce("teno_pack_far_most", Kokkos::RangePolicy<>(0, n_slices),
+                            KOKKOS_LAMBDA(const uint32_t sl, uint64_t & m) { m = count(sl) > m ? count(sl) : m; },
+                            Kokkos::Max<uint64_t>(most));
+    Kokkos::parallel_scan("teno_pack_far_scan", Kokkos::RangePolicy<>(0, n_slices + 1),
+                          KOKKOS_LAMBDA(const uint32_t sl, uint64_t & sum, const bool final) {
+        const uint64_t n = sl < n_slices ? count(sl) : 0;
+        if (final) count(sl) = sum;
+        sum += n;
+    });
+    Kokkos::deep_copy(total, Kokkos::subview(count, n_slices));
+    if (most > P::MAX_FAR || total > UINT32_MAX) {
+        throw std::logic_error("TENO: too many stencil entries far from their cells to pack.");
+    }
+    Kokkos::View<uint32_t *> far_start(label + "_far_start", n_slices + 1);
+    Kokkos::parallel_for("teno_pack_far_start", Kokkos::RangePolicy<>(0, n_slices + 1),
+                         KOKKOS_LAMBDA(const uint32_t sl) { far_start(sl) = static_cast<uint32_t>(count(sl)); });
+    Kokkos::View<int16_t *> slots(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), cells.extent(0));
+    Kokkos::View<int32_t *> far(Kokkos::view_alloc(Kokkos::WithoutInitializing, label + "_far"), total);
+    // Far entries in slot order within each slice
+    Kokkos::parallel_for("teno_pack_slots", Kokkos::RangePolicy<>(0, n_slices), KOKKOS_LAMBDA(const uint32_t sl) {
+        uint32_t i = 0;
+        for (uint64_t s = start(sl); s < start(sl + 1); s++) {
+            for (uint32_t lane = 0; lane < (1u << sh); lane++) {
+                const uint32_t r = (sl << sh) + lane;
+                const uint64_t k = (s << sh) + lane;
+                int32_t v = P::SPAN / 2;  // padding: the row itself
+                if (r < n_rows && s - start(sl) < size(r)) {
+                    const int32_t e = cells(k);
+                    v = P::slot_of(e, r, stride);
+                    if (v == P::FAR) {
+                        far(far_start(sl) + i) = e;
+                        v = P::far_slot(i++);
+                    }
+                }
+                slots(k) = static_cast<int16_t>(v);
+            }
+        }
+    });
+    Kokkos::fence();
+    p.slots = slots;
+    p.far_start = far_start;
+    p.far = far;
+    p.stride = stride;
+    p.cells = Kokkos::View<int32_t *>();
+}
+
+namespace {
+
 /**
  * @brief Moves one stencil family (large or sector) of CellTables into a
  *        teno::PackedStencils and back. The device arrays can only be sized
@@ -540,7 +669,8 @@ class PackedRows {
             std::vector<int32_t> h_cells(slots.second - slots.first);
             const bool shared_values = packed.shared;
             std::vector<char> h_pinv_bytes(shared_values ? 0 : n_values * vb);
-            Kokkos::deep_copy(HostUnmanaged<int32_t>(h_cells.data(), h_cells.size()), Kokkos::subview(packed.cells, slots));
+            Kokkos::deep_copy(HostUnmanaged<int32_t>(h_cells.data(), h_cells.size()),
+                              slot_entries(packed, c0 >> sh, (c1 + slice - 1) >> sh));
             if (!shared_values && n_values > 0) {
                 Kokkos::deep_copy(HostUnmanaged<char>(h_pinv_bytes.data(), h_pinv_bytes.size()),
                                   DeviceUnmanaged<char>(reinterpret_cast<char *>(packed.pinv.data()) +
@@ -841,7 +971,7 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
     // Images are renumbered in cell order, then slot order, as a packing from scratch numbers them
     auto old_start = old.slice_start;
     auto old_pinv_index = old.pinv_index;
-    auto old_cells = old.cells;
+    const SlotEntries old_cells{old};
     auto old_images = old.images;
     auto old_pinv = old.pinv;
     Kokkos::View<uint64_t *> first_image("teno_pack_first_image", n_cells + 1);
@@ -856,7 +986,7 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
         } else {
             const uint64_t o0 = old_start(c >> sh);
             const uint32_t lane = c & ((1u << sh) - 1);
-            for (uint64_t s = 0; s < old_size(c); s++) sum += old_cells(((o0 + s) << sh) + lane) < 0 ? 1u : 0u;
+            for (uint64_t s = 0; s < old_size(c); s++) sum += old_cells(((o0 + s) << sh) + lane, c) < 0 ? 1u : 0u;
         }
     });
     uint64_t total = 0, n_images = 0;
@@ -903,7 +1033,7 @@ teno::PackedStencils repack(const teno::PackedStencils & old, const uint32_t n_c
                     cell = lc[s];
                     face = lf[s];
                 } else {
-                    const int32_t e = old_cells(ko);
+                    const int32_t e = old_cells(ko, c);
                     cell = e >= 0 ? e : old_images(2 * (-1 - e));
                     face = e >= 0 ? -1 : old_images(2 * (-1 - e) + 1);
                 }
@@ -1180,9 +1310,12 @@ class TableBuilder {
             scheme.stencil_large = large.finish("teno_stencil_large");
             scheme.stencil_small = small.finish("teno_stencil_small");
             share_cell_rows(scheme);
-            scheme.table_memory = large.device_memory();
-            scheme.table_memory.insert(scheme.table_memory.end(), small.device_memory().begin(),
-                                       small.device_memory().end());
+            scheme.compact_stencils();
+            // Streamed: the pseudo-inverses stay where they were streamed; the int32 entries are freed
+            scheme.table_memory.clear();
+            for (const PackedRows * rows : {&large, &small}) {
+                if (rows->device_memory().size() == 2) scheme.table_memory.push_back(rows->device_memory()[1]);
+            }
         }
 
     private:
@@ -1373,7 +1506,7 @@ report::Summary TENO::summary() const {
     if (!cache_status.empty()) s.setting("TENO cache", cache_status);
     if (share_tables) {
         const auto slots = [](const teno::PackedStencils & p) { 
-            return std::make_pair(p.pinv.extent(0), teno::PackedStencils::pinv_elements(p.cells.extent(0) * p.width, p.single));
+            return std::make_pair(p.pinv.extent(0), teno::PackedStencils::pinv_elements(p.slots.extent(0) * p.width, p.single));
         };
         const auto [large_kept, large_all] = slots(stencil_large);
         const auto [small_kept, small_all] = slots(stencil_small);
@@ -1509,6 +1642,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     } else {
         if (share_tables) share_again(*this);
         share_cell_rows(*this);
+        compact_stencils();
     }
     setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
@@ -3444,6 +3578,42 @@ struct OffsetsHash {
 
 } // namespace
 
+void TENO::compact_stencils() {
+    const uint32_t n_rows = static_cast<uint32_t>(scale.extent(0));
+    auto large_size = stencil_large_size;
+    auto small_size = stencil_small_size;
+    const auto pending = [](const teno::PackedStencils & p) { return p.cells.data() != nullptr || p.slots.data() == nullptr; };
+    Kokkos::View<uint32_t *> sizes(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_pack_sizes"), n_rows);
+    // The cells per plane (2D: row) of the largest structured blocks, numbered i fastest
+    std::vector<std::pair<uint64_t, int32_t>> blocks;
+    for (const StructuredBlock & b : mesh->structured_blocks) {
+        const uint64_t plane = N_DIM == 3 ? uint64_t(b.n[0]) * b.n[1] : b.n[0];
+        if (plane > uint64_t(teno::PackedStencils::SPAN) && plane < (uint64_t(1) << 28)) {
+            blocks.emplace_back(plane * b.n[N_DIM - 1], static_cast<int32_t>(plane));
+        }
+    }
+    std::sort(blocks.rbegin(), blocks.rend());
+    std::vector<int32_t> strides;
+    for (const auto & b : blocks) {
+        if (strides.size() < 4 && std::find(strides.begin(), strides.end(), b.second) == strides.end()) {
+            strides.push_back(b.second);
+        }
+    }
+    if (pending(stencil_large)) {
+        Kokkos::parallel_for("teno_pack_sizes", Kokkos::RangePolicy<>(0, n_rows),
+                             KOKKOS_LAMBDA(const uint32_t r) { sizes(r) = large_size(r); });
+        teno::compact_slots(stencil_large, sizes, strides, "teno_stencil_large");
+    }
+    if (pending(stencil_small)) {
+        Kokkos::parallel_for("teno_pack_sizes", Kokkos::RangePolicy<>(0, n_rows), KOKKOS_LAMBDA(const uint32_t r) {
+            uint32_t total = 0;
+            for (int k = 0; k < teno::MAX_FACES; k++) total += small_size(r, k);
+            sizes(r) = total;
+        });
+        teno::compact_slots(stencil_small, sizes, strides, "teno_stencil_small");
+    }
+}
+
 void TENO::find_block_stencils() {
     block_stencils = teno::BlockStencils();
     n_block_cells = 0;
@@ -3458,8 +3628,7 @@ void TENO::find_block_stencils() {
     Kokkos::deep_copy(HostUnmanaged<uint64_t>(start.data(), start.size()),
                       Kokkos::subview(p.slice_start, std::make_pair(0u, n_slices + 1)));
     std::vector<int32_t> slots(start[n_slices] << sh);
-    Kokkos::deep_copy(HostUnmanaged<int32_t>(slots.data(), slots.size()),
-                      Kokkos::subview(p.cells, std::make_pair(size_t(0), slots.size())));
+    Kokkos::deep_copy(HostUnmanaged<int32_t>(slots.data(), slots.size()), slot_entries(p, 0, n_slices));
     std::vector<uint16_t> sizes(n);
     Kokkos::deep_copy(HostUnmanaged<uint16_t>(sizes.data(), n), Kokkos::subview(stencil_large_size, std::make_pair(0u, n)));
     std::vector<uint32_t> shape(n_rec, teno::BlockStencils::NONE);

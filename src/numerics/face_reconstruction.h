@@ -432,6 +432,8 @@ class TENO : public FaceReconstruction {
          *        (after the tables are set up or rebuilt; a no-op unless block_path).
          */
         void find_block_stencils();
+        /** @brief teno::compact_slots() of both stencil families, once their tables and sizes are complete. */
+        void compact_stencils();
         /** @brief Each table row's global id, or null if the mesh is not distributed (its row then). */
         const uint64_t * global_cell_ids() const {
             if (mesh->h_global_cell_id.empty()) return nullptr;

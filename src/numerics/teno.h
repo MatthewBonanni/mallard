@@ -12,6 +12,9 @@
 #ifndef TENO_H
 #define TENO_H
 
+#include <string>
+#include <vector>
+
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
@@ -117,7 +120,13 @@ constexpr uint8_t SLICE_SHIFT =
  *        cell e, without a mirror face; e < 0 is the image -1 - e, whose cell
  *        and mirror boundary face (TENO's face field) images holds at
  *        2 (-1 - e) and 2 (-1 - e) + 1: images are rare, so the face field
- *        is stored only for them. Consecutive cells form slices of 2^shift
+ *        is stored only for them. A slot holds its entry in 16 bits (see
+ *        slot_of): a cell row + q stride + r, |q| <= 3 and |r| <= SPAN / 2, or
+ *        the index of the entry among the far entries of its slice. Cells are
+ *        numbered for locality, and stride is SPAN (any cell within 28672 of
+ *        the row) or the cells per plane of a structured block (a cell within
+ *        three planes), whichever leaves fewer far entries, so few are far.
+ *        Consecutive cells form slices of 2^shift
  *        cells; a slice is padded to its largest stencil and interleaves its
  *        cells' slots. The pseudo-inverse entries are packed the same way,
  *        in blocks of 2^shift tables, and a cell finds its own through
@@ -128,11 +137,20 @@ constexpr uint8_t SLICE_SHIFT =
  *        floats, two to an element, at the same indices.
  */
 struct PackedStencils {
+    /** @brief A slot value v: q = v >> 13 in [-3, 3] and r = (v & (SPAN - 1)) - SPAN / 2, or q = -4 and far entry r + SPAN / 2. */
+    static constexpr int32_t SPAN = 1 << 13;
+    /** @brief The most far entries of one slice. */
+    static constexpr uint32_t MAX_FAR = SPAN;
+
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
     Kokkos::View<uint64_t *> pinv_index;   // (cell): where its pseudo-inverse entries are
-    Kokkos::View<int32_t *> cells;
+    Kokkos::View<int16_t *> slots;         // (slot): its entry, see slot_of
+    Kokkos::View<uint32_t *> far_start;    // (slice, and one past the last): first far entry of the slice
+    Kokkos::View<int32_t *> far;           // the entries of the slots that are far
     Kokkos::View<int32_t *> images;        // (2 image + {0: cell, 1: face field})
+    Kokkos::View<int32_t *> cells;         // setup only: the entries as int32 until compact_slots()
     Kokkos::View<rtype *> pinv;
+    int32_t stride = SPAN;
     uint8_t shift = SLICE_SHIFT;
     uint8_t width = 0;
     bool single = false;
@@ -150,23 +168,60 @@ struct PackedStencils {
     KOKKOS_INLINE_FUNCTION
     static int32_t image_entry(const uint64_t k) { return -1 - static_cast<int32_t>(k); }
 
+    /** @brief The slot value of far entry i (< MAX_FAR) of a slice. */
+    KOKKOS_INLINE_FUNCTION
+    static int16_t far_slot(const uint32_t i) { return static_cast<int16_t>(-4 * SPAN + int32_t(i)); }
+
+    /** @brief slot_of() of an entry that is far. */
+    static constexpr int32_t FAR = -(1 << 30);
+
+    /** @brief The slot value of entry e of a row as row + q stride + r, or FAR (an image, or no such q, r). */
+    KOKKOS_INLINE_FUNCTION
+    static int32_t slot_of(const int32_t e, const uint32_t row, const int32_t stride) {
+        if (e < 0) return FAR;
+        const int64_t d = int64_t(e) - int64_t(row), half = stride / 2;
+        const int64_t q = (d + half >= 0 ? d + half : d + half - stride + 1) / stride;
+        const int64_t r = d - q * stride;
+        if (q < -3 || q > 3 || r < -SPAN / 2 || r >= SPAN / 2) return FAR;
+        return static_cast<int32_t>(q * SPAN + r + SPAN / 2);
+    }
+
+    /** @brief The entry of slot value v of a row, whose slice's far entries start at far. */
+    KOKKOS_INLINE_FUNCTION
+    static int32_t entry_of(const int32_t v, const int32_t row, const int32_t stride, const int32_t * far) {
+        const int32_t q = v >> 13, r = v & (SPAN - 1);
+        return q == -4 ? far[r] : row + q * stride + r - SPAN / 2;
+    }
+
+    /** @brief The entry of slot k, of row `row`. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t entry(const uint64_t k, const uint32_t row) const {
+        return entry_of(slots(k), static_cast<int32_t>(row), stride, far.data() + far_start(row >> shift));
+    }
+
     /** @brief One cell's stencil, resolved once per cell, for pseudo-inverse entries of type T. */
     template <typename T>
     struct RowT {
         const T * pinv_;
-        const int32_t * cells_;
+        const int16_t * slots_;
+        const int32_t * far_;
         const int32_t * images_;
+        int32_t row_;
+        int32_t stride_;
         uint8_t shift;
 
         KOKKOS_INLINE_FUNCTION
+        int32_t entry(const uint32_t s) const { return entry_of(slots_[s << shift], row_, stride_, far_); }
+
+        KOKKOS_INLINE_FUNCTION
         int32_t cell(const uint32_t s) const {
-            const int32_t e = cells_[s << shift];
+            const int32_t e = entry(s);
             return e >= 0 ? e : images_[2 * (-1 - e)];
         }
 
         KOKKOS_INLINE_FUNCTION
         int32_t face(const uint32_t s) const {
-            const int32_t e = cells_[s << shift];
+            const int32_t e = entry(s);
             return e >= 0 ? -1 : images_[2 * (-1 - e) + 1];
         }
 
@@ -239,14 +294,18 @@ struct PackedStencils {
     RowT<T> row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
-        return RowT<T>{pinv_of<T>(c), cells.data() + (start << shift) + lane, images.data(), shift};
+        return RowT<T>{pinv_of<T>(c), slots.data() + (start << shift) + lane, far.data() + far_start(c >> shift),
+                       images.data(), static_cast<int32_t>(c), stride, shift};
     }
 
     /** @brief block_row(c, offsets) if offsets, else row(c). */
     template <typename T = rtype>
     KOKKOS_INLINE_FUNCTION
     MixedRowT<T> mixed_row(const uint32_t c, const int32_t * offsets) const {
-        if (offsets) return MixedRowT<T>{RowT<T>{pinv_of<T>(c), nullptr, nullptr, shift}, offsets, static_cast<int32_t>(c)};
+        if (offsets) {
+            return MixedRowT<T>{RowT<T>{pinv_of<T>(c), nullptr, nullptr, nullptr, static_cast<int32_t>(c), stride, shift}, offsets,
+                                static_cast<int32_t>(c)};
+        }
         return MixedRowT<T>{row<T>(c), nullptr, static_cast<int32_t>(c)};
     }
 
@@ -257,6 +316,15 @@ struct PackedStencils {
         return BlockRowT<T>{pinv_of<T>(c), offsets, static_cast<int32_t>(c), shift};
     }
 };
+
+/**
+ * @brief Store the setup's int32 entries (cells) of packed stencils in 16-bit
+ *        slots, far_start and far, and free them, with the stride among SPAN
+ *        and `strides` that leaves the fewest far entries. size(r): the slots
+ *        of row r that hold entries; the others are padding.
+ */
+void compact_slots(PackedStencils & p, const Kokkos::View<const uint32_t *> & size, const std::vector<int32_t> & strides,
+                   const std::string & label);
 
 /**
  * @brief Central stencils of the cells of structured blocks by index
