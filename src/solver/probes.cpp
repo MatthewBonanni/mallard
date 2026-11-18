@@ -3624,17 +3624,18 @@ void Probes::Probe::extract(const double t) {
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
 }
 
-void Probes::Probe::stage_crossed(const uint64_t * seq) const {
-    const Isosurface & iso = *isosurface;
-    const Kokkos::View<const uint32_t *> cells = iso.levels->cells();
-    const Kokkos::View<const uint32_t> count = iso.levels->count();
-    const auto values = iso.levels->values();
-    const auto st_cells = iso.staged_cells;
-    const auto st_levels = iso.staged_levels;
-    const auto st_count = iso.staged_count;
+namespace {
+
+/** @brief The first count() of crossed cells (at most the staging's), their levels and count(), into record slot
+ *         (*seq - 1) % n_records. */
+void stage_levels(const region::CrossedLevels & levels, const PinnedCells & st_cells, const PinnedWeights & st_levels,
+                  const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st_count, const uint64_t * seq) {
+    const Kokkos::View<const uint32_t *> cells = levels.cells();
+    const Kokkos::View<const uint32_t> count = levels.count();
+    const auto values = levels.values();
     const uint64_t n_records = st_count.extent(0);
-    const uint32_t n_k = iso.levels->size();
-    Kokkos::parallel_for("probe_staged_crossed", iso.capacity, KOKKOS_LAMBDA(const uint32_t i) {
+    const uint32_t n_k = levels.size();
+    Kokkos::parallel_for("probe_staged_crossed", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
         const uint64_t slot = (*seq - 1) % n_records;
         if (i == 0) st_count(slot) = count();
         if (i >= count()) return;
@@ -3643,6 +3644,13 @@ void Probes::Probe::stage_crossed(const uint64_t * seq) const {
             for (uint32_t d = 0; d <= N_DIM; d++) st_levels(slot, (size_t(i) * n_k + k) * (N_DIM + 1) + d) = values(i, k, d);
         }
     });
+}
+
+} // namespace
+
+void Probes::Probe::stage_crossed(const uint64_t * seq) const {
+    const Isosurface & iso = *isosurface;
+    stage_levels(*iso.levels, iso.staged_cells, iso.staged_levels, iso.staged_count, seq);
 }
 
 void Probes::Probe::extracted(const uint64_t slot) {

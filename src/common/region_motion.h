@@ -95,6 +95,8 @@ class CrossedLevels {
         const Kokkos::View<uint32_t> & count() const { return m_count; }
         const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> & values() const { return m_values; }
         uint32_t size() const { return m_levels->size(); }
+        /** @brief The cells and values of the current levels(), and their count (public for nvcc's device lambdas). */
+        void select_cells() const;
 
     private:
         uint32_t n_owned = 0;
@@ -105,8 +107,6 @@ class CrossedLevels {
         Kokkos::View<uint32_t *> m_cells;
         Kokkos::View<uint32_t> m_count;
         Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> m_values;
-        /** @brief The cells and values of the current levels(), and their count. */
-        void select_cells() const;
 };
 
 /**
