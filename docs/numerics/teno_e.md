@@ -287,8 +287,10 @@ cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged. A stencil that the
-search grows past $n_0$ to such a cell is searched again at that degree
-(#1202).
+search grows past $n_0$ to such a cell is searched again below that cell's
+position, at the full degree, and only if no size there fits, at the wall
+degree (#1202), so no other stencil changes and the full degree is kept
+where it can be.
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -775,15 +777,6 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     fourth at the walls. On the fine cylinder with curved walls and far
     field, order 5's drag is as smooth as order 3's
     ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
-
-- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
-    at curved walls looks only at a stencil's first $n_0$ candidates
-    ([central stencil](#central-stencil)). When the Lebesgue search grows
-    the stencil past them, the entries it adds can be cells at a curved wall,
-    and the stencil keeps the full degree, one-sided there. On a $6^3$
-    `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
-    28 at order 6 do so. The 2D and 3D setups both check only the first
-    $n_0$ entries, for every cell type.
 
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes

@@ -913,6 +913,13 @@ struct CellSetup {
         return false;
     }
 
+    /** @brief The position of the first sorted entry from s on that is a cell at a curved wall (one must follow). */
+    KOKKOS_INLINE_FUNCTION
+    uint32_t first_wall(const Lanes & w, uint32_t s) const {
+        while (!g.wall_cell(w.visit_cell[w.entry_ref[w.entry_order[s]] & 0xFFFFFFu])) s++;
+        return s;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
         if constexpr (ON_HOST) {
@@ -1602,7 +1609,7 @@ struct CellSetup {
         };
         uint16_t n_used = 0;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        auto select = [&]() {
+        auto select = [&](const uint32_t n_max) {
             fit = fit_columns(flat, at_wall ? wall_nk : nk);
             nf = fit.n;
             const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
@@ -1611,7 +1618,7 @@ struct CellSetup {
             n_used = n_first;
             bool found = false;
             uint32_t n_tried = 0;
-            for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
+            for (uint32_t n_try = n_first; n_try <= n_max; n_try++) {
                 if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
                 if (!build(static_cast<int>(n_try))) continue;
                 const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
@@ -1637,11 +1644,15 @@ struct CellSetup {
             }
             return found;
         };
-        bool found = select();
-        // The search grows stencils past their first n_full entries, possibly to a curved-wall cell
+        bool found = select(try_max);
+        // The search grows stencils past their first n_full entries, possibly to a curved-wall
+        // cell: they stop short of it, or else fit the wall degree
         if (found && !at_wall && wall_nk < nk && reaches_wall(w, n_used)) {
-            at_wall = true;
-            found = select();
+            found = select(first_wall(w, n_full));
+            if (!found) {
+                at_wall = true;
+                found = select(try_max);
+            }
         }
         if (!found) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -2796,7 +2807,7 @@ struct CellTeam {
             return okq[0];
         };
         uint16_t n_used = 0;
-        auto select = [&]() {
+        auto select = [&](const uint32_t n_max) {
             fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
             nf = fit.n;
             const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
@@ -2805,7 +2816,7 @@ struct CellTeam {
             n_used = n_first;
             bool found = false;
             uint32_t n_tried = 0;
-            for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
+            for (uint32_t n_try = n_first; n_try <= n_max; n_try++) {
                 if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
                 if (!build(int(n_try))) continue;
                 const double lebesgue =
@@ -2835,14 +2846,20 @@ struct CellTeam {
             }
             return found;
         };
-        bool found = select();
-        // The search grows stencils past their first n_full entries, possibly to a curved-wall cell
+        bool found = select(try_max);
+        // The search grows stencils past their first n_full entries, possibly to a curved-wall
+        // cell: they stop short of it, or else fit the wall degree
         if (found && !at_wall && c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
-            bool reached = false;
-            Kokkos::single(Kokkos::PerTeam(tm), [&](bool & hit) { hit = c.reaches_wall(w, n_used); }, reached);
-            if (reached) {
-                at_wall = true;
-                found = select();
+            uint32_t n_wall = 0;
+            Kokkos::single(Kokkos::PerTeam(tm), [&](uint32_t & first) {
+                first = c.reaches_wall(w, n_used) ? c.first_wall(w, n_full) : 0;
+            }, n_wall);
+            if (n_wall > 0) {
+                found = select(n_wall);
+                if (!found) {
+                    at_wall = true;
+                    found = select(try_max);
+                }
             }
         }
         if (!found) {

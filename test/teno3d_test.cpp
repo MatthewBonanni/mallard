@@ -686,7 +686,8 @@ TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
     // The wall degree is 3, whose pseudo-inverse has no rows of degrees 4 and
     // 5. Pyramids at order 6 start from 208 entries, other cells from 110. The
     // Lebesgue search grows stencils past their start: here 87 at order 5 and
-    // 28 at order 6 reached a curved-wall cell only there, at full degree (#1202)
+    // 28 at order 6 reached a curved-wall cell only there, at full degree (#1202).
+    // They now stop short of it at full degree or fit the wall degree.
     auto mesh = make_mesh_3d("cartesian_pyramid", 6, 6, 6);
     mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"left\"\ntype = \"box\"\n"
                                                                   "filled = false\ncenter = [0.5, 0.5, 0.5]\nsize = [1.0, 1.0, 1.0]\n")));
