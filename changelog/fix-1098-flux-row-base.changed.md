@@ -1,0 +1,1 @@
+- The viscous flux loads each cell's state and gradient with fewer address computations on GPUs, recovering the cost of the unsigned View offsets of 2^32-entry Views in that kernel; results are bitwise unchanged (#1098).
