@@ -4480,7 +4480,14 @@ struct CellSetup2D {
         };
         int k = 0;
         for (int l = 0; l < NK; l++) {
+#if defined(KOKKOS_ENABLE_HIP)
+            // ROCm 10.1's gfx90a backend emits an illegal V_CNDMASK_B32_sdwa (two constant-bus reads) for ea[l]
+            uint8_t ual, ubl;
+            teno::exponents(uint8_t(l), ual, ubl);
+            const int al = ual, bl = ubl;
+#else
             const int al = ea[l], bl = eb[l];
+#endif
             double row[size_t(NK)];
             static_for<0, NK>([&](auto mc) { row[decltype(mc)::value] = 0.0; });
             integrate(i, x0, y0, h, identity, [&](const double x, const double y, const double wq) {
