@@ -71,7 +71,7 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
 
 void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, CellNodes cells,
                                   const std::vector<BoundaryFace> & boundary_faces,
-                                  const std::string & unlisted_zone, const PeriodicNodes & classes) {
+                                  const std::string & unlisted_zone, PeriodicNodes classes) {
     n_nodes = static_cast<uint32_t>(nodes.size());
     n_cells = cells.size();
     view_entries::set_cells(n_cells);
@@ -95,11 +95,11 @@ void Mesh::init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, C
 
     // Periodic classes of the nodes; faces are keyed by the classes' keys so a
     // face of zone_a and its image in zone_b become one face
-    periodic_translations = classes.translations;
+    periodic_translations = std::move(classes.translations);
     periodic_rotation = classes.rotation;
-    periodic_zones = classes.zones;
-    h_node_key = classes.key;
-    h_node_lattice = classes.lattice;
+    periodic_zones = std::move(classes.zones);
+    h_node_key = std::move(classes.key);
+    h_node_lattice = std::move(classes.lattice);
     shift_lattice.assign(1, {0, 0, 0});
     auto node_key = [&](uint32_t n) { return h_node_key.empty() ? n : h_node_key[n]; };
     auto keyed = [&](std::vector<uint32_t> & face) {
@@ -462,7 +462,7 @@ void Mesh::init_from_block(MeshBlock block, const std::vector<PeriodicPair> & pe
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
     PeriodicNodes classes = periodic.empty() ? PeriodicNodes() : match_periodic_nodes(nodes, boundary_faces, periodic);
-    init_from_connectivity(std::move(nodes), std::move(cells), boundary_faces, "unassigned", classes);
+    init_from_connectivity(std::move(nodes), std::move(cells), boundary_faces, "unassigned", std::move(classes));
     cell_zone_names = block.cell_zone_names;
     h_cell_zone.resize(block.cell_zone.size());
     for (uint32_t c = 0; c < h_cell_zone.size(); c++) h_cell_zone[c] = block.cell_zone[h_global_cell(c)];

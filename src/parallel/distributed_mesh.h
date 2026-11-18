@@ -130,6 +130,8 @@ class DistributedMesh {
         /** @brief Send every block cell to its owner, build the node directory and find halo layer 1 (collective). */
         void send_to_owners();
         void release_cells();
+        /** @brief Free the halo search's state (node directory, visited cells and nodes), keeping the cells. */
+        void release_search();
         void append_record(std::vector<uint64_t> & out, uint32_t i) const;
         void read_records(const std::vector<uint64_t> & in, uint8_t layer);
         std::vector<std::array<double, N_DIM>> fetch_nodes(const std::vector<uint64_t> & sorted_ids) const;
