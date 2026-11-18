@@ -200,7 +200,21 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   and right-hand sides, the last good state) is the one call it skips, and the
   rewrite turns off `[output] health`, whose ledger follows steps. The
   reconstruction stays the run's, because point samples, gradients and
-  `Q`/`VORTICITY` read its polynomials.
+  `Q`/`VORTICITY` read its polynomials, but TENO sets up only its central
+  stencils (`TENO::sector_stencils` off), which those read: no sector
+  stencils, smoothness matrices or the moments they are formed from, no
+  troubled-cell scratch, and no species reconstruction of mixtures, all of
+  which only face values read. The central stencils' tables, and so
+  gradients, are bitwise the run's
+  (`CentralStencilsAloneAreTheFullSetupsBitForBit`). With `share_tables`,
+  cells share basis means when the means alone agree on the sharing grid,
+  where the run also compares smoothness matrices or moments, so point
+  samples can differ from the run's below that grid. These tables are never
+  written to `cache_file`, and a run's cache is read without its sector
+  stencils. `STENCIL_*` fields summarize the sectors, so writing any keeps
+  the full setup and gives the run's fields bit for bit
+  (`StencilFieldsAreTheRunsBitForBit`); the rewrite drops `[output]
+  write_stencils`, the run's file.
 - **Steps.** Each snapshot's step and time are those the reader finds
   recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
   header), never the file name; only the snapshots of files written before
@@ -223,9 +237,11 @@ by the run's own reconstruction, gradients and kernels.
   snapshots of `RHO`, `U`, `P` and `T` the gradient fields were bitwise too
   in both cases of the benchmark below, and `MACH` differs in the last bit, from converting
   the stored primitives back to the conservative variables.
-- **Cost.** The case's setup is the reconstruction's: for TENO its stencils,
-  pseudo-inverses and smoothness matrices, the same tables as a run's
-  (`[numerics.face_reconstruction] cache_file` stores them), and their memory. Each snapshot then costs one gradient pass and the write.
+- **Cost.** The case's setup is the reconstruction's: for TENO the central
+  stencils and their pseudo-inverses, as a run computes them
+  (`[numerics.face_reconstruction] cache_file` stores them with the rest of a
+  run's tables), and their memory. Each snapshot then costs one gradient pass
+  and the write.
 
 ### Cost against ParaView
 
