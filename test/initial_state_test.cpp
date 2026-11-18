@@ -334,7 +334,7 @@ TEST(InitialStateTest, DataFilesRejectValuesThatAreNotFinite) {
     for (const std::string v : {"nan", "inf", "-Infinity"}) {
         const std::string file = write_temp("mallard_not_finite_" + v + ".csv", "s, u\n0, 1\n1, " + v + "\n");
         try {
-            tabulated::read_csv(file);
+            tabulated::read_csv(file, "docs/guide/initialization.md#tabulated-data-and-point-clouds");
             ADD_FAILURE() << v << " was accepted";
         } catch (const InputError & e) {
             EXPECT_NE(std::string(e.what()).find(file + ":3: column u is \"" + v + "\""), std::string::npos) << e.what();
