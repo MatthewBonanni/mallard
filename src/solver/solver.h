@@ -837,6 +837,8 @@ class Solver {
         std::vector<int> cell_owners() const;
         /** @brief The stencils of the owned cells, with the members of targets (stencils::build). */
         stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
+        /** @brief Whether the setup writes STENCIL_* fields or the stencil file of [output] write_stencils. */
+        bool writes_stencils() const;
         /**
          * @brief The mesh and stencil fields [[write_data]] asks for, once, and
          *        the stencil file of [output] write_stencils.
