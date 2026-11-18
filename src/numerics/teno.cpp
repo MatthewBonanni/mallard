@@ -3175,8 +3175,9 @@ namespace {
 // version 15 mirrors 3D candidates only across the boundary faces beneath them (#443); version 16
 // starts odd-degree stencils of pyramids from 2.5 times the monomials of the next degree (#236);
 // version 21 keeps 2D mirror images no deeper than the body under their foot (#976); version 22 has
-// tables for the owned cells and halo image cells only when partition faces are exchanged (#1040)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-22";
+// tables for the owned cells and halo image cells only when partition faces are exchanged (#1040);
+// version 24 fits curved_wall_degree in 2D stencils grown past their start to a curved-wall cell (#1202)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-24";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
