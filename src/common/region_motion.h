@@ -85,6 +85,16 @@ class CrossedLevels {
 
         /** @brief The levels at time t in the cells, on the host. */
         Levels update(double t) const;
+        /**
+         * @brief The levels at the time time() on the device, in the first count() of cells() and values(), enqueued
+         *        without host work or allocation.
+         */
+        void select(const Kokkos::View<const rtype> & time) const;
+
+        const Kokkos::View<uint32_t *> & cells() const { return m_cells; }
+        const Kokkos::View<uint32_t> & count() const { return m_count; }
+        const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> & values() const { return m_values; }
+        uint32_t size() const { return m_levels->size(); }
 
     private:
         uint32_t n_owned = 0;
@@ -92,8 +102,11 @@ class CrossedLevels {
         std::shared_ptr<const SolutionLevels> m_levels;
         Kokkos::View<const uint32_t *> offsets, conditions;  // of each piece cut from conditions' levels
         Kokkos::View<const double *> radii;
-        Kokkos::View<uint32_t *> cells;
-        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> values;
+        Kokkos::View<uint32_t *> m_cells;
+        Kokkos::View<uint32_t> m_count;
+        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> m_values;
+        /** @brief The cells and values of the current levels(), and their count. */
+        void select_cells() const;
 };
 
 /**

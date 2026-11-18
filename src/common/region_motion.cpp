@@ -443,22 +443,24 @@ CrossedLevels::CrossedLevels(const Mesh & mesh, const Region & region, std::shar
     offsets = upload(h_offsets, "region_crossed_offsets");
     conditions = upload(h_conditions, "region_crossed_conditions");
     radii = upload(reads.radii, "region_crossed_radii");
-    cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
-    values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
+    m_cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
+    m_count = Kokkos::View<uint32_t>("region_crossed_count");
+    m_values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
 }
 
-Levels CrossedLevels::update(const double t) const {
-    m_levels->update(t);
+void CrossedLevels::select_cells() const {
     const auto L = m_levels->levels();
     const auto offsets_ = offsets;
     const auto conditions_ = conditions;
     const auto radii_ = radii;
-    const auto cells_ = cells;
+    const auto cells_ = m_cells;
+    const auto count_ = m_count;
     const bool all = every;
+    const uint32_t n = n_owned;
     const uint32_t n_pieces = static_cast<uint32_t>(offsets.extent(0)) - 1;
-    uint32_t n = 0;
+    if (n == 0) Kokkos::parallel_for("region_crossed_none", 1, KOKKOS_LAMBDA(const int) { count_() = 0; });
     // A cell the host keeps (|g| <= 1.01 |grad g| r for every condition of a piece) with a margin for round-off
-    Kokkos::parallel_scan("region_crossed_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
+    Kokkos::parallel_scan("region_crossed_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
         bool keep = all;
         for (uint32_t p = 0; p < n_pieces && !keep; p++) {
             keep = true;
@@ -469,24 +471,37 @@ Levels CrossedLevels::update(const double t) const {
                 keep = !(Kokkos::fabs(L(c, k, 0)) > 1.02 * Kokkos::sqrt(slope) * radii_(c));
             }
         }
-        if (!keep) return;
-        if (final) cells_(i) = c;
-        i++;
-    }, n);
-    const auto rows = Kokkos::make_pair(uint32_t(0), n);
-    const auto values_ = values;
+        if (keep && final) cells_(i) = c;
+        if (keep) i++;
+        if (final && c + 1 == n) count_() = i;
+    });
+    const auto values_ = m_values;
     const uint32_t n_k = m_levels->size();
     Kokkos::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= count_()) return;
         for (uint32_t k = 0; k < n_k; k++) {
             for (int d = 0; d <= N_DIM; d++) values_(i, k, d) = L(cells_(i), k, d);
         }
     });
+}
+
+void CrossedLevels::select(const Kokkos::View<const rtype> & time) const {
+    m_levels->update(time);
+    select_cells();
+}
+
+Levels CrossedLevels::update(const double t) const {
+    m_levels->update(t);
+    select_cells();
+    uint32_t n = 0;
+    Kokkos::deep_copy(Kokkos::View<uint32_t, Kokkos::HostSpace>(&n), m_count);
+    const auto rows = Kokkos::make_pair(uint32_t(0), n);
     Levels out;
-    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(cells, rows));
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(m_cells, rows));
     out.cells.assign(h_cells.data(), h_cells.data() + n);
     const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> h_values(
-        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, n_k);
-    Kokkos::deep_copy(h_values, Kokkos::subview(values, rows, Kokkos::ALL, Kokkos::ALL));
+        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, m_levels->size());
+    Kokkos::deep_copy(h_values, Kokkos::subview(m_values, rows, Kokkos::ALL, Kokkos::ALL));
     out.values = h_values;
     return out;
 }

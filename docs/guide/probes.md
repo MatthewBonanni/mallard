@@ -487,7 +487,10 @@ crossed; like a moving region's, its means are kept for those cells only.
 Isosurfaces take no `n_points`: their elements have no parameters to
 place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
 entry with the isosurface as its region writes the values on its elements at
-each write.
+each write. When steps run ahead of the host ([`[run] step_queue`](parallel.md)),
+these probes do not stop the queue, except an isosurface's that reads normals
+(`MASS_FLUX` and the other fluxes), `sampling = "point"` or gradients: its
+samples are placed at each quadrature point, which only the host knows.
 
 **Point sampling.** With `sampling = "point"`, a static filled region
 integrates the reconstruction over its own shape instead of `f V` times the

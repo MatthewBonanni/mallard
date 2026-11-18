@@ -654,9 +654,12 @@ Who follows the solution, and when:
   isosurface's elements, extracted anew, and at each sample of a probe with
   `average = true`. The measure column of the reductions file is the region's
   at that time. A `where` region's fractions are computed on the device, in
-  the step graph when steps run ahead (`[run] step_queue`); an isosurface is
-  extracted by the host, which stops the queue at its writes. The run-health
-  timing row `regions` is the time the host takes.
+  the step graph when steps run ahead (`[run] step_queue`). So are the cells
+  an isosurface crosses, with their levels and values, when it is sampled as
+  cell averages without normals: the host extracts its elements from them
+  while the device steps on. One that reads normals (fluxes), point values or
+  gradients is extracted and sampled by the host, which stops the queue at its
+  writes. The run-health timing row `regions` is the time the host takes.
 - `[[write_data]]`: at each write, a `where` region's cells (those of positive
   fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
   [snapshot](output.md#snapshots-of-regions) is a mesh of its own.

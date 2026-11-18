@@ -546,7 +546,8 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of isosurfaces and other surfaces or curves of the solution. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of isosurfaces and other surfaces or curves of the solution that read normals, point
+values or gradients (below). A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
@@ -560,6 +561,14 @@ updated at the device's `t`, and a scan selects the owned cells it covers, with 
 some rank the count is above the capacity of the probe's staging, the device stops at that step (reason
 `PROBES`, reduced over the ranks), the host writes it as it writes unstaged probes, and the step graph is built
 anew with each moving probe's staging at twice the cells it covers then (at least 64, at most the owned cells).
+An isosurface (or another surface or curve of the solution) sampled as cell averages without normals has one
+sample per cell it crosses, whose values are the cell's: the same scan selects, at the device's `t`, the owned
+cells the host would read levels in (`region::CrossedLevels`), and their values are evaluated there and copied
+with the cells' levels into the record slot (with the same capacity and `PROBES` stop). The host extracts the
+elements from those levels as it takes the record, with the code it runs on the levels it selects itself, so the
+samples, their order and weights are its own bit for bit, and each sample takes its cell's staged values. Probes
+of fluxes through it, of point values or of gradients need values at each quadrature point, and stay with the
+host.
 Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
 returning at once, and
 the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
