@@ -286,6 +286,8 @@ class Probes {
         bool reads_intervals(size_t k) const;
         /** @brief Probe k samples a moving region. */
         bool moves(size_t k) const;
+        /** @brief Probe k's region follows the solution: its selection reads ProbeFields::W. */
+        bool follows_solution(size_t k) const;
         /**
          * @brief Probe k is evaluated in a step graph into staging of n_records record slots (a moving region's sized
          *        by the cells it covers at t); with reduce, its values are reduced there too (reduce_staged), over the

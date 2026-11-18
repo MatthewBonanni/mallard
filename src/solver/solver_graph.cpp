@@ -532,7 +532,7 @@ void Solver::device_step_body() {
     // the triggers read are reduced into their variables before the triggers, the others after them. probe_due holds
     // for each staged probe whether it is evaluated, then whether any other or any reduced one is, then whether its
     // values change (reduced for the triggers), then whether it adds a sample to its time averages, and last, with a
-    // moving region among them, whether any moving one is evaluated
+    // moving region among them, whether any moving one is evaluated, then any following the solution
     const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
     const auto evaluate_probes = [&](const bool reduced) {
         recording_step = true;
@@ -882,19 +882,32 @@ void Solver::select_moving_probes() {
     const uint64_t n_records = step_records.extent(0);
     const Kokkos::View<uint32_t *> due = probe_due;
     const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
-    const uint32_t any_moving = static_cast<uint32_t>(probe_due.extent(0)) - 1;
+    const uint32_t n_flags = static_cast<uint32_t>(probe_due.extent(0));
+    const uint32_t any_moving = 3 * n_probes + 2, any_solution = 3 * n_probes + 3;
     const Kokkos::View<int64_t *> overflow = probe_overflow;
-    uint64_t moving = 0;
+    uint64_t moving = 0, solution = 0;
     for (uint32_t k = 0; k < n_probes; k++) {
         if (probes.moves(staged_probes[k])) moving |= uint64_t(1) << k;
+        if (probes.follows_solution(staged_probes[k])) solution |= uint64_t(1) << k;
     }
     Kokkos::parallel_for("probes_moving_due", 1, KOKKOS_LAMBDA(const int) {
         due(any_moving) = 0;
+        if (solution != 0) due(any_solution) = 0;
         for (uint32_t k = 0; k < n_probes; k++) {
             overflow(k) = 0;
             if (moving >> k & 1) due(any_moving) |= due(k);
+            if (solution >> k & 1) due(any_solution) |= due(k);
         }
     });
+    if (solution != 0) {
+        // Regions of the solution are placed on the state the probes sample: boundary states at the step's end
+        flush_chemistry_if(&probe_due.data()[any_solution], 1);
+        recording_step = true;
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        device_if(&probe_due.data()[any_solution], [&] { update_cell_W(); });
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        recording_step = false;
+    }
     for (uint32_t k = 0; k < n_probes; k++) {
         if (!(moving >> k & 1)) continue;
         device_if(&probe_due.data()[k], [&] {
@@ -910,7 +923,7 @@ void Solver::select_moving_probes() {
             step_queue::Loop & L = loop();
             step_queue::Record & record = records((L.seq - 1) % n_records);
             record.reasons |= step_queue::PROBES;
-            for (uint32_t k = 0; k <= any_moving; k++) due(k) = 0;
+            for (uint32_t k = 0; k < n_flags; k++) due(k) = 0;
             L.active = 0;
             L.progress = 0;
         });
@@ -1171,12 +1184,18 @@ void Solver::begin_device_steps() {
     staged_probes.clear();
     staged_intervals = false;
     probe_trigger_vars.clear();
-    bool moving = false;
+    bool moving = false, solution = false, current = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
         const bool reduced = triggers_read_probe(k) || convergence_reads_probe(k);
         if (!probes.can_stage(k, statistics) || (reduced && probes.moves(k))) continue;
+        if (probes.follows_solution(k) && !current) {
+            // Its staging is sized by the cells it covers now
+            update_cell_W();
+            current = true;
+        }
         probes.stage(k, n_records, statistics, static_cast<double>(t), reduced, halo.uses_nccl());
         moving = moving || probes.moves(k);
+        solution = solution || probes.follows_solution(k);
         staged_probes.push_back(k);
         staged_intervals = staged_intervals || probes.reads_intervals(k);
         const size_t j = static_cast<size_t>(std::find(value_probes.begin(), value_probes.end(), k) - value_probes.begin());
@@ -1184,7 +1203,7 @@ void Solver::begin_device_steps() {
     }
     probe_overflow = moving ? Kokkos::View<int64_t *>("step_probe_overflow", staged_probes.size()) : Kokkos::View<int64_t *>();
     if (!staged_probes.empty()) {
-        probe_due = Kokkos::View<uint32_t *>("step_probe_due", 3 * staged_probes.size() + (moving ? 3 : 2));
+        probe_due = Kokkos::View<uint32_t *>("step_probe_due", 3 * staged_probes.size() + (solution ? 4 : moving ? 3 : 2));
         probe_clocks = Kokkos::View<Probes::StagedClock *>("step_probe_clocks", staged_probes.size());
     }
     if (convergence_on_device()) {

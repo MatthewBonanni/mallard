@@ -653,8 +653,10 @@ Who follows the solution, and when:
 - `[[probes]]`: at each write, a `where` region's fractions and an
   isosurface's elements, extracted anew, and at each sample of a probe with
   `average = true`. The measure column of the reductions file is the region's
-  at that time. The run-health timing row `regions` is
-  the time this takes.
+  at that time. A `where` region's fractions are computed on the device, in
+  the step graph when steps run ahead (`[run] step_queue`); an isosurface is
+  extracted by the host, which stops the queue at its writes. The run-health
+  timing row `regions` is the time the host takes.
 - `[[write_data]]`: at each write, a `where` region's cells (those of positive
   fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
   [snapshot](output.md#snapshots-of-regions) is a mesh of its own.
