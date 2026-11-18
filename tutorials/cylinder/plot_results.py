@@ -59,8 +59,8 @@ def main():
     print(f"t >= {args.t_start:g}: St {st:.4f}, mean Cd {mean_cd:.4f}, Cl amplitude {amp:.4f} "
           f"(references: St {REF['St'][0]}-{REF['St'][1]}, Cd {REF['Cd'][0]}-{REF['Cd'][1]}, "
           f"Cl {REF['Cl'][0]}-{REF['Cl'][1]})")
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.run, "solut", "cylinder")))
-    polys, _ = snapshots.cells(pts, conn, offs)
+    g, a = snapshots.read(snapshots.series(os.path.join(args.run, "solut", "cylinder")))
+    polys, _ = snapshots.cells(g)
     polys = [p[:, :2] for p in polys]
     w = a["VORTICITY"]
 

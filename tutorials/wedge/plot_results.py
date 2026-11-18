@@ -31,8 +31,8 @@ CORNER, RAMP = 0.5, 8.0
 
 
 def load(run):
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "wedge")))
-    polys, c = snapshots.cells(pts, conn, offs)
+    g, a = snapshots.read(snapshots.series(os.path.join(run, "solut", "wedge")))
+    polys, c = snapshots.cells(g)
     return [p[:, :2] for p in polys], c[:, :2], a
 
 

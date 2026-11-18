@@ -26,16 +26,20 @@
 
 namespace {
 
+using parallel_read::Chain;
 using parallel_read::collectively;
-using parallel_read::Fields;
 using parallel_read::FileCursor;
-using parallel_read::FileLines;
-using parallel_read::LineReader;
+using parallel_read::Marks;
 using parallel_read::Records;
+using parallel_read::Tokens;
 
 constexpr int INTERIOR = 2;            // Fluent's bc-type of interior face zones
+constexpr uint64_t MAX_FACE_WORDS = 67;  // the node count, at most 64 nodes and two cells
 
-/** @brief A node or face section with data: ASCII (one item per line from line `start`) or binary (from byte `start`). */
+/** @brief The values of a face of mixed faces whose first value (its node count) is n; 0 if n is not one. */
+uint64_t face_length(uint64_t n) { return n >= 2 && n <= 64 ? n + 3 : 0; }
+
+/** @brief A node or face section with data, from byte `start`: ASCII or binary. */
 struct Section {
     int kind = 0;  // 10: nodes, 13: faces
     uint64_t zone = 0, first = 0, last = 0;
@@ -43,7 +47,7 @@ struct Section {
     int bc_type = 0, face_type = 0;  // faces; face_type 0 or 5: mixed, a node count per face
     int value_size = 0;              // binary: bytes per value; 0: ASCII
     uint64_t start = 0;
-    std::vector<uint64_t> marks;  // binary mixed faces: offset of faces first, first + mark spacing, ...
+    Marks marks;  // ASCII: of the values, or of the faces if mixed; binary: of the faces if mixed
 
     uint64_t size() const { return last >= first ? last - first + 1 : 0; }
     bool mixed() const { return face_type == 0 || face_type == 5; }
@@ -53,13 +57,6 @@ struct Section {
     }
 };
 
-/** @brief The error of an ASCII section that does not hold one node or face per line, at line `line` (1-based). */
-std::string not_one_per_line(const Section & s, uint64_t line) {
-    return "line " + std::to_string(line) + " of the " + s.what() +
-           " holds more or less than one item. Mallard reads ASCII node and face sections with one node or face per "
-           "line, as Fluent writes them; write the mesh again from Fluent, or as a binary file.";
-}
-
 /** @brief What every rank knows of a Fluent file: everything but the nodes' and faces' data. */
 struct Layout {
     int dim = 0;
@@ -67,48 +64,6 @@ struct Layout {
     std::vector<Section> sections;
     std::vector<std::array<uint64_t, 3>> cell_sections;  // zone, first and last cell id
     std::map<uint64_t, std::string> zone_names;
-
-    std::string pack() const {
-        std::ostringstream s;
-        s << dim << " " << n_cells << " " << n_nodes << " " << n_faces << " " << sections.size() << "\n";
-        for (const Section & x : sections) {
-            s << x.kind << " " << x.zone << " " << x.first << " " << x.last << " " << x.nd << " " << x.bc_type << " "
-              << x.face_type << " " << x.value_size << " " << x.start << " " << x.marks.size();
-            for (uint64_t m : x.marks) s << " " << m;
-            s << "\n";
-        }
-        s << cell_sections.size();
-        for (const auto & c : cell_sections) s << " " << c[0] << " " << c[1] << " " << c[2];
-        s << "\n" << zone_names.size() << "\n";
-        for (const auto & [id, name] : zone_names) s << id << " " << name.size() << " " << name << "\n";
-        return s.str();
-    }
-
-    void unpack(const std::string & text) {
-        std::istringstream s(text);
-        size_t n = 0;
-        s >> dim >> n_cells >> n_nodes >> n_faces >> n;
-        sections.resize(n);
-        for (Section & x : sections) {
-            size_t n_marks = 0;
-            s >> x.kind >> x.zone >> x.first >> x.last >> x.nd >> x.bc_type >> x.face_type >> x.value_size >> x.start >> n_marks;
-            x.marks.resize(n_marks);
-            for (uint64_t & m : x.marks) s >> m;
-        }
-        s >> n;
-        cell_sections.resize(n);
-        for (auto & c : cell_sections) s >> c[0] >> c[1] >> c[2];
-        s >> n;
-        for (size_t k = 0; k < n; k++) {
-            uint64_t id = 0;
-            size_t length = 0;
-            s >> id >> length;
-            s.get();
-            std::string name(length, ' ');
-            s.read(name.data(), static_cast<std::streamsize>(length));
-            zone_names[id] = name;
-        }
-    }
 
     std::string zone_name(uint64_t zone) const {
         const auto it = zone_names.find(zone);
@@ -119,12 +74,13 @@ struct Layout {
 /** @brief Walks a Fluent file's sections, skipping over their data. */
 class Walker {
   public:
-    Walker(const std::string & filename, LineReader & line_reader, uint64_t cursor_bytes)
-        : cur(filename, cursor_bytes), lines(line_reader), name(filename) {}
+    Walker(const std::string & filename, uint64_t cursor_bytes) : cur(filename, cursor_bytes), name(filename) {}
 
     [[noreturn]] void fail(const std::string & what) const { throw std::runtime_error("Fluent file " + name + ": " + what); }
 
     uint64_t offset() const { return cur.offset(); }
+    uint64_t size() const { return cur.size(); }
+    void seek(uint64_t to) { cur.seek(to); }
     bool done() {
         skip_space();
         return cur.peek() < 0;
@@ -206,36 +162,34 @@ class Walker {
         if (n > cur.size() - cur.offset()) fail("binary section ends early.");
         cur.seek(cur.offset() + n);
     }
-    int32_t int32() {
-        char bytes[4];
-        for (char & b : bytes) {
-            const int c = cur.get();
-            if (c < 0) fail("binary section ends early.");
-            b = char(c);
-        }
-        int32_t v;
-        std::memcpy(&v, bytes, 4);
-        return v;
-    }
-    /** @brief Skip the ASCII data of section s, which starts on the next line; returns its first line's number. */
-    uint64_t skip_lines(const Section & s) {
-        while (cur.peek() == ' ' || cur.peek() == '\t' || cur.peek() == '\r') cur.get();
-        if (cur.get() != '\n') fail(not_one_per_line(s, lines.line_at(cur.offset()) + 1));
-        const uint64_t first = lines.line_at(cur.offset());
-        cur.seek(lines.offset(first + s.size()));
-        if (!peek(')')) fail(not_one_per_line(s, first + s.size() + 1));
-        return first;
-    }
-
   private:
     FileCursor cur;
-    LineReader & lines;
     std::string name;
 };
 
-Layout read_layout(const std::string & filename, LineReader & lines, uint64_t mark_spacing, uint64_t cursor_bytes) {
-    Walker r(filename, lines, cursor_bytes);
+/** @brief The file's layout, every rank walking its structure and the ranks splitting the work on sections' data (collective). */
+Layout read_layout(const std::string & filename, const std::string & source, uint64_t mark_spacing, uint64_t cursor_bytes) {
+    Walker r(filename, cursor_bytes);
     Layout layout;
+    // From the '(' that opens the data of ASCII section s, of per_item values per item (0: mixed faces), to its ')'
+    auto ascii = [&](Section & s, uint64_t per_item) {
+        s.start = r.offset();
+        const uint64_t close = parallel_read::find_nth(filename, s.start, ')', 1, cursor_bytes);
+        if (close == parallel_read::NONE) r.fail(s.what() + " does not end.");
+        if (per_item > 0) {
+            s.marks = parallel_read::mark_units(filename, s.start, close, parallel_read::Unit::TOKEN, mark_spacing, cursor_bytes);
+            if (s.marks.n != s.size() * per_item) {
+                r.fail("the " + s.what() + " holds " + std::to_string(s.marks.n) + " values, not " +
+                       std::to_string(s.size() * per_item) + ".");
+            }
+        } else {
+            const Chain c = parallel_read::chain_items(filename, source, s.start, close, false, MAX_FACE_WORDS, face_length,
+                                                       mark_spacing, cursor_bytes);
+            if (c.marks.n != s.size() || c.end != c.units) r.fail("the " + s.what() + " does not hold its faces.");
+            s.marks = c.marks;
+        }
+        r.seek(close);
+    };
     while (!r.done()) {
         r.expect('(');
         const std::string index_text = r.token();
@@ -270,7 +224,7 @@ Layout read_layout(const std::string & filename, LineReader & lines, uint64_t ma
                 s.start = r.offset();
                 r.skip(s.size() * uint64_t(s.nd) * uint64_t(s.value_size));
             } else {
-                s.start = r.skip_lines(s);
+                ascii(s, uint64_t(s.nd));
             }
             layout.sections.push_back(s);
             r.expect(')');
@@ -310,15 +264,26 @@ Layout read_layout(const std::string & filename, LineReader & lines, uint64_t ma
                 if (!s.mixed()) {
                     r.skip(s.size() * uint64_t(s.face_type + 2) * 4);
                 } else {
-                    for (uint64_t f = 0; f < s.size(); f++) {
-                        if (f % mark_spacing == 0) s.marks.push_back(r.offset());
-                        const int32_t n = r.int32();
-                        if (n < 2 || n > 64) r.fail("face of " + std::to_string(n) + " nodes.");
-                        r.skip(uint64_t(n + 2) * 4);
+                    // In windows no longer than the faces left can be (all of two nodes), so that no chain leaves the section
+                    uint64_t at = s.start;
+                    while (s.marks.n < s.size()) {
+                        const uint64_t window = std::min((s.size() - s.marks.n) * 4 * face_length(2), r.size() - at);
+                        if (window < 4) r.fail("binary section ends early.");
+                        const Chain c = parallel_read::chain_items(filename, source, at, at + window, true, MAX_FACE_WORDS,
+                                                                   face_length, mark_spacing, cursor_bytes);
+                        for (size_t k = 0; k < c.marks.unit.size(); k++) {
+                            s.marks.unit.push_back(s.marks.n + c.marks.unit[k]);
+                            s.marks.offset.push_back(c.marks.offset[k]);
+                        }
+                        if (c.end == parallel_read::NONE) r.fail("the " + s.what() + " has a face of fewer than 2 or more than 64 nodes.");
+                        s.marks.n += c.marks.n;
+                        at = c.end;
                     }
+                    if (at > r.size()) r.fail("binary section ends early.");
+                    r.seek(at);
                 }
             } else {
-                s.start = r.skip_lines(s);
+                ascii(s, s.mixed() ? 0 : uint64_t(s.face_type + 2));
             }
             layout.sections.push_back(s);
             r.expect(')');
@@ -344,6 +309,13 @@ Layout read_layout(const std::string & filename, LineReader & lines, uint64_t ma
     return layout;
 }
 
+/** @brief Put t at value u of an ASCII section of values marked by marks. */
+void seek_value(Tokens & t, const Marks & marks, uint64_t u) {
+    const size_t k = marks.before(u);
+    t.seek(marks.offset[k]);
+    for (uint64_t i = marks.unit[k]; i < u; i++) t.next();
+}
+
 } // namespace
 
 MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing, uint64_t cursor_bytes) {
@@ -351,15 +323,7 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
     const int p = comm::size(), r = comm::rank();
     if (comm::allreduce(std::ifstream(filename).good() ? 0 : 1, comm::Op::MAX)) throw cannot_read("the mesh file", filename);
     const std::string source = "Fluent file " + filename;
-    const uint64_t file_size = std::filesystem::file_size(filename);
-    const FileLines lines = parallel_read::index_lines(filename, file_size);
-    LineReader reader(filename, lines, source);
-    Layout layout;
-    std::string packed;
-    collectively([&] {
-        if (r == 0) packed = read_layout(filename, reader, mark_spacing, cursor_bytes).pack();
-    });
-    layout.unpack(comm::broadcast(packed));
+    const Layout layout = read_layout(filename, source, mark_spacing, cursor_bytes);
     auto fail = [&](const std::string & what) { throw std::runtime_error(source + ": " + what); };
     std::ifstream in(filename, std::ios::binary);
     auto read_bytes = [&](uint64_t at, uint64_t n) {
@@ -381,14 +345,13 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
             if (from >= to) continue;
             const int nd = std::min(s.nd, N_DIM);
             if (s.value_size == 0) {
-                reader.seek(s.start + from - (s.first - 1));
+                Tokens t(filename, source, cursor_bytes);
+                seek_value(t, s.marks, (from - (s.first - 1)) * uint64_t(s.nd));
                 for (uint64_t n = from; n < to; n++) {
-                    Fields f = reader.next();
                     for (int d = 0; d < s.nd; d++) {
-                        const double x = f.real();
+                        const double x = t.real();
                         if (d < nd) xyz[n - first_node][size_t(d)] = x;
                     }
-                    if (!f.done()) fail(not_one_per_line(s, f.number()));
                 }
                 continue;
             }
@@ -447,14 +410,21 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
                 if (n < 2 || n > 64) fail("face of " + std::to_string(n) + " nodes.");
             };
             if (s.value_size == 0) {
-                reader.seek(s.start + from - (s.first - 1));
+                Tokens t(filename, source, cursor_bytes);
+                if (s.mixed()) {
+                    const size_t mark = s.marks.before(from - (s.first - 1));
+                    t.seek(s.marks.offset[mark]);
+                    for (uint64_t f = s.marks.unit[mark]; f < from - (s.first - 1); f++) {
+                        for (uint64_t i = face_length(t.integer<uint64_t>(16)); i > 1; i--) t.next();
+                    }
+                } else {
+                    seek_value(t, s.marks, (from - (s.first - 1)) * uint64_t(s.face_type + 2));
+                }
                 for (uint64_t f = from; f < to; f++) {
-                    Fields line = reader.next();
-                    const uint64_t n = s.mixed() ? line.integer<uint64_t>(16) : uint64_t(s.face_type);
+                    const uint64_t n = s.mixed() ? t.integer<uint64_t>(16) : uint64_t(s.face_type);
                     check_size(n);
                     nodes.resize(n + 2);
-                    for (uint64_t & v : nodes) v = line.integer<uint64_t>(16);
-                    if (!line.done()) fail(not_one_per_line(s, line.number()));
+                    for (uint64_t & v : nodes) v = t.integer<uint64_t>(16);
                     add(f, int(k), nodes);
                 }
                 continue;
@@ -476,9 +446,9 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
                 }
                 continue;
             }
-            const uint64_t mark = (from - (s.first - 1)) / mark_spacing;
+            const size_t mark = s.marks.before(from - (s.first - 1));
             FileCursor cur(filename, cursor_bytes);
-            cur.seek(s.marks[mark]);
+            cur.seek(s.marks.offset[mark]);
             char word[4];
             auto next = [&]() {
                 for (char & b : word) {
@@ -488,7 +458,7 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
                 }
                 return value(word);
             };
-            for (uint64_t f = s.first - 1 + mark * mark_spacing; f < to; f++) {
+            for (uint64_t f = s.first - 1 + s.marks.unit[mark]; f < to; f++) {
                 const uint64_t n = next();
                 check_size(n);
                 nodes.resize(n + 2);

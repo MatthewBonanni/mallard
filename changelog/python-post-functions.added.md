@@ -1,0 +1,2 @@
+- Python package: `mallard.post.derive`, `mallard.post.average`, `mallard.report` (`mallard info RUN_DIR --html`) and `mallard.pack` (with `verify=True`, `mallard pack --verify`), each returning the command's JSON report (#793).
+- `mallard pack` and `mallard pack --verify` take `--format json`: the archive, the rerun command and each file with its role, size and SHA-256, or each problem and the result; `mallard info RUN_DIR --html --format json` prints the report's path (#793).
