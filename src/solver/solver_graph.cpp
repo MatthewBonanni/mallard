@@ -1109,6 +1109,7 @@ void Solver::begin_device_steps() {
                                                           (convergence.enabled() ? convergence.columns().size() : 0)
                                                     : 0;
     staged_probes.clear();
+    staged_intervals = false;
     probe_trigger_vars.clear();
     bool moving = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
@@ -1117,6 +1118,7 @@ void Solver::begin_device_steps() {
         probes.stage(k, n_records, statistics, static_cast<double>(t), reduced, halo.uses_nccl());
         moving = moving || probes.moves(k);
         staged_probes.push_back(k);
+        staged_intervals = staged_intervals || probes.reads_intervals(k);
         const size_t j = static_cast<size_t>(std::find(value_probes.begin(), value_probes.end(), k) - value_probes.begin());
         probe_trigger_vars.push_back(reduced ? static_cast<uint32_t>(first_value + j) : NO_TRIGGER_VARS);
     }
@@ -1186,6 +1188,7 @@ void Solver::resume_device_steps() {
     loop.active = 1;
     loop.check_interval = check_interval;
     loop.horizon = step_horizon();
+    if (staged_intervals) statistics.refresh_intervals(step, loop.horizon.step_limit);
     loop.outputs_staged = n_staged_outputs;
     if (reacting) {
         loop.chemistry_failures = static_cast<double>(chem_failures_seen);

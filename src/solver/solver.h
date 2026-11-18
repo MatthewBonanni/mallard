@@ -997,6 +997,7 @@ class Solver {
         Kokkos::View<int64_t *> probe_overflow;  // staged moving probe k outgrew its staging (unallocated: none moves)
         Kokkos::View<rtype> step_target;  // next_target_time of all but the staged probes and outputs
         bool staged_time_probes = false;
+        bool staged_intervals = false;           // some staged probe reads CI_<average>
         bool staged_outputs = false;             // the step graph stages the [[write_data]] outputs
         bool staged_time_outputs = false;        // some of them by time
         Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
