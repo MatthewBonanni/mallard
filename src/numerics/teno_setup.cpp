@@ -4521,22 +4521,17 @@ struct CellSetup2D {
         const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images (one-sided there)
         // fit at most the lower degree, from that degree's stencil size
-        uint8_t r_fit = r;
-        uint16_t n_start = ns;
-        if (g.wall_cell.extent(0) > 0 && wall_r < r) {
+        const bool capped = g.wall_cell.extent(0) > 0 && wall_r < r;
+        auto reaches_wall = [&](const uint32_t n) {
             bool near = g.wall_cell(i) != 0;
-            for (uint32_t k = 0; k < uint32_t(n_entries) && k < ns && !near; k++) {
+            for (uint32_t k = 0; k < uint32_t(n_entries) && k < n && !near; k++) {
                 near = g.wall_cell(w.visit_cell[w.entry_visit[w.entry_order[k]]]) != 0;
             }
-            if (near) {
-                r_fit = wall_r;
-                n_start = wall_ns;
-            }
-        }
-        const FitColumns fit = fit_columns(flat, teno::n_dof(r_fit));
-        const int nf = fit.n;
-        // Sized for the monomials of the spanned axes
-        if (flat != 0) n_start = static_cast<uint16_t>(Kokkos::ceil(stencil_factor * rtype(nf)));
+            return near;
+        };
+        bool at_wall = capped && reaches_wall(ns);
+        FitColumns fit;
+        int nf = 0;
         uint32_t n_means = 0;
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
@@ -4552,22 +4547,39 @@ struct CellSetup2D {
             if (ok_fit) widen(w.X, m, fit, nk);
             return ok_fit;
         };
-        uint16_t n_used = n_start;
+        uint16_t n_used = 0;
         uint32_t n_built = 0;
         bool found = false;
-        double best = Kokkos::Experimental::finite_max_v<double>;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        for (uint32_t n_try = n_start; n_try <= try_max; n_try++) {
-            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
-            if (!build(static_cast<int>(n_try))) continue;
-            n_built = n_try;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
-            if (lebesgue < best) {
-                best = lebesgue;
-                n_used = static_cast<uint16_t>(n_try);
-                found = true;
+        auto select = [&]() {
+            fit = fit_columns(flat, teno::n_dof(at_wall ? wall_r : r));
+            nf = fit.n;
+            // Sized for the monomials of the spanned axes
+            const uint16_t n_start = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * rtype(nf)))
+                                     : at_wall ? wall_ns
+                                               : ns;
+            n_used = n_start;
+            n_built = 0;
+            found = false;
+            double best = Kokkos::Experimental::finite_max_v<double>;
+            for (uint32_t n_try = n_start; n_try <= try_max; n_try++) {
+                if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+                if (!build(static_cast<int>(n_try))) continue;
+                n_built = n_try;
+                const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
+                if (lebesgue < best) {
+                    best = lebesgue;
+                    n_used = static_cast<uint16_t>(n_try);
+                    found = true;
+                }
+                if (lebesgue <= MAX_LEBESGUE_2D) break;
             }
-            if (lebesgue <= MAX_LEBESGUE_2D) break;
+        };
+        select();
+        // The search grows stencils past their first ns entries, possibly to a curved-wall cell
+        if (found && capped && !at_wall && reaches_wall(n_used)) {
+            at_wall = true;
+            select();
         }
         if (found && n_built != n_used) build(n_used);
         if (!found) {
