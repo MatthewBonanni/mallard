@@ -834,6 +834,42 @@ verification manual instead of bitwise identity ([CONTRIBUTING.md](../../CONTRIB
 none of the three relaxations above qualifies, so none was kept, and the TENO setup keeps its host and device
 tables equal.
 
+### 17. Planar face points and the troubled scratch (#978)
+
+The cases of section 15 (perfect gas on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra, LES, the propane
+flame on $48 \times 24^2$ / $24 \times 12^2 \times 6$, GRI-Mech 3.0 on $32 \times 16^2$), 3D TENO5 unless
+stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell at the steady state and
+the cells that fit on an A100-80GB, each change on top of the one before. Tetrahedra stop at 11.4M cells, the
+entries a multi-dimensional View addresses.
+
+| bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
+|---|---|---|---|---|---|---|---|
+| main | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,579 / 8,097,303 | 8,752 / 8,862,292 | 14,509 / 5,345,860 |
+| planar face points | 6,889 / 11,411,702 | 7,068 / 11,123,593 | 6,929 / 11,345,826 | 7,108 / 11,060,991 | 8,918 / 8,697,945 | 8,409 / 9,223,756 | 13,841 / 5,603,945 |
+| troubled scratch for a quarter of the cells | 6,009 / 13,082,840 | 6,188 / 11,446,092 | 6,049 / 12,996,330 | 6,228 / 11,446,092 | 8,038 / 9,650,243 | 7,529 / 10,301,808 | 12,961 / 5,984,427 |
+
+| perfect gas, bytes per cell, cells per A100-80GB | TENO3, hexahedra | tetrahedra | TENO4, hexahedra | tetrahedra | TENO6, hexahedra | tetrahedra |
+|---|---|---|---|---|---|---|
+| main | 4,973 / 15,808,529 | 5,740 / 11,446,092 | 5,371 / 14,636,220 | 6,183 / 11,446,092 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
+| both changes | 4,046 / 19,430,341 | 4,813 / 11,446,092 | 4,344 / 18,096,080 | 5,156 / 11,446,092 | 6,624 / 11,868,703 | 7,338 / 10,714,101 |
+
+- **Planar face points.** The 3D face quadrature stored every face's points (9 on quadrilaterals, 6 or 7 on
+  triangles, 3 coordinates each) for the TENO kernels. Only curved faces need them stored: the points of a planar
+  face are its nodes mapped by the rule, which the kernels now do from the face's nodes (`planar_face_point`,
+  every product rounded on its own, `rounded_product`, so host and device place them alike whatever they
+  contract), and the points are freed after the setup, which still reads them. Meshes with curved faces keep
+  them. The weights stay (the flux sums read them). 670 bytes less per hexahedron and 350 per tetrahedron at
+  TENO5 (300 / 300 at TENO3, 670 / 350 at TENO6), net of the face nodes the kernels now keep.
+- **Troubled scratch.** The troubled passes' scratch (central coefficients and the sector coefficients of every
+  face) had room for half the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond
+  it are done in further rounds. Every round below a capacity of 1 recomputes its cells' central coefficients,
+  so results do not depend on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02
+  against 1 and 0.5): 880 bytes less per cell at TENO5, 630 at TENO3, 1,090 at TENO6. 2D keeps a capacity of 1.
+
+Together: 26% more hexahedra per A100-80GB at TENO5 for a perfect gas, 19% for the 6-species flame, 12% with
+GRI-Mech. Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps of every case above,
+the 3D explosion on $24^3$ hexahedra and $12^3 \times 6$ tetrahedra and TENO4, on a CPU; on the A100 below).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

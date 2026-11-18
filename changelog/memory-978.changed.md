@@ -1,0 +1,2 @@
+- 3D TENO no longer stores the quadrature points of planar faces after setup: the kernels place them from the face's nodes with the setup's roundings, 670 bytes less device memory per hexahedron and 350 per tetrahedron at TENO5 on meshes without curved faces; results are bitwise unchanged (#978).
+- 3D TENO's troubled-cell passes take a quarter of the cells per round by default (`troubled_capacity = 0.25`, was 0.5): 880 bytes less device memory per cell at TENO5 (630 at TENO3, 1,100 at TENO6); results are bitwise unchanged, as they do not depend on the capacity (#978).
