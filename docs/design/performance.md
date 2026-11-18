@@ -495,9 +495,32 @@ it stops at, a restart, averages started afresh), the device's means are copied 
 Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
 the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
 written), the record says so, and the host takes the step without sampling them again (writing the spectra's
-staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
+staged sample instead). Confidence intervals `CI_<average>` are computed at each sample's cell from the
+device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
+Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
+half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
+Probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
+
+`[statistics.convergence]` values that a trigger reads are updated on the device too, at the rows of their signals,
+between the probes and the triggers. The integrals' and forces' values are the trigger variables the monitors set;
+probe signals are reduced into theirs like the probes a trigger reads. Each signal's history (times, values and the
+prefix sums of its values less the first, and of their squares) lives in device memory, and one kernel, under an IF
+node on whether any signal has a sample (and itself checking that flag, since graphs without conditional nodes run
+every IF body), does `Convergence::add` and `update`: the MSER-5 checks, the start of the stationary window, the
+integrated autocorrelation time and the batch means of the mean and the variance, in the host's order of operations
+and compiled without contracted multiply-adds, so its values are the host's bit for bit. Its team sums each of
+MSER's batch means and each lag's autocorrelation on one thread, as the host does, and Sokal's window closes over
+chunks of 256 lags. The host updates its own estimate as it takes each record, which writes the file and the
+restart histories; the device keeps the window's start, the `[statistics]` averages' start after the step's
+samples, in the record, since the host's copy of the statistics' clock may be steps ahead. On resuming, the host
+copies its state to the device, and its histories' samples since the last copy if it added any. The histories are
+whole, with no wraparound: their device memory holds at least 4096 samples, twice the longest history when staged,
+at 32 bytes per sample and signal (128 KiB per signal at least, about 1 GiB per signal at 10^7 samples, besides
+MSER's batch means and the lags' chunk). A history fills it only by running that long without a stop; the device
+then stops at that row (`CONVERGENCE`) and resumes with twice the room, in a new graph; while it restages, the old
+and the new memory are held at once, about three times the old.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -547,8 +570,7 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that follow the solution and those reading `[statistics]` confidence
-intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of regions that follow the solution. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
