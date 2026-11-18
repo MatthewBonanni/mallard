@@ -150,8 +150,9 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     }
 }
 
-TEST(MUSCL3D, FusedKernelReadsTheRowsAndGivesTheSeparateKernelsFaceValuesBitwise) {
-    // A blast in a box with walls, and in one periodic in x and y: every cell has a row
+TEST(MUSCL3D, FusedAndBlockPathsGiveTheSeparateKernelsFaceValuesAndLimitersBitwise) {
+    // A blast in a box with walls, and in one periodic in x and y: every cell has a row, and the walls'
+    // cells read their faces
     for (const bool periodic : {false, true}) {
         Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 10\nNz = 10\n") +
                                  (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : ""));
@@ -170,12 +171,14 @@ TEST(MUSCL3D, FusedKernelReadsTheRowsAndGivesTheSeparateKernelsFaceValuesBitwise
             h_W(c, 4) = inside ? 1.0_r : 0.1_r;
         }
         Kokkos::deep_copy(W, h_W);
-        auto results = [&](const bool fused) {
+        auto results = [&](const bool block_path, const bool fused) {
             auto muscl = std::make_unique<MUSCL>();
             muscl->set_mesh(mesh);
             muscl->set_boundaries(bd);
+            muscl->block_path = block_path;
             muscl->init(parse_toml("type = \"MUSCL\"\n"));
             EXPECT_EQ(muscl->n_table_cells, uint64_t(mesh->n_cells)) << "periodic " << periodic;
+            EXPECT_EQ(muscl->n_block_cells, block_path ? uint64_t(periodic ? 10 * 10 * 8 : 8 * 8 * 8) : 0u) << "periodic " << periodic;
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
             if (fused) {
                 muscl->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W, face_W, IndexSet{{}, 0, mesh->n_cells});
@@ -183,9 +186,18 @@ TEST(MUSCL3D, FusedKernelReadsTheRowsAndGivesTheSeparateKernelsFaceValuesBitwise
                 muscl->calc_face_values(W, face_W);
             }
             auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
-            return std::vector<rtype>(h.data(), h.data() + h.span());
+            auto phi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), muscl->limiters);
+            std::vector<rtype> out(h.data(), h.data() + h.span());
+            out.insert(out.end(), phi.data(), phi.data() + phi.span());
+            return out;
         };
-        EXPECT_TRUE(results(true) == results(false)) << "periodic " << periodic;
+        const auto separate = results(false, false);
+        for (const bool block_path : {false, true}) {
+            for (const bool fused : {false, true}) {
+                EXPECT_TRUE(results(block_path, fused) == separate)
+                    << "periodic " << periodic << ", block path " << block_path << ", fused " << fused;
+            }
+        }
     }
 }
 
