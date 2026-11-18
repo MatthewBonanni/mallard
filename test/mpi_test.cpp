@@ -1376,7 +1376,10 @@ TEST(MPITest, CurvedWallsMatchSerial) {
                                       "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
         const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
-        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & s) {
+            EXPECT_TRUE(s.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(s);
+        });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
@@ -1410,6 +1413,7 @@ TEST(MPITest, AxisymmetricCurvedWallsMatchSerial) {
             expect_matches_serial(input, [](const Solver & s) {
                 EXPECT_TRUE(s.get_mesh()->curved_geometry);
                 EXPECT_TRUE(s.get_mesh()->axisymmetric);
+                expect_halo_geometry_matches_owners(s);
             });
         }
     }

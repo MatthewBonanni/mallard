@@ -807,6 +807,12 @@ class Solver {
 
     protected:
         void init_mesh();
+        /**
+         * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
+         *        covariances. A curved cell's rule sums over its faces as the local mesh orients them, which
+         *        differs in the outermost halo layer, and so rounds differently (collective among neighbors).
+         */
+        void exchange_halo_geometry();
         /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);

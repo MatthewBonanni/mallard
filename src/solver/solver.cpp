@@ -575,7 +575,35 @@ void Solver::init_mesh() {
         mesh->make_axisymmetric();
         mesh_setup.settings.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
     }
+    if (mesh->curved_geometry && is_distributed()) exchange_halo_geometry();
     mesh->copy_host_to_device();
+}
+
+void Solver::exchange_halo_geometry() {
+    // Centroid and volume in the flow block, the axisymmetric measure and covariance as species columns
+    const uint32_t n_revolved = mesh->axisymmetric ? 4 : 0;
+    const State geometry("halo_geometry", mesh->n_cells, n_revolved);
+    auto h_flow = Kokkos::create_mirror_view(geometry.flow);
+    auto h_revolved = Kokkos::create_mirror_view(geometry.species);
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        FOR_I_DIM h_flow(c, i) = mesh->h_cell_coords(c, i);
+        h_flow(c, N_DIM) = mesh->h_cell_volume(c);
+        if (n_revolved == 0) continue;
+        h_revolved(c, 0) = mesh->h_cell_measure(c);
+        for (uint32_t k = 0; k < 3; k++) h_revolved(c, k + 1) = mesh->h_cell_covariance(c, k);
+    }
+    Kokkos::deep_copy(geometry.flow, h_flow);
+    Kokkos::deep_copy(geometry.species, h_revolved);
+    halo.exchange(geometry);
+    Kokkos::deep_copy(h_flow, geometry.flow);
+    Kokkos::deep_copy(h_revolved, geometry.species);
+    for (uint32_t c = mesh->n_owned(); c < mesh->n_cells; c++) {
+        FOR_I_DIM mesh->h_cell_coords(c, i) = h_flow(c, i);
+        mesh->h_cell_volume(c) = h_flow(c, N_DIM);
+        if (n_revolved == 0) continue;
+        mesh->h_cell_measure(c) = h_revolved(c, 0);
+        for (uint32_t k = 0; k < 3; k++) mesh->h_cell_covariance(c, k) = h_revolved(c, k + 1);
+    }
 }
 
 int Solver::base_halo_layers() const {
