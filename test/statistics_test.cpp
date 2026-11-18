@@ -112,7 +112,9 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
     solver.run();
 #ifdef KOKKOS_ENABLE_CUDA
     // The samples' first kernels, in the step graph's capture, do not break it
-    if (!Solver::are_cuda_graphs_off()) EXPECT_GT(solver.get_graph_steps(), 0u);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_GT(solver.get_graph_steps(), 0u);
+    }
 #endif
     solver.copy_device_to_host();
     const Statistics & stats = solver.get_statistics();
