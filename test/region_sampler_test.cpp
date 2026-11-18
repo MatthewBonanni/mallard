@@ -240,6 +240,52 @@ TEST(RegionSamplerTest, SharpSumsAcrossABinadeAreTheSumsOfOneThread) {
     EXPECT_GT(walking, STARTS / 8);
 }
 
+TEST(RegionSamplerTest, TeamsOfEverySizeClassifyEveryNodeAsTheRecursionDoes) {
+    namespace sampler = region::sampler;
+    namespace detail = region::sampler::detail;
+    const Shape<Ball> shape{{{0.43, 0.51, 0.47}, 0.17}, 0.0, true};
+    const double v0[4][3] = {{0.3, 0.35, 0.3}, {0.62, 0.4, 0.33}, {0.35, 0.7, 0.36}, {0.32, 0.42, 0.66}};
+    constexpr uint32_t n_nodes = sampler::tree_nodes();
+    std::vector<uint32_t> expected(n_nodes, detail::ABSENT);
+    auto recurse = [&](auto && self, const detail::SimplexNode & s, const int level, const uint32_t code) -> void {
+        const uint32_t state = Classify{shape}(s, level);
+        expected[sampler::tree_nodes(level) + code] = state;
+        if (state != detail::SUBDIVIDED) return;
+        for (int j = 0; j < sampler::CHILDREN; j++) {
+            detail::SimplexNode next;
+            Child{}(s, j, next);
+            self(self, next, level + 1, code * sampler::CHILDREN + static_cast<uint32_t>(j));
+        }
+    };
+    detail::SimplexNode root;
+    for (int k = 0; k < 4; k++) {
+        for (int i = 0; i < 3; i++) root.v[k][i] = v0[k][i];
+    }
+    root.measure = 1.0;
+    recurse(recurse, root, 0, 0);
+    // The deepest level's outside nodes and the absent ones share a state in the table
+    for (uint32_t node = sampler::tree_nodes(sampler::MAX_LEVEL); node < n_nodes; node++) {
+        if (expected[node] == detail::ABSENT) expected[node] = detail::OUTSIDE;
+    }
+    using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
+    const int largest = std::min(8, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
+    for (int size = 1; size <= largest; size++) {
+        Kokkos::View<uint32_t *, Kokkos::HostSpace> states("classified_states", n_nodes);
+        Policy policy(1, size);
+        policy.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(size)));
+        Kokkos::parallel_for("region_sampler_test", policy, [=](const Policy::member_type & member) {
+            const auto scratch = sampler::team_scratch(member);
+            detail::team_classify(member, scratch, root, Child{}, Classify{shape});
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_nodes),
+                                 [&](const uint32_t node) { states(node) = detail::node_state(scratch.tree, node); });
+        });
+        Kokkos::fence();
+        uint32_t mismatches = 0;
+        for (uint32_t node = 0; node < n_nodes; node++) mismatches += states(node) != expected[node] ? 1u : 0u;
+        EXPECT_EQ(mismatches, 0u) << "team of " << size;
+    }
+}
+
 TEST(RegionSamplerTest, TeamsSumWhatOneThreadSums) {
     const Ball ball{{0.43, 0.51, 0.47}, 0.17};
     struct Case {
