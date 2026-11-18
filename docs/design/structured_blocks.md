@@ -251,10 +251,12 @@ block cell they read its shape's table set and find its entries by offset,
 through the same template parameter; troubled cells are a few percent of the
 cells, so a branch per cell costs little.
 
-**MUSCL.** No block kernel: every cell reads its face neighbors through its
-faces, and its least-squares weights and face-centroid offsets from a row shared
-over the lattice (MUSCL tables, below). Cells on characteristic boundaries
-(vertex gradients) have no row.
+**MUSCL.** One kernel body: every cell with a row (MUSCL tables, below) reads
+its least-squares weights and face-centroid offsets from the row, and each face
+neighbor's state once, for both the fit and the limiter's extrema. The cells of
+a block whose faces all have a neighbor take them at $c + o_k$, one offset per
+face slot; every other cell reads its faces. Cells on characteristic
+boundaries (vertex gradients) have no row.
 
 **Mirror images.** A cell near one straight boundary plane has the stencil
 shape of the interior with mirror images in place of the cells beyond the plane
@@ -431,8 +433,19 @@ shared, each taking the row of its lowest global id, agreed over the ranks, so
 a cell's row depends on its own geometry alone and not on the partition. When
 fewer than 8 cells share each distinct row, over the ranks (counted by the
 rows' hashes before any is stored), no cell has a row: the rows would cost
-memory without sharing. MUSCL has no block path: reading the face neighbors
-by block offsets instead of through the faces measured within noise on an
-A100 (#1035). The rows give 4-5% more cells/s on lattices on an A100, far from
-the CPU prototype's 3.5 times: on the GPU the fused kernel's time is the
-neighbors' states it reads, not the least-squares solve (#1119).
+memory without sharing. The rows give 4-5% more cells/s on lattices on an
+A100, far from the CPU prototype's 3.5 times: on the GPU the fused kernel's
+time is the neighbors' states it reads, not the least-squares solve.
+
+**MUSCL's neighbor pass (#1119).** The fused kernel makes one pass over a
+row cell's face slots that sums the fit ($g = \mathrm{fma}(w_k, W_j - W_i,
+g)$) and keeps the extrema, then limits and extrapolates from registers: each
+neighbor's state is read once, not twice, and the cell's gradient is not
+written. The cells of a block whose faces all have a neighbor take them as the
+cell plus their block shape's offsets (`MUSCLTables::block`, a
+`teno::BlockStencils`) instead of through `faces_of_cell` and `cells_of_face`.
+The separate kernels call the same pass, so the fused and separate kernels
+and the block and face paths are bitwise equal.
+On an A100 against the rows alone: +4.8% cells/s on the walled MUSCL
+Taylor-Green $96^3$, +5.8% on the periodic one, +15% on `muscl_2d` ($1024^2$)
+and +3% on `air_3d`; the fused kernel takes 24-37% less time (nsys).
