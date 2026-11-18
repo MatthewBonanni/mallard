@@ -152,6 +152,7 @@ class MovingFractions {
         bool bounded = true;
         bool axisymmetric = false;
         bool implicit_shapes = false;
+        bool sharp_leaves = false, smooth_leaves = false;  // whether the straight cells' sharp or SMOOTH ShapeSampler has leaves
         Kokkos::View<Node *> nodes;
         Kokkos::View<const double *> vertices;
         kexpr::ProgramTable<> programs, times;
