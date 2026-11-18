@@ -1,0 +1,1 @@
+- Moving regions classify the subdivided simplices of a crossed cell with every thread of its team on GPUs, instead of mostly idle threads, with the same fractions bit for bit.
