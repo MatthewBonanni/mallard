@@ -572,7 +572,8 @@ surface is cut from one condition alone (`region::single_level`: one piece, uncl
 device cuts each crossed cell's level on its simplices as the host does (`region::cut::level_cut`, the host's
 double arithmetic in its order, without contraction, and an exact angular order instead of `atan2`; the host's
 `order_about` uses the same), counts the points per cell, scans their offsets and fills them into arrays of twice
-the points at the stage (at least 256; more stop the device with `PROBES` as above), samples them as
+the points at the stage, and at least the surface's points per crossed cell over the ranks times the cells staged
+(at least 256; more stop the device with `PROBES` as above), samples them as
 `Samples::in_cells` would, and stages their values with the levels. The host cuts the staged levels again at
 the record and takes the staged values point by point, after checking that it found as many points. Other
 surfaces of the solution stay with the host.

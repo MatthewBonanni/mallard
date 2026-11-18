@@ -2550,9 +2550,17 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
             c.values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_crossed_values", n_owned, p.n_evaluated());
             c.allocate_staging(n_records, iso.capacity);
         } else {
-            // Twice the quadrature points of the surface at t, cut and sampled where they lie
-            const size_t n_points = iso.extraction->elements(levels).quad_points.size();
-            const uint32_t capacity = static_cast<uint32_t>(std::max<size_t>(2 * n_points, 256));
+            // Twice the quadrature points of the surface at t, and as many per staged cell as it has per crossed
+            // cell over the ranks, cut and sampled where they lie
+            const uint64_t n_points = iso.extraction->elements(levels).quad_points.size();
+            uint64_t all_points = n_points, all_crossed = n_crossed;
+            if (iso.mesh->n_global_cells > 0) {
+                all_points = comm::allreduce(all_points, comm::Op::SUM);
+                all_crossed = comm::allreduce(all_crossed, comm::Op::SUM);
+            }
+            const uint64_t per_cell = all_crossed > 0 ? (all_points + all_crossed - 1) / all_crossed : 1;
+            const uint32_t capacity = static_cast<uint32_t>(
+                std::max<uint64_t>({2 * n_points, per_cell * iso.capacity, 256}));
             iso.cut = std::make_shared<region::LevelCut>(*iso.mesh, *region::single_level(*iso.mesh, *iso.region),
                                                          iso.levels, capacity);
             Samples & q = iso.points;
