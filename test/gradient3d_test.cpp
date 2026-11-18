@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "comm.h"
 #include "face_reconstruction.h"
 #include "gradient.h"
 #include "viscous_flux.h"
@@ -204,7 +205,7 @@ TEST(MUSCL3D, NoRowsWhenFewerThanEightCellsShareEachRow) {
     muscl->set_mesh(mesh);
     muscl->set_boundaries(make_boundary_data(*mesh, face_bc, {extrapolation}, 1.4_r));
     muscl->init(parse_toml("type = \"MUSCL\"\n"));
-    EXPECT_EQ(muscl->n_candidates_global, uint64_t(mesh->n_cells));
+    EXPECT_EQ(muscl->n_candidates_global, comm::allreduce(uint64_t(mesh->n_cells), comm::Op::SUM));
     EXPECT_GT(muscl->n_rows_global * MUSCL::MIN_CELLS_PER_ROW, muscl->n_candidates_global);
     EXPECT_EQ(muscl->n_table_cells, 0u);
     EXPECT_EQ(muscl->tables.row.extent(0), 0u);
