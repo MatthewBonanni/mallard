@@ -243,7 +243,7 @@ The Taylor–Green vortex of the 0.8.0 measurements, on the same hardware, with 
 
 With 128³ cells per GPU, 4 GPUs take 346 ms per step and one takes 344 ms (99.4%).
 
-- **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. Mixtures also reconstruct the first halo layer.
+- **Owner-computes partition faces:** each rank reconstructs only the cells it owns and receives the far side of each partition face from the rank owning it, while the other faces' fluxes are computed. TENO keeps its tables for those cells only, so halo cells cost little memory. Mixtures also reconstruct the first halo layer.
 - **Overlapped time step:** the first stage's reconstruction starts before the time-step exchange and the time-step reduction, and covers both; halo-dependent cells, the exchanges and the time-step reduction run on a high-priority stream, also inside the step's CUDA graph, so that they fill the device alongside the interior cells instead of in a tail of their own.
 - **What is left** (one node, NCCL and CUDA graphs, 33.1 ms per step on one GPU; 33.45 ms on 2 GPUs, 99.0%, and 33.5 ms on 4, 98.8%): the interior cells' reconstruction takes longer while the halo-dependent cells' and NCCL's kernels share the device with it, and NCCL's send and receive kernels hold their SMs while they wait for the other rank. Each rank numbers its cells and faces as [interior | near the partition], so the cells reconstructed before and after the halo arrives and the faces that wait for the partition faces are contiguous ranges.
 

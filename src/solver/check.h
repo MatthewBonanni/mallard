@@ -182,6 +182,8 @@ struct CheckReport {
     memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
     std::vector<memory::Bytes> setup_phases;  // at the peak of each phase of the setup
     uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
+    double view_entries_per_cell = 0.0;  // the most of any View proportional to the cells, largest rank
+    uint64_t view_max_local_cells = 0;   // owned and halo cells per rank its view_entries::MAX allows, 0: no limit
 
     // Sizing for options.memory (or the device): the largest rank's peak against the memory per rank
     std::string sizing_name;       // empty: no sizing
@@ -193,6 +195,7 @@ struct CheckReport {
     uint64_t fixed_bytes = 0;      // the rest (memory::scales_with_cells)
     bool sizing_setup = false;     // the setup's peak limits the cells per rank, else the steady state
     uint64_t max_local_cells = 0;  // owned and halo cells per rank that fit
+    bool sizing_view_entries = false;  // view_max_local_cells limits them, else the memory
     int min_ranks = 0;             // fewest ranks the mesh fits on, 0 if not found
     uint64_t min_owned = 0, min_halo = 0, min_peak = 0;  // largest part there and its predicted peak
     bool min_partitioned = false;  // the part comes from the partitioner (serial checks), else from this halo ratio
