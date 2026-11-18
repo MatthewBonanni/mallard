@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a cell field from a Mallard snapshot (VTKHDF or VTU) to PNG.
+"""Render a cell field from a Mallard snapshot (VTKHDF, VTU, HDF5 or a series: its last snapshot) to PNG.
     plot_vtu.py SNAPSHOT OUTPUT.png [--var RHO] [--contours N] [--line]
         [--slice z] [--at VALUE]
 2D meshes are drawn cell by cell; --line plots the field against x instead
@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import VTK_3D_TYPES, read_vtu, read_vtu_cells  # noqa: E402
+import mallard  # noqa: E402
 
 AXES = {"x": 0, "y": 1, "z": 2}
 
@@ -27,15 +27,7 @@ def scalar(values):
     return np.linalg.norm(values, axis=1) if values.ndim == 2 else values
 
 
-def cell_centers(path, var):
-    pts, conn, offs, types, arrays = read_vtu_cells(path)
-    starts = np.concatenate([[0], offs[:-1]])
-    sizes = offs - starts
-    centers = np.empty((len(offs), 3))
-    for n in np.unique(sizes):
-        sel = np.nonzero(sizes == n)[0]
-        centers[sel] = pts[conn[starts[sel, None] + np.arange(n)]].mean(axis=1)
-    return centers, scalar(arrays[var]), np.isin(types, list(VTK_3D_TYPES)).any(), arrays.get("TIME")
+VOLUME_TYPES = [10, 12, 13, 14]
 
 
 def plot_line(ax, centers, vals, var):
@@ -75,10 +67,11 @@ def main():
     ap.add_argument("--at", type=float, help="3D: position of the plane (default: the middle)")
     args = ap.parse_args()
 
-    centers, vals, is_3d, time = cell_centers(args.vtu, args.var)
-    title = f"{args.var}  min={vals.min():.4g} max={vals.max():.4g}"
-    if time is not None:
-        title = f"t = {time:.4g}   " + title
+    snapshot = mallard.open(args.vtu)
+    g = snapshot.geometry()
+    centers, vals = g.vertex_averages(), scalar(snapshot.read(args.var))
+    is_3d = np.isin(g.types, VOLUME_TYPES).any()
+    title = f"t = {snapshot.snapshots[-1].t:.4g}   {args.var}  min={vals.min():.4g} max={vals.max():.4g}"
     if args.line:
         fig, ax = plt.subplots(figsize=(7, 4))
         plot_line(ax, centers, vals, args.var)
@@ -88,10 +81,9 @@ def main():
         fig.colorbar(tpc, ax=ax, label=args.var)
         title += f"   ({where})"
     else:
-        pts, tris, tri_cell, arrays = read_vtu(args.vtu)
+        tris, tri_cell = g.triangles()
         fig, ax = plt.subplots(figsize=(7, 6))
-        tpc = ax.tripcolor(pts[:, 0], pts[:, 1], tris, facecolors=scalar(arrays[args.var])[tri_cell],
-                           cmap="viridis")
+        tpc = ax.tripcolor(g.points[:, 0], g.points[:, 1], tris, facecolors=vals[tri_cell], cmap="viridis")
         if args.contours:
             ax.tricontour(centers[:, 0], centers[:, 1], vals, args.contours, colors="k", linewidths=0.4)
         fig.colorbar(tpc, ax=ax, label=args.var)

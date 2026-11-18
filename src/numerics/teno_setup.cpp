@@ -3712,10 +3712,17 @@ class Setup3D {
 
         const Timings & timings() const { return timing; }
 
-        teno::Moments moments(const uint32_t n_rows) const {
-            if (n_rows == device.moments.extent(0)) return device.moments;
-            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, static_cast<size_t>(tables.n_moments));
-            Kokkos::deep_copy(out, Kokkos::subview(device.moments, std::make_pair(0u, n_rows), Kokkos::ALL()));
+        teno::Moments moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
+            const uint32_t n_extra = static_cast<uint32_t>(extra.extent(0));
+            if (n_extra == 0 && n_direct == device.moments.extent(0)) return device.moments;
+            const size_t n_moments = static_cast<size_t>(tables.n_moments);
+            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_direct + n_extra, n_moments);
+            const std::pair<uint32_t, uint32_t> direct(0u, n_direct);
+            Kokkos::deep_copy(Kokkos::subview(out, direct, Kokkos::ALL()), Kokkos::subview(device.moments, direct, Kokkos::ALL()));
+            const auto from = device.moments;
+            Kokkos::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
+                for (size_t m = 0; m < n_moments; m++) out(n_direct + k, m) = from(extra(k), m);
+            });
             return out;
         }
 
@@ -5007,7 +5014,7 @@ class Setup2D {
 
         const Timings & timings() const { return timing; }
 
-        teno::Moments moments(uint32_t) const { return teno::Moments(); }
+        teno::Moments moments(uint32_t, const Kokkos::View<uint32_t *> &) const { return teno::Moments(); }
 
     private:
         template <class Exec>
@@ -5108,7 +5115,9 @@ uint16_t SetupHandle::max_large() const { return impl->max_large(); }
 uint16_t SetupHandle::max_small() const { return impl->max_small(); }
 const Timings & SetupHandle::timings() const { return impl->timings(); }
 
-teno::Moments SetupHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
+teno::Moments SetupHandle::moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
+    return impl->moments(n_direct, extra);
+}
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);
