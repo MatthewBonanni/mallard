@@ -902,6 +902,7 @@ struct CellSetup {
     double stencil_factor = 2.0;
     // Central stencil sizes to start from on pyramids, at the full and the wall degree (PYRAMID_ODD_FACTOR)
     uint16_t pyramid_ns = 0, pyramid_wall_ns = 0;
+    bool sector_stencils = true;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1642,6 +1643,11 @@ struct CellSetup {
                 o.large_faces[s] = code(w, s, v, n_plane_faces);
                 for (uint32_t l = 0; l < nk; l++) o.large_pinv[s * nk + l] = rtype(w.X[s * nk + l]);
             }
+        }
+
+        if (!sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return OK;
         }
 
         // Small sector stencils, one per face: entries whose direction from the
@@ -2831,6 +2837,10 @@ struct CellTeam {
                                  [&](const uint32_t e) { o.large_pinv[e] = rtype(X_used[e]); });
         }
         tm.team_barrier();
+        if (!c.sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return Status::OK;
+        }
 
         // Sector stencils
         if (reach_grows(ctl, end, 8 * uint32_t(c.nss), 6)) fill_hash(tm, ws, hash_pos, ctl, end[ctl[N_END] - 1]);
@@ -3022,8 +3032,11 @@ struct CellTeam {
     }
 };
 
-/** @brief Central moments of every cell, mean of ((x - x_c) / h_c)^a ... (see teno.cpp). */
-template <int NM, class Space>
+/**
+ * @brief Central moments of every cell, mean of ((x - x_c) / h_c)^a ... (see
+ *        teno.cpp), up to degree D; the slots of higher degrees are left zero.
+ */
+template <int NM, int D, class Space>
 struct MomentsTask {
     Geometry<Space> g;
     int n_moments = 0;
@@ -3066,7 +3079,8 @@ struct MomentsTask {
         int k = 0;
         for (int a = 0; a < NM; a++) {
             for (int b = 0; a + b < NM; b++) {
-                for (int c = 0; a + b + c < NM; c++) m[k++] += w * px[a] * py[b] * pz[c];
+                for (int c = 0; a + b + c <= D; c++) m[k + c] += w * px[a] * py[b] * pz[c];
+                k += NM - a - b;
             }
         }
     }
@@ -3128,6 +3142,22 @@ struct MomentsTask {
         for (int k = 0; k < n_moments; k++) g.moments(c, k) = sums[k] / vol;
     }
 };
+
+/**
+ * @brief The moments of cells [0, n_cells) of degree 2 r - 2 (NM = 2 r - 1) for the smoothness
+ *        matrices, else of degree r, all that the central stencils read.
+ */
+template <int NM>
+void launch_moments(const Geometry<Kokkos::DefaultExecutionSpace::memory_space> & g, const uint32_t n_cells,
+                    const int n_moments, const bool smoothness) {
+    using Space = Kokkos::DefaultExecutionSpace::memory_space;
+    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, n_cells);
+    if (smoothness) {
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, Space>{g, n_moments});
+    } else {
+        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, Space>{g, n_moments});
+    }
+}
 
 /** @brief Box around every point inside all face planes of each cell (see plane_bounds in teno.cpp). */
 template <class Space>
@@ -3536,10 +3566,10 @@ class Setup3D {
                                                            n_cells);
             using Range = Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>;
             switch (tables.nm) {
-                case 3: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<3, DefaultMem>{d, tables.n_moments}); break;
-                case 5: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<5, DefaultMem>{d, tables.n_moments}); break;
-                case 7: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<7, DefaultMem>{d, tables.n_moments}); break;
-                case 9: Kokkos::parallel_for("teno_moments", Range(0, n_cells), MomentsTask<9, DefaultMem>{d, tables.n_moments}); break;
+                case 3: launch_moments<3>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 5: launch_moments<5>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 7: launch_moments<7>(d, n_cells, tables.n_moments, options.sector_stencils); break;
+                case 9: launch_moments<9>(d, n_cells, tables.n_moments, options.sector_stencils); break;
                 default: throw std::logic_error("TENO setup: unsupported degree.");
             }
             Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
@@ -3557,13 +3587,13 @@ class Setup3D {
 
         uint16_t max_large() const { return ns_max; }
         size_t c_nss_max() const { return nss_max; }
-        uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
+        uint16_t max_small() const { return options.sector_stencils ? uint16_t(teno::MAX_FACES * nss_max) : uint16_t(0); }
 
         uint32_t batch_cells() const { return std::min(device_batch(), whole_slices(n_target)); }
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 8192;
+            if constexpr (DEVICE_IS_HOST) return options.sector_stencils ? 8192 : 2048;
             // Batch outputs within about a quarter of the free device memory, for at most MAX_BATCH cells
             size_t free_bytes = size_t(8) << 30;
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -3674,7 +3704,7 @@ class Setup3D {
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
+                                                              double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, options.sector_stencils};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3687,7 +3717,7 @@ class Setup3D {
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
                                                     ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns},
+                                                    double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, options.sector_stencils},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3712,10 +3742,17 @@ class Setup3D {
 
         const Timings & timings() const { return timing; }
 
-        teno::Moments moments(const uint32_t n_rows) const {
-            if (n_rows == device.moments.extent(0)) return device.moments;
-            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_rows, static_cast<size_t>(tables.n_moments));
-            Kokkos::deep_copy(out, Kokkos::subview(device.moments, std::make_pair(0u, n_rows), Kokkos::ALL()));
+        teno::Moments moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
+            const uint32_t n_extra = static_cast<uint32_t>(extra.extent(0));
+            if (n_extra == 0 && n_direct == device.moments.extent(0)) return device.moments;
+            const size_t n_moments = static_cast<size_t>(tables.n_moments);
+            teno::Moments out(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moments"), n_direct + n_extra, n_moments);
+            const std::pair<uint32_t, uint32_t> direct(0u, n_direct);
+            Kokkos::deep_copy(Kokkos::subview(out, direct, Kokkos::ALL()), Kokkos::subview(device.moments, direct, Kokkos::ALL()));
+            const auto from = device.moments;
+            Kokkos::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
+                for (size_t m = 0; m < n_moments; m++) out(n_direct + k, m) = from(extra(k), m);
+            });
             return out;
         }
 
@@ -3758,7 +3795,7 @@ class Setup3D {
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
-                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns};
+                                                                  double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, options.sector_stencils};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);
@@ -4013,6 +4050,7 @@ struct CellSetup2D {
     uint8_t wall_r = 0;
     uint16_t wall_ns = 0;
     rtype stencil_factor = 2.0;
+    bool sector_stencils = true;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
@@ -4503,22 +4541,17 @@ struct CellSetup2D {
         const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images (one-sided there)
         // fit at most the lower degree, from that degree's stencil size
-        uint8_t r_fit = r;
-        uint16_t n_start = ns;
-        if (g.wall_cell.extent(0) > 0 && wall_r < r) {
+        const bool capped = g.wall_cell.extent(0) > 0 && wall_r < r;
+        auto reaches_wall = [&](const uint32_t n) {
             bool near = g.wall_cell(i) != 0;
-            for (uint32_t k = 0; k < uint32_t(n_entries) && k < ns && !near; k++) {
+            for (uint32_t k = 0; k < uint32_t(n_entries) && k < n && !near; k++) {
                 near = g.wall_cell(w.visit_cell[w.entry_visit[w.entry_order[k]]]) != 0;
             }
-            if (near) {
-                r_fit = wall_r;
-                n_start = wall_ns;
-            }
-        }
-        const FitColumns fit = fit_columns(flat, teno::n_dof(r_fit));
-        const int nf = fit.n;
-        // Sized for the monomials of the spanned axes
-        if (flat != 0) n_start = static_cast<uint16_t>(Kokkos::ceil(stencil_factor * rtype(nf)));
+            return near;
+        };
+        bool at_wall = capped && reaches_wall(ns);
+        FitColumns fit;
+        int nf = 0;
         uint32_t n_means = 0;
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
@@ -4534,22 +4567,39 @@ struct CellSetup2D {
             if (ok_fit) widen(w.X, m, fit, nk);
             return ok_fit;
         };
-        uint16_t n_used = n_start;
+        uint16_t n_used = 0;
         uint32_t n_built = 0;
         bool found = false;
-        double best = Kokkos::Experimental::finite_max_v<double>;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        for (uint32_t n_try = n_start; n_try <= try_max; n_try++) {
-            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
-            if (!build(static_cast<int>(n_try))) continue;
-            n_built = n_try;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
-            if (lebesgue < best) {
-                best = lebesgue;
-                n_used = static_cast<uint16_t>(n_try);
-                found = true;
+        auto select = [&]() {
+            fit = fit_columns(flat, teno::n_dof(at_wall ? wall_r : r));
+            nf = fit.n;
+            // Sized for the monomials of the spanned axes
+            const uint16_t n_start = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * rtype(nf)))
+                                     : at_wall ? wall_ns
+                                               : ns;
+            n_used = n_start;
+            n_built = 0;
+            found = false;
+            double best = Kokkos::Experimental::finite_max_v<double>;
+            for (uint32_t n_try = n_start; n_try <= try_max; n_try++) {
+                if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+                if (!build(static_cast<int>(n_try))) continue;
+                n_built = n_try;
+                const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
+                if (lebesgue < best) {
+                    best = lebesgue;
+                    n_used = static_cast<uint16_t>(n_try);
+                    found = true;
+                }
+                if (lebesgue <= MAX_LEBESGUE_2D) break;
             }
-            if (lebesgue <= MAX_LEBESGUE_2D) break;
+        };
+        select();
+        // The search grows stencils past their first ns entries, possibly to a curved-wall cell
+        if (found && capped && !at_wall && reaches_wall(n_used)) {
+            at_wall = true;
+            select();
         }
         if (found && n_built != n_used) build(n_used);
         if (!found) {
@@ -4566,6 +4616,11 @@ struct CellSetup2D {
                 faces_out[s] = code(w, e);
                 for (uint32_t l = 0; l < nk; l++) pinv_out[s * nk + l] = rtype(w.X[s * nk + l]);
             }
+        }
+
+        if (!sector_stencils) {
+            gather_depth = uint8_t(layers_used);
+            return OK;
         }
 
         // The visits of the rows of w.means that are no mirror images: the
@@ -4937,7 +4992,7 @@ class Setup2D {
         }
 
         uint16_t max_large() const { return ns_max; }
-        uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
+        uint16_t max_small() const { return options.sector_stencils ? uint16_t(teno::MAX_FACES * nss_max) : uint16_t(0); }
 
         // Meshes of at least MAX_BATCH cells share one workspace, the one check --memory measures on them
         uint32_t batch_cells() const {
@@ -4947,7 +5002,7 @@ class Setup2D {
 
         uint32_t device_batch() const {
             if (options.batch_cells > 0) return options.batch_cells;
-            if constexpr (DEVICE_IS_HOST) return 8192;
+            if constexpr (DEVICE_IS_HOST) return options.sector_stencils ? 8192 : 2048;
             // Scratch and outputs within about a quarter of the free device memory and what MAX_BATCH
             // cells take with twice the scratch: a thread per cell, so smaller scratch fills more of the device
             size_t free_bytes = size_t(8) << 30;
@@ -5008,7 +5063,7 @@ class Setup2D {
 
         const Timings & timings() const { return timing; }
 
-        teno::Moments moments(uint32_t) const { return teno::Moments(); }
+        teno::Moments moments(uint32_t, const Kokkos::View<uint32_t *> &) const { return teno::Moments(); }
 
     private:
         template <class Exec>
@@ -5017,7 +5072,8 @@ class Setup2D {
                                const TableBatchT<typename Exec::memory_space> & batch,
                                const Kokkos::View<uint32_t *, typename Exec::memory_space> & batch_cells) const {
             return CellSetup2D<Exec>{geometry, s, batch, batch_cells, {}, r, nk, ns, nss, ns_max, nss_max,
-                                     double(options.max_condition), wall_r, wall_ns, rtype(options.stencil_factor)};
+                                     double(options.max_condition), wall_r, wall_ns, rtype(options.stencil_factor),
+                                     options.sector_stencils};
         }
 
         /** @brief Where cell c is, for errors. */
@@ -5109,7 +5165,9 @@ uint16_t SetupHandle::max_large() const { return impl->max_large(); }
 uint16_t SetupHandle::max_small() const { return impl->max_small(); }
 const Timings & SetupHandle::timings() const { return impl->timings(); }
 
-teno::Moments SetupHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
+teno::Moments SetupHandle::moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
+    return impl->moments(n_direct, extra);
+}
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);

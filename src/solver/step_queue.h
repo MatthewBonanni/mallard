@@ -54,6 +54,7 @@ enum Reason : uint32_t {
     TRIGGER = 512,     // a trigger fires at the step (or its condition stopped at the iteration limit)
     OUTPUT = 1024,     // an output is due while the one staged before is still being written on some rank
     PROBES = 2048,     // a staged probe's moving region covers more cells than its staging holds
+    CONVERGENCE = 4096,  // a [statistics.convergence] history fills its device memory
 };
 
 /**
@@ -147,6 +148,7 @@ struct Record {
     uint32_t spectra;        // the unaveraged spectra staged their sample
     uint32_t statistics;     // the statistics took the step's samples
     uint32_t outputs;        // [[write_data]] writers are due, their arrays staged in the host's mirrors
+    double window_start;     // the start of the [statistics] averages after the step (-inf before), with convergence
     ProgressLocals progress_locals;
 };
 
