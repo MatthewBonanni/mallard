@@ -26,6 +26,13 @@ stencils::Table Solver::stencil_table(const std::vector<uint32_t> & targets, con
     return stencils::build(*face_reconstruction, *mesh, boundary_data, cell_owners(), targets, weights);
 }
 
+bool Solver::writes_stencils() const {
+    for (const char * name : stencils::FIELDS) {
+        if (writes_variable(input, name)) return true;
+    }
+    return !find_value_or<std::string>(input, "output", "write_stencils", "").empty() && output_files_enabled();
+}
+
 void Solver::init_mesh_fields() {
     const std::string stencil_file = find_value_or<std::string>(input, "output", "write_stencils", "");
     mesh_field_names.clear();

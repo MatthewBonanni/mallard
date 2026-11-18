@@ -1578,6 +1578,8 @@ void Solver::init_numerics() {
     face_reconstruction->set_boundaries(boundary_data);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         teno->partition_faces_exchanged = exchanges_partition_faces();
+        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
+        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
     }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
@@ -1585,7 +1587,7 @@ void Solver::init_numerics() {
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
-    if (is_mixture()) {
+    if (is_mixture() && !state_reader) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
@@ -1656,7 +1658,8 @@ void Solver::init_numerics() {
 
 void Solver::describe_block_path() {
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    if (teno == nullptr) return;
+    // The setup report of states read from files is not shown
+    if (teno == nullptr || state_reader) return;
     const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
     if (cells == 0) return;
     const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
@@ -2612,7 +2615,7 @@ int Solver::run_loop() {
                 if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
                 write_staged_monitors(record);
                 write_staged_probes(record);
-                update_convergence();
+                update_convergence(&record);
                 write_staged_outputs(record);
                 t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();

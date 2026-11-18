@@ -1,15 +1,15 @@
 #!/bin/bash
 # run.sh MALLARD PVBATCH INPUT [REPEATS]: in the directory where INPUT was run,
 # the wall time and peak memory of mallard post derive and of pv_derive.py on
-# the last snapshot and on the whole series, without and with a TENO cache_file
-# (benchmarks/README.md). macOS /usr/bin/time -l.
+# the last snapshot and on the whole series, without and with the run's TENO
+# cache_file (benchmarks/README.md). macOS /usr/bin/time -l.
 set -eu
 MALLARD=$1; PVBATCH=$2; INPUT=$3; N=${4:-3}
 HERE=$(cd "$(dirname "$0")" && pwd)
 F=MACH,Q_CRITERION,LAMBDA2,SCHLIEREN,VORTICITY
 SERIES=$(ls solut/*.vtkhdf.series)
 LAST=$(ls solut/*_[0-9]*.vtkhdf | tail -1)
-sed 's/^order = 5$/order = 5\ncache_file = "teno.cache"/' "$INPUT" > cached.toml
+sed '/^cache_file = /d' "$INPUT" > uncached.toml
 measure() {
   local label=$1; shift
   for _ in $(seq "$N"); do
@@ -20,11 +20,10 @@ measure() {
   done
 }
 DERIVE=("$MALLARD" post derive --fields $F -o bench_out --kokkos-num-threads=2)
-measure "mallard, one file" "${DERIVE[@]}" "$LAST" -i "$INPUT"
-measure "mallard, series" "${DERIVE[@]}" "$SERIES" -i "$INPUT"
-"${DERIVE[@]}" "$LAST" -i cached.toml > /dev/null
-measure "mallard cached, one file" "${DERIVE[@]}" "$LAST" -i cached.toml
-measure "mallard cached, series" "${DERIVE[@]}" "$SERIES" -i cached.toml
+measure "mallard, one file" "${DERIVE[@]}" "$LAST" -i uncached.toml
+measure "mallard, series" "${DERIVE[@]}" "$SERIES" -i uncached.toml
+measure "mallard cached, one file" "${DERIVE[@]}" "$LAST" -i "$INPUT"
+measure "mallard cached, series" "${DERIVE[@]}" "$SERIES" -i "$INPUT"
 export VTK_SMP_MAX_THREADS=2
 measure "pvbatch, one file" "$PVBATCH" "$HERE/pv_derive.py" 1.4 bench_out "$LAST"
 measure "pvbatch, series" "$PVBATCH" "$HERE/pv_derive.py" 1.4 bench_out solut/*_[0-9]*.vtkhdf
