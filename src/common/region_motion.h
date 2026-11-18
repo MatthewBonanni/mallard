@@ -110,6 +110,44 @@ class CrossedLevels {
 };
 
 /**
+ * @brief The quadrature points of a surface cut from one condition alone
+ *        (single_level) in the first count() of a CrossedLevels' cells, on
+ *        the device: those elements(mesh, region, levels) gives in these
+ *        cells, bit for bit and in its order, enqueued without host work or
+ *        allocation.
+ */
+class LevelCut {
+    public:
+        /** @brief Of the condition single_level gives, with room for capacity points. */
+        LevelCut(const Mesh & mesh, uint32_t condition, std::shared_ptr<const CrossedLevels> crossed, uint32_t capacity);
+
+        /**
+         * @brief Cuts the crossed cells' current levels (after CrossedLevels::select): total() points, kept in the
+         *        first total() of cells(), points(), weights() and normals() if they fit in capacity().
+         */
+        void select() const;
+
+        const Kokkos::View<uint32_t *> & cells() const { return m_cells; }
+        const Kokkos::View<double *[3]> & points() const { return m_points; }
+        const Kokkos::View<double *> & weights() const { return m_weights; }
+        const Kokkos::View<double *[3]> & normals() const { return m_normals; }
+        const Kokkos::View<uint32_t> & total() const { return m_total; }
+        uint32_t capacity() const { return static_cast<uint32_t>(m_cells.extent(0)); }
+
+    private:
+        std::shared_ptr<const CrossedLevels> m_crossed;
+        uint32_t m_condition = 0;
+        Kokkos::View<const uint32_t *> offsets_nodes, nodes;  // of the owned cells
+        Kokkos::View<const double *[3]> node_coords;
+        Kokkos::View<const rtype *[N_DIM]> cell_coords;
+        Kokkos::View<uint32_t *> row_offsets;  // of each crossed cell's points, then their total
+        Kokkos::View<uint32_t *> m_cells;
+        Kokkos::View<double *[3]> m_points, m_normals;
+        Kokkos::View<double *> m_weights;
+        Kokkos::View<uint32_t> m_total;
+};
+
+/**
  * @brief The fractions of every cell (owned and halo) inside a filled region
  *        that moves, as cell_fractions gives them at any time: its moving
  *        nodes placed at the time, then each cell sampled as cell_fractions

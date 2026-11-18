@@ -489,8 +489,10 @@ place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
 entry with the isosurface as its region writes the values on its elements at
 each write. When steps run ahead of the host ([`[run] step_queue`](parallel.md)),
 these probes do not stop the queue, except an isosurface's that reads normals
-(`MASS_FLUX` and the other fluxes), `sampling = "point"` or gradients: its
-samples are placed at each quadrature point, which only the host knows.
+(`MASS_FLUX` and the other fluxes) or `sampling = "point"` and is clipped,
+made of more than one piece or cut from two conditions (a 3D curve), or lies
+on a mesh with curved cells: the device cuts the others itself, the host's
+quadrature points bit for bit.
 
 **Point sampling.** With `sampling = "point"`, a static filled region
 integrates the reconstruction over its own shape instead of `f V` times the

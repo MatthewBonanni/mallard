@@ -50,6 +50,7 @@ class Region;
 class Regions;
 class MovingFractions;
 class CrossedLevels;
+class LevelCut;
 class SolutionLevels;
 class Extraction;
 struct Elements;
@@ -419,6 +420,7 @@ class Probes {
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
             Kokkos::View<rtype *[N_CONSERVATIVE]> inside_W;
             Kokkos::View<uint32_t *> unique_cells;  // cells of the inside samples, once each
+            Kokkos::View<const uint32_t> unique_count;  // isosurfaces cut on the device: the first count() of them
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
             // Staged probes: values of each record slot, (slot, local sample * variables)
@@ -601,6 +603,11 @@ class Probes {
                 Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged_count;
                 uint32_t capacity = 0;
                 std::vector<double> gathered;
+                // Staged, and cut from one condition (else per_cell): its quadrature points, cut and sampled on
+                // the device in the crossed cells, and the number of each record slot
+                std::shared_ptr<region::LevelCut> cut;
+                Samples points;
+                Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged_points;
             };
             std::shared_ptr<Isosurface> isosurface;
             /**
@@ -624,6 +631,8 @@ class Probes {
             void extracted(uint64_t slot);
             /** @brief Copies the crossed cells and their levels into record slot (*seq - 1) % n_records. */
             void stage_crossed(const uint64_t * seq) const;
+            /** @brief The cut's quadrature points as samples: their offsets from their cells' centroids, and normals. */
+            void sample_cut() const;
             /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
             bool cell_means() const { return average && (motion || isosurface); }
             /** @brief The cells its time averages may cover (cell_means): those of the mesh. */

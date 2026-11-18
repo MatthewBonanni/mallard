@@ -546,8 +546,8 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of isosurfaces and other surfaces or curves of the solution that read normals, point
-values or gradients (below). A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of surfaces or curves of the solution that are clipped, made of more than one
+piece or cut from two conditions, or lie on a mesh with curved cells (below). A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
@@ -566,9 +566,16 @@ sample per cell it crosses, whose values are the cell's: the same scan selects, 
 cells the host would read levels in (`region::CrossedLevels`), and their values are evaluated there and copied
 with the cells' levels into the record slot (with the same capacity and `PROBES` stop). The host extracts the
 elements from those levels as it takes the record, with the code it runs on the levels it selects itself, so the
-samples, their order and weights are its own bit for bit, and each sample takes its cell's staged values. Probes
-of fluxes through it, of point values or of gradients need values at each quadrature point, and stay with the
-host.
+samples, their order and weights are its own bit for bit, and each sample takes its cell's staged values.
+Probes of fluxes through it, of point values or of gradients need values at each quadrature point. When the
+surface is cut from one condition alone (`region::single_level`: one piece, unclipped, on straight cells), the
+device cuts each crossed cell's level on its simplices as the host does (`region::cut::level_cut`, the host's
+double arithmetic in its order, without contraction, and an exact angular order instead of `atan2`; the host's
+`order_about` uses the same), counts the points per cell, scans their offsets and fills them into arrays of twice
+the points at the stage (at least 256; more stop the device with `PROBES` as above), samples them as
+`Samples::in_cells` would, and stages their values with the levels. The host cuts the staged levels again at
+the record and takes the staged values point by point, after checking that it found as many points. Other
+surfaces of the solution stay with the host.
 Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
 returning at once, and
 the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders

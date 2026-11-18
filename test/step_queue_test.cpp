@@ -940,12 +940,35 @@ TEST(StepQueueTest, ProbesOfIsosurfacesAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
     EXPECT_EQ(run_case("isosurface_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
 
-    // Fluxes through it read each quadrature point's normal: the host extracts and samples them at its writes
-    Case flux = c;
-    flux.extra = c.extra + "[[probes]]\nname = \"flux\"\nregion = " + iso + "\nfields = [\"MASS_FLUX\"]\n"
-                 "interval = 4\nreductions = [\"integral\"]\nreductions_file = \"{dir}/flux.csv\"\n";
-    expect_queue_invariant("isosurface_fluxes", flux);
+TEST(StepQueueTest, ProbesOfIsosurfacesCutOnTheDeviceAreStagedWithoutStoppingTheDevice) {
+    // The isobar's mass flux at each quadrature point (through its normal), the reconstruction there, and their
+    // time averages: cut and sampled by the device, then cut again by the host from the levels it staged
+    const std::string iso = "{type = \"isosurface\", field = \"P\", value = 1.25}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"flux\"\nregion = " + iso + "\nfields = [\"MASS_FLUX\", \"MEAN_P\"]\n"
+              "interval = 3\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/flux.csv\"\n"
+              "[[probes]]\nname = \"points\"\nregion = " + iso + "\nfields = [\"RHO\", \"U\", \"T\"]\n"
+              "sampling = \"point\"\ninterval = 4\nreductions = [\"integral\", \"min\", \"max\"]\n"
+              "reductions_file = \"{dir}/points.csv\"\n"
+              "[[probes]]\nname = \"mean_flux\"\nregion = " + iso + "\nfields = [\"MASS_FLUX\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\"]\nreductions_file = \"{dir}/mean_flux.csv\"\n"
+              "[[probes]]\nname = \"flux_t\"\nregion = " + iso + "\nfields = [\"ENTHALPY_FLUX\"]\nsampling = \"point\"\n"
+              "time_interval = 0.013\nreductions = [\"integral\"]\nreductions_file = \"{dir}/flux_t.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("isosurface_cuts", c);
+    if (comm::is_root()) {
+        for (const char * f : {"flux.csv", "points.csv", "mean_flux.csv", "flux_t.csv"}) {
+            EXPECT_GT(std::count(o.files.at(f).begin(), o.files.at(f).end(), '\n'), 4) << f;
+        }
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    EXPECT_EQ(run_case("isosurface_cuts", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {

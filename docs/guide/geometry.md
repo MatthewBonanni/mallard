@@ -657,9 +657,11 @@ Who follows the solution, and when:
   the step graph when steps run ahead (`[run] step_queue`). So are the cells
   an isosurface crosses, with their levels and values, when it is sampled as
   cell averages without normals: the host extracts its elements from them
-  while the device steps on. One that reads normals (fluxes), point values or
-  gradients is extracted and sampled by the host, which stops the queue at its
-  writes. The run-health timing row `regions` is the time the host takes.
+  while the device steps on. One that reads normals (fluxes) or point values
+  is cut and sampled at its quadrature points by the device too, when it is
+  cut from one condition alone, unclipped, on a mesh without curved cells;
+  any other is extracted and sampled by the host, which stops the queue at
+  its writes. The run-health timing row `regions` is the time the host takes.
 - `[[write_data]]`: at each write, a `where` region's cells (those of positive
   fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
   [snapshot](output.md#snapshots-of-regions) is a mesh of its own.
