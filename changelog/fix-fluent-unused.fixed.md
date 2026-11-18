@@ -1,0 +1,1 @@
+- CUDA builds compile `src/mesh/read_fluent.cpp` again: nvcc rejected an unused member function as an error (#1251).

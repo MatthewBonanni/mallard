@@ -365,8 +365,8 @@ averages, and `--time T` the values at one time.
 ## 7. Figures: the Python package
 
 The [Python package](../guide/python.md) reads every file above into numpy arrays through Mallard's own
-reader, and runs the commands as functions that return their JSON reports (`mallard.command` runs any
-command, its options as keyword arguments):
+reader, and runs the commands as functions that return their JSON reports, their options as keyword
+arguments:
 
 ```python
 import mallard
@@ -381,8 +381,8 @@ q = mallard.open("fine/derived/derived.vtkhdf")
 cells = q.geometry()                                                          # points, connectivity, VTK types
 rms = mallard.open("fine/average/average.vtkhdf").read("RMS_U_X")     # one value per cell
 
-mallard.command("post", "average", "solut/wake.vtkhdf", times="100:200", fields=["U_X", "U_Y", "P"],
-                cwd="fine")                                                   # any command, by its options
+mallard.post.average("solut/wake.vtkhdf", times="100:200", fields=["U_X", "U_Y", "P"],
+                     cwd="fine")                                              # mallard post average
 
 study = mallard.post.convergence(["coarse", "medium", "fine"], quantity=["Fx_pressure", "Fx_viscous"])
 [(s["name"], s["estimate"]["extrapolated"], s["estimate"]["gci"]) for s in study["quantities"]]

@@ -1,0 +1,87 @@
+# input.toml on 144^3 hexahedra (a / 6), the resolution check of its growth rates.
+#
+# RESULTS: n = 11 dominates, as on 192^3, but the growth rates are 15-20% below
+# input.toml's in every fit window (over t = 30-70 the fastest is n = 10 at
+# sigma 2 pi R^2 / Gamma = 0.773, against n = 11 at 0.909) and fall as the
+# window moves later: the numerical dissipation of the coarser mesh thickens
+# the core (a = 0.237 against 0.225 at t = 63.8). 2,985,984 cells and 12,633
+# steps: 2.5 hours on 64 CPU threads.
+
+[run]
+t_stop = 95.73
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 144
+Ny = 144
+Nz = 144
+Lx = 4.8
+Ly = 4.8
+Lz = 4.8
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
+
+# The ring from its table (x, r: ux, q = u_r / r, p), with the background flow
+# that holds it in place; isentropic density
+[initialize]
+type = "analytical"
+rho = "(ring_p / 0.7142857142857143)^(1 / 1.4)"
+p = "ring_p"
+u = ["ring_ux - 0.1471739010081762", "ring_q * (y - 2.4)", "ring_q * (z - 2.4)"]
+
+# Seed: the table is read at a displaced core, by 3e-4 R in x and in r for each
+# azimuthal mode n = 1..24, with incommensurate phases (n^2 times the golden
+# ratio and sqrt(2), modulo 1)
+[[initialize.data]]
+name = "ring"
+file = "ring.csv"
+interpolation = "cubic"
+coordinates = ["x", "r"]
+at = [
+    """\
+    var th := atan2(z - 2.4, y - 2.4); var d := 0; \
+    for (var n := 1; n <= 24; n += 1) { d += cos(n * th + 2 * pi * frac(0.6180339887 * n * n)) }; \
+    x - 3e-4 * d""",
+    """\
+    var th := atan2(z - 2.4, y - 2.4); var d := 0; \
+    for (var n := 1; n <= 24; n += 1) { d += cos(n * th + 2 * pi * frac(0.4142135624 * n * n)) }; \
+    hypot(y - 2.4, z - 2.4) - 3e-4 * d""",
+]
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 1.880288310874334e-5
+Pr = 0.71
+
+[output]
+check_interval = 200
+
+[integrals]
+interval = 20
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "./restart/ring"
+format = "restart"
+time_interval = 2.659166666666667
