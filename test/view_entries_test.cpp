@@ -88,6 +88,19 @@ void expect_load_row_reads_the_row() {
         view_entries::load_row<5>(v, r, out);
         for (uint32_t i = 0; i < 5; i++) EXPECT_EQ(out[i], v(r, i)) << "row " << r << ", entry " << i;
     }
+    const Kokkos::View<double * [5][3], Layout, Kokkos::HostSpace> g("rows3", 7);
+    for (uint32_t r = 0; r < 7; r++) {
+        for (uint32_t k = 0; k < 5; k++) {
+            for (uint32_t i = 0; i < 3; i++) g(r, k, i) = 100.0 * r + 10.0 * k + i;
+        }
+    }
+    for (uint32_t r = 0; r < 7; r++) {
+        double out[5][3];
+        view_entries::load_row(g, r, out);
+        for (uint32_t k = 0; k < 5; k++) {
+            for (uint32_t i = 0; i < 3; i++) EXPECT_EQ(out[k][i], g(r, k, i)) << "row " << r << ", entry " << k << ", " << i;
+        }
+    }
 }
 
 } // namespace
