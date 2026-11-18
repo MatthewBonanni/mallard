@@ -407,6 +407,9 @@ class TENO : public FaceReconstruction {
         // This rank's cells whose tables the last full setup fitted; with shared tables the
         // others take those of their stencil shape's cell with the lowest global id
         uint32_t n_cells_fitted = 0;
+        // false: the central stencils alone, which cell_gradients and point_values read, and no
+        // face values (output of states read from files); such tables are never written to the cache
+        bool sector_stencils = true;
         // Set before init() when distributed runs get the halo side of partition faces from their owners
         // (Solver::exchanges_partition_faces): the tables then cover only the owned cells and the halo cells
         // of halo_image_cells(), which are all whose reconstruction is evaluated
