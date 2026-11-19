@@ -682,11 +682,12 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     }
 }
 
-TEST(TENO3DSetup, PyramidsWhoseOddDegreeStencilsReachACurvedWallFitTheWallDegree) {
-    // Order 6: a pyramid's stencil starts from 208 entries, other cells' from
-    // 110, and a curved-wall cell anywhere among the first 208 makes it fit
-    // the wall degree 3, whose pseudo-inverse has no rows of degrees 4 and 5.
-    // Order 5 fits degree 4, and its pyramids start from the other cells' 68
+TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
+    // The wall degree is 3, whose pseudo-inverse has no rows of degrees 4 and
+    // 5. Pyramids at order 6 start from 208 entries, other cells from 110. The
+    // Lebesgue search grows stencils past their start: here 87 at order 5 and
+    // 28 at order 6 reached a curved-wall cell only there, at full degree (#1202).
+    // They now stop short of it at full degree or fit the wall degree.
     auto mesh = make_mesh_3d("cartesian_pyramid", 6, 6, 6);
     mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"left\"\ntype = \"box\"\n"
                                                                   "filled = false\ncenter = [0.5, 0.5, 0.5]\nsize = [1.0, 1.0, 1.0]\n")));
@@ -697,22 +698,20 @@ TEST(TENO3DSetup, PyramidsWhoseOddDegreeStencilsReachACurvedWallFitTheWallDegree
         if (mesh->h_cells_of_face(f, 1) < 0 && mesh->curved_geometry->face_is_curved(f)) at_wall[uint32_t(mesh->h_cells_of_face(f, 0))] = 1;
     }
     const size_t wall_nk = teno::n_dof(3);
-    for (const auto & [order, n_start] : {std::make_pair(5, size_t(68)), std::make_pair(6, size_t(208))}) {
+    for (const int order : {5, 6}) {
         const size_t nk = teno::n_dof(uint8_t(order - 1));
         uint32_t reaching = 0;
         // Unshared, the central slots are the candidates in order of distance
         auto teno = make_teno_with(mesh, bd, order, [](TENO & t) { t.share_tables = false; });
         teno->for_each_stencil([&](const uint32_t c, const TENO::CellStencils & st) {
             bool reaches = false, full = false;
-            for (size_t s = 0; s < std::min<size_t>(st.central, n_start); s++) {
-                reaches |= st.cells[s] >= 0 && at_wall[uint32_t(st.cells[s])] != 0;
-            }
             for (size_t s = 0; s < st.central; s++) {
+                reaches |= st.cells[s] >= 0 && at_wall[uint32_t(st.cells[s])] != 0;
                 for (size_t l = wall_nk; l < nk; l++) full |= st.pinv[s * nk + l] != 0.0_r;
             }
             reaching += reaches;
             EXPECT_FALSE(reaches && full) << "order " << order << ": cell " << c << " fits degree " << order - 1
-                                          << " with a curved-wall cell among its first " << n_start << " entries";
+                                          << " with a curved-wall cell in its central stencil of " << st.central;
         }, true);
         EXPECT_GT(reaching, 0u) << "order " << order;
     }

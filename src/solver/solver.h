@@ -18,6 +18,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1019,6 +1020,8 @@ class Solver {
         bool staged_time_outputs = false;        // some of them by time
         Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
         Kokkos::View<uint32_t *> output_due;     // the launch stages writer k's output (n: any, n + 1: a region of the solution)
+        Kokkos::View<uint32_t *> output_follows;  // writer k follows the solution
+        Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> output_staged;  // writer k's output is staged, until the host wrote it
         uint64_t n_staged_outputs = 0;           // records whose outputs the host wrote
         PinnedMirrors pinned_mirrors;            // the host mirrors output_arrays_to_host fills
         Kokkos::View<rtype *>::host_mirror_type h_step_control;  // the step controller's slots
@@ -1059,7 +1062,7 @@ class Solver {
 
         bool distribute = true;
         int halo_layers = 0;
-        std::unique_ptr<DistributedMesh> setup;  // during init only
+        std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;
