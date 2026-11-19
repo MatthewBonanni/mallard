@@ -16,12 +16,15 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "test_fixtures.h"
 #include "verification.h"
+#include "gmsh_fixtures.h"
+#include "lattice_symbol.h"
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "scratch.h"
@@ -819,12 +822,22 @@ std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const Bou
 TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Triangles with mirror images at the walls: small batches split the cells
     // differently, and the host setup is the fallback for cells whose search
-    // outgrows the device's scratch
-    auto mesh = make_mesh("cartesian_tri", 12, 10);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+    // outgrows the device's scratch; order 6 on quadrilaterals too, the largest fits and smoothness matrix
+    struct Case {
+        const char * type;
+        uint32_t nx, ny;
+        int order;
+    };
+    for (const Case c : {Case{"cartesian_tri", 12, 10, 5}, Case{"cartesian_tri", 12, 10, 6}, Case{"cartesian", 14, 12, 6}}) {
+        auto mesh = make_mesh(c.type, c.nx, c.ny);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        const auto reference = teno_tables(*make_teno(mesh, bd, c.order));
+        const std::string label = std::string(c.type) + ", order " + std::to_string(c.order);
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_batch_cells = 64; }) == reference)
+            << label << ", batches of 64 cells";
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_on_host = true; }) == reference)
+            << label << ", host setup";
+    }
 }
 
 TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
@@ -912,3 +925,46 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     EXPECT_FALSE(teno_tables(*changed_only) == tables);
     EXPECT_FALSE(before == tables);
 }
+
+namespace {
+
+struct LatticeCase {
+    const char * lattice;
+    int order;
+    double lowest, highest; // growth rate, sound speeds over the block size
+};
+
+void PrintTo(const LatticeCase & c, std::ostream * out) { *out << c.lattice << ", order " << c.order; }
+
+} // namespace
+
+class TENOLattice : public ::testing::TestWithParam<LatticeCase> {};
+
+TEST_P(TENOLattice, LongWavesOfTheLinearizedSchemeGrowAtTheRecordedRate) {
+    // Largest real part of the Bloch symbol of the scheme linearized at rest
+    // (HLLC), over wavevectors up to 0.12 cycles per block. Orders 3 and 5 are
+    // neutral to the noise of the finite differences. Order 4 is a known
+    // failure on triangles (#1136): with the default 18-entry stencils the
+    // Riemann solver's jump term feeds long acoustic waves. A fix brings its
+    // rates under the bound of orders 3 and 5; then give order 4 that bound
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "finite differences of the right-hand side need double precision";
+    }
+    const LatticeCase c = GetParam();
+    const uint32_t n = 12;
+    const std::string mesh = std::string(c.lattice) == "crossed_squares"
+                                 ? "[mesh]\ntype = \"file\"\nfilename = \"" +
+                                       write_temp("mallard_teno_crossed_squares.msh", crossed_squares_mesh_2d(n)) + "\"\n"
+                                 : lattice_mesh(c.lattice, n);
+    const double rate = lattice_jacobian(mesh, n, c.order).largest_long_wave_rate(0.12, 0.02, 4e6);
+    std::cout << c.lattice << ", order " << c.order << ": largest growth rate of the long waves: " << rate
+              << " sound speeds over the block size" << std::endl;
+    EXPECT_GT(rate, c.lowest);
+    EXPECT_LT(rate, c.highest);
+}
+
+INSTANTIATE_TEST_SUITE_P(Triangles, TENOLattice,
+                         ::testing::Values(LatticeCase{"cartesian_tri", 3, -1.0, 1e-7}, LatticeCase{"cartesian_tri", 4, 1.0e-5, 1.5e-5},
+                                           LatticeCase{"cartesian_tri", 5, -1.0, 1e-7}, LatticeCase{"crossed_squares", 3, -1.0, 1e-7},
+                                           LatticeCase{"crossed_squares", 4, 0.8e-6, 1.3e-6},
+                                           LatticeCase{"crossed_squares", 5, -1.0, 1e-7}));
