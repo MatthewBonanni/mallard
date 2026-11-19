@@ -1,0 +1,2 @@
+- `[statistics.convergence]` windows read the start of the `[statistics]` averages at each row's step, where steps enqueued ahead of the host (`[run] step_queue`) could make it read a later step's (#1062).
+- A run restarted from a checkpoint with `[[triggers]]` and steps enqueued ahead of the host (`[run] step_queue`) no longer crashes before its first step.

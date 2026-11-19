@@ -200,7 +200,21 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   and right-hand sides, the last good state) is the one call it skips, and the
   rewrite turns off `[output] health`, whose ledger follows steps. The
   reconstruction stays the run's, because point samples, gradients and
-  `Q`/`VORTICITY` read its polynomials.
+  `Q`/`VORTICITY` read its polynomials, but TENO sets up only its central
+  stencils (`TENO::sector_stencils` off), which those read: no sector
+  stencils, smoothness matrices or the moments they are formed from, no
+  troubled-cell scratch, and no species reconstruction of mixtures, all of
+  which only face values read. The central stencils' tables, and so
+  gradients, are bitwise the run's
+  (`CentralStencilsAloneAreTheFullSetupsBitForBit`). With `share_tables`,
+  cells share basis means when the means alone agree on the sharing grid,
+  where the run also compares smoothness matrices or moments, so point
+  samples can differ from the run's below that grid. These tables are never
+  written to `cache_file`, and a run's cache is read without its sector
+  stencils. `STENCIL_*` fields summarize the sectors, so writing any keeps
+  the full setup and gives the run's fields bit for bit
+  (`StencilFieldsAreTheRunsBitForBit`); the rewrite drops `[output]
+  write_stencils`, the run's file.
 - **Steps.** Each snapshot's step and time are those the reader finds
   recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
   header), never the file name; only the snapshots of files written before
@@ -223,9 +237,11 @@ by the run's own reconstruction, gradients and kernels.
   snapshots of `RHO`, `U`, `P` and `T` the gradient fields were bitwise too
   in both cases of the benchmark below, and `MACH` differs in the last bit, from converting
   the stored primitives back to the conservative variables.
-- **Cost.** The case's setup is the reconstruction's: for TENO its stencils,
-  pseudo-inverses and smoothness matrices, the same tables as a run's
-  (`[numerics.face_reconstruction] cache_file` stores them), and their memory. Each snapshot then costs one gradient pass and the write.
+- **Cost.** The case's setup is the reconstruction's: for TENO the central
+  stencils and their pseudo-inverses, as a run computes them
+  (`[numerics.face_reconstruction] cache_file` stores them with the rest of a
+  run's tables), and their memory. Each snapshot then costs one gradient pass
+  and the write.
 
 ### Cost against ParaView
 
@@ -240,21 +256,26 @@ memory (`/usr/bin/time -l`), the best of 3 (2D) or 2 (3D) runs:
 
 | Case | Files | `post derive` | `post derive`, TENO cache | `pvbatch` |
 |---|---|---|---|---|
-| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 4.6 s, 1.1 GB | 0.64 s, 1.0 GB | 3.8 s, 0.21 GB |
-|  | 11 | 5.0 s, 1.1 GB | 1.0 s, 1.0 GB | 4.4 s, 0.24 GB |
-| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 32 s, 9.6 GB | 4.5 s, 9.5 GB | 3.3 s, 0.32 GB |
-|  | 11 | 33 s, 9.6 GB | 7.2 s, 9.5 GB | 5.8 s, 0.37 GB |
+| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 3.2 s, 0.21 GB | 1.3 s, 0.24 GB | 4.3 s, 0.21 GB |
+|  | 11 | 3.3 s, 0.22 GB | 1.6 s, 0.24 GB | 5.3 s, 0.24 GB |
+| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 47 s, 1.1 GB | 10 s, 1.2 GB | 3.8 s, 0.32 GB |
+|  | 11 | 35 s, 1.1 GB | 11 s, 1.2 GB | 6.4 s, 0.37 GB |
 
-- **Setup dominates.** Without a cache, the TENO setup is about 4 s in 2D and
-  28 s in 3D, against ParaView's 3-4 s start (Python, the reader and the
-  pipeline). Each further snapshot costs about 0.04 s in 2D and 0.27 s in 3D
-  for `post derive` (the TENO gradient pass), 0.06 s and 0.24 s for `pvbatch`:
-  in 2D `post derive` is faster from about 40 snapshots on, in 3D not at all.
+`mallard` built with GCC 16. Both programs ran while the machine ran other
+jobs (load average 10-50), which slows them and spreads repeated 3D runs by
+up to a third.
+
+- **Setup dominates.** Without a cache, the TENO setup is about 3 s in 2D and
+  half a minute or more in 3D, against ParaView's 4 s start (Python, the
+  reader and the pipeline). In 2D `post derive` is faster from the first
+  snapshot on, in 3D not at all.
 - **With the run's cache.** Reading the TENO cache (0.76 GB in 2D, 8.4 GB in
-  3D) instead of computing it makes `post derive` 6 and 4 times faster than
-  `pvbatch` in 2D; in 3D it is slower by a quarter to a third.
-- **Memory** is the TENO tables' (about 32 KB per hexahedron at order 5):
-  5 times ParaView's in 2D, 30 times in 3D.
+  3D) instead of computing it makes `post derive` 3 times faster than
+  `pvbatch` in 2D; in 3D it is 2 to 3 times slower.
+- **Memory.** `post derive` sets TENO up with its central stencils alone, the
+  only tables the gradient reads, so its memory is mostly the mesh's (face
+  quadrature and vertex gradient weights): ParaView's in 2D, 3 to 4 times it
+  in 3D.
 
 Agreement, as relative L2 norms of the difference over the norm of
 `post derive`'s field:
