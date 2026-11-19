@@ -13,7 +13,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
 | [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
-| [Performance](#performance): benchmarks and baselines | `perf/perf_suite.py` |
+| [Performance](#performance): benchmarks and baselines, work-precision study | `perf/perf_suite.py`, `perf/work_precision.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
 
@@ -24,7 +24,7 @@ python3 -m venv .venv
 .venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -72,7 +72,7 @@ More: [Thermochemistry](../docs/guide/thermochemistry.md#0d-reactors-mallard-rea
 
 ### `mallard mesh convert`: meshes for large parallel runs
 
-Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; use it once the mesh is too large for each rank to read whole.
+Writes a mesh file (Gmsh, Fluent, CGNS or OpenFOAM), or the mesh of an input file with its `[mesh.transform]`, in Mallard's HDF5 format, which every rank of a parallel run reads only its share of. Needs a build with `-DMallard_ENABLE_HDF5=ON`; HDF5 meshes need no parsing, so convert a large mesh used for many runs once.
 
 ```sh
 mallard mesh convert mesh.msh mesh.h5                # from any mesh file
@@ -227,6 +227,15 @@ python examples/premixed_flame/plot_flame.py run/ examples/premixed_flame/refere
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-light.svg#gh-light-mode-only)
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-dark.svg#gh-dark-mode-only)
 
+### `flame_table.py`: premixed flames against the mixture fraction
+
+```sh
+python tools/setup/flame_table.py mechanisms/h2o2.yaml ohmech h2n2_air.csv --fuel H2:0.5,N2:0.5 \
+    [--oxidizer O2:1,N2:3.76] [--species H2] [--T 300] [--p 101325] [--dz 0.01] [--full full/]
+```
+
+Cantera flames of the mixtures of two streams, from the stoichiometric mixture fraction towards each side in steps of `--dz`, each from its neighbor's solution, until a flame fails or burns slower than `--min-speed` (0.02 m/s): one row per flame of `Z`, `s_L`, `delta_L` (thermal thickness), `omega_max` (the largest consumption rate of `--species`, by default the fuel's most abundant species with C or H), `phi` and `T_b`. It is the `flame_table` of `[les.combustion] sensor = "reaction"` ([thickened flames of non-premixed and partially premixed combustion](../docs/guide/les.md#non-premixed-and-partially-premixed-flames)); `--full` also writes each flame's solution for `flame_restart.py`.
+
 ### `detonation_reference.py` and `znd_restart.py`: detonations
 
 ```sh
@@ -276,9 +285,12 @@ import mallard
 f = mallard.open("solut/flow.vtkhdf")
 p = f.read_all("P")                           # (snapshots, cells)
 g = f.geometry()                              # points, connectivity, offsets, VTK types
+triangles, cell = g.triangles()               # 2D: a triangle fan of every cell, for tripcolor
+for f, k in mallard.series("solut", "flow*"): # every snapshot of the series and snapshot files matching, in time order
+    rho = f.read("RHO", k)
 ```
 
-Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h5py alone, for the scripts below, which run without the library:
+Its modules `vtu`, `vtkhdf`, `h5` and `tables` read the formats with numpy and h5py alone, for the example, documentation and setup scripts not yet moved onto `mallard.open`, which run without the library:
 
 ```python
 import sys; sys.path.insert(0, "tools")
@@ -316,10 +328,10 @@ The same field of several snapshots side by side, each titled with its run direc
 ### `animate.py`: movies of a 2D run
 
 ```sh
-python tools/post/animate.py solut riemann [--var RHO] [--res 1000] [--fps 20] [--xlim 0 1] [--glob "flow_[0-9]*.h5"]
+python tools/post/animate.py solut riemann [--var RHO] [--res 1000] [--fps 20] [--xlim 0 1] [--glob "flow*"]
 ```
 
-An MP4 and a GIF of a 2D series: the field (density, or `--var`, including the derived `VORTICITY` and `MACH`) with contours, beside a numerical schlieren. Frames map every pixel to the cell holding it, so any mesh works; `--frames-dir` keeps the PNG frames, and `--help` lists the layout, color and size options.
+An MP4 and a GIF of a 2D series (the series and snapshot files of a directory matching `--glob`, in time order, or one series file): the field (density, or `--var`, including the derived `VORTICITY` and `MACH`) with contours, beside a numerical schlieren. Frames map every pixel to the cell holding it, so any mesh works; `--frames-dir` keeps the PNG frames, and `--help` lists the layout, color and size options.
 
 ![The last frame: density and numerical schlieren](../docs/images/tools/animate-light.svg#gh-light-mode-only)
 ![The last frame: density and numerical schlieren](../docs/images/tools/animate-dark.svg#gh-dark-mode-only)
@@ -373,6 +385,17 @@ Runs the performance set of `benchmarks/perf/` (flow solver in 2D and 3D, reacti
 ![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-light.svg#gh-light-mode-only)
 ![Baseline throughput of each benchmark on each GPU](../docs/images/tools/perf_baselines-dark.svg#gh-dark-mode-only)
 
+### `work_precision.py`: error against cost
+
+```sh
+python tools/perf/work_precision.py run --mallard-2d build/src/mallard --mallard-3d build-3d/src/mallard --out cpu --threads 2 [--jobs 6 --cpus 0-11]
+python tools/perf/work_precision.py reference --mallard-2d build/src/mallard --out cpu
+python tools/perf/work_precision.py collect cpu gpu
+python tools/docs/work_precision.py --table
+```
+
+Runs the [work-precision study](../docs/design/work_precision.md): the isentropic vortex on 2D squares and irregular triangles and on 3D hexahedra and tetrahedra, and the Shu-Osher problem, each with MUSCL and TENO-E 3 to 6 on meshes from coarse to fine, until the next mesh would take longer than `--max-wall` seconds. Each run's record (its run id, steps, wall time and its parts, peak memory, build and device, all read from its `mallard.jsonl`) and error (from `mallard post convergence --exact`, or against the Shu-Osher reference) go to `results.jsonl` in the output directory; `collect` merges directories, one per platform, into `tools/docs/work_precision.json`, from which `tools/docs/work_precision.py` draws the figures and prints the cost of reaching each target error. Runs already in the output directory are read back, not repeated. On a GPU, `--defer-errors` keeps the snapshots and writes no records, so that the same `run` command on a copy of the directory, on a CPU machine, computes the errors (`post convergence` runs on one host thread) without holding the GPU.
+
 ## Case scripts
 
 These set up or analyze one example each, and live in its directory (`examples/<case>/`) unless they also serve others (`tools/setup/`, `tools/post/`); their figures are on the [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) and [Validation](https://matthewbonanni.github.io/mallard/validation/) pages, and `--help` gives each one's usage.
@@ -420,6 +443,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/gpu_runtime_tests.sh [--full] BUILD` | GPU runtime checks of a CUDA build: the step graph and stream ordering tests under NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) on one GPU and on 2 ranks; `--full` adds initcheck, more tests under each tool and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL across the network). The GPU CI runs it |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard`'s h5py readers that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases by dispatch on `main`); the first job of `ci.yml` runs it |
@@ -442,7 +466,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/python.py --mallard build/src/mallard` | The figure of the [Python](../docs/guide/python.md) page, drawn with the package from the Sod example (a build with HDF5; `make_figures.py` runs it) |
 | `docs/used_in.py [--check]` | The "Used in" line of each feature section of the user guide, from the example inputs; `--check` fails on stale lines (first job of `ci.yml`); standard library only |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
-| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |
+| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots, through the Python package) |
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |

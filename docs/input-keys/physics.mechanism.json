@@ -22,7 +22,9 @@
   "examples/reactive_shock_tube/input.toml",
   "examples/shock_bubble_3d/input.toml",
   "examples/triple_flame/input.toml",
-  "examples/triple_flame/thick/input.toml"
+  "examples/triple_flame/tfles/input.toml",
+  "examples/triple_flame/thick/input.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
  ],
  "type": "string"
 }

@@ -11,20 +11,27 @@
 
 #include "distribution.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "comm.h"
 
 void plan_halo_exchange(Distribution & dist, const std::vector<int> & halo_owner) {
     const size_t me = static_cast<size_t>(comm::rank());
     const size_t n_ranks = static_cast<size_t>(comm::size());
-    std::unordered_map<uint64_t, uint32_t> local_of;
-    for (uint32_t i = 0; i < dist.global_cell.size(); i++) local_of.emplace(dist.global_cell[i], i);
+    // Owned cells by global id
+    std::vector<std::pair<uint64_t, uint32_t>> owned(dist.n_owned);
+    for (uint32_t i = 0; i < dist.n_owned; i++) owned[i] = {dist.global_cell[i], i};
+    std::sort(owned.begin(), owned.end());
     std::vector<std::vector<uint64_t>> wanted(n_ranks);
+    std::vector<std::vector<uint32_t>> wanted_local(n_ranks);
     for (size_t i = dist.n_owned; i < dist.global_cell.size(); i++) {
-        wanted[static_cast<size_t>(halo_owner[i - dist.n_owned])].push_back(dist.global_cell[i]);
+        const size_t r = static_cast<size_t>(halo_owner[i - dist.n_owned]);
+        wanted[r].push_back(dist.global_cell[i]);
+        wanted_local[r].push_back(static_cast<uint32_t>(i));
     }
     const auto requested = comm::alltoallv(wanted);
     dist.neighbors.clear();
@@ -34,17 +41,16 @@ void plan_halo_exchange(Distribution & dist, const std::vector<int> & halo_owner
         if (wanted[r].empty() && requested[r].empty()) continue;
         if (r == me) throw std::logic_error("plan_halo_exchange: a rank requested its own cells");
         dist.neighbors.push_back(static_cast<int>(r));
-        std::vector<uint32_t> recv, send;
-        for (uint64_t g : wanted[r]) recv.push_back(local_of.at(g));
+        std::vector<uint32_t> send;
         for (uint64_t g : requested[r]) {
-            const auto it = local_of.find(g);
-            if (it == local_of.end() || it->second >= dist.n_owned) {
+            const auto it = std::lower_bound(owned.begin(), owned.end(), std::pair<uint64_t, uint32_t>{g, 0});
+            if (it == owned.end() || it->first != g) {
                 throw std::logic_error("plan_halo_exchange: rank " + std::to_string(r) +
                                        " requested a cell not owned here");
             }
             send.push_back(it->second);
         }
-        dist.recv_cells.push_back(std::move(recv));
+        dist.recv_cells.push_back(std::move(wanted_local[r]));
         dist.send_cells.push_back(std::move(send));
     }
 }
