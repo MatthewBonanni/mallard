@@ -969,6 +969,13 @@ struct CellSetup {
         return false;
     }
 
+    /** @brief The position of the first sorted entry from s on that is a cell at a curved wall (one must follow). */
+    KOKKOS_INLINE_FUNCTION
+    uint32_t first_wall(const Lanes & w, uint32_t s) const {
+        while (!g.wall_cell(w.visit_cell[w.entry_ref[w.entry_order[s]] & 0xFFFFFFu])) s++;
+        return s;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
         if constexpr (ON_HOST) {
@@ -1640,12 +1647,9 @@ struct CellSetup {
         // Stencils reaching a curved wall without mirror images fit a lower degree
         const bool pyramid = g.offsets_nodes_of_cell(i + 1) - g.offsets_nodes_of_cell(i) == 5;
         const uint32_t n_full = pyramid ? pyramid_ns : ns;
-        const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
-        const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
-        const int nf = fit.n;
-        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
-                                 : at_wall ? (pyramid ? pyramid_wall_ns : wall_ns)
-                                           : (pyramid ? pyramid_ns : ns);
+        bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
+        FitColumns fit;
+        int nf = 0;
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
@@ -1659,33 +1663,52 @@ struct CellSetup {
             if (ok_fit) widen(w.X, m, fit, nk);
             return ok_fit;
         };
-        uint16_t n_used = n_first;
-        bool found = false;
-        uint32_t n_tried = 0;
+        uint16_t n_used = 0;
         const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
-        for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
-            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
-            if (!build(static_cast<int>(n_try))) continue;
-            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
-            w.tried_n[n_tried] = n_try;
-            w.tried_lebesgue[n_tried] = lebesgue;
-            n_tried++;
-            if (lebesgue <= MAX_LEBESGUE_3D) {
-                n_used = static_cast<uint16_t>(n_try);
-                found = true;
-                break;
-            }
-        }
-        if (!found && n_tried > 0) {
-            double best = Kokkos::Experimental::finite_max_v<double>;
-            for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
-            for (uint32_t k = 0; k < n_tried; k++) {
-                if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
-                    n_used = static_cast<uint16_t>(w.tried_n[k]);
+        auto select = [&](const uint32_t n_max) {
+            fit = fit_columns(flat, at_wall ? wall_nk : nk);
+            nf = fit.n;
+            const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
+                                     : at_wall ? (pyramid ? pyramid_wall_ns : wall_ns)
+                                               : (pyramid ? pyramid_ns : ns);
+            n_used = n_first;
+            bool found = false;
+            uint32_t n_tried = 0;
+            for (uint32_t n_try = n_first; n_try <= n_max; n_try++) {
+                if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+                if (!build(static_cast<int>(n_try))) continue;
+                const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
+                w.tried_n[n_tried] = n_try;
+                w.tried_lebesgue[n_tried] = lebesgue;
+                n_tried++;
+                if (lebesgue <= MAX_LEBESGUE_3D) {
+                    n_used = static_cast<uint16_t>(n_try);
+                    found = true;
                     break;
                 }
             }
-            found = build(n_used);
+            if (!found && n_tried > 0) {
+                double best = Kokkos::Experimental::finite_max_v<double>;
+                for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
+                for (uint32_t k = 0; k < n_tried; k++) {
+                    if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
+                        n_used = static_cast<uint16_t>(w.tried_n[k]);
+                        break;
+                    }
+                }
+                found = build(n_used);
+            }
+            return found;
+        };
+        bool found = select(try_max);
+        // The search grows stencils past their first n_full entries, possibly to a curved-wall
+        // cell: they stop short of it, or else fit the wall degree
+        if (found && !at_wall && wall_nk < nk && reaches_wall(w, n_used)) {
+            found = select(first_wall(w, n_full));
+            if (!found) {
+                at_wall = true;
+                found = select(try_max);
+            }
         }
         if (!found) {
             // A stencil cut off by the halo is retried once the halo is deep enough
@@ -2820,11 +2843,8 @@ struct CellTeam {
                 reached = c.reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
             }, at_wall);
         }
-        const FitColumns fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
-        const int nf = fit.n;
-        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
-                                 : at_wall ? (pyramid ? c.pyramid_wall_ns : c.wall_ns)
-                                           : (pyramid ? c.pyramid_ns : c.ns);
+        FitColumns fit;
+        int nf = 0;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
             const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
@@ -2847,36 +2867,61 @@ struct CellTeam {
             }
             return okq[0];
         };
-        uint16_t n_used = n_first;
-        bool found = false;
-        uint32_t n_tried = 0;
-        for (uint32_t n_try = n_first; n_try <= try_max; n_try++) {
-            if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
-            if (!build(int(n_try))) continue;
-            const double lebesgue =
-                team_lebesgue_constant(tm, &w.psi[0], int(n_psi), nk, X_used, int(n_try), &w.coef[0]);
-            if (tm.team_rank() == 0) {
-                w.tried_n[n_tried] = n_try;
-                w.tried_lebesgue[n_tried] = lebesgue;
-            }
-            n_tried++;
-            if (lebesgue <= MAX_LEBESGUE_3D) {
-                n_used = static_cast<uint16_t>(n_try);
-                found = true;
-                break;
-            }
-        }
-        tm.team_barrier();
-        if (!found && n_tried > 0) {
-            double best = Kokkos::Experimental::finite_max_v<double>;
-            for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
-            for (uint32_t k = 0; k < n_tried; k++) {
-                if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
-                    n_used = static_cast<uint16_t>(w.tried_n[k]);
+        uint16_t n_used = 0;
+        auto select = [&](const uint32_t n_max) {
+            fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
+            nf = fit.n;
+            const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf))
+                                     : at_wall ? (pyramid ? c.pyramid_wall_ns : c.wall_ns)
+                                               : (pyramid ? c.pyramid_ns : c.ns);
+            n_used = n_first;
+            bool found = false;
+            uint32_t n_tried = 0;
+            for (uint32_t n_try = n_first; n_try <= n_max; n_try++) {
+                if (n_try < uint32_t(n_entries) && Kokkos::fabs(key(n_try) - key(n_try - 1)) < tie) continue;
+                if (!build(int(n_try))) continue;
+                const double lebesgue =
+                    team_lebesgue_constant(tm, &w.psi[0], int(n_psi), nk, X_used, int(n_try), &w.coef[0]);
+                if (tm.team_rank() == 0) {
+                    w.tried_n[n_tried] = n_try;
+                    w.tried_lebesgue[n_tried] = lebesgue;
+                }
+                n_tried++;
+                if (lebesgue <= MAX_LEBESGUE_3D) {
+                    n_used = static_cast<uint16_t>(n_try);
+                    found = true;
                     break;
                 }
             }
-            found = build(n_used);
+            tm.team_barrier();
+            if (!found && n_tried > 0) {
+                double best = Kokkos::Experimental::finite_max_v<double>;
+                for (uint32_t k = 0; k < n_tried; k++) best = w.tried_lebesgue[k] < best ? w.tried_lebesgue[k] : best;
+                for (uint32_t k = 0; k < n_tried; k++) {
+                    if (w.tried_lebesgue[k] <= LEBESGUE_SLACK * best) {
+                        n_used = static_cast<uint16_t>(w.tried_n[k]);
+                        break;
+                    }
+                }
+                found = build(n_used);
+            }
+            return found;
+        };
+        bool found = select(try_max);
+        // The search grows stencils past their first n_full entries, possibly to a curved-wall
+        // cell: they stop short of it, or else fit the wall degree
+        if (found && !at_wall && c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
+            uint32_t n_wall = 0;
+            Kokkos::single(Kokkos::PerTeam(tm), [&](uint32_t & first) {
+                first = c.reaches_wall(w, n_used) ? c.first_wall(w, n_full) : 0;
+            }, n_wall);
+            if (n_wall > 0) {
+                found = select(n_wall);
+                if (!found) {
+                    at_wall = true;
+                    found = select(try_max);
+                }
+            }
         }
         if (!found) {
             if (!ctl[TRUNCATED]) failed = 1;
