@@ -150,9 +150,15 @@ class Spectra {
     private:
         /** @brief The averages and their clock from the device into the host's copies. */
         void pull() const;
+        /** @brief Enqueues copies of the averages and their clock into pinned memory (capturable). */
+        void copy_to_host() const;
+        /** @brief The host's copies from the pinned ones copy_to_host filled, once they arrived. */
+        void take_host_copies() const;
         void push();
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
         void write_file(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
+        /** @brief write_file from the host's copies as they are, which pull then leaves. */
+        void write_held(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
         /** @brief The file of the unaveraged sample at step: <file stem>_<step>.csv. */
         std::string sample_file(uint64_t step) const;
         bool homogeneous(size_t axis) const;
@@ -204,7 +210,7 @@ class Spectra {
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
         mutable bool holding_staged = false;  // a file is written from the host's copies, which pull leaves
 
-        // Averaged: the averages and their clock as stage_output copied them
+        // The averages and their clock as copy_to_host copied them
         PinnedMirrors pinned;
         Kokkos::View<Clock>::host_mirror_type h_clock;
         Kokkos::View<double *>::host_mirror_type h_spec, h_mean, h_shell;
