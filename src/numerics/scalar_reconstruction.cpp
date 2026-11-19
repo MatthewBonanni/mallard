@@ -14,9 +14,12 @@
 
 #include "launch_bounds.h"
 #include "mixture_flux.h"
+#include "scratch_arena.h"
 #include "teno_scalars.h"
 
+#include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 
 namespace {
 
@@ -395,15 +398,42 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
         }
         case FaceReconstructionType::TENO:
             teno = &dynamic_cast<const TENO &>(flow);
-            theta = Kokkos::View<rtype *>("scalar_theta", mesh->n_cells);
+            theta = memory::scratch_view<Kokkos::View<rtype *>>(own_scratch, "scalar_theta", mesh->n_cells);
             break;
     }
     if (linear) {
-        gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("scalar_gradients", mesh->n_cells, n_species + 2,
-                                                                 N_DIM);
-        density_slope = Kokkos::View<rtype *[N_DIM]>("scalar_density_slope", mesh->n_cells);
-        limiter = Kokkos::View<rtype *>("scalar_limiter", mesh->n_cells);
+        gradients = memory::scratch_view<Kokkos::View<rtype ***, Kokkos::LayoutRight>>(
+            own_scratch, "scalar_gradients", mesh->n_cells, n_species + 2, uint32_t(N_DIM));
+        density_slope = memory::scratch_view<Kokkos::View<rtype *[N_DIM]>>(own_scratch, "scalar_density_slope",
+                                                                          mesh->n_cells);
+        limiter = memory::scratch_view<Kokkos::View<rtype *>>(own_scratch, "scalar_limiter", mesh->n_cells);
     }
+}
+
+namespace {
+
+size_t aligned_bytes(const size_t n) { return memory::ScratchArena::aligned(n * sizeof(rtype)); }
+
+} // namespace
+
+size_t ScalarReconstruction::scratch_bytes() const {
+    return aligned_bytes(gradients.span()) + aligned_bytes(density_slope.span()) + aligned_bytes(limiter.span()) +
+           aligned_bytes(theta.span());
+}
+
+void ScalarReconstruction::place_scratch(void * storage) {
+    std::byte * p = static_cast<std::byte *>(storage);
+    const auto place = [&](auto & v) {
+        using V = std::remove_reference_t<decltype(v)>;
+        if (v.span() == 0) return;
+        const size_t bytes = aligned_bytes(v.span());
+        v = V(reinterpret_cast<rtype *>(p), v.layout());
+        p += bytes;
+    };
+    place(gradients);
+    place(density_slope);
+    place(limiter);
+    place(theta);
 }
 
 ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {

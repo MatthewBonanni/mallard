@@ -30,11 +30,14 @@
  */
 class PinnedMirrors {
     public:
+        /** @brief A mirror of v, labeled after v, or after label for views without one (memory::ScratchArena). */
         template <class V>
-        typename V::host_mirror_type operator()(const V & v) {
+        typename V::host_mirror_type operator()(const V & v, const std::string & label = {}) {
             using T = typename V::non_const_value_type;
             const size_t bytes = v.span() * sizeof(T);
-            Kokkos::View<char *, Kokkos::SharedHostPinnedSpace> block(std::string(v.label()) + "_pinned", bytes);
+            Kokkos::View<char *, Kokkos::SharedHostPinnedSpace> block((label.empty() ? std::string(v.label()) : label) +
+                                                                          "_pinned",
+                                                                      bytes);
             blocks.push_back(block);
             return typename V::host_mirror_type(reinterpret_cast<T *>(block.data()), v.layout());
         }

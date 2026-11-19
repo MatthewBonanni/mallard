@@ -252,8 +252,10 @@ endforeach()
 # only: contracting multiplies and adds into FMAs would round each differently
 # by where the compiler fuses, so neither file contracts and the hot loops
 # write their FMAs explicitly. [statistics.convergence] updates its estimate on
-# the device as the host does, bit for bit
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp)
+# the device as the host does, bit for bit, and the device cuts isosurfaces
+# into the host's quadrature points (region_motion.cpp)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp
+                       common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")

@@ -645,6 +645,16 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region 
 
 void Probes::select_elements(Probe & p, const Mesh & mesh, region::Elements e, const int dimension,
                              const std::string & summary, uint32_t n_variables, const bool per_cell) {
+    std::vector<probe::Point> normals;
+    const probe::CellPoints set = element_samples(p, mesh, std::move(e), per_cell, normals);
+    p.quadrature.in_cells(mesh, set, {}, n_variables);
+    if (!per_cell) p.quadrature.set_normals(normals);
+    p.geometry.dim = static_cast<uint8_t>(dimension);
+    p.geometry.type = "region " + summary;
+}
+
+probe::CellPoints Probes::element_samples(Probe & p, const Mesh & mesh, region::Elements e, const bool per_cell,
+                                          std::vector<probe::Point> & normals) {
     // The quadrature points of the region's elements, in the order of their cells' global ids, then position;
     // cell averages without normals are the same summed per cell: one sample each
     p.geometry.quad_weights.clear();
@@ -670,7 +680,7 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, region::Elements e, c
         e = std::move(merged);
     }
     probe::CellPoints set;
-    std::vector<probe::Point> normals;
+    normals.clear();
     std::vector<double> local;  // global cell, x, y, z, weight
     for (size_t k = 0; k < e.size(); k++) {
         for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
@@ -704,10 +714,7 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, region::Elements e, c
             for (const uint64_t i : order) p.isosurface->quad_cells.push_back(static_cast<uint64_t>(all[W * i]));
         }
     }
-    p.quadrature.in_cells(mesh, set, {}, n_variables);
-    if (!per_cell) p.quadrature.set_normals(normals);
-    p.geometry.dim = static_cast<uint8_t>(dimension);
-    p.geometry.type = "region " + summary;
+    return set;
 }
 
 namespace {
@@ -1145,11 +1152,16 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     if (sampling == Sampling::POINT || need_gradients) {
         const auto gradient = fields.gradient;
         const auto unique = unique_cells;
-        gated::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) { gradient(unique(i)); });
+        const uint32_t * n_unique = unique_count.data();
+        gated::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
+            if (n_unique && i >= *n_unique) return;
+            gradient(unique(i));
+        });
     }
     // The trace: the cell average (from the current conservatives), or the reconstruction at the sample
     const auto Ws = W;
     gated::parallel_for("probe_cell_W", n, KOKKOS_LAMBDA(const uint32_t s) {
+        if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
         Ws(s, 0) = sampler.U(c, 0);
         for (uint8_t i = 0; i <= N_DIM; i++) Ws(s, 1 + i) = sampler.P(c, i);
@@ -1161,6 +1173,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         const auto in_W = inside_W;
         // Linear least squares, kept where the reconstruction has no admissible polynomial value
         gated::parallel_for("probe_linear_values", in_cells.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+            if (counted && j >= *counted) return;
             const uint32_t c = in_cells(j);
             rtype Wq[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE {
@@ -1173,6 +1186,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
         const auto in = inside;
         gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+            if (counted && j >= *counted) return;
             FOR_I_CONSERVATIVE Ws(in(j), i) = in_W(j, i);
         });
     }
@@ -1243,6 +1257,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const WallModelFunctor wall_model = fields.wall_model;
     const bool modeled = wall_model.wm.active();
     gated::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
+        if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
         const rtype g = mixture ? cell_gamma(c) : physics.gamma;
         const rtype rho_c = sampler.U(c, 0), p_c = sampler.P(c, N_DIM), T_c = sampler.P(c, N_DIM + 1);
@@ -1379,14 +1394,14 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
 void Probes::Samples::gather(std::vector<double> & out, const CellColumns & columns, const rtype * staged) const {
     const rtype * h = staged;
     if (!staged) {
-        using Space = Kokkos::View<rtype **, Kokkos::LayoutRight>::memory_space;
-        if (Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space>::accessible ||
-            host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
-            host_values = Kokkos::create_mirror_view(values);
+        if (host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
+            pinned = PinnedMirrors();
+            host_values = pinned(values);
         }
         // The first rows: the samples (a moving region's covered cells, of all its owned ones)
         const auto rows = Kokkos::make_pair(size_t(0), this->rows());
-        Kokkos::deep_copy(Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
+        copy_to_pinned(pinned, Kokkos::subview(host_values, rows, Kokkos::ALL), Kokkos::subview(values, rows, Kokkos::ALL));
+        Kokkos::fence("probe_values");
         for (const auto & [column, data] : columns) {
             for (size_t i = 0; i < host_cells.size(); i++) host_values(i, column) = (*data)[host_cells[i]];
         }
@@ -1904,6 +1919,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             motion->volumes = to_device(weights, "probe_motion_volumes");
             motion->covered = Kokkos::View<uint32_t *>("probe_motion_cells", mesh.n_owned());
             motion->weights = Kokkos::View<double *>("probe_motion_weights", mesh.n_owned());
+            motion->h_covered = motion->pinned(motion->covered);
+            motion->h_weights = motion->pinned(motion->weights);
             motion->count = Kokkos::View<uint32_t>("probe_motion_count");
             select_region(p, mesh, r, weights, n_evaluated);
             p.quadrature.cells = motion->covered;
@@ -2484,7 +2501,9 @@ bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
         return statistics.device_column(c.second->name()).exists();
     });
-    return !p.snapshot && !p.isosurface && !p.solution && device_columns &&
+    const bool cut = !p.isosurface || p.isosurface->per_cell ||
+                     region::single_level(*p.isosurface->mesh, *p.isosurface->region).has_value();
+    return !p.snapshot && cut && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
@@ -2493,7 +2512,9 @@ bool Probes::reads_intervals(const size_t k) const {
     return std::any_of(columns.begin(), columns.end(), [](const auto & c) { return c.second.interval(); });
 }
 
-bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr; }
+bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr || probes[k]->isosurface != nullptr; }
+
+bool Probes::follows_solution(const size_t k) const { return probes[k]->solution; }
 
 void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const double t,
                    const bool reduce, const bool use_nccl) {
@@ -2514,6 +2535,60 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
         m.staged_weights =
             Kokkos::View<double **, Kokkos::LayoutRight, Pinned>("probe_staged_weights", n_records, m.capacity);
         m.staged_count = Kokkos::View<uint32_t *, Pinned>("probe_staged_count", n_records);
+    }
+    if (p.isosurface) {
+        // Twice the cells its levels are selected in at t, as a moving region's
+        Probe::Isosurface & iso = *p.isosurface;
+        const size_t n_owned = iso.mesh->n_owned();
+        const region::Levels levels = iso.levels->update(t);
+        const size_t n_crossed = levels.cells.size();
+        iso.capacity = static_cast<uint32_t>(std::min<size_t>(n_owned, std::max<size_t>(2 * n_crossed, 64)));
+        using Pinned = Kokkos::SharedHostPinnedSpace;
+        if (iso.per_cell) {
+            Samples & c = iso.crossed;
+            c.cells = iso.levels->cells();
+            c.count = iso.levels->count();
+            c.normals = Kokkos::View<rtype *[N_DIM]>("probe_crossed_normals", n_owned);
+            c.W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_crossed_W", n_owned);
+            c.values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_crossed_values", n_owned, p.n_evaluated());
+            c.allocate_staging(n_records, iso.capacity);
+        } else {
+            // Twice the quadrature points of the surface at t, and as many per staged cell as it has per crossed
+            // cell over the ranks, cut and sampled where they lie
+            const uint64_t n_points = iso.extraction->elements(levels).quad_points.size();
+            uint64_t all_points = n_points, all_crossed = n_crossed;
+            if (iso.mesh->n_global_cells > 0) {
+                all_points = comm::allreduce(all_points, comm::Op::SUM);
+                all_crossed = comm::allreduce(all_crossed, comm::Op::SUM);
+            }
+            const uint64_t per_cell = all_crossed > 0 ? (all_points + all_crossed - 1) / all_crossed : 1;
+            const uint32_t capacity = static_cast<uint32_t>(
+                std::max<uint64_t>({2 * n_points, per_cell * iso.capacity, 256}));
+            iso.cut = std::make_shared<region::LevelCut>(*iso.mesh, *region::single_level(*iso.mesh, *iso.region),
+                                                         iso.levels, capacity);
+            Samples & q = iso.points;
+            q.cells = iso.cut->cells();
+            q.count = iso.cut->total();
+            q.inside = Kokkos::View<uint32_t *>("probe_cut_inside", capacity);
+            const auto inside = q.inside;
+            gated::parallel_for("probe_cut_inside", capacity, KOKKOS_LAMBDA(const uint32_t i) { inside(i) = i; });
+            q.inside_cells = q.cells;
+            q.inside_offsets = Kokkos::View<rtype *[N_DIM]>("probe_cut_offsets", capacity);
+            q.inside_W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_cut_inside_W", capacity);
+            q.unique_cells = iso.levels->cells();
+            q.unique_count = iso.levels->count();
+            q.normals = Kokkos::View<rtype *[N_DIM]>("probe_cut_normals", capacity);
+            q.W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_cut_W", capacity);
+            q.values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_cut_values", capacity, p.n_evaluated());
+            q.allocate_staging(n_records, capacity);
+            iso.staged_points = Kokkos::View<uint32_t *, Pinned>("probe_staged_points", n_records);
+        }
+        iso.staged_cells =
+            Kokkos::View<uint32_t **, Kokkos::LayoutRight, Pinned>("probe_staged_crossed", n_records, iso.capacity);
+        iso.staged_levels = Kokkos::View<double **, Kokkos::LayoutRight, Pinned>(
+            "probe_staged_levels", n_records, size_t(iso.capacity) * iso.levels->size() * (N_DIM + 1));
+        iso.staged_count = Kokkos::View<uint32_t *, Pinned>("probe_staged_crossed_count", n_records);
+        return;
     }
     if (p.samples_nodes()) p.nodes.allocate_staging(n_records, p.nodes.values.extent(0));
     if (p.samples_quadrature()) {
@@ -2710,14 +2785,47 @@ std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_model) const {
 
 void Probes::select_staged(const size_t k, const Kokkos::View<const rtype> & time, int64_t * const overflow) const {
     const Probe & p = *probes[k];
-    p.select_covered(time);
-    const Kokkos::View<const uint32_t> count = p.motion->count;
-    const uint32_t capacity = p.motion->capacity;
-    gated::parallel_for("probe_staged_capacity", 1, KOKKOS_LAMBDA(const int) { *overflow = count() > capacity ? 1 : 0; });
+    if (p.isosurface) {
+        p.isosurface->levels->select(time);
+    } else {
+        p.select_covered(time);
+    }
+    const Kokkos::View<const uint32_t> count = p.isosurface ? p.isosurface->levels->count() : p.motion->count;
+    const uint32_t capacity = p.isosurface ? p.isosurface->capacity : p.motion->capacity;
+    Kokkos::View<const uint32_t> points;
+    uint32_t point_capacity = 0;
+    if (p.isosurface && p.isosurface->cut) {
+        p.isosurface->cut->select();
+        points = p.isosurface->cut->total();
+        point_capacity = p.isosurface->cut->capacity();
+    }
+    const bool cut = points.is_allocated();
+    gated::parallel_for("probe_staged_capacity", 1, KOKKOS_LAMBDA(const int) {
+        *overflow = count() > capacity || (cut && points() > point_capacity) ? 1 : 0;
+    });
 }
 
 void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const uint64_t * seq) {
     Probe & p = *probes[k];
+    if (p.isosurface && p.isosurface->cut) {
+        // The values at the quadrature points cut on the device, and the levels the host cuts them from again
+        Samples & q = p.isosurface->points;
+        p.sample_cut();
+        q.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
+        q.fill_columns(p.device_columns);
+        q.copy_to_staging(seq);
+        p.stage_crossed(seq);
+        return;
+    }
+    if (p.isosurface) {
+        // Each crossed cell's values, which are those of its samples (per_cell), and its levels
+        Samples & c = p.isosurface->crossed;
+        c.evaluate(p.sampling, p.codes, fields, p.reference, false);
+        c.fill_columns(p.device_columns);
+        c.copy_to_staging(seq);
+        p.stage_crossed(seq);
+        return;
+    }
     if (p.samples_nodes()) {
         p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
         p.nodes.fill_columns(p.device_columns);
@@ -2753,7 +2861,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
         } else {
             Kokkos::Timer timer;
             if (p.motion) slot < 0 ? p.move(double(t)) : p.moved(static_cast<uint64_t>(slot));
-            if (p.isosurface) p.extract(double(t));
+            if (p.isosurface) slot < 0 ? p.extract(double(t)) : p.extracted(static_cast<uint64_t>(slot));
             if (p.solution) m_region_seconds += timer.seconds();
             if (!p.average) p.sample(fields, sampled_nodes, sampled_quad, slot);
         }
@@ -2949,6 +3057,10 @@ void Probes::Probe::sample(const ProbeFields * fields, std::vector<double> & nod
         nodes.gather(node_values, cell_columns, slot < 0 ? nullptr : nodes.staged(s));
     }
     if (samples_quadrature()) {
+        if (isosurface && slot >= 0) {
+            quad_values = isosurface->gathered;
+            return;
+        }
         if (slot < 0) quadrature.evaluate(sampling, codes, *fields, reference, gradients);
         quadrature.gather(quad_values, cell_columns, slot < 0 ? nullptr : quadrature.staged(s));
     }
@@ -3030,7 +3142,7 @@ void Probes::sample_average(Probe & p, const rtype t, const ProbeFields * fields
     std::vector<double> nodes, quad;
     Kokkos::Timer timer;
     if (p.motion) slot < 0 ? p.move(static_cast<double>(t)) : p.moved(static_cast<uint64_t>(slot));
-    if (p.isosurface) p.extract(static_cast<double>(t));
+    if (p.isosurface) slot < 0 ? p.extract(static_cast<double>(t)) : p.extracted(static_cast<uint64_t>(slot));
     if (p.solution) m_region_seconds += timer.seconds();
     p.sample(fields, nodes, quad, slot);
     // The device means took the staged samples themselves
@@ -3522,9 +3634,11 @@ uint32_t Probes::Probe::cover(const double t) const {
 void Probes::Probe::move(const double t) {
     const uint32_t n = cover(t);
     const auto rows = Kokkos::make_pair(uint32_t(0), n);
-    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->covered, rows));
-    const auto h_weights =
-        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(motion->weights, rows));
+    const auto h_cells = Kokkos::subview(motion->h_covered, rows);
+    const auto h_weights = Kokkos::subview(motion->h_weights, rows);
+    copy_to_pinned(motion->pinned, h_cells, Kokkos::subview(motion->covered, rows));
+    copy_to_pinned(motion->pinned, h_weights, Kokkos::subview(motion->weights, rows));
+    Kokkos::fence("probe_motion_cells");
     order_covered(n, h_cells.data(), h_weights.data());
 }
 
@@ -3574,6 +3688,101 @@ void Probes::Probe::extract(const double t) {
     }
     select_elements(*this, *iso.mesh, iso.extraction->elements(levels), iso.region->dimension(),
                     iso.region->summary(), iso.n_evaluated, iso.per_cell);
+}
+
+namespace {
+
+/** @brief The first count() of crossed cells (at most the staging's), their levels and count(), into record slot
+ *         (*seq - 1) % n_records. */
+void stage_levels(const region::CrossedLevels & levels, const PinnedCells & st_cells, const PinnedWeights & st_levels,
+                  const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st_count, const uint64_t * seq) {
+    const Kokkos::View<const uint32_t *> cells = levels.cells();
+    const Kokkos::View<const uint32_t> count = levels.count();
+    const auto values = levels.values();
+    const uint64_t n_records = st_count.extent(0);
+    const uint32_t n_k = levels.size();
+    gated::parallel_for("probe_staged_crossed", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
+        const uint64_t slot = (*seq - 1) % n_records;
+        if (i == 0) st_count(slot) = count();
+        if (i >= count()) return;
+        st_cells(slot, i) = cells(i);
+        for (uint32_t k = 0; k < n_k; k++) {
+            for (uint32_t d = 0; d <= N_DIM; d++) st_levels(slot, (size_t(i) * n_k + k) * (N_DIM + 1) + d) = values(i, k, d);
+        }
+    });
+}
+
+/** @brief The total of a cut's points into record slot (*seq - 1) % n_records. */
+void stage_total(const Kokkos::View<const uint32_t> & total, const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st,
+                 const uint64_t * seq) {
+    const uint64_t n_records = st.extent(0);
+    gated::parallel_for("probe_staged_points", 1, KOKKOS_LAMBDA(const int) { st((*seq - 1) % n_records) = total(); });
+}
+
+/** @brief As Samples::in_cells and set_normals: each point's offset from its cell's centroid, and its normal. */
+void cut_samples(const region::LevelCut & cut, const Kokkos::View<const rtype *[N_DIM]> & centroids,
+                 const Kokkos::View<rtype *[N_DIM]> & offsets, const Kokkos::View<rtype *[N_DIM]> & normals) {
+    const auto cells = cut.cells();
+    const auto points = cut.points();
+    const auto n = cut.normals();
+    const auto total = cut.total();
+    gated::parallel_for("probe_cut_samples", cut.capacity(), KOKKOS_LAMBDA(const uint32_t s) {
+        if (s >= total()) return;
+        for (int d = 0; d < N_DIM; d++) {
+            offsets(s, d) = static_cast<rtype>(points(s, d) - static_cast<double>(centroids(cells(s), d)));
+            normals(s, d) = static_cast<rtype>(n(s, d));
+        }
+    });
+}
+
+} // namespace
+
+void Probes::Probe::stage_crossed(const uint64_t * seq) const {
+    const Isosurface & iso = *isosurface;
+    stage_levels(*iso.levels, iso.staged_cells, iso.staged_levels, iso.staged_count, seq);
+    if (iso.cut) stage_total(iso.cut->total(), iso.staged_points, seq);
+}
+
+void Probes::Probe::sample_cut() const {
+    const Isosurface & iso = *isosurface;
+    cut_samples(*iso.cut, iso.mesh->cell_coords, iso.points.inside_offsets, iso.points.normals);
+}
+
+void Probes::Probe::extracted(const uint64_t slot) {
+    Isosurface & iso = *isosurface;
+    const uint32_t n = iso.staged_count(slot);
+    region::Levels levels;
+    const uint32_t * const cells = iso.staged_cells.data() + slot * iso.staged_cells.extent(1);
+    levels.cells.assign(cells, cells + n);
+    levels.values = Kokkos::View<const double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace>(
+        iso.staged_levels.data() + slot * iso.staged_levels.extent(1), n, iso.levels->size());
+    // The host's samples of these levels, without their device views, taking the staged values: per cell, of
+    // their cells; else the device's of its own cut of the levels, point by point in the same order
+    std::vector<probe::Point> normals;
+    const bool per_cell = iso.cut == nullptr;
+    const probe::CellPoints set = element_samples(*this, *iso.mesh, iso.extraction->elements(levels), per_cell, normals);
+    if (!per_cell && set.cells.size() != iso.staged_points(slot)) {
+        throw std::logic_error("probe " + name + ": the device cut the isosurface differently from the host");
+    }
+    quadrature.distributed = iso.mesh->n_global_cells > 0;
+    quadrature.n_global = set.n_global;
+    quadrature.gathered_row = set.gathered_row;
+    const size_t n_vars = n_evaluated();
+    const rtype * const rows = per_cell ? iso.crossed.staged(slot) : iso.points.staged(slot);
+    std::vector<double> local(set.cells.size() * n_vars);
+    for (size_t i = 0; i < set.cells.size(); i++) {
+        const size_t row = per_cell ? static_cast<size_t>(std::lower_bound(levels.cells.begin(), levels.cells.end(),
+                                                                           set.cells[i]) - levels.cells.begin())
+                                    : i;
+        for (size_t v = 0; v < n_vars; v++) local[i * n_vars + v] = static_cast<double>(rows[row * n_vars + v]);
+    }
+    const std::vector<double> all = quadrature.distributed ? comm::gatherv(local) : local;
+    iso.gathered.clear();
+    if (quadrature.distributed && !comm::is_root()) return;
+    iso.gathered.resize(quadrature.n_global * n_vars);
+    for (uint64_t q = 0; q < quadrature.n_global; q++) {
+        for (size_t v = 0; v < n_vars; v++) iso.gathered[q * n_vars + v] = all[quadrature.gathered_row[q] * n_vars + v];
+    }
 }
 
 void Probes::Probe::cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells,
