@@ -838,6 +838,40 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
+#### Stage scratch of gas mixtures (#552)
+
+A gas mixture's right-hand side runs in this order: the reconstruction (the TENO troubled passes' coefficients, or
+MUSCL's gradients and limiters, and the scalar reconstruction's work memory) writes `face_thermo`; the convective
+fluxes read it and write `face_mdot`; the species slots read `face_mdot`; only then does `update_transport` fill
+`cell_diffusion`, `transport_values` and `transport_gradients` for the viscous fluxes. Every other reader of those
+three (the time step's transport, the eddy viscosity of LES, TFLES and PaSR, output, probes, forces, derived fields)
+runs after a call that fills them. Gas mixtures never start a reconstruction before the time step
+(`exchanges_partition_faces`), so the two groups are never live together. They share one allocation,
+`stage_scratch`, as large as the larger group: buffers placed one after another, 256-byte aligned. The memory
+tracker counts it once under that label, so `mallard check --memory` stays exact; view sizes are checked as
+for any allocation. The reconstructions are told not to allocate their own scratch, so the setup never holds both.
+
+Not shared: `production` (live with the transport buffers in the TFLES reaction sensor and output), a perfect
+gas's `viscous_gradients` (its reconstruction may start before the time step's gradients are read), and the
+chemistry's work memory (on the thread's stack).
+
+| bytes per cell, cells per A100-80GB | `main` | stage scratch | cells |
+|---|---|---|---|
+| propane flame, TENO5, hexahedra | 9,590 / 8,090,532 | 9,220 / 8,413,483 | +4.0% |
+| propane flame, TENO5, tetrahedra | 8,760 / 8,854,176 | 8,390 / 9,242,432 | +4.4% |
+| propane flame, MUSCL, hexahedra | 4,190 / 18,514,190 | 3,840 / 20,183,512 | +9.0% |
+| GRI-Mech, TENO5, hexahedra | 14,500 / 5,342,876 | 12,300 / 6,321,797 | +18.3% |
+| GRI-Mech, MUSCL, hexahedra | 12,100 / 6,435,177 | 10,600 / 7,333,000 | +14.0% |
+| 2D propane flame, MUSCL | 2,100 / 37,226,797 | 1,870 / 41,879,047 | +12.5% |
+
+With GRI-Mech at TENO5, the 2,882 bytes of `stage_scratch` replace 1,760 (TENO), 891 (`face_thermo`), 223
+(`face_mdot`) and 2,248 (transport). Perfect gases and runs limited by the setup or by view sizes (2D TENO5) are
+unchanged. Restart files after 4 steps are bitwise identical to `main` for 31 runs: TENO and MUSCL, 2D, 3D and
+axisymmetric, GRI-Mech, Soret, PaSR, dynamic LES, double flux, MPI on 3 ranks and restarts. On one A100 (medians
+of alternating runs) the time per step does not change: `flame_3d` 39.1 / 39.3 ms, with TENO5 217 / 217 ms,
+with GRI-Mech at TENO5 1,567 / 1,558 ms, `teno5_3d` 105 / 104 ms; the device's peak falls by 82 MiB, 86 MiB and
+482 MiB on the three flames (221,184 cells).
+
 ### 16. Cost of bitwise reproducibility (#429)
 
 Three places where the bitwise contract constrains the arithmetic were relaxed one at a time on a branch that is
