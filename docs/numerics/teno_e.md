@@ -286,9 +286,11 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged. A 2D stencil that the
-search grows past $n_0$ to such a cell is searched again at that degree
-(#1202; 3D: [known limitations](#known-limitations)).
+it are zero, so the run-time kernels are unchanged. A stencil that the
+search grows past $n_0$ to such a cell is searched again (#1202): in 2D at
+that degree; in 3D below that cell's position at the full degree, and only if
+no size there fits, at the wall degree, so the full degree is kept where it
+can be. No other stencil changes.
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -592,7 +594,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 24; one file per MPI rank). The file is used
+on later runs (format version 25; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -729,11 +731,39 @@ cycles per block. The growth is slow: $1.3\times10^{-5}$ e-folds once in
 $8\times10^4\,h/c$, about 800 acoustic crossings of a 100-cell domain, and
 the hexahedral order-6 mode ($5.25\times10^{-5}$) in about 190.
 
-Starting the order-4 stencils of tetrahedra and triangles larger, like the
-pyramids' (86 entries on Kuhn tetrahedra; about 28 on triangles, where the
-2D cap is 32), removes the order-4 modes at +87% and +50% central stencil
-size on those cells, but not the hexahedral one. A criterion tied to the sign
-of the dissipation, covering every cell shape, is the planned fix (0.12.0).
+The growth comes from the Riemann solver's jump term alone: with the left
+and right states averaged before HLLC (a central flux, in a scratch build),
+the long waves are neutral on all three lattices (below $5\times10^{-9}$).
+The jump of the unweighted degree-3 fits is slightly anti-dissipative for
+them. Its sign is erratic in the stencil size, not a threshold as on
+pyramids (order 4, largest real part):
+
+| Entries | `cartesian_tri` | squares split in four |
+|---|---|---|
+| 14, 16 | < 1e-9 | 1.75 |
+| 18 (default) | 1.25e-5 | 1.0e-6 |
+| 19 or 20 | 1.0e-5 (20) | 4.7e-4 (19) |
+| 23 or 24 | < 1e-9 (24) | 1.6e-7 (23) |
+| 26 to 31 | < 1e-9 | < 1e-9 (27, 31) |
+
+Larger starts, like the pyramids', therefore stabilize these lattices only
+from about 27 entries on triangles and 78 on Kuhn tetrahedra, and they cost
+accuracy. Maximum density error of the
+[advection study](../verification/index.md) on the finer mesh, against the
+default: triangles +46% from 24 entries and +136% from 27; Kuhn tetrahedra
++11% (58 entries), +24% (66) and +37% (78). Weighting the fit by the inverse
+centroid distance lowers the triangles' errors (advection −16%) and the
+growth to $1.5\times10^{-7}$ and $5\times10^{-8}$, but does not remove it,
+and on Kuhn tetrahedra it leaves $2.4\times10^{-7}$. Neither is adopted,
+and neither was tried on the hexahedral mode. A criterion tied to the sign of
+the jump's dissipation, covering every cell shape, is the planned fix (#1268).
+
+With SSPRK3 the time integrator damps the order-4 modes at `cfl = 1`: the
+amplification factor of the full step leaves no growth on either triangle
+lattice (it appears below `cfl` of about 0.8 on `cartesian_tri` and between
+0.6 and 0.7 on squares split in four) and $5.5\times10^{-7}$ on Kuhn tetrahedra. The tests
+`TENOLattice` (2D) and `TENO3DKuhnLattice` record the semi-discrete rates
+above and fail when they change.
 
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
@@ -781,14 +811,6 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     field, order 5's drag is as smooth as order 3's
     ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
-- **Curved walls past the first $n_0$ candidates in 3D** (#1202). The 3D
-    degree cap at curved walls looks only at a stencil's first $n_0$
-    candidates ([central stencil](#central-stencil)). When the Lebesgue search
-    grows the stencil past them, the entries it adds can be cells at a curved
-    wall, and the stencil keeps the full degree, one-sided there. On a $6^3$
-    `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
-    28 at order 6 do so. The 2D setup checks the whole stencil.
-
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
@@ -824,4 +846,7 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     $1.3\times 10^{-5}$ sound speeds over the block size, squares split into
     four triangles at $10^{-6}$, and hexahedra at order 6 at
     $5.25\times10^{-5}$ (#1136;
-    [3D stability](#3d-stability)).
+    [3D stability](#3d-stability)). The cause is the Riemann solver's jump
+    term; larger stencils remove the order-4 modes only at 37% to 136% more
+    error, so the defaults stay, and SSPRK3 at `cfl = 1` damps them on
+    triangles.
