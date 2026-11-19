@@ -875,7 +875,8 @@ void Solver::init_boundaries() {
             for (uint32_t i = 0; i < z->n_faces(); i++) zone_faces[i] = z->h_faces(i);
             std::vector<double> keep(zone_faces.size(), 1.0);
             if (b.contains("where")) {
-                const Expression w(find_value<std::string>(b, "name") + ".where", find_value<std::string>(b, "where"));
+                const Expression w(find_value<std::string>(b, "name") + ".where", line_of(b, "where"),
+                                   find_value<std::string>(b, "where"));
                 keep = evaluate_at({&w}, mesh->face_coords, zone_faces);
             }
             for (size_t k = 0; k < zone_faces.size(); k++) {
