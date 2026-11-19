@@ -93,8 +93,7 @@ the same step. There `wall` is rank 0's as its host last posted it before the
 step. The device also reduces the probes a condition reads at their writes,
 time-averaged probes and probes of `[statistics]` outputs included, to the
 values the host writes, so they do not stop the queue either, except probes
-reading cell data or `[statistics]` confidence intervals: the steps queued
-ahead stop at their writes, where rank 0's host reduces them and sends their
+reading cell data: the steps queued ahead stop at their writes, where rank 0's host reduces them and sends their
 values to every rank.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
