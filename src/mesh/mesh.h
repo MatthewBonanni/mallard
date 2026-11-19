@@ -427,12 +427,12 @@ class Mesh {
         /**
          * @brief Build the mesh with periodic node classes found beforehand
          *        (e.g. across ranks); boundary faces of classes.zones, if given,
-         *        are dropped. Takes the nodes and cells, and frees them as soon
-         *        as the mesh holds them.
+         *        are dropped. Takes the nodes, cells and classes, and frees the
+         *        nodes and cells as soon as the mesh holds them.
          */
         void init_from_connectivity(std::vector<std::array<rtype, N_DIM>> nodes, CellNodes cells,
                                     const std::vector<BoundaryFace> & boundary_faces,
-                                    const std::string & unlisted_zone, const PeriodicNodes & classes);
+                                    const std::string & unlisted_zone, PeriodicNodes classes);
 
         /**
          * @brief Build the mesh from a block holding the whole mesh, freeing the
