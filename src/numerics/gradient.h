@@ -499,9 +499,10 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
                                                      bool quadratic = true,
                                                      uint32_t n_cells = std::numeric_limits<uint32_t>::max()) {
     n_cells = std::min(n_cells, mesh.n_cells);
-    LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    LSQVertexGradientFunctor functor{faces, neighbors.offsets, neighbors.cells, neighbors.shift,
                                      {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells",
-                                                                   mesh.h_offsets_cells_of_cell(n_cells)),
+                                                                   neighbors.h_offsets(n_cells)),
                                       {},
                                       Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_images",
                                                                    faces.boundaries.image_neighbors.extent(0)),

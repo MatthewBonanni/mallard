@@ -660,10 +660,11 @@ std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) c
     if (n_owned < fused_cells) return {};
     // Gradients read the face or vertex neighbors, limiters the face neighbors
     std::vector<uint32_t> cells;
+    const VertexNeighbors & neighbors = mesh->vertex_neighbors();
     for (uint32_t c = 0; c < n_owned; c++) {
         bool independent = true;
-        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
-            independent = independent && mesh->h_cells_of_cell(k) < n_owned;
+        for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) {
+            independent = independent && neighbors.h_cells(k) < n_owned;
         }
         for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
             const uint32_t f = mesh->h_face_of_cell(c, k);

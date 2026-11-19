@@ -341,18 +341,19 @@ TEST(RotationalPeriodicSetup, LinearSwirlHasExactGradientsAcrossTheSeam) {
     auto h_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g_face);
     auto h_vertex = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g_vertex);
     const double exact[2][2] = {{ga, -gb}, {gb, ga}};
+    const VertexNeighbors & nb = mesh.vertex_neighbors();
     auto interior = [&](uint32_t c) {
         if (is_boundary_cell(mesh, c)) return false;
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(c); k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            if (is_boundary_cell(mesh, mesh.h_cells_of_cell(k))) return false;
+        for (uint32_t k = nb.h_offsets(c); k < nb.h_offsets(c + 1); k++) {
+            if (is_boundary_cell(mesh, nb.h_cells(k))) return false;
         }
         return true;
     };
     uint32_t n_seam = 0;
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         bool seam = false;
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(c); k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            seam = seam || mesh.h_rotated_row(mesh.h_cells_of_cell_shift(k));
+        for (uint32_t k = nb.h_offsets(c); k < nb.h_offsets(c + 1); k++) {
+            seam = seam || mesh.h_rotated_row(nb.h_shift(k));
         }
         if (!interior(c)) continue;
         n_seam += seam;

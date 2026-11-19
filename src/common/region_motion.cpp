@@ -330,9 +330,10 @@ SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> &
         velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("region_velocity_gradients", n_cells);
     }
     m_centroids = mesh.cell_coords;
-    offsets_cells_of_cell = mesh.offsets_cells_of_cell;
-    cells_of_cell = mesh.cells_of_cell;
-    cells_of_cell_shift = mesh.cells_of_cell_shift;
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    offsets_cells_of_cell = neighbors.offsets;
+    cells_of_cell = neighbors.cells;
+    cells_of_cell_shift = neighbors.shift;
     periodic = mesh.periodic_maps();
     host_time = Kokkos::View<rtype>("region_levels_time");
     m_levels = Kokkos::View<double **[N_DIM + 1]>("region_levels", n_cells, n_conditions);

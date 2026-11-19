@@ -114,7 +114,7 @@ struct PeriodicMaps {
 };
 
 /**
- * @brief The shift row of every entry of a neighbor list (Mesh::cells_of_cell_shift):
+ * @brief The shift row of every entry of a neighbor list (VertexNeighbors::shift):
  *        rows is empty, and every entry's row 0 (the identity), when no entry
  *        crosses a periodic boundary.
  */
