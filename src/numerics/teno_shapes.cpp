@@ -72,13 +72,13 @@ KOKKOS_INLINE_FUNCTION bool equal(const int64_t * a, const int64_t * b) {
 
 } // namespace
 
-int64_t ShapeSearch::on_grid(const double v) {
+KOKKOS_FUNCTION int64_t ShapeSearch::on_grid(const double v) {
     constexpr double LIMIT = 4.0e18;
     const double x = v * double(uint64_t(1) << ShapeKeys::SHAPE_GRID_BITS);
     return static_cast<int64_t>(Kokkos::round(Kokkos::fmin(Kokkos::fmax(x, -LIMIT), LIMIT)));
 }
 
-int64_t ShapeSearch::position(const ShapeLanes & w, const uint32_t c) const {
+KOKKOS_FUNCTION int64_t ShapeSearch::position(const ShapeLanes & w, const uint32_t c) const {
     const uint32_t mask = 2 * cap - 1;
     for (uint64_t k = hash_slot(c, mask);; k = (k + 1) & mask) {
         const uint64_t e = w.hash[k];
@@ -87,7 +87,7 @@ int64_t ShapeSearch::position(const ShapeLanes & w, const uint32_t c) const {
     }
 }
 
-void ShapeSearch::clear(const ShapeLanes & w, const uint32_t n) const {
+KOKKOS_FUNCTION void ShapeSearch::clear(const ShapeLanes & w, const uint32_t n) const {
     // In reverse order of insertion, each entry's probe sequence is as it was when it was inserted
     const uint32_t mask = 2 * cap - 1;
     for (uint32_t v = n; v-- > 0;) {
@@ -101,7 +101,7 @@ void ShapeSearch::clear(const ShapeLanes & w, const uint32_t n) const {
     }
 }
 
-ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, uint32_t * end) const {
+KOKKOS_FUNCTION ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, uint32_t * end) const {
     Result r;
     const uint32_t mask = 2 * cap - 1;
     w.cell[0] = c;
@@ -231,7 +231,7 @@ ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, 
     return r;
 }
 
-int ShapeSearch::boundary_rank(const uint32_t c, const uint32_t f) const {
+KOKKOS_FUNCTION int ShapeSearch::boundary_rank(const uint32_t c, const uint32_t f) const {
     int64_t qf[N_DIM];
     for (int d = 0; d < N_DIM; d++) qf[d] = on_grid((double(face_coords(f, d)) - double(cell_coords(c, d))) / h(c));
     int rank = 0;
@@ -251,7 +251,7 @@ int ShapeSearch::boundary_rank(const uint32_t c, const uint32_t f) const {
     return found ? rank : -1;
 }
 
-int64_t ShapeSearch::boundary_face(const uint32_t c, const int rank) const {
+KOKKOS_FUNCTION int64_t ShapeSearch::boundary_face(const uint32_t c, const int rank) const {
     for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
         const uint32_t g = faces_of_cell(k);
         if (cells_of_face(g, 1) < 0 && boundary_rank(c, g) == rank) return int64_t(g);
