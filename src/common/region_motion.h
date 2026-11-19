@@ -85,6 +85,18 @@ class CrossedLevels {
 
         /** @brief The levels at time t in the cells, on the host. */
         Levels update(double t) const;
+        /**
+         * @brief The levels at the time time() on the device, in the first count() of cells() and values(), enqueued
+         *        without host work or allocation.
+         */
+        void select(const Kokkos::View<const rtype> & time) const;
+
+        const Kokkos::View<uint32_t *> & cells() const { return m_cells; }
+        const Kokkos::View<uint32_t> & count() const { return m_count; }
+        const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> & values() const { return m_values; }
+        uint32_t size() const { return m_levels->size(); }
+        /** @brief The cells and values of the current levels(), and their count (public for nvcc's device lambdas). */
+        void select_cells() const;
 
     private:
         uint32_t n_owned = 0;
@@ -92,8 +104,47 @@ class CrossedLevels {
         std::shared_ptr<const SolutionLevels> m_levels;
         Kokkos::View<const uint32_t *> offsets, conditions;  // of each piece cut from conditions' levels
         Kokkos::View<const double *> radii;
-        Kokkos::View<uint32_t *> cells;
-        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> values;
+        Kokkos::View<uint32_t *> m_cells;
+        Kokkos::View<uint32_t> m_count;
+        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> m_values;
+};
+
+/**
+ * @brief The quadrature points of a surface cut from one condition alone
+ *        (single_level) in the first count() of a CrossedLevels' cells, on
+ *        the device: those elements(mesh, region, levels) gives in these
+ *        cells, bit for bit and in its order, enqueued without host work or
+ *        allocation.
+ */
+class LevelCut {
+    public:
+        /** @brief Of the condition single_level gives, with room for capacity points. */
+        LevelCut(const Mesh & mesh, uint32_t condition, std::shared_ptr<const CrossedLevels> crossed, uint32_t capacity);
+
+        /**
+         * @brief Cuts the crossed cells' current levels (after CrossedLevels::select): total() points, kept in the
+         *        first total() of cells(), points(), weights() and normals() if they fit in capacity().
+         */
+        void select() const;
+
+        const Kokkos::View<uint32_t *> & cells() const { return m_cells; }
+        const Kokkos::View<double *[3]> & points() const { return m_points; }
+        const Kokkos::View<double *> & weights() const { return m_weights; }
+        const Kokkos::View<double *[3]> & normals() const { return m_normals; }
+        const Kokkos::View<uint32_t> & total() const { return m_total; }
+        uint32_t capacity() const { return static_cast<uint32_t>(m_cells.extent(0)); }
+
+    private:
+        std::shared_ptr<const CrossedLevels> m_crossed;
+        uint32_t m_condition = 0;
+        Kokkos::View<const uint32_t *> offsets_nodes, nodes;  // of the owned cells
+        Kokkos::View<const double *[3]> node_coords;
+        Kokkos::View<const rtype *[N_DIM]> cell_coords;
+        Kokkos::View<uint32_t *> row_offsets;  // of each crossed cell's points, then their total
+        Kokkos::View<uint32_t *> m_cells;
+        Kokkos::View<double *[3]> m_points, m_normals;
+        Kokkos::View<double *> m_weights;
+        Kokkos::View<uint32_t> m_total;
 };
 
 /**
@@ -152,6 +203,7 @@ class MovingFractions {
         bool bounded = true;
         bool axisymmetric = false;
         bool implicit_shapes = false;
+        bool sharp_leaves = false, smooth_leaves = false;  // whether the straight cells' sharp or SMOOTH ShapeSampler has leaves
         Kokkos::View<Node *> nodes;
         Kokkos::View<const double *> vertices;
         kexpr::ProgramTable<> programs, times;
