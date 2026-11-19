@@ -187,6 +187,15 @@ std::string archive_stem(const std::string & path) {
     return name;
 }
 
+std::string file_json(const Entry & e) {
+    json::Object f;
+    f.add("path", e.packed.name).add("role", e.role);
+    if (!e.kind.empty()) f.add("kind", e.kind);
+    if (!e.given.empty()) f.add("given", e.given);
+    f.add("bytes", e.packed.bytes).add("sha256", e.packed.sha256);
+    return f.str();
+}
+
 std::string manifest_json(const Run & run, const std::string & rerun_dir, const std::string & command,
                           const std::string & with, const std::vector<std::string> & notes,
                           const std::vector<Entry> & entries) {
@@ -212,13 +221,7 @@ std::string manifest_json(const Run & run, const std::string & rerun_dir, const 
     line("notes", json_list(notes));
     out += "  \"files\": [\n";
     for (size_t i = 0; i < entries.size(); i++) {
-        const Entry & e = entries[i];
-        json::Object f;
-        f.add("path", e.packed.name).add("role", e.role);
-        if (!e.kind.empty()) f.add("kind", e.kind);
-        if (!e.given.empty()) f.add("given", e.given);
-        f.add("bytes", e.packed.bytes).add("sha256", e.packed.sha256);
-        out += "    " + f.str() + (i + 1 < entries.size() ? ",\n" : "\n");
+        out += "    " + file_json(entries[i]) + (i + 1 < entries.size() ? ",\n" : "\n");
     }
     out += "  ]\n}\n";
     return out;
@@ -399,6 +402,18 @@ int pack(const cli::Args & args) {
         throw;
     }
 
+    const std::string rerun_in = top + "/" + rerun_dir.generic_string();
+    if (args.value_or("--format", "text") == "json") {
+        std::string files = "[";
+        for (const Entry & e : entries) files += (files.size() > 1 ? "," : "") + file_json(e);
+        json::Object o;
+        o.add("archive", out_path).add("run_id", text(run.start.find("run_id"))).add("with_outputs", with);
+        o.raw("rerun", json::Object().add("directory", rerun_in).add("command", command).str());
+        o.raw("notes", json_list(notes)).raw("files", files + "]");
+        std::cout << o.str() << "\n";
+        for (const std::string & note : notes) logging::warning(diagnostic_code::PACK_RERUN, note);
+        return 0;
+    }
     uint64_t total = 0;
     std::map<std::string, size_t> by_role;
     for (const Entry & e : entries) {
@@ -411,8 +426,7 @@ int pack(const cli::Args & args) {
                  "the run read");
     item("Outputs", count(by_role["output"] + by_role["run_log"], "file") + " (--with-outputs " + with + ")");
     item("Size", count(total, "byte") + " before compression");
-    item("Rerun", "tar -xf " + fs::path(out_path).filename().string() + " && cd " + top + "/" +
-                      rerun_dir.generic_string() + " && " + command);
+    item("Rerun", "tar -xf " + fs::path(out_path).filename().string() + " && cd " + rerun_in + " && " + command);
     item("Verify", "mallard pack --verify " + out_path);
     for (const std::string & note : notes) logging::warning(diagnostic_code::PACK_RERUN, note);
     return 0;
@@ -504,6 +518,25 @@ int verify(const cli::Args & args) {
         problems.push_back({RUN_RECORD, "missing: the run's start record"});
     }
 
+    if (args.value_or("--format", "text") == "json") {
+        std::string list = "[";
+        for (const auto & p : problems) {
+            list += (list.size() > 1 ? "," : "") + json::Object().add("path", p[0]).add("problem", p[1]).str();
+        }
+        std::string notes = "[";
+        for (const json::Value & note : m["notes"].array) notes += (notes.size() > 1 ? "," : "") + json::quote(note.string);
+        json::Object o;
+        o.add("archive", path).add("run_id", text(m.find("run_id"))).add("created", text(m.find("created")));
+        o.add("mallard", text(m.find("mallard"))).add("files", m["files"].array.size()).add("against_run", against_run);
+        o.raw("rerun", json::Object()
+                           .add("directory", top + "/" + text(m["rerun"].find("directory")))
+                           .add("command", text(m["rerun"].find("command")))
+                           .str());
+        o.raw("notes", notes + "]").raw("problems", list + "]");
+        o.add("result", std::string(problems.empty() ? "ok" : "differs")).add("exit_status", problems.empty() ? 0 : 1);
+        std::cout << o.str() << "\n";
+        return problems.empty() ? 0 : 1;
+    }
     logging::section("Archive " + path, count(members.size(), "file"));
     item("Run", text(m.find("run_id")));
     item("Packed", text(m.find("created")) + ", by Mallard " + text(m.find("mallard")));
@@ -527,6 +560,9 @@ int pack_main(const cli::Args & args) {
     char ** argv = args.argv;
     if (args.has("--verify") && (args.has("--output") || args.has("--with-outputs"))) {
         return cli::usage_error(*cli::command("pack"), "--verify checks an archive; it takes no -o or --with-outputs");
+    }
+    if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
+        return cli::usage_error(*cli::command("pack"), "--format takes text or json, not " + f);
     }
     comm::Session session(argc, argv);
     try {

@@ -14,6 +14,7 @@
 #define BOUNDARY_FIELDS_H
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,7 +29,60 @@
 /** @brief Point in space. */
 using Point = std::array<double, N_DIM>;
 
-/** @brief A number of a [[boundaries]] entry, or an expression of x, y, z and t, compiled. */
+/**
+ * @brief The variables of boundary expressions, by index: x, y, z, t, then the
+ *        local coordinates of the face (docs/guide/boundary_conditions.md#local-coordinates).
+ */
+namespace boundary_variable {
+constexpr uint16_t T = 3;
+constexpr uint16_t N = 4;   // distance to the nearest wall
+constexpr uint16_t XI = 5;  // along the tangent axis of the zone's frame
+#if N_DIM == 2
+constexpr uint16_t S = 6;   // arc length along the zone
+constexpr uint16_t COUNT = 7;
+#else
+constexpr uint16_t ETA = 6;    // along the second tangent axis
+constexpr uint16_t R = 7;      // hypot(xi, eta)
+constexpr uint16_t THETA = 8;  // atan2(eta, xi)
+constexpr uint16_t COUNT = 9;
+#endif
+constexpr uint16_t FIRST_LOCAL = N;
+} // namespace boundary_variable
+
+/**
+ * @brief A face's values of the variables of boundary expressions, by index
+ *        (boundary_variable), t's slot unused: its position, and its local
+ *        coordinates, NaN where they were not computed.
+ */
+struct FacePoint {
+    std::array<double, boundary_variable::COUNT> v;
+
+    FacePoint() { v.fill(0.0); }
+    /** @brief The point x, without local coordinates. */
+    FacePoint(const Point & x) {  // NOLINT(google-explicit-constructor)
+        v.fill(std::numeric_limits<double>::quiet_NaN());
+        v[2] = v[boundary_variable::T] = 0.0;
+        for (size_t d = 0; d < N_DIM; d++) v[d] = x[d];
+    }
+
+    double & operator[](const size_t i) { return v[i]; }
+    double operator[](const size_t i) const { return v[i]; }
+
+    Point point() const {
+        Point x{};
+        for (size_t d = 0; d < N_DIM; d++) x[d] = v[d];
+        return x;
+    }
+
+    /** @brief The variables at time t, for kexpr. */
+    std::array<double, boundary_variable::COUNT> at(const double t) const {
+        auto vars = v;
+        vars[boundary_variable::T] = t;
+        return vars;
+    }
+};
+
+/** @brief A number of a [[boundaries]] entry, or an expression of x, y, z, t and the local coordinates, compiled. */
 class BoundaryValue {
     public:
         BoundaryValue() = default;
@@ -37,12 +91,15 @@ class BoundaryValue {
         /** @brief Whether v is an expression rather than a number or a quantity with a unit. */
         static bool is_expression(const Input & v);
 
-        /** @brief The variables of the expressions, by index: x, y, z, t. */
+        /** @brief The variables of the expressions, by index (boundary_variable): x, y, z, t, then the local coordinates. */
         static const std::vector<std::string> & variables();
+
+        /** @brief Adds to the error for an unknown symbol: a local coordinate of the other dimension, or a unit. */
+        static std::string hint(const std::string & symbol);
 
         bool varies() const { return program && !program->is_constant(); }
         bool depends_on_time() const { return program && program->uses(3); }
-        double at(const Point & x, double t) const;
+        double at(const FacePoint & x, double t) const;
 
         /** @brief The compiled value (a constant for a number); null if absent. */
         const std::shared_ptr<kexpr::Program> & compiled() const { return program; }
@@ -69,10 +126,10 @@ class DirectionKey {
         bool depends_on_time() const;
 
         /** @brief The unit direction at x and t; an error if it is zero there. */
-        Point at(const Point & x, double t) const;
+        Point at(const FacePoint & x, double t) const;
 
         /** @brief The unit direction at x and t, checked to point into the domain at a face of inward normal n_in. */
-        Point inward(const Point & x, double t, const Point & n_in) const;
+        Point inward(const FacePoint & x, double t, const Point & n_in) const;
 
         /** @brief The compiled components (expressions only). */
         const std::vector<BoundaryValue> & programs() const { return components; }
@@ -99,7 +156,7 @@ struct VectorKey {
     VectorKey(const Input & entry, const std::string & key, const std::string & where);
 
     /** @brief The unit direction of the magnitude at x and t on a face of inward normal n_in. */
-    Point direction_at(const Point & x, double t, const Point & n_in) const {
+    Point direction_at(const FacePoint & x, double t, const Point & n_in) const {
         return directed ? direction.at(x, t) : n_in;
     }
 };
@@ -139,7 +196,7 @@ class BoundaryFields {
         }
 
         /** @brief The temperature the condition prescribes (T, or T0 of inlet_stagnation), 0 if none. */
-        double temperature(const Point & x, double t) const;
+        double temperature(const FacePoint & x, double t) const;
 
         /**
          * @brief Write the condition's numbers at x and t into bc; densities of
@@ -149,7 +206,7 @@ class BoundaryFields {
          * @param numbers_only Write only the numbers that are not expressions
          *        (the condition before it is split by face).
          */
-        void apply(BoundaryCondition & bc, const Point & x, double t, double R, const Point & n_in,
+        void apply(BoundaryCondition & bc, const FacePoint & x, double t, double R, const Point & n_in,
                    bool numbers_only = false) const;
 
         BoundaryType get_type() const { return type; }
@@ -163,7 +220,7 @@ class BoundaryFields {
         const DirectionKey & get_direction() const { return direction; }
 
         /** @brief The direction of a speed at x and t on a face of inward normal n_in. */
-        Point speed_direction(const Point & x, double t, const Point & n_in) const {
+        Point speed_direction(const FacePoint & x, double t, const Point & n_in) const {
             return directed ? direction.at(x, t) : n_in;
         }
 
@@ -210,7 +267,7 @@ struct MassFlowProfile {
     std::string where;
     std::shared_ptr<const kexpr::Program> shape;
     std::shared_ptr<const kexpr::Program> mdot;  // of t only
-    std::vector<Point> x;          // face centers
+    std::vector<FacePoint> x;      // face centers and local coordinates
     std::vector<double> measure;   // face measures as the flux integral weighs them
 };
 
@@ -239,7 +296,7 @@ class TimedBoundaryFields {
          *        Without a face (`at_face` false), x and n_in are 0 and errors
          *        give no position.
          */
-        void add(uint32_t i_bc, const Point & x, const Point & n_in, const std::shared_ptr<const BoundaryFields> & fields,
+        void add(uint32_t i_bc, const FacePoint & x, const Point & n_in, const std::shared_ptr<const BoundaryFields> & fields,
                  const std::shared_ptr<const CompositionPrograms> & composition, bool at_face = true);
 
         /**
@@ -247,7 +304,7 @@ class TimedBoundaryFields {
          *        `profile`, at each stage. Every rank integrates the profile over every face in the same
          *        order, so the fluxes are the same on any rank count with no communication.
          */
-        void add(const MassFlowProfile & profile, const std::vector<uint32_t> & bcs, const std::vector<Point> & x);
+        void add(const MassFlowProfile & profile, const std::vector<uint32_t> & bcs, const std::vector<FacePoint> & x);
 
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
         void finish();
@@ -282,7 +339,7 @@ class TimedBoundaryFields {
         struct FaceHost {
             uint32_t i_bc;
             uint32_t set;
-            Point x;
+            FacePoint x;
             Point n_in;
             bool at_face;
         };
@@ -292,7 +349,7 @@ class TimedBoundaryFields {
 
         Kokkos::View<uint32_t *> face_bc;
         Kokkos::View<uint32_t *> face_set;
-        Kokkos::View<double *[3]> face_x;
+        Kokkos::View<double *[boundary_variable::COUNT]> face_x;
         // The speed's direction, or the inward normal (of a mass flux vector, or of a direction of t)
         Kokkos::View<double *[N_DIM]> face_direction;
         Kokkos::View<uint8_t *[2]> set_type;            // type, Vector
@@ -313,12 +370,12 @@ class TimedBoundaryFields {
         std::vector<MassFlowProfile> profiles;
         // This rank's faces: condition, center and profile
         std::vector<uint32_t> profile_bc_host;
-        std::vector<Point> profile_x_host;
+        std::vector<FacePoint> profile_x_host;
         std::vector<uint32_t> profile_of_host;
         std::vector<uint32_t> first;            // first inlet face of each profile, then the total
         Kokkos::View<uint32_t *> profile_program;
         Kokkos::View<uint32_t *> profile_mdot;    // program
-        Kokkos::View<double *[3]> inlet_x;
+        Kokkos::View<double *[boundary_variable::COUNT]> inlet_x;
         Kokkos::View<double *> inlet_measure;
         Kokkos::View<uint32_t *[3]> chunk_range;  // profile, first and end face
         Kokkos::View<uint32_t *> profile_chunks;  // first chunk of each profile, then the total
@@ -326,7 +383,7 @@ class TimedBoundaryFields {
         Kokkos::View<double *> profile_scale;
         Kokkos::View<uint32_t *> profile_bc;
         Kokkos::View<uint32_t *> profile_of;
-        Kokkos::View<double *[3]> profile_x;
+        Kokkos::View<double *[boundary_variable::COUNT]> profile_x;
         Kokkos::View<int32_t> profile_error;          // 1 + the lowest inlet face or profile in error, 0 if none
         Kokkos::View<double[3]> profile_error_value;  // its time, value and ProfileError
 
@@ -345,7 +402,7 @@ class DirichletStates {
     public:
         /** @brief Face states `states` (indices into BoundaryData::face_state) at x take the programs W. */
         void add(const std::vector<std::shared_ptr<const kexpr::Program>> & W, const std::vector<int32_t> & states,
-                 const std::vector<Point> & x);
+                 const std::vector<FacePoint> & x);
 
         /** @brief Copy what add() gathered to the device and write the states that do not depend on t. */
         void finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state);
@@ -366,7 +423,7 @@ class DirichletStates {
         struct FaceHost {
             int32_t state;
             uint32_t set;
-            Point x;
+            FacePoint x;
         };
         std::vector<std::shared_ptr<const kexpr::Program>> host_programs;  // N_DIM + 2 per set
         std::vector<bool> set_timed;
@@ -375,7 +432,7 @@ class DirichletStates {
 
         Kokkos::View<int32_t *> face_state_index;
         Kokkos::View<uint32_t *> face_set;
-        Kokkos::View<double *[3]> face_x;
+        Kokkos::View<double *[boundary_variable::COUNT]> face_x;
         kexpr::ProgramTable<> programs;
 };
 
@@ -390,7 +447,7 @@ class TimedInletTargets {
 
         /** @brief Characteristic faces `chars` with centers x and inward normals n_in take the entry's velocity u. */
         void add(const Input & entry, const std::string & where, const std::vector<int32_t> & chars,
-                 const std::vector<Point> & x, const std::vector<Point> & n_in);
+                 const std::vector<FacePoint> & x, const std::vector<Point> & n_in);
 
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
         void finish();
@@ -413,11 +470,11 @@ class TimedInletTargets {
         std::vector<std::array<int32_t, N_DIM>> host_direction;  // programs of a direction of t, -1 if none
         std::vector<Point> host_scale;  // 1, the direction of a speed, or the inward normal for a direction of t
         std::vector<int32_t> host_chars;
-        std::vector<Point> host_x;
+        std::vector<FacePoint> host_x;
         std::vector<std::string> host_where;  // per face
 
         Kokkos::View<int32_t *> chars;
-        Kokkos::View<double *[3]> x;
+        Kokkos::View<double *[boundary_variable::COUNT]> x;
         Kokkos::View<uint32_t *[N_DIM]> slots;
         Kokkos::View<int32_t *[N_DIM]> direction;
         Kokkos::View<double *[N_DIM]> scale;

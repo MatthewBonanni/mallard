@@ -8,10 +8,8 @@ numerical schlieren, beside the schlieren itself, rendered pixel-exact.
 
 extract turns each snapshot of SERIES_DIR (VTKHDF, or VTU or the PVTU of a
 distributed run) into GRID_DIR/NAME.npy, the cell values on the (ny, nx) grid
-in float32, and appends its time to GRID_DIR/times.txt. The snapshots of a
-series file (.vtkhdf) are read, and of one file per snapshot only those
-listed in the series index (.vtkhdf.series or .pvd), so files still being
-written are skipped; --delete removes those snapshot files afterwards and
+in float32, and appends its time to GRID_DIR/times.txt. Files still being
+written are skipped; --delete removes the snapshot files afterwards and
 --follow keeps polling until the run's log says it finished, which keeps the
 disk use of long runs bounded (with series = false, or VTU output).
 
@@ -21,7 +19,6 @@ drawn by matplotlib around the pixel-exact panels. still writes the final
 state at one pixel per cell (density and schlieren PNGs).
 """
 import argparse
-import glob
 import os
 import re
 import shutil
@@ -40,27 +37,11 @@ from matplotlib.colors import Normalize
 from scipy.ndimage import gaussian_filter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from animate import write_gif, write_mp4  # noqa: E402
-from mallard.vtu import grid_fields  # noqa: E402
+import mallard  # noqa: E402
+from animate import grid_fields, write_gif, write_mp4  # noqa: E402
 
 BG = "#101014"
 FG = "#e8e8e8"
-
-
-def listed_snapshots(series_dir):
-    """Snapshots of the series files and of the series indexes (written after each snapshot is complete)."""
-    out = []
-    for f in sorted(glob.glob(os.path.join(series_dir, "*.vtkhdf"))):
-        from mallard.vtkhdf import is_series_file, snapshots
-        if is_series_file(f):
-            out += snapshots(f)
-    for index in glob.glob(os.path.join(series_dir, "*.vtkhdf.series")):
-        from mallard.vtkhdf import read_series
-        out += [path for _, path in read_series(index)]
-    for pvd in glob.glob(os.path.join(series_dir, "*.pvd")):
-        for name in re.findall(r'file="([^"]+)"', open(pvd).read()):
-            out.append(os.path.join(series_dir, name))
-    return out
 
 
 def extract(args):
@@ -68,19 +49,21 @@ def extract(args):
     times = os.path.join(args.grid_dir, "times.txt")
     while True:
         finished = args.follow and os.path.exists(args.follow) and re.search(r"^\W*Stopped", open(args.follow).read(), re.M) is not None
-        for path in listed_snapshots(args.series_dir):
+        for series, k in mallard.series(args.series_dir):
+            path = series.snapshots[k].file
+            in_series_file = os.path.abspath(path) == os.path.abspath(series.path) and path.endswith(".vtkhdf")
             stem = os.path.splitext(os.path.basename(path))[0]
-            if hasattr(path, "position"):
-                stem += f"_{path.position:06d}"
+            if in_series_file:
+                stem += f"_{series.snapshots[k].index:06d}"
             out = os.path.join(args.grid_dir, stem + ".npy")
             if os.path.exists(out) or not os.path.exists(path):
                 continue
-            t, xs, ys, f = grid_fields(path, [args.var])
+            t, xs, ys, f = grid_fields(series, k, [args.var])
             np.save(out + ".tmp.npy", f[args.var].T.astype(np.float32))
             os.replace(out + ".tmp.npy", out)
             with open(times, "a") as fh:
                 fh.write(f"{stem} {t:.10g}\n")
-            if args.delete and not hasattr(path, "position"):
+            if args.delete and not in_series_file:
                 pieces = re.findall(r'Source="([^"]+)"', open(path).read()) if path.endswith(".pvtu") else []
                 for p in pieces:
                     os.remove(os.path.join(os.path.dirname(path), p))

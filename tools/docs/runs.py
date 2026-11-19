@@ -543,7 +543,7 @@ def remap_fields(P, args):
     source, rho_s, target, rho_t = remap_data(args)
     lo, hi = min(rho_s.min(), rho_t.min()), max(rho_s.max(), rho_t.max())
     fig = plt.figure(figsize=(10.4, 3.6))
-    grid = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.25], wspace=0.12)
+    grid = fig.add_gridspec(1, 4, width_ratios=[1, 1, 0.12, 1.25], wspace=0.12)
     y_cut = 0.58
     for k, (cells, rho, title) in enumerate([(source, rho_s, "before: 256 quadrilaterals"),
                                              (target, rho_t, "after: 2,738 triangles")]):
@@ -555,7 +555,7 @@ def remap_fields(P, args):
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.set_title(title, fontsize=12)
-    ax = fig.add_subplot(grid[2])
+    ax = fig.add_subplot(grid[3])
     x = np.linspace(0.0005, 0.9995, 2000)
     for cells, rho, name, color, lw in [(source, rho_s, "before", P["blue"], 1.4), (target, rho_t, "after", P["flame"], 2.0)]:
         values = np.full(x.size, np.nan)
