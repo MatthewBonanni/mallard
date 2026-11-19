@@ -196,6 +196,53 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+**2D** (#889, #999). The 2D setup runs one thread per cell (`CellSetup2D`), each with its own scratch in
+global memory, so the threads in flight are the batch's cells. The kernel takes 134 registers per thread,
+and Kokkos launches it in blocks of 128, three per SM: 41,472 resident threads on an A100. On CUDA a
+batch is that one wave (`resident_threads()` repeats Kokkos's block-size choice from the kernel's
+attributes), within a quarter of the free memory. Batches of 13,824 to 55,296 cells at orders 5 and 6
+took 6.25 / 5.04 / 5.17 / **4.17** / 4.69 / 4.48 s and 19.7 / 19.3 / 15.6 / **12.2** / 14.5 / 14.7 s
+(13,824 cells, the earlier byte budget's batch, then 27,648, 41,472, 51,840 and 55,296 cells): past one wave, a partial
+second wave lengthens every batch.
+
+At orders 5 and 6 a per-thread `clock64` profile of that kernel put 73-82% of the thread time in the
+smoothness-indicator matrix, which added every term to the cell's interleaved scratch in global memory (a
+load and a store per term, for each of up to 231 entries, quadrature point and derivative), and 16-22% in
+the fits. Each thread now sums the matrix one row at a time in registers (`smoothness_rows<R>`, the terms
+whose derivative vanishes left out), and on the device the Householder sums, the back-substitution and
+the Lebesgue constant's coefficients likewise column by column; every entry adds the same terms in the
+same order, so the tables are bitwise the same (in builds whose CUDA compiler is `nvcc_wrapper`, which
+compiles the TENO sources without contracting FMAs; not yet with the host compiler as
+`CMAKE_CXX_COMPILER`, #1184). The kernel then takes 255 registers and 2.3 KB of local memory per thread,
+two blocks per SM; bounded to four blocks of 128 per SM (128 registers, 2.8 KB) it holds 55,296 threads
+and is faster at every order. The fits are now about 70% of the thread time (#1185). The host backends
+run the same row sums; their pseudo-inverse keeps updating whole rows, which vectorize.
+
+"TENO setup" tables phase, one A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`); the host setup is
+the same code on the 16 host threads; restart files are bitwise identical:
+
+| tables (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 6.48 | 12.8 | 23.5 | 57.8 |
+| double Mach, device, batches from a byte budget (at most 27,648 cells) | 1.03 | 1.66 | 5.12 | 19.3 |
+| double Mach, device, batches of one wave (41,472) | **0.89** | **1.47** | **4.18** | **12.2** |
+| box, 1024 x 1024 quadrilaterals, device, byte budget | 0.86 | 1.35 | 3.38 | 17.4 |
+| box, device, one wave | **0.69** | **1.11** | **3.25** | **10.7** |
+| double Mach, device, one wave, again (same session as the next row) | 0.92 | 1.45 | 4.43 | 13.5 |
+| double Mach, device, sums in registers, four blocks per SM (55,296) | **0.78** | **1.07** | **2.15** | **4.83** |
+| box, device, one wave, again | 0.69 | 1.11 | 3.23 | 11.4 |
+| box, device, sums in registers, four blocks per SM | **0.51** | **0.75** | **1.32** | **3.42** |
+
+On the 28 threads of the Threads backend the 2D tables take 2-43% less (box 1.63 / 3.30 / 9.34 / 25.6 s
+before, 1.59 / 2.66 / 5.47 / 14.6 s after; double Mach 2.56 / 4.19 / 10.8 / 26.8 s before, 2.51 / 3.56 /
+7.75 / 16.0 s after) and the 3D tables the same (Taylor-Green 96^3 at orders 3, 5 and 6: 5.74 / 11.2 /
+25.0 s). The tables' SHA-256 (the cache file after its header) is the same before and after, on the A100
+and on the host, for every case above.
+
+The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
+wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. The packing of the shared tables, on the host,
+takes 7-37 s on these meshes, more than the tables (#1031).
+
 ### 5. Reacting mixtures (#257)
 
 The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
@@ -471,9 +518,32 @@ it stops at, a restart, averages started afresh), the device's means are copied 
 Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
 the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
 written), the record says so, and the host takes the step without sampling them again (writing the spectra's
-staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
+staged sample instead). Confidence intervals `CI_<average>` are computed at each sample's cell from the
+device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
+Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
+half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
+Probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
+
+`[statistics.convergence]` values that a trigger reads are updated on the device too, at the rows of their signals,
+between the probes and the triggers. The integrals' and forces' values are the trigger variables the monitors set;
+probe signals are reduced into theirs like the probes a trigger reads. Each signal's history (times, values and the
+prefix sums of its values less the first, and of their squares) lives in device memory, and one kernel, under an IF
+node on whether any signal has a sample (and itself checking that flag, since graphs without conditional nodes run
+every IF body), does `Convergence::add` and `update`: the MSER-5 checks, the start of the stationary window, the
+integrated autocorrelation time and the batch means of the mean and the variance, in the host's order of operations
+and compiled without contracted multiply-adds, so its values are the host's bit for bit. Its team sums each of
+MSER's batch means and each lag's autocorrelation on one thread, as the host does, and Sokal's window closes over
+chunks of 256 lags. The host updates its own estimate as it takes each record, which writes the file and the
+restart histories; the device keeps the window's start, the `[statistics]` averages' start after the step's
+samples, in the record, since the host's copy of the statistics' clock may be steps ahead. On resuming, the host
+copies its state to the device, and its histories' samples since the last copy if it added any. The histories are
+whole, with no wraparound: their device memory holds at least 4096 samples, twice the longest history when staged,
+at 32 bytes per sample and signal (128 KiB per signal at least, about 1 GiB per signal at 10^7 samples, besides
+MSER's batch means and the lags' chunk). A history fills it only by running that long without a stop; the device
+then stops at that row (`CONVERGENCE`) and resumes with twice the room, in a new graph; while it restages, the old
+and the new memory are held at once, about three times the old.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -525,8 +595,7 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that follow the solution and those reading `[statistics]` confidence
-intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of regions that follow the solution. A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there

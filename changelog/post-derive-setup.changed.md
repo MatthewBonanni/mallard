@@ -1,0 +1,1 @@
+- In `mallard post` commands, TENO's setup computes the cells' moments only up to the degree the central stencils read (r instead of 2r - 2) and skips the structured-block summary of the setup report, which these commands do not print: about a tenth less CPU time for `post derive` of a 64³ TENO5 Taylor-Green vortex; derived fields are bitwise unchanged (#935).

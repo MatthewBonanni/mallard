@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include <Kokkos_Core.hpp>
+
 #include "data_writer.h"
 #include "input.h"
 #include "run_status.h"
@@ -122,17 +124,53 @@ class Convergence {
         std::vector<OutputSummary> summary() const;
         const std::string & file_name() const { return file; }
 
+        /** @brief A signal's state between samples, besides its history. */
+        struct SignalState {
+            uint64_t next_check = 0;  // samples at the next MSER check
+            time_series::Truncation truncation{0, false};  // the latest accepted
+            uint64_t n_tau = 0;       // window samples at the last autocorrelation time
+            double window_tau = 0.0;  // its window's start
+            double tau = 0.0;
+        };
+        /** @brief A signal on the device: its state and the samples of its history. */
+        struct DeviceSignal {
+            SignalState state;
+            uint64_t n;
+        };
+
+        /**
+         * @brief Device copies of the histories and state, for a step graph's add_staged, with room for at least
+         *        twice the longest history (and 4096 samples).
+         */
+        void stage();
+        /** @brief Whether a history fills half its room on the device: stage again (the step graph is captured anew). */
+        bool staged_room_low() const;
+        /**
+         * @brief The device's histories and state from the host's, whose samples since the last call it copies (none
+         *        when the host added none; the state always).
+         */
+        void resume_staged();
+        /**
+         * @brief In a step graph: add's update on the device, bit for bit, of the samples of the signals whose
+         *        staged_written() is set, valued staged_input() (then t and window_start); the values into result, as
+         *        last() holds them; nothing while *due (device memory) is 0, as in graphs whose IF bodies all run. The
+         *        caller ensures room for them (staged_signals, staged_capacity).
+         */
+        void add_staged(const uint32_t * due, double * result);
+        /** @brief Per signal: its sample is added (device memory). */
+        const Kokkos::View<uint32_t *> & staged_written() const { return d_written; }
+        /** @brief Per signal: its sample's value; then t and window_start (device memory). */
+        const Kokkos::View<double *> & staged_input() const { return d_input; }
+        const Kokkos::View<DeviceSignal *> & staged_signals() const { return d_signals; }
+        uint64_t staged_capacity() const { return capacity; }
+
     private:
-        struct Signal {
+        struct Signal : SignalState {
             std::string name;
             Dimension dimension;
             std::vector<double> t, x;
             std::vector<double> s1 = {0.0}, s2 = {0.0};  // prefix sums of x - x[0] and of its square
-            uint64_t next_check = 0;  // samples at the next MSER check
-            time_series::Truncation truncation;  // the latest accepted
-            uint64_t n_tau = 0;       // window samples at the last autocorrelation time
-            double window_tau = 0.0;  // its window's start
-            double tau = 0.0;
+            uint64_t n_staged = 0;    // samples resume_staged copied
 
             void push(double time, double value);
         };
@@ -152,6 +190,16 @@ class Convergence {
         std::string file;
         std::shared_ptr<std::ofstream> out;
         MonitorValues values;
+
+        // Staged: (signal, [t, x, s1, s2], sample), the signals, [stationary, t_stationary], MSER's batch means and
+        // the autocorrelations of a chunk of lags
+        uint64_t capacity = 0;
+        bool staged_current = false;  // the device's histories hold every sample
+        Kokkos::View<double ***, Kokkos::LayoutRight> d_history;
+        Kokkos::View<DeviceSignal *> d_signals;
+        Kokkos::View<double *> d_global, d_batches, d_lags;
+        Kokkos::View<uint32_t *> d_written;
+        Kokkos::View<double *> d_input;
 };
 
 #endif // STATISTICAL_CONVERGENCE_H
