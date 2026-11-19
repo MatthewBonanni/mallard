@@ -196,6 +196,53 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+**2D** (#889, #999). The 2D setup runs one thread per cell (`CellSetup2D`), each with its own scratch in
+global memory, so the threads in flight are the batch's cells. The kernel takes 134 registers per thread,
+and Kokkos launches it in blocks of 128, three per SM: 41,472 resident threads on an A100. On CUDA a
+batch is that one wave (`resident_threads()` repeats Kokkos's block-size choice from the kernel's
+attributes), within a quarter of the free memory. Batches of 13,824 to 55,296 cells at orders 5 and 6
+took 6.25 / 5.04 / 5.17 / **4.17** / 4.69 / 4.48 s and 19.7 / 19.3 / 15.6 / **12.2** / 14.5 / 14.7 s
+(13,824 cells, the earlier byte budget's batch, then 27,648, 41,472, 51,840 and 55,296 cells): past one wave, a partial
+second wave lengthens every batch.
+
+At orders 5 and 6 a per-thread `clock64` profile of that kernel put 73-82% of the thread time in the
+smoothness-indicator matrix, which added every term to the cell's interleaved scratch in global memory (a
+load and a store per term, for each of up to 231 entries, quadrature point and derivative), and 16-22% in
+the fits. Each thread now sums the matrix one row at a time in registers (`smoothness_rows<R>`, the terms
+whose derivative vanishes left out), and on the device the Householder sums, the back-substitution and
+the Lebesgue constant's coefficients likewise column by column; every entry adds the same terms in the
+same order, so the tables are bitwise the same (in builds whose CUDA compiler is `nvcc_wrapper`, which
+compiles the TENO sources without contracting FMAs; not yet with the host compiler as
+`CMAKE_CXX_COMPILER`, #1184). The kernel then takes 255 registers and 2.3 KB of local memory per thread,
+two blocks per SM; bounded to four blocks of 128 per SM (128 registers, 2.8 KB) it holds 55,296 threads
+and is faster at every order. The fits are now about 70% of the thread time (#1185). The host backends
+run the same row sums; their pseudo-inverse keeps updating whole rows, which vectorize.
+
+"TENO setup" tables phase, one A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`); the host setup is
+the same code on the 16 host threads; restart files are bitwise identical:
+
+| tables (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 6.48 | 12.8 | 23.5 | 57.8 |
+| double Mach, device, batches from a byte budget (at most 27,648 cells) | 1.03 | 1.66 | 5.12 | 19.3 |
+| double Mach, device, batches of one wave (41,472) | **0.89** | **1.47** | **4.18** | **12.2** |
+| box, 1024 x 1024 quadrilaterals, device, byte budget | 0.86 | 1.35 | 3.38 | 17.4 |
+| box, device, one wave | **0.69** | **1.11** | **3.25** | **10.7** |
+| double Mach, device, one wave, again (same session as the next row) | 0.92 | 1.45 | 4.43 | 13.5 |
+| double Mach, device, sums in registers, four blocks per SM (55,296) | **0.78** | **1.07** | **2.15** | **4.83** |
+| box, device, one wave, again | 0.69 | 1.11 | 3.23 | 11.4 |
+| box, device, sums in registers, four blocks per SM | **0.51** | **0.75** | **1.32** | **3.42** |
+
+On the 28 threads of the Threads backend the 2D tables take 2-43% less (box 1.63 / 3.30 / 9.34 / 25.6 s
+before, 1.59 / 2.66 / 5.47 / 14.6 s after; double Mach 2.56 / 4.19 / 10.8 / 26.8 s before, 2.51 / 3.56 /
+7.75 / 16.0 s after) and the 3D tables the same (Taylor-Green 96^3 at orders 3, 5 and 6: 5.74 / 11.2 /
+25.0 s). The tables' SHA-256 (the cache file after its header) is the same before and after, on the A100
+and on the host, for every case above.
+
+The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
+wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. The packing of the shared tables, on the host,
+takes 7-37 s on these meshes, more than the tables (#1031).
+
 ### 5. Reacting mixtures (#257)
 
 The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
@@ -517,7 +564,9 @@ node on its writer's own flag at the device's `t` (after the cell states, for a 
 copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
 With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
 copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
-of builds without conditional nodes stop the device at their steps.
+of builds without conditional nodes stop the device at their steps. What the host copies from the device for an
+output it writes itself also goes through pinned mirrors: the same ones for snapshots and restarts, and their
+own for probe values, a moving region probe's cells and the spectra.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values

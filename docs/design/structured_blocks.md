@@ -181,6 +181,11 @@ reconstruction's setup, each rank finds its blocks among its owned cells:
 Detection reads only geometry and connectivity, so it gives the same shapes for
 any numbering. The detection loop of the prototype, a host breadth-first search,
 takes 1-3 s per million cells; it is part of the mesh setup, not of the step.
+The search matches the faces of the candidate cells by sorting one record per
+face (its sorted keyed nodes, cell and side: 24 B in 3D), allocated once, and
+keeps 8 B per face for the neighbor across it, so it holds about 200 B per
+hexahedron, well under the finished mesh (about 500 B), which sets the build's
+peak.
 
 ## Data layout
 
