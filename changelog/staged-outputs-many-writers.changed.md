@@ -1,0 +1,1 @@
+- Runs with more than 64 `[[write_data]]` outputs stage them in pinned host memory like other runs, instead of stopping the GPU's step queue at each one. Files are the same bit for bit. (#1049)

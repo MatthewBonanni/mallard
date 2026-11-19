@@ -361,25 +361,29 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     s_mean = Kokkos::View<double *>("spectra_sample_mean", acc_mean.size());
     s_shell = Kokkos::View<double *>("spectra_sample_shell", acc_shell.size());
     clock = Kokkos::View<Clock>("spectra_clock");
-    if (average) {
-        h_clock = pinned(clock);
-        h_spec = pinned(d_spec);
-        h_mean = pinned(d_mean);
-        h_shell = pinned(d_shell);
-    }
+    h_clock = pinned(clock);
+    h_spec = pinned(d_spec);
+    h_mean = pinned(d_mean);
+    h_shell = pinned(d_shell);
     push();
 }
 
 void Spectra::stage_output() {
-    if (!h_clock.data()) return;
+    if (average) copy_to_host();
+}
+
+void Spectra::finish_output() {
+    if (average) take_host_copies();
+}
+
+void Spectra::copy_to_host() const {
     copy_to_pinned(pinned, h_clock, clock);
     copy_to_pinned(pinned, h_spec, d_spec);
     copy_to_pinned(pinned, h_mean, d_mean);
     copy_to_pinned(pinned, h_shell, d_shell);
 }
 
-void Spectra::finish_output() {
-    if (!h_clock.data()) return;
+void Spectra::take_host_copies() const {
     const Clock k = h_clock();
     weight = k.weight;
     t_last = k.t_last;
@@ -391,15 +395,9 @@ void Spectra::finish_output() {
 
 void Spectra::pull() const {
     if (!clock.is_allocated() || holding_staged) return;
-    Clock k;
-    Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
-    weight = k.weight;
-    t_last = k.t_last;
-    n_samples = k.n_samples;
-    using Host = Kokkos::View<double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
-    Kokkos::deep_copy(Host(acc_spec.data(), acc_spec.size()), d_spec);
-    Kokkos::deep_copy(Host(acc_mean.data(), acc_mean.size()), d_mean);
-    Kokkos::deep_copy(Host(acc_shell.data(), acc_shell.size()), d_shell);
+    copy_to_host();
+    Kokkos::fence("spectra_pull");
+    take_host_copies();
 }
 
 void Spectra::push() {
@@ -643,7 +641,7 @@ void Spectra::sample(const uint64_t step, const rtype t, const rtype * const t_d
     sample_device(t_device, sampler);
     if (average) return;
     pull();
-    if (comm::is_root()) write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
+    if (comm::is_root()) write_held(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
 }
 
 std::string Spectra::sample_file(const uint64_t step) const {
@@ -683,14 +681,7 @@ void Spectra::write_staged(const uint64_t step, const rtype t, const uint64_t sl
     std::copy(row, row + acc_mean.size(), acc_mean.begin());
     row += acc_mean.size();
     std::copy(row, row + acc_shell.size(), acc_shell.begin());
-    holding_staged = true;
-    try {
-        write_file(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
-    } catch (...) {
-        holding_staged = false;
-        throw;
-    }
-    holding_staged = false;
+    write_held(sample_file(step), step, t, snapshot_block::reason::INTERVAL);
 }
 
 void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) {
@@ -847,9 +838,13 @@ RestartArrays Spectra::arrays() const {
 
 void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!enabled() || !average || !comm::is_root()) return;
+    write_held(file, step, t, reason);
+}
+
+void Spectra::write_held(const std::string & name, uint64_t step, rtype t, const std::string & reason) const {
     holding_staged = true;
     try {
-        write_file(file, step, t, reason);
+        write_file(name, step, t, reason);
     } catch (...) {
         holding_staged = false;
         throw;

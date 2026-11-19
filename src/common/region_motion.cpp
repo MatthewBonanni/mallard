@@ -124,9 +124,13 @@ constexpr bool GPU_SAMPLING = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecuti
 /**
  * @brief The fractions of the shapes of the curved cells (CURVED) or of the
  *        straight ones, a team per cell: two kernels, so that the straight
- *        cells' does not carry the registers and stack of the cones.
+ *        cells' does not carry the registers and stack of the cones. The
+ *        straight cells' is split again: SMOOTH samples the shapes with a
+ *        smooth edge, or all in an axisymmetric run, and the other the rest,
+ *        so that sharp shapes do not carry the registers and stack of sums
+ *        of smooth terms.
  */
-template <bool CURVED, bool IMPLICIT>
+template <bool CURVED, bool IMPLICIT, bool SMOOTH = false>
 struct ShapeSampler {
     Kokkos::View<Node *> nodes;
     Kokkos::View<const double *> vertices;
@@ -150,6 +154,7 @@ struct ShapeSampler {
         const double t = static_cast<double>(time());
         for (uint32_t i = 0; i < leaves.extent(0); i++) {
             const MovingFractions::Leaf leaf = leaves(i);
+            if (!CURVED && (axisymmetric || leaf.edge > 0.0) != SMOOTH) continue;
             const sampler::Shape<Distance<IMPLICIT>> shape{
                 Distance<IMPLICIT>{nodes.data() + leaf.first, leaf.count, vertices.data(), implicit, t}, leaf.edge,
                 bounded};
@@ -181,7 +186,7 @@ struct ShapeSampler {
                         for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                     };
                     if constexpr (GPU_SAMPLING) {
-                        sampler::team_straight_cell(member, scratch, shape, axisymmetric, n, node, inside, total);
+                        sampler::team_straight_cell<SMOOTH>(member, scratch, shape, axisymmetric, n, node, inside, total);
                     } else {
                         sampler::straight_cell(shape, axisymmetric, n, node, inside, total);
                     }
@@ -194,8 +199,8 @@ struct ShapeSampler {
 };
 
 /** @brief Launches a ShapeSampler: 8 teams per SM where its shared memory holds them, otherwise as many as it does. */
-template <bool CURVED, bool IMPLICIT>
-void launch(const ShapeSampler<CURVED, IMPLICIT> & sample, const uint32_t n_cells) {
+template <bool CURVED, bool IMPLICIT, bool SMOOTH>
+void launch(const ShapeSampler<CURVED, IMPLICIT, SMOOTH> & sample, const uint32_t n_cells) {
     const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
     Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
     if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
@@ -540,6 +545,7 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
     };
     walk(walk, filled);
     leaves = upload(h_leaves, "region_moving_leaves");
+    for (const Leaf & leaf : h_leaves) (axisymmetric || leaf.edge > 0.0 ? smooth_leaves : sharp_leaves) = true;
     ops = upload(h_ops, "region_moving_ops");
     Kokkos::View<double **, Kokkos::LayoutLeft> d_fixed("region_moving_fixed", n_cells, columns.size());
     auto h_fixed = Kokkos::create_mirror_view(d_fixed);
@@ -705,10 +711,12 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
         };
         const bool has_curved = curved_faces.extent(0) > 0;
         if (implicit_shapes) {
-            sample(ShapeSampler<false, true>{});
+            if (sharp_leaves) sample(ShapeSampler<false, true, false>{});
+            if (smooth_leaves) sample(ShapeSampler<false, true, true>{});
             if (has_curved) sample(ShapeSampler<true, true>{});
         } else {
-            sample(ShapeSampler<false, false>{});
+            if (sharp_leaves) sample(ShapeSampler<false, false, false>{});
+            if (smooth_leaves) sample(ShapeSampler<false, false, true>{});
             if (has_curved) sample(ShapeSampler<true, false>{});
         }
     }

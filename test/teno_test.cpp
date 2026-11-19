@@ -744,12 +744,42 @@ std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const Bou
 TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Triangles with mirror images at the walls: small batches split the cells
     // differently, and the host setup is the fallback for cells whose search
-    // outgrows the device's scratch
+    // outgrows the device's scratch; order 6 on quadrilaterals too, the largest fits and smoothness matrix
+    struct Case {
+        const char * type;
+        uint32_t nx, ny;
+        int order;
+    };
+    for (const Case c : {Case{"cartesian_tri", 12, 10, 5}, Case{"cartesian_tri", 12, 10, 6}, Case{"cartesian", 14, 12, 6}}) {
+        auto mesh = make_mesh(c.type, c.nx, c.ny);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        const auto reference = teno_tables(*make_teno(mesh, bd, c.order));
+        const std::string label = std::string(c.type) + ", order " + std::to_string(c.order);
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_batch_cells = 64; }) == reference)
+            << label << ", batches of 64 cells";
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_on_host = true; }) == reference)
+            << label << ", host setup";
+    }
+}
+
+TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
+    // Output of states read from files sets up only what cell_gradients and point_values read: scale,
+    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses. With
+    // share_tables, cells share basis means on the means alone, without smoothness matrices
     auto mesh = make_mesh("cartesian_tri", 12, 10);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+    for (const bool share : {true, false}) {
+        const auto full = tables_with(mesh, bd, 5, [&](TENO & t) { t.share_tables = share; });
+        const auto central = tables_with(mesh, bd, 5, [&](TENO & t) {
+            t.share_tables = share;
+            t.sector_stencils = false;
+        });
+        std::vector<size_t> same = {0u, 4u, 6u, 7u, 8u, 9u};
+        if (!share) same.insert(same.end(), {1u, 2u});
+        for (const size_t k : same) EXPECT_TRUE(central[k] == full[k]) << "table " << k << (share ? ", shared" : "");
+        EXPECT_TRUE(central[3].empty()) << "smoothness matrices";
+        EXPECT_TRUE(central[13].empty()) << "sector pseudo-inverses";
+    }
 }
 
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {

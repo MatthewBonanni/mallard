@@ -286,7 +286,11 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged.
+it are zero, so the run-time kernels are unchanged. A stencil that the
+search grows past $n_0$ to such a cell is searched again (#1202): in 2D at
+that degree; in 3D below that cell's position at the full degree, and only if
+no size there fits, at the wall degree, so the full degree is kept where it
+can be. No other stencil changes.
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -540,10 +544,12 @@ and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
 free device memory: a thread per cell in 2D, a team of threads per cell on
 GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
-the cells the searches gather), and a batch takes as many cells as fit what
-16,384 cells take with twice that scratch, up to one wave of threads on the
-GPU; meshes of at least 16,384 cells share one batch size, so that the
-setup's workspace does not grow with the mesh. Cells whose search
+the cells the searches gather). On CUDA a batch is one wave of the kernel's
+threads (as many as the GPU holds at once with the kernel's registers: 41,472
+on an A100), within a quarter of the free memory; on other GPUs it takes as
+many cells as fit what 16,384 cells take with twice that scratch. Meshes of
+at least 16,384 cells share one batch size, so that the setup's workspace
+does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
@@ -585,7 +591,7 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 16; one file per MPI rank). The file is used
+on later runs (format version 25; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -770,28 +776,20 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     converge at any order ([curved boundaries](../design/curved_boundaries.md)).
     With curved walls (high-order Gmsh faces or `[[mesh.curved]]`) and the
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
-    fourth at the walls. The fine cylinder at order 5 keeps a small drag
-    noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not; its root cause is
-    not known (#427).
-
-- **Curved walls past the first $n_0$ candidates** (#1202). The degree cap
-    at curved walls looks only at a stencil's first $n_0$ candidates
-    ([central stencil](#central-stencil)). When the Lebesgue search grows
-    the stencil past them, the entries it adds can be cells at a curved wall,
-    and the stencil keeps the full degree, one-sided there. On a $6^3$
-    `cartesian_pyramid` box with one curved wall, 87 stencils at order 5 and
-    28 at order 6 do so. The 2D and 3D setups both check only the first
-    $n_0$ entries, for every cell type.
+    fourth at the walls. On the fine cylinder with curved walls and far
+    field, order 5's drag is as smooth as order 3's
+    ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
 - **Order 4.** `high_order` stays at order 5 because order 4 fails three
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
-    outgoing acoustic wave on a radially stretched O-grid (#975), leaves an
-    odd-even wall pressure at the closed trailing edge of the NACA 0012
-    tutorial mesh (#976), and undershoots ahead of shocks on quads about 10
-    times more than order 5 (#977).
+    outgoing acoustic wave on a radially stretched O-grid (#975),
+    undershoots ahead of shocks on quads about 10 times more than order 5
+    (#977), and grows acoustic modes on graded hexahedra from 5%
+    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    pressure it left at the closed trailing edge of the NACA 0012 tutorial
+    mesh (#976) came from mirror images past the far side of the body, which
+    the setup now rejects ([candidates](#candidates)).
 
 - **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
