@@ -13,9 +13,11 @@
  */
 
 #include <gtest/gtest.h>
+#include <Kokkos_Core.hpp>
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <numbers>
 #include <random>
@@ -216,6 +218,70 @@ TEST(StatisticalConvergenceTest, RestartedHistoryContinuesBitwise) {
         feed(b, x, cut, 6000, NO_WINDOW);
         for (size_t k = 0; k < whole.last().values.size(); k++) {
             EXPECT_EQ(b.last().values[k].second, whole.last().values[k].second) << whole.last().values[k].first;
+        }
+    }
+}
+
+TEST(StatisticalConvergenceTest, DeviceUpdateIsTheHostsBitForBit) {
+    // add_staged, as a step graph runs it, against add: two signals, the second sampled at every third sample, the
+    // averages' window starting midway, histories of odd and even lengths; phi = 0.99 (tau = 199) keeps Sokal's window
+    // over several chunks of 256 lags. Launches that are not due change nothing.
+    const uint64_t n = 3001;
+    const std::vector<double> x = ar1(0.99, n, 51), y = ar1(0.6, n, 52);
+    const std::vector<Convergence::Monitored> monitored = {{"probe_u", dim::velocity}, {"probe_v", dim::velocity}};
+    const auto input = [](const std::string & name) {
+        return parse_toml("[statistics.convergence]\nsignals = [\"probe_u\", \"probe_v\"]\nfile = \"" +
+                          (scratch_dir() / name).string() +
+                          "\"\ntolerance = 0.05\nvariance_tolerance = 0.2\nmin_samples = 100\nbatches = 8\n");
+    };
+    Convergence host, device;
+    host.init(input("convergence_host.csv"), monitored, false);
+    device.init(input("convergence_device.csv"), monitored, false);
+    device.stage();
+    device.resume_staged();
+    const size_t n_columns = host.columns().size();
+    const Kokkos::View<double *> result("result", n_columns);
+    const Kokkos::View<uint32_t> due("due");
+    const auto h_result = Kokkos::create_mirror_view(result);
+    const auto h_written = Kokkos::create_mirror_view(device.staged_written());
+    const auto h_input = Kokkos::create_mirror_view(device.staged_input());
+    const auto launch = [&](const uint32_t is_due, const double t, const double window_start, const bool u,
+                            const double xu, const bool v, const double xv) {
+        h_written(0) = u;
+        h_written(1) = v;
+        h_input(0) = xu;
+        h_input(1) = xv;
+        h_input(2) = t;
+        h_input(3) = window_start;
+        Kokkos::deep_copy(device.staged_written(), h_written);
+        Kokkos::deep_copy(device.staged_input(), h_input);
+        Kokkos::deep_copy(due, is_due);
+        device.add_staged(due.data(), result.data());
+        Kokkos::deep_copy(h_result, result);
+    };
+    uint64_t mismatches = 0;
+    for (uint64_t i = 0; i < n; i++) {
+        const double t = 0.01 * static_cast<double>(i);
+        const double window_start = i < n / 2 ? NO_WINDOW : 0.01 * static_cast<double>(n / 2);
+        const bool v = i % 3 == 0;
+        std::vector<std::pair<size_t, double>> samples = {{0, x[i]}};
+        if (v) samples.emplace_back(1, y[i]);
+        host.add(i, t, samples, window_start);
+        // A launch between rows, with another window start: the values stay the last row's
+        launch(0, t, window_start + 1.0, false, 0.0, false, 0.0);
+        launch(1, t, window_start, true, x[i], v, v ? y[i] : 0.0);
+        ASSERT_EQ(host.last().values.size(), n_columns);
+        for (size_t k = 0; k < n_columns; k++) {
+            const double a = host.last().values[k].second, b = h_result(k);
+            if (std::memcmp(&a, &b, sizeof a) != 0 && mismatches++ < 10) {
+                ADD_FAILURE() << "sample " << i << ", " << host.last().values[k].first << ": " << a << " vs " << b;
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0u);
+    for (const auto & [name, value] : host.last().values) {
+        if (name == "probe_u_tau") {
+            EXPECT_GT(5.0 * value, 256.0);
         }
     }
 }
