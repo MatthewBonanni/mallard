@@ -1,6 +1,7 @@
 """Every file Mallard writes or reads, through its C++ reader (src/io/output_reader.h)."""
 import builtins
 import ctypes
+import fnmatch
 import json
 import os
 from dataclasses import dataclass
@@ -77,6 +78,29 @@ class Geometry:
         sums = np.zeros((self.n_cells, 3))
         np.add.at(sums, cell, self.points[self.connectivity])
         return sums / counts[:, None]
+
+    def triangles(self):
+        """A triangle fan of each 2D cell, of its outline for quadratic cells (corners and edge points in turn):
+        `(triangles, cell)`, the `(n_triangles, 3)` point indices and the cell of each triangle, for
+        matplotlib's `tripcolor(points[:, 0], points[:, 1], triangles, facecolors=values[cell])`. Raises
+        `ValueError` for 3D cells."""
+        if np.isin(self.types, list(_VOLUME_TYPES)).any():
+            raise ValueError("triangles() draws 2D cells; these are 3D cells")
+        starts, sizes = self.offsets[:-1], np.diff(self.offsets)
+        tris, cells = [], []
+        for t, n in sorted(set(zip(self.types.tolist(), sizes.tolist()))):
+            sel = np.nonzero((self.types == t) & (sizes == n))[0]
+            outline = self.connectivity[starts[sel, None] + np.array(_OUTLINE.get(t, range(n)))]
+            for k in range(1, n - 1):
+                tris.append(outline[:, [0, k, k + 1]])
+                cells.append(sel)
+        if not tris:
+            return np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+        return np.vstack(tris), np.concatenate(cells)
+
+
+_VOLUME_TYPES = {10, 12, 13, 14, 27, 71, 72, 73}
+_OUTLINE = {69: [0, 3, 1, 4, 2, 5], 70: [0, 4, 1, 5, 2, 6, 3, 7]}
 
 
 class _Result:
@@ -261,6 +285,29 @@ def run_files(directory):
         return json.loads(lib.lib.mallard_array_text(array).decode())
     finally:
         lib.lib.mallard_array_free(array)
+
+
+def series(path, pattern="*"):
+    """The snapshots of a series, as `(File, index)` pairs in time order (then step): of a series index or
+    snapshot file, or of every series index and snapshot file in a directory (not its subdirectories) whose
+    name matches `pattern`, as `run_files` lists them, but files still being written. `file.read(field, index)`
+    reads one."""
+    path = os.fspath(path)
+    if os.path.isdir(path):
+        paths = [p for p in run_files(path) if os.path.samefile(os.path.dirname(p), path)
+                 and fnmatch.fnmatch(os.path.basename(p), pattern) and not p.endswith(".partial")]
+    else:
+        paths = [path]
+    pairs = []
+    for p in paths:
+        f = open(p)
+        if f.kind == "snapshot":
+            pairs += [(f, i) for i in range(len(f.snapshots))]
+
+    def order(pair):
+        s = pair[0].snapshots[pair[1]]
+        return s.t, -1 if s.step is None else s.step
+    return sorted(pairs, key=order)
 
 
 def run_record(path):

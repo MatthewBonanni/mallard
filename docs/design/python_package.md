@@ -18,7 +18,7 @@ The containers, Spack and `cmake --install` install it with Mallard
 ## Post-processing layer
 
 `mallard.open`, `File`, `run_record`, `run_files`, `mallard.command`, `info`,
-`diff` and `post.*` read what Mallard writes and run its commands. They depend
+`diff`, `report`, `pack` and `post.*` read what Mallard writes and run its commands. They depend
 on numpy and on the reader library (`libmallard2d`/`libmallard3d`, the C
 interface of `src/io/reader_c_api.h`, loaded with ctypes) and on nothing else:
 no solver bindings, no compiled extension module, no MPI. Commands run the

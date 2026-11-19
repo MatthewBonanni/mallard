@@ -78,9 +78,10 @@ chemistry's share.
 
 `dmr_2d.toml` (2D) and `tgv_3d.toml` (3D) write 11 VTKHDF snapshots of `RHO`,
 `U`, `P` and `T`, the same steps' `MACH`, `Q_CRITERION`, `LAMBDA2`,
-`SCHLIEREN` and `VORTICITY` from the run, and restart files. `pv_derive.py` is
+`SCHLIEREN` and `VORTICITY` from the run, restart files and the TENO
+`cache_file`. `pv_derive.py` is
 the `pvbatch` pipeline that derives those fields; `run.sh` times both on the
-last snapshot and on the series, with and without a TENO `cache_file`, and
+last snapshot and on the series, with and without the run's `cache_file`, and
 `compare.py` (`pvpython`) gives the relative differences of two snapshots of
 the fields, optionally only more than a margin from the domain's faces:
 
