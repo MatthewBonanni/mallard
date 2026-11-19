@@ -535,3 +535,47 @@ TEST(MixtureTransportTest, WallsAreImpermeableToEverySpecies) {
         EXPECT_GT(Y.value[hot], Y.value[cold]) << bottom;
     }
 }
+
+TEST(MixtureTransportTest, SharedStageScratchMatchesSeparateBuffersBitwise) {
+    // The reconstructions' work memory, face_thermo and face_mdot share their memory with cell_diffusion and
+    // the transport values and gradients (Solver::allocate_stage_scratch): a step that reads either group while
+    // the other holds the memory, or reads what an earlier stage left there, changes the bits. A reacting
+    // propane flame between an inlet, an outlet and walls, with Soret diffusion and thickened-flame LES (the
+    // time step's transport), on TENO and on MUSCL (the scalars' gradients)
+    const std::string mechanism = SOURCE_DIR + "/mechanisms/c3h8_2step.yaml";
+    const std::string front = "0.5 * (1 + tanh((x - 0.012) / 0.002))";
+    for (const char * reconstruction : {"type = \"TENO\"\norder = 3", "type = \"MUSCL\""}) {
+        std::ostringstream input;
+        input << "[run]\nn_steps = 3\ncfl = 0.8\n[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 12\nLx = 0.024\n"
+              << "Ly = 0.012\n";
+        if (N_DIM == 3) input << "Nz = 3\nLz = 0.003\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+        input << "[initialize]\ntype = \"analytical\"\nu = " << velocity("3.0 * sin(523.6 * x)") << "\n"
+              << "p = \"101325.0\"\nT = \"288.0 + 1478.0 * " << front << "\"\n"
+              << "X = { C3H8 = \"0.13 - 0.13 * " << front << "\", O2 = \"1.0 - 0.65 * " << front
+              << "\", CO2 = \"0.39 * " << front << "\", H2O = \"0.52 * " << front << "\", N2 = \"3.76\" }\n"
+              << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = " << (N_DIM == 2 ? "[17.3, 0.0]" : "[17.3, 0.0, 0.0]")
+              << "\np = 101325.0\nT = 288.0\nX = { C3H8 = 0.13, O2 = 1.0, N2 = 3.76 }\n"
+              << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 101325.0\n"
+              << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 300.0\n"
+              << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+              << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n"
+              << "[numerics.face_reconstruction]\n" << reconstruction << "\n"
+              << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << mechanism << "\"\n"
+              << "phase = \"c3h8_2step\"\ntransport = \"mixture_averaged\"\nsoret = true\n"
+              << "[chemistry]\nT_frozen = 500.0\n[les]\nmodel = \"" << (N_DIM == 2 ? "wale" : "sigma") << "\"\n[les.combustion]\nmodel = \"tfles\"\n"
+              << "delta_L = 4.71e-4\ns_L = 0.2091\nT_unburnt = 288.0\nT_burnt = 1766.0\n"
+              << "efficiency = \"charlette\"\nsubgrid_velocity = \"eddy_viscosity\"\n"
+              << "[output]\ncheck_interval = 1000000\n";
+        Solver shared, separate;
+        separate.set_shared_stage_scratch(false);
+        run(shared, input.str());
+        run(separate, input.str());
+        const uint32_t n = shared.get_mesh()->n_owned(), n_species = static_cast<uint32_t>(shared.h_species.extent(1));
+        uint32_t differ = 0;
+        for (uint32_t c = 0; c < n; c++) {
+            FOR_I_CONSERVATIVE differ += shared.h_conservatives(c, i) != separate.h_conservatives(c, i);
+            for (uint32_t k = 0; k < n_species; k++) differ += shared.h_species(c, k) != separate.h_species(c, k);
+        }
+        EXPECT_EQ(differ, 0u) << reconstruction;
+    }
+}

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -39,6 +40,7 @@
 #include "launch_bounds.h"
 #include "log.h"
 #include "periodic.h"
+#include "scratch_arena.h"
 #include "teno_sharing.h"
 #include "teno.h"
 #include "structured_blocks.h"
@@ -3328,11 +3330,26 @@ void TENO::allocate_scratch() {
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_reconstructed());
     const uint32_t capacity = !sector_stencils ? 0u : std::min<uint32_t>(
         n_table_rows, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_table_rows))));
-    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);
-    troubled_small_coeffs = Kokkos::View<rtype ****>("teno_troubled_small_coeffs", capacity, teno::MAX_FACES,
-                                                     teno::NK_SMALL, N_CONSERVATIVE);
+    troubled_coeffs = memory::scratch_view<Kokkos::View<rtype ***>>(own_scratch, "teno_troubled_coeffs", capacity,
+                                                                     n_dof_large, N_CONSERVATIVE);
+    troubled_small_coeffs = memory::scratch_view<Kokkos::View<rtype ****>>(
+        own_scratch, "teno_troubled_small_coeffs", capacity, teno::MAX_FACES, teno::NK_SMALL, N_CONSERVATIVE);
     troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", n_table_rows);
     n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
+}
+
+size_t TENO::scratch_bytes() const {
+    using memory::ScratchArena;
+    return ScratchArena::aligned(troubled_coeffs.span() * sizeof(rtype)) +
+           ScratchArena::aligned(troubled_small_coeffs.span() * sizeof(rtype));
+}
+
+void TENO::place_scratch(void * storage) {
+    if (troubled_coeffs.span() == 0) return;
+    std::byte * const p = static_cast<std::byte *>(storage);
+    const size_t small = memory::ScratchArena::aligned(troubled_coeffs.span() * sizeof(rtype));
+    troubled_coeffs = Kokkos::View<rtype ***>(reinterpret_cast<rtype *>(p), troubled_coeffs.layout());
+    troubled_small_coeffs = Kokkos::View<rtype ****>(reinterpret_cast<rtype *>(p + small), troubled_small_coeffs.layout());
 }
 
 std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {
