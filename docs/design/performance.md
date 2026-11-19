@@ -870,6 +870,26 @@ Together: 26% more hexahedra per A100-80GB at TENO5 for a perfect gas, 19% for t
 GRI-Mech. Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps of every case above,
 the 3D explosion on $24^3$ hexahedra and $12^3 \times 6$ tetrahedra and TENO4, on a CPU; on the A100 below).
 
+On one A100-80GB (CUDA 13.5), restart files after 100 steps are bitwise identical to main on the $96^3$
+Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex. They are also
+identical with `troubled_capacity = 0.125`, and on the 2D Riemann problem with capacity 0.25 and 0.125 against 1.
+`mallard check` on the A100 gives 7,418 to 5,958 bytes per hexahedron and 7,434 to 6,245 per tetrahedron, as on
+the CPU. The step is slower, though. Wall time per step, mean of four alternating runs (range):
+
+| one A100, TENO5, ms per step | main | both changes |
+|---|---|---|
+| Taylor-Green $96^3$ hexahedra | 105 (105-105) | 115.8 (115-117), +10.2% |
+| explosion $96^3$ hexahedra | 186.8 (186-187) | 201 (201-201), +7.7% |
+| Taylor-Green $48^3 \times 6$ tetrahedra | 90.0 (89.9-90.1) | 93.8 (93.7-93.8), +4.2% |
+
+The planar face points cost the time. Each quadrature point gathers its face's nodes through `nodes_of_face`
+and maps them, where it used to make one load. In Nsight Systems, the smooth pass grows from 83.6 to 90.6 ms
+per step on the Taylor-Green vortex (7.0 of the 7.2 ms the kernels add), 93.1 to 99.6 on the explosion, whose
+troubled selection also grows from 63.9 to 68.0, and 71.3 to 73.7 on tetrahedra. The smaller scratch adds two
+rounds of the five troubled kernels per stage, under 0.3 ms per step. A capacity of 0.125 is within 1% of
+0.25 (Taylor-Green 116 against 115 ms). In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms
+per step), because every round recomputes the central coefficients, so 2D keeps 1.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
