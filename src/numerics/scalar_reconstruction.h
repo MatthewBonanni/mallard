@@ -170,6 +170,20 @@ class ScalarReconstruction {
 
         void set_boundaries(const BoundaryData & b) { boundaries = b; }
 
+        /** @brief Bytes of the work memory needed only from calc() to species_slots(). */
+        size_t scratch_bytes() const;
+
+        /**
+         * @brief Keep that work memory in storage that other work uses at other times (memory::ScratchArena),
+         *        instead of its own allocation.
+         * @param storage scratch_bytes() bytes, aligned for rtype, that outlive its use.
+         */
+        void place_scratch(void * storage);
+
+        // false, set before init() by a caller that places the work memory (place_scratch): init() leaves it
+        // without memory
+        bool own_scratch = true;
+
         // Public because nvcc rejects device lambdas in non-public member functions
         template <typename Eval>
         void launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
