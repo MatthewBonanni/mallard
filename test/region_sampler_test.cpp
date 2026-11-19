@@ -251,6 +251,7 @@ TEST(RegionSamplerTest, TeamsOfEverySizeClassifyEveryNodeAsTheRecursionDoes) {
         const uint32_t state = Classify{shape}(s, level);
         expected[sampler::tree_nodes(level) + code] = state;
         if (state != detail::SUBDIVIDED) return;
+        ASSERT_LT(level, sampler::MAX_LEVEL);
         for (int j = 0; j < sampler::CHILDREN; j++) {
             detail::SimplexNode next;
             Child{}(s, j, next);
