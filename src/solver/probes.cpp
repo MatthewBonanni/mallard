@@ -2485,7 +2485,7 @@ bool Probes::can_stage(const size_t k, const Statistics & statistics) const {
     const bool device_columns = std::all_of(p.cell_columns.begin(), p.cell_columns.end(), [&](const auto & c) {
         return statistics.device_column(c.second->name()).exists();
     });
-    return !p.snapshot && !p.isosurface && !p.solution && device_columns &&
+    return !p.snapshot && !p.isosurface && device_columns &&
            (p.interval > 0 || p.time_interval > 0.0_r);
 }
 
@@ -2495,6 +2495,8 @@ bool Probes::reads_intervals(const size_t k) const {
 }
 
 bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr; }
+
+bool Probes::follows_solution(const size_t k) const { return probes[k]->solution; }
 
 void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const double t,
                    const bool reduce, const bool use_nccl) {
