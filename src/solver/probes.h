@@ -285,7 +285,7 @@ class Probes {
         bool can_stage(size_t k, const Statistics & statistics) const;
         /** @brief Whether staged probe k reads intervals CI_<average> (see Statistics::refresh_intervals). */
         bool reads_intervals(size_t k) const;
-        /** @brief Probe k samples a moving region. */
+        /** @brief Probe k's samples are selected anew at each write: it samples a moving region or an isosurface. */
         bool moves(size_t k) const;
         /** @brief Probe k's region follows the solution: its selection reads ProbeFields::W. */
         bool follows_solution(size_t k) const;
@@ -597,6 +597,15 @@ class Probes {
                 bool per_cell = false;
                 uint64_t n_cells = 0;              // of the mesh, which its averages are kept per
                 std::vector<uint64_t> quad_cells;  // rank 0: the global cell of each gathered quadrature point
+                // Staged (per_cell): the cells its levels are selected in, sampled on the device, and of each record
+                // slot the first (at most capacity) of them, with their levels; and rank 0's values of the samples
+                // extracted from a slot, in sample order
+                Samples crossed;
+                Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_cells;
+                Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_levels;
+                Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged_count;
+                uint32_t capacity = 0;
+                std::vector<double> gathered;
             };
             std::shared_ptr<Isosurface> isosurface;
             /**
@@ -616,6 +625,10 @@ class Probes {
             void order_covered(uint32_t n, const uint32_t * cells, const double * weights);
             /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
             void extract(double t);
+            /** @brief As extract, from the levels and values the step graph staged in record slot `slot` (collective). */
+            void extracted(uint64_t slot);
+            /** @brief Copies the crossed cells and their levels into record slot (*seq - 1) % n_records. */
+            void stage_crossed(const uint64_t * seq) const;
             /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
             bool cell_means() const { return average && (motion || isosurface); }
             /** @brief The cells its time averages may cover (cell_means): those of the mesh. */
@@ -701,6 +714,12 @@ class Probes {
                                     bool per_cell);
         static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
                                     const std::string & summary, uint32_t n_variables, bool per_cell);
+        /**
+         * @brief select_elements' samples, without their device views: their cells and points, with their normals,
+         *        and (rank 0) their order, weights and, of isosurfaces, global cells (collective).
+         */
+        static probe::CellPoints element_samples(Probe & p, const Mesh & mesh, region::Elements e, bool per_cell,
+                                                 std::vector<probe::Point> & normals);
 
         /** @brief Adds probe p's samples to its time averages (collective): sampled with fields, or from a slot. */
         void sample_average(Probe & p, rtype t, const ProbeFields * fields, int64_t slot);
