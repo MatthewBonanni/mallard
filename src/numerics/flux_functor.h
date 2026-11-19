@@ -71,15 +71,24 @@ rtype face_upwind_fraction(const Kokkos::View<rtype *> & upwind, const BoundaryD
 /**
  * @brief Upwind fraction of each cell for the hybrid convective flux: 1 where
  *        the Ducros sensor restricted to compressions (Ducros et al. 1999;
- *        Bhagatwala & Lele 2009), theta = (div u)^2 / ((div u)^2 + |omega|^2)
- *        for div u < 0, exceeds the threshold (shocks), else the floor.
+ *        Bhagatwala & Lele 2009), theta = (div u)^2 / ((div u)^2 + |omega|^2
+ *        + eps) for div u < 0, exceeds the threshold (shocks), else the floor.
+ *        eps = (dilatation_scale c / h)^2, with the cell's sound speed c and
+ *        size h = V^(1/N_DIM), a rate squared in any units: round-off
+ *        compressions of uniform flow, where omega is round-off too, are
+ *        not shocks.
  *        gradients(c, 1 + k, i) = d u_k / d x_i.
  */
 struct UpwindSensorFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *> volume;
+    rtype gamma;
+    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // gas mixtures, else empty (gamma)
     Kokkos::View<rtype *> upwind;
     rtype threshold;
     rtype floor;
+    rtype dilatation_scale;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -97,8 +106,17 @@ struct UpwindSensorFunctor {
                 omega2 += w * w;
             }
         }
+        const rtype g = cell_gamma.extent(0) > 0 ? cell_gamma(c) : gamma;
+        rtype h2;
+        if constexpr (N_DIM == 2) {
+            h2 = volume(c);
+        } else {
+            const rtype h = Kokkos::cbrt(volume(c));
+            h2 = h * h;
+        }
+        const rtype eps = dilatation_scale * dilatation_scale * g * W(c, N_DIM + 1) / (W(c, 0) * h2);
         const rtype div2 = div * div;
-        const bool shock = div < 0.0_r && div2 > threshold * (div2 + omega2);
+        const bool shock = div < 0.0_r && div2 > threshold * (div2 + omega2 + eps);
         upwind(c) = shock ? 1.0_r : floor;
     }
 };
