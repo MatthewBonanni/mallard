@@ -938,7 +938,8 @@ void Solver::init_boundaries() {
         // Optional filter selecting part of the zone by face centroid
         std::unique_ptr<Expression> where;
         if (contains_optional(bound, "where")) {
-            where = std::make_unique<Expression>(name + ".where", find_value<std::string>(bound, "where"));
+            where = std::make_unique<Expression>(name + ".where", line_of(bound, "where"),
+                                                 find_value<std::string>(bound, "where"));
         }
         DirichletBoundary dirichlet;
         if (bcs.back().type == BoundaryType::DIRICHLET) {
@@ -953,9 +954,9 @@ void Solver::init_boundaries() {
             }
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
-                dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
-                    boundary_variable::FIRST_LOCAL));
+                dirichlet.W.push_back(std::make_shared<const kexpr::Program>(compile_expression(
+                    key, line_of(v), quantity_or_expression(v, key, dimension), BoundaryValue::variables(),
+                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL)));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);

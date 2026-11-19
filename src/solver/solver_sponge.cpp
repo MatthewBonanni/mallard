@@ -24,7 +24,7 @@ namespace {
 
 /** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
 Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
-    return Expression(name, quantity_or_expression(value, name, dimension));
+    return Expression(name, line_of(value), quantity_or_expression(value, name, dimension));
 }
 
 } // namespace

@@ -26,6 +26,7 @@
 #include "comm.h"
 #include "kexpr.h"
 #include "curved.h"
+#include "expression.h"
 #include "log.h"
 #include "mesh.h"
 #include "mixture.h"
@@ -1115,8 +1116,9 @@ struct InitialState::Impl {
     Impl(const Mesh & m, const Euler & p, const MixtureModel * mix, bool cells) :
         mesh(m), physics(p), mixture(mix), from_cells(cells) {}
 
-    int32_t add_program(const std::string & where, const std::string & text, const std::vector<std::string> & vars) {
-        programs.emplace_back(where, text, vars, expression_unit_hint);
+    int32_t add_program(const std::string & where, const std::size_t line, const std::string & text,
+                        const std::vector<std::string> & vars) {
+        programs.push_back(compile_expression(where, line, text, vars));
         return static_cast<int32_t>(programs.size() - 1);
     }
 
@@ -1323,7 +1325,7 @@ struct InitialState::Impl {
                               "Give one expression of x, y, z per coordinate", DATA_DOCS);
             }
             for (size_t d = 0; d < at.size(); d++) {
-                m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", at[d], {"x", "y", "z"});
+                m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", line_of(e, "at"), at[d], {"x", "y", "z"});
                 at_text += (d ? ", " : "") + coordinates[d] + " = " + at[d];
             }
         }
@@ -1356,12 +1358,12 @@ struct InitialState::Impl {
                                                  std::to_string(N_DIM) + "D",
                                       .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
                 }
-                FOR_I_DIM L.u[i] = add_program(where + ".u", number(double(u[i])), names);
+                FOR_I_DIM L.u[i] = add_program(where + ".u", line_of(t, "u"), number(double(u[i])), names);
             } else {
                 if (!t.at("u").is_array() || t.at("u").as_array().size() != N_DIM) throw u_error(t, where);
                 const auto & u = t.at("u").as_array();
                 for (size_t i = 0; i < N_DIM; i++) {
-                    L.u[i] = add_program(where + ".u[" + std::to_string(i) + "]",
+                    L.u[i] = add_program(where + ".u[" + std::to_string(i) + "]", line_of(u[i]),
                                          quantity_or_expression(u[i], where + ".u", dim::velocity), names);
                 }
             }
@@ -1384,7 +1386,7 @@ struct InitialState::Impl {
             n_thermo++;
             const std::string text = constant ? number(double(find_real(t, key, dimension)))
                                               : quantity_or_expression(t.at(key), where + "." + key, dimension);
-            *slots[i] = add_program(where + "." + key, text, names);
+            *slots[i] = add_program(where + "." + key, line_of(t, key), text, names);
         }
         if (type == "analytical" && n_thermo != 2) {
             throw InputError({.key = "initialize",
@@ -1412,7 +1414,7 @@ struct InitialState::Impl {
         if (constant) {
             const std::vector<double> Y = mixture->mass_fractions(t, where);
             for (uint32_t k = 0; k < Y.size(); k++) {
-                fractions.push_back({k, static_cast<uint32_t>(add_program(where + ".Y", number(Y[k]), names))});
+                fractions.push_back({k, static_cast<uint32_t>(add_program(where + ".Y", line_of(t), number(Y[k]), names))});
             }
             L.n_fractions = static_cast<uint32_t>(Y.size());
             return;
@@ -1440,7 +1442,8 @@ struct InitialState::Impl {
         for (const auto & [name, value] : t.at(key).as_table()) {
             const int32_t k = mixture->mechanism().species_index(name);
             if (k < 0) throw mixture->unknown_species(t.at(key), where + "." + key + "." + name, name);
-            const int32_t p = add_program(where + "." + key + "." + name, quantity_or_expression(value, name, dim::none), names);
+            const int32_t p = add_program(where + "." + key + "." + name, line_of(value),
+                                          quantity_or_expression(value, name, dim::none), names);
             fractions.push_back({static_cast<uint32_t>(k), static_cast<uint32_t>(p)});
         }
         L.n_fractions = static_cast<uint32_t>(fractions.size()) - L.fractions;
