@@ -368,22 +368,38 @@ for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
 |---|---|---|
 | `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
 
-On a decaying shear wave (periodic box, to $t = 0.1$), TENO4 with
-`reconstruction` converges at fourth order on triangles, quadrilaterals,
-tetrahedra and hexahedra; on 64 × 64 × 2 triangles its momentum error is 460
-times smaller than with least squares (7.2e-9 against 3.3e-6), which stays
-second order. On a manufactured solution, the viscous residual of TENO5
-converges at third order or better on every cell shape, where least squares
-gives second order on quadrilaterals and hexahedra and does not converge on
+Two convergence studies on periodic boxes of every cell type
+(`tools/docs/viscous_gradients.py`) compare the two paths against their design
+orders. The momentum error of a decaying shear wave, an exact Navier-Stokes
+solution, converges with `reconstruction` at least at the face gradients'
+order, `order - 1`, and in practice at about `order` (4 for TENO4 and TENO5, 6
+for TENO6); least squares gives second order, and stalls on hexahedra:
+
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-light.svg#gh-light-mode-only)
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-dark.svg#gh-dark-mode-only)
+
+The viscous residual of a manufactured solution (velocity, temperature and
+density all varying) at its exact cell averages divides the face gradients'
+error by h: design order `order - 2` with `reconstruction` (higher on
+symmetric meshes), 1 with least squares, which does not converge on
 tetrahedra:
 
-| Cells | `least_squares` | `reconstruction` |
-|---|---|---|
-| quadrilaterals | 2.0 | 3.9 |
-| triangles | 1.0 | 3.0 |
-| hexahedra | 1.8 | 3.7 |
-| prisms | 0.8 | 3.0 |
-| tetrahedra | 0.0 | 3.0 |
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-light.svg#gh-light-mode-only)
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-dark.svg#gh-dark-mode-only)
+
+Finest-pair orders (design in parentheses), least squares with TENO5:
+
+| Cells | Shear wave, `least_squares` | Shear wave, `reconstruction` TENO4 / 5 / 6 | Residual, `least_squares` | Residual, `reconstruction` TENO4 / 5 / 6 |
+|---|---|---|---|---|
+| quadrilaterals | 2.6 (2) | 4.0 / 3.9 / 5.9 (3 / 4 / 5) | 2.0 (1) | 4.0 / 3.9 / 5.9 (2 / 3 / 4) |
+| triangles | 2.0 (2) | 4.1 / 3.9 / 6.1 | 1.0 (1) | 3.0 / 3.0 / 5.0 |
+| hexahedra | -0.1 (2) | 3.9 / 3.9 / 5.9 | 1.9 (1) | 3.7 / 3.6 / 5.3 |
+| prisms | 2.0 (2) | 4.1 / 3.9 / 5.9 | 1.0 (1) | 2.9 / 3.0 / 4.8 |
+| tetrahedra | 2.0 (2) | 4.1 / 4.0 / 5.9 | 0.0 (1) | 2.0 / 3.0 / 4.1 |
+
+On 32 × 32 × 2 triangles, TENO5's shear-wave error is 24 times smaller with
+`reconstruction` than with least squares (1.9e-8 against 4.4e-7), and the gap
+grows with resolution.
 
 Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
 per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to

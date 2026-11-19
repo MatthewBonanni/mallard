@@ -15,6 +15,7 @@
 #include <cmath>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -245,10 +246,13 @@ double viscous_residual_error(const std::string & mesh, uint32_t n, uint32_t ord
  *        u = A e sin(k . x) exp(-nu |k|^2 t) with k = 2 pi (1, 1), e
  *        normal to k, uniform density and pressure. The convective terms
  *        vanish and an energy source cancels the viscous heating, so the
- *        momentum's cell averages decay exactly as the mode.
+ *        momentum's cell averages decay exactly as the mode. The source is
+ *        taken at cell centers, a second-order error of size A^2 that A =
+ *        0.001 keeps below TENO6's momentum error (A = 0.01 floored it near
+ *        1e-9).
  */
 double shear_wave_error(const std::string & mesh, uint32_t n, uint32_t order, const std::string & gradients) {
-    const double A = 0.01, mu = 0.05, k2 = 8.0 * PI * PI;
+    const double A = 0.001, mu = 0.05, k2 = 8.0 * PI * PI;
     std::ostringstream s;
     s.precision(17);
     s << "[run]\nt_stop = 0.025\ncfl = 0.8\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
@@ -319,6 +323,72 @@ TEST(ViscousOrder, ShearWaveWithReconstructionGradientsConvergesAtDesignOrder) {
     verification::expect_order({"viscous", "TENO4, reconstruction gradients", verification::cells_of(mesh),
                                 "mean momentum error, decaying shear wave", n, e, 4.0, 3.5});
 }
+
+namespace {
+
+/** @brief (mesh, TENO order, viscous_gradients) of a study of tools/docs/viscous_gradients.py. */
+using StudyParam = std::tuple<std::string, int, std::string>;
+
+std::vector<StudyParam> study_matrix() {
+    const std::vector<std::string> meshes = N_DIM == 2 ? std::vector<std::string>{"cartesian", "cartesian_tri"}
+                                                       : std::vector<std::string>{"cartesian", "cartesian_prism",
+                                                                                  "cartesian_tet"};
+    std::vector<StudyParam> out;
+    for (const std::string & m : meshes) {
+        out.emplace_back(m, 5, "least_squares");
+        for (const int order : {4, 5, 6}) out.emplace_back(m, order, "reconstruction");
+    }
+    return out;
+}
+
+/**
+ * @brief A study against its design order: the reconstruction gradients' must hold it, the least-squares
+ *        gradients' (the default path, for comparison) is recorded as measured.
+ */
+void expect_study(const std::string & method, const std::string & gradients, const std::string & mesh,
+                  const std::string & error, const std::vector<double> & n, const std::vector<double> & e,
+                  double design) {
+    const verification::Study s{"viscous gradients", method, verification::cells_of(mesh), error, n, e, design,
+                                design - 0.3};
+    if (gradients == "reconstruction") {
+        verification::expect_order(s);
+    } else {
+        verification::record(s, verification::observed_order(s), verification::observed_order(s) > s.min_order);
+    }
+}
+
+std::string study_method(int order, const std::string & gradients) {
+    return "TENO" + std::to_string(order) + ", " + (gradients == "reconstruction" ? "reconstruction" : "least squares");
+}
+
+class ViscousGradientsStudy : public ::testing::TestWithParam<StudyParam> {};
+
+} // namespace
+
+TEST_P(ViscousGradientsStudy, ViscousResidualOfAManufacturedSolution) {
+    // Face gradients of order `order - 1` (reconstruction) or 2 (least squares); the residual divides their error by h
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const auto [mesh, order, gradients] = GetParam();
+    const std::vector<double> n = N_DIM == 2 ? std::vector<double>{8, 16, 32, 64} : std::vector<double>{8, 16, 24};
+    std::vector<double> e;
+    for (const double k : n) e.push_back(viscous_residual_error(mesh, uint32_t(k), uint32_t(order), gradients));
+    expect_study(study_method(order, gradients), gradients, mesh, "mean viscous residual error, manufactured solution",
+                 n, e, gradients == "reconstruction" ? order - 2.0 : 1.0);
+}
+
+TEST_P(ViscousGradientsStudy, MomentumOfADecayingShearWave) {
+    // The exact solution: the error follows the face gradients' order, `order - 1` or 2
+    SKIP_IN_SINGLE_PRECISION("the errors reach round-off");
+    const auto [mesh, order, gradients] = GetParam();
+    const std::vector<double> n = N_DIM == 2 ? std::vector<double>{8, 16, 32} : std::vector<double>{8, 16, 24};
+    std::vector<double> e;
+    for (const double k : n) e.push_back(shear_wave_error(mesh, uint32_t(k), uint32_t(order), gradients));
+    expect_study(study_method(order, gradients), gradients, mesh, "mean momentum error, decaying shear wave", n, e,
+                 gradients == "reconstruction" ? order - 1.0 : 2.0);
+}
+
+// Run by tools/docs/viscous_gradients.py, which draws the guide's convergence figures from them
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ViscousGradientsStudy, ::testing::ValuesIn(study_matrix()));
 
 TEST(ViscousReconstructionGradients, MatchSerialWithAndWithoutStepGraphs) {
     // A shear layer with a density jump, between isothermal walls: faces of smooth cells, of troubled ones
