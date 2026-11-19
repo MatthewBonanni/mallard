@@ -837,24 +837,20 @@ void Solver::decide_outputs() {
     const Kokkos::View<rtype *> r = step_reduce, s = step_scalars;
     const Kokkos::View<OutputClock *> clocks = output_clocks;
     const Kokkos::View<uint32_t *> due = output_due;
+    const Kokkos::View<uint32_t *> follows = output_follows;
+    const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> staged = output_staged;
     const uint32_t n_writers = static_cast<uint32_t>(output_clocks.extent(0));
     const Kokkos::View<uint32_t *> probes_due = probe_due;
     const uint32_t n_probe_flags = static_cast<uint32_t>(probe_due.extent(0));
-    uint64_t solution_bits = 0;
-    for (uint32_t k = 0; k < n_writers; k++) {
-        if (data_writers[k]->follows_solution()) solution_bits |= uint64_t(1) << k;
-    }
     Kokkos::parallel_for("outputs_due", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         step_queue::Record & record = records((L.seq - 1) % n_records);
         record.outputs = 0;
         for (uint32_t k = 0; k < n_writers + 2; k++) due(k) = 0;
         if (!L.active || !L.advanced) return;
-        uint64_t bits = 0;
-        for (uint32_t k = 0; k < n_writers; k++) {
-            if (clocks(k).due(L.step, s(T))) bits |= uint64_t(1) << k;
-        }
-        if (bits == 0) return;
+        bool any = false;
+        for (uint32_t k = 0; k < n_writers && !any; k++) any = clocks(k).due(L.step, s(T));
+        if (!any) return;
         // The mirrors hold an output every rank's host has yet to write (the minimum over the ranks of what they wrote)
         if (static_cast<uint64_t>(r(OUTPUTS)) != L.outputs_staged) {
             record.reasons |= step_queue::OUTPUT;
@@ -864,15 +860,18 @@ void Solver::decide_outputs() {
             for (uint32_t k = 0; k < n_probe_flags; k++) probes_due(k) = 0;
             return;
         }
+        uint32_t solution = 0;
         for (uint32_t k = 0; k < n_writers; k++) {
-            if (!(bits >> k & 1)) continue;
+            due(k) = clocks(k).due(L.step, s(T));
+            staged(k) = due(k);
+            if (!due(k)) continue;
             clocks(k).written(s(T));
-            due(k) = 1;
+            solution |= follows(k);
         }
         L.outputs_staged++;
-        record.outputs = bits;
+        record.outputs = 1;
         due(n_writers) = 1;
-        due(n_writers + 1) = (bits & solution_bits) != 0;
+        due(n_writers + 1) = solution;
     });
 }
 
@@ -920,12 +919,12 @@ void Solver::select_moving_probes() {
 void Solver::write_staged_outputs(const step_queue::Record & record) {
     if (record.outputs == 0) return;
     for (size_t k = 0; k < data_writers.size(); k++) {
-        if ((record.outputs >> k & 1) != uint64_t(data_writers[k]->due(step, t))) {
+        if ((output_staged(k) != 0) != data_writers[k]->due(step, t)) {
             throw std::logic_error("the step graph staged the outputs due at step " + std::to_string(step) +
                                    " differently from the host");
         }
         data_writers[k]->publish_written();
-        if ((record.outputs >> k & 1) && data_writers[k]->moving_subset()) data_writers[k]->use_staged_subset();
+        if (output_staged(k) && data_writers[k]->moving_subset()) data_writers[k]->use_staged_subset();
     }
     // Staged at steps the device flushed the pending half step for
     mirrors_unflushed = defer_chemistry;
@@ -942,7 +941,7 @@ void Solver::write_staged_outputs(const step_queue::Record & record) {
 }
 
 bool Solver::outputs_stageable() const {
-    return !data_writers.empty() && data_writers.size() <= 64 && !output_data;
+    return !data_writers.empty() && !output_data;
 }
 
 Kokkos::View<rtype> Solver::output_time() {
@@ -1238,6 +1237,11 @@ void Solver::begin_device_steps() {
     if (staged_outputs) {
         output_clocks = Kokkos::View<OutputClock *>("step_output_clocks", data_writers.size());
         output_due = Kokkos::View<uint32_t *>("step_output_due", data_writers.size() + 2);
+        output_staged = Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace>("step_output_staged", data_writers.size());
+        output_follows = Kokkos::View<uint32_t *>("step_output_follows", data_writers.size());
+        const auto follows = Kokkos::create_mirror_view(output_follows);
+        for (size_t k = 0; k < data_writers.size(); k++) follows(k) = data_writers[k]->follows_solution();
+        Kokkos::deep_copy(output_follows, follows);
         for (const auto & writer : data_writers) staged_time_outputs = staged_time_outputs || writer->output_clock().interval == 0;
         allocate_restart_mirrors();
         if (triggers_on_device() && h_trigger_states.extent(0) != trigger_states.extent(0)) {

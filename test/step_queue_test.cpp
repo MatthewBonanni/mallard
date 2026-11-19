@@ -1246,6 +1246,31 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
+    // More writers than a 64-bit mask holds; the last one, alone due at steps 6 and 18, follows the solution
+    std::string writers = "check_interval = 1000\n";
+    for (int k = 0; k < 65; k++) {
+        writers += "[[write_data]]\nprefix = \"{dir}/w" + std::to_string(k) + "\"\nformat = \"vtu\"\ninterval = 12\n"
+                   "fields = [\"RHO\"]\n";
+    }
+    Case c;
+    c.run = "n_steps = 26\ncfl = 0.5\n";
+    c.extra = writers + "[[write_data]]\nprefix = \"{dir}/region\"\nformat = \"vtu\"\ninterval = 6\n"
+                        "regions = [{type = \"where\", condition = \"x < 0.4 + t and RHO > 0\"}]\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("many_writers", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"w64_000024.vtu", "region_0_000006.vtu", "region_0_000024.vtu"}) {
+            EXPECT_TRUE(o.files.count(file) || o.files.count(file.substr(0, file.size() - 3) + "pvtu")) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    const Outcome queued = run_case("many_writers", c, 3);
+    expect_graphed(queued, "many_writers");
+    EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
     // Snapshots of the state with the pending half step applied on the device, restarts of the state without it,
     // with the pending time
