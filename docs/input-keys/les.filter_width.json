@@ -1,6 +1,10 @@
 {
  "default": "\"scotti\"",
+ "defaults_by_dim": {
+  "2": "\"volume\""
+ },
  "dims": [
+  2,
   3
  ],
  "set_in": [],

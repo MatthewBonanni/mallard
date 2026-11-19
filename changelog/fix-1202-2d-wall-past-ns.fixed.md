@@ -1,0 +1,1 @@
+- TENO-E orders 5 and 6 in 2D: a central stencil that the Lebesgue search grows past its first entries to a cell at a curved wall (without mirror images) now fits `curved_wall_degree` too, instead of a one-sided fit of the full degree (#1202). TENO cache files of earlier formats are rebuilt (format 24).

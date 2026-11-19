@@ -1,0 +1,1 @@
+- Gmsh files whose node tags are sparse and clustered in value (most nodes tagged 1 to N, a few near 2^64) no longer put nearly the whole tag-to-node table, and every lookup, on one rank of a distributed read: the ranks split the tags into ranges of equal counts instead of equal widths (#1134).
