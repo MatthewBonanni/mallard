@@ -3,5 +3,7 @@
   2,
   3
  ],
- "set_in": []
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/mesh_file.toml"
+ ]
 }

@@ -402,10 +402,11 @@ each weighted by its volume times its volume fraction `f`, so a region need not
 follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`, its momentum,
 total energy and species masses for `RHOU_*`, `RHOE` and `RHOY_<species>`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
-mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
-sums them in global cell order, so they are the same bit for bit on any number
-of ranks. The region may be one of the mesh's own: `region = "domain"` gives
-the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
+mean square, and `min`, `max` the extremes over the cells with `f > 0`. Every
+sum adds its terms exactly in fixed point, each rounded to a multiple of 2^-62 n
+times the largest (n the number of terms rounded up to a power of two), so it is
+the same bit for bit on any number of ranks. The region may be one of the mesh's
+own: `region = "domain"` gives the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
 cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
 curve or set of points weighs each cell by its area, length or count in the
 cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
@@ -486,7 +487,12 @@ crossed; like a moving region's, its means are kept for those cells only.
 Isosurfaces take no `n_points`: their elements have no parameters to
 place a grid of samples on; a [`[[write_data]]`](output.md#snapshots-of-regions)
 entry with the isosurface as its region writes the values on its elements at
-each write.
+each write. When steps run ahead of the host ([`[run] step_queue`](parallel.md)),
+these probes do not stop the queue, except an isosurface's that reads normals
+(`MASS_FLUX` and the other fluxes) or `sampling = "point"` and is clipped,
+made of more than one piece or cut from two conditions (a 3D curve), or lies
+on a mesh with curved cells: the device cuts the others itself, the host's
+quadrature points bit for bit.
 
 **Point sampling.** With `sampling = "point"`, a static filled region
 integrates the reconstruction over its own shape instead of `f V` times the
@@ -674,11 +680,11 @@ budget = true        # kinetic-energy budget (LES), default false
 
 *Used in:*
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d),
 [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d),
 [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
-[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
-[`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence)
-and 5 more.
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180)
+and 6 more.
 
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,

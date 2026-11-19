@@ -46,12 +46,13 @@ void finalize_nccl();
 
 /**
  * @brief Reduce values over the ranks in place, after the work enqueued so far
- *        on the default execution space: with NCCL on its stream, without
- *        blocking the host (capturable in a CUDA graph), else through the host
- *        with MPI. Defined for double, float and int64_t.
+ *        on exec: with NCCL on its stream, without blocking the host
+ *        (capturable in a CUDA graph), else through the host with MPI. Defined
+ *        for double, float and int64_t.
  */
 template <typename T>
-void allreduce_device(const Kokkos::View<T *> & values, Op op, bool use_nccl);
+void allreduce_device(const Kokkos::View<T *> & values, Op op, bool use_nccl,
+                      const Kokkos::DefaultExecutionSpace & exec = Kokkos::DefaultExecutionSpace());
 
 /**
  * @brief Gather every rank's values into all, in rank order (all holds size()
@@ -102,6 +103,14 @@ void send_receive_device(const std::vector<DeviceMessage> & sends, const std::ve
  *        (CUDA); a fence of done otherwise.
  */
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done);
+
+/**
+ * @brief Tests only: in CUDA builds each enqueue_wait then also enqueues on
+ *        waiter a kernel that spins for this many clock cycles, so that work a
+ *        missing enqueue_wait leaves unordered runs in the wrong order; 0 (the
+ *        default) enqueues none.
+ */
+void set_wait_delay(uint64_t cycles);
 
 /**
  * @brief A new execution space instance whose kernels the device schedules

@@ -97,8 +97,11 @@ def check(mallard):
         def path(name):
             return os.path.join(work, name)
 
+        # The tools find libmallard next to the mallard executable on PATH
+        env = dict(os.environ, PATH=os.pathsep.join([os.path.dirname(mallard), os.environ.get("PATH", "")]))
+
         def run(*args, check=True):
-            done = subprocess.run([*map(str, args)], cwd=work, capture_output=True, text=True)
+            done = subprocess.run([*map(str, args)], cwd=work, capture_output=True, text=True, env=env)
             if check and done.returncode:
                 raise SystemExit(f"{' '.join(map(str, args))} exited with {done.returncode}:\n{done.stdout}{done.stderr}")
             return done

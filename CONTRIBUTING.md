@@ -11,6 +11,7 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 - [Building and testing](#building-and-testing)
 - [Code style](#code-style)
 - [Adding a feature, end to end](#adding-a-feature-end-to-end)
+- [Reproducibility](#reproducibility)
 - [Pull requests and CI](#pull-requests-and-ci)
 
 ## Reporting bugs and asking questions
@@ -61,6 +62,9 @@ cmake --build build -j
   solver communicates with its own rank alone, so every rank writes its files:
   give them `rank_scratch_dir()` or `serial_name()`. `MALLARD_TEST_TIMEOUT=<seconds>`
   aborts a test that runs longer, naming it, as CI does for the MPI runs.
+  Ranks on several machines need `TMPDIR` on a filesystem they all share: the
+  tests' files live there, and the suite stops at once, saying so, when a rank
+  cannot see rank 0's temporary directory.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -105,7 +109,7 @@ cmake --build build -j
     with 64 bits, as `teno::PackedStencils` does.
   - Results must not depend on the backend, thread count or rank count: reductions
     that feed the solution must be deterministic (the suite checks bitwise
-    reproducibility across ranks and restarts).
+    reproducibility across ranks and restarts; see [Reproducibility](#reproducibility)).
   - nvcc compiles every source, including host-only code, so a host-only change can
     still break the CUDA build; the CUDA compile jobs in CI catch this.
 
@@ -169,6 +173,29 @@ that adds or changes behavior includes:
 
 Small fixes need only what applies: a bug fix needs a test that failed before the
 fix and a `fixed` fragment; a documentation fix needs neither.
+
+## Reproducibility
+
+- **Always bitwise:** within one build and version, results do not depend on the
+  rank count, partition, thread count, `step_queue`, CUDA graphs or restarts. Sums
+  that feed the solution are exact (fixed point, as in `ExactSums`) or in an order
+  fixed by global ids, never floating-point atomics or reductions whose order depends
+  on the ranks or the schedule, and the TENO setup gives the same tables on
+  the host and the device (the stencil cache is portable). This is never traded
+  for speed: it costs under 0.5% per step and 4% of the TENO fits
+  ([measurements](docs/design/performance.md#16-cost-of-bitwise-reproducibility-429)),
+  and it is what lets `mallard diff` check restarts and partitions with no
+  tolerance.
+- **Bitwise against `main` by default:** a change that is not meant to change the
+  arithmetic (refactors, memory layout, scheduling, most performance work) shows
+  restart files bitwise identical to `main` on the cases of
+  [Verification](docs/design/performance.md#verification).
+- **Last bits may move with a measured reason:** a change that reorders arithmetic
+  for speed may change the last bits against `main` if the PR gives the speedup
+  (performance suite or a real case, before and after), `mallard diff --tol` on the
+  same cases showing round-off differences only, an unchanged verification manual
+  (every study within its bounds), and a `changed` changelog fragment. The
+  guarantees above still hold for the new code.
 
 ## Pull requests and CI
 
@@ -238,8 +265,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   in three jobs (`CI / cuda-13.5-2d-1of3`, ...) and links them in `CI / cuda-13.5-2d`.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
-  on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
-  the [performance suite](benchmarks/README.md) against per-hardware baselines. It
+  on the GPU (including the CUDA-graph path), the MPI tests on 2 ranks with NCCL's and MPI's
+  halo exchanges, the step graph and stream ordering tests under compute-sanitizer
+  (`tools/dev/gpu_runtime_tests.sh`; `--full`, with every MPI test across nodes, when GPU
+  time allows), and the [performance suite](benchmarks/README.md) against per-hardware baselines. It
   posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
   its results show on the PR next to `CI`. A PR that changes device code merges only
   with both passing. You do not need a GPU to contribute: say in the PR template

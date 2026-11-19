@@ -1,0 +1,10 @@
+{
+ "dimension": "length (m)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/mesh_file.toml"
+ ],
+ "type": "array"
+}
