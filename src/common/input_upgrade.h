@@ -32,7 +32,8 @@ struct KeyRule {
     std::string since;    ///< Release that deprecated it (still read, with a warning)
     std::string removed;  ///< First release that rejects it, at least one minor release after `since`
     std::string note;     ///< What changed, for the warning and the rewritten file
-    /// Converts the value's TOML text (e.g. "3" to "4"); nullptr keeps it
+    /// Converts the value's TOML text (e.g. "3" to "4"); nullptr keeps it. Throws
+    /// std::invalid_argument, saying why, for a value it does not take
     std::string (*convert)(const std::string & toml_text) = nullptr;
 };
 

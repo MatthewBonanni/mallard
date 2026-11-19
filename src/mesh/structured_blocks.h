@@ -43,10 +43,15 @@ struct StructuredBlock {
  *        Blocks come in the order of their lowest cell. A block's i axis is the
  *        one along which the lowest cell of its connected set has its nearest
  *        neighbor in the given numbering, then j, and indices grow with it, so
- *        that a box already numbered i fastest keeps its numbering.
+ *        that a box already numbered i fastest keeps its numbering. With
+ *        node_key (periodic images of a node share its key), faces match by
+ *        their nodes' keys, so a block continues across a periodic boundary;
+ *        a block that a periodic direction closes on itself is cut there, so
+ *        a periodic box is numbered as without periodicity.
  */
 std::vector<StructuredBlock> structured_blocks(const CellNodes & cells, uint32_t n_cells,
-                                               uint32_t min_extent, std::vector<uint32_t> & block_cells);
+                                               uint32_t min_extent, std::vector<uint32_t> & block_cells,
+                                               const std::vector<uint32_t> & node_key = {});
 
 /** @brief Cells in the blocks, which come first: the end of the last block. */
 uint32_t structured_block_cells(const std::vector<StructuredBlock> & blocks);
