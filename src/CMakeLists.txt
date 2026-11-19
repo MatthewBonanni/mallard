@@ -231,9 +231,10 @@ endforeach()
 # is listed, here and in test/CMakeLists.txt, so that they round alike in every
 # kernel and whichever copy of an inline function the linker keeps.
 # [statistics.convergence] updates its estimate on the device as the host does,
-# bit for bit
+# bit for bit, and the device cuts isosurfaces into the host's quadrature points
+# (region_motion.cpp)
 mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/solver_convective_flux.cpp
-                       solver/statistical_convergence.cpp)
+                       solver/statistical_convergence.cpp common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")

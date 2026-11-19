@@ -12,6 +12,7 @@
 #include "region_mesh.h"
 
 #include <algorithm>
+#include <numeric>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -20,6 +21,7 @@
 #include <span>
 
 #include "comm.h"
+#include "region_cut.h"
 #include "mesh.h"
 #include "statistics.h"
 
@@ -149,13 +151,15 @@ Vec gradient(const std::vector<Vertex> & s, const size_t k) {
 /** @brief A polygon's vertices ordered counterclockwise about n. */
 void order_about(std::vector<Vertex> & poly, const Vec & n) {
     if (poly.size() < 3) return;
-    Vec c = {0.0, 0.0, 0.0};
-    for (const Vertex & v : poly) c = add(c, mul(1.0 / double(poly.size()), v.x));
-    const Vec e1 = unit(sub(poly[0].x, c)), e2 = cross(n, e1);
-    std::sort(poly.begin(), poly.end(), [&](const Vertex & a, const Vertex & b) {
-        return std::atan2(dot(sub(a.x, c), e2), dot(sub(a.x, c), e1)) <
-               std::atan2(dot(sub(b.x, c), e2), dot(sub(b.x, c), e1));
-    });
+    std::vector<cut::Vec> x(poly.size());
+    for (size_t i = 0; i < poly.size(); i++) x[i] = {{poly[i].x[0], poly[i].x[1], poly[i].x[2]}};
+    std::vector<uint32_t> order(poly.size());
+    std::iota(order.begin(), order.end(), 0u);
+    const uint32_t count = static_cast<uint32_t>(poly.size());
+    cut::insertion_sort(order.data(), count, cut::AngleAbout(x.data(), count, {{n[0], n[1], n[2]}}));
+    std::vector<Vertex> sorted;
+    for (const uint32_t i : order) sorted.push_back(poly[i]);
+    poly = std::move(sorted);
 }
 
 /** @brief Area and centroid of a planar polygon, or length and midpoint of a segment; 1 and the point itself. */
@@ -1695,6 +1699,16 @@ LevelCells level_cells(const Mesh & mesh, const Region & region) {
         for (uint32_t c = 0; c < mesh.n_owned(); c++) out.radii[c] = cell_radius(mesh, c);
     }
     return out;
+}
+
+std::optional<uint32_t> single_level(const Mesh & mesh, const Region & region) {
+    if (mesh.curved_geometry || region.pieces().size() != 1) return std::nullopt;
+    const Piece & p = region.pieces()[0];
+    if (!cut_from_conditions(region, p) || p.carriers.size() != 1 || !p.inside.empty() || !p.outside.empty() ||
+        p.flip) {
+        return std::nullopt;
+    }
+    return region.filled()[p.carriers[0]].first;
 }
 
 Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions) {

@@ -18,6 +18,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,6 +66,7 @@
 #include "check.h"
 #include "run_report.h"
 #include "memory_tracker.h"
+#include "scratch_arena.h"
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
@@ -747,6 +749,11 @@ class Solver {
             CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: no step graph
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
+        /**
+         * @brief false gives each part of stage_scratch its own memory instead of sharing it, so that tests
+         *        compare the two bit for bit. Call before init().
+         */
+        void set_shared_stage_scratch(bool on) { shared_stage_scratch = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const {
@@ -901,6 +908,13 @@ class Solver {
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
+        /**
+         * @brief stage_scratch: the reconstructions' work memory and face_thermo and face_mdot (from the
+         *        reconstruction to the species slots) share it with cell_diffusion, transport_values and
+         *        transport_gradients (from update_transport to their last reader, also outside the right-hand
+         *        side, each reader after the update that fills them).
+         */
+        void allocate_stage_scratch();
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         RunEnd stop_reason() const;       // Empty while no stop condition holds
@@ -985,6 +999,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        bool shared_stage_scratch = true;
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
@@ -1021,6 +1036,8 @@ class Solver {
         bool staged_time_outputs = false;        // some of them by time
         Kokkos::View<OutputClock *> output_clocks;  // of the writers, on the device
         Kokkos::View<uint32_t *> output_due;     // the launch stages writer k's output (n: any, n + 1: a region of the solution)
+        Kokkos::View<uint32_t *> output_follows;  // writer k follows the solution
+        Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> output_staged;  // writer k's output is staged, until the host wrote it
         uint64_t n_staged_outputs = 0;           // records whose outputs the host wrote
         PinnedMirrors pinned_mirrors;            // the host mirrors output_arrays_to_host fills
         Kokkos::View<rtype *>::host_mirror_type h_step_control;  // the step controller's slots
@@ -1061,7 +1078,7 @@ class Solver {
 
         bool distribute = true;
         int halo_layers = 0;
-        std::unique_ptr<DistributedMesh> setup;  // during init only
+        std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;
@@ -1244,6 +1261,8 @@ class Solver {
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
         Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;  // in face_storage
         Kokkos::View<rtype *> face_storage;  // face_solution, and in gas mixtures species_slots too
+        // Work memory of the right-hand side's parts that never overlap (allocate_stage_scratch)
+        memory::ScratchArena stage_scratch;
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
         LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
@@ -1314,11 +1333,12 @@ class Solver {
         Kokkos::View<rtype *> face_energy_1;                  // double flux: energy flux of side 1
         Kokkos::View<rtype *> T_seed;                         // Newton seed of each cell's temperature
         Kokkos::View<rtype *>::host_mirror_type h_T_seed;
-        Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0])
-        Kokkos::View<rtype **> face_mdot;                     // (face, q)
+        Kokkos::View<rtype **[2][2]> face_thermo;              // (face, q, side, [gamma, e0]), in stage_scratch
+        Kokkos::View<rtype **> face_mdot;                     // (face, q), in stage_scratch
         Kokkos::View<rtype ***, Kokkos::LayoutRight> species_slots;  // (face, side, k), in face_storage
         Kokkos::View<rtype *[3]> cell_transport;                     // viscous: (cell, [mu, lambda, nu_eff])
         Kokkos::View<rtype *[3]>::host_mirror_type h_cell_transport;
+        // In stage_scratch: cell_diffusion, transport_values and transport_gradients
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
         Kokkos::View<double **, Kokkos::LayoutRight>::host_mirror_type h_cell_diffusion;
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])

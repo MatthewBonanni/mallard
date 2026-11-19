@@ -209,6 +209,46 @@ inline std::string jittered_periodic_mesh_2d(uint32_t n, double amplitude = 0.15
 }
 
 /**
+ * @brief Gmsh 2.2 file of the unit square with zones left/right (x) and
+ *        bottom/top (y): n x n squares, each split into four triangles at its
+ *        center.
+ */
+inline std::string crossed_squares_mesh_2d(uint32_t n) {
+    auto id = [&](uint32_t i, uint32_t j) { return std::to_string(j * (n + 1) + i + 1); };
+    auto center = [&](uint32_t i, uint32_t j) { return std::to_string((n + 1) * (n + 1) + j * n + i + 1); };
+    std::ostringstream s;
+    s.precision(17);
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n"
+      << "$Nodes\n" << (n + 1) * (n + 1) + n * n << "\n";
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) s << id(i, j) << " " << double(i) / n << " " << double(j) / n << " 0\n";
+    }
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) s << center(i, j) << " " << (i + 0.5) / n << " " << (j + 0.5) / n << " 0\n";
+    }
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < n; i++) {
+        elements.push_back("1 2 1 1 " + id(i, 0) + " " + id(i + 1, 0));
+        elements.push_back("1 2 3 3 " + id(i + 1, n) + " " + id(i, n));
+        elements.push_back("1 2 4 4 " + id(0, i + 1) + " " + id(0, i));
+        elements.push_back("1 2 2 2 " + id(n, i) + " " + id(n, i + 1));
+    }
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            const std::string corner[4] = {id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)};
+            for (size_t a = 0; a < 4; a++) {
+                elements.push_back("2 2 0 1 " + corner[a] + " " + corner[(a + 1) % 4] + " " + center(i, j));
+            }
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+/**
  * @brief Gmsh 2.2 file of the unit cube with zones left/right (x),
  *        bottom/top (y) and back/front (z): columns alternate between
  *        hexahedra and pairs of prisms (all prisms if prisms_only). Every node moves by a random
