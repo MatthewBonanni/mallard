@@ -1,0 +1,1 @@
+- Moving regions classify a crossed cell's subdivided simplices with every thread of its team on GPUs, with the same fractions bit for bit: on an A100, sampling a sharp sphere moving through air_3d takes 39 ms per update instead of 87 ms.

@@ -31,6 +31,7 @@
 #include "gradient.h"
 #include "mesh.h"
 #include "physics.h"
+#include "pinned_mirrors.h"
 #include "boundary.h"
 #include "case_view.h"
 #include "cell_fields.h"
@@ -280,8 +281,10 @@ class Probes {
 
         size_t size() const { return probes.size(); }
         /** @brief Whether a step graph can evaluate probe k: written by step or by time, or averaged, from device
-         *         fields and statistics' device averages only. */
+         *         fields and statistics' device columns only. */
         bool can_stage(size_t k, const Statistics & statistics) const;
+        /** @brief Whether staged probe k reads intervals CI_<average> (see Statistics::refresh_intervals). */
+        bool reads_intervals(size_t k) const;
         /** @brief Probe k samples a moving region. */
         bool moves(size_t k) const;
         /**
@@ -440,8 +443,7 @@ class Probes {
             void gather(std::vector<double> & out, const CellColumns & columns = {}, const rtype * staged = nullptr) const;
             void allocate_staging(uint64_t n_records, size_t n_rows);
             /** @brief gather's cell columns into values: each sample's cell's value of the column's device field. */
-            void fill_columns(
-                const std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> & columns) const;
+            void fill_columns(const std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> & columns) const;
             /** @brief Copies values into record slot (*seq - 1) % n_records of staging. */
             void copy_to_staging(const uint64_t * seq) const;
             const rtype * staged(uint64_t slot) const { return staging.data() + slot * staging.extent(1); }
@@ -457,6 +459,7 @@ class Probes {
 
             private:
                 // Reused across writes: fresh pages for every write cost page faults
+                mutable PinnedMirrors pinned;
                 mutable Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type host_values;
                 /** @brief Rank 0's row of each global sample, from the samples' ids. */
                 void order(const Mesh & mesh);
@@ -517,7 +520,7 @@ class Probes {
             bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
             // Staged: the device columns of cell_columns' fields
-            std::vector<std::pair<uint32_t, Kokkos::View<const rtype *, Kokkos::LayoutStride>>> device_columns;
+            std::vector<std::pair<uint32_t, Statistics::DeviceColumn>> device_columns;
             /** @brief A staged probe's reductions on the device, of its local samples (see reduce_staged). */
             struct DeviceReduction {
                 Kokkos::View<ProbeTerm *> terms;
@@ -568,6 +571,9 @@ class Probes {
                 Kokkos::View<double *> volumes;
                 Kokkos::View<uint32_t *> covered;
                 Kokkos::View<double *> weights;
+                PinnedMirrors pinned;
+                Kokkos::View<uint32_t *>::host_mirror_type h_covered;
+                Kokkos::View<double *>::host_mirror_type h_weights;
                 Kokkos::View<uint32_t> count;
                 Kokkos::View<uint32_t **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_cells;
                 Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_weights;

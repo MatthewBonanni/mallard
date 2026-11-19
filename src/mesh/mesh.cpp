@@ -775,6 +775,7 @@ void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles
     const rtype dx = Lx / static_cast<rtype>(nx);
     const rtype dy = Ly / static_cast<rtype>(ny);
     std::vector<std::array<rtype, N_DIM>> nodes;
+    nodes.reserve(size_t(nx + 1) * (ny + 1));
     for (uint32_t i = 0; i < nx + 1; ++i) {
         for (uint32_t j = 0; j < ny + 1; ++j) {
             std::array<rtype, 2> x = {static_cast<rtype>(i) * dx, static_cast<rtype>(j) * dy};
@@ -786,16 +787,18 @@ void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles
         }
     }
     auto node = [&](uint32_t i, uint32_t j) { return i * (ny + 1) + j; };
-    std::vector<std::vector<uint32_t>> cells;
+    CellNodes cells;
+    cells.offsets.reserve(size_t(nx) * ny * (triangles ? 2u : 1u) + 1);
+    cells.nodes.reserve(size_t(nx) * ny * (triangles ? 6u : 4u));
     for (uint32_t ic = 0; ic < nx; ++ic) {
         for (uint32_t jc = 0; jc < ny; ++jc) {
             const uint32_t tr = node(ic + 1, jc + 1), tl = node(ic, jc + 1);
             const uint32_t bl = node(ic, jc), br = node(ic + 1, jc);
             if (triangles) {
-                cells.push_back({br, tr, bl});
-                cells.push_back({tl, bl, tr});
+                cells.add(std::array{br, tr, bl});
+                cells.add(std::array{tl, bl, tr});
             } else {
-                cells.push_back({tr, tl, bl, br});
+                cells.add(std::array{tr, tl, bl, br});
             }
         }
     }
@@ -808,7 +811,7 @@ void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles
         boundary_faces.push_back({{node(nx, j), node(nx, j + 1)}, "right"});
         boundary_faces.push_back({{node(0, j + 1), node(0, j)}, "left"});
     }
-    init_from_connectivity(nodes, cells, boundary_faces);
+    init_from_connectivity(std::move(nodes), std::move(cells), boundary_faces, "unassigned", PeriodicNodes());
 }
 
 void Mesh::init_cart(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly) {
