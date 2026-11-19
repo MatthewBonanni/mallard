@@ -313,6 +313,8 @@ class Parser {
         size_t at = 0;
         std::vector<std::vector<std::pair<std::string, uint16_t>>> scopes{1};
         uint16_t live = 0, max_live = 0;
+        static constexpr int MAX_DEPTH = 256;
+        int depth = 0;
         std::vector<bool> loop_breaks;  // per enclosing loop: whether a break leaves it
 
         const Token & peek() const { return tokens[at]; }
@@ -325,6 +327,17 @@ class Parser {
 
         void expect_text(const std::string & t, const std::string & what) {
             if (peek().text != t) fail("expected " + what, peek().pos);
+            at++;
+        }
+
+        // Any of (), [] and {} group, as in exprtk, but each closes only its own opener
+        void expect_closer(const Token & open, const std::string & what) {
+            const std::string closer = open.text == "(" ? ")" : open.text == "[" ? "]" : "}";
+            if (peek().text != closer) {
+                fail("expected '" + closer + "'" + what + " to match the '" + open.text + "' at position " +
+                         std::to_string(open.pos + 1),
+                     peek().pos);
+            }
             at++;
         }
 
@@ -562,6 +575,15 @@ class Parser {
         }
 
         NodePtr branch() {
+            if (++depth > MAX_DEPTH) {
+                fail("the expression is nested more than " + std::to_string(MAX_DEPTH) + " levels deep", peek().pos);
+            }
+            NodePtr e = operand();
+            depth--;
+            return e;
+        }
+
+        NodePtr operand() {
             const Token t = next();
             switch (t.type) {
                 case Tok::NUMBER:
@@ -572,7 +594,7 @@ class Parser {
                     }
                 case Tok::LPAREN: {
                     NodePtr e = expression(0);
-                    expect(Tok::RPAREN, "')'");
+                    expect_closer(t, "");
                     return e;
                 }
                 case Tok::OP:
@@ -823,7 +845,7 @@ class Parser {
                 fail("unknown symbol '" + t.text + "' (variables: " + known + ")" + (hint ? hint(t.text) : ""), t.pos);
             }
             if (peek().type != Tok::LPAREN) fail("expected '(' after " + t.text, peek().pos);
-            next();
+            const Token open = next();
             std::vector<NodePtr> args;
             if (peek().type != Tok::RPAREN) {
                 args.push_back(expression(0));
@@ -832,7 +854,7 @@ class Parser {
                     args.push_back(expression(0));
                 }
             }
-            expect(Tok::RPAREN, "')' after the arguments of " + t.text);
+            expect_closer(open, " after the arguments of " + t.text);
             const Function & fn = f->second;
             const int n = static_cast<int>(args.size());
             if (n < fn.min_args || (fn.max_args >= 0 && n > fn.max_args)) {
