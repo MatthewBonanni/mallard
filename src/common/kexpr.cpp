@@ -314,7 +314,7 @@ class Parser {
         std::vector<std::vector<std::pair<std::string, uint16_t>>> scopes{1};
         uint16_t live = 0, max_live = 0;
         static constexpr int MAX_DEPTH = 256;
-        int depth = 0;
+        int depth = 0;  // of expression() and if_statement(), through which every recursion of the descent passes
         std::vector<bool> loop_breaks;  // per enclosing loop: whether a break leaves it
 
         const Token & peek() const { return tokens[at]; }
@@ -340,6 +340,19 @@ class Parser {
             }
             at++;
         }
+
+        struct Nested {
+            explicit Nested(Parser & parser) : p(parser) {
+                if (++p.depth > MAX_DEPTH) {
+                    p.fail("the expression is nested more than " + std::to_string(MAX_DEPTH) + " levels deep",
+                           p.peek().pos);
+                }
+            }
+            ~Nested() { p.depth--; }
+            Nested(const Nested &) = delete;
+            Nested & operator=(const Nested &) = delete;
+            Parser & p;
+        };
 
         static bool is_word(const Token & t, const char * word) {
             return t.type == Tok::NAME && lower(t.text) == word;
@@ -533,6 +546,7 @@ class Parser {
         }
 
         NodePtr expression(const int precedence) {
+            const Nested nested(*this);
             NodePtr e = branch();
             for (;;) {
                 Op op = Op::CONST;
@@ -575,15 +589,6 @@ class Parser {
         }
 
         NodePtr branch() {
-            if (++depth > MAX_DEPTH) {
-                fail("the expression is nested more than " + std::to_string(MAX_DEPTH) + " levels deep", peek().pos);
-            }
-            NodePtr e = operand();
-            depth--;
-            return e;
-        }
-
-        NodePtr operand() {
             const Token t = next();
             switch (t.type) {
                 case Tok::NUMBER:
@@ -728,6 +733,7 @@ class Parser {
 
         // exprtk's forms: if (c, a, b); if (c) a; [else b;]; if (c) { ... } [else { ... }]; else if ...
         NodePtr if_statement() {
+            const Nested nested(*this);
             open_condition("if");
             NodePtr c = expression(0);
             if (peek().type == Tok::COMMA) {
