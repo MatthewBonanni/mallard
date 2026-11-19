@@ -525,11 +525,20 @@ TEST(KexprTest, BracketsMatchAndNestBoundedly) {
     EXPECT_EQ(kexpr::Program("test", "[x + 1] * {y - 3} + max[x, {y}]", VARIABLES)(vars), 0.5);
     const auto nested = [](const size_t n) { return std::string(n, '(') + "x" + std::string(n, ')'); };
     EXPECT_EQ(kexpr::Program("test", nested(200), VARIABLES)(vars), 0.5);
-    try {
-        const kexpr::Program program("test", nested(100000), VARIABLES);
-        ADD_FAILURE() << "100000 nested parentheses compiled";
-    } catch (const std::invalid_argument & e) {
-        EXPECT_NE(std::string(e.what()).find("nested more than 256 levels deep"), std::string::npos) << e.what();
+    std::string powers = "x", chain;
+    for (int i = 0; i < 100000; i++) {
+        powers += "^x";
+        chain += "if (x < 0) 1; else ";
+    }
+    chain += "x";
+    for (const std::string & deep : {nested(100000), powers, chain}) {
+        try {
+            const kexpr::Program program("test", deep, VARIABLES);
+            ADD_FAILURE() << deep.substr(0, 40) << "... compiled";
+        } catch (const std::invalid_argument & e) {
+            EXPECT_NE(std::string(e.what()).find("nested more than 256 levels deep"), std::string::npos)
+                << deep.substr(0, 40);
+        }
     }
 }
 
