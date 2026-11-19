@@ -61,8 +61,9 @@ constexpr Option CHECK_OPTIONS[] = {
      "steps' peak. Default: no cost."},
     {"--memory", "", "SIZE|GPU",
      "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
-     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank, the fewest ranks the mesh fits "
-     "on and up to how many the halo stays below 10%. Default: the GPU's memory in GPU builds, else none."},
+     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank (within the memory and the "
+     "entries a multi-dimensional View addresses), the fewest ranks the mesh fits on and up to how many the halo "
+     "stays below 10%. Default: the GPU's memory in GPU builds, else none."},
     {"--mesh-fields", "", "PREFIX",
      "Write the mesh and stencil fields of every cell to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds "
      "without HDF5), the default snapshot format: the mesh quality (NON_ORTHOGONALITY, SKEWNESS, ASPECT_RATIO, "

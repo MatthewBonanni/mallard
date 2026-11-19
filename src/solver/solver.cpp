@@ -244,7 +244,7 @@ void Solver::setup_from_input() {
     // The cache describes the local mesh at this halo depth
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     if (teno && output_files_enabled()) teno->save_cache(static_cast<uint8_t>(halo_layers));
-    setup.reset();
+    block_owners.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
         // Output of states read from files takes no steps
@@ -435,9 +435,11 @@ void Solver::init_mesh() {
     if (exchange != "nccl" && exchange != "mpi") {
         throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
     }
+    curved::Surfaces surfaces;
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
         mesh->init(input);
+        surfaces = curved::surfaces_of_mesh(*mesh, input);
     } else {
         if (halo_layers == 0) {
             // A TENO cache records the halo depth its stencils need, which spares
@@ -449,14 +451,17 @@ void Solver::init_mesh() {
                 comm::allreduce(teno ? int(TENO::cached_halo_layers(reconstruction)) : 0, comm::Op::MAX);
             halo_layers = std::max(base_halo_layers(), cached);
         }
-        // Partition once; deeper halos (see halo_too_shallow) keep the partition
-        if (!setup) {
-            setup = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
-            setup->distribute(partitioner == "graph"         ? partition_graph(*setup, comm::size())
-                              : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
-                                                             : partition_hilbert(*setup, comm::size()));
+        // The block is freed before the Mesh is built, so a deeper halo (see
+        // halo_too_shallow) reads it again; it keeps the partition
+        DistributedMesh setup(read_mesh_block(input), Mesh::periodic_pairs(input));
+        if (!block_owners) {
+            block_owners = partitioner == "graph"         ? partition_graph(setup, comm::size())
+                         : partitioner == "multijagged" ? partition_multijagged(setup, comm::size())
+                                                        : partition_hilbert(setup, comm::size());
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
+        setup.distribute(*block_owners);
+        surfaces = curved::surfaces_of_block(setup.mesh_block(), input);
+        mesh = std::move(setup).build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
@@ -466,8 +471,6 @@ void Solver::init_mesh() {
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
-    const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
-                                                       : curved::surfaces_of_mesh(*mesh, input);
     mesh->apply_curved(surfaces);
     mesh_setup = describe_mesh(*mesh);
     Settings & mesh_settings = mesh_setup.settings;
@@ -609,14 +612,7 @@ void Solver::trim_halo() {
     std::vector<uint8_t> reconstructed(mesh->n_cells, 0);
     std::fill_n(reconstructed.begin(), own_faces ? mesh->n_owned() : mesh->n_reconstructed(), uint8_t(1));
     if (own_faces) {
-        const BoundaryData::HostImages images = boundary_data.host_images();
-        for (uint32_t f = 0; f < mesh->n_faces; f++) {
-            const int32_t c0 = mesh->h_cells_of_face(f, 0);
-            if (mesh->h_cells_of_face(f, 1) < 0 && c0 >= 0 && c0 < static_cast<int32_t>(mesh->n_owned()) &&
-                images.cell[f] >= 0 && images.face[f] < 0) {
-                reconstructed[static_cast<size_t>(images.cell[f])] = 1;
-            }
-        }
+        for (const uint32_t c : face_reconstruction->halo_image_cells()) reconstructed[c] = 1;
     }
     std::vector<uint8_t> needed = teno->stencil_cells(reconstructed);
     const int base = base_halo_layers();
@@ -670,11 +666,11 @@ bool Solver::halo_too_shallow() {
     // Every rank takes part in the reduction below, also those without image neighbors
     const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
     if (teno == nullptr && !wall_model_on && !images) return false;
-    // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
-    // see every layer they visited, so stencils match the serial ones exactly
+    // The stencil searches of the cells with TENO tables must see every layer
+    // they visited, so stencils match the serial ones exactly
     int needed = 0;
-    for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
-        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    for (uint32_t r = 0; teno && r < teno->n_rows(); r++) {
+        needed = std::max(needed, distribution.layer[teno->cell_of_row(r)] + teno->gather_depth[r] + 1);
     }
     // The same for the gradient stencils that continue across extrapolation boundaries
     for (uint32_t c = 0; !image_reach.empty() && c < mesh->n_cells; c++) {
@@ -1583,14 +1579,19 @@ void Solver::init_numerics() {
 
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+        teno->partition_faces_exchanged = exchanges_partition_faces();
+        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
+        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
+    }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
-    if (is_mixture()) {
-        scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
+    if (is_mixture() && !state_reader) {
+        scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
@@ -1660,7 +1661,8 @@ void Solver::init_numerics() {
 
 void Solver::describe_block_path() {
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    if (teno == nullptr) return;
+    // The setup report of states read from files is not shown
+    if (teno == nullptr || state_reader) return;
     const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
     if (cells == 0) return;
     const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
@@ -2616,7 +2618,7 @@ int Solver::run_loop() {
                 if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
                 write_staged_monitors(record);
                 write_staged_probes(record);
-                update_convergence();
+                update_convergence(&record);
                 write_staged_outputs(record);
                 t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();

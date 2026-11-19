@@ -270,6 +270,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);  // Its ledger and repair audit follow time steps
+    output.erase("write_stencils");    // The run's stencils, not output of its states
 
     const bool chosen = args.has("--probe");
     const bool others = args.has("--region") || args.has("--snapshot");
@@ -395,6 +396,7 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);
+    output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
     if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
 
@@ -966,6 +968,7 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);
+    output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
     if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
     std::vector<std::string> products;
