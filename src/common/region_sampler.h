@@ -228,10 +228,19 @@ constexpr int IN_BINADES = N_DIM == 2 ? 2 : 4, ALL_BINADES = 2, SLOT_SUMS = IN_B
 /** @brief Bytes of the sums of the slots of team_sample: SLOT_SUMS sums in ulps each, then a word of flags each. */
 constexpr size_t SLOT_BYTES = SUBTREES * (SLOT_SUMS * sizeof(uint64_t) + sizeof(uint32_t));
 
-/** @brief Bytes of the counts of kept nodes, or in the same bytes a weight and indicator per thread of a team. */
+/** @brief Groups of 16 nodes of the deepest level of parents: team_classify numbers their subdivided nodes per group. */
+constexpr size_t GROUPS = (tree_nodes(MAX_LEVEL) - tree_nodes(MAX_LEVEL - 1)) / 16;
+
+/**
+ * @brief Bytes of the counts of kept nodes, or in the same bytes a weight and
+ *        indicator per thread of a team, or the offsets of the groups of
+ *        parents of team_classify.
+ */
 KOKKOS_INLINE_FUNCTION constexpr size_t shared_bytes(const int team_size) {
     const size_t terms = 2 * static_cast<size_t>(team_size) * sizeof(double);
-    return terms > COUNT_WORDS * sizeof(uint32_t) ? terms : COUNT_WORDS * sizeof(uint32_t);
+    const size_t words = COUNT_WORDS > GROUPS + 1 ? COUNT_WORDS : GROUPS + 1;
+    const size_t counts = (words * sizeof(uint32_t) + 7) / 8 * 8;  // the sums of team_sample follow, 64-bit
+    return terms > counts ? terms : counts;
 }
 
 /** @brief Team scratch of team_simplex and team_cone, for a team of team_size threads. */
@@ -285,6 +294,36 @@ KOKKOS_INLINE_FUNCTION void set_state(uint32_t * tree, const uint32_t node, cons
         const uint32_t bit = above + node;
         Kokkos::atomic_or(&tree[bit / 32], 1u << (bit % 32));
     }
+}
+
+/** @brief Ors bits into the table's bits from bit, n <= 32 of them, with the other threads of a team. */
+KOKKOS_INLINE_FUNCTION void or_bits(uint32_t * tree, const uint32_t bit, const uint32_t n, const uint32_t bits) {
+    const uint32_t shift = bit % 32;
+    if (bits == 0) return;
+    Kokkos::atomic_or(&tree[bit / 32], bits << shift);
+    if (shift + n > 32 && bits >> (32 - shift) != 0) Kokkos::atomic_or(&tree[bit / 32 + 1], bits >> (32 - shift));
+}
+
+/** @brief Sets the states of the CHILDREN children of a node, from node on, 2 bits each in states. */
+KOKKOS_INLINE_FUNCTION void set_children_states(uint32_t * tree, const uint32_t node, const uint32_t states) {
+    constexpr uint32_t above = tree_nodes(MAX_LEVEL);
+    if (node < above) {
+        or_bits(tree, 2 * node, 2 * CHILDREN, states);
+        return;
+    }
+    uint32_t inside = 0;
+    for (uint32_t j = 0; j < CHILDREN; j++) inside |= (((states >> (2 * j)) & 3u) == INSIDE ? 1u : 0u) << j;
+    or_bits(tree, above + node, CHILDREN, inside);
+}
+
+/** @brief Bit 2 k of the subdivided nodes among nodes first + 16 g + k of a level above the deepest, k < 16, of n. */
+KOKKOS_INLINE_FUNCTION uint32_t subdivided_in_group(const uint32_t * tree, const uint32_t first, const uint32_t n,
+                                                    const uint32_t g) {
+    const uint32_t node = first + 16 * g, shift = 2 * (node % 16);
+    uint32_t states = tree[node / 16] >> shift;
+    if (shift > 0) states |= tree[node / 16 + 1] << (32 - shift);
+    if (n - 16 * g < 16) states &= (1u << (2 * (n - 16 * g))) - 1u;
+    return states & ~(states >> 1) & 0x55555555u;
 }
 
 /** @brief Node code of a level of the subdivision tree, placed from the root by child(node, j, next). */
@@ -354,23 +393,68 @@ KOKKOS_INLINE_FUNCTION uint32_t team_classify(const Member & member, const TeamS
         tree[i] = i == 0 ? root_state : 0u;
     });
     member.team_barrier();
+    uint32_t * offsets = scratch.counts;
+    const uint32_t size = static_cast<uint32_t>(member.team_size()), rank = static_cast<uint32_t>(member.team_rank());
     uint32_t first = 0, width = 1;  // the level's first node and its number of nodes
     for (int level = 1; level <= MAX_LEVEL; level++) {
         const uint32_t parents = first, n_parents = width;
         first += width;
         width *= CHILDREN;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_parents), [&](const uint32_t p) {
-            if (node_state(tree, parents + p) != SUBDIVIDED) return;
-            const Node parent = place(root, child, level - 1, p);
-            for (int j = 0; j < CHILDREN; j++) {
-                Node next;
-                child(parent, j, next);
-                const uint32_t code = p * CHILDREN + static_cast<uint32_t>(j);
-                const uint32_t state = classify(next, level);
-                set_state(tree, first + code, state);
-                if (state != SUBDIVIDED) kept(next, level, code);
+        // The subdivided parents, counted per group of 16 and numbered, so that the threads take one each
+        const uint32_t n_groups = (n_parents + 15) / 16, per = (n_groups + size - 1) / size;
+        const uint32_t g0 = Kokkos::min(rank * per, n_groups), g1 = Kokkos::min(g0 + per, n_groups);
+        auto count = [&](const uint32_t g) {
+            return static_cast<uint32_t>(Kokkos::popcount(subdivided_in_group(tree, parents, n_parents, g)));
+        };
+        uint32_t mine = 0;
+        for (uint32_t g = g0; g < g1; g++) mine += count(g);
+        uint32_t offset = member.team_scan(mine);
+        for (uint32_t g = g0; g < g1; g++) {
+            offsets[g] = offset;
+            offset += count(g);
+        }
+        if (rank + 1 == size) offsets[n_groups] = offset;
+        member.team_barrier();
+        const uint32_t n = offsets[n_groups];
+        auto parent_of = [&](const uint32_t i) {
+            uint32_t lo = 0, hi = n_groups;  // the last group whose offset is at most i
+            while (hi - lo > 1) {
+                const uint32_t mid = (lo + hi) / 2;
+                if (offsets[mid] <= i) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
             }
-        });
+            uint32_t bits = subdivided_in_group(tree, parents, n_parents, lo);
+            for (uint32_t r = i - offsets[lo]; r > 0; r--) bits &= bits - 1u;
+            return 16 * lo + static_cast<uint32_t>(Kokkos::countr_zero(bits)) / 2;
+        };
+        auto classify_child = [&](const Node & parent, const uint32_t p, const int j) {
+            Node next;
+            child(parent, j, next);
+            const uint32_t code = p * CHILDREN + static_cast<uint32_t>(j);
+            const uint32_t state = classify(next, level);
+            if (state != SUBDIVIDED) kept(next, level, code);
+            return state;
+        };
+        if (n * CHILDREN <= 2 * size) {
+            // Few parents: a child each, so that more threads classify
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n * CHILDREN), [&](const uint32_t i) {
+                const uint32_t p = parent_of(i / CHILDREN);
+                const int j = static_cast<int>(i % CHILDREN);
+                const uint32_t code = p * CHILDREN + static_cast<uint32_t>(j);
+                set_state(tree, first + code, classify_child(place(root, child, level - 1, p), p, j));
+            });
+        } else {
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n), [&](const uint32_t i) {
+                const uint32_t p = parent_of(i);
+                const Node parent = place(root, child, level - 1, p);
+                uint32_t states = 0;
+                for (int j = 0; j < CHILDREN; j++) states |= classify_child(parent, p, j) << (2 * j);
+                set_children_states(tree, first + p * CHILDREN, states);
+            });
+        }
         member.team_barrier();
     }
     return root_state;
