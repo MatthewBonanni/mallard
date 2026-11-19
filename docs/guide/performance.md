@@ -126,6 +126,8 @@ The performance case `flame_3d` is a propane–air flame with the two-step mecha
 
 The opt-in `C_reg = 1e-10` cheapens trace fuel burning out in hot gas. After 100 steps the temperature is within 0.54 K and the integrated heat release within 0.08% of the default.
 
+Device memory: the reconstruction's work memory and the transport properties of a mixture share one allocation, since a step never needs both at once ([#552](https://github.com/MatthewBonanni/mallard/issues/552)). An A100-80GB holds 4% more cells of the two-step flame at TENO5, 9% with MUSCL and 18% with GRI-Mech 3.0; `mallard check --memory` counts it under faces and gradients.
+
 ### Chemistry load balancing {#chemistry-load-balancing}
 
 `[chemistry] load_balance = true` ([#255](https://github.com/MatthewBonanni/mallard/pull/255)) moves the integration of cells from ranks with more chemistry work than the mean to ranks with less, in every call; results stay bitwise the same. Time per step on A100s, with the share of the step spent waiting for the slowest rank's chemistry:
