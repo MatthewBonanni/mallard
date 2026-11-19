@@ -12,8 +12,10 @@
 #include "distributed_mesh.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <span>
@@ -494,51 +496,50 @@ DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPa
         // boundary faces matching it. Two cells make a graph edge; one cell a
         // boundary face in the zone of the first matching boundary face (lowest
         // zone index), else unassigned. Each cell face gets the reply
-        // (its tag, the other cell or ZONE | zone).
-        const uint64_t n_records = received.data.size() / WIDTH;
-        const uint64_t * r = received.data.data();
-        std::vector<uint32_t> order(n_records);
-        std::iota(order.begin(), order.end(), 0u);
-        std::sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) {
-            return std::lexicographical_compare(r + x * WIDTH, r + (x + 1) * WIDTH, r + y * WIDTH, r + (y + 1) * WIDTH);
-        });
+        // (its tag, the other cell or ZONE | zone). Equal records are the same
+        // words, so any sort gives the same order; std::sort takes twice as
+        // long on some meshes' rounds.
+        std::vector<std::array<uint64_t, WIDTH>> records(received.data.size() / WIDTH);
+        std::memcpy(records.data(), received.data.data(), received.data.size() * sizeof(uint64_t));
+        received = {};
+        std::stable_sort(records.begin(), records.end());
+        const uint64_t n_records = records.size();
         send.assign(p, {});
         {
             // Each record of a cell face sends one reply
             std::fill(count.begin(), count.end(), 0);
             for (uint64_t i = 0; i < n_records; i++) {
-                if (r[i * WIDTH + KEY] < ZONE) count[rank_of_cell(r[i * WIDTH + KEY] >> FACE_BITS)] += 2;
+                if (records[i][KEY] < ZONE) count[rank_of_cell(records[i][KEY] >> FACE_BITS)] += 2;
             }
             for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
         }
         for (uint64_t i = 0; i < n_records;) {
             uint64_t j = i + 1;
-            while (j < n_records && std::equal(r + order[i] * WIDTH, r + order[i] * WIDTH + KEY, r + order[j] * WIDTH)) j++;
+            while (j < n_records && std::equal(records[i].begin(), records[i].begin() + KEY, records[j].begin())) j++;
             uint32_t n_cells = 0;
-            while (i + n_cells < j && r[order[i + n_cells] * WIDTH + KEY] < ZONE) n_cells++;
+            while (i + n_cells < j && records[i + n_cells][KEY] < ZONE) n_cells++;
             const bool zoned = i + n_cells < j;
-            const uint64_t zone = zoned ? r[order[i + n_cells] * WIDTH + KEY] & ~ZONE : unassigned;
+            const uint64_t zone = zoned ? records[i + n_cells][KEY] & ~ZONE : unassigned;
             if (n_cells == 0) {
                 error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
             } else if (n_cells > 2) {
                 error = "Mesh: a face is shared by more than two cells.";
             } else if (n_cells == 2 &&
-                       r[order[i] * WIDTH + KEY] >> FACE_BITS == r[order[i + 1] * WIDTH + KEY] >> FACE_BITS) {
+                       records[i][KEY] >> FACE_BITS == records[i + 1][KEY] >> FACE_BITS) {
                 error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
             } else if (n_cells == 2 && zoned) {
                 error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
             } else {
                 for (uint32_t m = 0; m < n_cells; m++) {
-                    const uint64_t tag = r[order[i + m] * WIDTH + KEY];
-                    const uint64_t other = n_cells == 2 ? r[order[i + 1 - m] * WIDTH + KEY] >> FACE_BITS : ZONE | zone;
+                    const uint64_t tag = records[i + m][KEY];
+                    const uint64_t other = n_cells == 2 ? records[i + 1 - m][KEY] >> FACE_BITS : ZONE | zone;
                     auto & out = send[rank_of_cell(tag >> FACE_BITS)];
                     out.insert(out.end(), {tag, other});
                 }
             }
             i = j;
         }
-        received = {};
-        release(order);
+        release(records);
         check_all(error);
         received = comm::exchange(std::move(send));
         if (round + 1 == MATCH_ROUNDS) release(face_round);
