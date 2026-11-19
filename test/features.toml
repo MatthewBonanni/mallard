@@ -100,6 +100,12 @@
 ]
 "ReactingTest.SimplerSplittingIsSecondOrderInTime" = ["mixture", "euler", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"]
 
+[mixture_transport_test]
+"MixtureTransportTest.SharedStageScratchMatchesSeparateBuffersBitwise" = [
+    ["les", "navier_stokes", "mixture", "chemistry", "teno3", "hllc", "hybrid", "ssprk3"],
+    ["les", "navier_stokes", "mixture", "chemistry", "muscl", "hllc", "hybrid", "ssprk3"],
+]
+
 [mpi_test]
 "MPITest.FirstOrderMatchesSerial" = ["mpi", "euler", "fo", "hllc", "ssprk3"]
 "MPITest.MUSCLMatchesSerial" = ["mpi", "euler", "muscl", "hllc", "ssprk3"]
