@@ -239,4 +239,24 @@ class Parser {
 
 Value parse(std::string_view text) { return Parser(text).document(); }
 
+std::string dump(const Value & v) {
+    switch (v.type) {
+        case Value::Type::BOOL: return v.boolean ? "true" : "false";
+        case Value::Type::NUMBER: return number(v.number);
+        case Value::Type::STRING: return quote(v.string);
+        case Value::Type::ARRAY: {
+            std::string out = "[";
+            for (const Value & item : v.array) out += (out.size() > 1 ? "," : "") + dump(item);
+            return out + "]";
+        }
+        case Value::Type::OBJECT: {
+            Object o;
+            for (size_t i = 0; i < v.names.size(); i++) o.raw(v.names[i], dump(v.members[i]));
+            return o.str();
+        }
+        case Value::Type::NUL: break;
+    }
+    return "null";
+}
+
 } // namespace json

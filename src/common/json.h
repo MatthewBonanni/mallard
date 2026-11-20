@@ -89,6 +89,9 @@ struct Value {
  */
 Value parse(std::string_view text);
 
+/** @brief The value as JSON text, members in their order. */
+std::string dump(const Value & value);
+
 } // namespace json
 
 #endif // JSON_H

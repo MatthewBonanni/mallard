@@ -74,6 +74,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
+- [`mallard session`](https://matthewbonanni.github.io/mallard/docs/guide/session/) for programs: holds a case and answers JSON-RPC requests (check, key listings) after each edit, with JSON Schemas for every answer
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 - 40 [examples](https://matthewbonanni.github.io/mallard/docs/examples/), compared with exact solutions, other codes, DNS and experiments: the [verification and validation cases](https://matthewbonanni.github.io/mallard/validation/)

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-check.v1.schema.json",
+  "title": "The report of mallard check --format json, and of the session's case.check",
+  "type": "object",
+  "required": ["version", "status", "errors", "warnings", "setup_done", "dim", "environment", "diagnostics"],
+  "properties": {
+    "schema": {"const": "mallard-check"},
+    "version": {"const": 1},
+    "status": {"enum": ["ok", "warning", "error"]},
+    "errors": {"type": "integer", "minimum": 0},
+    "warnings": {"type": "integer", "minimum": 0},
+    "input_file": {"type": ["string", "null"]},
+    "setup_done": {"type": "boolean"},
+    "dim": {"enum": [2, 3]},
+    "environment": {
+      "type": "object",
+      "required": ["build", "ranks"],
+      "properties": {
+        "build": {"type": "object"},
+        "dependencies": {"type": "object"},
+        "solvers": {"type": "array", "items": {"enum": [2, 3]}},
+        "ranks": {"type": "integer", "minimum": 1},
+        "placement": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "diagnostics": {"type": "array", "items": {"$ref": "mallard-diagnostic.v1.schema.json"}},
+    "unused_keys": {"type": "array", "items": {"type": "object", "required": ["key"], "properties": {"key": {"type": "string"}}}},
+    "boundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["zone", "condition", "faces"],
+        "properties": {"zone": {"type": "string"}, "condition": {"type": "string"}, "faces": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "dimension", "cells"],
+        "properties": {
+          "name": {"type": "string"},
+          "of_mesh": {"type": "boolean"},
+          "dimension": {"enum": [0, 1, 2, 3]},
+          "measure": {"type": ["number", "null"]},
+          "cells": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "case_view": {"type": ["string", "null"]},
+    "case_view_images": {"type": "array", "items": {"type": "string"}},
+    "mesh_quality": {"type": ["object", "null"]},
+    "mesh_fields_file": {"type": ["string", "null"]},
+    "stencil_file": {"type": ["string", "null"]},
+    "time_step": {"type": ["object", "null"]},
+    "resolution": {"type": ["object", "null"]},
+    "memory": {"type": ["object", "null"]},
+    "sizing": {"type": ["object", "null"]},
+    "cost": {"type": ["object", "null"]}
+  },
+  "additionalProperties": true
+}

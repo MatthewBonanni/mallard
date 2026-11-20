@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-case.v1.schema.json",
+  "title": "The case a session holds: the result of case.open and case.update",
+  "type": "object",
+  "required": ["schema", "version", "input", "dimension", "mesh_files_read"],
+  "properties": {
+    "schema": {"const": "mallard-case"},
+    "version": {"const": 1},
+    "input": {"type": "string"},
+    "dimension": {"enum": [2, 3]},
+    "mesh_files_read": {"type": "integer", "minimum": 0, "description": "mesh files the session's setups read from disk so far"},
+    "changed": {"type": "array", "items": {"type": "string"}, "description": "case.update: the key paths whose values differ"}
+  },
+  "additionalProperties": true
+}

@@ -18,6 +18,8 @@ set(MALLARD_TEST_SOURCES
     case_template_test.cpp
     front_end_test.cpp
     cli_test.cpp
+    session_test.cpp
+    json_schema.cpp
     time_integrator_test.cpp
     binding_test.cpp
     comm_test.cpp
