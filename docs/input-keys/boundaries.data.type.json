@@ -1,0 +1,14 @@
+{
+ "default": "\"table\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/boundary_data.toml"
+ ],
+ "type": "string",
+ "values": [
+  "points",
+  "table"
+ ]
+}
