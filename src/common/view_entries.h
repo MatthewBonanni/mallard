@@ -9,10 +9,18 @@
 #ifndef VIEW_ENTRIES_H
 #define VIEW_ENTRIES_H
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 
 #include <Kokkos_Macros.hpp>
+
+// Kokkos's View header includes this one, so its public headers can't be included here
+namespace Kokkos {
+struct LayoutLeft;
+struct LayoutRight;
+} // namespace Kokkos
 
 namespace view_entries {
 
@@ -45,6 +53,27 @@ KOKKOS_INLINE_FUNCTION void load_row(const View & v, const uint32_t r, T * out) 
     for (int i = 1; i < N; i++) {
         p += stride;
         out[i] = *p;
+    }
+}
+
+/**
+ * @brief Entries (r, k, i) of the rank-3 View v into out[k][i], as the rank-2 load_row:
+ *        in either contiguous layout a row's N1 * N2 entries are one stride apart, and
+ *        N1 * N2 >= 3 keeps it below 2^31.
+ */
+template <size_t N1, size_t N2, typename View, typename T>
+KOKKOS_INLINE_FUNCTION void load_row(const View & v, const uint32_t r, T (&out)[N1][N2]) {
+    using Layout = typename View::array_layout;
+    constexpr bool left = std::is_same_v<Layout, Kokkos::LayoutLeft>;
+    static_assert(View::rank() == 3);
+    static_assert(left || std::is_same_v<Layout, Kokkos::LayoutRight>);
+    static_assert(View::static_extent(1) == N1 && View::static_extent(2) == N2);
+    static_assert(N1 * N2 >= 3);
+    const auto * p = &v(r, 0, 0);
+    const int32_t stride = static_cast<int32_t>(left ? v.stride(1) : v.stride(2));
+    for (size_t j = 0; j < N1 * N2; j++) {
+        if (j > 0) p += stride;
+        out[left ? j % N1 : j / N2][left ? j / N1 : j % N2] = *p;
     }
 }
 
