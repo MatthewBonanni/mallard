@@ -1180,6 +1180,8 @@ struct InitialState::Impl {
             std::vector<std::string> at;
             if (contains_optional(e, "at")) {
                 at = find_value<std::vector<std::string>>(e, "at");
+            } else if (!entry.at.empty()) {
+                at = entry.at;
             } else {
                 for (const auto & c : coordinates) {
                     if (c != "x" && c != "y" && c != "z") {

@@ -207,10 +207,13 @@ struct DataView {
 /**
  * @brief The columns of a CSV file: a header of names, then rows of numbers
  *        separated by commas (or spaces); lines starting with # are comments.
+ *        A comment "# mallard-profile {...}" before the header is the file's
+ *        metadata.
  */
 struct Csv {
     std::vector<std::string> names;
     std::vector<std::vector<double>> columns;
+    std::string metadata;  // JSON, or empty
 
     /** @brief Index of the named column, or -1. */
     int32_t column(const std::string & name) const;
@@ -219,8 +222,23 @@ struct Csv {
 /** @brief Read a CSV file; errors name the file and line, and link docs (page#anchor of the key that reads it). */
 Csv read_csv(const std::string & file, const std::string & docs);
 
-/** @brief The column names of a CSV file (its header); empty if it cannot be read. */
-std::vector<std::string> read_header(const std::string & file);
+/** @brief The column names of a CSV file (its header), and its metadata; empty if it cannot be read. */
+std::vector<std::string> read_header(const std::string & file, std::string * metadata = nullptr);
+
+/**
+ * @brief The metadata of a data file: defaults of its entry's keys
+ *        coordinates, at, units and reference, and where the data come from
+ *        (source, and the transforms that made the file).
+ */
+struct Metadata {
+    std::vector<std::string> coordinates, at, transforms;
+    std::vector<std::pair<std::string, std::string>> units;  // column, unit
+    std::vector<std::pair<std::string, double>> reference;   // scale name, its value in SI
+    std::string source;
+};
+
+/** @brief Parse metadata JSON (empty: none); errors name the file. */
+Metadata parse_metadata(const std::string & json, const std::string & file, const std::string & docs);
 
 /** @brief Data sets on the host, gathered for the device. */
 class Data {
@@ -270,15 +288,20 @@ class Data {
 struct Entry {
     std::string name, file;
     std::vector<std::string> coordinates;  // the coordinate columns
+    std::vector<std::string> at;           // the metadata's at, the default of the entry's (empty: none)
     std::vector<std::string> variables;    // <name>_<column> of the other columns: the set's fields, in order
     uint32_t set = 0;
     std::string kind;                      // the set's type and size, for the run log
 };
 
 /**
- * @brief Read a data entry's keys name, file, type, coordinates,
- *        interpolation, neighbors and units, and add its file to data; where
- *        the set is read (at, region) is the caller's.
+ * @brief Read a data entry's keys name, file, type, coordinates, columns,
+ *        interpolation, neighbors, units, scale and reference, and add its
+ *        file to data; where the set is read (at, region) is the caller's.
+ *        scale rescales every column by the ratio of its scales to the
+ *        reference's (length, velocity, density, temperature), each to the
+ *        power of the column's dimension in them, mass and amount as density
+ *        times length cubed.
  * @param where The entry's key, for messages.
  * @param docs The guide section for messages.
  */

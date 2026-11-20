@@ -12,6 +12,7 @@
 #include "tabulated.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 #include "box_tree.h"
 #include "common_io.h"
 #include "input.h"
+#include "json.h"
 #include "log.h"
 #include "provenance.h"
 #include "units.h"
@@ -97,11 +99,52 @@ InputError invalid(const Input & table, const std::string & key, const std::stri
     return InputError({.key = key, .line = line_of(table, leaf), .message = message, .fix = fix, .docs = docs});
 }
 
-/** @brief The coordinate columns of entry e of a file with these columns: its coordinates, else the default. */
-std::vector<std::string> entry_coordinates(const Input & e, const std::vector<std::string> & columns, const bool points) {
+/**
+ * @brief The coordinate columns of entry e of a file with these columns: its
+ *        coordinates, else the metadata's, else the default.
+ */
+std::vector<std::string> entry_coordinates(const Input & e, const std::vector<std::string> & columns, const bool points,
+                                           const std::vector<std::string> & metadata) {
     if (e.contains("coordinates")) return find_value<std::vector<std::string>>(e, "coordinates");
+    if (!metadata.empty()) return metadata;
     if (points) return N_DIM == 2 ? std::vector<std::string>{"x", "y"} : std::vector<std::string>{"x", "y", "z"};
     return {columns.empty() ? std::string() : columns[0]};
+}
+
+/** @brief The value columns of entry e: its columns, else every column but the coordinates. */
+std::vector<std::string> entry_values(const Input & e, const std::vector<std::string> & columns,
+                                      const std::vector<std::string> & coordinates) {
+    if (contains_optional(e, "columns")) return find_value<std::vector<std::string>>(e, "columns");
+    std::vector<std::string> values;
+    for (const std::string & c : columns) {
+        if (std::find(coordinates.begin(), coordinates.end(), c) == coordinates.end()) values.push_back(c);
+    }
+    return values;
+}
+
+const std::string METADATA = "mallard-profile";
+
+/** @brief The metadata JSON of a comment line, or "" if it is not one. */
+std::string metadata_of(const std::string & line) {
+    const std::string open = "# " + METADATA + " ";
+    const size_t a = line.find_first_not_of(" \t");
+    return a != std::string::npos && line.compare(a, open.size(), open) == 0 ? line.substr(a + open.size()) : "";
+}
+
+/** @brief The scales a data entry rescales by, in the order of Metadata::reference's names. */
+struct Scale {
+    const char * name;
+    Dimension dimension;
+};
+const std::array<Scale, 4> SCALES = {{{"length", dim::length},
+                                      {"velocity", dim::velocity},
+                                      {"density", dim::density},
+                                      {"temperature", dim::temperature}}};
+
+std::string scale_names() {
+    std::string names;
+    for (const Scale & s : SCALES) names += (names.empty() ? "" : ", ") + std::string(s.name);
+    return names;
 }
 
 } // namespace
@@ -122,6 +165,7 @@ Csv read_csv(const std::string & file, const std::string & docs) {
     while (std::getline(in, line)) {
         line_number++;
         const std::string t = trim(line);
+        if (!t.empty() && t[0] == '#' && csv.names.empty() && csv.metadata.empty()) csv.metadata = metadata_of(line);
         if (t.empty() || t[0] == '#') continue;
         const std::vector<std::string> items = split(line);
         if (csv.names.empty()) {
@@ -152,14 +196,93 @@ Csv read_csv(const std::string & file, const std::string & docs) {
     return csv;
 }
 
-std::vector<std::string> read_header(const std::string & file) {
+std::vector<std::string> read_header(const std::string & file, std::string * metadata) {
     std::ifstream in(file);
     std::string line;
     while (std::getline(in, line)) {
         const std::string t = trim(line);
+        if (metadata && metadata->empty() && !t.empty() && t[0] == '#') *metadata = metadata_of(line);
         if (!t.empty() && t[0] != '#') return split(line);
     }
     return {};
+}
+
+Metadata parse_metadata(const std::string & text, const std::string & file, const std::string & docs) {
+    Metadata m;
+    if (text.empty()) return m;
+    const auto error = [&](const std::string & what) {
+        return InputError(Diagnostic{.message = file + ": its " + METADATA + " comment " + what,
+                                     .fix = "Correct the comment line \"# " + METADATA + " {...}\" before the "
+                                            "file's header, or remove it",
+                                     .docs = docs});
+    };
+    json::Value v;
+    try {
+        v = json::parse(text);
+    } catch (const std::exception & err) {
+        throw error(std::string("is not JSON (") + err.what() + ")");
+    }
+    if (v.type != json::Value::Type::OBJECT) throw error("is not a JSON object");
+    const std::vector<std::string> keys = {"coordinates", "at", "units", "reference", "source", "transforms"};
+    for (const std::string & key : v.names) {
+        if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
+            throw error("has an unknown key \"" + key + "\" (keys: " + one_of(keys) + ")");
+        }
+    }
+    const auto strings = [&](const std::string & key) {
+        std::vector<std::string> out;
+        const json::Value * a = v.find(key);
+        if (!a) return out;
+        if (a->type != json::Value::Type::ARRAY) throw error("gives " + key + " that is not a list of strings");
+        for (const json::Value & item : a->array) {
+            if (item.type != json::Value::Type::STRING) throw error("gives " + key + " that is not a list of strings");
+            out.push_back(item.string);
+        }
+        return out;
+    };
+    m.coordinates = strings("coordinates");
+    m.at = strings("at");
+    m.transforms = strings("transforms");
+    if (const json::Value * s = v.find("source")) {
+        if (s->type != json::Value::Type::STRING) throw error("gives a source that is not a string");
+        m.source = s->string;
+    }
+    if (const json::Value * u = v.find("units")) {
+        if (u->type != json::Value::Type::OBJECT) throw error("gives units that are not an object of columns");
+        for (size_t i = 0; i < u->names.size(); i++) {
+            if (u->members[i].type != json::Value::Type::STRING) {
+                throw error("gives the unit of column " + u->names[i] + " as something other than a string");
+            }
+            m.units.emplace_back(u->names[i], u->members[i].string);
+        }
+    }
+    if (const json::Value * r = v.find("reference")) {
+        if (r->type != json::Value::Type::OBJECT) throw error("gives a reference that is not an object of scales");
+        for (size_t i = 0; i < r->names.size(); i++) {
+            const std::string & name = r->names[i];
+            const auto scale = std::find_if(SCALES.begin(), SCALES.end(), [&](const Scale & s) { return name == s.name; });
+            if (scale == SCALES.end()) throw error("gives a reference " + name + " (scales: " + scale_names() + ")");
+            const json::Value & value = r->members[i];
+            double si = value.number;
+            if (value.type == json::Value::Type::STRING) {
+                try {
+                    const Quantity q = parse_quantity(value.string);
+                    if (q.has_unit && !q.dimension.same_as(scale->dimension)) {
+                        throw error("gives the reference " + name + " \"" + value.string + "\", not a " +
+                                    scale->dimension.describe());
+                    }
+                    si = q.value;
+                } catch (const UnitError & err) {
+                    throw error("gives the reference " + name + " " + err.what());
+                }
+            } else if (value.type != json::Value::Type::NUMBER) {
+                throw error("gives the reference " + name + " as something other than a number or a quantity");
+            }
+            if (!(si > 0.0) || !std::isfinite(si)) throw error("gives a reference " + name + " that is not positive");
+            m.reference.emplace_back(name, si);
+        }
+    }
+    return m;
 }
 
 Entry read_entry(const Input & e, const std::string & where, const std::string & docs, Data & data) {
@@ -183,72 +306,170 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
     if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
     const bool points = type == "points";
     const Csv csv = read_csv(file, docs);
-    entry.coordinates = entry_coordinates(e, csv.names, points);
+    const Metadata metadata = parse_metadata(csv.metadata, file, docs);
+    entry.at = metadata.at;
+    entry.coordinates = entry_coordinates(e, csv.names, points, metadata.coordinates);
     const std::vector<std::string> & coordinates = entry.coordinates;
     if (coordinates.empty() || coordinates.size() > MAX_DIMS) {
         throw invalid(e, where + ".coordinates", "coordinates", "names " + std::to_string(coordinates.size()) + " columns",
                       "Name 1 to 3 columns of " + file, docs);
     }
+    const auto no_column = [&](const std::string & key, const Input & table, const std::string & leaf,
+                               const std::string & c, const std::string & fix) {
+        return InputError({.key = key,
+                           .line = line_of(table, leaf),
+                           .message = file + " has no column " + c,
+                           .valid = csv.names,
+                           .suggestion = suggest_value(c, csv.names),
+                           .fix = fix,
+                           .docs = docs});
+    };
     std::vector<int32_t> coordinate_columns;
     for (const auto & c : coordinates) {
         const int32_t i = csv.column(c);
         if (i < 0) {
-            throw InputError({.key = where + ".coordinates",
-                              .line = line_of(e, e.contains("coordinates") ? "coordinates" : "file"),
-                              .message = file + " has no column " + c,
-                              .valid = csv.names,
-                              .suggestion = suggest_value(c, csv.names),
-                              .fix = "Name the coordinate columns with coordinates = [...]",
-                              .docs = docs});
+            throw no_column(where + ".coordinates", e, e.contains("coordinates") ? "coordinates" : "file", c,
+                            "Name the coordinate columns with coordinates = [...]");
         }
         coordinate_columns.push_back(i);
     }
-    // Units of columns, as affine maps to SI (a + b v)
-    std::vector<double> offset(csv.names.size(), 0.0), factor(csv.names.size(), 1.0);
+    std::vector<int32_t> value_columns;
+    for (const std::string & c : entry_values(e, csv.names, coordinates)) {
+        const int32_t i = csv.column(c);
+        if (i < 0) throw no_column(where + ".columns", e, "columns", c, "Name value columns of the file");
+        if (std::find(coordinate_columns.begin(), coordinate_columns.end(), i) != coordinate_columns.end() ||
+            std::find(value_columns.begin(), value_columns.end(), i) != value_columns.end()) {
+            throw invalid(e, where + ".columns", "columns", "names column " + c + " twice, or a coordinate",
+                          "Name each value column once, and no coordinate column", docs);
+        }
+        value_columns.push_back(i);
+    }
+    if (value_columns.empty()) {
+        throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
+                      "Add value columns to the file, or name fewer coordinates", docs);
+    }
+    // Units of columns: the metadata's, then the entry's
+    std::vector<std::string> unit(csv.names.size()), unit_key(csv.names.size());
+    for (const auto & [column, text] : metadata.units) {
+        const int32_t i = csv.column(column);
+        if (i < 0) {
+            throw InputError(Diagnostic{.message = file + ": its " + METADATA + " comment gives the unit of column " +
+                                                   column + ", which the file does not have",
+                                        .valid = csv.names,
+                                        .docs = docs});
+        }
+        unit[size_t(i)] = text;
+        unit_key[size_t(i)] = "the " + METADATA + " comment of " + file;
+    }
     if (e.contains("units")) {
         const Input & units = e.at("units");
         if (!units.is_table()) {
             throw invalid(e, where + ".units", "units", "must be a table of columns and their units",
                           "Write units = {x = \"mm\", T = \"degC\"}", docs);
         }
-        for (const auto & [column, unit] : units.as_table()) {
+        for (const auto & [column, value] : units.as_table()) {
             const int32_t i = csv.column(column);
-            if (i < 0) {
-                throw InputError({.key = where + ".units." + column,
-                                  .line = line_of(units, column),
-                                  .message = file + " has no column " + column,
-                                  .valid = csv.names,
-                                  .suggestion = suggest_value(column, csv.names),
-                                  .docs = docs});
-            }
-            const std::string text = find_value<std::string>(units, column);
-            try {
-                const Quantity q0 = parse_quantity("0 " + text), q1 = parse_quantity("1 " + text);
-                offset[size_t(i)] = q0.value;
-                factor[size_t(i)] = q1.value - q0.value;
-            } catch (const UnitError & err) {
-                throw invalid(units, where + ".units." + column, column, err.what(),
-                              "Give a unit such as \"mm\", \"bar\" or \"degC\"", docs);
-            }
+            if (i < 0) throw no_column(where + ".units." + column, units, column, column, "");
+            unit[size_t(i)] = find_value<std::string>(units, column);
+            unit_key[size_t(i)] = where + ".units." + column;
         }
+    }
+    // As affine maps to SI (a + b v), and the dimension of each column with a unit
+    std::vector<double> offset(csv.names.size(), 0.0), factor(csv.names.size(), 1.0);
+    std::vector<Dimension> dimension(csv.names.size());
+    for (size_t i = 0; i < csv.names.size(); i++) {
+        if (unit[i].empty() || unit[i] == "1") continue;
+        try {
+            const Quantity q0 = parse_quantity("0 " + unit[i]), q1 = parse_quantity("1 " + unit[i]);
+            offset[i] = q0.value;
+            factor[i] = q1.value - q0.value;
+            dimension[i] = q1.dimension;
+        } catch (const UnitError & err) {
+            throw InputError(Diagnostic{.key = unit_key[i],
+                                        .line = e.contains("units") ? line_of(e.at("units"), csv.names[i]) : 0,
+                                        .message = "column " + csv.names[i] + ": " + err.what(),
+                                        .fix = "Give a unit such as \"mm\", \"bar\" or \"degC\" (\"1\" if dimensionless)",
+                                        .docs = docs});
+        }
+    }
+    // Rescaling: each scale over the reference's, the entry's or else the metadata's
+    std::vector<double> scale(csv.names.size(), 1.0);
+    std::string scaled_text;
+    const bool scaled = contains_optional(e, "scale");
+    if (contains_optional(e, "reference") && !scaled) {
+        throw invalid(e, where + ".reference", "reference", "is given without scale",
+                      "Add scale = {...}, the scales to rescale the data to, or remove reference", docs);
+    }
+    if (scaled) {
+        const Input & to = e.at("scale");
+        if (!to.is_table() || to.as_table().entries().empty()) {
+            throw invalid(e, where + ".scale", "scale", "must be a table of scales (" + scale_names() + ")",
+                          "Write scale = {length = 0.02, velocity = 15}", docs);
+        }
+        const Input * from = contains_optional(e, "reference") ? &e.at("reference") : nullptr;
+        if (from && !from->is_table()) {
+            throw invalid(e, where + ".reference", "reference", "must be a table of scales (" + scale_names() + ")",
+                          "Write reference = {length = 0.01, velocity = 30}, the scales of the data", docs);
+        }
+        std::array<double, 4> f = {1.0, 1.0, 1.0, 1.0};
+        std::string text;
+        for (size_t k = 0; k < SCALES.size(); k++) {
+            const Scale & sc = SCALES[k];
+            if (!contains_optional(to, sc.name)) continue;
+            const double target = find_double(to, sc.name, sc.dimension);
+            double ref = 0.0;
+            if (from && contains_optional(*from, sc.name)) {
+                ref = find_double(*from, sc.name, sc.dimension);
+            } else {
+                for (const auto & [name, value] : metadata.reference) {
+                    if (name == sc.name) ref = value;
+                }
+            }
+            if (!(ref > 0.0)) {
+                throw invalid(e, where + ".scale", "scale",
+                              "rescales the " + std::string(sc.name) + ", but neither the entry nor the " + METADATA +
+                                  " comment of " + file + " gives its reference " + sc.name,
+                              "Add reference = {" + std::string(sc.name) + " = ...}, the " + sc.name +
+                                  " the data are scaled by",
+                              docs);
+            }
+            if (!(target > 0.0) || !std::isfinite(target)) {
+                throw invalid(to, where + ".scale." + sc.name, sc.name, "must be positive", "", docs);
+            }
+            f[k] = target / ref;
+            text += ", " + std::string(sc.name) + " x" + logging::real(f[k]);
+        }
+        const double f_mass = f[2] * f[0] * f[0] * f[0], f_time = f[0] / f[1];
+        std::vector<int32_t> read = coordinate_columns;
+        read.insert(read.end(), value_columns.begin(), value_columns.end());
+        for (const int32_t c : read) {
+            const size_t i = size_t(c);
+            if (unit[i].empty()) {
+                throw invalid(e, where + ".scale", "scale",
+                              "needs the unit of every column it rescales, and column " + csv.names[i] + " has none",
+                              "Give units = {" + csv.names[i] + " = \"m/s\"} (\"1\" if dimensionless), here or in "
+                              "the file's " + METADATA + " comment",
+                              docs);
+            }
+            const auto & x = dimension[i].exponent;
+            scale[i] = std::pow(f_mass, x[Dimension::MASS] + x[Dimension::AMOUNT]) * std::pow(f[0], x[Dimension::LENGTH]) *
+                       std::pow(f_time, x[Dimension::TIME]) * std::pow(f[3], x[Dimension::TEMPERATURE]);
+        }
+        scaled_text = ", scaled:" + text.substr(1);
     }
     auto column = [&](const size_t i) {
         std::vector<double> c = csv.columns[i];
         for (double & v : c) v = offset[i] + factor[i] * v;
+        if (scaled) {
+            for (double & v : c) v *= scale[i];
+        }
         return c;
     };
     std::vector<std::vector<double>> coords, fields;
     for (const int32_t i : coordinate_columns) coords.push_back(column(size_t(i)));
-    for (size_t i = 0; i < csv.names.size(); i++) {
-        if (std::find(coordinate_columns.begin(), coordinate_columns.end(), int32_t(i)) != coordinate_columns.end()) {
-            continue;
-        }
-        fields.push_back(column(i));
-        entry.variables.push_back(name + "_" + identifier(csv.names[i]));
-    }
-    if (fields.empty()) {
-        throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
-                      "Add value columns to the file, or name fewer coordinates", docs);
+    for (const int32_t i : value_columns) {
+        fields.push_back(column(size_t(i)));
+        entry.variables.push_back(name + "_" + identifier(csv.names[size_t(i)]));
     }
     if (points) {
         if (e.contains("interpolation")) {
@@ -258,7 +479,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
         const uint32_t neighbors = find_value_or<uint32_t>(e, "neighbors", 1);
         entry.set = data.add_points(coords, fields, neighbors, where);
         entry.kind = logging::count(coords[0].size(), "point") + ", " +
-                     (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance");
+                     (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance") + scaled_text;
     } else {
         if (e.contains("neighbors")) {
             throw invalid(e, where + ".neighbors", "neighbors", "is for point clouds (type = \"points\")",
@@ -273,7 +494,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
         const Set & s = data.set(entry.set);
         std::string shape;
         for (uint32_t d = 0; d < s.dims; d++) shape += (d ? " x " : "") + std::to_string(s.n_axis[d]);
-        entry.kind = "table " + shape + ", " + interpolation;
+        entry.kind = "table " + shape + ", " + interpolation + scaled_text;
     }
     return entry;
 }
@@ -283,19 +504,17 @@ std::vector<std::string> entry_variables(const Input & e) {
         !e.at("file").is_string()) {
         return {};
     }
-    const std::vector<std::string> columns = read_header(e.at("file").as_string());
+    std::string metadata;
+    const std::vector<std::string> columns = read_header(e.at("file").as_string(), &metadata);
     const bool points = e.contains("type") && e.at("type").is_string() && e.at("type").as_string() == "points";
-    std::vector<std::string> coordinates;
-    try {
-        coordinates = entry_coordinates(e, columns, points);
-    } catch (const std::exception &) {
-        return {};
-    }
     std::vector<std::string> variables;
-    for (const std::string & c : columns) {
-        if (std::find(coordinates.begin(), coordinates.end(), c) == coordinates.end()) {
+    try {
+        const Metadata m = parse_metadata(metadata, "", "");
+        for (const std::string & c : entry_values(e, columns, entry_coordinates(e, columns, points, m.coordinates))) {
             variables.push_back(e.at("name").as_string() + "_" + identifier(c));
         }
+    } catch (const std::exception &) {
+        return {};
     }
     return variables;
 }
