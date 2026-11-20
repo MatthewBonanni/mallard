@@ -534,6 +534,7 @@ TEST(ErrorMessages, CheckReportsErrorsOfIndependentPartsTogether) {
     EXPECT_EQ(setup[0]["key"].string, "run");
     EXPECT_TRUE(setup[0]["missing"].boolean);
     EXPECT_EQ(setup[1]["key"].string, "mesh.Nx");
+    EXPECT_EQ(setup[1]["element"].type, json::Value::Type::NUL);
     EXPECT_FALSE(setup[1]["missing"].boolean);
     EXPECT_EQ(setup[2]["key"].string, "physics.gamma");
     EXPECT_TRUE(setup[2]["missing"].boolean);
@@ -544,6 +545,7 @@ TEST(ErrorMessages, CheckReportsErrorsOfIndependentPartsTogether) {
     const std::vector<json::Value> entries = errors_of(check_diagnostics(boundaries));
     ASSERT_EQ(entries.size(), 2u) << messages(entries);
     EXPECT_EQ(entries[0]["key"].string, "boundaries[name = \"lefft\"].name");
+    EXPECT_EQ(entries[0]["element"].string, "boundaries[name = \"lefft\"]");
     EXPECT_EQ(entries[0]["line"].number, double(line_number(boundaries, "\"lefft\"")));
     EXPECT_FALSE(entries[0]["missing"].boolean);
     EXPECT_EQ(entries[1]["key"].string, "boundaries[name = \"top\"].type");
@@ -554,6 +556,7 @@ TEST(ErrorMessages, CheckReportsErrorsOfIndependentPartsTogether) {
     const std::vector<json::Value> outputs = errors_of(check_diagnostics(writers));
     ASSERT_EQ(outputs.size(), 2u) << messages(outputs);
     EXPECT_EQ(outputs[0]["key"].string, "write_data[0].format");
+    EXPECT_EQ(outputs[0]["element"].string, "write_data[0]");
     EXPECT_EQ(outputs[0]["line"].number, double(line_number(writers, "bogus")));
     EXPECT_EQ(outputs[1]["key"].string, "write_data[1].interval");
     EXPECT_EQ(outputs[1]["line"].number, double(line_number(writers, "interval = 0")));

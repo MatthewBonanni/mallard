@@ -523,7 +523,7 @@ An input still being written fails on what it does not have yet: a required key 
 | Member | Holds |
 |---|---|
 | `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file` (`null` without an input), `setup_done`, `dim` | The result |
-| `diagnostics` | `[{severity, code, message, docs, key, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
+| `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |

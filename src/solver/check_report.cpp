@@ -704,6 +704,11 @@ std::string check_text(const CheckReport & r, const bool color) {
     return text.str();
 }
 
+std::string CheckDiagnostic::element() const {
+    const size_t open = key.find('['), close = key.find(']');
+    return open == std::string::npos || close == std::string::npos ? "" : key.substr(0, close + 1);
+}
+
 std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
     const auto number_or_null = [](const size_t n) { return n > 0 ? std::to_string(n) : std::string("null"); };
     return array_json(diagnostics, [&](const CheckDiagnostic & d) {
@@ -713,6 +718,7 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
             .add("message", d.message)
             .add("docs", d.docs())
             .raw("key", d.key.empty() ? "null" : json::quote(d.key))
+            .raw("element", d.element().empty() ? "null" : json::quote(d.element()))
             .raw("line", number_or_null(d.line))
             .raw("column", number_or_null(d.column))
             .add("missing", d.missing)

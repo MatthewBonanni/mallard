@@ -67,6 +67,8 @@ struct CheckDiagnostic {
 
     /** @brief The page and anchor that explain the code: "docs/guide/input_files.md#w-cfl-limit". */
     std::string docs() const;
+    /** @brief The element of an array of tables the key is in ("boundaries[1]", "write_data[prefix = \"a\"]"), or empty. */
+    std::string element() const;
 };
 
 /** @brief A boundary zone with its condition. */
@@ -284,7 +286,10 @@ double predicted_peak(const CheckReport & report, double local_cells);
  */
 std::string check_text(const CheckReport & report, bool color);
 
-/** @brief Diagnostics as a JSON array, each with its severity, code, message, docs, key, line, column and missing. */
+/**
+ * @brief Diagnostics as a JSON array, each with its severity, code, message, docs, key, element, line, column and
+ *        missing: data for scripts and front ends, which need no stderr text.
+ */
 std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics);
 
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
