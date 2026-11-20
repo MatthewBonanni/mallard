@@ -1140,6 +1140,34 @@ class Builder {
                     0.0, 1.0, 0.0, 1.0};
         }
 
+        /**
+         * @brief Triangle t (local to n) clipped to the domain's bounding box widened by a cell, as a fan: what lies
+         *        outside the mesh is never kept, and a surface far larger than the domain (a CAD file read in the
+         *        wrong units) would otherwise split into more pieces than sampling allows. A triangle inside is t.
+         */
+        std::vector<std::array<Vec, 3>> in_domain(const Node & n, const std::array<Vec, 3> & t) const {
+            const Local world(n);
+            std::vector<Vec> polygon(t.begin(), t.end());
+            for (size_t k = 0; k < 3; k++) {
+                for (const bool upper : {false, true}) {
+                    const double bound = upper ? m_hi[k] + m_h : m_lo[k] - m_h;
+                    auto beyond = [&](const Vec & q) { return upper ? world.point(q)[k] - bound : bound - world.point(q)[k]; };
+                    std::vector<Vec> kept;
+                    for (size_t i = 0; i < polygon.size(); i++) {
+                        const Vec & a = polygon[i];
+                        const Vec & b = polygon[(i + 1) % polygon.size()];
+                        const double fa = beyond(a), fb = beyond(b);
+                        if (fa <= 0.0) kept.push_back(a);
+                        if ((fa < 0.0 && fb > 0.0) || (fa > 0.0 && fb < 0.0)) kept.push_back(lerp(a, b, fa / (fa - fb)));
+                    }
+                    polygon = std::move(kept);
+                }
+            }
+            std::vector<std::array<Vec, 3>> out;
+            for (size_t i = 1; i + 1 < polygon.size(); i++) out.push_back({polygon[0], polygon[i], polygon[i + 1]});
+            return out;
+        }
+
         /** @brief The flat region z = 0 inside a prism along z (disk, ring, ellipse, rectangle, polygon): surface patches. */
         std::vector<Patch> flat_patches(const Node & m) const {
             std::vector<Patch> out;
@@ -1333,7 +1361,7 @@ class Builder {
                 }
             } else if (n.kind == Kind::TRIANGLES) {
                 for (const auto & t : ::region::surface::triangles(m_views[0].vertices.data() + 2 * n.first)) {
-                    out.push_back(triangle(t));
+                    for (const auto & piece : in_domain(n, t)) out.push_back(triangle(piece));
                 }
             } else if (n.kind == Kind::TORUS) {
                 const double R = n.p[0], r = n.p[1];

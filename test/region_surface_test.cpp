@@ -310,7 +310,9 @@ TEST(RegionSurfaceTest, TheHierarchyFindsTheClosestTriangle) {
         }
         const double phi = stl.distance(x.data());
         EXPECT_NEAR(std::abs(phi), std::sqrt(least), 1e-15);
-        if (std::sqrt(least) > 1e-12) EXPECT_EQ(phi < 0.0, inside);
+        if (std::sqrt(least) > 1e-12) {
+            EXPECT_EQ(phi < 0.0, inside);
+        }
     }
 }
 
