@@ -5,8 +5,9 @@ smooth flow at 0.3 to 0.5 times the CPU time, with 0.4 to 0.6 times the
 memory, but it fails two robustness checks that order 5 passes. Each failure
 has its own issue, and the preset can move to order 4 once both are
 fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)). A third,
-undershoots ahead of shocks on quads about 10 times order 5's
-([#977](https://github.com/MatthewBonanni/mallard/issues/977)), is fixed:
+undershoots ahead of plane shocks on quads about 10 times order 5's
+([#977](https://github.com/MatthewBonanni/mallard/issues/977)), is fixed, but
+an undershoot where shocks start from a corner remains:
 [shocks](#shocks-undershoots).
 
 | Failure at order 4 | Issue |
@@ -221,7 +222,8 @@ cells, so it is not done.
 
 When [#975](https://github.com/MatthewBonanni/mallard/issues/975) and
 [#1232](https://github.com/MatthewBonanni/mallard/issues/1232) are fixed and
-this page's cases pass at order 4, `high_order` can move to order 4. The
+this page's cases pass at order 4, the [corner undershoot](#shocks-undershoots)
+included, `high_order` can move to order 4. The
 cylinder is the deciding check. Until then, order 4 is an explicit choice for
 smooth flow:
 `[numerics.face_reconstruction] order = 4` under `high_order`.

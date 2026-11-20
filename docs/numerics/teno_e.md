@@ -839,9 +839,10 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
     outgoing acoustic wave on a radially stretched O-grid (#975) and grows
     acoustic modes on graded hexahedra from 5% cell-to-cell grading, as
-    order 6 does (#1232). Its undershoots ahead of shocks, once about 10
-    times order 5's (#977), are down to order 5's on quads
-    ([troubled cells](#troubled-cells)). The odd-even wall
+    order 6 does (#1232). Its undershoots ahead of plane shocks, once about
+    10 times order 5's (#977), are down to order 5's on quads
+    ([troubled cells](#troubled-cells)); where shocks start from a corner it
+    still undershoots. The odd-even wall
     pressure it left at the closed trailing edge of the NACA 0012 tutorial
     mesh (#976) came from mirror images past the far side of the body, which
     the setup now rejects ([candidates](#candidates)).

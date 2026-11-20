@@ -177,6 +177,8 @@ Read off the curves (interpolated between the measured meshes):
   times its memory, at the same or lower error). It is not as robust, though:
   - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
     (Mach 1 in a Mach 0.2 flow);
+  - it undershoots where shocks start from a corner on quads (the density by a
+    third in the first steps of the 2D Riemann problem);
   - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
   Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
