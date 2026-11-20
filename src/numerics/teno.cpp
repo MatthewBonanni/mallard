@@ -1289,7 +1289,7 @@ void TENO::init(const Input & input) {
         if (sector_stencils) si_terms = teno_setup::smoothness_terms(degree);
     }
     init_face_quadrature_2d_curved();
-    if (N_DIM == 2 || !mesh->curved_geometry) {
+    if constexpr (N_DIM == 2) {
         offsets_nodes_of_face = mesh->offsets_nodes_of_face;
         nodes_of_face = mesh->nodes_of_face;
         node_coords = mesh->node_coords;
@@ -1341,15 +1341,9 @@ void TENO::init(const Input & input) {
         // Runs that write the cache use the tables as they will be read back
         if (single_tables || (cache_single && !cache_file.empty())) round_to_single();
     }
-    release_planar_face_points();
     allocate_scratch();
     largest_stencil = comm::allreduce(largest_stencil, comm::Op::MAX);
     find_block_stencils();
-}
-
-void TENO::release_planar_face_points() {
-    // The kernels place the points of planar faces from their nodes; only the setup reads them
-    if (N_DIM == 3 && !mesh->curved_geometry) face_quad_points = {};
 }
 
 void TENO::choose_rows() {
@@ -1576,9 +1570,8 @@ struct TENOFunctor {
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
-    Kokkos::View<rtype ***> face_quad_points;   // 3D: (face, q, dim), curved meshes
+    Kokkos::View<rtype ***> face_quad_points;   // 3D: (face, q, dim)
     Kokkos::View<rtype **> face_quad_weights;   // 3D: (face, q), zero on padding points
-    Kokkos::View<rtype *[4]> face_rule;         // 3D: planar faces' points (planar_face_point)
     BoundaryData boundaries;
 
     Kokkos::View<rtype *> scale;
@@ -1762,11 +1755,7 @@ struct TENOFunctor {
             teno::monomials(DEG, (p[0] - xc) / h, (p[1] - yc) / h, psi);
         } else {
             if (face_quad_weights(f, q) == 0.0_r) return false;
-            if (face_quad_points.extent(0) > 0) {
-                FOR_I_DIM x[i] = face_quad_points(f, q, i);
-            } else {
-                planar_face_point(offsets_nodes_of_face, nodes_of_face, node_coords, face_rule, f, q, x);
-            }
+            FOR_I_DIM x[i] = face_quad_points(f, q, i);
             periodic.backward(s, x, p);
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = (p[i] - cell_coords(i_cell, i)) / h;
@@ -2846,7 +2835,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
-                    quadrature_face.points, face_quad_points, face_quad_weights, face_rule, boundaries,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
@@ -2932,7 +2921,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
-                    quadrature_face.points, face_quad_points, face_quad_weights, face_rule, boundaries,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
@@ -2948,7 +2937,7 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
-                    quadrature_face.points, face_quad_points, face_quad_weights, face_rule, boundaries,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
@@ -2970,7 +2959,7 @@ void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
-                    quadrature_face.points, face_quad_points, face_quad_weights, face_rule, boundaries,
+                    quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, cell_shape, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
@@ -3419,7 +3408,6 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
     if constexpr (N_DIM == 3) init_face_quadrature_3d(degree + 1);
     expand_cell_rows(*this);
     compute_stencils_and_matrices(&sorted);
-    release_planar_face_points();
     if (single_tables || (cache_single && !cache_file.empty())) round_to_single();
     uint16_t largest = 0;
     auto sizes = stencil_large_size;

@@ -319,7 +319,7 @@ std::pair<double, double> shell_wall_errors(int n, const std::string & geometry,
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
     teno->calc_face_values(W, face_W);
     auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
-    const auto h_points = teno->host_face_points();
+    auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
     auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
     double err = 0.0, sum = 0.0, area = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {

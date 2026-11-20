@@ -20,7 +20,6 @@
 
 #include "input.h"
 
-#include "common_math.h"
 #include "common_typedef.h"
 #include "index_set.h"
 #include "mesh.h"
@@ -30,48 +29,6 @@
 #include "log.h"
 #include "report.h"
 #include "teno.h"
-
-/**
- * @brief Point (a, b) of a planar 3D face's quadrature rule from its nodes v:
- *        v0 + a (v1 - v0) + b (v2 - v0) on a triangle, the bilinear map at
- *        (s, t) = (a, b) on a quadrilateral. Every product is rounded on its
- *        own, so host and device place the points alike.
- */
-template <typename V>
-KOKKOS_INLINE_FUNCTION void planar_face_point(const bool triangle, const double a, const double b, const V & v,
-                                              double * p) {
-    if (triangle) {
-        for (uint8_t i = 0; i < 3; i++) {
-            p[i] = v[0][i] + rounded_product(a, v[1][i] - v[0][i]) + rounded_product(b, v[2][i] - v[0][i]);
-        }
-        return;
-    }
-    const double N[4] = {0.25 * (1 - a) * (1 - b), 0.25 * (1 + a) * (1 - b), 0.25 * (1 + a) * (1 + b),
-                         0.25 * (1 - a) * (1 + b)};
-    for (uint8_t i = 0; i < 3; i++) {
-        p[i] = 0.0;
-        for (uint8_t k = 0; k < 4; k++) p[i] += rounded_product(N[k], v[k][i]);
-    }
-}
-
-/**
- * @brief Point q of planar 3D face f (FaceReconstruction::face_rule), from the
- *        face's nodes as FaceReconstruction::init_face_quadrature_3d places it.
- */
-template <typename Offsets, typename Nodes, typename Coords, typename Rule>
-KOKKOS_INLINE_FUNCTION void planar_face_point(const Offsets & offsets_nodes_of_face, const Nodes & nodes_of_face,
-                                              const Coords & node_coords, const Rule & rule, const uint32_t f,
-                                              const uint32_t q, rtype * x) {
-    const uint32_t o = offsets_nodes_of_face(f);
-    const bool triangle = offsets_nodes_of_face(f + 1) - o == 3;
-    double v[4][3] = {};
-    for (uint32_t k = 0; k < (triangle ? 3u : 4u); k++) {
-        FOR_I_DIM v[k][i] = double(node_coords(nodes_of_face(o + k), i));
-    }
-    double p[3];
-    planar_face_point(triangle, double(rule(q, triangle ? 2 : 0)), double(rule(q, triangle ? 3 : 1)), v, p);
-    FOR_I_DIM x[i] = static_cast<rtype>(p[i]);
-}
 
 enum class FaceReconstructionType {
     FIRST_ORDER,
@@ -293,22 +250,12 @@ class FaceReconstruction {
          */
         void init_face_quadrature_2d_curved();
 
-        /**
-         * @brief 3D, and 2D curved meshes: the faces' quadrature points (face,
-         *        q, dim) on the host, the stored ones or, on planar faces whose
-         *        points were released, placed from the nodes as the kernels do.
-         */
-        Kokkos::View<rtype ***>::host_mirror_type host_face_points() const;
-
         Quadrature quadrature_face;
         // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
         // (twice the area over face_area on curved faces) and are zero on padding points
         Kokkos::View<rtype ***> face_quad_points;
         Kokkos::View<rtype **> face_quad_weights;
         Kokkos::View<rtype ***> face_quad_normals;  // curved meshes: (face, q, dim) unit normals out of cell 0
-        // 3D: reference coordinates of point q on planar faces, (s, t) on quadrilaterals and (a, b) on triangles,
-        // from which planar_face_point places it
-        Kokkos::View<rtype *[4]> face_rule;
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;
@@ -544,10 +491,9 @@ class TENO : public FaceReconstruction {
         std::vector<uint8_t> gather_depth;
         // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
         Kokkos::View<rtype *[3]> cell_rule;
-        // The faces' nodes, from which the kernels place the face points of
-        // straight (2D) and planar (3D, meshes without curved faces) faces, and
-        // (axisymmetric runs) the cells' nodes; the mesh's own views are
-        // released after setup
+        // 2D: the faces' nodes, from which the kernels place the face points of
+        // straight faces, and (axisymmetric runs) the cells' nodes; the mesh's
+        // own views are released after setup
         Kokkos::View<uint32_t *> offsets_nodes_of_face, nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
         Kokkos::View<rtype *[N_DIM]> node_coords;
         // Device memory of the packed stencils when they were streamed to the device (CUDA)
@@ -659,8 +605,6 @@ class TENO : public FaceReconstruction {
 
         void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
-        /** @brief 3D meshes without curved faces: frees the face points, which only the setup reads. */
-        void release_planar_face_points();
         void allocate_scratch();
         uint64_t options_key() const;
         uint64_t cache_key() const;
