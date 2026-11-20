@@ -868,6 +868,49 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
         << (first_error(r));
 }
 
+TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitErrors) {
+    // A box 0.4 m wide in the 2 x 1 domain (3D: 2 x 1 x 0.25): in 2D across z = 0, which its section is
+    const auto box_stl = [](const double scale) {
+        const double z0 = N_DIM == 3 ? 0.05 : -0.1, z1 = N_DIM == 3 ? 0.2 : 0.1;
+        const double lo[3] = {0.8 * scale, 0.3 * scale, z0 * scale}, hi[3] = {1.2 * scale, 0.7 * scale, z1 * scale};
+        const int faces[6][4] = {{0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5}};
+        std::ostringstream s;
+        s << "solid box\n";
+        for (const auto & f : faces) {
+            for (const int t : {0, 1}) {
+                s << "facet normal 0 0 0\nouter loop\n";
+                for (const int c : {f[0], f[1 + t], f[2 + t]}) {
+                    s << "vertex " << ((c & 1) ? hi[0] : lo[0]) << " " << ((c & 2) ? hi[1] : lo[1]) << " "
+                      << ((c & 4) ? hi[2] : lo[2]) << "\n";
+                }
+                s << "endloop\nendfacet\n";
+            }
+        }
+        return s.str() + "endsolid box\n";
+    };
+    const std::string m = write_temp_shared("check_box_m.stl", box_stl(1.0));
+    const std::string mm = write_temp_shared("check_box_mm.stl", box_stl(1000.0));
+    const auto run = [](const std::string & region) {
+        return check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                         "[[sponges]]\nstrength = 1.0\nregion = " + region + "\nu = " + U_ZERO + "\np = 1.0\nT = 1.0\n"));
+    };
+    const CheckReport placed = run("{type = \"stl\", file = \"" + m + "\", units = \"m\"}");
+    ASSERT_TRUE(placed.ok()) << first_error(placed);
+    EXPECT_FALSE(mentions(placed.warnings(), "region sponges[0].region"));
+    const CheckRegion & g = placed.regions.back();
+    ASSERT_TRUE(g.from_file);
+    EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
+    EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
+    EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    // Millimeters read as meters: 1000 times larger than it should be
+    const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
+    EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
+    EXPECT_FALSE(mentions(run("{type = \"stl\", file = \"" + mm + "\", units = \"mm\"}").warnings(), "region sponges[0].region"));
+    const CheckReport out = run("{type = \"stl\", file = \"" + m + "\", units = \"m\", translate = [1, 0, 0]}");
+    EXPECT_TRUE(mentions(out.warnings(), "region sponges[0].region spans (1.8, 0.3")) << first_error(out);
+    EXPECT_TRUE(mentions(out.warnings(), "its part outside the domain is left out"));
+}
+
 namespace {
 
 std::string read_file(const std::filesystem::path & path) {
