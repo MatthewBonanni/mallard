@@ -32,6 +32,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
 - Detailed transport, Soret diffusion, optically thin radiation
 - Source terms and sponges as expressions over named [regions](https://matthewbonanni.github.io/mallard/docs/guide/geometry/#regions); arrays of copies, regions that move with `t`, regions that wrap across periodic boundaries, and regions defined by the solution (where a condition such as `T > 1500` holds, or an isosurface)
+- Regions from CAD surfaces: the solids inside closed [STL and OBJ files](https://matthewbonanni.github.io/mallard/docs/guide/geometry/#regions-from-cad-surfaces), checked to be watertight, in the units they were drawn in
 
 **Large-eddy simulation** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/les/))
 - Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux

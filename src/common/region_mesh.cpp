@@ -23,6 +23,7 @@
 #include "comm.h"
 #include "region_cut.h"
 #include "mesh.h"
+#include "region_surface.h"
 #include "statistics.h"
 
 namespace region {
@@ -1129,6 +1130,16 @@ class Builder {
                     0.0, 1.0};
         }
 
+        /** @brief A triangle a, b, c as a quadrilateral collapsed at c, facing along (b - a) x (c - a). */
+        static Patch triangle(const std::array<Vec, 3> & t) {
+            return {[t](double u, double v, Vec & q, Vec & qu, Vec & qv) {
+                        q = add(t[0], add(mul(u, sub(t[1], t[0])), mul(u * v, sub(t[2], t[1]))));
+                        qu = add(sub(t[1], t[0]), mul(v, sub(t[2], t[1])));
+                        qv = mul(u, sub(t[2], t[1]));
+                    },
+                    0.0, 1.0, 0.0, 1.0};
+        }
+
         /** @brief The flat region z = 0 inside a prism along z (disk, ring, ellipse, rectangle, polygon): surface patches. */
         std::vector<Patch> flat_patches(const Node & m) const {
             std::vector<Patch> out;
@@ -1150,15 +1161,7 @@ class Builder {
                                },
                                -a, a, -b, b});
             } else {
-                for (const auto & t : triangles(m)) {
-                    out.push_back({[t](double u, double v, Vec & q, Vec & qu, Vec & qv) {
-                                       // The triangle as a quadrilateral collapsed at its third corner
-                                       q = add(t[0], add(mul(u, sub(t[1], t[0])), mul(u * v, sub(t[2], t[1]))));
-                                       qu = add(sub(t[1], t[0]), mul(v, sub(t[2], t[1])));
-                                       qv = mul(u, sub(t[2], t[1]));
-                                   },
-                                   0.0, 1.0, 0.0, 1.0});
-                }
+                for (const auto & t : triangles(m)) out.push_back(triangle(t));
             }
             return out;
         }
@@ -1239,6 +1242,10 @@ class Builder {
                 } else if (n.kind == Kind::ELLIPSOID || n.kind == Kind::BOX || n.kind == Kind::POLYGON ||
                            n.kind == Kind::CYLINDER) {
                     return outline(n);
+                } else if (n.kind == Kind::TRIANGLES) {
+                    for (const auto & [a, b] : ::region::surface::section(m_views[0].vertices.data() + 2 * n.first, 0.0)) {
+                        out.push_back(segment(a, b));
+                    }
                 } else {
                     return std::nullopt;
                 }
@@ -1323,6 +1330,10 @@ class Builder {
                                        },
                                        -hs[a], hs[a], -hs[b], hs[b]});
                     }
+                }
+            } else if (n.kind == Kind::TRIANGLES) {
+                for (const auto & t : ::region::surface::triangles(m_views[0].vertices.data() + 2 * n.first)) {
+                    out.push_back(triangle(t));
                 }
             } else if (n.kind == Kind::TORUS) {
                 const double R = n.p[0], r = n.p[1];
