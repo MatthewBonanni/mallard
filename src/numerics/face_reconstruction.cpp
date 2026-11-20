@@ -100,6 +100,7 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
         if (face_quad_points.is_allocated()) {
             h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
         }
+        const auto h_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
         std::vector<uint32_t> faces, cells;
         std::vector<std::array<rtype, N_DIM>> offsets;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -115,6 +116,8 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
                 std::array<rtype, N_DIM> x;
                 if (h_quad_points.extent(0) > 0) {
                     FOR_I_DIM x[i] = h_quad_points(f, q, i);
+                } else if constexpr (N_DIM == 3) {
+                    planar_face_point(host_planar_face(f), h_rule, q, x.data());
                 } else {
                     const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
                     const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
@@ -196,6 +199,10 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         for (uint32_t k = 0; k < n; k++) {
             FOR_I_DIM v[k][i] = double(mesh->h_node_coords(mesh->h_node_of_face(f, k), i));
         }
+        double nodes[4][3] = {};
+        for (uint32_t k = 0; k < std::min(n, 4u); k++) {
+            for (size_t i = 0; i < 3; i++) nodes[k][i] = v[k][i];
+        }
         pts.clear();
         w.clear();
         if (geometry && degree > 1 && geometry->face_is_curved(f)) {
@@ -233,9 +240,8 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             w.push_back(1.0);
         } else if (n == 3) {
             for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
-                const double a = double(tri.h_points(q, 0)), b = double(tri.h_points(q, 1));
                 std::array<double, 3> p;
-                for (size_t i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
+                planar_face_point(true, double(tri.h_points(q, 0)), double(tri.h_points(q, 1)), nodes, p.data());
                 pts.push_back(p);
                 w.push_back(double(tri.h_weights(q)));
             }
@@ -243,14 +249,12 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             for (int a = 0; a < n_gp; a++) {
                 for (int b = 0; b < n_gp; b++) {
                     const double s = double(gl.h_points(a, 0)), t = double(gl.h_points(b, 0));
-                    const double N[4] = {0.25 * (1 - s) * (1 - t), 0.25 * (1 + s) * (1 - t),
-                                         0.25 * (1 + s) * (1 + t), 0.25 * (1 - s) * (1 + t)};
                     const double dNs[4] = {-0.25 * (1 - t), 0.25 * (1 - t), 0.25 * (1 + t), -0.25 * (1 + t)};
                     const double dNt[4] = {-0.25 * (1 - s), -0.25 * (1 + s), 0.25 * (1 + s), 0.25 * (1 - s)};
-                    std::array<double, 3> p = {0, 0, 0}, xs = {0, 0, 0}, xt = {0, 0, 0};
+                    std::array<double, 3> p, xs = {0, 0, 0}, xt = {0, 0, 0};
+                    planar_face_point(false, s, t, nodes, p.data());
                     for (size_t k = 0; k < 4; k++) {
                         for (size_t i = 0; i < 3; i++) {
-                            p[i] += N[k] * v[k][i];
                             xs[i] += dNs[k] * v[k][i];
                             xt[i] += dNt[k] * v[k][i];
                         }
@@ -269,6 +273,18 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         n_max = std::max(n_max, pts.size());
         add_face(f);
     }
+    const uint32_t n_gp2 = static_cast<uint32_t>(n_gp * n_gp), n_tri = static_cast<uint32_t>(tri.h_weights.extent(0));
+    face_rule = Kokkos::View<rtype *[4]>("face_quad_rule", std::max(n_gp2, n_tri));
+    auto h_rule = Kokkos::create_mirror_view(face_rule);
+    // Padding points repeat the face's last point
+    for (uint32_t q = 0; q < h_rule.extent(0); q++) {
+        const uint32_t g = std::min(q, n_gp2 - 1), t = std::min(q, n_tri - 1);
+        h_rule(q, 0) = gl.h_points(g / uint32_t(n_gp), 0);
+        h_rule(q, 1) = gl.h_points(g % uint32_t(n_gp), 0);
+        h_rule(q, 2) = tri.h_points(t, 0);
+        h_rule(q, 3) = tri.h_points(t, 1);
+    }
+    Kokkos::deep_copy(face_rule, h_rule);
     const uint32_t n_state = mesh->n_state_faces();
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_state, n_max, N_DIM);
     face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_state, n_max);
@@ -326,6 +342,35 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         }
     }
     Kokkos::deep_copy(boundaries.image_quads, h_image_quad);
+}
+
+uint32_t FaceReconstruction::host_face_node(const uint32_t f, const uint32_t k) const {
+    return mesh->h_node_of_face(f, std::min(k, mesh->h_n_nodes_of_face(f) - 1));
+}
+
+PlanarFace FaceReconstruction::host_planar_face(const uint32_t f) const {
+    PlanarFace face;
+    face.triangle = mesh->h_n_nodes_of_face(f) == 3;
+    for (uint32_t k = 0; k < 4; k++) {
+        FOR_I_DIM face.v[k][i] = mesh->h_node_coords(host_face_node(f, k), i);
+    }
+    return face;
+}
+
+Kokkos::View<rtype ***>::host_mirror_type FaceReconstruction::host_face_points() const {
+    if (face_quad_points.is_allocated()) return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+    const auto h_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
+    Kokkos::View<rtype ***>::host_mirror_type points("face_quad_points_host", face_quad_weights.extent(0),
+                                                     face_quad_weights.extent(1), N_DIM);
+    for (uint32_t f = 0; f < points.extent(0); f++) {
+        const PlanarFace face = host_planar_face(f);
+        for (uint32_t q = 0; q < points.extent(1); q++) {
+            rtype x[3];
+            planar_face_point(face, h_rule, q, x);
+            FOR_I_DIM points(f, q, i) = x[i];
+        }
+    }
+    return points;
 }
 
 void FaceReconstruction::init_face_quadrature_2d_curved() {
