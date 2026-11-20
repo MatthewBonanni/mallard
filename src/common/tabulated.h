@@ -214,6 +214,7 @@ struct Csv {
     std::vector<std::string> names;
     std::vector<std::vector<double>> columns;
     std::string metadata;  // JSON, or empty
+    std::vector<std::string> not_finite;  // per column, its first value that is not a finite number, or empty
 
     /** @brief Index of the named column, or -1. */
     int32_t column(const std::string & name) const;

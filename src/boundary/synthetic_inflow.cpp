@@ -248,7 +248,7 @@ void InletProfile::read_profile(const Input & boundary, const std::string & wher
         } else if (r == c) {
             throw missing(column);
         } else {
-            stress.push_back(BoundaryValue(Input(0.0), key, dim::velocity_squared, variables));
+            stress.push_back(BoundaryValue(Input(std::string("0")), key, dim::velocity_squared, variables));
         }
     }
 }

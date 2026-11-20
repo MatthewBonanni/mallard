@@ -369,6 +369,14 @@ TEST(BoundaryProfilesTest, MisdescribedProfilesAreInputErrors) {
     EXPECT_NE(error_of(inlet(csv, "scale = {length = 0.1}\nreference = {length = 0.25}\n"))
                   .find("needs the unit of every column it rescales, and column d has none"),
               std::string::npos);
+    // A value that is not a finite number is an error in a column the entry reads, not in one it leaves out
+    const std::string gap = write_temp_shared("gap.csv", "d, T, junk\n0, 1, nan\n100, nan, 0\n250, 2, 0\n");
+    EXPECT_NE(error_of(inlet(gap, "units = {d = \"mm\"}\ncolumns = [\"T\"]\n"))
+                  .find(gap + ":3: column T is \"nan\", not a finite number"),
+              std::string::npos);
+    EXPECT_EQ(error_of(inlet(write_temp_shared("gap2.csv", "d, T, junk\n0, 1, nan\n250, 2, 0\n"),
+                             "units = {d = \"mm\"}\ncolumns = [\"T\"]\n")),
+              "no error");
     const std::string typo = write_temp_shared("typo.csv", "# mallard-profile {\"unit\": {\"d\": \"mm\"}}\n" +
                                                                profile_csv(0.25));
     EXPECT_NE(error_of(inlet(typo, "")).find("its mallard-profile comment has an unknown key \"unit\""),

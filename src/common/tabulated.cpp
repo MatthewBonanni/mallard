@@ -177,6 +177,7 @@ Csv read_csv(const std::string & file, const std::string & docs) {
                 }
             }
             csv.columns.resize(csv.names.size());
+            csv.not_finite.resize(csv.names.size());
             continue;
         }
         if (items.size() != csv.names.size()) {
@@ -188,6 +189,10 @@ Csv read_csv(const std::string & file, const std::string & docs) {
             const double v = std::strtod(items[i].c_str(), &end);
             if (items[i].empty() || end != items[i].c_str() + items[i].size()) {
                 throw error(file + ":" + std::to_string(line_number) + ": \"" + items[i] + "\" is not a number");
+            }
+            if (!std::isfinite(v) && csv.not_finite[i].empty()) {
+                csv.not_finite[i] = file + ":" + std::to_string(line_number) + ": column " + csv.names[i] + " is \"" +
+                                    items[i] + "\", not a finite number";
             }
             csv.columns[i].push_back(v);
         }
@@ -347,6 +352,17 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
     if (value_columns.empty()) {
         throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
                       "Add value columns to the file, or name fewer coordinates", docs);
+    }
+    for (const auto * read : {&coordinate_columns, &value_columns}) {
+        for (const int32_t i : *read) {
+            if (!csv.not_finite[size_t(i)].empty()) {
+                throw InputError(Diagnostic{.key = where + ".file",
+                                            .line = line_of(e, "file"),
+                                            .message = csv.not_finite[size_t(i)],
+                                            .fix = "Give a number there, or leave the column out with columns = [...]",
+                                            .docs = docs});
+            }
+        }
     }
     // Units of columns: the metadata's, then the entry's
     std::vector<std::string> unit(csv.names.size()), unit_key(csv.names.size());
