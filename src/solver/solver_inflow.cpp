@@ -39,9 +39,10 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
             if (h_face_char(f) >= 0) faces.push_back(f);
         }
         const Input & bound = input_boundaries[i_bc];
-        const std::string name = find_value<std::string>(bound, "name");
-        const std::string where = "boundaries[name = \"" + name + "\"]";
-        const InletProfile profile(bound, where);
+        const BoundaryEntry & entry = boundary_entries[i_bc];
+        const std::string & name = entry.name;
+        const std::string & where = entry.where_name;
+        const InletProfile & profile = *entry.inlet;
         std::vector<int32_t> chars;
         std::vector<FacePoint> x(faces.size());
         std::vector<Point> n_in(faces.size());
@@ -62,8 +63,8 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
             }
             profiled = true;
         }
-        if (InletProfile::turbulent(bound)) {
-            inflows.push_back(std::make_unique<SyntheticInflow>(bound, where, i_bc, *mesh, faces, x, chars));
+        if (entry.turbulence) {
+            inflows.push_back(std::make_unique<SyntheticInflow>(*entry.turbulence, profile, i_bc, *mesh, faces, x, chars));
             for (CheckBoundary & b : boundary_summary) {
                 if (b.zone == name) b.turbulence = inflows.back()->summary();
             }
@@ -76,16 +77,12 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
     if (!timed_inlets.empty()) timed_inlets.finish();
 }
 
-std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
-                                                   BoundaryCondition & bc, MassFlowProfile & timed) const {
-    if (bc.type != BoundaryType::INLET_MASS_FLOW) return {};
-    const std::string name = find_value<std::string>(bound, "name");
-    const std::string where = "boundaries[name = \"" + name + "\"]";
+MassFlowInput Solver::read_mass_flow(const Input & bound, const BoundaryCondition & bc, const std::string & where) {
+    MassFlowInput m;
     // An expression for mass_flux is BoundaryFields'
-    if (!contains_optional(bound, "mdot")) return {};
+    if (bc.type != BoundaryType::INLET_MASS_FLOW || !contains_optional(bound, "mdot")) return m;
+    m.given = true;
     // mdot: a number, or an expression of t, a total over the inlet
-    double mdot = 0.0;
-    std::shared_ptr<const kexpr::Program> mdot_program;
     if (BoundaryValue::is_expression(bound.at("mdot"))) {
         if (const auto * table = input_detail::table_of(bound)) {
             table->record_use("mdot", input_detail::real_use("number", dim::mass_flow, "", true));
@@ -98,20 +95,30 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
                                  "or the local flux in mass_flux.");
             }
         }
-        mdot = v.at(Point{}, 0.0);
-        if (v.depends_on_time()) mdot_program = v.compiled();
+        m.mdot = v.at(Point{}, 0.0);
+        if (v.depends_on_time()) m.mdot_of_t = v.compiled();
     } else {
-        mdot = find_double(bound, "mdot", dim::mass_flow);
+        m.mdot = find_double(bound, "mdot", dim::mass_flow);
     }
-    if (mdot_program ? !(mdot >= 0.0) : !(mdot > 0.0)) {
-        throw InputError(where + ".mdot must be " + (mdot_program ? "non-negative (at t = 0)" : "positive") + ".");
+    if (m.mdot_of_t ? !(m.mdot >= 0.0) : !(m.mdot > 0.0)) {
+        throw InputError(where + ".mdot must be " + (m.mdot_of_t ? "non-negative (at t = 0)" : "positive") + ".");
     }
-    std::unique_ptr<kexpr::Program> shape;
     if (bound.contains("profile")) {
-        shape = std::make_unique<kexpr::Program>(
+        m.shape = std::make_shared<const kexpr::Program>(
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
             BoundaryValue::variables(), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
     }
+    return m;
+}
+
+std::vector<double> Solver::mass_flow_inlet_fluxes(const BoundaryEntry & entry, const std::vector<uint32_t> & faces,
+                                                   BoundaryCondition & bc, MassFlowProfile & timed) const {
+    const MassFlowInput & m = entry.mass_flow;
+    if (!m.given) return {};
+    const std::string & where = entry.where_name;
+    const double mdot = m.mdot;
+    const std::shared_ptr<const kexpr::Program> & mdot_program = m.mdot_of_t;
+    const std::shared_ptr<const kexpr::Program> & shape = m.shape;
     const bool profile_of_t = shape && shape->uses(boundary_variable::T);
     // Either of t: the faces' fluxes are recomputed on the device at every stage
     const bool of_t = profile_of_t || mdot_program;
@@ -162,14 +169,13 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     const double scale = mdot / area;
     if (of_t) {
         // Every rank keeps every face of the inlet, so that each integrates the profile alike at every stage
-        const std::string profile =
-            shape ? quantity_or_expression(bound.at("profile"), where + ".profile", dim::none) : "1";
         std::ostringstream mdot_text;
         mdot_text << std::setprecision(17) << mdot;
         timed = MassFlowProfile{
             where,
-            std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(),
-                                                   BoundaryValue::hint, boundary_variable::FIRST_LOCAL),
+            shape ? shape
+                  : std::make_shared<const kexpr::Program>(where + ".profile", "1", BoundaryValue::variables(),
+                                                           BoundaryValue::hint, boundary_variable::FIRST_LOCAL),
             mdot_program ? mdot_program
                          : std::make_shared<const kexpr::Program>(where + ".mdot", mdot_text.str(),
                                                                   BoundaryValue::variables()),

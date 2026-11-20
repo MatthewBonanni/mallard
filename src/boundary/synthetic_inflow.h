@@ -93,16 +93,28 @@ class InletProfile {
  */
 class SyntheticInflow {
     public:
+        /** @brief The [boundaries.turbulence] table of an entry, read and checked without the mesh. */
+        struct Settings {
+            std::string where;  // the table's path, for messages
+            uint64_t seed = 1;
+            bool zero_net_flux = true;
+            double points_per_length = 6.0;
+            double L[N_DIM][N_DIM];               // integral length scales: (velocity component, direction)
+            double convection_velocity = 0.0;     // 0: the area-averaged mean inflow speed
+            bool timed_mean = false;              // the mean velocity depends on t
+        };
+        static Settings read(const Input & boundary, const std::string & where);
+
         /**
-         * @param boundary The [[boundaries]] entry (with its turbulence table).
-         * @param where Its name for messages.
+         * @param settings The entry's turbulence table (read).
+         * @param profile Its mean velocity and Reynolds stress.
          * @param stream Random stream of the inlet (its index among the boundaries).
          * @param mesh Mesh.
          * @param faces The inlet's faces on this rank.
          * @param points Their points for the inlet's expressions (centers and local coordinates).
          * @param char_index Index of each face into BoundaryData::char_*.
          */
-        SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
+        SyntheticInflow(const Settings & settings, const InletProfile & profile, uint64_t stream, const Mesh & mesh,
                         const std::vector<uint32_t> & faces, const std::vector<FacePoint> & points,
                         const std::vector<int32_t> & char_index);
 
