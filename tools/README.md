@@ -20,11 +20,11 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the mesh generators also need gmsh, the chemistry scripts cantera, HDF5 output h5py, and the 3D renders pyvista:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
+uv venv
+uv pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `uv pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -288,7 +288,7 @@ Mallard writes VTKHDF files that ParaView opens (`PREFIX.vtkhdf` holds the serie
 
 ### `mallard`: the Python package
 
-`tools/mallard` is the [Python package](../docs/guide/python.md) (`pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
+`tools/mallard` is the [Python package](../docs/guide/python.md) (`uv pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
 
 ```python
 import mallard
