@@ -303,11 +303,11 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(). */
+        /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(entry). */
         CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name,
                                const std::vector<std::string> & variables = {"x", "y", "z", "t"},
                                const size_t first_shadowable = SIZE_MAX) :
-            mixture(mixture_model), where(name), shadowable(first_shadowable) {
+            mixture(mixture_model), where(name), names(variables), shadowable(first_shadowable) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
@@ -333,9 +333,8 @@ class CompositionExpressions {
             auto c = std::make_shared<CompositionPrograms>();
             for (size_t i = 0; i < listed.size(); i++) {
                 c->species.push_back(static_cast<uint32_t>(listed[i]));
-                c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i],
-                                                                       BoundaryValue::variables(), BoundaryValue::hint,
-                                                                       shadowable));
+                c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i], names,
+                                                                       BoundaryValue::hint, shadowable));
             }
             c->balance = balance;
             c->mole = mole;
@@ -354,7 +353,7 @@ class CompositionExpressions {
             return Y;
         }
 
-        /** @brief Mass fractions at boundary faces, at t = 0 (expressions of BoundaryValue::variables()). */
+        /** @brief Mass fractions at boundary faces, at t = 0 (expressions of BoundaryValue::variables(entry)). */
         std::vector<std::vector<double>> mass_fractions(const std::vector<FacePoint> & points) const {
             std::vector<std::vector<double>> Y;
             Y.reserve(points.size());
@@ -387,6 +386,7 @@ class CompositionExpressions {
 
         const MixtureModel & mixture;
         std::string where;
+        std::vector<std::string> names;  // the variables of the expressions
         size_t shadowable;
         bool mole = false;
         int32_t balance = -1;
@@ -743,7 +743,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 std::vector<double> Y_uniform;
                 if (MixtureModel::composition_varies(bound)) {
                     composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where,
-                                                                           BoundaryValue::variables(),
+                                                                           BoundaryValue::variables(bound),
                                                                            boundary_variable::FIRST_LOCAL);
                     const auto programs = composition->compiled();
                     if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
