@@ -44,17 +44,23 @@ mpicc=$(command -v mpicc || ls /usr/lib64/mpich/bin/mpicc 2> /dev/null) ||
     { echo "archive.sh: no MPICH (mpicc); the container must provide MPICH's development files" >&2; exit 1; }
 export PATH="$(dirname "$mpicc"):$PATH"
 mpicc -show | grep -q mpich || { echo "archive.sh: $mpicc is not MPICH's" >&2; exit 1; }
+# MPI's C library and headers alone: no libmpicxx, and none of the distribution's flags that its compiler
+# wrappers add (RHEL's add _GLIBCXX_ASSERTIONS and hardening options)
+mpi_lib=$(dirname "$(dirname "$mpicc")")/lib
+mpi_inc=$(mpicc -show | tr ' ' '\n' | sed -n 's/^-I//p' | head -n 1)
+mpi=(-DMPI_SKIP_COMPILER_WRAPPER=ON -DMPI_C_HEADER_DIR="$mpi_inc" -DMPI_CXX_HEADER_DIR="$mpi_inc"
+    -DMPI_C_LIB_NAMES=mpi -DMPI_CXX_LIB_NAMES=mpi -DMPI_mpi_LIBRARY="$mpi_lib/libmpi.so" -DMPI_CXX_SKIP_MPICXX=ON)
 
 # Parallel HDF5 from the submodule, installed on its own first: CGNS (built from source) finds it there
 hdf5="$out/hdf5"
 cmake -S "$src/src/external/hdf5" -B "$out/build-hdf5" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$hdf5" \
-    -DHDF5_ENABLE_PARALLEL=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF \
+    "${mpi[@]}" -DHDF5_ENABLE_PARALLEL=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF \
     -DHDF5_BUILD_TOOLS=OFF -DHDF5_BUILD_EXAMPLES=OFF -DHDF5_BUILD_CPP_LIB=OFF -DHDF5_BUILD_FORTRAN=OFF \
     -DHDF5_BUILD_JAVA=OFF -DHDF5_BUILD_UTILS=OFF
 cmake --build "$out/build-hdf5" --parallel "${JOBS:-$(nproc)}"
 cmake --install "$out/build-hdf5"
 # What ldd resolves while collecting lib/: the libraries the build linked from outside system paths
-export LD_LIBRARY_PATH="$hdf5/lib:$hdf5/lib64:$(dirname "$(dirname "$mpicc")")/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$hdf5/lib:$hdf5/lib64:$mpi_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 for dim in 2 3; do
     cmake -S "$src" -B "$out/build-$dim" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$stage" \
@@ -62,7 +68,7 @@ for dim in 2 3; do
         -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DHDF5_ROOT="$hdf5" \
         -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF -DMallard_ENABLE_ZLIB=ON \
         -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=OFF \
-        -DMPI_CXX_SKIP_MPICXX=ON -DMallard_DIM="$dim" "${backend[@]}" "$@"
+        "${mpi[@]}" -DMallard_DIM="$dim" "${backend[@]}" "$@"
     cmake --build "$out/build-$dim" --parallel "${JOBS:-$(nproc)}"
     cmake --install "$out/build-$dim"
 done
