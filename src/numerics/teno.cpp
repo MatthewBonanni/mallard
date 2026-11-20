@@ -1534,38 +1534,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     if (subset == nullptr) n_sector_unavailable = n_invalid_small;
 }
 
-#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
-[[maybe_unused]] constexpr bool HOST_FMA = true;
-#else
-[[maybe_unused]] constexpr bool HOST_FMA = false;
-#endif
-
-/**
- * @brief a b + c, fused where the hardware fuses (std::fma would be a library
- *        call on CPUs without FMA). teno.cpp is compiled without contraction,
- *        so these are its only FMAs and its results do not depend on how the
- *        compiler schedules a kernel.
- */
-KOKKOS_INLINE_FUNCTION
-rtype fmadd(const rtype a, const rtype b, const rtype c) {
-    KOKKOS_IF_ON_DEVICE((return Kokkos::fma(a, b, c);))
-    KOKKOS_IF_ON_HOST((
-        if constexpr (HOST_FMA) {
-            return std::fma(a, b, c);
-        } else {
-            return a * b + c;
-        }))
-}
-
-/** @brief a . a, with fmadd. */
-template <uint8_t N>
-KOKKOS_INLINE_FUNCTION
-rtype norm2(const rtype * a) {
-    rtype q = a[0] * a[0];
-    for (uint8_t i = 1; i < N; i++) q = fmadd(a[i], a[i], q);
-    return q;
-}
-
 /**
  * @brief Per-cell TENO-E reconstruction of degree DEG to the quadrature points
  *        of all of the cell's faces. SmoothPass finishes the cells below the
@@ -1730,7 +1698,7 @@ struct TENOFunctor {
     void conservatives_of(const rtype * W_e, rtype * U) const {
         U[0] = W_e[0];
         FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], norm2<N_DIM>(W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
+        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], fma_dot<N_DIM>(W_e + 1, W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1751,7 +1719,7 @@ struct TENOFunctor {
         } else {
             Wq[0] = U[0];
             FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], norm2<N_DIM>(Wq + 1), U[N_DIM + 1]);
+            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], fma_dot<N_DIM>(Wq + 1, Wq + 1), U[N_DIM + 1]);
         }
     }
 
