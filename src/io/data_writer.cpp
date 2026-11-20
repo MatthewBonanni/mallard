@@ -420,6 +420,12 @@ std::string DataWriter::index_file() const {
 
 bool DataWriter::due(uint64_t step, rtype t) const { return output_clock().due(step, t); }
 
+bool DataWriter::reads(const Data & data) const {
+    return std::any_of(fields.begin(), fields.end(), [&](const Field & field) {
+        return std::find(field.components.begin(), field.components.end(), &data) != field.components.end();
+    });
+}
+
 rtype DataWriter::due_time() const { return output_clock().due_time(); }
 
 void DataWriter::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {

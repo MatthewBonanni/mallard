@@ -280,8 +280,9 @@ runs:
   table again to share them (#1079).
 - **Memory.** `post derive` sets TENO up with its central stencils alone, the
   only tables the gradient reads, so its memory is mostly the mesh's (face
-  quadrature and vertex gradient weights): less than ParaView's in 2D, about
-  twice it in 3D.
+  quadrature): less than ParaView's in 2D, about twice it in 3D. The peak is
+  the TENO setup's; after it, the solver holds only what the requested outputs
+  read (below).
 
 Agreement, as relative L2 norms of the difference over the norm of
 `post derive`'s field:
@@ -301,3 +302,33 @@ the smooth Taylor-Green vortex they agree to 1-2% away from the box's faces
 (2 cells), which ParaView does not know are periodic (14% for `Q_CRITERION`
 over the whole box); behind the shocks of the double Mach reflection the
 gradient of a discontinuity depends on the method, and they differ at order one.
+
+### Buffers only for their readers
+
+The vertex gradient's weights (`make_vertex_gradient`) take about as much
+memory as the gradients they fill. `Solver::init_vertex_gradient` builds them
+once every writer, probe and model is set up, and only if one of them reads
+them: the right-hand side's viscous fluxes and upwind sensor in runs that step,
+the velocity gradients of schemes without cell gradients (TENO's come from its
+polynomials), mixture transport, LES, probes of gradients, mass-fraction
+gradients (`FLAME_INDEX`, `SCALAR_DISSIPATION`) and viscous forces. A read
+without them throws, so a reader added without a line there fails loudly.
+Likewise gas mixtures stage `Y_*` and `X_*` on the host, and compute the mole
+fractions at each snapshot, only when a writer or snapshot writes them
+(`Solver::init_mixture_fractions`; the divergence report stages `Y_*` itself).
+
+Measured on a CPU-only Linux container (AMD EPYC 7763, GCC 15.2, Kokkos
+Threads, 2 threads), resident memory from `/proc`, outputs identical bit for bit
+(`mallard diff`) before and after:
+
+| Case | Command | Before | After |
+|---|---|---|---|
+| 3D Taylor-Green vortex, 64³, TENO5, Navier-Stokes | `post derive --fields MACH,Q_CRITERION,LAMBDA2,SCHLIEREN,VORTICITY`, 2 restart files | 776 MB after setup, 953 MB peak | 648 MB after setup, 953 MB peak |
+| 2D H2/air, 512², TENO5, Euler mixture, 10 restart files | `post derive --fields MIXTURE_FRACTION,MACH` | 430 MB peak | 359 MB peak |
+|  | `post extract --snapshot vtu --fields Y_H2,T` | 371 MB peak | 352 MB peak |
+|  | `post extract --snapshot vtu --fields X_H2` | 370 MB peak | 352 MB peak |
+|  | `post average --conditional '{on = "MIXTURE_FRACTION", fields = ["T", "U_X", "Y_H2"]}'` | 424 MB peak | 351 MB peak |
+
+Without the weights' fit, the 3D `post derive` of one file takes 52.8 s instead
+of 56.1 s (best of 3); the 2D commands' 14 s, mostly the TENO setup, are
+unchanged within noise.
