@@ -80,8 +80,14 @@ void check_columns(const std::vector<std::vector<double>> & coordinates,
             if (!std::isfinite(v)) throw InputError(where + " has a coordinate that is not a finite number.");
         }
     }
-    for (const auto & f : fields) {
-        if (f.size() != n) throw InputError(where + ": the columns differ in length.");
+    for (size_t k = 0; k < fields.size(); k++) {
+        if (fields[k].size() != n) throw InputError(where + ": the columns differ in length.");
+        for (size_t r = 0; r < n; r++) {
+            if (!std::isfinite(fields[k][r])) {
+                throw InputError(where + ": row " + std::to_string(r + 1) + " of value column " + std::to_string(k + 1) +
+                                 " is not a finite number.");
+            }
+        }
     }
 }
 
@@ -154,7 +160,10 @@ int32_t Csv::column(const std::string & name) const {
     return it == names.end() ? -1 : static_cast<int32_t>(it - names.begin());
 }
 
-Csv read_csv(const std::string & file, const std::string & docs) {
+namespace {
+
+// The columns of a file; values that are not finite are recorded for the caller to judge
+Csv read_columns(const std::string & file, const std::string & docs) {
     const auto error = [&](const std::string & what) { return InputError(Diagnostic{.message = what, .docs = docs}); };
     std::ifstream in(file);
     if (!in) throw cannot_read("data file", file);
@@ -198,6 +207,16 @@ Csv read_csv(const std::string & file, const std::string & docs) {
         }
     }
     if (csv.names.empty() || csv.columns[0].empty()) throw error("Data file " + file + " has no rows");
+    return csv;
+}
+
+} // namespace
+
+Csv read_csv(const std::string & file, const std::string & docs) {
+    Csv csv = read_columns(file, docs);
+    for (const std::string & first : csv.not_finite) {
+        if (!first.empty()) throw InputError(Diagnostic{.message = first, .docs = docs});
+    }
     return csv;
 }
 
@@ -310,7 +329,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
     record_options(where + ".type", {"table", "points"});
     if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
     const bool points = type == "points";
-    const Csv csv = read_csv(file, docs);
+    const Csv csv = read_columns(file, docs);
     const Metadata metadata = parse_metadata(csv.metadata, file, docs);
     if (!e.contains("coordinates")) entry.at = metadata.at;  // where the metadata's coordinates are read
     entry.coordinates = entry_coordinates(e, csv.names, points, metadata.coordinates);
