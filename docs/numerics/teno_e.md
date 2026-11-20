@@ -762,6 +762,63 @@ lattice (it appears below `cfl` of about 0.8 on `cartesian_tri` and between
 `TENOLattice` (2D) and `TENO3DKuhnLattice` record the semi-discrete rates
 above and fail when they change.
 
+**Graded hexahedra** (#1232). Orders 4 and 6 grow on hexahedra graded along
+one axis from 5% cell-to-cell growth, the default order 5 and order 3 do not.
+On a periodic box of 24 cells along x with `stretching = [β, 0, 0]` and cells
+of the mean spacing across, the fastest mode is a sound wave along the grading,
+uniform across, of 4 to 6 cells per wavelength. Largest real part of the
+eigenvalues of the linearized operator (acoustics at rest, HLLC; sound speeds
+over the mean cell size), the column as the block of a Bloch analysis:
+
+| β (largest cell-to-cell ratio) | 0.6 (1.05) | 0.9 (1.11) | 1.5 (1.25) |
+|---|---|---|---|
+| order 3, order 5 | < 1e-9 | < 1e-9 | < 1e-9 |
+| order 4 | 7.5e-7 | 5.7e-2 | 5.1e-2 |
+| order 6 | 5.7e-2 | 4.7e-2 | 5.1e-5 |
+
+The cause is the ranking by physical distance. On the uniform box every cell
+takes the same 56 entries, symmetric along x (5, 13, 20, 13 and 5 cells at
+x offsets −2 to 2). Grading splits each equidistant shell of the lattice by
+the side and the direction of its members: at β = 1.5 neighbors take 39 to 79
+entries, mostly three layers along x plus single cells two or three layers
+away on the finer side only, and the size jumps between neighbors (39, 43, 63
+entries in a row). An odd degree's own dissipation does not cover the
+mismatch between the face values of such neighbors. Ranking experiments (a
+scratch build, both orders, β = 0.6 / 0.9 / 1.5):
+
+| Ranking | Order 4 | Order 6 |
+|---|---|---|
+| physical distance | 7.5e-7 / 5.7e-2 / 5.1e-2 | 5.7e-2 / 4.7e-2 / 5.1e-5 |
+| no cut within 1% of the cut distance | < 1e-9 / 3.9e-2 / 8.1e-3 | 5.7e-2 / 4.1e-2 / 4.1e-5 |
+| offsets scaled per axis by $2s_i/(s_i + s_j)$ | < 1e-9 / 4.1e-2 / 3.3e-3 | 3.2e-2 / 4.2e-2 / 1.1e-6 |
+| both | < 1e-9 / < 1e-9 / 1.4e-9 | < 1e-9 / < 1e-9 / 3.8e-7 |
+| both, with $s$ the cube root of the volume | < 1e-9 / 4.0e-2 / 4.6e-2 | 5.9e-3 / 4.1e-2 / 1.1e-2 |
+
+with $s_i$ and $s_j$ the widths of the target cell and of the candidate
+along each axis, a distance in which a geometric grading leaves every shell
+whole. Neither part removes the growth alone, and a scalar size does not:
+the ranking has to undo the grading direction by direction and close the
+shells it nearly restores. None of it is adopted:
+
+- Widths per axis exist only for hexahedra aligned with the axes. The
+    tensor spacing of the vertex neighbors (the [ranking metric's](#candidates)
+    second moment) differs between the cells of the Kuhn and pyramid tilings,
+    so it changes their stencils: the Kuhn rate of #1136 rises from 1.20e-5 to
+    1.48e-5, and pyramids at order 4 grow again. A spacing summed over the
+    centroids around each node of the cell keeps every regular tiling's
+    stencils, but it needs a 2% closure, still grows at β = 1.8 (2.1e-2 at
+    order 4, 1.0e-3 at order 6), and fails to set up order 6 on walled
+    $8^3$ and $16^3$ boxes.
+- Accuracy is not kept everywhere. Order 4's face-value error on walled
+    graded boxes changes by −3% to +7%; applied to every degree it raises
+    order 5's by 35% to 100% at `stretching = [1, 1, 1]`.
+- Each key needs the spacing of every candidate, which a partition's
+    outermost halo layer lacks.
+
+`TENO3DGradedLattice` records the rates of order 4 at β = 0.9 and 1.5 and of
+order 6 at β = 0.6 and 0.9, and keeps orders 3 and 5 below 1e-7 at β = 1.5;
+a fix gives orders 4 and 6 that bound.
+
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
 small centroid offsets. That fit has full rank and Lebesgue constants within
@@ -814,7 +871,8 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     outgoing acoustic wave on a radially stretched O-grid (#975),
     undershoots ahead of shocks on quads about 10 times more than order 5
     (#977), and grows acoustic modes on graded hexahedra from 5%
-    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    cell-to-cell grading, as order 6 does
+    ([graded hexahedra](#3d-stability), #1232). The odd-even wall
     pressure it left at the closed trailing edge of the NACA 0012 tutorial
     mesh (#976) came from mirror images past the far side of the body, which
     the setup now rejects ([candidates](#candidates)).
