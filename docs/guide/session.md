@@ -35,7 +35,7 @@ The session never writes the input file: `case.update` takes the text of the edi
 
 While a request runs, the session sends `$/progress` notifications naming the request and the setup phase it starts. Warnings raised outside a result's diagnostics come as a `$/log` notification with a `diagnostics` list.
 
-To stop a request, send the notification `{"jsonrpc": "2.0", "method": "$/cancel", "params": {"id": 3}}`. A request not yet started is answered with the cancelled error; a running one stops at the start of its next setup phase.
+To stop a request, send the notification `{"jsonrpc": "2.0", "method": "$/cancel", "params": {"id": 3}}`. A request not yet started is answered with the canceled error; a running one stops at the start of its next setup phase.
 
 ## Errors
 
@@ -48,7 +48,7 @@ A problem of the case is not an error of the request: `case.check` succeeds and 
 | -32601 | No such method |
 | -32602 | Wrong params: a name the method does not take, or a value of the wrong type |
 | -32603 | An internal error of Mallard (please report it) |
-| -32800 | Cancelled |
+| -32800 | Canceled |
 | -32001 | No case is open: send `case.open` first |
 | -32003 | A file cannot be read; `data.path` names it |
 

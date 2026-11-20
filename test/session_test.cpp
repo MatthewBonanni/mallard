@@ -302,7 +302,7 @@ TEST(SessionTest, AnswersEveryMessageOfItsProtocol) {
     EXPECT_EQ(code_of(4), session::code::UNREADABLE);
     EXPECT_EQ(code_of(5), session::code::INVALID_PARAMS);
     EXPECT_TRUE(response(list, 7).has("result"));
-    EXPECT_EQ(code_of(8), session::code::CANCELLED);
+    EXPECT_EQ(code_of(8), session::code::CANCELED);
     // A notification is never answered
     size_t answers = 0;
     for (const json::Value & m : list) answers += !m.has("method");

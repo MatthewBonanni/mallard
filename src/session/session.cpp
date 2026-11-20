@@ -221,12 +221,12 @@ class Reader {
             Pending p = std::move(s.queue.front());
             s.queue.pop_front();
             s.running = p.id;
-            s.cancel_running = !p.id.empty() && s.cancelled.erase(p.id) > 0;
+            s.cancel_running = !p.id.empty() && s.canceled.erase(p.id) > 0;
             return p;
         }
 
-        /** @brief Whether the request running was cancelled. */
-        bool cancelled_now() {
+        /** @brief Whether the request running was canceled. */
+        bool canceled_now() {
             std::lock_guard lock(state->mutex);
             return state->cancel_running;
         }
@@ -236,7 +236,7 @@ class Reader {
             std::mutex mutex;
             std::condition_variable ready;
             std::deque<Pending> queue;
-            std::set<std::string> cancelled;
+            std::set<std::string> canceled;
             std::string running;
             bool cancel_running = false;
             bool done = false;
@@ -254,7 +254,7 @@ class Reader {
                         if (text == running) {
                             cancel_running = true;
                         } else {
-                            cancelled.insert(text);
+                            canceled.insert(text);
                         }
                         continue;
                     }
@@ -312,8 +312,8 @@ int serve(std::istream & in, std::ostream & out, Context & context) {
             if (!notification_only) send(out, error_message(p->id, code::NO_METHOD, "no method " + p->method));
             continue;
         }
-        if (reader.cancelled_now()) {
-            send(out, error_message(p->id, code::CANCELLED, "cancelled"));
+        if (reader.canceled_now()) {
+            send(out, error_message(p->id, code::CANCELED, "canceled"));
             continue;
         }
         std::string result, failure;
@@ -324,16 +324,16 @@ int serve(std::istream & in, std::ostream & out, Context & context) {
             if (m->needs_case && !context.is_open()) throw Error(code::NO_CASE, "no case is open: send case.open first");
             const std::string id = p->id;
             logging::PhaseObserver phases([&](std::string_view phase) {
-                if (reader.cancelled_now()) throw Cancelled{};
+                if (reader.canceled_now()) throw Canceled{};
                 if (!id.empty()) {
                     send(out, notification("$/progress",
                                            json::Object().raw("id", id).add("phase", std::string(phase)).str()));
                 }
             });
             result = m->handler(context, p->params);
-        } catch (const Cancelled &) {
-            failure_code = code::CANCELLED;
-            failure = "cancelled";
+        } catch (const Canceled &) {
+            failure_code = code::CANCELED;
+            failure = "canceled";
         } catch (const Error & e) {
             failure_code = e.code;
             failure = e.what();

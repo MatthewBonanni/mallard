@@ -45,7 +45,7 @@ inline constexpr int INVALID_REQUEST = -32600;
 inline constexpr int NO_METHOD = -32601;
 inline constexpr int INVALID_PARAMS = -32602;
 inline constexpr int INTERNAL = -32603;
-inline constexpr int CANCELLED = -32800;
+inline constexpr int CANCELED = -32800;
 inline constexpr int NO_CASE = -32001;
 inline constexpr int UNREADABLE = -32003;
 } // namespace code
@@ -59,10 +59,10 @@ struct Error : std::runtime_error {
 };
 
 /**
- * @brief Thrown at the start of a setup phase once the running request is cancelled. Not a std::exception, so the
+ * @brief Thrown at the start of a setup phase once the running request is canceled. Not a std::exception, so the
  *        setup's handlers of errors, which turn them into diagnostics, let it through.
  */
-struct Cancelled {};
+struct Canceled {};
 
 /** @brief The case a session holds, and what its setups keep between requests. */
 class Context {
