@@ -1757,7 +1757,7 @@ void Solver::init_run_parameters() {
         }
     }
     n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
-    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
+    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true) && !cuda_graphs_off;
     t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
     t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
     keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
