@@ -982,7 +982,48 @@ state). Results change in the last bits once: after 20 steps of `teno5_3d` the c
 pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
 (`teno5_3d`, 20 steps).
 
-### 18. TENO setup: one fit per stencil shape (#986)
+### 18. Mesh build memory (#964)
+
+Peak heap in use (glibc `mallinfo2`, bytes per local cell, the highest rank) while building 1M-cell meshes, and
+build times of rank 0 (s, best and worst of two runs), on `main` and with the change; Linux x86_64, GCC, Release,
+double, 2 threads, MPI on 1 or 3 ranks (`DistributedMesh`, as `mallard` builds a mesh for a run). Generated
+meshes, and a Gmsh file of the same box; "built" is the finished mesh.
+
+| peak / built, B per cell; time, s | serial | | distributed, 1 rank | | distributed, 3 ranks | |
+|---|---|---|---|---|---|---|
+| hexahedra $100^3$ | 513 / 504 → 407 / 398 | 3.74-3.86 → 3.38-3.46 | 532 → 426 | 5.45-5.60 → 4.88-4.92 | 604 → 465 | 2.21-2.38 → 1.89-2.08 |
+| periodic hexahedra | 546 / 537 → 413 / 404 | 4.84-4.96 → 4.35-4.37 | 561 → 428 | 7.47-7.58 → 6.27-6.29 | 571 → 446 | 2.94-3.03 → 2.52-2.59 |
+| Kuhn tetrahedra $56^3 \times 6$ | 537 / 531 → 262 / 256 | 3.10-3.13 → 1.94-2.18 | 550 → 331 | 3.92-4.19 → 2.87-2.89 | 547 → 276 | 1.62-1.86 → 1.25-1.37 |
+| Gmsh hexahedra $100^3$ | 521 / 508 → 415 / 402 | 3.76-4.26 → 3.31-3.35 | 536 → 430 | 5.86-6.00 → 4.95-4.99 | 560 → 435 | 2.48-2.56 → 2.09-2.19 |
+| quadrilaterals $1000^2$ | 255 / 254 → 219 / 218 | 1.33-1.35 → 1.14-1.16 | 276 → 252 | 2.08 → 1.78 | 324 → 294 | 0.86-0.94 → 0.78-0.84 |
+| periodic quadrilaterals | 270 / 269 → 226 / 225 | 1.98-2.12 → 1.83-1.85 | 290 → 246 | 3.41-3.44 → 2.69-2.72 | 323 → 295 | 1.23-1.27 → 1.02-1.06 |
+| triangles $700^2 \times 2$ | 222 / 222 → 170 / 170 | 0.93-0.94 → 0.70 | 239 → 223 | 1.57 → 1.28 | 253 → 228 | 0.65-0.71 → 0.58-0.64 |
+| Gmsh quadrilaterals $1000^2$ | 263 / 258 → 227 / 222 | 1.59-1.64 → 1.41-1.44 | 281 → 281 | 2.38-2.57 → 2.01-2.13 | 303 → 283 | 1.14-1.15 → 0.85-0.90 |
+
+- **Vertex neighbors on first use.** `cells_of_cell` and its offsets and shift rows (106 B per hexahedron, 275 B
+  per Kuhn tetrahedron, 36 B per quadrilateral) are built by `Mesh::vertex_neighbors()` when first read, not
+  with the mesh, and freed with the setup's data: only the kernels that read them in the step keep them (the
+  vertex gradient of viscous fluxes, the hybrid sensor and MUSCL, the LES filters through it, moving regions).
+  Building them takes 0.49 s per million hexahedra and 1.1 s per million tetrahedra, as before, at the first
+  reader. Their periodic shift rows are still numbered with the mesh, so the `shifts` table and the checks of
+  periodic directions are unchanged.
+- **Face matching and node directory in rounds.** `DistributedMesh` sends the faces in four rounds of a hash
+  bucket, and the node directory's records in four rounds of node ranges: on 3 ranks of hexahedra the
+  construction peaked at 604 B per cell and now at 320, the distribution at 540 and now at 465. The records of a round are
+  sorted as records, stably: `std::sort` of an index took twice as long on some meshes' rounds.
+
+Distributed builds now peak in the distribution (465 B per hexahedron on 3 ranks against 419 built, 331 per
+tetrahedron on 1 rank against 266): the cells sent to their owners next to the block. A whole run (Kokkos host
+allocations, CPU, 10 steps) holds less after setup when no step kernel reads the vertex neighbors: 134 B per cell
+less on the $64^3$ Taylor-Green vortex with TENO5 (6,660 → 6,526 B per cell; 5,440 → 5,309 on 3 ranks), 44 B on
+$512^2$ quadrilaterals (2,476 → 2,432). With GPUs that is device memory, and the host copies of the lists go too.
+The runs' peaks are set later, in the numerics setup, and do not change; nor do viscous runs, which keep the lists.
+Setup and step times are within the run-to-run spread (Taylor-Green, 10 steps: 17.86 → 17.73 s). Meshes are
+bitwise those of `main` on every rank (a hash of every array), and `mallard diff` finds the states of 10-step runs
+(inviscid and viscous, 2D and 3D, hexahedra and tetrahedra, dynamic Smagorinsky LES) the same bit for bit on 1 and
+3 ranks.
+
+### 19. TENO setup: one fit per stencil shape (#986)
 
 With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
 cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
