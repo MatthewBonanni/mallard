@@ -12,8 +12,9 @@
  * Where a conditional node cannot hold NCCL operations, a step graph's launches run the parts of the step that
  * conditional nodes would hold (Solver::device_if) also when not due or after the device stopped for the host,
  * and each of their kernels exits at once. A
- * reduction that does nothing leaves its destination as it was: its final step copies the destination's value
- * into the result Kokkos then writes there.
+ * reduction that does nothing leaves its destination as it was: its init and join do nothing too, since some
+ * backends (Serial) reduce in the destination itself, and its final step copies the destination's value into the
+ * result Kokkos then writes there.
  *
  */
 
@@ -143,7 +144,7 @@ struct For {
     }
 };
 
-/** @brief A reduction's functor (a lambda); old: its destination, or null. */
+/** @brief A reduction's functor (a lambda, of a scalar value); old: its destination, or null. */
 template <class F>
 struct Reduce {
     F f;
@@ -157,15 +158,22 @@ struct Reduce {
         f(static_cast<A &&>(a)...);
     }
     template <class V>
+    KOKKOS_FUNCTION void init(V && v) const {
+        if (on && !*on) return;
+        v = {};
+    }
+    template <class D, class S>
+    KOKKOS_FUNCTION void join(D && dst, S && src) const {
+        if (on && !*on) return;
+        dst += src;
+    }
+    template <class V>
     KOKKOS_FUNCTION void final(V && v) const {
         if (on && !*on && old) restore(static_cast<V &&>(v), old, count);
     }
 };
 
-/**
- * @brief A reduction's functor that defines its value type (and its init, join and final) itself. While gated it
- *        skips init and join too, which cost as much as the work for values of many entries.
- */
+/** @brief A reduction's functor that defines its value type (and its init, join and final) itself. */
 template <DefinesValueType F>
 struct Reduce<F> : F {
     const uint32_t * on;
@@ -221,8 +229,14 @@ struct Reducer {
     R r;
     const uint32_t * on;
 
-    KOKKOS_FUNCTION void join(value_type & dst, const value_type & src) const { r.join(dst, src); }
-    KOKKOS_FUNCTION void init(value_type & v) const { r.init(v); }
+    KOKKOS_FUNCTION void join(value_type & dst, const value_type & src) const {
+        if (on && !*on) return;
+        r.join(dst, src);
+    }
+    KOKKOS_FUNCTION void init(value_type & v) const {
+        if (on && !*on) return;
+        r.init(v);
+    }
     KOKKOS_FUNCTION void final(value_type & v) const {
         if (on && !*on) v = *r.view().data();
     }
