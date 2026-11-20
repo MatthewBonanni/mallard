@@ -16,12 +16,15 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "test_fixtures.h"
 #include "verification.h"
+#include "gmsh_fixtures.h"
+#include "lattice_symbol.h"
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "scratch.h"
@@ -847,3 +850,46 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     EXPECT_FALSE(teno_tables(*changed_only) == tables);
     EXPECT_FALSE(before == tables);
 }
+
+namespace {
+
+struct LatticeCase {
+    const char * lattice;
+    int order;
+    double lowest, highest; // growth rate, sound speeds over the block size
+};
+
+void PrintTo(const LatticeCase & c, std::ostream * out) { *out << c.lattice << ", order " << c.order; }
+
+} // namespace
+
+class TENOLattice : public ::testing::TestWithParam<LatticeCase> {};
+
+TEST_P(TENOLattice, LongWavesOfTheLinearizedSchemeGrowAtTheRecordedRate) {
+    // Largest real part of the Bloch symbol of the scheme linearized at rest
+    // (HLLC), over wavevectors up to 0.12 cycles per block. Orders 3 and 5 are
+    // neutral to the noise of the finite differences. Order 4 is a known
+    // failure on triangles (#1136): with the default 18-entry stencils the
+    // Riemann solver's jump term feeds long acoustic waves. A fix brings its
+    // rates under the bound of orders 3 and 5; then give order 4 that bound
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "finite differences of the right-hand side need double precision";
+    }
+    const LatticeCase c = GetParam();
+    const uint32_t n = 12;
+    const std::string mesh = std::string(c.lattice) == "crossed_squares"
+                                 ? "[mesh]\ntype = \"file\"\nfilename = \"" +
+                                       write_temp("mallard_teno_crossed_squares.msh", crossed_squares_mesh_2d(n)) + "\"\n"
+                                 : lattice_mesh(c.lattice, n);
+    const double rate = lattice_jacobian(mesh, n, c.order).largest_long_wave_rate(0.12, 0.02, 4e6);
+    std::cout << c.lattice << ", order " << c.order << ": largest growth rate of the long waves: " << rate
+              << " sound speeds over the block size" << std::endl;
+    EXPECT_GT(rate, c.lowest);
+    EXPECT_LT(rate, c.highest);
+}
+
+INSTANTIATE_TEST_SUITE_P(Triangles, TENOLattice,
+                         ::testing::Values(LatticeCase{"cartesian_tri", 3, -1.0, 1e-7}, LatticeCase{"cartesian_tri", 4, 1.0e-5, 1.5e-5},
+                                           LatticeCase{"cartesian_tri", 5, -1.0, 1e-7}, LatticeCase{"crossed_squares", 3, -1.0, 1e-7},
+                                           LatticeCase{"crossed_squares", 4, 0.8e-6, 1.3e-6},
+                                           LatticeCase{"crossed_squares", 5, -1.0, 1e-7}));
