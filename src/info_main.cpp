@@ -498,6 +498,17 @@ Record run_record(const std::string & dir) {
             r.found = true;
             const std::string type = text(v.find("type"));
             if (type == "start") {
+                // The files a rewind set aside are found where it put them
+                const json::Value * restart = v.find("restart");
+                const json::Value * moved = restart ? restart->find("superseded") : nullptr;
+                if (moved && moved->type == json::Value::Type::ARRAY) {
+                    for (const json::Value & m : moved->array) {
+                        const auto it = r.written.find(text(m.find("path")));
+                        if (it == r.written.end()) continue;
+                        r.written[text(m.find("to"))] = std::move(it->second);
+                        r.written.erase(text(m.find("path")));
+                    }
+                }
                 r.start = v;
                 r.end = json::Value{};
             } else if (type == "end") {

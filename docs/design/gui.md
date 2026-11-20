@@ -497,15 +497,15 @@ current code:
 | Restart files | written as `.partial`, renamed when complete | object |
 | Snapshots with `series = false`, VTU, per-step VTP | one file per snapshot | object |
 | Run log, CSV probes, forces, integrals | appended when a run continues from a restart; truncated by a fresh start in the same directory | stream (a fresh start is a new stream: the prefix hash no longer matches, and the run's `start` record has a new `run_id`) |
-| VTKHDF series (`series = true`, the default; boundary and region writers always), HDF5 and VTKHDF probes | every snapshot appended into one HDF5 file, rewritten in place | no: mutable until the run ends |
-| Snapshots and restart files after a rewind (resuming from an earlier restart) | files of the same names overwritten as the run reaches them again | path reused for new content; the old object is gone |
+| VTKHDF series (`series = true`, the default; boundary and region writers always) | one file per snapshot and the mesh once, each written once; `PREFIX.vtkhdf` an index of HDF5 virtual datasets over them, rewritten after each snapshot | objects, and a derived index |
+| HDF5 and VTKHDF probes | rows appended into one HDF5 file in place; cut back by a rewind, after a copy to `.rewound/<run_id>/` | no: live files, read on the remote ([#1317](https://github.com/MatthewBonanni/mallard/issues/1317)) |
+| Snapshots and restart files after a rewind (resuming from an earlier restart) | the files of the later steps moved to `.rewound/<run_id>/` before the run writes, listed in its `start` record (`restart.superseded`) | objects: kept, at the path the record gives |
 | Series indexes, `report.html` | rewritten | derived |
 
-Until Mallard makes them write-once (a [follow-up](#follow-ups)), the GUI treats
-a single-file series as one object only once its run has ended and the end
-record carries its final SHA-256, and as a live file (viewable remotely, not
-copyable as an object) before that; a rewind shows as the old object being
-gone from the run's home.
+Why and how: [output objects](output_objects.md). A probe's HDF5 or VTKHDF
+file stays one growing file: a file per sample, or an index rewritten at every
+sample, would cost the step loop. The GUI shows it as a live file, viewable
+remotely and not copyable as an object until its run has ended.
 
 ### The manifest and the cache index
 
@@ -1076,7 +1076,7 @@ tested like any other.
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | missing | `mallard version --format json` |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
-| Write-once outputs | restarts and per-snapshot files are; single-file series and rewinds are not | write-once series and rewinds |
+| Write-once outputs | done ([#1326](https://github.com/MatthewBonanni/mallard/issues/1326)): snapshots, series and rewinds; probe HDF5 and VTKHDF files stay live | none |
 | Install verification | missing | `mallard install verify` |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
@@ -1166,8 +1166,7 @@ Mallard prerequisites of the MVP: the catalog with types, units, descriptions,
 variants and a schema version (#1256, at least for the keys of the guided
 steps); partial-input `list keys` (#1311); structured diagnostics (#1312); the
 capabilities query (#1314); `mallard files` (#1317); a way to turn control files
-on from the command line (#1316). Write-once series (#1326) can follow: until
-then single-file series are copied only once their run has ended.
+on from the command line (#1316).
 
 **After the MVP:**
 

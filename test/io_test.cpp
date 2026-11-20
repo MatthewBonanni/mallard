@@ -381,7 +381,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
-        EXPECT_EQ(sync.size(), have_hdf5() ? 34u : 13u) << snapshot_keys;
+        EXPECT_EQ(sync.size(), have_hdf5() ? 39u : 13u) << snapshot_keys;
         ASSERT_EQ(async.size(), sync.size()) << snapshot_keys;
         for (const auto & [name, bytes] : sync) {
             ASSERT_TRUE(async.count(name)) << name;

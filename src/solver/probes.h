@@ -40,6 +40,7 @@
 #include "common_io.h"
 #include "probe_surface.h"
 #include "snapshot_block.h"
+#include "vtkhdf_series.h"
 #include "data.h"
 #include "exact_sums.h"
 #include "probe_reduction.h"
@@ -554,6 +555,7 @@ class Probes {
             };
             std::vector<SeriesEntry> series;  // vtp: the snapshots of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
+            std::vector<vtkhdf_series::Step> index_steps;        // vtkhdf snapshots: those the series file indexes
             std::string last_file;                               // vtp, vtkhdf: the file written last
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
@@ -686,6 +688,9 @@ class Probes {
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
+            bool vtkhdf_mesh_checked = false;  // a boundary snapshot's mesh file is written, or compared
+            bool vtkhdf_mesh_linked = false;   // the snapshots link to the fixed geometry of the mesh file
+            std::string vtkhdf_mesh_written;  // the mesh file, by the last write_vtkhdf that wrote it
             /** @brief The terms its reductions sum (the weight first), and its reduced values as reduction_names(). */
             void reduction_plan(std::vector<ProbeTerm> & terms, std::vector<ProbeOutput> & outputs) const;
             /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */

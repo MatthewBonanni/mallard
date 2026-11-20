@@ -131,6 +131,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
