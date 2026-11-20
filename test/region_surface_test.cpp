@@ -359,8 +359,6 @@ TEST(RegionSurfaceTest, ItsSurfaceIsExactAndFacesOut) {
         measure += e.measure[k];
         for (size_t i = 0; i < 3; i++) flux += (e.center[k][i] - 0.5) * e.direction[k][i] * e.measure[k];
     }
-    measure = comm::allreduce(measure, comm::Op::SUM);
-    flux = comm::allreduce(flux, comm::Op::SUM);
     // Facing out: the flux of x - x0 is N_DIM times the enclosed measure
     EXPECT_NEAR(measure, N_DIM == 3 ? 2.0 * (a * b + b * c + c * a) : 2.0 * (a + b), 1e-12);
     EXPECT_NEAR(flux, N_DIM == 3 ? 3.0 * a * b * c : 2.0 * a * b, 1e-12);
