@@ -595,7 +595,8 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that follow the solution. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of surfaces or curves of the solution that are clipped, made of more than one
+piece or cut from two conditions, or lie on a mesh with curved cells (below). A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
@@ -603,11 +604,28 @@ from the device's averages at each sample's cell. The host gathers them over the
 takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
-A moving region's fractions are updated at the device's `t`, and a scan selects the owned cells it covers, with
-their count, on the device. That happens before the outputs and the statistics' samples are staged, at the steps the probe is due: if on
+A moving region's fractions, and a `where` region's (from the levels of its conditions on the cell states, which
+an IF node on a flag for any due probe of the solution updates first, after the pending chemistry flush), are
+updated at the device's `t`, and a scan selects the owned cells it covers, with their count, on the device. That happens before the outputs and the statistics' samples are staged, at the steps the probe is due: if on
 some rank the count is above the capacity of the probe's staging, the device stops at that step (reason
 `PROBES`, reduced over the ranks), the host writes it as it writes unstaged probes, and the step graph is built
 anew with each moving probe's staging at twice the cells it covers then (at least 64, at most the owned cells).
+An isosurface (or another surface or curve of the solution) sampled as cell averages without normals has one
+sample per cell it crosses, whose values are the cell's: the same scan selects, at the device's `t`, the owned
+cells the host would read levels in (`region::CrossedLevels`), and their values are evaluated there and copied
+with the cells' levels into the record slot (with the same capacity and `PROBES` stop). The host extracts the
+elements from those levels as it takes the record, with the code it runs on the levels it selects itself, so the
+samples, their order and weights are its own bit for bit, and each sample takes its cell's staged values.
+Probes of fluxes through it, of point values or of gradients need values at each quadrature point. When the
+surface is cut from one condition alone (`region::single_level`: one piece, unclipped, on straight cells), the
+device cuts each crossed cell's level on its simplices as the host does (`region::cut::level_cut`, the host's
+double arithmetic in its order, without contraction, and an exact angular order instead of `atan2`; the host's
+`order_about` uses the same), counts the points per cell, scans their offsets and fills them into arrays of twice
+the points at the stage, and at least the surface's points per crossed cell over the ranks times the cells staged
+(at least 256; more stop the device with `PROBES` as above), samples them as
+`Samples::in_cells` would, and stages their values with the levels. The host cuts the staged levels again at
+the record and takes the staged values point by point, after checking that it found as many points. Other
+surfaces of the solution stay with the host.
 Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
 returning at once, and
 the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
@@ -820,6 +838,40 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
+#### Stage scratch of gas mixtures (#552)
+
+A gas mixture's right-hand side runs in this order: the reconstruction (the TENO troubled passes' coefficients, or
+MUSCL's gradients and limiters, and the scalar reconstruction's work memory) writes `face_thermo`; the convective
+fluxes read it and write `face_mdot`; the species slots read `face_mdot`; only then does `update_transport` fill
+`cell_diffusion`, `transport_values` and `transport_gradients` for the viscous fluxes. Every other reader of those
+three (the time step's transport, the eddy viscosity of LES, TFLES and PaSR, output, probes, forces, derived fields)
+runs after a call that fills them. Gas mixtures never start a reconstruction before the time step
+(`exchanges_partition_faces`), so the two groups are never live together. They share one allocation,
+`stage_scratch`, as large as the larger group: buffers placed one after another, 256-byte aligned. The memory
+tracker counts it once under that label, so `mallard check --memory` stays exact; view sizes are checked as
+for any allocation. The reconstructions are told not to allocate their own scratch, so the setup never holds both.
+
+Not shared: `production` (live with the transport buffers in the TFLES reaction sensor and output), a perfect
+gas's `viscous_gradients` (its reconstruction may start before the time step's gradients are read), and the
+chemistry's work memory (on the thread's stack).
+
+| bytes per cell, cells per A100-80GB | `main` | stage scratch | cells |
+|---|---|---|---|
+| propane flame, TENO5, hexahedra | 9,590 / 8,090,532 | 9,220 / 8,413,483 | +4.0% |
+| propane flame, TENO5, tetrahedra | 8,760 / 8,854,176 | 8,390 / 9,242,432 | +4.4% |
+| propane flame, MUSCL, hexahedra | 4,190 / 18,514,190 | 3,840 / 20,183,512 | +9.0% |
+| GRI-Mech, TENO5, hexahedra | 14,500 / 5,342,876 | 12,300 / 6,321,797 | +18.3% |
+| GRI-Mech, MUSCL, hexahedra | 12,100 / 6,435,177 | 10,600 / 7,333,000 | +14.0% |
+| 2D propane flame, MUSCL | 2,100 / 37,226,797 | 1,870 / 41,879,047 | +12.5% |
+
+With GRI-Mech at TENO5, the 2,882 bytes of `stage_scratch` replace 1,760 (TENO), 891 (`face_thermo`), 223
+(`face_mdot`) and 2,248 (transport). Perfect gases and runs limited by the setup or by view sizes (2D TENO5) are
+unchanged. Restart files after 4 steps are bitwise identical to `main` for 31 runs: TENO and MUSCL, 2D, 3D and
+axisymmetric, GRI-Mech, Soret, PaSR, dynamic LES, double flux, MPI on 3 ranks and restarts. On one A100 (medians
+of alternating runs) the time per step does not change: `flame_3d` 39.1 / 39.3 ms, with TENO5 217 / 217 ms,
+with GRI-Mech at TENO5 1,567 / 1,558 ms, `teno5_3d` 105 / 104 ms; the device's peak falls by 82 MiB, 86 MiB and
+482 MiB on the three flames (221,184 cells).
+
 ### 16. Cost of bitwise reproducibility (#429)
 
 Three places where the bitwise contract constrains the arithmetic were relaxed one at a time on a branch that is
@@ -882,6 +934,32 @@ makes restarts, partitions and GPU against CPU checkable by `mallard diff` with 
 verification manual instead of bitwise identity ([CONTRIBUTING.md](../../CONTRIBUTING.md#reproducibility));
 none of the three relaxations above qualifies, so none was kept, and the TENO setup keeps its host and device
 tables equal.
+
+### 17. Convective flux without contraction (#1253)
+
+The Riemann solvers are inline functions, and where nvcc and Clang contract their multiplies and adds into
+FMAs depends on the kernel they are inlined in: the same flux rounded differently in `convective_flux` and in a
+reconstruction kernel computing it on its own (#965), by about 1e-15. The sources that call them
+(`solver_convective_flux.cpp` and three tests) are compiled without contraction, as `teno.cpp` is, and the
+solvers, the flux functors and the low-Mach and hybrid blends write their FMAs explicitly (`fmadd`, `fma_dot`):
+every product added to something, as the compiler would have fused it. Configuring fails if another source
+names `riemann::` without the same flags. Measured on one A100 (CUDA 13.5, Release, three runs each;
+`convective_flux` is the mean over 60 (`teno5_3d`, 20 steps) or 300 (`sphere_3d`, 100 steps) launches, Nsight
+Systems):
+
+| case | `main` | no contraction, no explicit FMAs | this change |
+|---|---|---|---|
+| `teno5_3d`, `convective_flux` | 3.46 ms | 3.71 ms (+7.2%) | **3.18 ms (-8.0%)** |
+| `teno5_3d`, step | 105 ms (8.41-8.44M cells/s) | 106 ms (8.36-8.37M) | **104 ms (8.48-8.51M)** |
+| `sphere_3d` (MUSCL, 500 steps), `convective_flux` | 94.7 us | 98.2 us (+3.7%) | **88.0 us (-7.0%)** |
+| `sphere_3d`, step | 7.33-7.36 ms | 7.30-7.40 ms | 7.32-7.35 ms |
+
+Without contraction and without explicit FMAs the flux is 4-7% slower; with them it is 7-8% faster than `main`,
+whose contraction does not fuse every product (for example `0.5 W[0] |u|^2` into the energy, or the HLLC star
+state). Results change in the last bits once: after 20 steps of `teno5_3d` the cells differ from `main` by at most
+3.5e-15 of each field's maximum (`mallard diff`), 1.5e-12 for the momentum along z, which starts at zero. The block-face flux of #965 (design 1, computed in the TENO smooth
+pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
+(`teno5_3d`, 20 steps).
 
 ## Scaling (one node)
 

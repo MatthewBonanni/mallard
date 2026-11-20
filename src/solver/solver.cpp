@@ -11,6 +11,7 @@
 
 #include "solver.h"
 #include "boundary_coordinates.h"
+#include "boundary_profiles.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <cmath>
+#include <cstddef>
 #include <iomanip>
 #include <filesystem>
 #include <fstream>
@@ -979,6 +981,7 @@ void Solver::init_boundaries() {
                                      "bottom, top (back, front in 3D) for generated meshes",
                               .docs = "docs/guide/boundary_conditions.md"});
         }
+        const BoundaryProfiles profiles(bound, where_name);
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
         WallModelSpec wall_model_spec;
         if (bound.contains("wall_model")) {
@@ -1006,7 +1009,7 @@ void Solver::init_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound), BoundaryValue::hint,
                     boundary_variable::FIRST_LOCAL));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
@@ -1039,15 +1042,23 @@ void Solver::init_boundaries() {
             for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
             selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
         }
-        std::string coordinates;
+        std::string coordinates, data_summary;
         {
             std::vector<uint32_t> entry_faces;
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
-            const std::vector<uint16_t> used = local_coordinates_used(bound);
-            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
-            const bool reads_frame = !used.empty() && used.back() != boundary_variable::N;
+            std::vector<uint16_t> used = local_coordinates_used(bound);
+            for (const uint16_t i : profiles.coordinates_used()) {
+                if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
+            }
+            std::sort(used.begin(), used.end());
+            bool reads_n = false, reads_patch = false;
+            for (const uint16_t i : used) {
+                const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
+                reads_n = reads_n || wall;
+                reads_patch = reads_patch || !wall;
+            }
             auto unused_key = [&](const std::string & key, const std::string & what) {
                 return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
                                    .message = "no expression of the entry reads " + what + ", so " + key +
@@ -1084,16 +1095,27 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            if (bound.contains("frame") && !reads_frame) {
-                throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+            for (const char * key : {"corners", "origin", "toward"}) {
+                if (!bound.contains(key)) continue;
+                if (N_DIM == 2 && std::string(key) != "origin") {
+                    throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                      .message = std::string(key) == "corners"
+                                                     ? "a 2D boundary is a curve, which has two ends and no corners"
+                                                     : "a 2D boundary is a curve: origin alone says which end u "
+                                                       "starts from",
+                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
+                                             "the end nearest to origin = [x, y] if that is given",
+                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+                }
+                if (!reads_patch) throw unused_key(key, "u or v");
             }
-            [[maybe_unused]] const FrameKey frame_key(bound, where_name);
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
-            if (!used.empty() && n_entry > 0) {
+            if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
                 const WallDistance none;
                 const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
-                const std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used,
-                                                                        walls, is_distributed(), coordinates);
+                std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used, walls,
+                                                                  is_distributed(), coordinates);
+                if (!profiles.empty()) data_summary = profiles.evaluate(*mesh, entry_faces, points, is_distributed());
                 for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
             }
         }
@@ -1209,6 +1231,7 @@ void Solver::init_boundaries() {
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
+        if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {
@@ -1633,6 +1656,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_boundaries(boundary_data);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         teno->partition_faces_exchanged = exchanges_partition_faces();
+        teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
         // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
         if (state_reader && !writes_stencils()) teno->sector_stencils = false;
     }
@@ -1643,6 +1667,7 @@ void Solver::init_numerics() {
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture() && !state_reader) {
+        scalar_reconstruction.own_scratch = false;
         scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
@@ -1828,7 +1853,7 @@ void Solver::init_run_parameters() {
         }
     }
     n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
-    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
+    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true) && !cuda_graphs_off;
     t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
     t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
     keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
@@ -2213,17 +2238,12 @@ void Solver::allocate_memory() {
                                                  true, n_gradient_cells());
         }
     }
+    allocate_stage_scratch();
     if (is_mixture() && is_viscous()) {
         cell_transport =Kokkos::View<rtype *[3]>("cell_transport", mesh->n_cells);
         h_cell_transport = pinned_mirrors(cell_transport);
-        const uint32_t n_diffusion = (mixture.transport.thermal_diffusion ? 2 : 1) * n_species;
-        cell_diffusion = Kokkos::View<double **, Kokkos::LayoutRight>("cell_diffusion", mesh->n_cells, n_diffusion);
-        h_cell_diffusion = pinned_mirrors(cell_diffusion);
-        transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("transport_values", mesh->n_cells,
-                                                                       N_DIM + 1 + n_species);
-        transport_gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("transport_gradients", mesh->n_cells,
-                                                                           N_DIM + 1 + n_species, N_DIM);
-        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_diffusion);
+        h_cell_diffusion = pinned_mirrors(cell_diffusion, "cell_diffusion");
+        h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, cell_diffusion.extent(1));
     }
     if (is_mixture()) {
         cell_scalars = ScalarView("cell_scalars", mesh->n_cells, n_species + 2);
@@ -2245,6 +2265,49 @@ void Solver::allocate_memory() {
     h_cfl_local = pinned_mirrors(cfl_local);
 }
 
+void Solver::allocate_stage_scratch() {
+    // The convective part lives from the reconstruction to the species slots, the diffusive part from
+    // update_transport (or the time step's transport) to its last reader. Gas mixtures never start a
+    // reconstruction before the time step (exchanges_partition_faces), which would overlap the two
+    const size_t CONVECTIVE = 0, DIFFUSIVE = shared_stage_scratch ? 1 : 0;
+    memory::ScratchArena & arena = stage_scratch;
+    arena = memory::ScratchArena();
+    const bool stepping = !state_reader, mixture_stepping = stepping && is_mixture();
+    const uint32_t n_cells = mesh->n_cells, n_faces = mesh->n_state_faces();
+    const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
+    const uint32_t n_diffusion = (mixture.transport.thermal_diffusion ? 2 : 1) * n_species;
+    const uint32_t n_values = N_DIM + 1 + n_species;
+    const bool transport = is_mixture() && is_viscous();
+    size_t reconstruction = 0, scalars = 0, thermo = 0, mdot = 0, diffusion = 0, values = 0, gradients = 0;
+    if (stepping) reconstruction = arena.reserve<std::byte>(CONVECTIVE, face_reconstruction->scratch_bytes());
+    if (mixture_stepping) {
+        scalars = arena.reserve<std::byte>(CONVECTIVE, scalar_reconstruction.scratch_bytes());
+        thermo = arena.reserve<rtype>(CONVECTIVE, size_t(n_faces) * n_quad * 2 * 2);
+        mdot = arena.reserve<rtype>(CONVECTIVE, size_t(n_faces) * n_quad);
+    }
+    if (transport) {
+        diffusion = arena.reserve<double>(DIFFUSIVE, size_t(n_cells) * n_diffusion);
+        values = arena.reserve<rtype>(DIFFUSIVE, size_t(n_cells) * n_values);
+        gradients = arena.reserve<rtype>(DIFFUSIVE, size_t(n_cells) * n_values * N_DIM);
+    }
+    arena.allocate("stage_scratch");
+    if (stepping) face_reconstruction->place_scratch(arena.data(reconstruction));
+    if (mixture_stepping) {
+        scalar_reconstruction.place_scratch(arena.data(scalars));
+        face_thermo = arena.view<Kokkos::View<rtype **[2][2]>>("face_thermo", thermo, n_faces, n_quad);
+        face_mdot = arena.view<Kokkos::View<rtype **>>("face_mdot", mdot, n_faces, n_quad);
+    }
+    if (transport) {
+        cell_diffusion = arena.view<Kokkos::View<double **, Kokkos::LayoutRight>>("cell_diffusion", diffusion,
+                                                                                  n_cells, n_diffusion);
+        transport_values = arena.view<Kokkos::View<rtype **, Kokkos::LayoutRight>>("transport_values", values,
+                                                                                   n_cells, n_values);
+        transport_gradients = arena.view<Kokkos::View<rtype ***, Kokkos::LayoutRight>>(
+            "transport_gradients", gradients, n_cells, n_values, uint32_t(N_DIM));
+    }
+}
+
 void Solver::allocate_time_stepping() {
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
@@ -2257,8 +2320,6 @@ void Solver::allocate_time_stepping() {
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", n_faces);
     if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (is_mixture()) {
-        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", n_faces, n_quad);
-        face_mdot = Kokkos::View<rtype **>("face_mdot", n_faces, n_quad);
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), n_faces, 2, n_species);
         if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", n_faces);
     }

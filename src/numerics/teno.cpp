@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -34,11 +35,13 @@
 #include "diagnostic_code.h"
 #include "face_reconstruction.h"
 #include "growing_buffer.h"
+#include "view_entries.h"
 
 #include "input.h"
 #include "launch_bounds.h"
 #include "log.h"
 #include "periodic.h"
+#include "scratch_arena.h"
 #include "teno_sharing.h"
 #include "teno.h"
 #include "structured_blocks.h"
@@ -1526,38 +1529,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     if (subset == nullptr) n_sector_unavailable = n_invalid_small;
 }
 
-#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
-[[maybe_unused]] constexpr bool HOST_FMA = true;
-#else
-[[maybe_unused]] constexpr bool HOST_FMA = false;
-#endif
-
-/**
- * @brief a b + c, fused where the hardware fuses (std::fma would be a library
- *        call on CPUs without FMA). teno.cpp is compiled without contraction,
- *        so these are its only FMAs and its results do not depend on how the
- *        compiler schedules a kernel.
- */
-KOKKOS_INLINE_FUNCTION
-rtype fmadd(const rtype a, const rtype b, const rtype c) {
-    KOKKOS_IF_ON_DEVICE((return Kokkos::fma(a, b, c);))
-    KOKKOS_IF_ON_HOST((
-        if constexpr (HOST_FMA) {
-            return std::fma(a, b, c);
-        } else {
-            return a * b + c;
-        }))
-}
-
-/** @brief a . a, with fmadd. */
-template <uint8_t N>
-KOKKOS_INLINE_FUNCTION
-rtype norm2(const rtype * a) {
-    rtype q = a[0] * a[0];
-    for (uint8_t i = 1; i < N; i++) q = fmadd(a[i], a[i], q);
-    return q;
-}
-
 /**
  * @brief Per-cell TENO-E reconstruction of degree DEG to the quadrature points
  *        of all of the cell's faces. SmoothPass finishes the cells below the
@@ -1749,7 +1720,7 @@ struct TENOFunctor {
     void conservatives_of(const rtype * W_e, rtype * U) const {
         U[0] = W_e[0];
         FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], norm2<N_DIM>(W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
+        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], fma_dot<N_DIM>(W_e + 1, W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1770,7 +1741,7 @@ struct TENOFunctor {
         } else {
             Wq[0] = U[0];
             FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], norm2<N_DIM>(Wq + 1), U[N_DIM + 1]);
+            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], fma_dot<N_DIM>(Wq + 1, Wq + 1), U[N_DIM + 1]);
         }
     }
 
@@ -2138,7 +2109,7 @@ struct TENOFunctor {
                 f[j] = s < ns ? stencil.face(s) : -1;
             }
             for (uint32_t j = 0; j < PER; j++) {
-                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
+                if (c[j] >= 0) view_entries::load_row<N_CONSERVATIVE>(W, static_cast<uint32_t>(c[j]), W_e[j]);
             }
             for (uint32_t j = 0; j < PER; j++) {
                 if (c[j] < 0) continue;
@@ -3380,11 +3351,26 @@ void TENO::allocate_scratch() {
     troubled = Kokkos::View<rtype *>("teno_sigma", mesh->n_reconstructed());
     const uint32_t capacity = !sector_stencils ? 0u : std::min<uint32_t>(
         n_table_rows, static_cast<uint32_t>(std::ceil(double(troubled_capacity) * double(n_table_rows))));
-    troubled_coeffs = Kokkos::View<rtype ***>("teno_troubled_coeffs", capacity, n_dof_large, N_CONSERVATIVE);
-    troubled_small_coeffs = Kokkos::View<rtype ****>("teno_troubled_small_coeffs", capacity, teno::MAX_FACES,
-                                                     teno::NK_SMALL, N_CONSERVATIVE);
+    troubled_coeffs = memory::scratch_view<Kokkos::View<rtype ***>>(own_scratch, "teno_troubled_coeffs", capacity,
+                                                                     n_dof_large, N_CONSERVATIVE);
+    troubled_small_coeffs = memory::scratch_view<Kokkos::View<rtype ****>>(
+        own_scratch, "teno_troubled_small_coeffs", capacity, teno::MAX_FACES, teno::NK_SMALL, N_CONSERVATIVE);
     troubled_cells = Kokkos::View<uint32_t *>("teno_troubled_cells", n_table_rows);
     n_troubled = Kokkos::View<uint32_t>("teno_n_troubled");
+}
+
+size_t TENO::scratch_bytes() const {
+    using memory::ScratchArena;
+    return ScratchArena::aligned(troubled_coeffs.span() * sizeof(rtype)) +
+           ScratchArena::aligned(troubled_small_coeffs.span() * sizeof(rtype));
+}
+
+void TENO::place_scratch(void * storage) {
+    if (troubled_coeffs.span() == 0) return;
+    std::byte * const p = static_cast<std::byte *>(storage);
+    const size_t small = memory::ScratchArena::aligned(troubled_coeffs.span() * sizeof(rtype));
+    troubled_coeffs = Kokkos::View<rtype ***>(reinterpret_cast<rtype *>(p), troubled_coeffs.layout());
+    troubled_small_coeffs = Kokkos::View<rtype ****>(reinterpret_cast<rtype *>(p + small), troubled_small_coeffs.layout());
 }
 
 std::array<double, 9> TENO::stencil_metric(const uint32_t i) const {

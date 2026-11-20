@@ -18,6 +18,7 @@
 #include "boundary.h"
 #include "physics.h"
 #include "flux_functor.h"
+#include "view_entries.h"
 #include "wall_exchange.h"
 
 /**
@@ -247,12 +248,15 @@ struct ViscousFluxFunctor {
      */
     KOKKOS_INLINE_FUNCTION
     void cell_state(const int32_t c, rtype * q, rtype g[NQ][N_DIM]) const {
-        const rtype rho = W(c, 0), p = W(c, N_DIM + 1);
-        for (uint8_t k = 0; k < N_DIM; k++) q[k] = W(c, 1 + k);
+        rtype W_c[N_CONSERVATIVE], grad[N_CONSERVATIVE][N_DIM];
+        view_entries::load_row<N_CONSERVATIVE>(W, static_cast<uint32_t>(c), W_c);
+        view_entries::load_row(gradients, static_cast<uint32_t>(c), grad);
+        const rtype rho = W_c[0], p = W_c[N_DIM + 1];
+        for (uint8_t k = 0; k < N_DIM; k++) q[k] = W_c[1 + k];
         q[N_DIM] = p / (rho * physics.R);
         FOR_I_DIM {
-            for (uint8_t k = 0; k < N_DIM; k++) g[k][i] = gradients(c, 1 + k, i);
-            g[N_DIM][i] = (gradients(c, N_DIM + 1, i) - physics.R * q[N_DIM] * gradients(c, 0, i)) / (rho * physics.R);
+            for (uint8_t k = 0; k < N_DIM; k++) g[k][i] = grad[1 + k][i];
+            g[N_DIM][i] = (grad[N_DIM + 1][i] - physics.R * q[N_DIM] * grad[0][i]) / (rho * physics.R);
         }
     }
 

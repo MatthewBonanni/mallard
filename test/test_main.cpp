@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "scratch.h"
+#include "solver.h"
 
 namespace {
 
@@ -122,6 +123,10 @@ int main(int argc, char** argv) {
     }
     if (const char * limit = std::getenv("MALLARD_TEST_TIMEOUT")) {
         ::testing::UnitTest::GetInstance()->listeners().Append(new Watchdog(std::atof(limit)));
+    }
+    // compute-sanitizer misreports the step graph's kernels (#1076): tools/dev/gpu_runtime_tests.sh checks them kernel by kernel
+    if (const char * graphs = std::getenv("MALLARD_TEST_CUDA_GRAPHS"); graphs && std::string_view(graphs) == "off") {
+        Solver::set_cuda_graphs_off(true);
     }
     if (!install_scratch_directories()) return 1;
     Kokkos::initialize(argc, argv);
