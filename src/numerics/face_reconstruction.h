@@ -638,7 +638,7 @@ class TENO : public FaceReconstruction {
          *        of setting them up (Solver::drop_unread_halo); its cells with tables must be those of `from`.
          */
         struct Carried {
-            std::shared_ptr<const TENO> from;
+            std::unique_ptr<TENO> from;
             std::vector<int32_t> new_cell, new_face;
         };
         std::optional<Carried> carried;

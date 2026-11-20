@@ -3722,7 +3722,7 @@ bool TENO::load_cache() {
 
 bool TENO::carry_tables() {
     if (!carried) return false;
-    const TENO & from = *carried->from;
+    TENO & from = *carried->from;
     const std::vector<int32_t> & new_cell = carried->new_cell;
     const std::vector<int32_t> & new_face = carried->new_face;
     const uint32_t n_table_rows = n_rows();
@@ -3760,23 +3760,43 @@ bool TENO::carry_tables() {
         return teno::entry_code(g, b < 0 ? -1 : new_ordinal[static_cast<size_t>(b)], row - teno::TURN_BIAS,
                                 (x / teno::TURN_SPAN) % teno::REL_SPAN - teno::REL_BIAS);
     };
-    const HostIndex large_index = host_index(from.stencil_large);
-    const HostIndex small_index = host_index(from.stencil_small);
-    TableBuilder builder(*this, n_table_rows);
-    std::vector<CellTables> chunk;
-    for (uint32_t c0 = 0; c0 < n_table_rows; c0 += CHUNK_CELLS) {
-        chunk.assign(std::min(CHUNK_CELLS, n_table_rows - c0), CellTables());
-        download_tables(from, large_index, small_index, c0, chunk);
-        for (CellTables & t : chunk) {
-            for (int32_t & c : t.large_cells) c = cell(c);
-            for (int32_t & c : t.small_cells) c = cell(c);
-            for (int32_t & f : t.large_faces) f = face(f);
-            for (int32_t & f : t.small_faces) f = face(f);
-            largest_stencil = std::max(largest_stencil, static_cast<uint32_t>(t.large_cells.size()));
+    // Rows keep their indices, so the tables move over as they are and only the cells and faces their entries name
+    // are renumbered: in place on the device, and the few images on the host
+    Kokkos::View<int32_t *> d_new_cell(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_new_cell"), new_cell.size());
+    Kokkos::deep_copy(d_new_cell, HostUnmanaged<const int32_t>(new_cell.data(), new_cell.size()));
+    for (teno::PackedStencils * packed : {&from.stencil_large, &from.stencil_small}) {
+        auto slots = packed->cells;
+        uint64_t dropped = 0;
+        Kokkos::parallel_reduce("teno_carry_cells", Kokkos::RangePolicy<>(0, slots.extent(0)),
+                                KOKKOS_LAMBDA(const uint64_t k, uint64_t & n) {
+            const int32_t e = slots(k);
+            if (e < 0) return;
+            const int32_t d = d_new_cell(e);
+            n += d < 0 ? 1u : 0u;
+            slots(k) = d;
+        }, dropped);
+        if (dropped > 0) throw std::logic_error("TENO: a carried stencil reads a dropped cell");
+        if (packed->images.extent(0) == 0) continue;
+        auto h_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), packed->images);
+        for (size_t k = 0; k < h_images.extent(0); k += 2) {
+            h_images(k) = cell(h_images(k));
+            h_images(k + 1) = face(h_images(k + 1));
         }
-        builder.add(c0, chunk);
+        Kokkos::deep_copy(packed->images, h_images);
     }
-    builder.finish();
+    scale = from.scale;
+    cell_shape = from.cell_shape;
+    cell_shape_owner = std::move(from.cell_shape_owner);
+    basis_mean = from.basis_mean;
+    si_matrix = from.si_matrix;
+    moments = from.moments;
+    stencil_large_size = from.stencil_large_size;
+    stencil_small_size = from.stencil_small_size;
+    stencil_large = from.stencil_large;
+    stencil_small = from.stencil_small;
+    gather_depth = std::move(from.gather_depth);
+    table_memory = std::move(from.table_memory);
+    largest_stencil = from.largest_stencil;
     n_sector_unavailable = from.n_sector_unavailable;
     setup_status = from.setup_status;
     setup_producer = from.setup_producer;
