@@ -1178,7 +1178,8 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
         }
         SCOPED_TRACE(box);
         EXPECT_EQ(runs[1].chemistry_explicit_steps(), 0.0);
-        EXPECT_EQ(runs[1].chemistry_explicit_marked(), double(runs[1].get_mesh()->n_owned()));
+        EXPECT_EQ(runs[1].chemistry_explicit_marked(),
+                  comm::allreduce(double(runs[1].get_mesh()->n_owned()), comm::Op::SUM));
         for (uint32_t c = 0; c < runs[0].get_mesh()->n_cells; c++) {
             FOR_I_CONSERVATIVE ASSERT_EQ(runs[1].h_conservatives(c, i), runs[0].h_conservatives(c, i));
             for (uint32_t k = 0; k < runs[0].get_species_names().size(); k++) {
