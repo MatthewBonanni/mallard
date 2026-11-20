@@ -19,6 +19,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include "comm.h"
@@ -609,8 +610,10 @@ class Parser {
             if (!(names && names->as_table().entries().contains(name))) {
                 std::vector<std::string> automatic;
                 if (mesh) automatic = mesh->names();
-                if (std::find(automatic.begin(), automatic.end(), name) != automatic.end()) {
-                    if (!is_identity(parent)) {
+                if (std::find(automatic.begin(), automatic.end(), name) != automatic.end() ||
+                    (mesh && mesh->any_cell_zone)) {
+                    // Without the mesh the name may be a misspelled one of [regions]: the mesh tells
+                    if (!is_identity(parent) && !mesh->any_cell_zone) {
                         fail(where, line_of(value), "\"" + name + "\" is a region of the mesh, which transforms do not move",
                              "Transform the other regions instead", "docs/guide/geometry.md#regions-of-the-mesh");
                     }
@@ -713,6 +716,10 @@ class Parser {
             f.cells = true;
             if (name == "domain") {
                 f.kind = Filled::Kind::ALL;
+            } else if (mesh->any_cell_zone && std::find(mesh->boundary_zones.begin(), mesh->boundary_zones.end(),
+                                                        name) == mesh->boundary_zones.end()) {
+                f.kind = Filled::Kind::CELL_ZONE;
+                f.zones = {name};
             } else if (std::find(mesh->cell_zones.begin(), mesh->cell_zones.end(), name) != mesh->cell_zones.end()) {
                 f.kind = Filled::Kind::CELL_ZONE;
                 f.zones = {name};
@@ -1408,7 +1415,17 @@ std::vector<std::string> MeshRegions::names() const {
 }
 
 
+MeshRegions MeshRegions::without_mesh(std::vector<std::string> boundary_zones) {
+    MeshRegions out;
+    std::sort(boundary_zones.begin(), boundary_zones.end());
+    boundary_zones.erase(std::unique(boundary_zones.begin(), boundary_zones.end()), boundary_zones.end());
+    out.boundary_zones = std::move(boundary_zones);
+    out.any_cell_zone = true;
+    return out;
+}
+
 bool MeshRegions::closed(const std::vector<std::string> & zones) const {
+    if (mesh == nullptr) return true;
     // Closed: every node (2D) or edge (3D) of the faces belongs to exactly two of them
     const bool distributed = mesh->n_global_cells > 0;
     auto key = [&](const uint32_t n) { return distributed ? mesh->h_global_node_id[n] : uint64_t(n); };
@@ -1787,8 +1804,10 @@ void require_fixed(const Region & region, const Input & value, const std::string
          "Give a fixed region", "docs/guide/geometry.md#moving-regions");
 }
 
-Regions::Regions(const Input & input, const Mesh & mesh) :
-    m_names(named_regions(input)), m_mesh(mesh), m_automatic(mesh) {
+Regions::Regions(const Input & input, const Mesh & mesh) : Regions(input, MeshRegions(mesh)) { m_mesh = &mesh; }
+
+Regions::Regions(const Input & input, MeshRegions automatic) :
+    m_names(named_regions(input)), m_mesh(nullptr), m_automatic(std::move(automatic)) {
     if (!m_names) return;
     for (const auto & [name, value] : m_names->as_table().entries()) {
         const auto & zones = m_automatic.boundary_zones;
@@ -1829,7 +1848,8 @@ const Region & Regions::get(const Input & value, const std::string & where) { re
 
 const std::vector<double> & Regions::fractions(const Input & value, const std::string & where) {
     Entry & e = entry(value, where);
-    if (e.fractions.empty()) e.fractions = cell_fractions(m_mesh, e.region);
+    if (m_mesh == nullptr) throw std::logic_error("region fractions need the mesh");
+    if (e.fractions.empty()) e.fractions = cell_fractions(*m_mesh, e.region);
     return e.fractions;
 }
 

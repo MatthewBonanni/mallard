@@ -632,6 +632,10 @@ std::vector<rtype> Solver::integrate_species() {
     return total;
 }
 
+void Solver::read_composition(const Input & table, const std::string & where) const {
+    CompositionExpressions(*mixture_model, table, where);
+}
+
 std::vector<std::vector<double>> Solver::composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const {
     return CompositionExpressions(*mixture_model, table, where).mass_fractions(mesh->cell_coords, cells);

@@ -1,0 +1,1 @@
+- The setup reads `[[sources]]`, `[source]` and `[[sponges]]`, with the regions they name, before the mesh too, so a mistake in them is reported before a large mesh file is read. Part of `mallard list keys input.toml` without the mesh ([#886](https://github.com/MatthewBonanni/mallard/issues/886)).
