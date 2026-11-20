@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <tuple>
@@ -630,9 +631,8 @@ namespace {
  *        slices of 32 (the last partly empty), given strides, and check the
  *        stride taken, the far entries and that every slot reads back.
  */
-template <typename Expected>
-void check_packed_slots(const uint32_t n_rows, const std::vector<int32_t> & strides, Expected expected,
-                        const int32_t stride_taken) {
+void check_packed_slots(const uint32_t n_rows, const std::vector<int32_t> & strides,
+                        const std::function<int32_t(uint32_t, uint32_t)> & expected, const int32_t stride_taken) {
     using P = teno::PackedStencils;
     const uint32_t n_slices = (n_rows + 31) / 32;
     std::vector<uint32_t> h_size(n_rows);
