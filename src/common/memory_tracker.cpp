@@ -42,6 +42,7 @@ constexpr Rule RULES[] = {
     {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
     {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_", true, C::STATE},
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
+    {"particle_", true, C::STATE},
     // Faces, gradients and reconstruction buffers
     {"face_solution", false, C::FACES}, {"face_flux", false, C::FACES}, {"face_thermo", false, C::FACES},
     {"face_mdot", false, C::FACES}, {"face_energy_1", false, C::FACES},
