@@ -901,13 +901,13 @@ cell over `dt` under its chemistry plus that constant source, then lets
 the flow correct over the second half of the step with `T(U) - T(U^n)`:
 steady states of chemistry and transport stay exactly steady at any `dt`
 (see the [thermochemistry guide](guide/thermochemistry.md#finite-rate-chemistry)). The integrator
-is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
-double precision in every build.
+is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, or a
+variable-order BDF, in double precision in every build.
 
 | Key | Description |
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
-| `integrator` | `rosenbrock` (the default and only choice so far) |
+| `integrator` | `rosenbrock` (default; RODAS) or `bdf` (variable-order BDF, orders 1-5, with the Jacobian and its factorization kept over many sub-steps; CVODE's strategy). BDF is faster where cells take one or a few sub-steps per call, as at the small time steps of detonations and compressible flames (n-dodecane and n-hexane at `dt` = 1e-8 s: 1.4-1.7 times RODAS's throughput on CPUs), and no faster where igniting cells take many, since every call restarts it at order 1. Its error estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate than RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`, within 2e-5 at `1e-14`); see the [design notes](design/chemistry.md#bdf-integrator-issue-143) |
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |

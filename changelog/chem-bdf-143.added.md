@@ -1,0 +1,1 @@
+- `[chemistry] integrator = "bdf"`: a variable-order BDF chemistry integrator (orders 1-5, Jacobian and factorization kept over many sub-steps), on the device like RODAS, with the dense or sparse LU. On n-dodecane and n-hexane it is 1.4-1.7 times faster than RODAS at `dt` = 1e-8 s and about as fast at 1e-6 s; RODAS stays the default and is unchanged (#143).
