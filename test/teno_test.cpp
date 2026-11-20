@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <tuple>
@@ -623,6 +624,78 @@ std::string file_of(const std::string & cache) {
     return comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
 }
 
+namespace {
+
+/**
+ * @brief Pack the entries expected(r, s) of rows r < n_rows of r % 4 slots in
+ *        slices of 32 (the last partly empty), given strides, and check the
+ *        stride taken, the far entries and that every slot reads back.
+ */
+void check_packed_slots(const uint32_t n_rows, const std::vector<int32_t> & strides,
+                        const std::function<int32_t(uint32_t, uint32_t)> & expected, const int32_t stride_taken) {
+    using P = teno::PackedStencils;
+    const uint32_t n_slices = (n_rows + 31) / 32;
+    std::vector<uint32_t> h_size(n_rows);
+    for (uint32_t r = 0; r < n_rows; r++) h_size[r] = r % 4;
+    P p;
+    p.shift = 5;
+    p.slice_start = Kokkos::View<uint64_t *>("slice_start", n_slices + 1);
+    p.pinv_index = Kokkos::View<uint64_t *>("pinv_index", n_rows);
+    p.pinv = Kokkos::View<rtype *>("pinv", 32);
+    std::vector<uint64_t> h_start(n_slices + 1);
+    for (uint32_t k = 0; k <= n_slices; k++) h_start[k] = 3 * k;
+    Kokkos::deep_copy(p.slice_start, Kokkos::View<const uint64_t *, Kokkos::HostSpace>(h_start.data(), n_slices + 1));
+    std::vector<int32_t> h_cells(h_start[n_slices] << 5, 0);
+    uint64_t n_far = 0;
+    for (uint32_t r = 0; r < n_rows; r++) {
+        for (uint32_t s = 0; s < h_size[r]; s++) {
+            h_cells[((h_start[r >> 5] + s) << 5) + (r & 31)] = expected(r, s);
+            n_far += P::slot_of(expected(r, s), r, stride_taken) == P::FAR ? 1u : 0u;
+        }
+    }
+    p.cells = Kokkos::View<int32_t *>("cells", h_cells.size());
+    Kokkos::deep_copy(p.cells, Kokkos::View<const int32_t *, Kokkos::HostSpace>(h_cells.data(), h_cells.size()));
+    Kokkos::View<uint32_t *> size("size", n_rows);
+    Kokkos::deep_copy(size, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(h_size.data(), n_rows));
+    teno::compact_slots(p, size, strides, "teno_test_slots");
+    EXPECT_EQ(p.stride, stride_taken);
+    EXPECT_EQ(p.cells.extent(0), 0u);
+    EXPECT_EQ(p.slots.extent(0), h_cells.size());
+    EXPECT_EQ(p.far.extent(0), n_far);
+    Kokkos::View<int32_t *[3]> out("out", n_rows);
+    Kokkos::parallel_for("read_slots", n_rows, KOKKOS_LAMBDA(const uint32_t r) {
+        const auto row = p.row(r);
+        for (uint32_t s = 0; s < size(r); s++) out(r, s) = row.entry(s);
+    });
+    auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+    for (uint32_t r = 0; r < n_rows; r++) {
+        for (uint32_t s = 0; s < h_size[r]; s++) EXPECT_EQ(h_out(r, s), expected(r, s)) << "row " << r << ", slot " << s;
+    }
+}
+
+} // namespace
+
+TEST(TENOTest, PackedSlotsHoldCellsNearTheirRowInSixteenBitsAndTheOthersInFull) {
+    using P = teno::PackedStencils;
+    // Without strides: the farthest cells held in 16 bits on either side, the nearest beyond them, and images
+    const int32_t reach = 3 * P::SPAN + P::SPAN / 2;
+    check_packed_slots(uint32_t(reach) + 72, {}, [&](const uint32_t r, const uint32_t s) {
+        const int32_t row = static_cast<int32_t>(r);
+        const bool below = row > reach && r % 2;
+        if (s == 0) return below ? row - reach : row + reach - 1;
+        if (s == 1) return below ? row - reach - 1 : row + reach;
+        return P::image_entry(r);
+    }, P::SPAN);
+    // A plane stride that holds cells three planes away, which SPAN does not
+    const int32_t plane = 20000;
+    check_packed_slots(3 * plane + 72, {plane, 9000}, [&](const uint32_t r, const uint32_t s) {
+        const int32_t row = static_cast<int32_t>(r);
+        if (s == 0) return row > 3 * plane + 5 && r % 2 ? row - 3 * plane - 5 : row + 3 * plane + 5;
+        if (s == 1) return row + 5 * plane;
+        return P::image_entry(r);
+    }, plane);
+}
+
 TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     // Stencils of different sizes, and a cell count that is not a multiple of
     // the GPU slice width, so slices are both ragged and partly empty
@@ -723,7 +796,9 @@ std::vector<std::vector<char>> teno_tables(const TENO & teno) {
     add(teno.stencil_small_size);
     for (const teno::PackedStencils * s : {&teno.stencil_large, &teno.stencil_small}) {
         add(s->slice_start);
-        add(s->cells);
+        add(s->slots);
+        add(s->far_start);
+        add(s->far);
         add(s->images);
         add(s->pinv);
     }

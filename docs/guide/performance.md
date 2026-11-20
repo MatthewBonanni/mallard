@@ -68,6 +68,7 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 | TENO6, hexahedra | 129.6 / 99.6 KB | 77.9 KB | 46.5 KB |
 
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
+- **Stencil entries** ([#552](https://github.com/MatthewBonanni/mallard/issues/552)) take 16 bits instead of 32, with the few far from their cell kept in full: 300–365 bytes less per cell at TENO5 and TENO6 (about 4% more cells per A100), 165–200 at TENO3, 100–160 in 2D. Results are bitwise unchanged.
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
 
 ## Cell numbering {#cell-numbering}

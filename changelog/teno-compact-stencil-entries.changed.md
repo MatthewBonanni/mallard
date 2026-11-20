@@ -1,0 +1,1 @@
+- TENO keeps each stencil entry in 16 bits, as an offset from its cell (in cells, or in planes of a structured block), with the few that do not fit in a list of their own: 300 to 365 bytes less device memory per cell at TENO5 and TENO6 in 3D, about 4% more cells per A100-80GB, and 100 to 160 bytes in 2D; results are bitwise unchanged (#552).

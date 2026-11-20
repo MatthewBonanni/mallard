@@ -838,6 +838,31 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
+**Stencil entries in 16 bits.** The stencils' cell and image entries were 32-bit indices, half or more of the
+tables once the pseudo-inverses are shared by stencil shape. Each entry is now 16 bits, $q \cdot s + r$ from
+its row with $|q| \le 3$ and $-4096 \le r < 4096$, where the stride $s$ is 8192 or the plane of one of the four
+largest structured blocks, whichever leaves fewer entries out per family; the others (images, and cells further
+away) keep 32 bits in a list per slice of rows, which the slot points into. With Hilbert and block numbering,
+these are 5 to 8% of the cells' entries. The same cases at the time of the change, and large meshes ($96^3$
+hexahedra in the default and in Hilbert order, $40^3 \times 6$ tetrahedra):
+
+| bytes per cell (cells per A100-80GB) | main | 16-bit entries |
+|---|---:|---:|
+| perfect gas, hexahedra, TENO3 / 5 / 6 | 4,973 / 7,558 / 8,382 | 4,770 / 7,255 / 8,018 (+0.6 / 4.2 / 4.5%) |
+| perfect gas, tetrahedra, TENO3 / 5 / 6 | 5,740 / 7,414 / 8,774 | 5,574 / 7,084 / 8,427 (+0 / 4.7 / 4.1%) |
+| LES, hexahedra / tetrahedra | 7,598 / 7,454 | 7,295 / 7,124 (+4.1 / 4.6%) |
+| flame, hexahedra / tetrahedra | 9,587 / 8,760 | 9,263 / 8,403 (+3.5 / 4.3%) |
+| GRI-Mech, hexahedra | 14,517 | 14,215 (+2.1%) |
+| $96^3$ hexahedra, blocks / Hilbert | 7,347 / 7,343 | 7,002 / 7,034 (+4.9 / 4.4%) |
+| $40^3 \times 6$ tetrahedra | 6,978 | 6,636 (+0%) |
+| `sphere_3d` (Gmsh tetrahedra and prisms, Hilbert), TENO5 | 47,195 | 46,882 (+0.7%) |
+| 2D quadrilaterals, TENO3 / 5 / 6 | 1,923 / 2,410 / 2,681 | 1,823 / 2,281 / 2,521 |
+| 2D triangles, TENO3 / 5 / 6 | 1,730 / 2,220 / 2,442 | 1,658 / 2,101 / 2,313 |
+
+Where the cells per A100 do not change, the 32-bit view extents (`view_entries`) bound them, not the memory.
+Results are bitwise unchanged (restart files after 4 steps of the cases above but the large meshes, of a $48^3$
+Hilbert-ordered box and of the `sphere_3d` mesh).
+
 #### Stage scratch of gas mixtures (#552)
 
 A gas mixture's right-hand side runs in this order: the reconstruction (the TENO troubled passes' coefficients, or
