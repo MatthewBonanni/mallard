@@ -1,0 +1,1 @@
+- Distributed TENO runs whose halo must be deepened for the stencils set up their tables once instead of twice: the stencil searches alone find the halo depth before the setup. Results are bitwise unchanged.

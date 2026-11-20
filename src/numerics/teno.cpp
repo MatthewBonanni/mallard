@@ -3483,6 +3483,18 @@ void TENO::find_block_stencils() {
     n_block_shapes = static_cast<uint32_t>(shapes.size());
 }
 
+void TENO::find_gather_depth(const Input & input) {
+    read_options(input);
+    choose_rows();
+    std::vector<uint32_t> cells(n_rows());
+    for (uint32_t r = 0; r < n_rows(); r++) cells[r] = cell_of_row(r);
+    teno_setup::Options options;
+    options.nk = n_dof_large;
+    options.nss = n_stencil_small;
+    options.sector_stencils = sector_stencils;
+    gather_depth = teno_setup::search_depths(*mesh, options, cells);
+}
+
 std::vector<uint32_t> TENO::cells_within_reach(const std::vector<uint32_t> & changed) const {
     const uint32_t n_rec = n_rows();
     uint8_t max_depth = 0;
