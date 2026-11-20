@@ -31,6 +31,25 @@ A few things hold for every command:
   `list`, `post extract`, `post convergence`) are functions of the
   [Python package](python.md), `mallard.info(path)` and `mallard.post.extract(files, latest=True)`,
   which run the command and return its JSON as a dict.
+- **Programs that drive Mallard** (a GUI, a workflow tool) start with
+  `mallard version --format json`: its build and the schema of each interface
+  below. Each interface's JSON carries the same `schema` and integer `version`;
+  an addition (a member, a record type) keeps the version, and a change that
+  breaks a reader increments it.
+
+| Interface | Where | Schema |
+|---|---|---|
+| Capabilities | `mallard version --format json` | `mallard-capabilities` |
+| Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
+| Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
+| Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
+| Snapshot block | every snapshot and restart file | `mallard-snapshot` |
+| Probe sampling block | probe files | `mallard-probe-sampling` |
+| Run directory | `mallard info RUN_DIR --format json` | `mallard-run-directory` |
+| Run control | `mallard ctl`, control files ([Running](running.md)) | `mallard-run-control` |
+| Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
+| Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
 
 ## Shell completion
 
@@ -142,7 +161,7 @@ Commands:
     mallard test              Run the unit and regression tests
     mallard completion        Print the shell completion script for bash, zsh or
                               fish
-    mallard --version         Print the version
+    mallard version           Print the version, or what this build supports
 
 Options:
   -i FILE                  The input file (TOML). Required.
@@ -1426,22 +1445,43 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-completion
 ```
 
-### mallard --version
+### mallard version
 
 ```text
-Usage: mallard --version
+Usage: mallard version [--format text|json]
+       mallard --version
 
 Prints the version of this build: the git description of the commit it was built
 from, else the release.
 
+With --format json, one JSON object for programs that drive Mallard, such as a
+GUI or a workflow tool, to learn what this mallard supports before using it: the
+version and commit (mallard), the build (dimension, precision, Kokkos backends,
+MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the versions of the libraries it
+uses (dependencies), the dimensions of the solvers installed with it (mallard
+--dim 3 version --format json describes the 3D one's build), and under
+interfaces the schema name and version of every machine-readable output: the key
+catalog, the check report, the run log, the run, snapshot and probe sampling
+blocks of output files, the run directory report, run control (with its commands
+and control files), the grid convergence report and the pack manifest. Each of
+these carries the same schema and version fields; an addition keeps the version,
+a change that breaks a reader increments it.
+
 Options:
-  -h, --help  Show this page.
+  --format text|json  text: the version alone, as mallard --version prints it;
+                      json: the version, commit, build and dependencies, the
+                      dimensions of the solvers installed with it, and the
+                      schema and version of every machine-readable interface,
+                      for programs that drive Mallard. Default: text.
+  -h, --help          Show this page.
 
 Examples:
   $ mallard --version
+  $ mallard version --format json
 
 Exit status:
-  0  always
+  0  printed
+  2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-version
 ```

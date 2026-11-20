@@ -15,7 +15,12 @@
 #include "commands.h"
 #include "front_end.h"
 #include "input_upgrade.h"
+#include "interfaces.h"
+#include "json.h"
+#include "provenance.h"
 #include "run_control.h"
+#include "run_log.h"
+#include "snapshot_block.h"
 #include "diagnostic_code.h"
 #include "log.h"
 
@@ -409,6 +414,13 @@ constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
+constexpr Option VERSION_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: the version alone, as mallard --version prints it; json: the version, commit, build and "
+     "dependencies, the dimensions of the solvers installed with it, and the schema and version of every "
+     "machine-readable interface, for programs that drive Mallard. Default: text."},
+};
+
 int new_main(const Args & args) {
     if (args.has("--list")) {
         logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
@@ -450,8 +462,58 @@ int completion_main(const Args & args) {
     return 0;
 }
 
-int version_main(const Args &) {
-    std::cout << "Mallard " << mallard_version() << std::endl;
+std::string strings_json(std::span<const char * const> items) {
+    std::string out = "[";
+    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
+    return out + "]";
+}
+
+std::string schema_json(const char * schema, int version) {
+    return json::Object().add("schema", schema).add("version", version).str();
+}
+
+std::string capabilities_json() {
+    std::string dimensions = "[";
+    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
+    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
+    control.pop_back();
+    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
+    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
+    const std::string list = json::Object()
+                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
+                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
+                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
+                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
+                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
+                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
+                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
+                                 .raw("run_control", control)
+                                 .raw("convergence", entry(interfaces::CONVERGENCE))
+                                 .raw("pack", entry(interfaces::PACK))
+                                 .str();
+    return json::Object()
+        .add("schema", interfaces::CAPABILITIES.name)
+        .add("version", interfaces::CAPABILITIES.version)
+        .raw("mallard", provenance::code())
+        .raw("build", provenance::build())
+        .raw("dependencies", provenance::dependencies())
+        .raw("dimensions", dimensions + "]")
+        .raw("interfaces", list)
+        .str();
+}
+
+int version_main(const Args & args) {
+    const std::string format = args.value_or("--format", "text");
+    if (format != "text" && format != "json") {
+        return usage_error(*command("version"), "--format takes text or json, not " + format);
+    }
+    if (format == "json") {
+        std::cout << capabilities_json() << std::endl;
+    } else {
+        std::cout << "Mallard " << mallard_version() << std::endl;
+    }
     return 0;
 }
 
@@ -1097,17 +1159,32 @@ constexpr Command COMMANDS[] = {
         .run = completion_main,
     },
     {
-        .name = "--version",
+        .name = "version",
+        .alias = "--version",
         .group = "Maintain",
-        .summary = "Print the version",
-        .synopsis = "mallard --version",
+        .summary = "Print the version, or what this build supports",
+        .synopsis = "mallard version [--format text|json]\n"
+                    "mallard --version",
         .description =
             "Prints the version of this build: the git description of the commit it was built from, else the "
-            "release.",
-        .options = {},
+            "release.\n"
+            "\n"
+            "With --format json, one JSON object for programs that drive Mallard, such as a GUI or a workflow "
+            "tool, to learn what this mallard supports before using it: the version and commit (mallard), the "
+            "build (dimension, precision, Kokkos backends, MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the "
+            "versions of the libraries it uses (dependencies), the dimensions of the solvers installed with it "
+            "(mallard --dim 3 version --format json describes the 3D one's build), and under interfaces the "
+            "schema name and version of every machine-readable output: the key catalog, the check report, the "
+            "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run control (with "
+            "its commands and control files), the grid convergence report and the pack manifest. Each of these "
+            "carries the same schema and version fields; an addition keeps the version, a change that breaks "
+            "a reader increments it.",
+        .options = VERSION_OPTIONS,
         .arguments = {},
-        .examples = "$ mallard --version",
-        .exit_status = "0  always",
+        .examples = "$ mallard --version\n"
+                    "$ mallard version --format json",
+        .exit_status = "0  printed\n"
+                       "2  usage error",
         .run = version_main,
     },
 };
