@@ -53,7 +53,7 @@ double fixture(const size_t f, const double Z, const double S, const double c) {
         case 10: return 1000.0 * (1.0 + 0.4 * Z) * (1.0 + 0.2 * c);
         case 11: return 0.1 * Z * (1.0 - c);
         case 12: return 0.23 * (1.0 - Z) * (1.0 - c);
-        case 13: return 0.2 * c * (1.0 - 0.5 * S);
+        case 13: return c * (0.1 + 0.2 * Z) * (1.0 - 0.5 * S);
         default: return 0.7 - 0.1 * Z;
     }
 }
@@ -144,7 +144,7 @@ TEST(FlameletTableTest, LookupIsExactForMultilinearFunctions) {
             }
         }
     }
-    const Table t("test", axes, {{"f0", "1"}, {"f1", "1"}}, values);
+    const Table t("test", "test", axes, {{"f0", "1"}, {"f1", "1"}}, values);
     std::mt19937 rng(631);
     std::uniform_real_distribution<double> u(0.0, 1.0);
     std::vector<std::vector<double>> q;
@@ -262,8 +262,16 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
     expect_refused("gamma.mtab", set_value(5, "gamma0", 0.9), "the field \"gamma0\" is not above 1 at node 5");
     expect_refused("fraction.mtab", set_value(3, "Y_O2", 1.5), "the field \"Y_O2\" is outside [0, 1] at node 3");
     expect_refused("linear.mtab", set_value(1, "C", 0.5), "C is not linear in c at (Z, S) node 0");
+    expect_refused("name.mtab", edit_header("\"name\":\"Y_N2\"", "\"name\":\"Y N2\""), "field name \"Y N2\" is not of the form");
+    expect_refused("weights.mtab", edit_header("{\"H2O\":1.0}", "{\"H2O\":\"1\"}"), "model_data.progress_variable");
+    expect_refused("stream.mtab", edit_header("\"H2\":0.1,", "\"H2\":1.1,"), "model_data.streams.fuel.Y");
     const Table t = Table::read(FIXTURE);
     const std::vector<double> zeros(t.axes()[0].nodes.size() * t.axes()[2].nodes.size() * t.fields().size(), 0.0);
-    const Table two_axes("fpv", {t.axes()[0], t.axes()[2]}, t.fields(), zeros, "two axes");
-    EXPECT_THROW(two_axes.fpv(), std::runtime_error);
+    const Table two_axes("fpv", "saghafian2015", {t.axes()[0], t.axes()[2]}, t.fields(), zeros, "two axes");
+    try {
+        two_axes.fpv();
+        ADD_FAILURE() << "a table of two axes has an FPV map";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("a table of model \"fpv\" has 3 axes"), std::string::npos) << e.what();
+    }
 }

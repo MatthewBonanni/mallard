@@ -2,8 +2,8 @@
  * @file flamelet_table.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Tabulated chemistry: Mallard's table format (.mtab, written by an
- *        external table generator; contract in docs/design/flamelet.md,
- *        section 3), multilinear lookup on the host and in device kernels,
+ *        external table generator; specified in docs/design/table_format.md),
+ *        multilinear lookup on the host and in device kernels,
  *        and the flamelet/progress-variable (FPV) map from the
  *        transported mean mixture fraction, its variance and the mean progress
  *        variable to a table point (docs/design/flamelet.md).
@@ -182,10 +182,10 @@ class Table {
 
         /**
          * @brief A table from its parts, for tests: checked as a container (axes, fields, values),
-         *        not against a model's contract until fpv() is called.
+         *        not against its tags' contract until fpv() is called.
          */
-        Table(std::string model, std::vector<Axis> axes, std::vector<Field> fields, std::vector<double> values,
-              const std::string & where = "table");
+        Table(std::string model, std::string thermodynamics, std::vector<Axis> axes, std::vector<Field> fields,
+              std::vector<double> values, const std::string & where = "table");
 
         const std::string & model() const { return m_model; }
         const std::string & thermodynamics() const { return m_thermodynamics; }

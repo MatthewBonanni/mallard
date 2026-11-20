@@ -93,8 +93,8 @@ table is refused. Fields Mallard does not use may have any units string.
 | anything else | any | no | For example the versions of the generator's dependencies (Cantera), the generator's source revision, the transport model of the flamelets |
 
 Provenance must not hold personal data (user names, host names, paths below a
-home directory). Mallard prints the generator, its version and the mechanism's
-hash in the run log when it reads a table.
+home directory). When the solver reads a table (stage 2), it prints the
+generator, its version and the mechanism's hash in the run log.
 
 ## 4. Fields every table holds
 
@@ -160,8 +160,8 @@ solver scales it to the local state (stage 2 decides the scaling, for example
 | Member | Type | Meaning |
 |---|---|---|
 | `Z_st` | number in (0, 1) | Stoichiometric mixture fraction |
-| `progress_variable` | object | The weights `w_k` of `C`, by species name |
-| `streams` | object | `{"fuel": {"T": K, "Y": {species: mass fraction}}, "oxidizer": {...}}`, which define `Z = 1` and `Z = 0` |
+| `progress_variable` | object, not empty | The weights `w_k` of `C`, numbers by species name |
+| `streams` | object | `{"fuel": {"T": K, "Y": {species: mass fraction}}, "oxidizer": {...}}`, which define `Z = 1` and `Z = 0`; `T` positive, mass fractions in [0, 1] |
 
 ### 5.2 Reserved model tags
 
@@ -222,7 +222,8 @@ reason, unless:
    are present. The model's `model_data` members are present and in range.
 5. The axes are between 1 and 4 in number. The format sets no limit; this
    version of Mallard reads up to 4. Each axis has at least 2 finite,
-   strictly increasing nodes. Field names are unique.
+   strictly increasing nodes. Field names are unique and of the form
+   `[A-Za-z][A-Za-z0-9_]*`.
 6. Every `Y_` field is a species in `species`.
 7. The data holds exactly `prod(n_a) n_fields` values and every value is
    finite.
@@ -269,8 +270,8 @@ T0 = data[..., [f["name"] for f in header["fields"]].index("T0")]
 [`test/data/flamelet/fixture_fpv.mtab`](../../test/data/flamelet/fixture_fpv.mtab)
 is a small valid `fpv` / `saghafian2015` table (5 x 3 x 4 nodes, 15 fields,
 species H2, O2, H2O and N2). Its fields are synthetic functions, multilinear in
-`(Z, S, c)`, so lookups reproduce them exactly. They test the format, not
-combustion. The script that wrote it is in its own `provenance.input`. A
+`(Z, S, c)`, so lookups reproduce them exactly, and `C = Y_H2O` as its
+`progress_variable` says. They test the format, not combustion. The script that wrote it is in its own `provenance.input`. A
 generator can compare its writer against this file, and Mallard's tests
 (`test/flamelet_table_test.cpp`) read it.
 

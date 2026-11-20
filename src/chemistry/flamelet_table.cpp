@@ -16,7 +16,6 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -137,6 +136,15 @@ bool is_sha256(const std::string & s) {
     return true;
 }
 
+bool is_name(const std::string & s) {
+    auto letter = [](const char ch) { return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'); };
+    if (s.empty() || !letter(s[0])) return false;
+    for (const char ch : s) {
+        if (!(letter(ch) || (ch >= '0' && ch <= '9') || ch == '_')) return false;
+    }
+    return true;
+}
+
 double swap_bytes(double x) {
     uint64_t u;
     std::memcpy(&u, &x, sizeof u);
@@ -168,10 +176,10 @@ TableView<MemorySpace> make_view(const std::vector<Table::Axis> & axes, const ui
 
 } // namespace
 
-Table::Table(std::string model, std::vector<Axis> axes, std::vector<Field> fields, std::vector<double> values,
-             const std::string & where)
-    : m_where(where), m_model(std::move(model)), m_axes(std::move(axes)), m_fields(std::move(fields)),
-      m_values(std::move(values)) {
+Table::Table(std::string model, std::string thermodynamics, std::vector<Axis> axes, std::vector<Field> fields,
+             std::vector<double> values, const std::string & where)
+    : m_where(where), m_model(std::move(model)), m_thermodynamics(std::move(thermodynamics)), m_axes(std::move(axes)),
+      m_fields(std::move(fields)), m_values(std::move(values)) {
     finish();
 }
 
@@ -184,6 +192,7 @@ void Table::finish() {
     if (m_fields.empty()) fail(where, "no fields");
     std::unordered_set<std::string> names;
     for (const auto & f : m_fields) {
+        if (!is_name(f.name)) fail(where, "the field name \"" + f.name + "\" is not of the form [A-Za-z][A-Za-z0-9_]*");
         if (!names.insert(f.name).second) fail(where, "the field \"" + f.name + "\" appears twice");
     }
     uint64_t nodes = 1;
@@ -321,13 +330,26 @@ Table Table::read(const std::string & file) {
     if (t.m_model == "fpv") {
         const double Z_st = member(model_data, "Z_st", T::NUMBER, file, "model_data.").number;
         if (!(Z_st > 0.0 && Z_st < 1.0)) fail(file, "the header has no valid \"model_data.Z_st\"");
-        member(model_data, "progress_variable", T::OBJECT, file, "model_data.");
+        const json::Value weights = member(model_data, "progress_variable", T::OBJECT, file, "model_data.");
+        if (weights.members.empty()) fail(file, "the header has no valid \"model_data.progress_variable\"");
+        for (size_t k = 0; k < weights.members.size(); k++) {
+            if (weights.members[k].type != T::NUMBER) {
+                fail(file, "the weight of " + weights.names[k] + " in \"model_data.progress_variable\" is not a number");
+            }
+        }
         const json::Value streams = member(model_data, "streams", T::OBJECT, file, "model_data.");
         for (const char * s : {"fuel", "oxidizer"}) {
             const std::string path = "model_data.streams." + std::string(s) + ".";
             const json::Value stream = member(streams, s, T::OBJECT, file, "model_data.streams.");
-            member(stream, "T", T::NUMBER, file, path);
-            member(stream, "Y", T::OBJECT, file, path);
+            if (!(member(stream, "T", T::NUMBER, file, path).number > 0.0)) {
+                fail(file, "the header has no valid \"" + path + "T\"");
+            }
+            const json::Value Y = member(stream, "Y", T::OBJECT, file, path);
+            for (size_t k = 0; k < Y.members.size(); k++) {
+                if (Y.members[k].type != T::NUMBER || !within(Y.members[k].number, Bound::FRACTION)) {
+                    fail(file, "the mass fraction of " + Y.names[k] + " in \"" + path + "Y\" is not in [0, 1]");
+                }
+            }
         }
     }
     const json::Value provenance = member(h, "provenance", T::OBJECT, file);
@@ -341,10 +363,14 @@ Table Table::read(const std::string & file) {
     if (!is_sha256(member(mechanism, "sha256", T::STRING, file, "provenance.mechanism.").string)) {
         fail(file, "the header has no valid \"provenance.mechanism.sha256\" (64 lowercase hexadecimal digits)");
     }
-    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (bytes.size() % sizeof(double) != 0) fail(file, "its data is not a whole number of float64 values");
-    t.m_values.resize(bytes.size() / sizeof(double));
-    std::memcpy(t.m_values.data(), bytes.data(), bytes.size());
+    const std::streamoff start = in.tellg();
+    in.seekg(0, std::ios::end);
+    const std::streamoff size = in.tellg() - start;
+    in.seekg(start);
+    if (start < 0 || size < 0 || !in) fail(file, "its data cannot be read");
+    if (size % static_cast<std::streamoff>(sizeof(double)) != 0) fail(file, "its data is not a whole number of float64 values");
+    t.m_values.resize(static_cast<size_t>(size) / sizeof(double));
+    if (!in.read(reinterpret_cast<char *>(t.m_values.data()), size)) fail(file, "its data cannot be read");
     if constexpr (std::endian::native == std::endian::big) {
         for (auto & v : t.m_values) v = swap_bytes(v);
     }

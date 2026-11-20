@@ -381,9 +381,11 @@ Each must fail under a plausible bug (CONTRIBUTING.md).
   clamped outside the axes. The FPV map returns the transported `C` within its
   bounds and clamps outside. Files that break the format or the contract are
   refused with the file and the reason: truncated data, a wrong version, NaN,
-  an unknown model or thermodynamics tag, wrong units, a missing field, a `Y_`
-  field outside the species block, wrong axes, bad provenance, `Z_st` out of
-  range, `gamma0 <= 1`, a mass fraction outside [0, 1], and `C` not linear in `c`.
+  an unknown model or thermodynamics tag, wrong units, a missing field, a field
+  name outside the allowed form, a `Y_` field outside the species block, wrong
+  axes or too few of them, bad provenance, `Z_st` out of range, a weight of `C`
+  that is not a number, a stream mass fraction outside [0, 1], `gamma0 <= 1`, a
+  mass fraction outside [0, 1], and `C` not linear in `c`.
 - **Generation** (the generator library): beta weights against an independent
   integration, the PDF limits, the `Lambda -> c` remap, and off-table flamelets
   against direct Cantera solutions. The first draft of #1222 measured, on a
