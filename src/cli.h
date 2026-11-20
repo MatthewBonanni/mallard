@@ -68,7 +68,7 @@ struct Args {
  */
 struct Command {
     std::string_view name;         ///< "check", "mesh convert"; empty for the run (`mallard -i input.toml`)
-    std::string_view alias;        ///< another spelling of a one-word name ("--version"), or empty
+    std::string_view alias = {};   ///< another spelling of a one-word name ("--version"), or empty
     std::string_view group;        ///< heading of the top-level page (one of groups())
     std::string_view summary;      ///< one line on the top-level page
     std::string_view synopsis;     ///< usage lines, one per line
