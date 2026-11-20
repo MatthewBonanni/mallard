@@ -154,7 +154,10 @@ Check environment(int dim, const fs::path & solver, const std::vector<std::strin
 
 /** @brief The Sod shock tube of `mallard new sod --quick`, made three-dimensional (a slab four cells thick) for 3D. */
 bool make_case(int dim, const fs::path & front_end, const fs::path & dir, std::string & why) {
-    const Exit e = run_in({front_end.string(), "new", "sod", dir.string(), "--quick", "--force"}, dir.parent_path(),
+    // --dim: the template is 2D, and a build may have mallard3d alone
+    const Exit e = run_in({front_end.string(), "--dim", std::to_string(dim), "new", "sod", dir.string(), "--quick",
+                           "--force"},
+                          dir.parent_path(),
                           dir.parent_path() / ("new_" + std::to_string(dim) + "d.log"));
     if (e.status != 0) {
         why = "mallard new sod --quick: exit " + std::to_string(e.status) + ": " + tail(e.output);
