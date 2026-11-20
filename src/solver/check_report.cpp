@@ -218,6 +218,20 @@ void regions_section(report::Text & text, const CheckReport & r) {
                     "tolerance", "outside"},
                    measures);
     }
+    std::vector<Row> boxes;
+    for (const CheckRegion & g : r.regions) {
+        if (!g.from_file) continue;
+        std::string lo, hi;
+        for (size_t i = 0; i < N_DIM; i++) {
+            lo += (i ? ", " : "(") + logging::real(g.box[0][i]);
+            hi += (i ? ", " : "(") + logging::real(g.box[1][i]);
+        }
+        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")", "m"}});
+    }
+    if (!boxes.empty()) {
+        text.note("Regions from surface files (STL, OBJ): their bounding box, placed and in meters.");
+        text.table({"region", "from", "to", {"units", Kind::UNITS}}, boxes);
+    }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
         std::string images;
@@ -730,6 +744,10 @@ std::string check_json(const CheckReport & r) {
                   .raw("resolution", g.exact ? "null" : std::to_string(g.resolution))
                   .add("solution", g.solution)
                   .add("surface", g.surface)
+                  .raw("box", !g.from_file ? "null"
+                                           : "[[" + json::number(g.box[0][0]) + ", " + json::number(g.box[0][1]) +
+                                                 ", " + json::number(g.box[0][2]) + "], [" + json::number(g.box[1][0]) +
+                                                 ", " + json::number(g.box[1][1]) + ", " + json::number(g.box[1][2]) + "]]")
                   .raw("own", std::isfinite(g.own_measure) ? json::Object()
                                                                  .add("measure", g.own_measure)
                                                                  .add("surface", g.own_surface)

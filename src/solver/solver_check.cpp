@@ -836,6 +836,34 @@ void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
     block = std::move(out);
 }
 
+/**
+ * @brief Warnings for a region from a surface file whose box (in m) is likely in the wrong units, far smaller
+ *        or larger than the domain's, or reaches outside it (covers: it touches cells).
+ */
+void check_surface_file(CheckReport & r, const std::string & label, const Box & b, const Box & domain, const bool covers) {
+    double size = 0.0, across = 0.0;
+    bool beyond = false;
+    for (size_t i = 0; i < N_DIM; i++) {
+        if (!std::isfinite(b[0][i]) || !std::isfinite(b[1][i])) return;
+        size += (b[1][i] - b[0][i]) * (b[1][i] - b[0][i]);
+        across += (domain[1][i] - domain[0][i]) * (domain[1][i] - domain[0][i]);
+        const double margin = 1e-9 * (domain[1][i] - domain[0][i]);
+        beyond = beyond || b[0][i] < domain[0][i] - margin || b[1][i] > domain[1][i] + margin;
+    }
+    size = std::sqrt(size);
+    across = std::sqrt(across);
+    const std::string spans = "region " + label + " spans " + box_text(b) + " m (" + logging::real(size) +
+                              " m across), the domain " + box_text(domain) + " m (" + logging::real(across) + " m across)";
+    if (size > 10.0 * across || size < 1e-3 * across) {
+        r.warning(diagnostic_code::REGION_SCALE,
+                  spans + ": " + logging::real(size > across ? size / across : across / size) + " times " +
+                      (size > across ? "larger" : "smaller") + ", which is likely a unit error: check its units");
+    } else if (beyond && covers) {
+        r.warning(diagnostic_code::REGION_PARTLY_OUTSIDE,
+                  spans + ": its part outside the domain is left out (--view shows both)");
+    }
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -895,7 +923,14 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
-        r.regions.push_back(entry(*mesh, label, *region, m, false));
+        CheckRegion g = entry(*mesh, label, *region, m, false);
+        g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
+                                  [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
+        if (g.from_file) {
+            g.box = region::bounds(*region);
+            check_surface_file(r, label, g.box, domain, m.cells > 0);
+        }
+        r.regions.push_back(g);
         if (m.cells == 0) {
             const Box b = region::bounds(*region);
             bool outside = false;
