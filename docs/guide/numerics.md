@@ -177,8 +177,8 @@ Read off the curves (interpolated between the measured meshes):
   times its memory, at the same or lower error). It is not as robust, though:
   - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
     (Mach 1 in a Mach 0.2 flow);
-  - it keeps an odd-even wall-pressure mode at the NACA 0012 trailing edge;
-  - it undershoots ahead of shocks on quads about 10 times as much as order 5.
+  - it undershoots ahead of shocks on quads about 10 times as much as order 5;
+  - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
   Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
   For smooth flow, setting `order = 4` under
@@ -211,7 +211,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 50 more.
+and 51 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -264,7 +264,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 50 more.
+and 51 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -358,7 +358,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 50 more.
+and 51 more.
 
 | `riemann_solver` | Use |
 |---|---|
