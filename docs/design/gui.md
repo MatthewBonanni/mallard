@@ -99,8 +99,9 @@ state management, its own tests) lives there.
   subprocesses (locally, or through SSH or `kubectl exec`), owns the project
   model and the transfer engine, and renders local data with VTK.
 - **Remote processes**: short `mallard` commands on the login node or in a
-  helper pod; solver jobs; viewer jobs while viewing. All of them end on their
-  own.
+  helper pod (metadata only: anything that reads a large mesh or snapshot runs
+  as a job, see [Scale](#scale)); solver jobs; viewer jobs while viewing;
+  extraction and query jobs for large meshes. All of them end on their own.
 - **No in-process solver.** The programmatic interface of
   [#345](https://github.com/MatthewBonanni/mallard/issues/345) is not on the
   critical path: remote runs need a process boundary anyway, and the command
@@ -406,12 +407,11 @@ for small cases; remote rendering keeps them on the server, where picking is a
 round trip.
 
 **Large meshes.** The view never loads the volume mesh into the browser: it
-shows zone surfaces (decimated with `vtkQuadricDecimation` above a few hundred
-thousand triangles, with the full-resolution surface used for picking on the
-server), and a cut through the volume computed only for the plane shown
-(`vtkCutter` on the server). Beyond a few million surface triangles, the view
-switches to server-side rendering next to the mesh (the viewer job), with the
-same tools.
+shows zone surfaces, decimated above a few hundred thousand triangles, with the
+full-resolution surface used for picking on the server, and a cut through the
+volume computed on the server only for the plane shown. Meshes of hundreds of
+millions of cells and more use levels of detail made by Mallard near the data;
+see [Scale](#scale).
 
 ## Backends
 
@@ -477,7 +477,8 @@ where a copy happens to be:
 - **Objects**: snapshots, restart files, extracts and the files a run read
   (input, mesh, mechanism, data tables) are written once and identified by their
   SHA-256, which the run log's output records already hold (and `mallard pack`
-  for the files read). A copy is either byte-identical to the object, or it does
+  for the files read); large files are identified by a chunk tree of SHA-256
+  hashes ([Scale](#scale)). A copy is either byte-identical to the object, or it does
   not exist; nothing can be "stale". Two runs that wrote the same bytes share
   one object.
 - **Streams**: the run log, probe, force and integral CSV files and progress
@@ -623,9 +624,9 @@ vtk.js and keeps in memory only. Nothing is written to local disk.
 allocation, short queues, and fast enough for surfaces and slices of a few
 million triangles. EGL on a GPU node is an option per remote, for volume
 rendering and large surfaces. VTK's wheels select EGL or OSMesa at run time
-(to be confirmed for the VTK version pinned). The viewer is one process at
-first; data larger than a node's memory is reduced first (a slice, a surface,
-a region) by `mallard post extract` in a batch job.
+(to be confirmed for the VTK version pinned). One viewer process holds
+surfaces and slices of any mesh, as levels of detail; data that must be rendered
+whole uses a parallel viewer job ([Scale](#scale)).
 
 **Which software.** The viewer is GUI code (it speaks the GUI's protocol), so it
 is versioned with the GUI, not with Mallard: an image `mallard-viewer:<gui
@@ -673,6 +674,165 @@ a job; extraction to CSV through `mallard post extract`; images exported from
 the current view. Saved views and plots are in the project file. Heavier
 analysis stays in ParaView or Python: the GUI opens the same files and says
 where they are.
+
+## Scale
+
+The design must hold for meshes of 100 million to over a billion cells, run on
+thousands of ranks, whose mesh, snapshots and restarts never fit on one machine
+or in one viewer process. At a billion cells, roughly:
+
+| What | Size |
+|---|---|
+| Volume mesh | 35 GB (tetrahedra) to 90 GB (hexahedra), read by the ranks in shares ([HDF5 meshes](../guide/meshes.md#hdf5-meshes-for-large-runs)) |
+| Restart file | 40 GB for a single gas (5 variables × 8 B), 200 GB with 20 species; one file in global order, any rank count |
+| Snapshot | 80 GB for ten double-precision fields; one shared VTKHDF file, or one VTU piece per rank (ranks × snapshots files: millions for a long run on thousands of ranks) |
+| Boundary faces | about 6 million for a box, 10 to 100 million around a wall-resolved body |
+| A run | many TB |
+
+Four rules follow, and every feature is checked against them below:
+
+1. **Nothing of size O(cells) reaches the GUI process, a browser, or a single
+   viewer process.** The volume is never loaded for viewing; what is shown is
+   bounded in size by a budget, whatever the mesh.
+2. **Work goes to the data, in parallel, done by `mallard`**: the same parallel
+   readers and partitions a run uses, under the remote's launcher, as a job.
+   Short commands on a login node read only metadata; anything O(cells) is a
+   job.
+3. **Results arrive progressively**: coarse first, refined on demand and on
+   zoom, each step cancellable.
+4. **Nothing O(files) or O(bytes) runs in the UI thread or as per-file round
+   trips over SSH.** Listings, hashing and estimates run on the remote, in one
+   process, and come back as summaries and pages.
+
+### Budgets
+
+| What | Target at 10⁹ cells |
+|---|---|
+| GUI backend process | under 1 GB resident, independent of the case; manifests and the cache index in SQLite on disk, read by page |
+| Browser tab | under 1 GB; at most about 2 million triangles of local geometry (vtk.js), otherwise image mode |
+| UI thread | never blocked over 50 ms; every remote operation is asynchronous, with progress and a cancel |
+| Open a case: zones, kinds, face counts, bounds | under 2 s (metadata only) |
+| First 3D preview of the zones | under 10 s once the surface levels exist; making them is a one-off parallel job per mesh, cached by the mesh's hash |
+| Boundary assignment change validated | under 1 s, against zone metadata |
+| Region preview: geometry / cells and measures | under 1 s for analytic shapes over the surfaces / a geometry-only check as a job, minutes |
+| Pick a zone / a face or cell at full resolution | under 0.2 s (hardware selection) / under 1 s (server query) |
+| Section cut through the volume | coarse in under 3 s, full resolution in under 30 s |
+| Manifest of a million files | first page under 2 s; full index in the background |
+| Monitor poll | under 1 s; bytes read proportional to the new records |
+
+### Viewer
+
+**Surfaces, by Mallard, near the data.** The viewer never reads the volume to
+draw a mesh. A `mallard` job extracts every boundary zone, and internal zones
+and baffles, in parallel: each rank extracts its share of each zone's faces and
+decimates it with its partition borders locked, and the pieces are merged into
+**levels of detail** (for example 200 thousand, 2 million and 20 million
+triangles per mesh) stored as spatial tiles with an index. The result is a
+derived object named by the mesh's hash and the extraction parameters, so it is
+made once per mesh and shared by every case and run on that mesh. For results,
+the same extraction carries the fields of a snapshot onto the surfaces
+([#1319](https://github.com/MatthewBonanni/mallard/issues/1319), extended in a
+comment).
+
+**Progressive refinement.** The view starts from the coarsest level of every
+zone and loads finer tiles where the screen-space error asks for them (zooming
+on the sphere loads its fine tiles, not the far field's), within the triangle
+budget, evicting tiles that leave the view.
+
+**Rendering.** One viewer process holds the tiles in view, which the budget
+bounds, so it suffices for surfaces at any mesh size. Where the data itself must
+be rendered whole (a volume rendering, a full-resolution iso-surface of a
+billion-cell snapshot), the viewer job becomes parallel: the trame process
+drives a ParaView server (`pvserver`) of N MPI ranks that reads the shared
+VTKHDF file or the VTU pieces in parallel and composites the image with IceT,
+so only images leave the job. N is proposed from the snapshot's size (about one
+rank per 50 to 100 million cells, within the remote's viewer limits) and shown
+with its cost before the job starts.
+
+**Section cuts and picking at full resolution.** Clip planes and boxes on the
+surfaces stay GPU clipping planes on the tiles shown (instant). The cut face
+through the volume (the cells a plane crosses) is computed at full resolution
+on the server: by the parallel `pvserver` for results, and for setup (a mesh
+without a solution) by a resident `mallard` process that keeps the mesh
+partitioned in memory and answers slice and pick requests until idle
+([#1319](https://github.com/MatthewBonanni/mallard/issues/1319)); each request
+returns a decimated result first and the full one after. Picking a zone is exact
+from hardware selection on any level, since decimation keeps zone membership;
+the face or cell under the cursor is found by the same server from the picked
+point on the full-resolution data. Reading only the cells near a plane or point
+needs a spatial index of the mesh's chunks (the bounding box of each chunk of
+the global order), which an HDF5 mesh can carry.
+
+### Setup
+
+- **Zones from metadata.** `mallard info MESH --format json` must return zone
+  names, kinds, face counts, bounds and areas without reading the volume: from
+  the zone tables of an HDF5 mesh directly, and for other formats from one
+  parallel pass, cached beside the mesh by its hash. The GUI recommends
+  `mallard mesh convert` for large meshes used more than once.
+- **Boundary assignment** works on the zone list and the surface levels, and is
+  validated instantly against the metadata (zones without a condition, names
+  that are not zones); the full check follows as a job.
+- **Region previews**: analytic regions (boxes, spheres, cylinders, their
+  booleans and transforms) are drawn as their geometry over the surfaces at
+  once; their cells, fractions and measures come from a geometry-only check near
+  the data, returned as counts and the region's decimated boundary, never its
+  cells. Regions defined by the solution need a snapshot and are previewed on
+  the viewer.
+- **`mallard check`** of a large case runs under the remote's launcher on the
+  job's ranks (it already checks the run on N ranks under `mpirun -n N`), as a
+  short job the GUI submits, never on a login node; the GUI estimates its memory
+  from the metadata first. It needs the geometry-only mode, a case view that
+  writes surfaces and region boundaries instead of a volume block, and region
+  blocks written by each rank rather than gathered on rank 0
+  ([#1313](https://github.com/MatthewBonanni/mallard/issues/1313), extended in a
+  comment).
+
+### Data and transfers
+
+- **Hashes in parallel.** Today rank 0 hashes every shared output file (VTKHDF,
+  XDMF, restart) in one background thread by reading it back: about 25 s for a
+  40 GB restart at 1.6 GB/s, minutes for a 200 GB one, a queue that a run
+  writing often outgrows. Object ids for large files become a **chunk tree**:
+  SHA-256 of every 64 MiB chunk, computed by all ranks in parallel once the
+  file is closed (each reading its share of the chunks), and the object id is the SHA-256 of that list (files of one chunk keep
+  their plain SHA-256). Chunks are also the unit of resume, verification and
+  parallel transfer ([#1329](https://github.com/MatthewBonanni/mallard/issues/1329)).
+- **Manifests of millions of files.** `mallard files` streams JSON lines rather
+  than one document, built from the run log (O(records)), listing directories
+  only for what the log does not record, all in one process on the remote. It
+  groups files into logical objects (a snapshot and its per-rank pieces is one
+  entry with a piece count and total bytes), so the data manager lists
+  snapshots, not pieces. A `--summary` with a selection (steps, kinds, writers)
+  returns counts and bytes only, so estimates are computed on the remote and
+  the file list never crosses the wire to price a transfer
+  ([#1317](https://github.com/MatthewBonanni/mallard/issues/1317), extended in a
+  comment). The GUI stores manifests in its SQLite cache index and pages them.
+- **Transfers of many TB** run several streams at once (objects, chunks of a
+  large object, or groups of pieces; 8 to 16 by default, per route), each chunk
+  resumed and verified on its own, so a 200 GB restart moves at the route's
+  aggregate bandwidth and an interruption costs at most one chunk per stream.
+  Where both ends are Globus endpoints, Globus is a route the engine can choose
+  (a GUI follow-up).
+- **Partial subsets.** A Mallard restart is one file whatever the rank count,
+  so there are no per-rank restart sets to move: continuing elsewhere moves the
+  whole file, in parallel chunks. Its variables are contiguous byte ranges, so a
+  subset by variable is a range read; a subset in space is
+  `mallard post extract --region` near the data; a subset of ranks is their VTU
+  pieces, selectable as such.
+
+### Monitor
+
+- The run log is already followed by byte offset. For long runs (millions of
+  steps), each history is kept as min/max/last per bin at a few resolutions,
+  bounded to about 10 thousand points per curve per level; zooming in reads the
+  missing records by byte range, from an index of record offsets in the cache.
+- Probes, forces and integrals in CSV are streams, read from the last offset.
+  HDF5 and VTKHDF probe files are rewritten in place
+  ([#1326](https://github.com/MatthewBonanni/mallard/issues/1326)), so they are
+  read on the remote, new rows only and selected columns only
+  ([#1317](https://github.com/MatthewBonanni/mallard/issues/1317)); a probe of
+  thousands of points over a long run is never copied whole to plot one curve.
 
 ## Installation
 
@@ -1015,6 +1175,7 @@ then single-file series are copied only once their run has ended.
 | M3: installs | one-click remote install (archive, Apptainer, Spack), `mallard install verify`, versions side by side, upgrades; the release artifacts; the Tauri desktop app with signed installers |
 | M4: full setup | regions and probes editing with previews, boundary coordinates by picking, every section from the catalog, geometry-only fast previews, command palette over keys, `ctl set` and `SET` file |
 | M5: results | geometry mode (vtk.js), GPU viewer, fallbacks for blocked forwarding, extraction for large data, saved views, plots of probes with spectra, `diff` and `post average` as jobs |
+| M6: scale | surface levels of detail made by Mallard and progressive refinement, the resident query process for cuts and picks, the parallel viewer job (`pvserver` with IceT), chunk-tree hashes and parallel transfers, streamed manifests, decimated histories; tested on a mesh of 10⁹ cells |
 
 ## Follow-ups
 
@@ -1027,15 +1188,16 @@ Filed, each part of #346.
 | The catalog for the GUI: schema version, types, units, descriptions, variants of arrays of tables, roles of file keys, display hints, typed defaults, exported from the binary | [#1256](https://github.com/MatthewBonanni/mallard/issues/1256) (extended in a comment) |
 | `list keys` and `check` on partial inputs | [#1311](https://github.com/MatthewBonanni/mallard/issues/1311) |
 | Structured check diagnostics, setup warnings in the JSON, several errors at once | [#1312](https://github.com/MatthewBonanni/mallard/issues/1312) |
-| Case-view block metadata and a geometry-only `--view` | [#1313](https://github.com/MatthewBonanni/mallard/issues/1313) |
+| Case-view block metadata and a geometry-only `--view`; at scale, zone metadata without reading the volume, surface-only views, partitioned check | [#1313](https://github.com/MatthewBonanni/mallard/issues/1313) (extended in a comment) |
 | `mallard version --format json`, the capabilities query | [#1314](https://github.com/MatthewBonanni/mallard/issues/1314) |
 | JSON Schemas of the interfaces, tested in CI; the examples' JSON as a CI artifact | [#1315](https://github.com/MatthewBonanni/mallard/issues/1315) |
 | `--set KEY=VALUE` (or control files on by default) and a `SET` control file | [#1316](https://github.com/MatthewBonanni/mallard/issues/1316) |
-| `mallard files RUN_DIR`: objects by SHA-256, streams by length and prefix hash, `--hash` of files, ranges and prefixes | [#1317](https://github.com/MatthewBonanni/mallard/issues/1317) |
+| `mallard files RUN_DIR`: objects by SHA-256, streams by length and prefix hash, `--hash` of files, ranges and prefixes; at scale, streamed and grouped manifests, remote summaries, incremental probe reads | [#1317](https://github.com/MatthewBonanni/mallard/issues/1317) (extended in a comment) |
 | `mallard info RESTART`: whether this build can continue from it | [#1318](https://github.com/MatthewBonanni/mallard/issues/1318) |
-| `mallard post extract` of decimated surfaces and slices; `post render` ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) for batch images | [#1319](https://github.com/MatthewBonanni/mallard/issues/1319) |
+| `mallard post extract` of decimated surfaces and slices; `post render` ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) for batch images; at scale, parallel levels of detail per zone and a resident process for cuts and picks | [#1319](https://github.com/MatthewBonanni/mallard/issues/1319) (extended in a comment) |
 | `mallard install verify` | [#1320](https://github.com/MatthewBonanni/mallard/issues/1320) |
 | Write-once outputs: single-file series and rewinds modify files in place | [#1326](https://github.com/MatthewBonanni/mallard/issues/1326) |
+| Chunk-tree hashes of output files, computed by all ranks in parallel | [#1329](https://github.com/MatthewBonanni/mallard/issues/1329) |
 
 **Release pipeline**
 
