@@ -18,6 +18,7 @@
 #include <numbers>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -450,5 +451,60 @@ TEST(RegionMotionTest, SurfacesOfTheSolutionAreCutFromTheLevelsOfTheCellsTheyMay
         EXPECT_EQ(a.quad_points, b.quad_points) << table;
         EXPECT_EQ(a.quad_weights, b.quad_weights) << table;
         EXPECT_EQ(a.vertices, b.vertices) << table;
+    }
+}
+
+TEST(RegionMotionTest, SurfacesCutOnTheDeviceAreTheHostsBitForBit) {
+    // A sphere's isosurface through cells (and the boundary of the condition outside it, facing the other way),
+    // and a plane's through nodes (levels snapped to zero there), on each kind of cell
+    std::vector<std::shared_ptr<Mesh>> meshes = {unit_mesh()};
+#if N_DIM == 2
+    meshes.push_back(make_mesh("cartesian", 8, 6));
+#else
+    for (const char * type : {"cartesian", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
+        meshes.push_back(make_mesh_3d(type, 4, 4, 4));
+    }
+#endif
+    const auto sphere = [](const double * x) {
+        double r2 = 0.0;
+        for (int d = 0; d < N_DIM; d++) r2 += (x[d] - 0.45) * (x[d] - 0.45);
+        return 1.0 + r2;
+    };
+    const auto plane = [](const double * x) { return 1.0 + x[0]; };
+    const std::vector<std::pair<std::string, bool>> cases = {
+        {"{type = \"isosurface\", field = \"P\", value = 1.09}", true},
+        {"{type = \"boundary\", of = {type = \"where\", condition = \"P > 1.09\"}}", true},
+        {"{type = \"isosurface\", field = \"P\", value = 1.5}", false},
+    };
+    for (const auto & mesh : meshes) {
+        for (const auto & [table, round] : cases) {
+            const region::Region r = read(table);
+            const auto fields = round ? gas_with_pressure(*mesh, sphere) : gas_with_pressure(*mesh, plane);
+            const auto levels = std::make_shared<const region::SolutionLevels>(*mesh, r.conditions(), std::vector<std::string>{}, fields);
+            const auto crossed = std::make_shared<region::CrossedLevels>(*mesh, r, levels);
+            const region::Elements e = region::elements(*mesh, r, crossed->update(0.0));
+            const auto level = region::single_level(*mesh, r);
+            ASSERT_TRUE(level.has_value()) << table;
+            ASSERT_GT(e.quad_points.size(), 0u) << table;
+            const region::LevelCut cut(*mesh, *level, crossed, static_cast<uint32_t>(e.quad_points.size()));
+            cut.select();
+            uint32_t total = 0;
+            Kokkos::deep_copy(Kokkos::View<uint32_t, Kokkos::HostSpace>(&total), cut.total());
+            ASSERT_EQ(total, e.quad_points.size()) << table;
+            const auto cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cut.cells());
+            const auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cut.points());
+            const auto w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cut.weights());
+            const auto n = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cut.normals());
+            for (size_t k = 0; k < e.size(); k++) {
+                for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+                    EXPECT_EQ(cells(q), e.cell[k]) << table;
+                    EXPECT_EQ(w(q), e.quad_weights[q]) << table;
+                    for (size_t d = 0; d < 3; d++) {
+                        EXPECT_EQ(x(q, d), e.quad_points[q][d]) << table;
+                        EXPECT_EQ(n(q, d), e.quad_normals[q][d]) << table;
+                    }
+                }
+            }
+        }
     }
 }
