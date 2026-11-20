@@ -18,6 +18,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "flux_functor.h"
+#include "gated.h"
 #include "launch_bounds.h"
 #include "mixture_flux.h"
 #include "viscous_flux.h"
@@ -267,10 +268,10 @@ void Solver::launch_mixture_convective_flux() {
 void Solver::limit_flux_positivity(StateView solution) {
     const PositivityGeometry g{mesh->face_normals, mesh->face_area, mesh->cells_of_face, mesh->face_shift,
                                mesh->periodic_maps(), boundary_data, W_cells, physics.gamma};
-    Kokkos::parallel_for("positivity_kappa", mesh->n_reconstructed(),
-                         PositivityKappaFunctor{g, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
-                                                mesh->cell_measure, positivity_kappa,
-                                                recording_step ? step_dt_device() : nullptr, dt});
+    gated::parallel_for("positivity_kappa", mesh->n_reconstructed(),
+                        PositivityKappaFunctor{g, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                               mesh->cell_measure, positivity_kappa,
+                                               recording_step ? step_dt_device() : nullptr, dt});
     parallel_for_set<HeavyBounds>("positivity_flux", rhs_faces, PositivityFluxFunctor{g, solution, positivity_kappa, face_flux});
 }
 
