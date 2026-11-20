@@ -307,7 +307,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
     const bool points = type == "points";
     const Csv csv = read_csv(file, docs);
     const Metadata metadata = parse_metadata(csv.metadata, file, docs);
-    entry.at = metadata.at;
+    if (!e.contains("coordinates")) entry.at = metadata.at;  // where the metadata's coordinates are read
     entry.coordinates = entry_coordinates(e, csv.names, points, metadata.coordinates);
     const std::vector<std::string> & coordinates = entry.coordinates;
     if (coordinates.empty() || coordinates.size() > MAX_DIMS) {

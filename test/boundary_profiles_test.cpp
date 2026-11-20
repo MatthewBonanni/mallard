@@ -322,7 +322,7 @@ TEST(BoundaryProfilesTest, MetadataGivesTheEntrysDefaults) {
         profile_points(*mesh, faces, walls, parse_toml(entry + "outside = \"error\"\n"), summary);
         ADD_FAILURE() << "no error";
     } catch (const InputError & e) {
-        const std::string beyond = std::to_string(N_DIM == 2 ? 6 : 12) + " faces lie beyond the column's 0 to 0.2 m";
+        const std::string beyond = "beyond the column's 0 to 0.2 m at " + std::to_string(N_DIM == 2 ? 6 : 12) + " faces";
         EXPECT_NE(std::string(e.what()).find(beyond), std::string::npos) << e.what();
     }
 }

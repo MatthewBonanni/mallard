@@ -614,7 +614,10 @@ d,u,uu
 
 With it, the entry needs only its name and file, and `turbulence = {profile
 = "bl.csv", ...}` reads a described precursor profile at the wall distance of
-any inlet.
+any inlet. [`tools/setup/profiles.py`](../../tools/README.md#profilespy-profile-files-for-inlets)
+writes described files from analytic laws (power law, laminar channel or
+pipe, Spalding's law of the wall), adds the metadata to a measured table or a
+`mallard post average` profile, rescales a file and checks one.
 
 **Rescaling.** `scale` gives new scales, and every column is multiplied by
 the ratio of each scale to the data's `reference` (the entry's, else the

@@ -10,7 +10,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Commands](#commands): the solver, a 0D reactor, HDF5 meshes | `mallard -i`, `mallard reactor`, `mallard mesh convert` |
 | [Job scripts](../docs/guide/parallel.md#running-on-clusters): Slurm (one node, several nodes), PBS, Kubernetes, plain `mpirun` | `jobs/` |
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
-| [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
+| [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/profiles.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
 | [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
 | [Performance](#performance): benchmarks and baselines, work-precision study | `perf/perf_suite.py`, `perf/work_precision.py` |
@@ -175,6 +175,17 @@ Reads the box, cell counts, stretching and gas from an input with the generated 
 
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-light.svg#gh-light-mode-only)
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-dark.svg#gh-dark-mode-only)
+
+### `profiles.py`: profile files for inlets
+
+```sh
+python tools/setup/profiles.py law spalding bl.csv --delta 0.02 --u-inf 30 --u-tau 1.2 --nu 1.5e-5
+python tools/setup/profiles.py describe measured.csv --coordinates y --at n_m --unit y=mm --unit u=m/s --reference length=0.02 --reference velocity=30
+python tools/setup/profiles.py transform bl.csv bl_50mm.csv --scale length=0.05 --scale velocity=12
+python tools/setup/profiles.py show bl.csv [--plot bl.png]
+```
+
+Writes and checks the [profile files](../docs/guide/boundary_conditions.md#profile-files-metadata-and-rescaling) that `[[boundaries.data]]`, `[[initialize.data]]` and `turbulence.profile` read, with their `# mallard-profile` metadata. `law` writes an analytic profile in the wall distance `n_m` (read at the inlet's `n_m`): the power law, the developed laminar channel or pipe, or Spalding's law of the wall. `describe` adds the metadata to any CSV file (a measurement, `mallard post average` output); `transform` rescales a described file as the input's `scale` does and records the step in its `transforms`; `show` prints the metadata and the columns' ranges, flags what the solver would reject, and plots the columns.
 
 ### `wmles_channel.py`: wall-modeled channel
 

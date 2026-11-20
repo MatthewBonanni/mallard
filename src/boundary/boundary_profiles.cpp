@@ -89,9 +89,9 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
             for (const auto & c : coordinates) {
                 // mallard post average names its coordinate columns X, Y, Z
                 const bool axis = c.size() == 1 && c[0] >= 'X' && c[0] < 'X' + N_DIM;
-                const std::string b = axis ? std::string(1, static_cast<char>(c[0] - 'X' + 'x')) : c;
-                at.push_back(b);
-                if (b == "t" || std::find(base.begin(), base.end(), b) == base.end()) {
+                const std::string name = axis ? std::string(1, static_cast<char>(c[0] - 'X' + 'x')) : c;
+                at.push_back(name);
+                if (name == "t" || std::find(base.begin(), base.end(), name) == base.end()) {
                     std::string known;
                     for (const std::string & b : base) known += b == "t" ? "" : (known.empty() ? "" : ", ") + b;
                     throw invalid(e, key + ".at", "at",
@@ -214,10 +214,10 @@ std::string BoundaryProfiles::evaluate(const Mesh & mesh, const std::vector<uint
                 throw InputError({.key = where + ".data",
                                   .message = "data \"" + m.entry.name + "\": column " + m.entry.coordinates[d] +
                                              " <- boundary " + m.at_text[d] + " is " + logging::real(lo[d]) + " to " +
-                                             logging::real(hi[d]) + m.unit[d] + " at the boundary, and " +
-                                             logging::count(outside[d], "face") + " lie beyond the column's " +
+                                             logging::real(hi[d]) + m.unit[d] + " at the boundary, beyond the column's " +
                                              logging::real(axis[0]) + " to " + logging::real(axis[set.n_axis[d] - 1]) +
-                                             m.unit[d] + " (outside = \"error\")",
+                                             m.unit[d] + " at " + logging::count(outside[d], "face") +
+                                             " (outside = \"error\")",
                                   .fix = "Extend the table, map it with at or scale it, or hold its end values with "
                                          "outside = \"hold\"",
                                   .docs = DOCS});
