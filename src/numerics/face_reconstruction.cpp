@@ -445,11 +445,15 @@ MUSCL::~MUSCL() {
     // Empty
 }
 
-void MUSCL::init(const Input & input) {
+void MUSCL::read(const Input & input) {
     const std::string limiter_str = find_value_or<std::string>(input, "limiter", "venkatakrishnan");
     auto it = find_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     limiter = it->second;
     venkat_K = find_real_or(input, "venkatakrishnan_K", dim::none, 5.0);
+}
+
+void MUSCL::init(const Input & input) {
+    read(input);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);

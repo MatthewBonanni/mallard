@@ -70,6 +70,9 @@ class FaceReconstruction {
          */
         virtual void init(const Input & input) = 0;
 
+        /** @brief Read and check the options of [numerics.face_reconstruction], without the mesh (init reads them too). */
+        virtual void read(const Input & input) { (void)input; }
+
         /**
          * @brief Display lines for the run log.
          */
@@ -334,6 +337,7 @@ class MUSCL : public FaceReconstruction {
         MUSCL();
         ~MUSCL();
         void init(const Input & input) override;
+        void read(const Input & input) override;
         report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -371,6 +375,7 @@ class TENO : public FaceReconstruction {
         TENO();
         ~TENO();
         void init(const Input & input) override;
+        void read(const Input & input) override;
         report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -603,7 +608,6 @@ class TENO : public FaceReconstruction {
                       Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution, const IndexSet & cells,
                       bool troubled_pass);
 
-        void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
         void allocate_scratch();
         uint64_t options_key() const;
