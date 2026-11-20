@@ -1,0 +1,1 @@
+- `mallard check` counts the chemistry's clipped species masses (8 bytes per species and cell of a chunk, 424 B with GRI-Mech 3.0) as work memory sized by the device instead of chemistry memory per cell, and the chemistry's chunks leave room for them under the 1 GiB of work memory.

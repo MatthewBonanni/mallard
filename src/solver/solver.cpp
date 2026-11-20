@@ -11,6 +11,7 @@
 
 #include "solver.h"
 #include "boundary_coordinates.h"
+#include "boundary_profiles.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -866,6 +867,7 @@ void Solver::read_boundaries() {
             d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
             throw InputError(d);
         }
+        e.profiles = std::make_shared<const BoundaryProfiles>(bound, where_name);
         e.bc = BoundaryCondition::from_input(bound, physics);
         if (bound.contains("wall_model")) {
             e.wall_model = WallModelSpec::from_input(bound.at("wall_model"), e.bc, where_name + ".wall_model");
@@ -888,8 +890,8 @@ void Solver::read_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 e.dirichlet.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
-                    boundary_variable::FIRST_LOCAL));
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound),
+                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
@@ -897,8 +899,18 @@ void Solver::read_boundaries() {
         }
         e.fields = std::make_shared<BoundaryFields>(bound, e.bc, where_name);
         e.coordinates = local_coordinates_used(bound);
-        const bool reads_n = !e.coordinates.empty() && e.coordinates.front() == boundary_variable::N;
-        const bool reads_frame = !e.coordinates.empty() && e.coordinates.back() != boundary_variable::N;
+        for (const uint16_t i : e.profiles->coordinates_used()) {
+            if (std::find(e.coordinates.begin(), e.coordinates.end(), i) == e.coordinates.end()) {
+                e.coordinates.push_back(i);
+            }
+        }
+        std::sort(e.coordinates.begin(), e.coordinates.end());
+        bool reads_n = false, reads_patch = false;
+        for (const uint16_t i : e.coordinates) {
+            const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
+            reads_n = reads_n || wall;
+            reads_patch = reads_patch || !wall;
+        }
         auto unused_key = [&](const std::string & key, const std::string & what) {
             return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
                                .message = "no expression of the entry reads " + what + ", so " + key +
@@ -917,10 +929,21 @@ void Solver::read_boundaries() {
                                   .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
             }
         }
-        if (bound.contains("frame") && !reads_frame) {
-            throw unused_key("frame", N_DIM == 2 ? "xi or s" : "xi, eta, r or theta");
+        for (const char * key : {"corners", "origin", "toward"}) {
+            if (!bound.contains(key)) continue;
+            if (N_DIM == 2 && std::string(key) != "origin") {
+                throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                  .message = std::string(key) == "corners"
+                                                 ? "a 2D boundary is a curve, which has two ends and no corners"
+                                                 : "a 2D boundary is a curve: origin alone says which end u "
+                                                   "starts from",
+                                  .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
+                                         "the end nearest to origin = [x, y] if that is given",
+                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            }
+            if (!reads_patch) throw unused_key(key, "u or v");
         }
-        [[maybe_unused]] const FrameKey frame_key(bound, where_name);
+        read_patch_points(bound, where_name);  // read again with the faces, in local_coordinates
         e.mass_flow = read_mass_flow(bound, e.bc, where_name);
         if (is_mixture()) read_mixture_boundary(bound, e);
         if (e.bc.type == BoundaryType::INLET_STATE && e.bc.is_characteristic()) {
@@ -1007,6 +1030,7 @@ void Solver::init_boundaries() {
                                      "bottom, top (back, front in 3D) for generated meshes",
                               .docs = "docs/guide/boundary_conditions.md"});
         }
+        const BoundaryProfiles & profiles = *e.profiles;
         bcs.push_back(e.bc);
         wall_model_specs.push_back(e.wall_model);
         const Expression * where = e.where.get();
@@ -1038,14 +1062,15 @@ void Solver::init_boundaries() {
             for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
             selected = evaluate_at({where}, mesh->face_coords, zone_faces);
         }
-        std::string coordinates;
+        std::string coordinates, data_summary;
         {
             std::vector<uint32_t> entry_faces;
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
             const std::vector<uint16_t> & used = e.coordinates;
-            const bool reads_n = !used.empty() && used.front() == boundary_variable::N;
+            bool reads_n = false;
+            for (const uint16_t i : used) reads_n = reads_n || i == boundary_variable::N || i == boundary_variable::N_M;
             std::optional<WallDistance> named;
             if (!e.walls.empty()) {
                 std::vector<uint32_t> faces;
@@ -1067,11 +1092,12 @@ void Solver::init_boundaries() {
                 named = WallDistance(*mesh, faces, is_distributed());
             }
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
-            if (!used.empty() && n_entry > 0) {
+            if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
                 const WallDistance none;
                 const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
-                const std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used,
-                                                                        walls, is_distributed(), coordinates);
+                std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used, walls,
+                                                                  is_distributed(), coordinates);
+                if (!profiles.empty()) data_summary = profiles.evaluate(*mesh, entry_faces, points, is_distributed());
                 for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
             }
         }
@@ -1188,6 +1214,7 @@ void Solver::init_boundaries() {
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(e.wall_model.summary());
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
+        if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {

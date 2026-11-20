@@ -687,7 +687,7 @@ std::string mixture_box(const std::string & les, const std::string & composition
     return s.str();
 }
 
-const std::string UNIFORM = "X = { H2 = 0.2, O2 = 0.1, N2 = 0.7 }\n";
+const std::string PURE = "X = { N2 = 1.0 }\n";
 const std::string STRATIFIED = "X = { H2 = \"0.2 + 0.15 * sin(628.3185307179586 * y)\", O2 = 0.1, N2 = 0.5 }\n";
 
 } // namespace
@@ -700,21 +700,24 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
         return solver;
     };
     const std::string model = N_DIM == 2 ? "model = \"vreman\"\n" : "model = \"sigma\"\n";
-    auto low = run("[les]\n" + model + "Sc_t = 0.3\n", UNIFORM);
-    auto high = run("[les]\n" + model + "Sc_t = 3.0\n", UNIFORM);
-    auto none = run("", UNIFORM);
+    auto low = run("[les]\n" + model + "Sc_t = 0.3\n", PURE);
+    auto high = run("[les]\n" + model + "Sc_t = 3.0\n", PURE);
+    auto none = run("", PURE);
     const uint32_t n = low->get_mesh()->n_cells;
     double les_effect = 0.0;
     double sc_effect = 0.0;
     for (uint32_t c = 0; c < n; c++) {
         FOR_I_CONSERVATIVE {
-            const double ref = std::abs(double(low->h_conservatives(c, i))) + 1.0;
-            sc_effect = std::max(sc_effect, std::abs(double(low->h_conservatives(c, i) - high->h_conservatives(c, i))) / ref);
+            sc_effect = std::max(sc_effect, std::abs(double(low->h_conservatives(c, i) - high->h_conservatives(c, i))));
         }
         les_effect = std::max(les_effect, std::abs(double(low->h_conservatives(c, 1) - none->h_conservatives(c, 1))));
     }
-    // Uniform mass fractions leave only round-off gradients for the SGS species fluxes
-    EXPECT_LT(sc_effect, precision_tol<double>(1e-11, 1e-5));
+    // A pure gas's X = 1 varies by at most its last bit (in double; not at all in float), and a single
+    // species's SGS flux -c dX + Y (c dX / Y) cancels that to an ulp: far below the rounding of the
+    // fluxes it joins, so Sc_t changes nothing, bit for bit. A uniform mixture's round-off gradients of
+    // X feed SGS fluxes in 1 / Sc_t that shift rho E by ulps of its terms (near 1e5), which no tolerance
+    // relative to rho E bounds where it crosses zero, as it does here
+    EXPECT_EQ(sc_effect, 0.0);
     EXPECT_GT(les_effect, 1e-6);
 
     auto low_s = run("[les]\n" + model + "Sc_t = 0.3\n", STRATIFIED);

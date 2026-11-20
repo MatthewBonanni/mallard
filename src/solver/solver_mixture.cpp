@@ -305,11 +305,11 @@ struct MixtureDiagnosticsFunctor {
  */
 class CompositionExpressions {
     public:
-        /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(). */
+        /** @param variables Those of the expressions: x, y, z, t, or at boundaries BoundaryValue::variables(entry). */
         CompositionExpressions(const MixtureModel & mixture_model, const Input & table, const std::string & name,
                                const std::vector<std::string> & variables = {"x", "y", "z", "t"},
                                const size_t first_shadowable = SIZE_MAX) :
-            mixture(mixture_model), where(name), shadowable(first_shadowable) {
+            mixture(mixture_model), where(name), names(variables), shadowable(first_shadowable) {
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
@@ -335,9 +335,8 @@ class CompositionExpressions {
             auto c = std::make_shared<CompositionPrograms>();
             for (size_t i = 0; i < listed.size(); i++) {
                 c->species.push_back(static_cast<uint32_t>(listed[i]));
-                c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i],
-                                                                       BoundaryValue::variables(), BoundaryValue::hint,
-                                                                       shadowable));
+                c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i], names,
+                                                                       BoundaryValue::hint, shadowable));
             }
             c->balance = balance;
             c->mole = mole;
@@ -356,7 +355,7 @@ class CompositionExpressions {
             return Y;
         }
 
-        /** @brief Mass fractions at boundary faces, at t = 0 (expressions of BoundaryValue::variables()). */
+        /** @brief Mass fractions at boundary faces, at t = 0 (expressions of BoundaryValue::variables(entry)). */
         std::vector<std::vector<double>> mass_fractions(const std::vector<FacePoint> & points) const {
             std::vector<std::vector<double>> Y;
             Y.reserve(points.size());
@@ -389,6 +388,7 @@ class CompositionExpressions {
 
         const MixtureModel & mixture;
         std::string where;
+        std::vector<std::string> names;  // the variables of the expressions
         size_t shadowable;
         bool mole = false;
         int32_t balance = -1;
@@ -505,23 +505,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (double_flux && !cells_frozen) {
         throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");
     }
-    switch (riemann_solver_type) {
-        case RiemannSolverType::RUSANOV:
-            double_flux ? launch_double_flux_functor<riemann::Rusanov>() : launch_mixture_flux_functor<riemann::Rusanov>();
-            break;
-        case RiemannSolverType::HLL:
-            double_flux ? launch_double_flux_functor<riemann::HLL>() : launch_mixture_flux_functor<riemann::HLL>();
-            break;
-        case RiemannSolverType::HLLC:
-            double_flux ? launch_double_flux_functor<riemann::HLLC>() : launch_mixture_flux_functor<riemann::HLLC>();
-            break;
-        case RiemannSolverType::ROE:
-            double_flux ? launch_double_flux_functor<riemann::Roe>() : launch_mixture_flux_functor<riemann::Roe>();
-            break;
-        case RiemannSolverType::RHLL:
-            double_flux ? launch_double_flux_functor<riemann::RHLL>() : launch_mixture_flux_functor<riemann::RHLL>();
-            break;
-    }
+    launch_mixture_convective_flux();
 
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
@@ -595,53 +579,6 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         viscous_flux();
         budget_rates_of_fluxes(2);
     }
-}
-
-template <typename T_riemann_solver>
-void Solver::launch_mixture_flux_functor() {
-    const uint32_t n_species = mixture.n_species;
-    MixtureFluxFunctor<T_riemann_solver> functor{
-        mesh->face_normals,
-        mesh->face_area,
-        mesh->cells_of_face,
-        face_reconstruction->quadrature_face.weights,
-        flux_weights,
-        face_solution,
-        face_thermo,
-        boundary_data,
-        Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
-        face_flux,
-        face_mdot,
-        low_mach_cutoff,
-        cell_upwind,
-        face_reconstruction->face_quad_normals,
-        central_states()};
-    // Faces of owned cells, as the single-gas flux
-    parallel_for_set<HeavyBounds>("mixture_flux", rhs_faces, functor);
-}
-
-template <typename T_riemann_solver>
-void Solver::launch_double_flux_functor() {
-    const uint32_t n_species = mixture.n_species;
-    MixtureDoubleFluxFunctor<T_riemann_solver> functor{
-        mesh->face_normals,
-        mesh->face_area,
-        mesh->cells_of_face,
-        face_reconstruction->quadrature_face.weights,
-        flux_weights,
-        face_solution,
-        boundary_data,
-        frozen_thermo,
-        face_thermo,
-        Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
-        face_flux,
-        face_energy_1,
-        face_mdot,
-        low_mach_cutoff,
-        cell_upwind,
-        face_reconstruction->face_quad_normals,
-        central_states()};
-    parallel_for_set<HeavyBounds>("double_flux", rhs_faces, functor);
 }
 
 rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
@@ -725,7 +662,7 @@ void Solver::read_mixture_boundary(const Input & bound, BoundaryEntry & entry) c
             if (!entry.T_varies) entry.T = static_cast<double>(find_real(bound, T_key, dim::temperature));
             if (MixtureModel::composition_varies(bound)) {
                 entry.composition = std::make_shared<CompositionExpressions>(
-                    *mixture_model, bound, where, BoundaryValue::variables(), boundary_variable::FIRST_LOCAL);
+                    *mixture_model, bound, where, BoundaryValue::variables(bound), boundary_variable::FIRST_LOCAL);
             } else {
                 entry.Y = mixture_model->mass_fractions(bound, where);
             }

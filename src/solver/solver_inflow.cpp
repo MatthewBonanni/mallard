@@ -87,12 +87,12 @@ MassFlowInput Solver::read_mass_flow(const Input & bound, const BoundaryConditio
         if (const auto * table = input_detail::table_of(bound)) {
             table->record_use("mdot", input_detail::real_use("number", dim::mass_flow, "", true));
         }
-        const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow);
+        const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow, BoundaryValue::variables(bound));
         for (uint16_t i = 0; i < boundary_variable::COUNT; i++) {
             if (i != boundary_variable::T && v.compiled()->uses(i)) {
                 throw InputError(where + ".mdot is the total mass flow through the inlet, so it may depend on t but "
-                                 "not on x, y, z or the local coordinates: give its shape across the inlet in profile, "
-                                 "or the local flux in mass_flux.");
+                                 "not on x, y, z, the local coordinates or data: give its shape across the inlet in "
+                                 "profile, or the local flux in mass_flux.");
             }
         }
         m.mdot = v.at(Point{}, 0.0);
@@ -106,7 +106,7 @@ MassFlowInput Solver::read_mass_flow(const Input & bound, const BoundaryConditio
     if (bound.contains("profile")) {
         m.shape = std::make_shared<const kexpr::Program>(
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-            BoundaryValue::variables(), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
+            BoundaryValue::variables(bound), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
     }
     return m;
 }
