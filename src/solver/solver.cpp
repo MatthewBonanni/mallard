@@ -1685,12 +1685,11 @@ void Solver::init_numerics() {
 }
 
 void Solver::describe_block_path() {
-    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     // The setup report of states read from files is not shown
-    if (teno == nullptr || state_reader) return;
-    const uint64_t cells = comm::allreduce(teno->n_block_cells, comm::Op::SUM);
+    if (state_reader) return;
+    const uint64_t cells = comm::allreduce(face_reconstruction->n_block_cells, comm::Op::SUM);
     if (cells == 0) return;
-    const uint64_t most = comm::allreduce(uint64_t(teno->n_block_shapes), comm::Op::MAX);
+    const uint64_t most = comm::allreduce(uint64_t(face_reconstruction->n_block_shapes), comm::Op::MAX);
     block_path_setting = logging::format("%.1f%% of the cells on the block path, ",
                                          100.0 * double(cells) / double(n_cells_global)) +
                          (is_distributed() ? "up to " + logging::count(most, "block shape") + " per rank"
@@ -1758,7 +1757,7 @@ void Solver::init_run_parameters() {
         }
     }
     n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
-    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
+    cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true) && !cuda_graphs_off;
     t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
     t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
     keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
