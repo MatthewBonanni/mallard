@@ -1,8 +1,8 @@
 /**
  * @file particles_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Tests of the tracer particles: exact pathlines, the order of the
- *        velocity at the particles, outlets, and migration between ranks.
+ * @brief Tests of the tracer particles: exact pathlines, their order in space
+ *        and time, walls and outlets, migration between ranks and restarts.
  * @version 0.1
  * @date 2026-11-15
  *

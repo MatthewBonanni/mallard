@@ -207,6 +207,8 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
 
 - **Graphable migration** (above): distributed runs with particles are not
   graphed yet.
+- **Parallel particle I/O** (#753): restart files gather every particle on
+  every rank, which suits thousands of particles, not millions.
 - **Remapped restarts** (#541): `type = "remap"` seeds the particles from
   `[particles]` instead of relocating the file's.
 - **Seeding during the run**, regions and weights (#759), counter-based random
