@@ -25,7 +25,7 @@
 namespace region {
 
 enum class Kind : uint8_t {
-    SPHERE, ELLIPSOID, CYLINDER, CONE, BOX, TORUS, HALF_SPACE, POLYGON, IMPLICIT,
+    SPHERE, ELLIPSOID, CYLINDER, CONE, BOX, TORUS, HALF_SPACE, POLYGON, IMPLICIT, TRIANGLES,
     UNION, INTERSECTION, DIFFERENCE,
 };
 
@@ -44,7 +44,8 @@ constexpr int MAX_STACK = 16;
  */
 struct Node {
     Kind kind = Kind::SPHERE;
-    uint32_t first = 0, count = 0;  // POLYGON: its vertices; IMPLICIT: its implicit shape
+    uint32_t first = 0, count = 0;  // POLYGON: its vertices; IMPLICIT: its implicit shape; TRIANGLES: its surface
+                                    // (vertices from 2 first, count pairs; see triangles::)
     double m[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double d[3] = {0.0, 0.0, 0.0};
     double scale = 1.0;
@@ -153,6 +154,21 @@ KOKKOS_INLINE_FUNCTION void move(const Motion & motion, const Step * steps, cons
     }
 }
 
+/**
+ * @brief The layout of a closed triangulated surface (Kind::TRIANGLES) in a region's vertices, from
+ *        vertices + 2 first: the counts of triangles and of nodes of its bounding volume hierarchy, the nodes
+ *        (each its box lo, hi, then a leaf's first triangle and -count, or an inner node's two children), and
+ *        the triangles in the leaves' order (corners a, b, c counterclockwise seen from outside, then the
+ *        pseudonormals of the edges ab, bc, ca and of the corners a, b, c, angle weighted).
+ */
+namespace triangles {
+constexpr uint32_t HEADER = 2;
+constexpr uint32_t NODE = 8;
+constexpr uint32_t TRIANGLE = 27;
+constexpr uint32_t LEAF = 4;    // most triangles in a leaf
+constexpr int MAX_DEPTH = 40;   // of the hierarchy, and its traversal stack
+} // namespace triangles
+
 namespace detail {
 
 KOKKOS_INLINE_FUNCTION double max(const double a, const double b) { return a < b ? b : a; }
@@ -189,6 +205,171 @@ KOKKOS_INLINE_FUNCTION double polygon(const double * v, const uint32_t n, const 
         if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) inside = !inside;
     }
     return (inside ? -1.0 : 1.0) * Kokkos::sqrt(d);
+}
+
+KOKKOS_INLINE_FUNCTION double dot3(const double * a, const double * b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+/** @brief The squared distance from p to x, with c set to x. */
+KOKKOS_INLINE_FUNCTION double to_point(const double p[3], const double * x, double c[3]) {
+    double d2 = 0.0;
+    for (int i = 0; i < 3; i++) {
+        c[i] = x[i];
+        d2 += (p[i] - x[i]) * (p[i] - x[i]);
+    }
+    return d2;
+}
+
+/** @brief The squared distance from p to the point a + s (b - a), with c set to it. */
+KOKKOS_INLINE_FUNCTION double to_lerp(const double p[3], const double * a, const double * b, const double s, double c[3]) {
+    double d2 = 0.0;
+    for (int i = 0; i < 3; i++) {
+        c[i] = a[i] + s * (b[i] - a[i]);
+        d2 += (p[i] - c[i]) * (p[i] - c[i]);
+    }
+    return d2;
+}
+
+/**
+ * @brief The squared distance from p to the triangle t (triangles:: layout), the closest point c, and the
+ *        feature it lies on: 0 the face, 1, 2, 3 the edges ab, bc, ca, 4, 5, 6 the corners a, b, c (Ericson,
+ *        Real-Time Collision Detection, 5.1.5). A triangle of no area gives the closest of its edges.
+ */
+KOKKOS_INLINE_FUNCTION double to_triangle(const double * t, const double p[3], double c[3], int & feature) {
+    const double *a = t, *b = t + 3, *v = t + 6;
+    double ab[3], ac[3], ap[3], bp[3], cp[3];
+    for (int i = 0; i < 3; i++) {
+        ab[i] = b[i] - a[i];
+        ac[i] = v[i] - a[i];
+        ap[i] = p[i] - a[i];
+        bp[i] = p[i] - b[i];
+        cp[i] = p[i] - v[i];
+    }
+    const double d1 = dot3(ab, ap), d2 = dot3(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0) {
+        feature = 4;
+        return to_point(p, a, c);
+    }
+    const double d3 = dot3(ab, bp), d4 = dot3(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3) {
+        feature = 5;
+        return to_point(p, b, c);
+    }
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) {
+        feature = 1;
+        return to_lerp(p, a, b, d1 / (d1 - d3), c);
+    }
+    const double d5 = dot3(ab, cp), d6 = dot3(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6) {
+        feature = 6;
+        return to_point(p, v, c);
+    }
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) {
+        feature = 3;
+        return to_lerp(p, a, v, d2 / (d2 - d6), c);
+    }
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0) {
+        feature = 2;
+        return to_lerp(p, b, v, (d4 - d3) / ((d4 - d3) + (d5 - d6)), c);
+    }
+    if (!(va + vb + vc > 0.0)) {
+        // No area: the closest edge
+        const double * ends[3][2] = {{a, b}, {b, v}, {v, a}};
+        double best = 0.0;
+        for (int e = 0; e < 3; e++) {
+            double l = 0.0, s = 0.0;
+            for (int i = 0; i < 3; i++) {
+                l += (ends[e][1][i] - ends[e][0][i]) * (ends[e][1][i] - ends[e][0][i]);
+                s += (p[i] - ends[e][0][i]) * (ends[e][1][i] - ends[e][0][i]);
+            }
+            s = l > 0.0 ? clamp(s / l, 0.0, 1.0) : 0.0;
+            double q[3];
+            const double d = to_lerp(p, ends[e][0], ends[e][1], s, q);
+            if (e == 0 || d < best) {
+                best = d;
+                feature = 1 + e;
+                for (int i = 0; i < 3; i++) c[i] = q[i];
+            }
+        }
+        return best;
+    }
+    const double w = 1.0 / (va + vb + vc), sb = vb * w, sc = vc * w;
+    feature = 0;
+    double squared = 0.0;
+    for (int i = 0; i < 3; i++) {
+        c[i] = a[i] + ab[i] * sb + ac[i] * sc;
+        squared += (p[i] - c[i]) * (p[i] - c[i]);
+    }
+    return squared;
+}
+
+/** @brief The squared distance from p to a box lo, hi. */
+KOKKOS_INLINE_FUNCTION double to_box(const double * box, const double p[3]) {
+    double d2 = 0.0;
+    for (int i = 0; i < 3; i++) {
+        const double e = max(max(box[i] - p[i], p[i] - box[3 + i]), 0.0);
+        d2 += e * e;
+    }
+    return d2;
+}
+
+/**
+ * @brief Signed distance to a closed triangulated surface s (triangles:: layout) at q: the distance to the
+ *        closest triangle, found through the hierarchy, negative where q is behind the pseudonormal of the
+ *        feature the closest point lies on (Baerentzen and Aanaes 2005), which is exact for a closed,
+ *        consistently oriented surface.
+ */
+KOKKOS_INLINE_FUNCTION double triangulated(const double * s, const double q[3]) {
+    const uint32_t n_nodes = static_cast<uint32_t>(s[1]);
+    const double * bvh = s + triangles::HEADER;
+    const double * tris = bvh + triangles::NODE * n_nodes;
+    double best = 1.0e300, closest[3] = {0.0, 0.0, 0.0};
+    uint32_t best_triangle = 0;
+    int best_feature = 0;
+    uint32_t stack[triangles::MAX_DEPTH + 1];
+    int top = 0;
+    stack[top++] = 0;
+    while (top > 0) {
+        const double * node = bvh + triangles::NODE * stack[--top];
+        if (to_box(node, q) >= best) continue;
+        if (node[7] < 0.0) {
+            const uint32_t first = static_cast<uint32_t>(node[6]), n = static_cast<uint32_t>(-node[7]);
+            for (uint32_t k = first; k < first + n; k++) {
+                double c[3];
+                int feature = 0;
+                const double d2 = to_triangle(tris + triangles::TRIANGLE * k, q, c, feature);
+                if (d2 < best) {
+                    best = d2;
+                    best_triangle = k;
+                    best_feature = feature;
+                    for (int i = 0; i < 3; i++) closest[i] = c[i];
+                }
+            }
+            continue;
+        }
+        const uint32_t l = static_cast<uint32_t>(node[6]), r = static_cast<uint32_t>(node[7]);
+        const double dl = to_box(bvh + triangles::NODE * l, q), dr = to_box(bvh + triangles::NODE * r, q);
+        // The nearer child on top, so that it is searched first
+        const bool left_first = dl <= dr;
+        const double d_far = left_first ? dr : dl, d_near = left_first ? dl : dr;
+        if (d_far < best) stack[top++] = left_first ? r : l;
+        if (d_near < best) stack[top++] = left_first ? l : r;
+    }
+    const double * t = tris + triangles::TRIANGLE * best_triangle;
+    double n[3];
+    if (best_feature == 0) {
+        const double u[3] = {t[3] - t[0], t[4] - t[1], t[5] - t[2]}, v[3] = {t[6] - t[0], t[7] - t[1], t[8] - t[2]};
+        n[0] = u[1] * v[2] - u[2] * v[1];
+        n[1] = u[2] * v[0] - u[0] * v[2];
+        n[2] = u[0] * v[1] - u[1] * v[0];
+    } else {
+        for (int i = 0; i < 3; i++) n[i] = t[9 + 3 * (best_feature - 1) + i];
+    }
+    const double side = (q[0] - closest[0]) * n[0] + (q[1] - closest[1]) * n[1] + (q[2] - closest[2]) * n[2];
+    const double d = Kokkos::sqrt(best);
+    return side < 0.0 ? -d : d;
 }
 
 /** @brief implicit(i, q): the function of implicit shape i at the local point q (inside: negative). */
@@ -241,6 +422,9 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
             break;
         case Kind::IMPLICIT:
             phi = implicit(n.first, q);
+            break;
+        case Kind::TRIANGLES:
+            phi = triangulated(vertices + 2 * n.first, q);
             break;
         default:
             break;
