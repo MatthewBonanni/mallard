@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "check.h"
+#include "comm.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
@@ -513,7 +514,8 @@ TEST(ErrorMessages, CheckDiagnosticsNameTheirKeyLineAndColumn) {
     EXPECT_EQ(errors[0]["line"].number, double(line_number(input, "Nx = 16.0")));
     EXPECT_EQ(errors[0]["column"].number, 6.0);
     EXPECT_FALSE(errors[0]["missing"].boolean);
-    // A warning of the setup is in the report, with the key its text starts with
+    // A warning of the setup is in the report, with the key its text starts with (rank 0's, which prints it)
+    if (!comm::is_root()) return;
     const std::string source = box() + "[source]\nrhoE = \"0.0\"\ntime_dependent = true\n";
     const json::Value diagnostics = check_diagnostics(source);
     const auto ignored = std::find_if(diagnostics.array.begin(), diagnostics.array.end(),
