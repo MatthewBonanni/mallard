@@ -59,7 +59,7 @@ std::vector<uint32_t> zone_faces(const Mesh & mesh, const std::vector<std::strin
 
 std::vector<uint16_t> all_local() {
     std::vector<uint16_t> used;
-    for (uint16_t i = bv::FIRST_LOCAL; i < bv::COUNT; i++) used.push_back(i);
+    for (uint16_t i = bv::FIRST_LOCAL; i < bv::FIRST_DATA; i++) used.push_back(i);
     return used;
 }
 
@@ -68,21 +68,21 @@ std::vector<uint16_t> all_local() {
 TEST(BoundaryCoordinatesTest, ExpressionsOfAnEntryListTheCoordinatesTheyRead) {
     const Input entry = parse_toml(
         "name = \"inlet\"\ntype = \"inlet_state\"\nu = [\"10 * n\", 0, 0]\np = \"1 bar\"\nT = 300.0\n"
-        "where = \"x < 1\"\nX = { O2 = \"0.21 * xi\", N2 = 0.79 }\nturbulence = { profile = \"bl.csv\" }\n");
-    EXPECT_EQ(local_coordinates_used(entry), (std::vector<uint16_t>{bv::N, bv::XI}));
+        "where = \"x < 1\"\nX = { O2 = \"0.21 * u_m\", N2 = 0.79 }\nturbulence = { profile = \"bl.csv\" }\n");
+    EXPECT_EQ(local_coordinates_used(entry), (std::vector<uint16_t>{bv::N, bv::U_M}));
     EXPECT_TRUE(local_coordinates_used(parse_toml("name = \"inlet\"\nu = [\"x * t\", 0]\n")).empty());
 }
 
 TEST(BoundaryCoordinatesTest, LocalVariablesHideTheLocalCoordinates) {
     // Expressions written before the local coordinates keep their meaning in
     // 2D and 3D alike; x, y, z and t still cannot be hidden
-    const Input v = parse_toml("v = \"var s := y; var r := 2 * x; var n := 1; s + r + n\"\n");
+    const Input v = parse_toml("v = \"var u := y; var u_m := 2 * x; var n := 1; u + u_m + n\"\n");
     const BoundaryValue value(v.at("v"), "inlet.T", dim::none);
     Point x{};
     x[0] = 0.25;
     x[1] = 0.5;
     EXPECT_DOUBLE_EQ(value.at(FacePoint(x), 0.0), 2.0);
-    EXPECT_TRUE(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var theta := atan2(y, x); theta\"\n")).empty());
+    EXPECT_TRUE(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var u := atan2(y, x); u\"\n")).empty());
     EXPECT_EQ(local_coordinates_used(parse_toml("name = \"inlet\"\nT = \"var q := n; q\"\n")),
               (std::vector<uint16_t>{bv::N}));
     EXPECT_THROW(BoundaryValue(parse_toml("v = \"var y := 1; y\"\n").at("v"), "inlet.T", dim::none),
@@ -90,44 +90,105 @@ TEST(BoundaryCoordinatesTest, LocalVariablesHideTheLocalCoordinates) {
 }
 
 TEST(BoundaryCoordinatesTest, PlanarInletBetweenWallsHasExactCoordinates) {
-    // The left side of a box: tangent +y (and span +z) about its center,
-    // n the distance to the nearer of the bottom and top walls
+    // The left side of a box: u along +y (and v along +z) from 0 to 1, n_m the
+    // distance to the nearer of the bottom and top walls and n that over its
+    // largest value, half the height
     const double H = 0.5;
     const auto mesh = box(4, 10, 1.0, H);
     const std::vector<uint32_t> faces = zone_faces(*mesh, {"left"});
     const WallDistance walls(*mesh, zone_faces(*mesh, {"bottom", "top"}), false);
     const Input entry = parse_toml("name = \"left\"\n");
+    std::vector<uint16_t> used = all_local();
+#if N_DIM == 3
+    used.resize(used.size() - 3);  // r, r_m and theta belong to rings and disks
+#endif
     std::string summary;
-    const std::vector<FacePoint> p =
-        local_coordinates(*mesh, faces, entry, "left", all_local(), walls, false, summary);
+    const std::vector<FacePoint> p = local_coordinates(*mesh, faces, entry, "left", used, walls, false, summary);
     ASSERT_EQ(p.size(), faces.size());
     for (const FacePoint & x : p) {
         const double y = x[1];
-        EXPECT_NEAR(x[bv::N], std::min(y, H - y), tol(1e-15, 1e-6)) << y;
-        EXPECT_NEAR(x[bv::XI], y - 0.5 * H, tol(1e-15, 1e-6)) << y;
-#if N_DIM == 2
-        EXPECT_NEAR(x[bv::S], y, tol(1e-15, 1e-6)) << y;
-#else
+        EXPECT_NEAR(x[bv::N_M], std::min(y, H - y), tol(1e-15, 1e-6)) << y;
+        EXPECT_NEAR(x[bv::N], std::min(y, H - y) / (0.5 * H), tol(1e-14, 1e-6)) << y;
+        EXPECT_NEAR(x[bv::U], y / H, tol(1e-12, 1e-6)) << y;
+        EXPECT_NEAR(x[bv::U_M], y, tol(1e-12, 1e-6)) << y;
+#if N_DIM == 3
         const double z = x[2];
-        EXPECT_NEAR(x[bv::ETA], z - 0.5 * H, tol(1e-15, 1e-6)) << z;
-        EXPECT_NEAR(x[bv::R], std::hypot(y - 0.5 * H, z - 0.5 * H), tol(1e-15, 1e-6));
-        EXPECT_NEAR(x[bv::THETA], std::atan2(z - 0.5 * H, y - 0.5 * H), tol(1e-14, 1e-6));
+        EXPECT_NEAR(x[bv::V], z / H, tol(1e-12, 1e-6)) << z;
+        EXPECT_NEAR(x[bv::V_M], z, tol(1e-12, 1e-6)) << z;
+        EXPECT_TRUE(std::isnan(x[bv::R]));
 #endif
     }
-    EXPECT_NE(summary.find("tangent (0, 1"), std::string::npos) << summary;
-    EXPECT_NE(summary.find("n 0.025 to 0.225"), std::string::npos) << summary;
-
-    // A frame of its own: from the bottom, along -y
-    const Input framed = parse_toml(std::string("name = \"left\"\nframe = { origin = ") +
-                                    (N_DIM == 2 ? "[0, 0]" : "[0, 0, 0]") + ", tangent = " +
-                                    (N_DIM == 2 ? "[0, -1]" : "[0, -1, 0]") + " }\n");
+    EXPECT_NE(summary.find("n_m 0.025 to 0.225"), std::string::npos) << summary;
+    EXPECT_NE(summary.find("u 0.05 to 0.95"), std::string::npos) << summary;
+#if N_DIM == 3
+    EXPECT_NE(summary.find("four-sided patch, (u, v) = (0, 0) at (0, 0, 0), (1, 0) at (0, 0.5, 0)"), std::string::npos)
+        << summary;
+    // Corners of its own: from the top, u along -y
+    const Input cornered = parse_toml("name = \"left\"\ncorners = [[0, 0.5, 0], [0, 0, 0], [0, 0, 0.5], [0, 0.5, 0.5]]\n");
     const std::vector<FacePoint> q =
-        local_coordinates(*mesh, faces, framed, "left", {bv::XI}, WallDistance(), false, summary);
+        local_coordinates(*mesh, faces, cornered, "left", {bv::U, bv::V}, WallDistance(), false, summary);
     for (const FacePoint & x : q) {
-        EXPECT_NEAR(x[bv::XI], -x[1], tol(1e-15, 1e-6));
+        EXPECT_NEAR(x[bv::U], 1.0 - x[1] / H, tol(1e-12, 1e-6));
+        EXPECT_NEAR(x[bv::V], x[2] / H, tol(1e-12, 1e-6));
         EXPECT_TRUE(std::isnan(x[bv::N]));
     }
+    try {
+        local_coordinates(*mesh, faces, entry, "left", {bv::R}, WallDistance(), false, summary);
+        ADD_FAILURE() << "r on a four-sided patch is an error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("which rings and disks have"), std::string::npos) << e.what();
+    }
+#endif
 }
+
+#if N_DIM == 3
+TEST(BoundaryCoordinatesTest, RingsOfTheAnnulusMeshHaveTheirRadiusHeightAndAngle) {
+    // The annulus 1 <= r <= 2 about z, extruded: its end `back` is a flat
+    // ring (v logarithmic in r, theta the angle about the axis from +x), its
+    // side `inner` a tube (v = z / Lz from the lower rim, u_m the arc length)
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"annulus\"\nNtheta = 48\nNr = 12\nNz = 6\nLz = 0.5\n"));
+    const Input entry = parse_toml("name = \"zone\"\n");
+    std::string summary;
+    const std::vector<uint16_t> used{bv::U, bv::U_M, bv::V, bv::V_M, bv::R, bv::R_M, bv::THETA};
+    auto angle = [](const FacePoint & x) {
+        const double a = std::atan2(x[1], x[0]);
+        return a < 0.0 ? a + 2.0 * M_PI : a;
+    };
+    const std::vector<FacePoint> back =
+        local_coordinates(*mesh, zone_faces(*mesh, {"back"}), entry, "zone", used, WallDistance(), false, summary);
+    ASSERT_FALSE(back.empty());
+    EXPECT_NE(summary.find("ring, v = 0 on the rim around"), std::string::npos) << summary;
+    for (const FacePoint & x : back) {
+        const double r = std::hypot(x[0], x[1]);
+        EXPECT_NEAR(x[bv::V], std::log(r) / std::log(2.0), 5e-3);
+        EXPECT_EQ(x[bv::R], x[bv::V]);
+        EXPECT_NEAR(x[bv::R_M], r - 1.0, 5e-3);
+        EXPECT_NEAR(std::remainder(x[bv::THETA] - angle(x), 2.0 * M_PI), 0.0, tol(1e-9, 1e-4));
+        EXPECT_EQ(x[bv::THETA], 2.0 * M_PI * x[bv::U]);
+        EXPECT_NEAR(x[bv::U_M], x[bv::U] * 2.0 * M_PI * r, 0.02);
+    }
+    // A start of its own: theta from -y
+    const Input seamed = parse_toml("name = \"zone\"\norigin = [0.0, -1.5, 0.0]\n");
+    double least = 1.0;
+    for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"back"}), seamed, "zone", {bv::THETA},
+                                                 WallDistance(), false, summary)) {
+        const double from_seam = std::remainder(x[bv::THETA] - (angle(x) + 0.5 * M_PI), 2.0 * M_PI);
+        EXPECT_NEAR(from_seam, 0.0, 0.5 * 2.0 * M_PI / 48 + 1e-6);
+        least = std::min(least, x[bv::THETA]);
+    }
+    EXPECT_EQ(least, 0.0);
+    EXPECT_NE(summary.find("u = 0 at (0."), std::string::npos) << summary;
+    const std::vector<FacePoint> inner =
+        local_coordinates(*mesh, zone_faces(*mesh, {"inner"}), entry, "zone", used, WallDistance(), false, summary);
+    ASSERT_FALSE(inner.empty());
+    for (const FacePoint & x : inner) {
+        EXPECT_NEAR(x[bv::V], x[2] / 0.5, tol(1e-10, 1e-5));
+        EXPECT_NEAR(x[bv::V_M], x[2], tol(1e-10, 1e-5));
+        EXPECT_NEAR(std::remainder(x[bv::THETA] - angle(x), 2.0 * M_PI), 0.0, tol(1e-9, 1e-4));
+    }
+}
+#endif
 
 TEST(BoundaryCoordinatesTest, WallDistanceIsExactBesideEdgesAndCorners) {
     // Bottom (y = 0) and left (x = 0) walls of the unit box: off their ends the
@@ -153,23 +214,45 @@ TEST(BoundaryCoordinatesTest, WallDistanceIsExactBesideEdgesAndCorners) {
 }
 
 #if N_DIM == 2
-TEST(BoundaryCoordinatesTest, ArcLengthNeedsOneOpenCurve) {
+TEST(BoundaryCoordinatesTest, UNeedsOneOpenCurve) {
     const auto mesh = box(4, 4, 1.0, 1.0);
     const Input entry = parse_toml("name = \"zone\"\n");
     std::string summary;
     // Bottom then right: an L, from (0, 0) along x then up
     const std::vector<uint32_t> corner = zone_faces(*mesh, {"bottom", "right"});
     const std::vector<FacePoint> p =
-        local_coordinates(*mesh, corner, entry, "zone", {bv::S}, WallDistance(), false, summary);
+        local_coordinates(*mesh, corner, entry, "zone", {bv::U, bv::U_M}, WallDistance(), false, summary);
     for (const FacePoint & x : p) {
         const double expected = x[0] < 1.0 ? x[0] : 1.0 + x[1];
-        EXPECT_NEAR(x[bv::S], expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
+        EXPECT_NEAR(x[bv::U_M], expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
+        EXPECT_NEAR(x[bv::U], 0.5 * expected, tol(1e-15, 1e-6)) << x[0] << ", " << x[1];
     }
-    // Opposite sides: their normals cancel, so the frame needs a normal
-    const Input framed = parse_toml("name = \"zone\"\nframe.normal = [0.0, 1.0]\n");
+    // From the end nearest to origin instead
+    const Input reversed = parse_toml("name = \"zone\"\norigin = [0.9, 1.2]\n");
+    for (const FacePoint & x : local_coordinates(*mesh, corner, reversed, "zone", {bv::U}, WallDistance(), false, summary)) {
+        EXPECT_NEAR(x[bv::U], 1.0 - 0.5 * (x[0] < 1.0 ? x[0] : 1.0 + x[1]), tol(1e-15, 1e-6));
+    }
+    EXPECT_NE(summary.find("u = 0 at (1, 1)"), std::string::npos) << summary;
+    try {
+        local_coordinates(*mesh, corner, parse_toml("name = \"zone\"\norigin = [0.5, 0.5]\n"), "zone", {bv::U},
+                          WallDistance(), false, summary);
+        ADD_FAILURE() << "an origin as near to both ends is an error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("is as near to the end (0, 0) of the boundary as to the end (1, 1)"),
+                  std::string::npos) << e.what();
+    }
+    // The top alone runs along +x, the right side along +y
+    for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"top"}), entry, "zone", {bv::U},
+                                                 WallDistance(), false, summary)) {
+        EXPECT_NEAR(x[bv::U], x[0], tol(1e-15, 1e-6));
+    }
+    for (const FacePoint & x : local_coordinates(*mesh, zone_faces(*mesh, {"right"}), entry, "zone", {bv::U},
+                                                 WallDistance(), false, summary)) {
+        EXPECT_NEAR(x[bv::U], x[1], tol(1e-15, 1e-6));
+    }
     auto error = [&](const std::vector<std::string> & zones) {
         try {
-            local_coordinates(*mesh, zone_faces(*mesh, zones), framed, "zone", {bv::S}, WallDistance(), false, summary);
+            local_coordinates(*mesh, zone_faces(*mesh, zones), entry, "zone", {bv::U}, WallDistance(), false, summary);
         } catch (const InputError & e) {
             return std::string(e.what());
         }
@@ -228,15 +311,15 @@ void expect_error(const std::string & input, const std::string & message) {
 } // namespace
 
 TEST(BoundaryCoordinatesTest, SupersonicInflowCarriesTheProfileOfTheLocalCoordinates) {
-    // Uniform u and p with T a function of n (from the bottom), xi (along
-    // +y from the inlet's center) and s or eta: the steady flow carries the
+    // Uniform u and p with T a function of n_m and n (from the bottom), u
+    // (along +y from 0 to 1) and u_m or v, v_m: the steady flow carries the
     // inlet's profile unchanged, rho = 1 / T
 #if N_DIM == 2
-    const std::string T = "T = \"1 + n + 0.4 * (xi + 0.25) - 0.2 * s\"\n";
-    auto expected = [](double y, double) { return 1.0 + 1.2 * y; };
+    const std::string T = "T = \"1 + n_m + 0.5 * n + 0.2 * u - 0.2 * u_m\"\n";
+    auto expected = [](double y, double) { return 1.0 + 2.2 * y; };
 #else
-    const std::string T = "T = \"1 + n + 0.4 * (xi + 0.25) - 0.2 * (eta + 0.25)\"\n";
-    auto expected = [](double y, double z) { return 1.0 + 1.4 * y - 0.2 * z; };
+    const std::string T = "T = \"1 + n_m + 0.5 * n + 0.2 * u - 0.1 * v + 0.2 * v_m\"\n";
+    auto expected = [](double y, double) { return 1.0 + 2.4 * y; };
 #endif
     Solver solver;
     solver.set_distributed(false);
@@ -256,13 +339,32 @@ TEST(BoundaryCoordinatesTest, ConditionsOfLocalCoordinatesAndTimeMatchSerialAndK
     // setup: bit for bit on any rank count, with the step graph and without
     const std::string run = "t_stop = 0.05\ncfl = 0.5\n";
     expect_matches_serial_with_and_without_step_graphs(
-        channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"(1 + n + 0.1 * xi + " +
-                    (N_DIM == 2 ? "0.2 * s" : "0.2 * r + 0.01 * theta + 0.1 * eta") + ") * (1 + 0.1 * sin(60 * t))\"\n",
+        channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"(1 + n + 0.1 * n_m + 0.1 * u + " +
+                    (N_DIM == 2 ? "0.2 * u_m" : "0.2 * v + 0.01 * u_m + 0.1 * v_m") + ") * (1 + 0.1 * sin(60 * t))\"\n",
                 run, "wall_adiabatic"));
     expect_matches_serial_with_and_without_step_graphs(
         channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 0.5\nprofile = \"(0.01 + n) * (1 + 0.5 * sin(60 * t))\"\n",
                 run, "wall_adiabatic"));
 }
+
+#if N_DIM == 3
+TEST(BoundaryCoordinatesTest, ConditionsOnARingMatchSerial) {
+    // The patch is gathered from every rank and solved in one order, so the
+    // harmonic v and its conjugate u are the same bits on any rank count
+    expect_matches_serial(
+        "[run]\nt_stop = 0.05\ncfl = 0.5\n"
+        "[mesh]\ntype = \"annulus\"\nNtheta = 16\nNr = 4\nNz = 6\nLz = 1.0\n"
+        "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.25\nu = [0.0, 0.0, 3.0]\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[[boundaries]]\nname = \"back\"\ntype = \"inlet_state\"\nu = [0.0, 0.0, 3.0]\np = 1.0\n"
+        "T = \"(1 + 0.2 * r + 0.1 * sin(theta) + 0.05 * v_m + 0.01 * u_m) * (1 + 0.1 * sin(60 * t))\"\n"
+        "[[boundaries]]\nname = \"front\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n");
+}
+#endif
 
 TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
     const std::string run = "n_steps = 1\ncfl = 0.5\n";
@@ -275,18 +377,23 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = []\n", run),
                  "the list of zones is empty");
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\nwalls = [\"bottom\"]\n"
-                         "frame.tangent = " + vec("0.0", "1.0") + "\n", run),
-                 "so frame has no effect");
+                         "corners = []\n", run),
+                 N_DIM == 2 ? "has two ends and no corners" : "so corners has no effect");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + u\"\ntoward = " +
+                         vec("0.0", "0.5") + "\n", run),
+                 N_DIM == 2 ? "origin alone says which end" : "toward is given without origin");
     // A wall reading n measures from itself by default
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = 1.0\n", run,
                          "wall_isothermal\"\nT = \"1 + n", ns_state()),
                  "is 0 on every face");
     expect_error(channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = \"0.5 + n\"\n", run, "wall_adiabatic"),
-                 "not on x, y, z or the local coordinates");
+                 "not on x, y, z, the local coordinates or data");
 #if N_DIM == 2
-    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + eta\"\n", run), "eta");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + v\"\n", run),
+                 "a 2D boundary is a curve");
 #else
-    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + s\"\n", run), "arc length");
+    expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + theta\"\n", run),
+                 "which rings and disks have");
 #endif
 }
 
@@ -332,7 +439,7 @@ class LocalCoordinateConditions : public ::testing::TestWithParam<LocalCase> {};
 } // namespace
 
 TEST_P(LocalCoordinateConditions, MatchTheSameConditionWrittenInY) {
-    // n from the bottom is y: every path that evaluates an entry's expressions
+    // n_m from the bottom is y: every path that evaluates an entry's expressions
     // on the device must see the faces' local coordinates (not NaN)
     const LocalCase & c = GetParam();
     const std::string run = "n_steps = 3\ncfl = 0.4\n";
@@ -344,7 +451,7 @@ TEST_P(LocalCoordinateConditions, MatchTheSameConditionWrittenInY) {
         solver->copy_device_to_host();
         return solver;
     };
-    const auto local = solve(with(c.inlet, "n") + "walls = [\"bottom\"]\n");
+    const auto local = solve(with(c.inlet, "n_m") + "walls = [\"bottom\"]\n");
     const auto plain = solve(with(c.inlet, "y"));
     const Mesh & mesh = *local->get_mesh();
     for (uint32_t i = 0; i < mesh.n_owned(); i++) {
