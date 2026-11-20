@@ -51,7 +51,8 @@ enum class Case {
  */
 struct Args {
     std::vector<std::string> positional;                     ///< arguments that are not options
-    std::map<std::string, std::string, std::less<>> values;  ///< by option name; "" for a flag
+    std::map<std::string, std::string, std::less<>> values;  ///< by option name; "" for a flag; the last if repeated
+    std::map<std::string, std::vector<std::string>, std::less<>> repeated;  ///< every value of each option, in order
     std::vector<std::string> passthrough;                     ///< prefix options ("--gtest_*"), in order
     bool help = false;                                        ///< -h or --help was given
     int argc = 0;              ///< the process's arguments, for MPI and Kokkos
@@ -61,6 +62,8 @@ struct Args {
     bool has(std::string_view name) const { return values.find(name) != values.end(); }
     /** @brief The option's value, else fallback. */
     std::string value_or(std::string_view name, const std::string & fallback) const;
+    /** @brief Every value given to the option, in order (one per time it is given). */
+    std::vector<std::string> every(std::string_view name) const;
 };
 
 /**
