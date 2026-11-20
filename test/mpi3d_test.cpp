@@ -150,6 +150,14 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") + layers);
 }
 
+TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
+    // Rows shared over the ranks, with block cells and boundary cells
+    expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"), [](const Solver & s) {
+        const auto & muscl = dynamic_cast<const MUSCL &>(s.get_face_reconstruction());
+        EXPECT_EQ(muscl.n_table_cells, uint64_t(s.get_mesh()->n_reconstructed()));
+    });
+}
+
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
     expect_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }

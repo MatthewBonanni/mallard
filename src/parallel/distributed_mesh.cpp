@@ -12,8 +12,10 @@
 #include "distributed_mesh.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <span>
@@ -37,6 +39,8 @@ using FaceKey = std::array<uint64_t, KEY>;
 constexpr uint64_t ZONE = uint64_t(1) << 63;
 constexpr int FACE_BITS = 3;
 constexpr uint64_t MAX_CELLS = ZONE >> FACE_BITS;
+// Rounds of the face matching: each sends about 60 B per hexahedron (3D) and receives as much
+constexpr uint64_t MATCH_ROUNDS = 4;
 
 uint64_t face_tag(uint64_t cell, uint64_t k) { return cell << FACE_BITS | k; }
 
@@ -436,104 +440,115 @@ DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPa
 
     // Every cell face and boundary face goes to the rank its node set hashes
     // to, as (key, tag); faces of periodic zones are found as interior faces
-    // instead
+    // instead. In rounds, by another part of the hash, so that the messages,
+    // sent and received at once, stay small next to the block
     constexpr int WIDTH = KEY + 1;
-    std::vector<std::vector<uint64_t>> send(p);
     std::vector<uint64_t> face;
-    // Two passes: count, then fill lists of exactly the right size
-    std::vector<uint64_t> count(p, 0);
-    auto for_each_face = [&](auto && post) {
+    // post(key, tag) for every face numbered i (cell faces, then boundary faces) that visit(i) takes
+    auto for_each_face = [&](auto && visit, auto && post) {
+        uint64_t i = 0;
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             const uint32_t n = static_cast<uint32_t>(block.cell_offsets[c + 1] - block.cell_offsets[c]);
             for (uint32_t k = 0; k < n_cell_faces(n); k++) {
+                if (!visit(i++)) continue;
                 cell_face(&block.cell_nodes[block.cell_offsets[c]], n, k, face);
                 for (uint64_t & node : face) node = node_key(node);
                 post(face_key(face), face_tag(block.first_cell + c, k));
             }
         }
         for (uint64_t f = 0; f < block.n_faces(); f++) {
-            if (periodic_zone[block.face_zone[f]]) continue;
+            if (periodic_zone[block.face_zone[f]] || !visit(i++)) continue;
             face.assign(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
                         block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
             for (uint64_t & node : face) node = node_key(node);
             post(face_key(face), ZONE | block.face_zone[f]);
         }
     };
-    for_each_face([&](const FaceKey & key, uint64_t) { count[hash(key) % p] += WIDTH; });
-    for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
-    for_each_face([&](const FaceKey & key, uint64_t tag) {
-        auto & out = send[hash(key) % p];
-        out.insert(out.end(), key.begin(), key.end());
-        out.push_back(tag);
-    });
-    comm::Received<uint64_t> received = comm::exchange(std::move(send));
-
-    // Sorted by key, then tag: each face's cells come first, then the
-    // boundary faces matching it. Two cells make a graph edge; one cell a
-    // boundary face in the zone of the first matching boundary face (lowest
-    // zone index), else unassigned. Each cell face gets the reply
-    // (its tag, the other cell or ZONE | zone).
-    const uint64_t n_records = received.data.size() / WIDTH;
-    const uint64_t * r = received.data.data();
-    std::vector<uint32_t> order(n_records);
-    std::iota(order.begin(), order.end(), 0u);
-    std::sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) {
-        return std::lexicographical_compare(r + x * WIDTH, r + (x + 1) * WIDTH, r + y * WIDTH, r + (y + 1) * WIDTH);
-    });
-    send.assign(p, {});
-    {
-        // Each record of a cell face sends one reply
-        std::fill(count.begin(), count.end(), 0);
-        for (uint64_t i = 0; i < n_records; i++) {
-            if (r[i * WIDTH + KEY] < ZONE) count[rank_of_cell(r[i * WIDTH + KEY] >> FACE_BITS)] += 2;
-        }
-        for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
-    }
-    for (uint64_t i = 0; i < n_records;) {
-        uint64_t j = i + 1;
-        while (j < n_records && std::equal(r + order[i] * WIDTH, r + order[i] * WIDTH + KEY, r + order[j] * WIDTH)) j++;
-        uint32_t n_cells = 0;
-        while (i + n_cells < j && r[order[i + n_cells] * WIDTH + KEY] < ZONE) n_cells++;
-        const bool zoned = i + n_cells < j;
-        const uint64_t zone = zoned ? r[order[i + n_cells] * WIDTH + KEY] & ~ZONE : unassigned;
-        if (n_cells == 0) {
-            error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
-        } else if (n_cells > 2) {
-            error = "Mesh: a face is shared by more than two cells.";
-        } else if (n_cells == 2 &&
-                   r[order[i] * WIDTH + KEY] >> FACE_BITS == r[order[i + 1] * WIDTH + KEY] >> FACE_BITS) {
-            error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
-        } else if (n_cells == 2 && zoned) {
-            error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
-        } else {
-            for (uint32_t m = 0; m < n_cells; m++) {
-                const uint64_t tag = r[order[i + m] * WIDTH + KEY];
-                const uint64_t other = n_cells == 2 ? r[order[i + 1 - m] * WIDTH + KEY] >> FACE_BITS : ZONE | zone;
-                auto & out = send[rank_of_cell(tag >> FACE_BITS)];
-                out.insert(out.end(), {tag, other});
-            }
-        }
-        i = j;
-    }
-    received = {};
-    release(order);
-    check_all(error);
-    received = comm::exchange(std::move(send));
-
-    // Per block cell, in local face order: neighbors and boundary faces. Each
-    // local face has one reply, so it goes straight to the face's slot.
+    // Per block cell, in local face order: the other cell or ZONE | zone. Each
+    // local face has one reply, so it goes straight to the face's slot
     std::vector<uint64_t> half_offsets(block.n_cells() + 1, 0);
     for (uint64_t c = 0; c < block.n_cells(); c++) {
         half_offsets[c + 1] = half_offsets[c] + n_cell_faces(static_cast<uint32_t>(block.cell_offsets[c + 1] - block.cell_offsets[c]));
     }
     std::vector<uint64_t> half_other(half_offsets.back());
     uint64_t n_neighbors = 0, n_boundary = 0;
-    for (size_t i = 0; i < received.data.size(); i += 2) {
-        const uint64_t tag = received.data[i], other = received.data[i + 1];
-        half_other[half_offsets[(tag >> FACE_BITS) - block.first_cell] + (tag & ((uint64_t(1) << FACE_BITS) - 1))] = other;
-        (other < ZONE ? n_neighbors : n_boundary)++;
+    // The round of every face, and the words each round sends to each rank: the lists get exactly their size
+    std::vector<uint8_t> face_round(half_offsets.back() + block.n_faces());
+    std::vector<uint64_t> round_count(MATCH_ROUNDS * p, 0);
+    for_each_face([](uint64_t) { return true; }, [&, i = uint64_t(0)](const FaceKey & key, uint64_t) mutable {
+        const uint64_t h = hash(key);
+        face_round[i++] = static_cast<uint8_t>(h / p % MATCH_ROUNDS);
+        round_count[h / p % MATCH_ROUNDS * p + h % p] += WIDTH;
+    });
+    std::vector<uint64_t> count(p, 0);
+    for (uint64_t round = 0; round < MATCH_ROUNDS; round++) {
+        std::vector<std::vector<uint64_t>> send(p);
+        for (size_t q = 0; q < p; q++) send[q].reserve(round_count[round * p + q]);
+        for_each_face([&](uint64_t i) { return face_round[i] == round; }, [&](const FaceKey & key, uint64_t tag) {
+            const uint64_t h = hash(key);
+            auto & out = send[h % p];
+            out.insert(out.end(), key.begin(), key.end());
+            out.push_back(tag);
+        });
+        comm::Received<uint64_t> received = comm::exchange(std::move(send));
+
+        // Sorted by key, then tag: each face's cells come first, then the
+        // boundary faces matching it. Two cells make a graph edge; one cell a
+        // boundary face in the zone of the first matching boundary face (lowest
+        // zone index), else unassigned. Each cell face gets the reply
+        // (its tag, the other cell or ZONE | zone). Equal records are the same
+        // words, so any sort gives the same order; std::sort takes twice as
+        // long on some meshes' rounds.
+        std::vector<std::array<uint64_t, WIDTH>> records(received.data.size() / WIDTH);
+        std::memcpy(records.data(), received.data.data(), received.data.size() * sizeof(uint64_t));
+        received = {};
+        std::stable_sort(records.begin(), records.end());
+        const uint64_t n_records = records.size();
+        send.assign(p, {});
+        {
+            // Each record of a cell face sends one reply
+            std::fill(count.begin(), count.end(), 0);
+            for (uint64_t i = 0; i < n_records; i++) {
+                if (records[i][KEY] < ZONE) count[rank_of_cell(records[i][KEY] >> FACE_BITS)] += 2;
+            }
+            for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
+        }
+        for (uint64_t i = 0; i < n_records;) {
+            uint64_t j = i + 1;
+            while (j < n_records && std::equal(records[i].begin(), records[i].begin() + KEY, records[j].begin())) j++;
+            uint32_t n_cells = 0;
+            while (i + n_cells < j && records[i + n_cells][KEY] < ZONE) n_cells++;
+            const bool zoned = i + n_cells < j;
+            const uint64_t zone = zoned ? records[i + n_cells][KEY] & ~ZONE : unassigned;
+            if (n_cells == 0) {
+                error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
+            } else if (n_cells > 2) {
+                error = "Mesh: a face is shared by more than two cells.";
+            } else if (n_cells == 2 &&
+                       records[i][KEY] >> FACE_BITS == records[i + 1][KEY] >> FACE_BITS) {
+                error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
+            } else if (n_cells == 2 && zoned) {
+                error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
+            } else {
+                for (uint32_t m = 0; m < n_cells; m++) {
+                    const uint64_t tag = records[i + m][KEY];
+                    const uint64_t other = n_cells == 2 ? records[i + 1 - m][KEY] >> FACE_BITS : ZONE | zone;
+                    auto & out = send[rank_of_cell(tag >> FACE_BITS)];
+                    out.insert(out.end(), {tag, other});
+                }
+            }
+            i = j;
+        }
+        release(records);
+        check_all(error);
+        received = comm::exchange(std::move(send));
+        if (round + 1 == MATCH_ROUNDS) release(face_round);
+        for (size_t i = 0; i < received.data.size(); i += 2) {
+            const uint64_t tag = received.data[i], other = received.data[i + 1];
+            half_other[half_offsets[(tag >> FACE_BITS) - block.first_cell] + (tag & ((uint64_t(1) << FACE_BITS) - 1))] = other;
+            (other < ZONE ? n_neighbors : n_boundary)++;
+        }
     }
-    received = {};
     graph_offsets_.assign(block.n_cells() + 1, 0);
     boundary_offsets.assign(block.n_cells() + 1, 0);
     graph_neighbors_.reserve(n_neighbors);
@@ -689,34 +704,56 @@ void DistributedMesh::send_to_owners() {
 
     // Node directory: the cells using each block node (all nodes of a
     // periodic class count as its key), and their owners, sent as
-    // (key, cell * ranks + owner)
-    send.assign(p, {});
-    {
-        std::vector<uint64_t> count(p, 0);
-        for (uint64_t node : block.cell_nodes) count[rank_of_node(node_key(node))] += 2;
-        for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
+    // (key, cell * ranks + owner). In rounds of increasing nodes of every
+    // block, each filling the directory of its nodes, so that the messages
+    // stay small next to the block. First the round of every node use and the
+    // words each round sends to each rank
+    std::vector<uint8_t> use_round(block.cell_nodes.size());
+    std::vector<uint64_t> round_count(MATCH_ROUNDS * p, 0);
+    for (size_t k = 0; k < block.cell_nodes.size(); k++) {
+        const uint64_t key = node_key(block.cell_nodes[k]);
+        const size_t q = rank_of_node(key);
+        use_round[k] = static_cast<uint8_t>((key - node_dist[q]) * MATCH_ROUNDS / (node_dist[q + 1] - node_dist[q]));
+        round_count[use_round[k] * p + q] += 2;
     }
-    for (uint32_t c = 0; c < block.n_cells(); c++) {
-        for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
-            const uint64_t key = node_key(block.cell_nodes[k]);
-            send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, (block.first_cell + c) * p + uint64_t(owner[c])});
+    {
+        std::vector<std::vector<uint64_t>> counts(p, std::vector<uint64_t>(1, 0));
+        for (size_t q = 0; q < p; q++) {
+            for (uint64_t round = 0; round < MATCH_ROUNDS; round++) counts[q][0] += round_count[round * p + q] / 2;
         }
+        uint64_t total = 0;
+        for (uint64_t n : comm::exchange(std::move(counts)).data) total += n;
+        directory_offsets.assign(block.n_nodes() + 1, 0);
+        directory_cells.reserve(total);
+        directory_owners.reserve(total);
     }
-    std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
-    directory_offsets.assign(block.n_nodes() + 1, 0);
-    for (size_t i = 0; i < uses.size(); i += 2) directory_offsets[uses[i] - block.first_node + 1]++;
-    std::partial_sum(directory_offsets.begin(), directory_offsets.end(), directory_offsets.begin());
-    directory_cells.assign(directory_offsets.back(), 0);
-    directory_owners.assign(directory_offsets.back(), 0);
-    {
-        std::vector<uint64_t> fill(directory_offsets.begin(), directory_offsets.end() - 1);
+    for (uint64_t round = 0; round < MATCH_ROUNDS; round++) {
+        send.assign(p, {});
+        for (size_t q = 0; q < p; q++) send[q].reserve(round_count[round * p + q]);
+        for (uint32_t c = 0; c < block.n_cells(); c++) {
+            for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                if (use_round[k] != round) continue;
+                const uint64_t key = node_key(block.cell_nodes[k]);
+                send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, (block.first_cell + c) * p + uint64_t(owner[c])});
+            }
+        }
+        const std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
+        // This round's nodes of the block: [lo, hi)
+        const uint64_t n = block.n_nodes(), lo = (round * n + MATCH_ROUNDS - 1) / MATCH_ROUNDS,
+                       hi = ((round + 1) * n + MATCH_ROUNDS - 1) / MATCH_ROUNDS;
+        for (size_t i = 0; i < uses.size(); i += 2) directory_offsets[uses[i] - block.first_node + 1]++;
+        for (uint64_t m = lo; m < hi; m++) directory_offsets[m + 1] += directory_offsets[m];
+        directory_cells.resize(directory_offsets[hi]);
+        directory_owners.resize(directory_offsets[hi]);
+        std::vector<uint64_t> fill(directory_offsets.begin() + static_cast<std::ptrdiff_t>(lo),
+                                   directory_offsets.begin() + static_cast<std::ptrdiff_t>(hi));
         for (size_t i = 0; i < uses.size(); i += 2) {
-            const uint64_t j = fill[uses[i] - block.first_node]++;
+            const uint64_t j = fill[uses[i] - block.first_node - lo]++;
             directory_cells[j] = uses[i + 1] / p;
             directory_owners[j] = int(uses[i + 1] % p);
         }
     }
-    release(uses);
+    release(use_round);
 
     // Halo layer 1: at every node shared by several owners, each owner gets
     // the cells there that it does not own
