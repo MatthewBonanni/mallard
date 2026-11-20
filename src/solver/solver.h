@@ -947,6 +947,8 @@ class Solver {
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
+        void ledger_boundary_flux(const ViscousFluxFunctor * viscous);
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
         /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
@@ -1136,6 +1138,10 @@ class Solver {
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
         void launch_flux_functor(const IndexSet & faces);
+        /** @brief The single gas's convective fluxes of faces into face_flux, by the chosen Riemann solver. */
+        void launch_convective_flux(const IndexSet & faces);
+        /** @brief The mixture's convective fluxes (double flux or not) of rhs_faces, by the chosen Riemann solver. */
+        void launch_mixture_convective_flux();
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
         bool exchanges_partition_faces() const;
         /**

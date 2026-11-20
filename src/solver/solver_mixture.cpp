@@ -502,23 +502,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (double_flux && !cells_frozen) {
         throw std::logic_error("Double flux needs the cells' thermodynamics frozen (take_step).");
     }
-    switch (riemann_solver_type) {
-        case RiemannSolverType::RUSANOV:
-            double_flux ? launch_double_flux_functor<riemann::Rusanov>() : launch_mixture_flux_functor<riemann::Rusanov>();
-            break;
-        case RiemannSolverType::HLL:
-            double_flux ? launch_double_flux_functor<riemann::HLL>() : launch_mixture_flux_functor<riemann::HLL>();
-            break;
-        case RiemannSolverType::HLLC:
-            double_flux ? launch_double_flux_functor<riemann::HLLC>() : launch_mixture_flux_functor<riemann::HLLC>();
-            break;
-        case RiemannSolverType::ROE:
-            double_flux ? launch_double_flux_functor<riemann::Roe>() : launch_mixture_flux_functor<riemann::Roe>();
-            break;
-        case RiemannSolverType::RHLL:
-            double_flux ? launch_double_flux_functor<riemann::RHLL>() : launch_mixture_flux_functor<riemann::RHLL>();
-            break;
-    }
+    launch_mixture_convective_flux();
 
     const uint32_t n_species = mixture.n_species;
     scalar_reconstruction.species_slots(cell_scalars, face_mdot, face_reconstruction->quadrature_face.weights,
@@ -592,53 +576,6 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         viscous_flux();
         budget_rates_of_fluxes(2);
     }
-}
-
-template <typename T_riemann_solver>
-void Solver::launch_mixture_flux_functor() {
-    const uint32_t n_species = mixture.n_species;
-    MixtureFluxFunctor<T_riemann_solver> functor{
-        mesh->face_normals,
-        mesh->face_area,
-        mesh->cells_of_face,
-        face_reconstruction->quadrature_face.weights,
-        flux_weights,
-        face_solution,
-        face_thermo,
-        boundary_data,
-        Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
-        face_flux,
-        face_mdot,
-        low_mach_cutoff,
-        cell_upwind,
-        face_reconstruction->face_quad_normals,
-        central_states()};
-    // Faces of owned cells, as the single-gas flux
-    parallel_for_set<HeavyBounds>("mixture_flux", rhs_faces, functor);
-}
-
-template <typename T_riemann_solver>
-void Solver::launch_double_flux_functor() {
-    const uint32_t n_species = mixture.n_species;
-    MixtureDoubleFluxFunctor<T_riemann_solver> functor{
-        mesh->face_normals,
-        mesh->face_area,
-        mesh->cells_of_face,
-        face_reconstruction->quadrature_face.weights,
-        flux_weights,
-        face_solution,
-        boundary_data,
-        frozen_thermo,
-        face_thermo,
-        Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
-        face_flux,
-        face_energy_1,
-        face_mdot,
-        low_mach_cutoff,
-        cell_upwind,
-        face_reconstruction->face_quad_normals,
-        central_states()};
-    parallel_for_set<HeavyBounds>("double_flux", rhs_faces, functor);
 }
 
 rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
