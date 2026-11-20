@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "comm.h"
 #include "face_reconstruction.h"
 #include "gradient.h"
 #include "viscous_flux.h"
@@ -144,6 +145,132 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
             FOR_I_CONSERVATIVE {
                 ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), roundoff(1e-10))
                     << "face " << f << " side " << static_cast<int>(side);
+            }
+        }
+    }
+}
+
+TEST(MUSCL3D, FusedKernelReadsTheRowsAndGivesTheSeparateKernelsFaceValuesBitwise) {
+    // A blast in a box with walls, and in one periodic in x and y: every cell has a row
+    for (const bool periodic : {false, true}) {
+        Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 10\nNz = 10\n") +
+                                 (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : ""));
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double r2 = 0.0;
+            for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.45, 2);
+            const bool inside = r2 < 0.06;
+            h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+            for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+            h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+        }
+        Kokkos::deep_copy(W, h_W);
+        auto results = [&](const bool fused) {
+            auto muscl = std::make_unique<MUSCL>();
+            muscl->set_mesh(mesh);
+            muscl->set_boundaries(bd);
+            muscl->init(parse_toml("type = \"MUSCL\"\n"));
+            EXPECT_EQ(muscl->n_table_cells, uint64_t(mesh->n_cells)) << "periodic " << periodic;
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+            if (fused) {
+                muscl->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W, face_W, IndexSet{{}, 0, mesh->n_cells});
+            } else {
+                muscl->calc_face_values(W, face_W);
+            }
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::vector<rtype>(h.data(), h.data() + h.span());
+        };
+        EXPECT_TRUE(results(true) == results(false)) << "periodic " << periodic;
+    }
+}
+
+TEST(MUSCL3D, NoRowsWhenFewerThanEightCellsShareEachRow) {
+    // Stretched along every axis, every cell's geometry is its own
+    Input input = parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nstretching = [1.8, 1.8, 1.8]\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) < 0) face_bc[f] = 0;
+    }
+    BoundaryCondition extrapolation;
+    extrapolation.type = BoundaryType::OUTLET_EXTRAPOLATION;
+    auto muscl = std::make_unique<MUSCL>();
+    muscl->set_mesh(mesh);
+    muscl->set_boundaries(make_boundary_data(*mesh, face_bc, {extrapolation}, 1.4_r));
+    muscl->init(parse_toml("type = \"MUSCL\"\n"));
+    EXPECT_EQ(muscl->n_candidates_global, comm::allreduce(uint64_t(mesh->n_cells), comm::Op::SUM));
+    EXPECT_GT(muscl->n_rows_global * MUSCL::MIN_CELLS_PER_ROW, muscl->n_candidates_global);
+    EXPECT_EQ(muscl->n_table_cells, 0u);
+    EXPECT_EQ(muscl->tables.row.extent(0), 0u);
+}
+
+TEST(MUSCL3D, TableGradientsMatchTheLeastSquaresSolveOnAStretchedBoxWithBoundaryCells) {
+    // Image cells across extrapolation faces, ghosts at Dirichlet faces and mirrored ghosts at symmetry faces;
+    // shared rows are each cell's own up to the sharing grid
+    Input input = parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nstretching = [0, 0, 1.8]\n");
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(input);
+    mesh->copy_host_to_device();
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) >= 0) continue;
+        int axis = 0;
+        for (int d = 1; d < 3; d++) {
+            if (std::abs(mesh->h_face_normals(f, d)) > std::abs(mesh->h_face_normals(f, axis))) axis = d;
+        }
+        face_bc[f] = axis;
+    }
+    BoundaryCondition extrapolation, dirichlet, symmetry;
+    extrapolation.type = BoundaryType::OUTLET_EXTRAPOLATION;
+    dirichlet.type = BoundaryType::DIRICHLET;
+    symmetry.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(*mesh, face_bc, {extrapolation, dirichlet, symmetry}, 1.4_r);
+    auto field = [](const uint8_t i, const double x, const double y, const double z) {
+        return 1.0 + 0.1 * i + 0.3 * std::sin(2.0 * x + i) * std::cos(3.0 * y) + 0.2 * z * z;
+    };
+    auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
+    auto h_state = Kokkos::create_mirror_view(bd.face_state);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (h_index(f) < 0) continue;
+        FOR_I_CONSERVATIVE h_state(h_index(f), i) = static_cast<rtype>(
+            field(i, mesh->h_face_coords(f, 0), mesh->h_face_coords(f, 1), mesh->h_face_coords(f, 2)));
+    }
+    Kokkos::deep_copy(bd.face_state, h_state);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        FOR_I_CONSERVATIVE h_W(c, i) = static_cast<rtype>(
+            field(i, mesh->h_cell_coords(c, 0), mesh->h_cell_coords(c, 1), mesh->h_cell_coords(c, 2)));
+    }
+    Kokkos::deep_copy(W, h_W);
+
+    auto muscl = std::make_unique<MUSCL>();
+    muscl->set_mesh(mesh);
+    muscl->set_boundaries(bd);
+    muscl->init(parse_toml("type = \"MUSCL\"\nlimiter = \"none\"\n"));
+    ASSERT_EQ(muscl->n_table_cells, uint64_t(mesh->n_cells));
+    ASSERT_LT(muscl->n_rows_global * MUSCL::MIN_CELLS_PER_ROW, muscl->n_candidates_global);
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+    muscl->calc_face_values(W, face_W);
+    const auto table = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), muscl->gradients);
+
+    LSQGradientFunctor solve = make_gradient(*mesh, bd, W, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("grad", mesh->n_cells));
+    Kokkos::parallel_for(mesh->n_cells, solve);
+    const auto direct = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solve.gradients);
+    // Rows share on a grid of about 1e-9 of their magnitude in double, 4e-6 in single precision
+    const double tol = sizeof(rtype) == sizeof(double) ? 1e-7 : 2e-4;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        FOR_I_CONSERVATIVE {
+            for (int d = 0; d < 3; d++) {
+                ASSERT_NEAR(table(c, i, d), direct(c, i, d), tol * (1.0 + std::abs(double(direct(c, i, d)))))
+                    << "cell " << c << " var " << static_cast<int>(i) << " dir " << d;
             }
         }
     }
