@@ -469,7 +469,8 @@ void cells_of_faces_as(uint64_t n_cells, std::vector<uint64_t> & face_ids, Recor
                 words.clear();
                 for (auto k = first; k != last; ++k) words.insert(words.end(), got.begin() + std::ptrdiff_t(*k + 4),
                                                                   got.begin() + std::ptrdiff_t(*k + 4 + got[*k + 3]));
-                for (auto k = first, w = words.cbegin(); k != last; w += got[*k + 3], ++k) cell_faces.emplace_back(w, got[*k + 3]);
+                const uint64_t * w = words.data();
+                for (auto k = first; k != last; w += got[*k + 3], ++k) cell_faces.emplace_back(w, got[*k + 3]);
             }
             block.add_cell(cell_corners(cell_faces, block.first_cell + c, source));
         }
