@@ -307,27 +307,111 @@ and Vue with a solver behind it), and the GUI's form depends on asking a live
 later turn out to duplicate real logic, a shared Vue component is possible:
 trame hosts custom Vue components.
 
-### Mesh import, boundary zones, regions and probes
+### The case tree
+
+The case is one tree, in the order a case is built: Mesh, Physics, Boundaries
+(one node per zone), Initial state, Numerics, **Regions**, Probes, Output,
+Statistics, Run. Each node shows its key value (`navier_stokes`, `TENO 3`), and a
+badge with the count of errors or warnings `mallard check` attaches to it. The
+3D view, the tree and the property grid are always visible together; selecting
+in any one selects in the others.
+
+![Case setup in 2D (examples/cylinder): the case tree with Regions as a section of its own, the case view with zones, regions and probes, the problems panel, and the selected region's properties with where it is used](../images/design/gui-case-setup-light.svg#gh-light-mode-only)
+![Case setup in 2D (examples/cylinder): the case tree with Regions as a section of its own, the case view with zones, regions and probes, the problems panel, and the selected region's properties with where it is used](../images/design/gui-case-setup-dark.svg#gh-dark-mode-only)
+
+### Regions: define once, preview, reuse by name
+
+In Mallard a region is a general geometric primitive, not a probe setting
+([Geometry](../guide/geometry.md#who-uses-what)): `[[sources]]`, `[[sponges]]`,
+`[[probes]]`, `[[write_data]]`, `[[initialize.regions]]`, `[[initialize.data]]`,
+`[[statistics.conditional]]`, `[[mesh.curved]]`, `mallard post extract`,
+`mallard post average` and `mallard check --mesh-fields` all take one; regions
+can be primitives, regions of the mesh (`domain`, boundary and cell zones),
+booleans (`union`, `intersection`, `difference`), boundaries and interiors of
+other regions, transformed, repeated as arrays of copies, moving, defined by the
+solution, and (with [#1285](https://github.com/MatthewBonanni/mallard/issues/1285))
+closed CAD surfaces. So Regions is a first-class section of the case tree:
+
+- **Every region the case uses is listed**: the named ones of `[regions]`, the
+  inline tables of each feature (named after their owner, such as
+  `near_wake` from `write_data[2]`), and the mesh's own (`domain`, the zones).
+  An inline region can be promoted to `[regions]` in one action, which rewrites
+  the input to reference it by name.
+- **Each region shows where it is used** ("used by": every feature that
+  references it, with a link to that feature's node) and, from `mallard check`,
+  its dimension, cells, measure and cut cells.
+- **Every feature's form picks regions from the same list** (any region of the
+  dimension that feature takes, as the catalog says), or defines a new one
+  in place; a "use in…" action adds the selected region to another feature.
+- **Previews**: every region is drawn in the case view (filled regions with
+  their fractions, surfaces and curves with their normals), highlighted when
+  selected in the tree, a form or the view.
+- Probes are one consumer among others: the Probes section lists probes (points,
+  curves, boundary zones, region reductions), each referencing a region or a
+  probe type.
+
+### Mesh import and the case view
 
 - **Import**: a mesh file is read by `mallard info MESH --format json` (format,
   cells, cell types, bounds, boundary and cell zones with face counts, quality
   with the worst cells) and drawn from `mallard info MESH --view DIR`. Formats
   Mallard converts go through `mallard mesh convert`. A mesh on a remote is
   inspected there; nothing is copied to preview it.
-- **Boundary assignment**: the case view has one block per zone. The 3D view
-  colors zones (a colorblind-safe categorical palette), picking a zone selects
-  its `[[boundaries]]` element, and zones without a condition are highlighted
-  until assigned, as `mallard check` reports them.
+- **Boundary assignment**: the case view has one block per zone, colored with a
+  colorblind-safe categorical palette; picking a zone selects its
+  `[[boundaries]]` element, and zones without a condition are highlighted until
+  assigned, as `mallard check` reports them.
 - **Boundary coordinates** (#346): on a selected patch, show `u`, `v` and set
   `origin` and `toward` by clicking on it.
-- **Regions and probes**: `mallard check --view` already draws every region
-  (filled regions with their fractions, surfaces and curves with normals),
-  probe and periodic pair as named blocks, plus annotated light and dark SVG
-  images ([website #61](https://github.com/MatthewBonanni/mallard-website/issues/61)).
-  The GUI shows the blocks and links each to its input element, which needs
-  block metadata (the key path and element index of each block). For big meshes
-  the full check is too slow to rerun per edit: a geometry-only view (mesh,
-  zones, regions, probes, without stencils and numerics) is a follow-up.
+- **Blocks link to the input**: `mallard check --view` draws every zone, region,
+  probe and periodic pair as named blocks (and annotated SVG images,
+  [website #61](https://github.com/MatthewBonanni/mallard-website/issues/61));
+  linking each block to its input element needs block metadata, and rerunning on
+  every edit of a large mesh needs a geometry-only view
+  ([#1313](https://github.com/MatthewBonanni/mallard/issues/1313)).
+
+**Navigation**, the same in 2D and 3D: zoom (wheel, pinch), pan (shift-drag or
+middle button), orbit (drag), fit to view (F), view presets (+X, −X, +Y, −Y, +Z,
+−Z, iso), perspective or orthographic projection, and a 2D mode that locks
+rotation to the plane (on by default for 2D cases). Coordinates and the cell or
+face under the cursor show in the view's corner.
+
+**The section tool**, because the surfaces that need a condition are often hard
+to reach: a sphere or a blade inside a far-field box, an internal baffle, a
+periodic pair behind another zone.
+
+- One or more **clip planes**, axis-aligned with snapping or arbitrary, dragged
+  with a plane widget (origin handle, normal arrow to tilt), each keeping one
+  side; a **box clip**.
+- **Hide**, **isolate** and **show only selected** zones; **x-ray** draws the
+  other zones translucent.
+- **Picking through the cut**: picking works on interior and enclosed surfaces
+  the section exposes, and ignores clipped geometry.
+- The **zone list stays in sync** with the 3D selection, so a face that cannot be
+  reached in the view is picked from the list, and selecting in the list
+  highlights it in the view.
+
+![Case setup in 3D (examples/sphere_re300): the sphere enclosed by the far-field zones, exposed by a clip plane and picked through the cut, with the zone list, the boundary condition and the section settings](../images/design/gui-case-setup-3d-light.svg#gh-light-mode-only)
+![Case setup in 3D (examples/sphere_re300): the sphere enclosed by the far-field zones, exposed by a clip plane and picked through the cut, with the zone list, the boundary condition and the section settings](../images/design/gui-case-setup-3d-dark.svg#gh-dark-mode-only)
+
+**On VTK and trame.** Clip planes are `vtkPlaneWidget`/`vtkImplicitPlaneWidget2`
+driving a `vtkPlane` set on the mappers' clipping planes (no new geometry), the
+box clip `vtkBoxWidget2` with `vtkPlanes`; x-ray is per-actor opacity with
+depth peeling; isolate and hide toggle actors per block. Picking uses hardware
+selection (`vtkHardwareSelector`, cell and block ids rendered to an offscreen
+buffer), which honors clipping planes and opacity, so a click hits the first
+visible surface, interior ones included; `vtkCellPicker` is the fallback. In
+trame, local rendering (vtk.js in the browser) has its own widgets and picking
+for small cases; remote rendering keeps them on the server, where picking is a
+round trip.
+
+**Large meshes.** The view never loads the volume mesh into the browser: it
+shows zone surfaces (decimated with `vtkQuadricDecimation` above a few hundred
+thousand triangles, with the full-resolution surface used for picking on the
+server), and a cut through the volume computed only for the plane shown
+(`vtkCutter` on the server). Beyond a few million surface triangles, the view
+switches to server-side rendering next to the mesh (the viewer job), with the
+same tools.
 
 ## Backends
 
@@ -720,8 +804,9 @@ spacing, radii) with the redesigned website: the token file lives in the website
 repository and the GUI pins it by version. The mockups below use provisional
 values until that file exists.
 
-![Case setup: the setup steps with their status, the mesh with its zones, the problems panel, and the selected zone's boundary condition with an inline error](../images/design/gui-case-setup-light.svg#gh-light-mode-only)
-![Case setup: the setup steps with their status, the mesh with its zones, the problems panel, and the selected zone's boundary condition with an inline error](../images/design/gui-case-setup-dark.svg#gh-dark-mode-only)
+The mockups are drawn by `tools/docs/gui_mockups.py`; their numbers are
+synthetic, built from the examples' inputs and reference results (cylinder:
+St 0.164, Cd 1.36; sphere_re300: its mesh size and zones).
 
 - **Typography**: a high-quality sans for the interface (Inter, or the shared
   token's choice) and a monospace for numbers, units, keys and paths (JetBrains
@@ -735,9 +820,36 @@ values until that file exists.
   and `batlow` (sequential), `vik` (diverging, for signed fields such as
   vorticity), and Okabe-Ito for categories (zones, regions, curves). No rainbow
   colormaps by default.
-- **Grid and density**: a 4 px base unit on an 8 px grid. Two density modes:
-  compact (28 px rows, 13 px text) for experts, comfortable (36 px rows, 14 px
-  text) for beginners, switchable at any time.
+- **Density**: compact by default, because a case setup is read more than it
+  is browsed: the case tree, the 3D view and the property grid (label and value
+  side by side, units inline) are all visible at once, with thin dividers
+  instead of cards and minimal padding. A "comfortable" mode enlarges rows and
+  text for touch and for beginners. Hit targets stay at least 24 px (WCAG 2.2
+  2.5.8) in both. Provisional tokens:
+
+  | Token | Compact | Comfortable |
+  |---|---|---|
+  | Base unit | 4 px | 4 px |
+  | Row, input, tab height | 24 px (28 px tabs) | 32 px |
+  | Body / secondary text | 12 / 11 px | 14 / 12 px |
+  | Header bar / status bar | 36 / 24 px | 44 / 28 px |
+  | Panel padding | 8 px | 12 px |
+  | Radius | 4 px | 6 px |
+  | Divider | 1 px `border` | 1 px `border` |
+  | Accent (light / dark) | `#0f766e` / `#2dd4bf` | same |
+
+  Secondary text uses the `muted` color, which meets 4.5:1 on every panel; the
+  lighter `faint` is for dividers and disabled glyphs only, never for text that
+  must be read.
+- **Chrome**: a toolbar with the project, breadcrumbs (project / case / node)
+  and the run controls; tabs for open cases and runs; a status bar with the
+  remote, the job id, step, simulated time, wall time and ETA, and transfers in
+  progress. Tree rows have expand glyphs, type icons, and validation badges
+  (error and warning counts); hover and selection states differ by background,
+  selection also by the accent bar.
+- **Plots** always have labeled axes with units, ticks, a grid, and a legend
+  when there is more than one curve; field views always have a colorbar with the
+  field's name and units.
 - **Units everywhere**: every quantity shows its unit, in the monospace, next to
   the value. Fields accept a plain number in the key's units or a quantity with
   a unit (`1 atm`), as Mallard's input does; hovering shows the SI value.
@@ -745,13 +857,15 @@ values until that file exists.
 - **Motion** only where it carries meaning: a progress bar moving, a panel
   opening from where it was invoked, a transfer's state changing; 120 to 200 ms,
   none with `prefers-reduced-motion`.
-- **Icons**: one outline set (Lucide, 1.5 px strokes, 16 and 20 px) plus a few
-  drawn in the same style for Mallard's concepts: boundary condition types,
-  regions, probes, and the location badges (local machine, SSH remote,
-  Kubernetes).
+- **Icons**: one outline set at 1.5 px strokes on a 24-unit grid, shown at 16
+  px: Lucide (ISC license, to be credited in the about box and the
+  third-party notices), plus a few drawn in the same style for Mallard's
+  concepts: boundary condition types, regions, probes, and the location badges
+  (local machine, SSH remote, Kubernetes). The mockups use their own outline
+  paths in that style.
 - **Errors and validation**: `mallard check`'s diagnostics appear on the field
   they concern (red border, the message under it, its code and a link to its
-  docs), as counts on the setup step that holds them, in a problems panel
+  docs), as counts on the case tree node that holds them, in a problems panel
   (keyboard: next and previous problem), and in the 3D view (the zone without a
   condition, the region outside the domain, the cell that limits the time step).
   Warnings never block; errors block Run with the reason on the button.
