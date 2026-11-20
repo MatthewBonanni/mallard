@@ -152,6 +152,7 @@ inline void expect_matches_serial(const std::string & input,
 inline void expect_matches_serial_with_and_without_step_graphs(
     const std::string & input, const std::function<void(const Solver &)> & check_distributed = {}) {
     for (const bool graphs : {true, false}) {
+        if (graphs && Solver::are_cuda_graphs_off()) continue;
         std::string text = input;
         text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
         SCOPED_TRACE(text);
