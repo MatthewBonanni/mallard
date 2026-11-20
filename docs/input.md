@@ -1539,12 +1539,13 @@ reductions = ["mean", "rms"]
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every
-step ([Triggers](guide/running.md#triggers)).
+step ([Triggers](guide/running.md#triggers)). Each number a condition compares
+`t` with is a time a step lands on.
 
 | Key | Description |
 |---|---|
 | `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
-| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
+| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set), `"stop statistics"` (they keep their values from then on), `"log <message>"` (a line of the log, `{<name>}` replaced by that value), `"set <key>=<value> ..."` (as `mallard ctl set`). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
 | `repeat` | `true` fires again each time the condition turns true after being false; default `false` (once) |
