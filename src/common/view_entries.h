@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include <Kokkos_Macros.hpp>
+
 namespace view_entries {
 
 /**
@@ -26,6 +28,25 @@ inline constexpr uint64_t MAX = uint64_t(1) << 32;
 #else
 inline constexpr uint64_t MAX = uint64_t(1) << 31;
 #endif
+
+/**
+ * @brief Entries (r, 0) to (r, N - 1) of the rank-2 View v into out, stepping a pointer
+ *        along the View's stride. Kokkos's unsigned 32-bit offsets (see MAX) cost devices
+ *        an extra add per entry; stepping by a signed 32-bit stride does not. N >= 3 keeps
+ *        the stride of a View of at most MAX entries below 2^31.
+ */
+template <int N, typename View, typename T>
+KOKKOS_INLINE_FUNCTION void load_row(const View & v, const uint32_t r, T * out) {
+    static_assert(View::rank() == 2);
+    static_assert(N >= 3);
+    const auto * p = &v(r, 0);
+    const int32_t stride = static_cast<int32_t>(v.stride(1));
+    out[0] = p[0];
+    for (int i = 1; i < N; i++) {
+        p += stride;
+        out[i] = *p;
+    }
+}
 
 /** @brief Record the cells on this rank, halo included, for the limit check() reports, and restart
  *         entries_per_cell(). */

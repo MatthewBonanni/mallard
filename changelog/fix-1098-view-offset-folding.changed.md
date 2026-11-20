@@ -1,0 +1,1 @@
+- MUSCL reconstruction reads each cell's state, gradient and limiter once instead of once per face, and the 3D TENO reconstruction loads its stencil states with fewer address computations: on an A100, `benchmarks/perf` air_3d runs about 1.6% faster (median; 1.9% best of 3) and muscl_2d about 3%, with teno5_2d and teno5_3d unchanged (#1098).
