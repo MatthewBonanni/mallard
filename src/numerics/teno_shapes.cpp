@@ -339,17 +339,18 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
                      const uint32_t n_small, const uint32_t batch)
     : mesh(mesh_in) {
     const uint32_t n_cells = mesh.n_cells;
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
     s.cell_coords = mesh.cell_coords;
     s.face_coords = mesh.face_coords;
     s.node_coords = mesh.node_coords;
     s.shifts = mesh.shifts;
-    s.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
-    s.cells_of_cell = mesh.cells_of_cell;
+    s.offsets_cells_of_cell = neighbors.offsets;
+    s.cells_of_cell = neighbors.cells;
     s.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
     s.faces_of_cell = mesh.faces_of_cell;
     s.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
     s.nodes_of_cell = mesh.nodes_of_cell;
-    s.cells_of_cell_shift = mesh.cells_of_cell_shift;
+    s.cells_of_cell_shift = neighbors.shift;
     s.face_shift = mesh.face_shift;
     s.cells_of_face = mesh.cells_of_face;
     s.face_bc = boundaries.face_bc;
