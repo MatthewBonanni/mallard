@@ -193,9 +193,10 @@ struct Lattices {
 
     explicit Lattices(const Mesh & m)
         : mesh(m), stamp(m.n_cells, 0), lattice(m.n_cells) {
-        offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.offsets_cells_of_cell);
-        neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell);
-        shifts.rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell_shift.rows);
+        const VertexNeighbors & v = m.vertex_neighbors();
+        offsets = v.h_offsets;
+        neighbors = v.h_cells;
+        shifts = v.h_shift;
     }
 
     /** @brief Search depth layers from cell c; periodic(cell) then tells about the cells it met. */

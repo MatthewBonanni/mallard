@@ -824,7 +824,8 @@ void Solver::update_reaction_sensor() {
     exchange_cell_vectors(sensor);
     for (uint32_t pass = 0; pass < ThickenedFlame::SENSOR_PASSES; pass++) {
         gated::parallel_for("tfles_sensor_filter", n_owned,
-                             TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, sensor, filtered});
+                            TestFilterFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
+                                              mesh->cell_volume, sensor, filtered});
         // The fields read the last pass on owned cells only
         if (pass + 1 < ThickenedFlame::SENSOR_PASSES) exchange_cell_vectors(filtered);
         std::swap(sensor, filtered);
@@ -845,7 +846,8 @@ void Solver::update_dynamic_efficiency() {
     exchange_cell_vectors(progress);
     for (uint32_t pass = 0; pass < tfles_test_passes; pass++) {
         gated::parallel_for("tfles_test_filter", n_owned,
-                             TestFilterFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell, mesh->cell_volume, progress, filtered});
+                            TestFilterFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
+                                              mesh->cell_volume, progress, filtered});
         exchange_cell_vectors(filtered);
         std::swap(progress, filtered);
     }
@@ -870,9 +872,9 @@ void Solver::init_dynamic_efficiency() {
     const uint32_t n_owned = mesh->n_owned();
     tfles_test_width2 = Kokkos::View<rtype *>("tfles_test_width2", n_owned);
     gated::parallel_for("tfles_test_width", n_owned,
-                         TestFilterWidthFunctor{mesh->offsets_cells_of_cell, mesh->cells_of_cell,
-                                                mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
-                                                mesh->cell_volume, tfles_test_width2});
+                        TestFilterWidthFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
+                                               viscous_gradient.cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
+                                               mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
     tfles_dynamic_sums = ExactSums(4, n_owned, is_distributed(), halo.uses_nccl());
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
@@ -966,10 +968,11 @@ void Solver::update_dynamic_constant() {
     gated::parallel_for("dynamic_stresses", mesh->n_cells,
                          DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
     gated::parallel_for("dynamic_terms", n_owned,
-                         DynamicProcedureFunctor{les.model, mesh->offsets_cells_of_cell, mesh->cells_of_cell,
-                                                 mesh->cells_of_cell_shift, mesh->periodic_maps(), mesh->cell_coords,
-                                                 mesh->cell_volume, les_width, flow, g, dynamic_stresses,
-                                                 dynamic_terms});
+                        DynamicProcedureFunctor{les.model, viscous_gradient.offsets_cells_of_cell,
+                                                viscous_gradient.cells_of_cell, viscous_gradient.cells_of_cell_shift,
+                                                mesh->periodic_maps(), mesh->cell_coords,
+                                                mesh->cell_volume, les_width, flow, g, dynamic_stresses,
+                                                dynamic_terms});
     dynamic_sums.sum(dynamic_terms);
     const Kokkos::View<double *> sums = dynamic_sums.sums(), state = les_state;
     const bool vreman = les.model == SGSModel::VREMAN;

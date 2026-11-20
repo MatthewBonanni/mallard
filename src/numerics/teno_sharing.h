@@ -49,19 +49,21 @@ struct CanonicalTable {
     std::vector<uint16_t> order;     // (canonical slot): the stencil's slot
     std::vector<uint16_t> segments;  // slots of each segment
     int exponent = 0;                // of the table's largest |entry|, as frexp gives it
+    int bits = SHARE_GRID_BITS;      // the grid: 2^-bits of that magnitude
     uint64_t hash = 1469598103934665603ULL;
 
     CanonicalTable() = default;
 
     template <typename T>
-    CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes)
-        : segments(std::move(segment_sizes)) {
+    CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes,
+                   const int grid_bits = SHARE_GRID_BITS)
+        : segments(std::move(segment_sizes)), bits(grid_bits) {
         const uint32_t n = std::accumulate(segments.begin(), segments.end(), 0u);
         double magnitude = 0.0;
         for (size_t i = 0; i < size_t(n) * width; i++) magnitude = std::max(magnitude, std::abs(double(pinv[i])));
         std::frexp(magnitude, &exponent);
         std::vector<int64_t> q(size_t(n) * width);
-        for (size_t i = 0; i < q.size(); i++) q[i] = on_grid(pinv[i], exponent);
+        for (size_t i = 0; i < q.size(); i++) q[i] = on_grid(pinv[i], exponent, bits);
         order.resize(n);
         std::iota(order.begin(), order.end(), uint16_t(0));
         add(exponent);
@@ -81,7 +83,9 @@ struct CanonicalTable {
 
     /** @brief An entry on the grid of a table of this exponent. */
     template <typename T>
-    static int64_t on_grid(const T v, const int exp) { return std::llround(std::ldexp(double(v), SHARE_GRID_BITS - exp)); }
+    static int64_t on_grid(const T v, const int exp, const int bits = SHARE_GRID_BITS) {
+        return std::llround(std::ldexp(double(v), bits - exp));
+    }
 
     private:
         template <typename T>
@@ -282,6 +286,7 @@ class TableStore {
             kept.order.resize(t.order.size());
             kept.segments = t.segments;
             kept.exponent = t.exponent;
+            kept.bits = t.bits;
             kept.hash = t.hash;
             const uint64_t h = keyed ? hash : t.hash;
             kept.hash = h;
@@ -305,9 +310,11 @@ class TableStore {
 
         bool same_shape(const size_t k, const CanonicalTable & t, const T * v) const {
             const Shape & s = shapes[k];
-            if (s.canonical.exponent != t.exponent || s.canonical.segments != t.segments) return false;
+            if (s.canonical.exponent != t.exponent || s.canonical.bits != t.bits || s.canonical.segments != t.segments) {
+                return false;
+            }
             for (size_t i = 0; i < s.values.size(); i++) {
-                if (CanonicalTable::on_grid(s.values[i], t.exponent) != CanonicalTable::on_grid(v[i], t.exponent)) {
+                if (CanonicalTable::on_grid(s.values[i], t.exponent, t.bits) != CanonicalTable::on_grid(v[i], t.exponent, t.bits)) {
                     return false;
                 }
             }
