@@ -294,6 +294,46 @@ TEST(CliTest, UserDocsShowEveryHelpPage) {
     }
 }
 
+TEST(CliTest, InstallVerifyRunsEachSolverAgainstTheExactSolution) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"install", "verify", "--format", "json", "--kokkos-num-threads=2"});
+    ASSERT_EQ(r.status, 0) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_EQ(v["schema"].string, "mallard-install-verify");
+    EXPECT_EQ(v["version"].number, 1);
+    EXPECT_TRUE(v["passed"].boolean);
+    EXPECT_EQ(v["mallard"].string, mallard_version());
+    std::vector<std::string> names;
+    for (const json::Value & c : v["checks"].array) {
+        SCOPED_TRACE(c["name"].string + " " + c["detail"].string);
+        EXPECT_TRUE(c["passed"].boolean);
+        if (c["dim"].number != Mallard_DIM) continue;
+        names.push_back(c["name"].string);
+        if (c["name"].string == "run") {
+            EXPECT_NEAR(c["monitors"]["min_rho"].number, 0.125, 0.0025);
+            EXPECT_NEAR(c["monitors"]["max_mach"].number, 0.929, 0.05);
+            EXPECT_GT(c["steps"].number, 0);
+        }
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"environment", "run"}));
+}
+
+TEST(CliTest, InstallVerifyFailsTheChecksALauncherCannotRun) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"install", "verify", "--format", "json", "--launcher", "false"});
+    EXPECT_EQ(r.status, 1) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_FALSE(v["passed"].boolean);
+    ASSERT_FALSE(v["checks"].array.empty());
+    for (const json::Value & c : v["checks"].array) {
+        EXPECT_FALSE(c["passed"].boolean) << c["name"].string;
+        EXPECT_EQ(c["detail"].string.rfind("exit 1", 0), 0u) << c["detail"].string;
+    }
+    const Result text = run({"install", "verify", "--launcher", "false"});
+    EXPECT_EQ(text.status, 1);
+    EXPECT_TRUE(contains(text.out, "The install does not work")) << text.out;
+}
+
 TEST(CliTest, TestOptionsOnItsPageReachGoogleTest) {
     const cli::Command & test = *cli::command("test");
     cli::Args parsed;
