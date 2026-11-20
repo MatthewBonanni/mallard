@@ -145,14 +145,16 @@ bool is_name(const std::string & s) {
     return true;
 }
 
-double swap_bytes(double x) {
-    uint64_t u;
-    std::memcpy(&u, &x, sizeof u);
-    u = ((u & 0x00000000000000ffULL) << 56) | ((u & 0x000000000000ff00ULL) << 40) |
-        ((u & 0x0000000000ff0000ULL) << 24) | ((u & 0x00000000ff000000ULL) << 8) |
-        ((u & 0x000000ff00000000ULL) >> 8) | ((u & 0x0000ff0000000000ULL) >> 24) |
-        ((u & 0x00ff000000000000ULL) >> 40) | ((u & 0xff00000000000000ULL) >> 56);
-    std::memcpy(&x, &u, sizeof x);
+double from_little_endian(double x) {
+    if constexpr (std::endian::native == std::endian::big) {
+        uint64_t u;
+        std::memcpy(&u, &x, sizeof u);
+        u = ((u & 0x00000000000000ffULL) << 56) | ((u & 0x000000000000ff00ULL) << 40) |
+            ((u & 0x0000000000ff0000ULL) << 24) | ((u & 0x00000000ff000000ULL) << 8) |
+            ((u & 0x000000ff00000000ULL) >> 8) | ((u & 0x0000ff0000000000ULL) >> 24) |
+            ((u & 0x00ff000000000000ULL) >> 40) | ((u & 0xff00000000000000ULL) >> 56);
+        std::memcpy(&x, &u, sizeof x);
+    }
     return x;
 }
 
@@ -371,9 +373,7 @@ Table Table::read(const std::string & file) {
     if (size % static_cast<std::streamoff>(sizeof(double)) != 0) fail(file, "its data is not a whole number of float64 values");
     t.m_values.resize(static_cast<size_t>(size) / sizeof(double));
     if (!in.read(reinterpret_cast<char *>(t.m_values.data()), size)) fail(file, "its data cannot be read");
-    if constexpr (std::endian::native == std::endian::big) {
-        for (auto & v : t.m_values) v = swap_bytes(v);
-    }
+    for (auto & v : t.m_values) v = from_little_endian(v);
     t.finish();
     t.check_contract();
     return t;
