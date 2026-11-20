@@ -1013,10 +1013,12 @@ TEST(CliTest, ListKeysAndCheckAnswerForAnInputStillBeingWritten) {
     EXPECT_EQ(errors[0]["column"].number, 12.0);
 
     // A wrong value is an error, and the keys read so far are still listed
-    std::ofstream("wrong.toml") << mesh << "[physics]\ntype = \"euler\"\ngamma = true\n";
+    std::string wrong_input = mesh;
+    wrong_input.replace(wrong_input.find("Nx = 4"), 6, "Nx = 4.0");
+    std::ofstream("wrong.toml") << wrong_input;
     const Result wrong = run({"list", "keys", "wrong.toml", "--format", "json"}, true);
-    EXPECT_EQ(wrong.status, 1);
-    EXPECT_TRUE(json::parse(wrong.out)["keys"].has("mesh.Nx")) << wrong.out;
+    EXPECT_EQ(wrong.status, 1) << wrong.out;
+    EXPECT_TRUE(json::parse(wrong.out)["keys"].has("mesh.type")) << wrong.out;
     const Result text_list = run({"list", "keys", "only_mesh.toml"}, true);
     EXPECT_EQ(text_list.status, 0) << text_list.err;
     EXPECT_TRUE(contains(text_list.out, "before it stopped at the errors below")) << text_list.out;
