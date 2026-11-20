@@ -29,6 +29,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #ifdef __GLIBC__
@@ -263,6 +264,8 @@ void Solver::setup_from_input() {
         init_mesh_fields();
         register_data();
         init_output(*used_regions);
+        init_vertex_gradient();
+        init_mixture_fractions();
         init_check_inputs();
     });
     timed_phase("initial solution", [&] { init_solution(); });
@@ -1837,11 +1840,7 @@ void Solver::init_output(region::Regions & regions) {
                               .message = "must be positive",
                               .fix = "Use 1 to write the integrals every step"});
         }
-        if (!viscous_gradients.is_allocated()) {
-            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
-                                                 true, n_gradient_cells());
-        }
+        allocate_viscous_gradients();
         integral_monitor.budget = find_value_or<bool>(input, "integrals", "budget", false);
         if (integral_monitor.budget && axisymmetric) {
             throw InputError("integrals.budget is for planar runs (the geometric source of axisymmetric runs is not "
@@ -1889,11 +1888,7 @@ void Solver::init_output(region::Regions & regions) {
             add_data_writers(output, regions, async_output, io_threads);
         }
     }
-    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
-        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
-                                                 true, n_gradient_cells());
-    }
+    if (probes.any_gradients()) allocate_viscous_gradients();
     if (std::none_of(data_writers.begin(), data_writers.end(),
                      [](const auto & writer) { return writer->get_format() == DataFormat::RESTART; })) {
         const Input table(Input::table_type{{"prefix", "restart"}, {"format", "restart"}, {"interval", 1}});
@@ -2107,19 +2102,11 @@ void Solver::allocate_memory() {
         h_derived_fields = pinned_mirrors(derived_fields);
     }
     if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) derived_workspace = derived::Workspace(mesh->n_cells);
-    if (is_viscous() || vortex_output || derived_selection.any()) {
-        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
-                                                 true, n_gradient_cells());
-    }
+    if (is_viscous() || vortex_output || derived_selection.any()) allocate_viscous_gradients();
     if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
-        if (!viscous_gradients.is_allocated()) {
-            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
-                                                 true, n_gradient_cells());
-        }
+        allocate_viscous_gradients();
     }
     allocate_stage_scratch();
     if (is_mixture() && is_viscous()) {
@@ -2137,8 +2124,6 @@ void Solver::allocate_memory() {
             cell_molar_mass = Kokkos::View<rtype *>("cell_molar_mass", mesh->n_cells);
             teno->set_mixture(Kokkos::subview(cell_scalars, Kokkos::ALL(), n_species), cell_molar_mass);
         }
-        h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
-        h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
         if (reacting) allocate_chemistry();
         if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
@@ -2321,14 +2306,17 @@ void Solver::finish_output_arrays() {
                 }
             }
         }
+        const bool stage_Y = h_Y.is_allocated(), stage_X = h_X.is_allocated();
         std::vector<double> Y(species_names.size());
-        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        for (uint32_t c = 0; c < mesh->n_cells && (stage_Y || stage_X); c++) {
             const double rho = static_cast<double>(h_conservatives(c, 0));
             for (size_t k = 0; k < Y.size(); k++) Y[k] = static_cast<double>(h_species(c, k)) / rho;
-            const std::vector<double> X = mixture_model->mole_fractions(Y);
-            for (size_t k = 0; k < Y.size(); k++) {
-                h_Y(c, k) = static_cast<rtype>(Y[k]);
-                h_X(c, k) = static_cast<rtype>(X[k]);
+            if (stage_Y) {
+                for (size_t k = 0; k < Y.size(); k++) h_Y(c, k) = static_cast<rtype>(Y[k]);
+            }
+            if (stage_X) {
+                const std::vector<double> X = mixture_model->mole_fractions(Y);
+                for (size_t k = 0; k < Y.size(); k++) h_X(c, k) = static_cast<rtype>(X[k]);
             }
         }
     }
@@ -2352,9 +2340,10 @@ void Solver::register_data() {
     }
     if (is_mixture()) {
         data.reserve(data.size() + 4 * species_names.size() + 6 + PRIMITIVE_NAMES.size() + 2);
+        // Staged once a writer or probe reads them (init_mixture_fractions)
         for (size_t k = 0; k < species_names.size(); k++) {
-            data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
-            data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
+            data.push_back(Data("Y_" + species_names[k], {}));
+            data.push_back(Data("X_" + species_names[k], {}));
         }
         data.push_back(Data("T_SEED", h_T_seed));
         if (is_viscous()) {
@@ -2429,6 +2418,62 @@ void Solver::register_data() {
         data.push_back(Data("TENO_SIGMA", h_teno_sigma));
     }
     if (output_data) output_data(*mesh, data);
+}
+
+void Solver::allocate_viscous_gradients() {
+    if (!viscous_gradients.is_allocated()) {
+        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+    }
+}
+
+void Solver::init_vertex_gradient() {
+    const bool read = (!state_reader && (is_viscous() || hybrid_flux)) || !face_reconstruction->has_cell_gradients() ||
+                      (is_mixture() && is_viscous()) || les_on || tfles_on || probes.any_gradients() ||
+                      derived_selection.need(derived::need::SPECIES_GRADIENTS) ||
+                      (is_viscous() && !force_monitors.empty());
+    if (!viscous_gradients.is_allocated() || !read) return;
+    vertex_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh, true,
+                                           n_gradient_cells());
+}
+
+const LSQVertexGradientFunctor & Solver::viscous_gradient() const {
+    if (!vertex_gradient.weights.ghost_offsets.is_allocated()) {
+        throw std::logic_error("Solver: the vertex gradient is read, but init_vertex_gradient found no reader");
+    }
+    return vertex_gradient;
+}
+
+void Solver::init_mixture_fractions() {
+    if (!is_mixture()) return;
+    const auto read = [&](const Data & d) {
+        return probes.reads(d) || (checkpoint_writer && checkpoint_writer->reads(d)) ||
+               std::any_of(data_writers.begin(), data_writers.end(), [&](const auto & w) { return w->reads(d); });
+    };
+    bool Y = false, X = false;
+    for (const Data & d : data) {
+        for (const std::string & name : species_names) {
+            Y = Y || (d.name() == "Y_" + name && read(d));
+            X = X || (d.name() == "X_" + name && read(d));
+        }
+    }
+    stage_mixture_fractions(Y, X);
+}
+
+void Solver::stage_mixture_fractions(bool Y, bool X) {
+    const size_t n_species = species_names.size();
+    if (Y && !h_Y.is_allocated()) {
+        h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
+    }
+    if (X && !h_X.is_allocated()) {
+        h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+    }
+    // In place: writers and probes hold pointers to the entries
+    for (Data & d : data) {
+        for (size_t k = 0; k < n_species; k++) {
+            if (h_Y.is_allocated() && d.name() == "Y_" + species_names[k]) d.bind(Kokkos::subview(h_Y, Kokkos::ALL(), k));
+            if (h_X.is_allocated() && d.name() == "X_" + species_names[k]) d.bind(Kokkos::subview(h_X, Kokkos::ALL(), k));
+        }
+    }
 }
 
 namespace {
@@ -3283,14 +3328,23 @@ RestartArrays Solver::restart_arrays() const {
 
 void Solver::update_probe_gradients() {
     // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
-    Kokkos::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
+    Kokkos::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient());
     if (wall_model_on) update_wall_model();
 }
 
 ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
-    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
-                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
-                       {},             {}};
+    ProbeFields fields{cell_sampler(),
+                       W_cells,
+                       probes.any_gradients() ? viscous_gradient() : LSQVertexGradientFunctor{},
+                       viscous_gradients,
+                       face_reconstruction.get(),
+                       physics,
+                       boundary_data,
+                       is_viscous(),
+                       axisymmetric,
+                       mesh->face_coords,
+                       {},
+                       {}};
     if (is_mixture()) {
         fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
         if (is_viscous()) fields.transport = cell_transport;
@@ -3689,7 +3743,7 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
     // The gradients and the wall model read the halo, stale after the last stage
     update_cell_W();
     if (is_viscous()) {
-        Kokkos::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
+        Kokkos::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient());
         if (is_mixture()) update_transport();
         if (wall_model_on) update_wall_model();
     }
@@ -3816,8 +3870,10 @@ struct FlowStatisticsFunctor {
 
 void Solver::update_velocity_gradients() {
     update_cell_W();
-    if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
-        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+    if (face_reconstruction->has_cell_gradients()) {
+        face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned());
+    } else {
+        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient());
     }
 }
 
@@ -3898,7 +3954,7 @@ void Solver::update_derived_fields() {
             inputs.transport = cell_transport;
         }
         if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) {
-            derived::scalar_gradients(derived_settings, cell_scalars, viscous_gradient, boundary_data.bc_Y,
+            derived::scalar_gradients(derived_settings, cell_scalars, viscous_gradient(), boundary_data.bc_Y,
                                       mesh->n_cells, mesh->n_owned(), derived_workspace);
             inputs.scalar_gradients = derived_workspace.gradients;
         }
