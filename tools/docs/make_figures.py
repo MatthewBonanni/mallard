@@ -28,6 +28,7 @@ import mesh_fields
 import probes
 import python
 import regions
+import render
 import run_report
 import runs
 import schematics
@@ -62,6 +63,7 @@ def main():
         probes.main()
         python.figures(args.mallard)
         regions.figures(args.mallard, args.mallard3d)
+        render.figures(args.mallard, args.mallard3d)
         sys.argv = [sys.argv[0], "--mallard", args.mallard]
         run_report.main()
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

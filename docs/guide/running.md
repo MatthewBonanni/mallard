@@ -271,6 +271,7 @@ command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)
 | <a id="e-extract"></a>`E-EXTRACT` | `mallard post extract` cannot set up the case or read its output | The message names the input key or file ([Probes of existing output](probes.md#probes-of-existing-output)) |
 | <a id="e-convergence"></a>`E-CONVERGENCE` | `mallard post convergence` cannot read a run or compare the runs | The message names the run ([Grid convergence](convergence.md)) |
 | <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
+| <a id="e-render"></a>`E-RENDER` | `mallard post render` cannot read a snapshot, finds no cells on the plane or in the view, or cannot write the image or movie (a movie format with no `ffmpeg` on `PATH`) | The message names the file and what to change ([Images and movies](output.md#images-and-movies-mallard-post-render)) |
 | <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
 
 ## compute-sanitizer

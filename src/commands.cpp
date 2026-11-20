@@ -395,6 +395,54 @@ constexpr Option GLOBAL_OPTIONS[] = {
      "mesh."},
 };
 
+constexpr Option RENDER_OPTIONS[] = {
+    {"--field", "", "NAME",
+     "The field to color by, as the files name it: a vector is drawn as its magnitude, a component as "
+     "NAME[0] or NAME_X (U_X). Default: RHO, else T, else P, else the first field."},
+    {"--output", "-o", "FILE",
+     "What to write, by its extension: an image (.png), numbered PNG frames (frames/frame_%04d.png, one per "
+     "snapshot), an animated GIF (.gif), or a movie (.mp4, .mov, .mkv, .webm) encoded by an ffmpeg on PATH. A "
+     ".png of several snapshots draws the last. Default: FIELD.png for one snapshot, FIELD.gif for several."},
+    {"--slice", "", "AXIS[=POSITION]",
+     "3D files: the plane drawn, normal to x, y or z, at that position in m (z=0.5); the cells it cuts are drawn "
+     "as the polygons they cut. Default: z at the middle of the domain."},
+    {"--view", "", "XMIN,XMAX,YMIN,YMAX",
+     "The rectangle of the plane drawn, in m (on a slice, the plane's two other coordinates in order: y,z for x, "
+     "x,z for y, x,y for z). Default: fitted to the cells drawn."},
+    {"--size", "", "WIDTH[xHEIGHT]",
+     "The image in pixels; the text and lines grow with the width. With a height, the plot is fitted inside "
+     "it. Default: 1280 wide, as high as the view needs (at most 1.5 times the width)."},
+    {"--colormap", "", "viridis|magma|inferno|plasma|cividis|coolwarm|gray",
+     "The colormap, and each reversed as NAME_r (gray_r). Default: by the field: coolwarm centered on zero for "
+     "values of both signs and signed fields (VORTICITY_Z, DILATATION), inferno for temperatures and heat "
+     "release, plasma for species and mixture fractions, gray_r on a logarithmic scale for SCHLIEREN, viridis "
+     "for the rest."},
+    {"--range", "", "MIN,MAX",
+     "The values at the ends of the colormap, in the field's units, for every frame; also saves reading the "
+     "snapshots twice. Default: the least and greatest value drawn over every frame (symmetric about zero for "
+     "coolwarm)."},
+    {"--log", "", "",
+     "A logarithmic color scale; without --range, over at most three decades below the greatest value. Default: "
+     "linear (logarithmic for SCHLIEREN)."},
+    {"--theme", "", "light|dark", "The colors of the text and background, as the documentation's. Default: light."},
+    {"--title", "", "TEXT", "A line of text above the plot. Default: none."},
+    {"--mesh", "", "", "Draw the edges of the cells (on a slice, of the polygons cut). Default: off."},
+    {"--probes", "", "FILES",
+     "Draw these probe files' points, curves and the outlines of their surfaces over the plot, each labeled "
+     "with its name (probe_wake.csv: wake); comma separated, patterns allowed ('solut/probe_*.vtkhdf'). "
+     "On a slice, they are drawn as seen along its normal. Default: none."},
+    {"--bare", "", "", "The plot alone, with no text, colorbar or scale bar: for composing figures. Default: off."},
+    {"--fps", "", "N", "Frames per second of a GIF or movie. Default: 20."},
+    {"--steps", "", "LIST",
+     "Draw the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Draw the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: every "
+     "snapshot."},
+    {"--every", "", "N", "Draw every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Draw only the last snapshot selected."},
+    {"--threads", "", "N", "Threads that draw each frame. Default: every hardware thread."},
+};
+
 constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
 constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
@@ -1007,6 +1055,42 @@ constexpr Command COMMANDS[] = {
         .run = convergence_main,
     },
     {
+        .name = "post render",
+        .group = "Post",
+        .summary = "Images and movies of snapshots, headless: a field on the plane or a slice, with its colorbar",
+        .synopsis = "mallard post render FILE... [--field NAME] [-o OUTPUT.png|.gif|.mp4]\n"
+                    "mallard post render FILE... --slice z=0.5 [--view XMIN,XMAX,YMIN,YMAX] [--probes FILES]",
+        .description =
+            "Draws a field of snapshots as images and movies, with no display, ParaView or Python: on a cluster "
+            "node, in a batch job, in a script. 2D cells are drawn as they are; 3D cells are cut by a plane "
+            "(--slice) and drawn as the polygons they cut. Each pixel shows the cell values it covers, averaged by "
+            "area where cells are smaller than pixels, so that fine meshes do not alias; each image has the time, "
+            "the field with its units over a colorbar, and a scale bar.\n"
+            "\n"
+            "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, the .h5 of XDMF output) or a series of them (.vtkhdf.series, "
+            ".pvd, .xmf); several files, or a quoted pattern ('solut/flow_*.vtkhdf'), draw in the order given, "
+            "their snapshots chosen by --steps, --times, --every and --latest as for mallard post extract. Without "
+            "options it picks what a first look needs: the density (else temperature, pressure), a colormap by the "
+            "field, the view fitted to the domain, one color scale over every frame, a PNG of one snapshot and a "
+            "GIF of several. A series on one mesh is sampled once, and each frame then costs reading its field.\n"
+            "\n"
+            "GIF, PNG and frames need nothing outside Mallard; .mp4, .mov, .mkv and .webm are encoded by ffmpeg, "
+            "found on PATH, which reads the frames from a pipe (H.264, or VP9 for .webm).",
+        .options = RENDER_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post render solut/flow.vtkhdf --latest              # RHO.png\n"
+                    "$ mallard post render solut/flow.vtkhdf --field T -o T.mp4\n"
+                    "$ mallard post render 'solut/flow_*.vtkhdf' --field U_X --theme dark -o frames/u_%04d.png\n"
+                    "$ mallard post render solut/flow.vtkhdf --field VORTICITY_Z --slice z=0.05 \\\n"
+                    "      --view 0,0.4,-0.1,0.1 --probes solut/probe_wake.csv --mesh -o wake.png",
+        .exit_status = "0  written\n"
+                       "1  a file cannot be read, no cell is on the plane or in the view, or the output cannot be "
+                       "written (a movie with no ffmpeg on PATH)\n"
+                       "2  usage error",
+        .dim = Case::output,
+        .run = render_main,
+    },
+    {
         .name = "pack",
         .group = "Share",
         .summary = "One archive that reproduces a run, with a manifest of hashes",
@@ -1116,7 +1200,7 @@ constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields, averages and images of it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

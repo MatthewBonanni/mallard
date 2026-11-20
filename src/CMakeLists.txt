@@ -9,6 +9,8 @@ add_library(MallardCore STATIC
     common/region_motion.cpp
     io/case_view.cpp
     io/case_image.cpp
+    io/image.cpp
+    io/render.cpp
     common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp
@@ -335,7 +337,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp snapshot_selection.cpp render_main.cpp convergence_main.cpp pack_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

@@ -61,6 +61,7 @@ set(MALLARD_TEST_SOURCES
     post_derive_test.cpp
     post_average_test.cpp
     post_convergence_test.cpp
+    render_test.cpp
     wall_model_test.cpp
     units_test.cpp
     periodic_pairs_test.cpp

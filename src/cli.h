@@ -15,6 +15,7 @@
 #include <map>
 #include <ostream>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -133,6 +134,11 @@ void print_help(std::ostream & out, const Family & family);
  * @return empty for another shell.
  */
 std::string completion_script(std::string_view shell);
+
+/** @brief A usage error found after parsing, which the command prints with usage_error. */
+struct UsageError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 /**
  * @brief Prints "<title>: <message> (see <title> --help)" to stderr.

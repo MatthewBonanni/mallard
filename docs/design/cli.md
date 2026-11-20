@@ -34,7 +34,7 @@ Maintain  mallard test | completion | --version
 | `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
-| `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
+| `post render` | Post | available: 2D cells and slices of 3D cells, probe outlines; region outlines and 3D surface views planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack`, `pack --verify` | Share | available; on the run record (the files a run read, the output records) |
 | `test`, `completion`, `--version` | Maintain | available |
 
