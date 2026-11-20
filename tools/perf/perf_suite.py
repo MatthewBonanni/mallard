@@ -114,7 +114,7 @@ def run_once(case, binary, launcher, work, log=None):
     if not csv_files:
         raise RuntimeError(f"{case['name']}: the chemistry benchmark wrote no CSV")
     with open(csv_files[0]) as f:
-        for row in csv.DictReader(f):
+        for row in csv.DictReader(line for line in f if not line.startswith("#")):
             result[f"{case['name']}@dt={float(row['dt']):g}"] = float(row["cells_per_second"])
     for f in csv_files:
         f.unlink()

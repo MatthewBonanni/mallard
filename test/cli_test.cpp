@@ -725,6 +725,11 @@ TEST(CliTest, PackReproducesARunBitForBit) {
     EXPECT_TRUE(has_row(tampered.out, {"case/run/points.txt", "differs from what the run read (its run block's SHA-256)"}))
         << tampered.out;
     EXPECT_TRUE(has_row(tampered.out, {"case/run/mallard.jsonl", "not in the manifest"})) << tampered.out;
+    const Result tampered_json = run({"pack", "--verify", "tampered.tar", "--format", "json"}, true);
+    EXPECT_EQ(tampered_json.status, 1);
+    const json::Value report = json::parse(tampered_json.out);
+    EXPECT_EQ(report["result"].string, "differs");
+    EXPECT_FALSE(report["problems"].array.empty()) << tampered_json.out;
     std::ofstream("study/run/points.txt", std::ios::app) << "\n";
     const Result changed = run({"pack", "study/run", "-o", "changed.tar"}, true);
     EXPECT_EQ(changed.status, 1);
@@ -745,6 +750,7 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
         {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]", "write_data"},
         {"MACH", "dimensionless", "Mach number", "every case", "write_data, post derive"},
         {"U", "m s-1", "velocity (vector)", "every case", "write_data, probes, statistics"},
+        {"VORTICITY", "s-1", "vorticity (vector)", "every case", "write_data, post derive"},
         {"Y_<s>", "dimensionless", "mass fraction of species s", "a mixture", "write_data, probes, statistics"},
         {"MASS_FLUX", "kg m-2 s-1", "normal mass flux", "[[probes]] on a surface or boundary zone", "probes"},
         {"MEAN_<A>", "A's", "time average of A", "[statistics] fields with A, or [[probes]] averaging A",
@@ -1312,4 +1318,76 @@ TEST(CliTest, CompletionOffersTheKeyAndFieldCatalogs) {
         for (const std::string & w : keys) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
         for (const std::string & w : fields) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
     }
+}
+
+TEST(CliTest, CompletionOffersPostDeriveOnlyTheFieldsItWrites) {
+    SKIP_UNDER_MPI();
+    const Result listed = run({"list", "fields", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    std::vector<std::string> derived;
+    const json::Value catalog = json::parse(listed.out);
+    for (const json::Value & f : catalog["fields"].array) {
+        const std::vector<json::Value> & where = f["available"].array;
+        const bool writes =
+            std::any_of(where.begin(), where.end(), [](const json::Value & w) { return w.string == "post derive"; });
+        if (writes && f["name"].string.find('<') == std::string::npos) derived.push_back(f["name"].string);
+    }
+    std::sort(derived.begin(), derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "MACH") != derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "RHO") == derived.end());
+    auto expected = [&](const std::string & head) {
+        std::string out = " ";
+        for (const std::string & w : derived) out += head + w + " ";
+        return out;
+    };
+
+    const fs::path dir = fs::absolute("completion_derive");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::vector<std::vector<std::string>> lines = {
+        {"post", "derive", "flow.vtkhdf", "--fields", ""},
+        {"post", "derive", "flow.vtkhdf", "--fields", "MACH,P0,"},
+        {"post", "derive", "flow.vtkhdf", "--fields", "=", "MACH,"},
+    };
+    std::vector<std::string> got;
+    const int status = bash_complete(dir, lines, got);
+    if (status != -1) {
+        ASSERT_EQ(status, 0);
+        EXPECT_EQ(got[0], expected(""));
+        EXPECT_EQ(got[1], expected("MACH,P0,"));
+        EXPECT_EQ(got[2], expected("MACH,"));
+    }
+
+    // zsh: the catalog the value of post derive --fields completes from, and its words
+    const Result zsh = run({"completion", "zsh"});
+    ASSERT_EQ(zsh.status, 0) << zsh.err;
+    std::ofstream(dir / "mallard.zsh") << zsh.out;
+    std::ofstream(dir / "driver.zsh") << "export LC_ALL=C\ncompdef() { :; }\nsource '" << (dir / "mallard.zsh").string() << "' || exit 1\n"
+                                      << "_mallard_value 'post derive' --fields || exit 1\n"
+                                      << "[[ $reply == @* ]] || exit 1\n_mallard_catalog ${reply#@}\n"
+                                      << "print -l -- ${(o)reply} | tr '\\n' ' '\n";
+    std::string zsh_out;
+    const int zsh_status = run_shell("zsh", "-f", dir / "driver.zsh", zsh_out);
+    if (zsh_status != -1) {
+        EXPECT_EQ(zsh_status, 0) << zsh_out;
+        EXPECT_EQ(" " + zsh_out, expected("")) << zsh_out;
+    }
+
+    // fish: the same, read from the script
+    const Result fish = run({"completion", "fish"});
+    ASSERT_EQ(fish.status, 0) << fish.err;
+    std::smatch option;
+    ASSERT_TRUE(std::regex_search(fish.out, option,
+                                  std::regex("__mallard_is \\\\'post derive\\\\'' -l fields "
+                                             "-a '\\(__mallard_list ([a-z_]+)\\)'")))
+        << fish.out;
+    std::smatch words;
+    ASSERT_TRUE(std::regex_search(fish.out, words,
+                                  std::regex("\n        case " + option[1].str() + "\n            printf '%s\\\\n' ([^\n]*)")))
+        << fish.out;
+    std::vector<std::string> fish_words;
+    std::istringstream in(words[1].str());
+    for (std::string w; in >> w;) fish_words.push_back(w.substr(1, w.size() - 2));
+    std::sort(fish_words.begin(), fish_words.end());
+    EXPECT_EQ(fish_words, derived);
 }

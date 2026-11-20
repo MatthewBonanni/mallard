@@ -16,12 +16,15 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <tuple>
 #include <vector>
 
 #include "test_fixtures.h"
 #include "verification.h"
+#include "gmsh_fixtures.h"
+#include "lattice_symbol.h"
 #include "face_reconstruction.h"
 #include "physics.h"
 #include "scratch.h"
@@ -455,6 +458,93 @@ TEST(TENOTest, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
     for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
 }
 
+/**
+ * @brief Checks that no mirror image in the central stencils lies past the
+ *        far side of the body behind its face: the path from its foot on the
+ *        face's line to the image crosses no boundary face. Returns the number
+ *        of images checked.
+ */
+uint32_t expect_images_inside_the_body(const std::shared_ptr<Mesh> & mesh_ptr, int order) {
+    const Mesh & m = *mesh_ptr;
+    std::vector<int32_t> face_bc(m.n_faces, -1);
+    std::vector<uint32_t> boundary;
+    for (uint32_t f = 0; f < m.n_faces; f++) {
+        if (m.h_cells_of_face(f, 1) >= 0) continue;
+        face_bc[f] = 0;
+        boundary.push_back(f);
+    }
+    BoundaryCondition sym;
+    sym.type = BoundaryType::SYMMETRY;
+    BoundaryData bd = make_boundary_data(m, face_bc, {sym}, GAMMA);
+    auto teno = make_teno(mesh_ptr, bd, order);
+    const TENO::Stencils stencils = teno->large_stencils();
+    using P = std::array<double, 2>;
+    auto node = [&](uint32_t f, uint32_t k) {
+        const uint32_t n = m.h_node_of_face(f, k);
+        return P{double(m.h_node_coords(n, 0)), double(m.h_node_coords(n, 1))};
+    };
+    auto side = [](const P & a, const P & b, const P & q) {
+        const double cross = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
+        return (cross > 1e-6) - (cross < -1e-6);
+    };
+    auto hidden = [&](const P & a, const P & b) {
+        for (uint32_t f : boundary) {
+            const P p = node(f, 0u), q = node(f, 1u);
+            if (side(a, b, p) * side(a, b, q) < 0 && side(p, q, a) * side(p, q, b) < 0) return true;
+        }
+        return false;
+    };
+    uint32_t n_checked = 0;
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        for (uint64_t s = stencils.offsets[c]; s < stencils.offsets[c + 1]; s++) {
+            const int32_t f = stencils.faces[s];
+            if (f < 0) continue;
+            const uint32_t of = static_cast<uint32_t>(stencils.cells[s]);
+            const P y{double(m.h_cell_coords(of, 0)), double(m.h_cell_coords(of, 1))};
+            const P a = node(static_cast<uint32_t>(f), 0u), b = node(static_cast<uint32_t>(f), 1u);
+            const double tx = b[0] - a[0], ty = b[1] - a[1];
+            const double t = ((y[0] - a[0]) * tx + (y[1] - a[1]) * ty) / (tx * tx + ty * ty);
+            const P foot{a[0] + t * tx, a[1] + t * ty};
+            const P image{2 * foot[0] - y[0], 2 * foot[1] - y[1]};
+            EXPECT_FALSE(hidden(foot, image)) << "cell " << c << " takes the image of cell " << of << " across face " << f
+                                              << " at " << image[0] << ", " << image[1] << ", past another boundary";
+            n_checked++;
+        }
+    }
+    return n_checked;
+}
+
+TEST(TENOTest, MirrorImagesAtAClosedTrailingEdgeStayInsideTheBody) {
+    // Square with a lens-shaped hole, closed at both ends and at most three
+    // quarters of a cell thick, as at the closed trailing edge of an airfoil:
+    // images of the cells on one side, mirrored across it, would land past
+    // the other side, among the cells there (#976)
+    const uint32_t n = 8;
+    const double h = 1.0 / n;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({rtype(i * h), rtype(j * h)});
+    }
+    // The upper side of the hole, between the shared nodes at its ends (i = 2 and 6)
+    const double thickness[] = {0.5 * h, 0.75 * h, 0.5 * h};
+    const uint32_t upper0 = static_cast<uint32_t>(nodes.size());
+    for (uint32_t i = 3; i <= 5; i++) nodes.push_back({rtype(i * h), rtype(0.5 + thickness[i - 3])});
+    auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
+    auto lower_of_row4 = [&](uint32_t i) { return i >= 3 && i <= 5 ? upper0 + i - 3 : id(i, 4); };
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (j == 4) {
+                cells.push_back({lower_of_row4(i), lower_of_row4(i + 1), id(i + 1, 5), id(i, 5)});
+            } else {
+                cells.push_back({id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)});
+            }
+        }
+    }
+    const auto mesh = mesh_from(nodes, cells);
+    for (int order : {3, 4, 5}) EXPECT_GT(expect_images_inside_the_body(mesh, order), 0u) << "order " << order;
+}
+
 TEST(TENOTest, StencilsOfThinCellsSpanTheirLongDirection) {
     // Cells ten times wider than tall: by physical distance the nearest cells
     // are whole columns above and below, and the fit resolves x only from the
@@ -657,12 +747,42 @@ std::vector<std::vector<char>> tables_with(std::shared_ptr<Mesh> mesh, const Bou
 TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Triangles with mirror images at the walls: small batches split the cells
     // differently, and the host setup is the fallback for cells whose search
-    // outgrows the device's scratch
+    // outgrows the device's scratch; order 6 on quadrilaterals too, the largest fits and smoothness matrix
+    struct Case {
+        const char * type;
+        uint32_t nx, ny;
+        int order;
+    };
+    for (const Case c : {Case{"cartesian_tri", 12, 10, 5}, Case{"cartesian_tri", 12, 10, 6}, Case{"cartesian", 14, 12, 6}}) {
+        auto mesh = make_mesh(c.type, c.nx, c.ny);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        const auto reference = teno_tables(*make_teno(mesh, bd, c.order));
+        const std::string label = std::string(c.type) + ", order " + std::to_string(c.order);
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_batch_cells = 64; }) == reference)
+            << label << ", batches of 64 cells";
+        EXPECT_TRUE(tables_with(mesh, bd, c.order, [](TENO & t) { t.setup_on_host = true; }) == reference)
+            << label << ", host setup";
+    }
+}
+
+TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
+    // Output of states read from files sets up only what cell_gradients and point_values read: scale,
+    // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses. With
+    // share_tables, cells share basis means on the means alone, without smoothness matrices
     auto mesh = make_mesh("cartesian_tri", 12, 10);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    const auto reference = teno_tables(*make_teno(mesh, bd, 5));
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; }) == reference) << "batches of 64 cells";
-    EXPECT_TRUE(tables_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; }) == reference) << "host setup";
+    for (const bool share : {true, false}) {
+        const auto full = tables_with(mesh, bd, 5, [&](TENO & t) { t.share_tables = share; });
+        const auto central = tables_with(mesh, bd, 5, [&](TENO & t) {
+            t.share_tables = share;
+            t.sector_stencils = false;
+        });
+        std::vector<size_t> same = {0u, 4u, 6u, 7u, 8u, 9u};
+        if (!share) same.insert(same.end(), {1u, 2u});
+        for (const size_t k : same) EXPECT_TRUE(central[k] == full[k]) << "table " << k << (share ? ", shared" : "");
+        EXPECT_TRUE(central[3].empty()) << "smoothness matrices";
+        EXPECT_TRUE(central[13].empty()) << "sector pseudo-inverses";
+    }
 }
 
 TEST(TENOTest, CellsWhoseSearchOutgrowsTheScratchGetTheHostSetupsTables) {
@@ -730,3 +850,46 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     EXPECT_FALSE(teno_tables(*changed_only) == tables);
     EXPECT_FALSE(before == tables);
 }
+
+namespace {
+
+struct LatticeCase {
+    const char * lattice;
+    int order;
+    double lowest, highest; // growth rate, sound speeds over the block size
+};
+
+void PrintTo(const LatticeCase & c, std::ostream * out) { *out << c.lattice << ", order " << c.order; }
+
+} // namespace
+
+class TENOLattice : public ::testing::TestWithParam<LatticeCase> {};
+
+TEST_P(TENOLattice, LongWavesOfTheLinearizedSchemeGrowAtTheRecordedRate) {
+    // Largest real part of the Bloch symbol of the scheme linearized at rest
+    // (HLLC), over wavevectors up to 0.12 cycles per block. Orders 3 and 5 are
+    // neutral to the noise of the finite differences. Order 4 is a known
+    // failure on triangles (#1136): with the default 18-entry stencils the
+    // Riemann solver's jump term feeds long acoustic waves. A fix brings its
+    // rates under the bound of orders 3 and 5; then give order 4 that bound
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "finite differences of the right-hand side need double precision";
+    }
+    const LatticeCase c = GetParam();
+    const uint32_t n = 12;
+    const std::string mesh = std::string(c.lattice) == "crossed_squares"
+                                 ? "[mesh]\ntype = \"file\"\nfilename = \"" +
+                                       write_temp("mallard_teno_crossed_squares.msh", crossed_squares_mesh_2d(n)) + "\"\n"
+                                 : lattice_mesh(c.lattice, n);
+    const double rate = lattice_jacobian(mesh, n, c.order).largest_long_wave_rate(0.12, 0.02, 4e6);
+    std::cout << c.lattice << ", order " << c.order << ": largest growth rate of the long waves: " << rate
+              << " sound speeds over the block size" << std::endl;
+    EXPECT_GT(rate, c.lowest);
+    EXPECT_LT(rate, c.highest);
+}
+
+INSTANTIATE_TEST_SUITE_P(Triangles, TENOLattice,
+                         ::testing::Values(LatticeCase{"cartesian_tri", 3, -1.0, 1e-7}, LatticeCase{"cartesian_tri", 4, 1.0e-5, 1.5e-5},
+                                           LatticeCase{"cartesian_tri", 5, -1.0, 1e-7}, LatticeCase{"crossed_squares", 3, -1.0, 1e-7},
+                                           LatticeCase{"crossed_squares", 4, 0.8e-6, 1.3e-6},
+                                           LatticeCase{"crossed_squares", 5, -1.0, 1e-7}));

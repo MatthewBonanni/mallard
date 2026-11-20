@@ -88,6 +88,7 @@
 "MixtureTest.BudgetWithDoubleFluxLeavesTheSolutionUnchanged" = ["mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.DoubleFluxKeepsPressureAndVelocityUniformAtContacts" = ["mixture", "euler", "double_flux", "muscl", "teno5", "hllc", "roe", "rhll", "ssprk3"]
 "MixtureTest.DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError" = ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"]
+"MixtureTest.InertContactKeepsTemperatureAndPressureUniformWhereMassFractionsAreBounded" = ["mixture", "euler", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree" = [
     ["mixture", "euler", "fo", "roe", "ssprk3"],
     ["mixture", "euler", "fo", "rhll", "ssprk3"],
@@ -99,9 +100,19 @@
 ]
 "ReactingTest.SimplerSplittingIsSecondOrderInTime" = ["mixture", "euler", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"]
 
+[mixture_transport_test]
+"MixtureTransportTest.SharedStageScratchMatchesSeparateBuffersBitwise" = [
+    ["les", "navier_stokes", "mixture", "chemistry", "teno3", "hllc", "hybrid", "ssprk3"],
+    ["les", "navier_stokes", "mixture", "chemistry", "muscl", "hllc", "hybrid", "ssprk3"],
+]
+
 [mpi_test]
 "MPITest.FirstOrderMatchesSerial" = ["mpi", "euler", "fo", "hllc", "ssprk3"]
 "MPITest.MUSCLMatchesSerial" = ["mpi", "euler", "muscl", "hllc", "ssprk3"]
+"MPITest.FusedMUSCLMatchesSerial" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "muscl", "hllc", "ssprk3"],
+]
 "MPITest.TENOOnQuadsMatchesSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3"]
 "MPITest.TENOOnTrianglesMatchesSerial" = ["mpi", "euler", "teno4", "hllc", "ssprk3"]
 "MPITest.LowStorageIntegratorsAndErrorControlMatchSerial" = [
@@ -140,6 +151,7 @@
     ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"],
     ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "les", "muscl", "hllc", "ssprk3"],
 ]
+"MPITest.ReactionSensorMatchesSerialWithAndWithoutStepGraphs" = ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"]
 "MPITest.HybridConvectiveFluxMatchesSerial" = [
     ["mpi", "euler", "hybrid", "fo", "hllc", "ssprk3"],
     ["mpi", "mixture", "euler", "hybrid", "muscl", "hllc", "ssprk3"],
@@ -286,6 +298,8 @@
     ["les", "navier_stokes", "mixture", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"],
 ]
 "ThickenedFlame.EddyViscosityVelocitySetsTheEfficiency" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
+"ThickenedFlame.ReactionSensorThickensTheLocalPremixedFlameWithinTheFlammableRangeOnly" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
+"ThickenedFlame.EfficiencyCapHolds" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
 
 [time_integrator_test]
 "TimeIntegratorTest.ForwardEulerIsFirstOrder" = ["fe"]
