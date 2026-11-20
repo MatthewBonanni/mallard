@@ -1555,7 +1555,7 @@ own error in brackets.
 | `autoignition_2d` | 500, 8 | 332 → 190 ms | 685 → 534 ms | 7e-12 K (1e-10) | 3e-15 | ignition (below) | yes |
 | `reacting_mixing_layer` | 1,000, 8 | 71.1 → 46.7 ms | 239 → 220 ms | 2.1e-6 K (1.9e-6) | 1.4e-9 | | yes |
 | `triple_flame/tfles` | 2,000, 4 | 24.8 → 17.5 ms | 119 → 113 ms | 1.4e-4 K (1.0e-5) | 6.9e-8 | | yes |
-| `flame_turbulence` (DNS) | 20, 8 | 4.04 → 2.64 s | 14.5 → 13.1 s | 3.2e-7 K (6.1e-8) | 4.9e-11 | | yes |
+| `flame_turbulence` (DNS) | 200, 10 (timed over 20, 8) | 4.04 → 2.64 s | 14.5 → 13.1 s | 2.6e-4 K (2.6e-4) | 2.5e-10 | | yes |
 | `triple_flame` | 1,000, 8 | 59.1 → 51.9 ms | 452 → 460 ms | 8.6e-8 K (4.1e-6) | 7.1e-11 | | no |
 | `triple_flame/thick` | 500, 8 | 101 → 90 ms | 700 → 697 ms | 3.2e-7 K (3.9e-6) | 5.0e-10 | | no |
 | `flame_vortex_quenching` | 1,000, 4 | 6.37 → 5.70 ms | 87 → 85 ms | 5.1e-8 K (4.1e-6) | 6.3e-12 | | no |
@@ -1565,7 +1565,7 @@ own error in brackets.
 | `detonation_2d` | 100, 8 | 806 → 820 ms | 1961 → 1970 ms | 1.1e-4 K (1.8e-6) | 8.1e-8 | | no |
 | `detonation_3d` (2D stage) | 300, 8 | 239 → 240 ms | 389 → 387 ms | 0.42 K (0.49) | 4.0e-4 | | no |
 | `premixed_flame/ch4` (GRI-3.0) | 3,000, 2 | 29.3 → 29.6 ms | 60.1 → 60.5 ms | 9e-10 K (1.0e-5) | 3e-13 | | no |
-| `flame_turbulence` (`les.toml`) | 2,000, 2 | 148 → 101 ms | 368 → 324 ms | 0.017 K (1.1e-6) | 1.6e-6 | | no |
+| `flame_turbulence` (`les.toml`) | 2,000, 2 | 154 → 102 ms | 383 → 329 ms | 0.017 K (1.1e-6) | 1.6e-6 | | no |
 
 An example sets `explicit_step = true` where the explicit steps take at
 least 5% off its step on CPUs and every difference from RODAS alone stays
@@ -1592,7 +1592,7 @@ whole ignition (RODAS's own error 2.5e-4 K), with chemistry 1.44 and 1.26
 times faster: the example's ignition and front statistics are unchanged.
 
 `les.toml` (thickened flame on cells 8 times larger, 9.5 times the DNS's
-step) is left off although its chemistry runs 1.47 times faster: after 2,000
+step) is left off although its chemistry runs 1.52 times faster: after 2,000
 steps the explicit steps move `T` by 0.017 K and `Y_H2O` by 1.6e-6, about
 8e-6 and 6e-6 of their largest values, beyond `rtol`, and by 0.010 K still
 at `rtol` 1e-7, where RODAS alone moves by 1e-6 K. Why it does not shrink
