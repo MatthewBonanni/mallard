@@ -2292,6 +2292,48 @@
    "pass": true
   },
   {
+   "section": "axisymmetric",
+   "method": "TENO3",
+   "cells": "quadrilaterals, curved walls",
+   "error": "mean residual error, spherical shell",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricCurvedOrder.ResidualBetweenCurvedSpheresConvergesAtDesignOrder/0",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.002698569,
+    0.0004249562
+   ],
+   "design": 2.0,
+   "min_order": 1.7,
+   "max_order": null,
+   "order": 2.666809,
+   "pass": true
+  },
+  {
+   "section": "axisymmetric",
+   "method": "TENO4",
+   "cells": "quadrilaterals, curved walls",
+   "error": "mean residual error, spherical shell",
+   "dim": 2,
+   "test": "Axisymmetric/AxisymmetricCurvedOrder.ResidualBetweenCurvedSpheresConvergesAtDesignOrder/1",
+   "n": [
+    8.0,
+    16.0
+   ],
+   "errors": [
+    0.0007152732,
+    8.140824e-05
+   ],
+   "design": 3.0,
+   "min_order": 2.7,
+   "max_order": null,
+   "order": 3.135248,
+   "pass": true
+  },
+  {
    "section": "curved",
    "method": "P2 walls",
    "cells": "quadrilaterals",

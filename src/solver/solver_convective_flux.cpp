@@ -292,7 +292,7 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
                                                     physics.gamma,
                                                     low_mach_cutoff,
                                                     cell_upwind,
-                                                    face_reconstruction->face_quad_normals,
+                                                    flux_normals,
                                                     central_states()};
 }
 
@@ -318,7 +318,7 @@ void Solver::launch_mixture_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals,
+        flux_normals,
         central_states()};
     // Faces of owned cells, as the single-gas flux
     parallel_for_set<HeavyBounds>("mixture_flux", rhs_faces, functor);
@@ -343,7 +343,7 @@ void Solver::launch_double_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals,
+        flux_normals,
         central_states()};
     parallel_for_set<HeavyBounds>("double_flux", rhs_faces, functor);
 }

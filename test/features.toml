@@ -19,6 +19,8 @@
 ]
 "AxisymmetricTest.PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis" = ["axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
 "AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder" = [["axisymmetric", "euler", "teno3"], ["axisymmetric", "euler", "teno4"], ["axisymmetric", "euler", "teno5"]]
+"AxisymmetricCurvedUniform.UniformFlowAndGasAtRestStayExactlyUniform" = ["axisymmetric", "curved", "euler", "fo", "muscl", "teno3", "teno5", "hllc", "ssprk3"]
+"AxisymmetricCurvedOrder.ResidualBetweenCurvedSpheresConvergesAtDesignOrder" = [["axisymmetric", "curved", "euler", "teno3"], ["axisymmetric", "curved", "euler", "teno4"]]
 
 [chemistry_reactor_test]
 "ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution" = ["chemistry"]
@@ -171,6 +173,10 @@
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "curved"],
 ]
 "MPITest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3", "curved"]
+"MPITest.AxisymmetricCurvedWallsMatchSerial" = [
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "teno4", "hllc", "ssprk3"],
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "muscl", "hllc", "ssprk3"],
+]
 "MPITest.RemapDoesNotDependOnTheRankCount" = [
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"],
     ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "remap", "restart"],
