@@ -2229,19 +2229,23 @@ void Solver::allocate_time_stepping() {
 
 void Solver::init_particles() {
     if (!Particles::configured(input)) return;
-    const Input & table = input.at("particles");
-    auto unavailable = [&](const std::string & with) {
-        return InputError(Diagnostic{.key = "particles",
-                                     .line = line_of(table),
-                                     .message = "is not available yet with " + with,
-                                     .docs = "docs/guide/particles.md"});
-    };
-    if (simpler) throw unavailable("chemistry.coupling = \"simpler\"");
-    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
-        throw unavailable("restarts (restart files do not carry the particles yet)");
+    if (simpler) {
+        throw InputError(Diagnostic{.key = "particles",
+                                    .line = line_of(input.at("particles")),
+                                    .message = "is not available yet with chemistry.coupling = \"simpler\"",
+                                    .docs = "docs/guide/particles.md"});
+    }
+    // A restart file's particles continue; a file without them (or a remap) seeds them from [particles]
+    std::optional<RestartArrays> restart;
+    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart" &&
+        input.at("initialize").contains("file")) {
+        const std::string file = find_value<std::string>(input, "initialize", "file");
+        std::ifstream in(file, std::ios::binary);
+        if (in) restart = read_restart_header(in, file).arrays;
     }
     particles = std::make_unique<Particles>();
-    particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr);
+    particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
+                    restart ? &*restart : nullptr);
     if (!viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
@@ -2322,6 +2326,7 @@ void Solver::output_arrays_to_host() {
         copy(h_unflushed_chem_h, unflushed_chem_h);
     }
     allocate_restart_mirrors();
+    if (particles) particles->stage_output();
     if (step_controller.enabled()) copy(h_step_control, step_controller.slots());
     if (characteristic_state_set) copy(h_char_state, boundary_data.char_state);
 }
@@ -3311,6 +3316,9 @@ RestartArrays Solver::restart_arrays() const {
     RestartArrays arrays = statistics.arrays();
     for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
     for (auto && a : convergence.arrays()) arrays.push_back(std::move(a));
+    if (particles) {
+        for (auto && a : particles->restart_arrays()) arrays.push_back(std::move(a));
+    }
     return arrays;
 }
 

@@ -29,7 +29,8 @@ the reconstruction's own polynomial in the particle's cell, not from cell
 averages, and advances the positions as part of the time integrator's state,
 so pathlines converge at the order of the scheme in space (fourth order with
 TENO of `order = 4`, second order with MUSCL) and at the integrator's order in
-time.
+time (first with `FE`, third with `SSPRK3`, fourth with `RK4`). Results are
+bitwise the same on any number of ranks.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -41,6 +42,13 @@ time.
 
 Every particle is seeded at the start of the run. Ids follow the seeds: the
 `points` first, in order, then the lattice with `x` varying fastest.
+
+**Restarts.** Restart files carry the particles, and a restarted run continues
+their trajectories exactly, on any number of ranks; the seeds of `[particles]`
+are then not used. A restart file written without particles (by a run without
+`[particles]`) seeds them, which adds tracers to a developed flow: run the
+flow to its statistically steady state, then restart from it with
+`[particles]`. A `remap` start seeds them too.
 
 At boundaries:
 
@@ -54,11 +62,9 @@ At boundaries:
 - In a troubled cell (a shock, a flame front) and with first-order or MUSCL
   reconstruction, the velocity comes from the cell's linear least-squares fit
   rather than a high-order polynomial.
-- On several ranks, a particle that moves into another rank's cells within a
-  step reads that cell's average velocity for the rest of the step, so
-  results near partitions differ slightly from a serial run; such runs are not
-  captured in CUDA graphs yet.
-- Restarts with `[particles]` are refused for now: restart files do not carry
-  the particles. SIMPLER chemistry coupling is refused too.
+- On several ranks, particles move between ranks through the host at every
+  step, so such runs are not captured in CUDA graphs yet (single-rank runs
+  are).
+- SIMPLER chemistry coupling is refused for now.
 
 *Design notes:* [particles](../design/particles.md).

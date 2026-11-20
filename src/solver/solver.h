@@ -798,6 +798,7 @@ class Solver {
 
         /** @brief The particles ([particles]), or null. */
         const Particles * get_particles() const { return particles.get(); }
+        Particles * get_particles() { return particles.get(); }
 
         /** @brief Names of the transported species, empty for a single gas. */
         const std::vector<std::string> & get_species_names() const { return species_names; }

@@ -28,10 +28,12 @@
 #include "gradient.h"
 #include "input.h"
 #include "periodic_maps.h"
+#include "pinned_mirrors.h"
 #include "state.h"
 
 class FaceReconstruction;
 class Mesh;
+using RestartArrays = std::vector<std::pair<std::string, std::vector<double>>>;
 struct Distribution;
 
 namespace particles {
@@ -89,13 +91,9 @@ struct Walker {
         return d * inv;
     }
 
-    /**
-     * @brief Move from cell c across interior face f into its other cell: x
-     *        into that cell's frame, and R (if given) composed with the turn of
-     *        vectors into it.
-     */
+    /** @brief Move from cell c across interior face f into its other cell, with x into that cell's frame. */
     KOKKOS_INLINE_FUNCTION
-    void cross(uint32_t & c, const uint32_t f, rtype * x, rtype (*R)[N_DIM]) const {
+    void cross(uint32_t & c, const uint32_t f, rtype * x) const {
         const bool side1 = cells_of_face(f, 0) != static_cast<int32_t>(c);
         const uint8_t s = face_shift(f);
         if (s) {
@@ -106,30 +104,17 @@ struct Walker {
                 maps.backward(s, x, y);
             }
             FOR_I_DIM x[i] = y[i];
-            if (R && maps.rotated()) {
-                for (uint8_t j = 0; j < N_DIM; j++) {
-                    rtype col[N_DIM];
-                    FOR_I_DIM col[i] = R[i][j];
-                    if (side1) {
-                        maps.rotate(s, col);
-                    } else {
-                        maps.unrotate(s, col);
-                    }
-                    FOR_I_DIM R[i][j] = col[i];
-                }
-            }
         }
         c = static_cast<uint32_t>(cells_of_face(f, side1 ? 0 : 1));
     }
 
     /**
      * @brief Walk from cell c to the cell holding x (in c's frame), updating
-     *        both; R (if given) accumulates the turn of vectors from the start
-     *        cell's frame into the end cell's. Stops at the first face whose
-     *        action is not CROSS (BOUNDARY, face set), or after MAX_STEPS.
+     *        both. Stops at the first face whose action is not CROSS
+     *        (BOUNDARY, face set), or after MAX_STEPS.
      */
     KOKKOS_INLINE_FUNCTION
-    Outcome walk(uint32_t & c, rtype * x, int32_t & face, rtype (*R)[N_DIM] = nullptr) const {
+    Outcome walk(uint32_t & c, rtype * x, int32_t & face) const {
         for (uint32_t step = 0; step < MAX_STEPS; step++) {
             const rtype h = Kokkos::pow(cell_volume(c), 1.0_r / static_cast<rtype>(N_DIM));
             rtype best = precision_tol(1e-10, 1e-5) * h;
@@ -148,7 +133,7 @@ struct Walker {
                 face = exit;
                 return BOUNDARY;
             }
-            cross(c, static_cast<uint32_t>(exit), x, R);
+            cross(c, static_cast<uint32_t>(exit), x);
         }
         return STUCK;
     }
@@ -177,12 +162,14 @@ class Particles {
         static bool configured(const Input & input) { return input.contains("particles"); }
 
         /**
-         * @brief Read [particles] and seed the particles of this rank
-         *        (collective).
+         * @brief Read [particles] and seed the particles of this rank, or take
+         *        them from a restart file's arrays (collective).
          * @param distribution The distribution of a distributed run, else null.
+         * @param restart The arrays of the restart file the run starts from, or
+         *        null; the particles are seeded when it holds none.
          */
         void init(const Input & input, std::shared_ptr<const Mesh> mesh, const BoundaryData & boundaries,
-                  const Distribution * distribution);
+                  const Distribution * distribution, const RestartArrays * restart);
 
         /** @brief The values of the particle block of a State: N_DIM per slot. */
         size_t n_values() const { return size_t(capacity) * N_DIM; }
@@ -192,10 +179,12 @@ class Particles {
 
         /**
          * @brief dx/dt of a stage: the gas velocity at the stage positions x,
-         *        from the reconstruction polynomial of the cell holding each
+         *        from the reconstruction polynomial of the cell that held each
+         *        particle at the start of the step
          *        (FaceReconstruction::point_values) where the scheme has one,
-         *        else from the cell's least-squares gradient; in a halo cell,
-         *        the cell's average.
+         *        else from that cell's least-squares gradient. Within a step
+         *        the velocity is one smooth function of the position, so the
+         *        integrator keeps its order.
          * @param W Cell states W = [rho, u, p] of the stage, halo included.
          * @param reconstruction The face reconstruction of the stage.
          * @param gradient Least-squares gradients of W, written to gradients(c).
@@ -226,6 +215,17 @@ class Particles {
         /** @brief Every particle, by increasing id, on every rank (collective). */
         std::vector<particles::Record> gather() const;
 
+        /** @brief Enqueue copies of the particles into the host mirrors restart_arrays() reads (capturable). */
+        void stage_output();
+
+        /**
+         * @brief The particles as stage_output() last staged them, by
+         *        increasing id, on every rank (collective): PARTICLE_ID,
+         *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle)
+         *        and PARTICLE_REMOVED (left the domain, lost).
+         */
+        RestartArrays restart_arrays() const;
+
         /** @brief Write the positions to the file of [particles] if any, from rank 0 (collective). */
         void write(uint64_t step, double t) const;
 
@@ -240,6 +240,7 @@ class Particles {
         uint32_t capacity = 0;
         uint32_t n_owned = 0;
         uint64_t n_seeded = 0;
+        uint64_t n_restored = 0;
         bool distributed = false;
         std::string file;
 
@@ -249,17 +250,23 @@ class Particles {
         Kokkos::View<uint64_t[2]> n_removed;  // left the domain, lost
 
         // Stage scratch
-        Kokkos::View<uint32_t *> stage_cell;
-        Kokkos::View<uint32_t *> point_cell;  // stage_cell where the reconstruction has polynomials
+        Kokkos::View<uint32_t *> point_cell;  // cell, 0 in empty slots
         Kokkos::View<rtype *[N_DIM]> offsets;
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_point;
-        Kokkos::View<rtype *[N_DIM][N_DIM]> turns;  // rotational periodicity only
         Kokkos::View<uint32_t *> marked;      // (cell): its gradient is needed
+
+        // Staged for restart files
+        PinnedMirrors mirrors;
+        Kokkos::View<uint64_t *>::host_mirror_type h_id;
+        Kokkos::View<uint32_t *>::host_mirror_type h_cell;
+        ParticleView::host_mirror_type h_x;
+        Kokkos::View<uint64_t[2]>::host_mirror_type h_removed;
 
         // Migration (host)
         std::vector<int> halo_owner;        // (halo cell - n_owned): owner rank, -1 if unknown
         std::vector<uint64_t> global_cell;  // (local cell)
         std::unordered_map<uint64_t, uint32_t> local_of_global;  // owned cells
+        Kokkos::View<uint32_t *> slots;     // (slot): emigrants, then free slots
 };
 
 #endif // PARTICLES_H

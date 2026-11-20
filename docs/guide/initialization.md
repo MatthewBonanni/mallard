@@ -400,8 +400,8 @@ and 14 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot
-foil `P_MAX`, `[statistics]` averages, characteristic boundary states) in
-global cell order. A restarted run continues the uninterrupted one **bit for
+foil `P_MAX`, `[statistics]` averages, characteristic boundary states,
+[particles](particles.md#tracers-particles)) in global cell order. A restarted run continues the uninterrupted one **bit for
 bit**, also on a different number of MPI ranks, or serially from a parallel
 run. The step and time continue from the file; `t_stop` and `n_steps` refer to
 the total.

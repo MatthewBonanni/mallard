@@ -1514,14 +1514,16 @@ reductions = ["mean", "rms"]
 ## `[particles]`
 
 Lagrangian particles; this release has massless tracers
-([Particles](guide/particles.md)).
+([Particles](guide/particles.md)). Restart files carry them: a run restarted
+from a file with particles continues them and does not seed; a file without
+particles (or a `remap` start) seeds them from these keys.
 
 | Key | Description |
 |---|---|
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position. Required |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
 | `file` | CSV file of the positions at the end of the run (`id`, `x`, `y`, `z`, by id), default none |
-| `capacity` | Particles each rank can hold, default the number seeded |
+| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.lattice]`
 

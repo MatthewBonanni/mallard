@@ -60,9 +60,8 @@ the species block of a single gas.
 
 The right-hand side of the block is the particle velocity: after the flow's
 `calc_rhs` of a stage, `Particles::velocity` evaluates the gas velocity at each
-stage position. The positions of a stage are those of the integrator's stage
-state, in the frame of the cell that held the particle at the start of the
-step; the cell of a stage position is found by walking from that cell (below).
+stage position from the polynomial of the cell that held the particle at the
+start of the step (below), in that cell's frame. No stage walks across faces.
 
 Alternatives considered:
 
@@ -87,10 +86,8 @@ meshes; on curved meshes the planar faces approximate the curved boundary.
 
 Periodic faces carry a shift row (`Mesh::face_shift`): crossing one maps the
 position into the neighbor's frame (`PeriodicMaps::forward`/`backward`), so a
-particle wraps across translational and rotational periodic boundaries. For
-the velocity of a stage position reached across a rotational pair, the walk
-also accumulates the rotation of vectors, and the velocity is turned back into
-the frame of the start cell before it enters the integrator.
+particle wraps across translational and rotational periodic boundaries. The
+walk runs once per step, after it (`relocate`).
 
 Each face has a particle action, set at setup from its boundary condition:
 cross (interior faces), reflect (walls and symmetry planes: the position is
@@ -110,24 +107,42 @@ already builds:
 
 - With TENO, `FaceReconstruction::point_values` evaluates the cell's central
   polynomial (the one the probes and the transmissive boundaries use) where the
-  cell is smooth by TENO's measure and the value admissible. Its point values
-  converge at the scheme's order (fourth order for `order = 4`, measured by the
-  tests).
+  cell is smooth by TENO's measure and the value admissible.
 - Elsewhere (troubled cells, first-order and MUSCL schemes), the cell's linear
   least-squares fit (`LSQVertexGradientFunctor`, the gradient of the viscous
   fluxes and probes), computed only in the cells that hold particles, with the
   cell average where the linear value is not admissible.
 
 Both evaluate W = [rho, u, p], so the temperature, species and derived fields
-of later layers take the same path (#511). A stage position that has walked
-into a halo cell takes that cell's average: halo cells have no polynomial of
-their own on this rank (see *Not in this layer*).
+of later layers take the same path (#511).
+
+**One cell per step.** Every stage of a step evaluates the polynomial of the
+cell that held the particle at the start of the step, also where the stage
+position has moved into a neighbor (by less than a cell, at CFL below 1).
+Three things follow:
+
+- Within a step the velocity is one smooth function of the position, so the
+  integrator keeps its order. Switching polynomials at the faces a stage
+  position crosses would make the right-hand side jump by the reconstruction's
+  error within a step, and cost a Runge-Kutta scheme its order there.
+- A polynomial fitted on a stencil of several cells is as accurate a little
+  outside its cell as inside: the pathlines keep the scheme's order in space
+  (measured by the tests: fourth order with TENO of `order = 4`, second with
+  MUSCL).
+- The start cell is always owned (migration runs after each step), so no
+  stage reads a halo cell, which has no polynomial on this rank: trajectories
+  are bitwise independent of the rank count, and no stage walks, so the
+  rotation of vectors across rotational periodic pairs never enters a stage.
+
+The cell changes at the end of a step, when the particle is relocated; the
+jump between neighboring polynomials is the reconstruction's error, of the
+scheme's order in space.
 
 ## Time integration within the step graph
 
-On the step path, per stage: locate (one kernel), gradients of the marked cells
-(one kernel over the owned cells), the linear values, `point_values`, the
-velocity (one kernel each). After the step, `Particles::relocate` walks each
+On the step path, per stage: the offsets from the start cells (one kernel),
+gradients of the marked cells (one kernel over the owned cells), the linear
+values, `point_values`, the velocity (one kernel each). After the step, `Particles::relocate` walks each
 particle to its new cell, applies reflections and removals, and writes the
 position in the new cell's frame. All are plain kernels over fixed sizes,
 captured in the step graph (`record_step`) and checked by `StepGraphGuard` in
@@ -162,10 +177,25 @@ runs with particles take their steps outside the step graph
 
 Each particle's update reads only the flow and its own state, so its result
 does not depend on the slot it occupies, on the other particles or on the
-order of kernels. A trajectory is bitwise the same on any rank count as long
-as its stage positions stay in owned cells; one whose stage position walks into
-a halo cell within a step reads that cell's average instead of its polynomial
-(see below). Counters of removed particles are integer atomics.
+order of kernels. Its stages read the polynomial of its start cell, which is
+owned, and the flow is bitwise independent of the rank count, so trajectories
+are too (tested on 2 and 3 ranks). Counters of removed particles are integer
+atomics.
+
+## Restart files
+
+Restart files carry the particles as named arrays (version 6), written by rank
+0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
+holding each particle), `PARTICLE_X` (positions, exact in double precision) and
+`PARTICLE_REMOVED` (the counts of particles that left the domain and that were
+lost). The device copies them into pinned host mirrors with the other restart
+data (`Particles::stage_output`, capturable), so a restart staged by the step
+graph holds the particles of its own step. On a restart each rank takes the
+particles of the cells it owns, so the file restarts on any rank count, and a
+restarted run continues bit for bit. A restart file without particles (one
+written by a run without `[particles]`) seeds them from `[particles]`, which
+adds tracers to a developed flow; `type = "remap"` also seeds them (relocating
+a file's particles onto another mesh is #541).
 
 ## Output
 
@@ -177,12 +207,8 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
 
 - **Graphable migration** (above): distributed runs with particles are not
   graphed yet.
-- **Polynomials in halo cells**: a stage position in a halo cell reads the
-  cell average, so trajectories near partitions differ slightly from one rank
-  to another. The fix evaluates the polynomial on the owner, or reconstructs
-  halo layer 1 locally where the halo is deep enough (TENO's is).
-- **Restart files** do not carry the particles: restarts with `[particles]`
-  are refused.
+- **Remapped restarts** (#541): `type = "remap"` seeds the particles from
+  `[particles]` instead of relocating the file's.
 - **Seeding during the run**, regions and weights (#759), counter-based random
   numbers keyed by (seed, injector, step, index).
 - **Compaction**: kernels run over every slot; dense packing of the live
