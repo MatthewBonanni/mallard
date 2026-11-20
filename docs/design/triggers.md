@@ -64,7 +64,7 @@
    time is also a horizon (`step_horizon`) at which the host takes over and
    moves on to the next one, as for `t_stop`, since the device's target is the
    one the host set. A condition's `t` compared with anything else (`t - c`)
-   is not analysed. The same analysis lets `mallard check` decide conditions
+   is not analyzed. The same analysis lets `mallard check` decide conditions
    of `t` alone: constant between the compared times, they are evaluated at
    each and between each two up to `t_stop` (`W-TRIGGER-NEVER`).
 
