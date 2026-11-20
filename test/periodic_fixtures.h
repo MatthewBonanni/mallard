@@ -102,11 +102,11 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
         EXPECT_TRUE(found) << "face " << f;
     }
     EXPECT_GT(n_shifted, 0u);
-    // From the device: a solver's mesh drops the host copies after setup
-    const auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.offsets_cells_of_cell);
-    const auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cells_of_cell);
-    const HostShiftRows neighbor_shifts{
-        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cells_of_cell_shift.rows)};
+    // From the device copy, which the kernels read
+    const VertexNeighbors & v = mesh.vertex_neighbors();
+    const auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v.offsets);
+    const auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v.cells);
+    const HostShiftRows neighbor_shifts{Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), v.shift.rows)};
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
             const uint32_t nb = neighbors(k);

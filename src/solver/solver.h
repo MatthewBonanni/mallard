@@ -741,6 +741,14 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
+        /**
+         * @brief Tests only: every Solver initialized afterwards runs as with
+         *        [run] cuda_graphs = false, whatever its input, for
+         *        compute-sanitizer, which misreports the step graph's kernels
+         *        (#1076). Set from MALLARD_TEST_CUDA_GRAPHS=off.
+         */
+        static void set_cuda_graphs_off(bool off) { cuda_graphs_off = off; }
+        static bool are_cuda_graphs_off() { return cuda_graphs_off; }
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
@@ -938,6 +946,8 @@ class Solver {
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
+        void ledger_boundary_flux(const ViscousFluxFunctor * viscous);
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
         /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
@@ -997,6 +1007,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        static inline bool cuda_graphs_off = false;
         bool shared_stage_scratch = true;
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
@@ -1122,6 +1133,10 @@ class Solver {
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
         void launch_flux_functor(const IndexSet & faces);
+        /** @brief The single gas's convective fluxes of faces into face_flux, by the chosen Riemann solver. */
+        void launch_convective_flux(const IndexSet & faces);
+        /** @brief The mixture's convective fluxes (double flux or not) of rhs_faces, by the chosen Riemann solver. */
+        void launch_mixture_convective_flux();
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
         bool exchanges_partition_faces() const;
         /**
