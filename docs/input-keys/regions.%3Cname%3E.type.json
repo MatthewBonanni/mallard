@@ -26,9 +26,11 @@
   "interior",
   "intersection",
   "isosurface",
+  "obj",
   "polygon",
   "rectangle",
   "sphere",
+  "stl",
   "torus",
   "union",
   "where"
