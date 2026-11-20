@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 
+#include "check.h"
 #include "comm.h"
 #include "data_paths.h"
 #include "diagnostic_code.h"
@@ -178,6 +179,18 @@ TEST(DivergenceReportTest, TooLargeACflNumberIsTheTimeStep) {
         EXPECT_NE(o.text.find(" on rank "), std::string::npos) << o.text;
     }
     EXPECT_EQ(o.report["cell"]["rank"].type, json::Value::Type::NUMBER);
+}
+
+TEST(DivergenceReportTest, TheLimitIsTheOneMallardCheckGives) {
+    const std::string dir = fresh_dir("divergence_cfl_limit");
+    std::string input = periodic_box("cfl = 4.0\n", PULSE, PULSE);
+    input.replace(input.find("[numerics.face_reconstruction]"), 0, "[numerics]\ntime_integrator = \"SSPRK54\"\n");
+    Solver checker;
+    const double check_limit = checker.check(parse_toml(input), CheckOptions{}).cfl_limit;
+    const Outcome o = diverge(dir, input);
+    ASSERT_EQ(top_cause(o), "time_step") << o.text;
+    EXPECT_EQ(o.report["time_step"]["limit"].number, check_limit);
+    EXPECT_EQ(check_limit, cfl_limit(TimeIntegratorType::SSPRK54));
 }
 
 TEST(DivergenceReportTest, AnInflowTheFlowCannotTakeIsTheBoundary) {
