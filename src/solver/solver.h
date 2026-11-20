@@ -748,6 +748,14 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
+        /**
+         * @brief Tests only: every Solver initialized afterwards runs as with
+         *        [run] cuda_graphs = false, whatever its input, for
+         *        compute-sanitizer, which misreports the step graph's kernels
+         *        (#1076). Set from MALLARD_TEST_CUDA_GRAPHS=off.
+         */
+        static void set_cuda_graphs_off(bool off) { cuda_graphs_off = off; }
+        static bool are_cuda_graphs_off() { return cuda_graphs_off; }
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
@@ -1008,6 +1016,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        static inline bool cuda_graphs_off = false;
         bool shared_stage_scratch = true;
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
