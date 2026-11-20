@@ -1,0 +1,6 @@
+# mallard-profile {"coordinates": ["d"], "at": ["n_m"], "units": {"d": "mm", "u": "m/s", "T": "K", "unused": "1"}, "reference": {"length": "20 mm", "velocity": 10}, "source": "a power law, for the key catalog", "transforms": []}
+d,u,T,unused
+0,0,320,0
+5,7.07,310,0
+10,8.41,305,0
+20,10,300,0
