@@ -329,8 +329,8 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
-  rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
+- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+  further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
 - The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
@@ -961,61 +961,39 @@ state). Results change in the last bits once: after 20 steps of `teno5_3d` the c
 pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
 (`teno5_3d`, 20 steps).
 
-### 18. Planar face points and the troubled scratch (#978)
+### 18. Troubled scratch for a quarter of the cells (#978)
+
+The troubled passes' scratch (central coefficients and the sector coefficients of every face) had room for half
+the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond it are done in further
+rounds. Every round below a capacity of 1 recomputes its cells' central coefficients, so results do not depend
+on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02 against 1 and 0.5).
 
 The cases of section 15 (perfect gas on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra, LES, the propane
 flame on $48 \times 24^2$ / $24 \times 12^2 \times 6$, GRI-Mech 3.0 on $32 \times 16^2$), 3D TENO5 unless
-stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell at the steady state and
-the cells that fit on an A100-80GB, each change on top of the one before. Tetrahedra stop at 11.4M cells, the
-entries a multi-dimensional View addresses.
+stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell and the cells that fit
+on an A100-80GB.
 
 | bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
 |---|---|---|---|---|---|---|---|
-| main | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,579 / 8,097,303 | 8,752 / 8,862,292 | 14,509 / 5,345,860 |
-| planar face points | 6,889 / 11,411,702 | 7,068 / 11,123,593 | 6,929 / 11,345,826 | 7,108 / 11,060,991 | 8,918 / 8,697,945 | 8,409 / 9,223,756 | 13,841 / 5,603,945 |
-| troubled scratch for a quarter of the cells | 6,009 / 13,082,840 | 6,188 / 11,446,092 | 6,049 / 12,996,330 | 6,228 / 11,446,092 | 8,038 / 9,650,243 | 7,529 / 10,301,808 | 12,961 / 5,984,427 |
+| capacity 0.5 | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,212 / 8,419,977 | 8,383 / 9,252,886 | 12,046 / 6,432,167 |
+| capacity 0.25 | 6,678 / 11,773,594 | 6,534 / 12,031,826 | 6,718 / 11,703,485 | 6,574 / 11,958,618 | 8,332 / 9,309,270 | 7,503 / 10,338,158 | 11,413 / 6,789,351 |
 
 | perfect gas, bytes per cell, cells per A100-80GB | TENO3, hexahedra | tetrahedra | TENO4, hexahedra | tetrahedra | TENO6, hexahedra | tetrahedra |
 |---|---|---|---|---|---|---|
-| main | 4,973 / 15,808,529 | 5,740 / 11,446,092 | 5,371 / 14,636,220 | 6,183 / 11,446,092 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
-| both changes | 4,046 / 19,430,341 | 4,813 / 11,446,092 | 4,344 / 18,096,080 | 5,156 / 11,446,092 | 6,624 / 11,868,703 | 7,338 / 10,714,101 |
+| capacity 0.5 | 4,973 / 15,808,529 | 5,740 / 13,696,969 | 5,371 / 14,636,220 | 6,183 / 12,715,675 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
+| capacity 0.25 | 4,343 / 18,101,651 | 5,110 / 15,385,696 | 4,641 / 16,938,167 | 5,453 / 14,418,008 | 7,292 / 10,781,086 | 7,684 / 10,230,998 |
 
-- **Planar face points.** The 3D face quadrature stored every face's points (9 on quadrilaterals, 6 or 7 on
-  triangles, 3 coordinates each) for the TENO kernels. Only curved faces need them stored: the points of a planar
-  face are its nodes mapped by the rule, which the kernels now do from the face's nodes (`planar_face_point`,
-  every product rounded on its own, `rounded_product`, so host and device place them alike whatever they
-  contract), and the points are freed after the setup, which still reads them. Meshes with curved faces keep
-  them. The weights stay (the flux sums read them). 670 bytes less per hexahedron and 350 per tetrahedron at
-  TENO5 (300 / 300 at TENO3, 670 / 350 at TENO6), net of the face nodes the kernels now keep.
-- **Troubled scratch.** The troubled passes' scratch (central coefficients and the sector coefficients of every
-  face) had room for half the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond
-  it are done in further rounds. Every round below a capacity of 1 recomputes its cells' central coefficients,
-  so results do not depend on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02
-  against 1 and 0.5): 880 bytes less per cell at TENO5, 630 at TENO3, 1,090 at TENO6. 2D keeps a capacity of 1.
+880 bytes less per cell at TENO5 (630 at TENO3, 730 at TENO4, 1,090 at TENO6): 13% more cells per A100-80GB
+for a perfect gas at TENO5, 11-12% for the 6-species flame, 6% with GRI-Mech (whose setup peak binds).
+Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps, on a CPU). On one A100-80GB
+(CUDA 13.5), restart files after 100 steps are bitwise identical with capacities 0.25 and 0.125 on the $96^3$
+Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex, and on the
+2D Riemann problem with 0.25 and 0.125 against 1.
 
-Together: 26% more hexahedra per A100-80GB at TENO5 for a perfect gas, 19% for the 6-species flame, 12% with
-GRI-Mech. Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps of every case above,
-the 3D explosion on $24^3$ hexahedra and $12^3 \times 6$ tetrahedra and TENO4, on a CPU; on the A100 below).
-
-On one A100-80GB (CUDA 13.5), restart files after 100 steps are bitwise identical to main on the $96^3$
-Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex. They are also
-identical with `troubled_capacity = 0.125`, and on the 2D Riemann problem with capacity 0.25 and 0.125 against 1.
-`mallard check` on the A100 gives 7,418 to 5,958 bytes per hexahedron and 7,434 to 6,245 per tetrahedron, as on
-the CPU. The step is slower, though. Wall time per step, mean of four alternating runs (range):
-
-| one A100, TENO5, ms per step | main | both changes |
-|---|---|---|
-| Taylor-Green $96^3$ hexahedra | 105 (105-105) | 115.8 (115-117), +10.2% |
-| explosion $96^3$ hexahedra | 186.8 (186-187) | 201 (201-201), +7.7% |
-| Taylor-Green $48^3 \times 6$ tetrahedra | 90.0 (89.9-90.1) | 93.8 (93.7-93.8), +4.2% |
-
-The planar face points cost the time. Each quadrature point gathers its face's nodes through `nodes_of_face`
-and maps them, where it used to make one load. In Nsight Systems, the smooth pass grows from 83.6 to 90.6 ms
-per step on the Taylor-Green vortex (7.0 of the 7.2 ms the kernels add), 93.1 to 99.6 on the explosion, whose
-troubled selection also grows from 63.9 to 68.0, and 71.3 to 73.7 on tetrahedra. The smaller scratch adds two
-rounds of the five troubled kernels per stage, under 0.3 ms per step. A capacity of 0.125 is within 1% of
-0.25 (Taylor-Green 116 against 115 ms). In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms
-per step), because every round recomputes the central coefficients, so 2D keeps 1.
+The smaller scratch adds two rounds of the five troubled kernels per stage, which find no work in smooth flows:
+under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), and a capacity of 0.125 is within
+1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
+recomputes the central coefficients, so 2D keeps 1.
 
 ## Scaling (one node)
 
