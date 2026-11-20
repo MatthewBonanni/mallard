@@ -347,10 +347,10 @@ TEST(BoundaryProfilesTest, ScaleRescalesEachColumnByItsDimension) {
     const double d[3] = {0.0, 4.0, 10.0}, U[3] = {1, 3, 4}, R[3] = {0.5, 0.25, 0.125}, T[3] = {20, 30, 40},
                  p[3] = {1, 2, 4};
     for (int k = 0; k < 3; k++) {
-        const double q = 3.0 * 1e-3 * d[k];
+        const double q[tabulated::MAX_DIMS] = {3.0 * 1e-3 * d[k], 0.0, 0.0};
         const double expected[4] = {1.25 * U[k], 1.5625 * R[k], 273.15 + T[k], 2.0 * 1.5625 * 1e5 * p[k]};
         for (uint32_t f = 0; f < 4; f++) {
-            EXPECT_NEAR(host(entry.set, f, &q), expected[f], 1e-12 * std::abs(expected[f])) << f << " at " << d[k];
+            EXPECT_NEAR(host(entry.set, f, q), expected[f], 1e-12 * std::abs(expected[f])) << f << " at " << d[k];
         }
     }
 }
