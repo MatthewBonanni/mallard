@@ -373,8 +373,9 @@ The design:
    cuts the switch kept to their species to the shared value and loses
    accuracy, as the switch at `1e-5` does; ramps centered on `1e-4` keep the
    switch's front errors, and their consumption speeds lie within that of
-   the switch moved by 10%. Measured as in the table, and the front error
-   also in 2D (2 mm against 0.25 mm cells):
+   the switch moved by 10%. Measured as in the table (the switch again, on
+   the code of issue #1242), and the front error also in 2D (2 mm against
+   0.25 mm cells):
 
    | | switch `1e-4` | switch `0.9e-4` | switch `1.1e-4` | ramp `1e-5`-`1e-4` | ramp `1e-4`-`1e-3` | ramp `5e-5`-`2e-4` | **ramp `3e-5`-`3e-4` (used)** |
    |---|---|---|---|---|---|---|---|
@@ -389,7 +390,7 @@ The design:
    The H2/air flames of `examples/flame_2d` and `examples/triple_flame`
    (MUSCL with Venkatakrishnan) are unchanged to the last bit: their 1D
    planar flames (4 and 3 flame times at 12 cells per thermal thickness)
-   and their 2D runs on the examples' meshes (FL2D_T and TRI_T flame times
+   and their 2D runs on the examples' meshes (1 and 0.25 flame times
    from their initial states) give the same solution with the ramp as with
    the switch, so no cut there falls in the ramp.
 
