@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -67,6 +68,50 @@ void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & colum
     });
 }
 
+/** @brief terms, then `extra` rows of terms no sum may read: NaN, and too large for the fixed point of the others. */
+Kokkos::View<double *[2]> padded(const Kokkos::View<double *[2]> & terms, const uint32_t extra) {
+    const uint32_t n = static_cast<uint32_t>(terms.extent(0));
+    Kokkos::View<double *[2]> out("padded", n + extra);
+    Kokkos::parallel_for("pad", n + extra, KOKKOS_LAMBDA(const uint32_t i) {
+        for (int k = 0; k < 2; k++) out(i, k) = i < n ? terms(i, k) : (i % 2 ? Kokkos::Experimental::quiet_NaN_v<double> : 1e300);
+    });
+    return out;
+}
+
+}
+
+TEST(ExactSumsTest, UnitLeavesRoomForEveryRow) {
+    // 2^(62 - ceil(log2(n + 1))), as the host computed it in floating point before it was computed on the device
+    // (exact for these counts; near 2^49 rows, log2 of 2^b + 1 rounds to b)
+    for (uint64_t n = 0; n < 4100; n++) {
+        const double reference = std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n) + 1.0))));
+        ASSERT_EQ(exact_sums_unit(n), reference) << n;
+    }
+    for (int b = 12; b <= 40; b++) {
+        for (const int64_t d : {-1, 0, 1}) {
+            const uint64_t n = static_cast<uint64_t>(static_cast<int64_t>(uint64_t(1) << b) + d);
+            const double reference =
+                std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n) + 1.0))));
+            EXPECT_EQ(exact_sums_unit(n), reference) << n;
+        }
+    }
+}
+
+TEST(ExactSumsTest, SumsOfRowsCountedOnTheDeviceAreThoseOfTheRowsAlone) {
+    // The rows past the count would make every sum NaN, and counting them would make the unit that of more rows
+    const std::array<double, 2> expected = {0x1.df11f45f4e617p+2, 0x1.8f5a74b891b44p+26};
+    const bool distributed = comm::size() > 1;
+    const auto terms = global_terms<Kokkos::View<double *[2]>>("terms");
+    const uint32_t n = static_cast<uint32_t>(terms.extent(0));
+    const auto rows = padded(terms, 1100);
+    Kokkos::View<uint32_t> count("count");
+    Kokkos::deep_copy(count, n);
+    for (const bool nccl : {false, comm::nccl_available() && distributed}) {
+        const ExactSums sums(2, static_cast<uint32_t>(rows.extent(0)), distributed, nccl);
+        sums.sum(rows, count);
+        const auto a = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.sums());
+        for (size_t k = 0; k < 2; k++) EXPECT_EQ(a(k), expected[k]) << "column " << k << (nccl ? ", NCCL" : "");
+    }
 }
 
 TEST(ExactSumsTest, SumsAreTheSameBitForBitOnAnyNumberOfRanks) {
