@@ -155,9 +155,13 @@ target_include_directories(MallardCore PUBLIC
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
-# Kokkos computes a View's offset in the common type of its indices, so indices
-# that are all narrower than int (uint8_t, uint16_t) wrap the offset and alias
-# entries. Mallard compiles against a copy of Kokkos_View.hpp that rejects them.
+# Kokkos computes a View's offset in the common type of its indices: all-int indices
+# wrap it past 2^31 entries, and indices all narrower than int (uint8_t, uint16_t)
+# much sooner, aliasing entries. Mallard compiles against a copy of Kokkos_View.hpp
+# that computes a signed 32-bit offset as unsigned (the same offset for valid indices,
+# at the same width), so offsets reach 2^32 entries (common/view_entries.h), and that
+# rejects indices all narrower than int.
+set(view_offset_patched FALSE)
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_VIEW_HEADER Kokkos_View.hpp PATHS ${kokkos_includes} NO_DEFAULT_PATH NO_CACHE)
@@ -169,24 +173,39 @@ if(Mallard_KOKKOS_VIEW_HEADER)
     string(CONCAT narrow "\"Kokkos computes this View offset in the common type of the indices, which wraps when all "
                          "of them are narrower than int: make one index at least 32 bits (see src/CMakeLists.txt)\"")
     set(offset_anchor "    using idx_type = std::common_type_t<IndexOffsets...>;\n")
-    set(offset_check "    static_assert(sizeof(idx_type) >= sizeof(int), ${narrow});\n")
-    set(stride_anchor "      std::index_sequence<0>, IndexOffset index_offset) const {\n")
-    string(CONCAT stride_check "    static_assert(!std::is_same_v<typename base_t::layout_type, Kokkos::layout_stride> ||\n"
-                               "                  sizeof(IndexOffset) >= sizeof(int), ${narrow});\n")
+    string(CONCAT offset_patch
+        "    using common_idx_type = std::common_type_t<IndexOffsets...>;\n"
+        "    static_assert(sizeof(common_idx_type) >= sizeof(int), ${narrow});\n"
+        "    using idx_type = std::conditional_t<std::is_signed_v<common_idx_type> && sizeof(common_idx_type) == 4,\n"
+        "                                        uint32_t, common_idx_type>;\n")
+    set(stride_anchor "      return index_offset * static_cast<IndexOffset>(m_map.stride(0));\n")
+    string(CONCAT stride_patch
+        "    {\n"
+        "      static_assert(sizeof(IndexOffset) >= sizeof(int), ${narrow});\n"
+        "      using idx_type = std::conditional_t<std::is_signed_v<IndexOffset> && sizeof(IndexOffset) == 4, uint32_t,\n"
+        "                                          IndexOffset>;\n"
+        "      return static_cast<idx_type>(index_offset) * static_cast<idx_type>(m_map.stride(0));\n"
+        "    }\n")
     string(FIND "${kokkos_view}" "${offset_anchor}" offset_found)
     string(FIND "${kokkos_view}" "${stride_anchor}" stride_found)
     if(offset_found GREATER_EQUAL 0 AND stride_found GREATER_EQUAL 0)
-        string(REPLACE "${offset_anchor}" "${offset_anchor}${offset_check}" kokkos_view "${kokkos_view}")
-        string(REPLACE "${stride_anchor}" "${stride_anchor}${stride_check}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${offset_anchor}" "${offset_patch}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${stride_anchor}" "${stride_patch}" kokkos_view "${kokkos_view}")
         file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded "${kokkos_view}")
         configure_file(${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded
                        ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard/Kokkos_View.hpp COPYONLY)
         target_include_directories(MallardCore SYSTEM BEFORE PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard)
+        target_compile_definitions(MallardCore PUBLIC Mallard_UNSIGNED_VIEW_OFFSETS)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${Mallard_KOKKOS_VIEW_HEADER})
+        set(view_offset_patched TRUE)
     elseif(NOT USE_SYSTEM_KOKKOS)
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_View.hpp no longer computes View offsets as the "
-                            "narrow-index guard expects; update the guard for this Kokkos version.")
+                            "offset patch expects; update the patch for this Kokkos version.")
     endif()
+endif()
+if(NOT view_offset_patched)
+    message(WARNING "Mallard: this Kokkos's Kokkos_View.hpp does not compute View offsets as src/CMakeLists.txt "
+                    "expects, so multi-dimensional Views are limited to 2^31 entries.")
 endif()
 
 # Input (common/input.h) records the keys setup reads, and its accessors how it reads
@@ -293,10 +312,10 @@ add_custom_target(mallard_git_version COMMAND ${git_version_command}
 add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
-# Kokkos computes the offset of a multi-dimensional View in the common type of its
-# indices, at most 32 bits (signed or not) in Mallard, so a View with more entries
-# would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp that
-# checks every allocation against common/view_entries.h.
+# A multi-dimensional View's offset is 32 bits (unsigned with the offset patch above,
+# else possibly signed), so a View with more entries than common/view_entries.h
+# allows would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp
+# that checks every allocation against it.
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_BASIC_VIEW_HEADER View/Kokkos_BasicView.hpp PATHS ${kokkos_includes}
@@ -328,7 +347,7 @@ endif()
 if(NOT basic_view_patched)
     if(USE_SYSTEM_KOKKOS)
         message(WARNING "Mallard: this Kokkos's View/Kokkos_BasicView.hpp does not allocate as the View size check "
-                        "in src/CMakeLists.txt expects, so Views past 2^31 entries are not rejected.")
+                        "in src/CMakeLists.txt expects, so oversized Views are not rejected.")
     else()
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_BasicView.hpp no longer allocates as the View "
                             "size check expects; update the check for this Kokkos version.")
