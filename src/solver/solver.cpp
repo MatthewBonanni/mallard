@@ -2427,6 +2427,8 @@ void Solver::allocate_viscous_gradients() {
 }
 
 void Solver::init_vertex_gradient() {
+    // Its readers: the right-hand side's viscous fluxes and upwind sensor, the velocity gradients of schemes
+    // without cell gradients, mixture transport, LES, probes, mass-fraction gradients and viscous forces
     const bool read = (!state_reader && (is_viscous() || hybrid_flux)) || !face_reconstruction->has_cell_gradients() ||
                       (is_mixture() && is_viscous()) || les_on || tfles_on || probes.any_gradients() ||
                       derived_selection.need(derived::need::SPECIES_GRADIENTS) ||
