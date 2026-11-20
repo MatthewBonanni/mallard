@@ -284,14 +284,15 @@ The design:
      the flow block's neighbors and ghost placement. The gradients are
      stored (`N_DIM` words per scalar and cell; recomputing them in the
      species-flux kernel instead is a milestone-10 memory option). Each
-     `Y_k` that leaves `[0, 1]` at a face by at most `OWN_CUT_MAX = 1e-4`
+     `Y_k` that leaves `[0, 1]` at a face by at most `OWN_CUT_LO = 3e-5`
      (an absolute change of `Y_k` at the face) then scales its own gradient
      so that it stays in, and the cell's most abundant species takes the
      gradient the others give up, so the gradients still sum to zero. The
      gradients of `gamma` and `e0`, and the face density, change with that
      composition by their derivatives with respect to `Y_k` at the cell's
      `p` and `T`, so the face state stays the state of the face composition.
-     A larger cut reduces the shared limiter value instead, as do the most
+     A cut of `OWN_CUT_HI = 3e-4` or more reduces the shared limiter value
+     instead, one in between partly (the ramp below), as do the most
      abundant species' bounds and `gamma - 1` keeping at least half its cell
      value at every face (the physical bounds of item 3). Barth-Jespersen
      keeps each `Y_k` within its neighbors' range, so with it no gradient is
@@ -316,7 +317,7 @@ The design:
    after 100 steps at `rtol` 1e-8 and `atol` 1e-12, `explicit_step` moved
    the temperature by up to 0.87 K, `rtol` 1e-7 with `atol` 1e-11 by
    0.26 K, and `atol` 1e-11 against 1e-12 at `rtol` 1e-7 by 0.55 K. With
-   cuts up to `OWN_CUT_MAX` kept to their species, the three fall to
+   cuts up to `1e-4` kept to their species, the three fall to
    1.5e-7, 8.0e-7 and 7.3e-7 K. Excluding only round-off species
    (16 machine epsilons) or tolerating 16 machine epsilons below zero
    leaves 8% of the cells at first order and 0.3 K between the two `atol`,
@@ -353,23 +354,55 @@ The design:
    0.16-0.20 s of the thickened flame, and the front's temperature error
    against 0.125 mm cells, both 1D at 2 mm):
 
-   | Cuts kept to their species up to | `1e-5` | `1e-4` (used) | `1e-3` |
+   | Cuts kept to their species up to | `1e-5` | `1e-4` | `1e-3` |
    |---|---|---|---|
    | Consumption speed against `s_L` | -4.43% | -4.28% | -5.12% |
    | Front temperature error [K] | 6.3 | 3.3 | 3.4 |
 
-   Three things to know about the threshold:
+   That switch made the limiter of the whole cell jump where a cut crossed
+   the threshold: a cut just below left the other scalars alone, one just
+   above reduced all of them, so cells near it could switch from step to
+   step, the noise sensitivity of issue #1169 in another form (issue #1242).
+   A cut `c` of species `k` (its own factor `s_k`) now gives the shared
+   value `sigma_k = 1 - (1 - s_k) w(c)` and the species' own gradient the
+   rest, `s_k / sigma_k`, with `w` a smoothstep in `log c` from 0 at
+   `OWN_CUT_LO = 3e-5` to 1 at `OWN_CUT_HI = 3e-4`, a decade centered on
+   the switch's `1e-4`: the face values are continuous in the data
+   (`AirScalars.FaceValuesAreContinuousAsACutCrossesFromOwnToShared`, red
+   with the switch). A ramp starting at `1e-5`, as first proposed, takes
+   cuts the switch kept to their species to the shared value and loses
+   accuracy, as the switch at `1e-5` does; ramps centered on `1e-4` keep the
+   switch's front errors, and their consumption speeds lie within that of
+   the switch moved by 10%. Measured as in the table, and the front error
+   also in 2D (2 mm against 0.25 mm cells):
+
+   | | switch `1e-4` | switch `0.9e-4` | switch `1.1e-4` | ramp `1e-5`-`1e-4` | ramp `1e-4`-`1e-3` | ramp `5e-5`-`2e-4` | **ramp `3e-5`-`3e-4` (used)** |
+   |---|---|---|---|---|---|---|---|
+   | Consumption speed against `s_L` | -4.31% | -4.47% | -4.32% | -4.51% | -4.83% | -4.38% | **-4.43%** |
+   | Front temperature error, 1D [K] | 3.32 | 3.32 | 3.34 | 3.45 | 3.36 | 3.34 | **3.33** |
+   | Front temperature error, 2D [K] | 5.66 | 5.65 | 5.66 | 5.75 | - | 5.65 | **5.65** |
+
+   The consumption speed of this flame oscillates between about -4% and
+   -9% of `s_L` with a period near 0.15 s, so the 0.16-0.20 s fit catches
+   one phase of it. Over 0.2-0.4 s it is -6.57% with the switch at `1e-4`,
+   -6.64% and -6.57% at `0.9e-4` and `1.1e-4`, and -6.61% with the ramp.
+   The H2/air flames of `examples/flame_2d` and `examples/triple_flame`
+   (MUSCL with Venkatakrishnan) are unchanged to the last bit: their 1D
+   planar flames (4 and 3 flame times at 12 cells per thermal thickness)
+   and their 2D runs on the examples' meshes (FL2D_T and TRI_T flame times
+   from their initial states) give the same solution with the ramp as with
+   the switch, so no cut there falls in the ramp.
+
+   Three things to know about the thresholds:
    - it is absolute, a change of `Y_k` at a face, not relative to `Y_k`:
      whether a cut stays with its species depends on how steeply the species
      vanishes across the cell, not on how abundant it is;
-   - detailed mechanisms are untested: their radicals (`H`, `O`, `OH`, `HO2`)
-     peak at `1e-5` to `1e-4`, so their cuts at a flame front sit on either
-     side of it, and the two-step propane flames above have no such species
-     (issue #1243);
-   - the limiter of the whole cell jumps where a cut crosses it: a cut just
-     below leaves the other scalars alone, one just above reduces all of
-     them, so cells near it can switch from step to step (a ramp between two
-     thresholds: issue #1242).
+   - detailed mechanisms are untested with limiter `none`: their radicals
+     (`H`, `O`, `OH`, `HO2`) peak at `1e-5` to `1e-4`, so their cuts at a
+     flame front fall in the ramp or on either side of it, and the two-step
+     propane flames above have no such species (issue #1243);
+   - the ramp is a smoothstep, so the limiter is continuous but varies
+     fastest in the middle of the decade, about 1.5 times its mean rate.
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and
