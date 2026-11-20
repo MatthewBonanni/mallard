@@ -37,7 +37,7 @@ FILTER = ":".join([
     "*/TENOOrder.*", "*/TENO3DOrder.*",
     "*PeriodicAdvection2D.*", "*PeriodicAdvection3D.*", "*SodMesh.TENOConverges*", "TENO3DSolver.AdvectedPulse*",
     "*ViscousMesh.StokesFirst*", "*ViscousMesh.ForcedChannel*", "*ForcedChannel3D.*",
-    "AxisymmetricTest.Poiseuille*", "*AxisymmetricOrder.*",
+    "AxisymmetricTest.Poiseuille*", "*AxisymmetricOrder.*", "*AxisymmetricCurvedOrder.*",
     "CurvedGeometry.StraightWalls*", "*CurvedTENOOrder.*", "CurvedTENO.CellsReaching*", "Curved3DGeometry.Quadratic*",
     "RemapTest.SmoothPeriodic*", "*MixtureAdvectionOrder.*",
 ])
