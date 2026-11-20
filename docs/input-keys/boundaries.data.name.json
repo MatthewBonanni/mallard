@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_inlet_data/input.toml",
+  "tools/dev/catalog_inputs/2d/boundary_data.toml"
+ ],
+ "type": "string"
+}

@@ -90,12 +90,12 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
         if (const auto * table = input_detail::table_of(bound)) {
             table->record_use("mdot", input_detail::real_use("number", dim::mass_flow, "", true));
         }
-        const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow);
+        const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow, BoundaryValue::variables(bound));
         for (uint16_t i = 0; i < boundary_variable::COUNT; i++) {
             if (i != boundary_variable::T && v.compiled()->uses(i)) {
                 throw InputError(where + ".mdot is the total mass flow through the inlet, so it may depend on t but "
-                                 "not on x, y, z or the local coordinates: give its shape across the inlet in profile, "
-                                 "or the local flux in mass_flux.");
+                                 "not on x, y, z, the local coordinates or data: give its shape across the inlet in "
+                                 "profile, or the local flux in mass_flux.");
             }
         }
         mdot = v.at(Point{}, 0.0);
@@ -110,7 +110,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     if (bound.contains("profile")) {
         shape = std::make_unique<kexpr::Program>(
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-            BoundaryValue::variables(), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
+            BoundaryValue::variables(bound), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
     }
     const bool profile_of_t = shape && shape->uses(boundary_variable::T);
     // Either of t: the faces' fluxes are recomputed on the device at every stage
@@ -168,7 +168,7 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
         mdot_text << std::setprecision(17) << mdot;
         timed = MassFlowProfile{
             where,
-            std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(),
+            std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(bound),
                                                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL),
             mdot_program ? mdot_program
                          : std::make_shared<const kexpr::Program>(where + ".mdot", mdot_text.str(),
