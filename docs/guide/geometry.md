@@ -130,6 +130,7 @@ of a boolean.
 | `half_space` | `{type = "half_space", point = [1, 0, 0], normal = [1, 0, 0]}`: the side `x < 1` |
 | `polygon` (2D) | `{type = "polygon", vertices = [[0, 0], [1, 0], [0.5, 1]]}` |
 | `implicit` | `{type = "implicit", f = "x^4 + y^4 + z^4 - 0.41"}`: where `f < 0` |
+| `stl`, `obj` | `{type = "stl", file = "nozzle.stl", units = "mm"}`: inside a closed CAD surface ([Regions from CAD surfaces](#regions-from-cad-surfaces)) |
 
 Each type has one dimension, the same in every run: `circle` and `ellipse`
 are curves; `disk`, `annulus`, `rectangle` and `polygon` are flat (areas in 2D,
@@ -159,6 +160,97 @@ fractions below on a coarse triangle mesh, with the exact outline drawn over the
 
 ![Cell volume fractions of the 2D primitives on a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-light.svg#gh-light-mode-only)
 ![Cell volume fractions of the 2D primitives on a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-dark.svg#gh-dark-mode-only)
+
+### Regions from CAD surfaces
+
+A body too intricate for primitives, such as a nozzle, an injector or a bluff
+body, comes from CAD as a closed triangulated surface. Export it as STL
+(binary or ASCII) or OBJ, and give the file:
+
+```toml
+[regions]
+nozzle = {type = "stl", file = "nozzle.stl", units = "mm"}
+
+[[sponges]]
+region = "nozzle"
+strength = 500.0
+u = [0.0, 0.0, 0.0]
+p = 101325.0
+T = 300.0
+```
+
+The region is filled: the solid inside the surface. It works wherever a filled
+region does: sources, sponges, probes, snapshots, the initial state, booleans
+with any other region, `repeat`, `edge` and motion. Its surface,
+`{type = "stl", ..., filled = false}`, is exact: its own triangles (in 2D,
+the segments of its section).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `type` | | `"stl"` or `"obj"` |
+| `file` | required | the file, relative to the directory the run starts in |
+| `units` | required | the unit of length of the file's coordinates: `"m"`, `"cm"`, `"mm"`, `"um"`, `"in"`, `"ft"`. STL and OBJ files do not record one, and CAD tools export in whatever unit the part was drawn in, so Mallard never guesses |
+| `scale`, `rotate`, `pivot`, `translate` | none | [transforms](#transforms) that place it, in meters, after `units` |
+
+**Step by step.**
+
+1. Export the solid as STL or OBJ. Any triangle count works; finer triangles
+   follow curved faces more closely. OBJ faces of more than three corners
+   must be convex.
+2. Set `units` to the unit the part was drawn in. A part drawn in millimeters
+   read as meters is a thousand times too large.
+3. Place it with `translate`, `rotate` and `pivot`, which act after the units
+   in meters, as for any region.
+4. Run `mallard check input.toml`. It reports the region's bounding box in
+   meters, its volume and surface area from the triangles (exact), the
+   volume in the domain and the share outside it. `W-REGION-SCALE` warns when
+   it is more than 10 times larger, or 1000 times smaller, than the domain (a
+   likely unit error), and `W-REGION-PARTLY-OUTSIDE` when it reaches outside the
+   domain.
+5. Add `--view view` to see it among the mesh's zones (`view/case-light.svg`,
+   or `view/case.vtkhdf` in ParaView).
+
+In 2D runs the region is the surface's section by the plane `z = 0`, as for
+every region. Extrude the profile in CAD symmetrically about `z = 0`, or move
+it with `translate = [0, 0, -h/2]`: a surface that `z = 0` does not cut, or with
+faces in that plane, is an error that says so. Below, a converging-diverging
+nozzle drawn in millimeters, cut open at `z = 0`, and the cell volume
+fractions of that section in a 2D run, with the section drawn over them:
+
+![A thick-walled nozzle surface from an STL file in millimeters, cut open at z = 0, and the cell volume fractions of its section on a 2D triangle mesh](../images/guide/region-cad-surface-light.svg#gh-light-mode-only)
+![A thick-walled nozzle surface from an STL file in millimeters, cut open at z = 0, and the cell volume fractions of its section on a 2D triangle mesh](../images/guide/region-cad-surface-dark.svg#gh-dark-mode-only)
+
+**Inside and outside.** The signed distance is the exact distance to the
+nearest triangle, found through a bounding volume hierarchy, and its sign
+comes from the angle-weighted pseudonormal of the face, edge or corner
+nearest the point ([Bærentzen and Aanæs, 2005](../references.md#baerentzen-aanaes-2005)), which is exact for a closed
+surface. So cells entirely inside get exactly 1, cut cells are sampled like
+those of any primitive, and nothing depends on rays that graze an edge.
+Mallard orients the triangles itself, whatever order of corners the file
+uses: each closed surface faces out of the solid it bounds, and a closed surface
+inside another bounds a cavity. A file may hold several bodies and cavities.
+
+**What the file must be.** Each problem is an error that names the file, a
+place on the surface in meters, and the fix:
+
+| Error | Cause | Fix |
+|---|---|---|
+| is not closed: it has N edges of one triangle only | holes or gaps, or neighboring triangles whose shared corners differ in the file | close the holes in CAD or a mesh repair tool; corners must match exactly |
+| it has N edges of more than two triangles | bodies touching along an edge, or triangles given twice | remove the duplicates, or export each body to its own file and combine them with `union` |
+| triangles at a vertex do not form one fan | bodies touching at a point | separate them, or use `union` of separate files |
+| closed surfaces that cross or touch each other | overlapping bodies in one file | merge them in CAD, or use `union` of separate files |
+| is not orientable | a one-sided surface | repair it |
+| a closed surface that encloses no volume | a flat sheet given on both sides | remove it |
+
+Pitfalls:
+
+- Open surfaces, such as a sheet or a single face, are not regions yet.
+- A closed surface that crosses itself is not detected: its inside near the
+  crossing is that of the nearest triangles. Repair self-intersections in CAD.
+- The file is read once per run, on every rank, and its triangles are held
+  in device memory (about 270 bytes each): a million-triangle file takes
+  about 270 MB. Coarsen the export where the region needs no detail.
+- Like the mesh file, `file` is relative to the directory the run starts in.
 
 ### Regions of the mesh
 
@@ -321,7 +413,8 @@ or 1 for a point) and orientation. They are made in one of two ways, and
 `mallard check` reports which:
 
 - **Exact**: the surfaces of primitives (`sphere`, `ellipsoid`, `cylinder`,
-  `cone`, `box`, `torus`; in 2D their circles, ellipses and polygons) and the
+  `cone`, `box`, `torus`, the triangles of `stl` and `obj`; in 2D their
+  circles, ellipses, polygons and sections) and the
   flat surfaces and curves of 3D runs follow their own parameters, cut into
   patches about half a cell wide and integrated with Gauss points, so an
   unclipped surface has its exact area to round-off; planes (`half_space`) are
@@ -348,6 +441,7 @@ does not repeat its first node:
 | `disk`, `annulus` (3D) | radius, from `inner_radius` | angle from `reference` |
 | `rectangle` (3D) | along `reference` | along `normal x reference` |
 | `polygon` (3D) | each triangle of its ear clipping | |
+| `stl`, `obj` | each triangle, from its first corner toward the second | toward the third |
 
 Clipping regions cut exact surfaces where their own surface crosses them:
 along lines of the surface's parameters, the Gauss points fill the kept
@@ -384,7 +478,10 @@ kind, measure and cells; surfaces and curves say whether they are exact
 or extracted. Filled regions of the case also get their own volume and
 surface area (2D: area and perimeter), independent of the mesh, against those
 of their part in the domain, and the share outside it, as
-[region probes](probes.md#region-probes) record them. A region that covers no
+[region probes](probes.md#region-probes) record them. Regions from
+[CAD surfaces](#regions-from-cad-surfaces) also get their bounding box in
+meters, and warnings when their size suggests the wrong `units`
+(`W-REGION-SCALE`) or they reach outside the domain (`W-REGION-PARTLY-OUTSIDE`). A region that covers no
 cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
 extent and the domain's. [Regions defined by the solution](#regions-defined-by-the-solution)
 are placed on the initial solution: their measure and cells are those at the
