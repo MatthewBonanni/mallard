@@ -22,6 +22,7 @@ import case_view
 import domains
 import effective_resolution
 import geometry
+import gui_mockups
 import high_order_cost
 import inlets
 import les_models
@@ -49,6 +50,7 @@ def main():
     domains.figures()
     effective_resolution.figures()
     geometry.figures(args.mallard, args.mallard3d)
+    gui_mockups.figures()
     high_order_cost.figures()
     inlets.figures()
     les_models.figures()
