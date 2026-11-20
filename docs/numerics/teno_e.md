@@ -468,9 +468,9 @@ it (#977). Lowest values over every step on 200 × 4 quadrilaterals
 
 The rule does not act in smooth flow: every convergence study of the
 [verification manual](../verification/index.md) is unchanged to the last
-bit, and so is a convected density wave of 90% amplitude, troubled in nearly
-every cell, at 16 to 64 cells per wavelength. Orders 3, 5 and 6 do not have
-the rule. The [order-4 study](../design/teno4_robustness.md#shocks-undershoots)
+bit, and so is a convected density wave of 90% amplitude at 16 to 64 cells
+per wavelength, on quadrilaterals and triangles, with 44 to 100% of the cells
+troubled. Orders 3, 5 and 6 do not have the rule. The [order-4 study](../design/teno4_robustness.md#shocks-undershoots)
 compares the orders' undershoots, and gives what the rule changes in order 4's
 errors on shocks and the one undershoot it leaves.
 
