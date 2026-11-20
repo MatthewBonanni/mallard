@@ -3532,11 +3532,12 @@ std::vector<uint32_t> TENO::cells_within_reach(const std::vector<uint32_t> & cha
         if (distance[c] == FAR) frontier.push_back(c);
         distance[c] = 0;
     }
+    const VertexNeighbors & neighbors = mesh->vertex_neighbors();
     for (uint8_t d = 1; d <= max_depth && !frontier.empty(); d++) {
         next.clear();
         for (const uint32_t c : frontier) {
-            for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
-                const uint32_t nb = mesh->h_cells_of_cell(k);
+            for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) {
+                const uint32_t nb = neighbors.h_cells(k);
                 if (distance[nb] != FAR) continue;
                 distance[nb] = d;
                 next.push_back(nb);

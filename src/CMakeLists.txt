@@ -250,12 +250,14 @@ endforeach()
 # compiler fuses, so none of these files contracts and the hot loops write
 # their FMAs explicitly (fmadd). Every source that inlines the Riemann solvers
 # is listed, here and in test/CMakeLists.txt, so that they round alike in every
-# kernel and whichever copy of an inline function the linker keeps.
-# [statistics.convergence] updates its estimate on the device as the host does,
-# bit for bit, and the device cuts isosurfaces into the host's quadrature points
-# (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/solver_convective_flux.cpp
-                       solver/statistical_convergence.cpp common/region_motion.cpp)
+# kernel and whichever copy of an inline function the linker keeps. MUSCL's
+# fused cell kernel inlines the functions of its separate gradient, limiter and
+# face kernels, which nvcc would fuse differently in each, so that file does not
+# contract either. [statistics.convergence] updates its estimate on the device
+# as the host does, bit for bit, and the device cuts isosurfaces into the host's
+# quadrature points (region_motion.cpp)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+                       solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
