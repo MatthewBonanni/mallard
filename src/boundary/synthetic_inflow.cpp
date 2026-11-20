@@ -214,6 +214,7 @@ void InletProfile::read_profile(const Input & boundary, const std::string & wher
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
     }
     uniform_ = false;
+    const std::string given = find_value<std::string>(turbulence, "profile");
     const std::string name = BoundaryValue::profile_data(boundary);
     const auto has = [&](const std::string & c) {
         return std::find(variables.begin(), variables.end(), name + "_" + c) != variables.end();
@@ -224,10 +225,10 @@ void InletProfile::read_profile(const Input & boundary, const std::string & wher
     const auto missing = [&](const std::string & c) {
         return InputError({.key = key,
                            .line = line_of(turbulence, "profile"),
-                           .message = "the data \"" + name + "\" have no column " + c,
+                           .message = "the data of \"" + given + "\" have no column " + c,
                            .fix = "Give the precursor's mean velocity MEAN_U_* and Reynolds stresses COV_U_*_U_*, as "
                                   "mallard post average --statistics writes them",
-                           .docs = "docs/guide/boundary_conditions.md#synthetic-turbulence"});
+                           .docs = "docs/guide/boundary_conditions.md#synthetic-turbulence-turbulence"});
     };
     const char * XYZ = "XYZ";
     FOR_I_DIM {

@@ -328,14 +328,14 @@ TEST(BoundaryProfilesTest, MetadataGivesTheEntrysDefaults) {
 }
 
 TEST(BoundaryProfilesTest, ScaleRescalesEachColumnByItsDimension) {
-    // Length 0.01 m and velocity 2 m/s in the metadata, velocity 4 m/s in the
+    // Length 0.01 m, velocity 2 m/s and density 1 in the metadata, velocity 4 m/s in the
     // entry, rescaled to 0.03 m, 5 m/s and twice the density: lengths x3,
     // velocities x1.25, stresses x1.25^2, pressures (rho U^2) x2 x1.25^2, and
     // temperatures (in degC, converted to K) unchanged
     const std::string file = write_temp(
         "scaled.csv",
         "# mallard-profile {\"units\": {\"d\": \"mm\", \"U\": \"m/s\", \"R\": \"m^2/s^2\", \"T\": \"degC\", "
-        "\"p\": \"bar\"}, \"reference\": {\"length\": 0.01, \"velocity\": \"7.2 km/h\"}}\n"
+        "\"p\": \"bar\"}, \"reference\": {\"length\": 0.01, \"velocity\": \"7.2 km/h\", \"density\": 1.0}}\n"
         "d, U, R, T, p\n0, 1, 0.5, 20, 1\n4, 3, 0.25, 30, 2\n10, 4, 0.125, 40, 4\n");
     tabulated::Data data;
     const tabulated::Entry entry = tabulated::read_entry(
