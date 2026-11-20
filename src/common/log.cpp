@@ -357,8 +357,19 @@ std::string diagnostic(const bool is_error, std::string_view code, std::string_v
            " " + std::string(message) + "\n  " + paint(diagnostic_code::docs(code), Style::DIM, color);
 }
 
+namespace {
+WarningCapture * capture = nullptr;
+}
+
+WarningCapture::WarningCapture() : outer(capture) { capture = this; }
+WarningCapture::~WarningCapture() { capture = outer; }
+
 void warning(std::string_view code, std::string_view message) {
     if (!comm::is_root()) return;
+    if (capture) {
+        capture->warnings.emplace_back(code, message);
+        return;
+    }
     close_phase();
     std::cout << std::flush;
     std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;

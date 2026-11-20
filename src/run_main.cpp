@@ -119,7 +119,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                     if (json && comm::is_root()) std::cout.rdbuf(out);
                     print_check(report, json);
                 }
-                status = report.ok() ? 0 : 1;
+                status = report.ok() || (check->partial && report.only_missing()) ? 0 : 1;
             } else {
                 binding::report();
                 solver.enable_control(true);
@@ -220,13 +220,14 @@ int check_main(const cli::Args & args) {
         args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
     if (input_file.empty()) {
         for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--quality",
-                                    "--catalog", "--view"}) {
+                                    "--catalog", "--view", "--partial"}) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
     CheckOptions options;
     options.input_file = input_file;
     options.catalog_file = args.value_or("--catalog", "");
+    options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
     if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
         return cli::usage_error(command, "--format takes text or json, not " + f);

@@ -47,6 +47,7 @@ struct CheckOptions {
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
+    bool partial = false;       // an input still being written (--partial): only missing pieces is no failure
     uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
     std::string memory_name;    // what it is ("A100-80GB", "40GB")
     bool memory_gpu = false;    // a GPU's memory: CUDA's context comes on top of Kokkos' allocations
@@ -59,6 +60,10 @@ struct CheckDiagnostic {
     report::Status severity = report::Status::ERROR;  // ERROR or WARNING
     std::string code;                                 // one of diagnostic_code::ALL
     std::string message;
+    std::string key;           // the key path it is about ("boundaries[1].T"), or empty
+    size_t line = 0;           // of the key's value (or its table) in the input, 0 if unknown
+    size_t column = 0;         // on that line, 0 if unknown
+    bool missing = false;      // a required key, table or file that is absent: the input is incomplete, not wrong
 
     /** @brief The page and anchor that explain the code: "docs/guide/input_files.md#w-cfl-limit". */
     std::string docs() const;
@@ -228,14 +233,19 @@ struct CheckReport {
     double cells_per_delta_L_min = 0.0, cells_per_delta_L_max = 0.0;
     double tfles_thickening_max = 0.0;           // TFLES' largest F = n_res Delta / delta_L
 
-    void error(const std::string & code, const std::string & message);
-    void warning(const std::string & code, const std::string & message);
+    void error(const std::string & code, const std::string & message, const Diagnostic & about = {});
+    void warning(const std::string & code, const std::string & message, const Diagnostic & about = {});
     /** @brief The messages of the errors (of the warnings), in order. */
     std::vector<std::string> errors() const;
     std::vector<std::string> warnings() const;
     /** @brief Error if there is an error, else warning if there is a warning, else ok. */
     report::Status status() const;
     bool ok() const { return status() != report::Status::ERROR; }
+    /**
+     * @brief Whether every error is a missing piece (or, of a setup that did not complete, a key it did not read):
+     *        an input still being written, not a wrong one.
+     */
+    bool only_missing() const;
 };
 
 /**
@@ -273,6 +283,9 @@ double predicted_peak(const CheckReport & report, double local_cells);
  * @param color ANSI styles
  */
 std::string check_text(const CheckReport & report, bool color);
+
+/** @brief Diagnostics as a JSON array, each with its severity, code, message, docs, key, line, column and missing. */
+std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics);
 
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
 std::string check_json(const CheckReport & report);

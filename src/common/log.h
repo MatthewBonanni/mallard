@@ -129,6 +129,22 @@ void set_verbose(bool on);
 void warning(std::string_view code, std::string_view message);
 
 /**
+ * @brief While one is alive, warning collects its warnings here (code, message) instead of printing them: mallard
+ *        check reports those of the setup. The innermost collects.
+ */
+class WarningCapture {
+    public:
+        WarningCapture();
+        ~WarningCapture();
+        WarningCapture(const WarningCapture &) = delete;
+        WarningCapture & operator=(const WarningCapture &) = delete;
+        std::vector<std::pair<std::string, std::string>> warnings;
+
+    private:
+        WarningCapture * outer;
+};
+
+/**
  * @brief Error on stderr from the calling rank, as warning, prefixed with the rank in parallel runs; also a record
  *        of the run log (rank 0).
  */
