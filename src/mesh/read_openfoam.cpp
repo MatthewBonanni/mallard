@@ -466,19 +466,21 @@ MeshBlock read_openfoam_block(const std::string & path) {
     std::vector<uint64_t> position;
     Records boundary;
     if constexpr (N_DIM == 3) {
-        std::vector<uint64_t> face_ids(faces.size());
-        std::vector<std::array<int64_t, 2>> face_cells(faces.size());
-        for (uint64_t f = first_face; f < end_face; f++) {
-            face_ids[f - first_face] = f;
-            face_cells[f - first_face] = {owner[f - first_face], f < n_internal ? neighbour[f - first_face] : -1};
-        }
-        parallel_read::cells_of_faces(n_cells, face_ids, faces, face_cells, where, block);
         for (uint64_t f = std::max(first_face, n_internal); f < end_face; f++) {
             const int k = patch_of(f);
             if (k < 0) continue;
             position.push_back(position_of(f, k));
             add_record(boundary, {patch_zone[size_t(k)], uint64_t(faces[f - first_face].size())}, faces[f - first_face]);
         }
+        std::vector<uint64_t> face_ids(faces.size());
+        std::vector<std::array<int64_t, 2>> face_cells(faces.size());
+        for (uint64_t f = first_face; f < end_face; f++) {
+            face_ids[f - first_face] = f;
+            face_cells[f - first_face] = {owner[f - first_face], f < n_internal ? neighbour[f - first_face] : -1};
+        }
+        release(owner);
+        release(neighbour);
+        parallel_read::cells_of_faces(n_cells, std::move(face_ids), std::move(faces), std::move(face_cells), where, block);
     } else {
         // A 2D mesh is one cell thick between the faces of empty patches, normal to z: each cell is its face at the lower z
         if (std::none_of(patches.begin(), patches.end(), [](const Patch & q) { return q.type == "empty"; })) {
@@ -530,7 +532,7 @@ MeshBlock read_openfoam_block(const std::string & path) {
                 add_record(boundary, {patch_zone[size_t(q)], 2}, edge);
             }
         });
-        const Records mine = parallel_read::to_owners(cell_of_face, back_faces, n_cells);
+        const Records mine = parallel_read::to_owners(cell_of_face, std::move(back_faces), n_cells);
         block.first_cell = block_begin(n_cells, r, p);
         const uint64_t end_cell = block_begin(n_cells, r + 1, p);
         collectively([&] {
@@ -551,10 +553,10 @@ MeshBlock read_openfoam_block(const std::string & path) {
                 block.add_cell(cell);
             }
         });
+        release(faces.words);
+        release(faces.offsets);
     }
-    release(faces.words);
-    release(faces.offsets);
-    parallel_read::place_faces(position, boundary, n_boundary, false, block);
+    parallel_read::place_faces(position, std::move(boundary), n_boundary, false, block);
 
     // Cell zones: the last zone that lists a cell
     if (fs::exists(dir / "cellZones")) {
