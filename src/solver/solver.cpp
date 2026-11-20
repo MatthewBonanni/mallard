@@ -246,6 +246,8 @@ void Solver::setup_from_input() {
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     if (teno && output_files_enabled()) teno->save_cache(static_cast<uint8_t>(halo_layers));
     block_owners.reset();
+    drop_unread_halo();
+    curved_surfaces = {};
     timed_phase("fields and output", [&] {
         allocate_memory();
         // Output of states read from files takes no steps
@@ -473,6 +475,7 @@ void Solver::init_mesh() {
         halo = HaloExchange(distribution, exchange == "nccl");
     }
     mesh->apply_curved(surfaces);
+    if (is_distributed()) curved_surfaces = std::move(surfaces);
     mesh_setup = describe_mesh(*mesh);
     Settings & mesh_settings = mesh_setup.settings;
     mesh_settings.emplace_back("Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
@@ -636,6 +639,32 @@ void Solver::trim_halo() {
     }
     trim_halo_exchange(distribution, needed);
     halo = HaloExchange(distribution, halo.uses_nccl());
+}
+
+void Solver::drop_unread_halo() {
+    if (!is_distributed() || dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) return;
+    std::vector<uint8_t> keep(mesh->n_cells, 0);
+    std::fill_n(keep.begin(), mesh->n_owned(), uint8_t(1));
+    for (const auto & cells : distribution.recv_cells) {
+        for (const uint32_t c : cells) keep[c] = 1;
+    }
+    // The walks to the wall model's points find the same cells again
+    for (const uint32_t c : wall_model_points.walked) keep[c] = 1;
+    const uint64_t dropped = static_cast<uint64_t>(std::count(keep.begin(), keep.end(), uint8_t(0)));
+    if (comm::allreduce(dropped, comm::Op::SUM) == 0) return;
+    timed_phase("halo trim (" + logging::count(comm::allreduce(dropped, comm::Op::MAX), "cell") + " dropped)", [&] {
+        TENO::Carried carried;
+        auto trimmed = restrict_local_mesh(*mesh, distribution, keep, carried.new_cell, carried.new_face);
+        trimmed->apply_curved(curved_surfaces);
+        if (axisymmetric) trimmed->make_axisymmetric();
+        trimmed->copy_host_to_device();
+        carried.from.reset(static_cast<TENO *>(face_reconstruction.release()));
+        carried_tables = std::move(carried);
+        mesh = std::move(trimmed);
+        halo = HaloExchange(distribution, halo.uses_nccl());
+        init_boundaries();
+        init_numerics();
+    });
 }
 
 void Solver::describe_partition_surface() {
@@ -1582,6 +1611,7 @@ void Solver::init_numerics() {
     face_reconstruction->set_boundaries(boundary_data);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         teno->partition_faces_exchanged = exchanges_partition_faces();
+        teno->carried = std::exchange(carried_tables, std::nullopt);
         teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
         // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
         if (state_reader && !writes_stencils()) teno->sector_stencils = false;

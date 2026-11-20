@@ -15,6 +15,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -565,6 +566,17 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
+        /**
+         * @brief Tables set up on a mesh that held more cells, whose cells and faces this one numbers
+         *        new_cell and new_face (-1: not here). Set before init(), which then takes them over instead
+         *        of setting them up (Solver::drop_unread_halo); its cells with tables must be those of `from`.
+         */
+        struct Carried {
+            std::shared_ptr<const TENO> from;
+            std::vector<int32_t> new_cell, new_face;
+        };
+        std::optional<Carried> carried;
+
         // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
@@ -609,6 +621,7 @@ class TENO : public FaceReconstruction {
         uint64_t options_key() const;
         uint64_t cache_key() const;
         bool load_cache();
+        bool carry_tables();
         void round_to_single();
 
         void choose_rows();
