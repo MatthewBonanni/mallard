@@ -17,25 +17,34 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstring>
+#include <filesystem>
 #include <fstream>
-#include <iterator>
+#include <functional>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "data_paths.h"
 #include "flamelet_table.h"
+#include "input.h"
 #include "scratch.h"
+
+#ifdef Mallard_HAS_HDF5
+#include "hdf5_util.h"
+#endif
 
 using flamelet::Table;
 
 namespace {
 
-const std::string FIXTURE = source_dir() + "/test/data/flamelet/fixture_fpv.mtab";
+const std::string FIXTURE = source_dir() + "/test/data/flamelet/fixture_fpv.h5";
 
-// The fixture's fields, as test/data/flamelet/fixture_fpv.mtab's header (provenance.input) writes them:
-// multilinear in (Z, S, c), so multilinear lookups reproduce them anywhere in the table.
+#ifdef Mallard_HAS_HDF5
+const std::string FIXTURE_F32 = source_dir() + "/test/data/flamelet/fixture_fpv_f32.h5";
+
+// The fixture's fields, as the writer in test/data/flamelet/fixture_fpv.h5 (/provenance/input) computes them:
+// multilinear in (Z, S, c), so multilinear lookups reproduce them anywhere in the table. fixture_fpv_f32.h5
+// holds them rounded to float32.
 const std::vector<std::string> FIXTURE_FIELDS = {"C",     "omega_C", "rho0", "T0",   "e0",   "R",     "gamma0", "a_gamma",
                                                  "mu",    "kappa",   "cp",   "Y_H2", "Y_O2", "Y_H2O", "Y_N2"};
 double fixture(const size_t f, const double Z, const double S, const double c) {
@@ -57,15 +66,11 @@ double fixture(const size_t f, const double Z, const double S, const double c) {
         default: return 0.7 - 0.1 * Z;
     }
 }
-
-std::string read_bytes(const std::string & file) {
-    std::ifstream in(file, std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-}
+#endif
 
 /** @brief Fields fields at each query point q[i] (D coordinates each), looked up in a device kernel. */
-template <uint32_t D>
-std::vector<double> lookup_device(const flamelet::TableView<D> & t, const std::vector<std::vector<double>> & q,
+template <uint32_t D, typename Value>
+std::vector<double> lookup_device(const flamelet::TableView<D, Value> & t, const std::vector<std::vector<double>> & q,
                                   const std::vector<uint32_t> & fields) {
     const uint32_t n = static_cast<uint32_t>(q.size()), nf = static_cast<uint32_t>(fields.size()), na = D;
     Kokkos::View<double **, Kokkos::LayoutRight> d_q("q", n, na), d_out("out", n, nf);
@@ -90,8 +95,10 @@ std::vector<double> lookup_device(const flamelet::TableView<D> & t, const std::v
     return out;
 }
 
+#ifdef Mallard_HAS_HDF5
 /** @brief Fields at the FPV points (Z, Zvar, C), looked up in a device kernel. */
-std::vector<double> fpv_device(const flamelet::FPV<> & fpv, const std::vector<std::array<double, 3>> & q,
+template <typename Value>
+std::vector<double> fpv_device(const flamelet::FPV<Value> & fpv, const std::vector<std::array<double, 3>> & q,
                                const std::vector<uint32_t> & fields) {
     const uint32_t n = static_cast<uint32_t>(q.size()), nf = static_cast<uint32_t>(fields.size());
     Kokkos::View<double *[3]> d_q("q", n);
@@ -122,6 +129,7 @@ uint32_t field(const Table & t, const std::string & name) {
     EXPECT_GE(f, 0) << name;
     return static_cast<uint32_t>(std::max(f, 0));
 }
+#endif
 
 } // namespace
 
@@ -205,44 +213,74 @@ TEST(FlameletTableTest, LookupTakesAnyNumberOfAxes) {
     }
 }
 
-// The FPV map returns the transported C itself wherever C lies between the table's bounds at
-// (Z, S), and the bounds outside: catches a normalization of c against the wrong bounds.
-TEST(FlameletTableTest, FpvReproducesTheProgressVariable) {
-    const Table t = Table::read(FIXTURE);
-    const flamelet::FPV<Kokkos::HostSpace> host = t.fpv_host();
-    const uint32_t C = field(t, "C");
-    std::mt19937 rng(287);
-    std::uniform_real_distribution<double> u(0.0, 1.0);
-    std::vector<std::array<double, 3>> q;
-    std::vector<double> expected;
-    for (int i = 0; i < 300; i++) {
-        const double Z = u(rng), S = u(rng) * u(rng);
-        flamelet::Point<3> p;
-        host.table.locate_axis(0, Z, p.lo[0], p.t[0]);
-        host.table.locate_axis(1, S, p.lo[1], p.t[1]);
-        p.t[2] = 0.0;
-        const double lo = host.table(p, C);
-        p.lo[2] = host.table.n_nodes[2] - 2;
-        p.t[2] = 1.0;
-        const double hi = host.table(p, C);
-        const double target = lo + (-0.2 + 1.4 * u(rng)) * (hi - lo);
-        q.push_back({Z, S * Z * (1.0 - Z), target});
-        expected.push_back(std::clamp(target, lo, hi));
-    }
-    const auto out = fpv_device(t.fpv(), q, {C});
-    for (size_t i = 0; i < q.size(); i++) EXPECT_NEAR(out[i], expected[i], 1e-12 + 1e-10 * expected[i]) << i;
+
+#ifdef Mallard_HAS_HDF5
+
+namespace {
+
+/** @brief Random points of the fixture's (Z, S, c) space, a fifth of them outside it. */
+std::vector<std::vector<double>> fixture_points(const uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> u(-0.1, 1.1);
+    std::vector<std::vector<double>> q;
+    for (int i = 0; i < 300; i++) q.push_back({u(rng), u(rng), u(rng)});
+    return q;
 }
 
-// The fixture, written by an independent writer (Python, its header's provenance.input), reads with
-// its tags, species, pressure and provenance, and every field looks up as the writer computed it:
-// catches a wrong node order, field order, stride or byte order in the reader.
+std::vector<uint32_t> all_fields(const Table & t) {
+    std::vector<uint32_t> f(t.fields().size());
+    for (uint32_t k = 0; k < f.size(); k++) f[k] = k;
+    return f;
+}
+
+} // namespace
+
+// The FPV map returns the transported C itself wherever C lies between the table's bounds at
+// (Z, S), and the bounds outside, in float64 tables and to float32 rounding in float32 tables:
+// catches a normalization of c against the wrong bounds.
+TEST(FlameletTableTest, FpvReproducesTheProgressVariable) {
+    auto check = [](const Table & t, auto value, const double tolerance) {
+        using Value = decltype(value);
+        const flamelet::FPV<Value, Kokkos::HostSpace> host = t.fpv_host<Value>();
+        const uint32_t C = field(t, "C");
+        std::mt19937 rng(287);
+        std::uniform_real_distribution<double> u(0.0, 1.0);
+        std::vector<std::array<double, 3>> q;
+        std::vector<double> expected;
+        for (int i = 0; i < 300; i++) {
+            const double Z = u(rng), S = u(rng) * u(rng);
+            flamelet::Point<3> p;
+            host.table.locate_axis(0, Z, p.lo[0], p.t[0]);
+            host.table.locate_axis(1, S, p.lo[1], p.t[1]);
+            p.t[2] = 0.0;
+            const double lo = host.table(p, C);
+            p.lo[2] = host.table.n_nodes[2] - 2;
+            p.t[2] = 1.0;
+            const double hi = host.table(p, C);
+            const double target = lo + (-0.2 + 1.4 * u(rng)) * (hi - lo);
+            q.push_back({Z, S * Z * (1.0 - Z), target});
+            expected.push_back(std::clamp(target, lo, hi));
+        }
+        const auto out = fpv_device(t.fpv<Value>(), q, {C});
+        for (size_t i = 0; i < q.size(); i++) EXPECT_NEAR(out[i], expected[i], 1e-12 + tolerance * expected[i]) << i;
+    };
+    check(Table::read(FIXTURE), 0.0, 1e-10);
+    check(Table::read(FIXTURE_F32), 0.0f, 1e-6);
+}
+
+// The fixture, written by an independent writer (h5py, its /provenance/input), reads with its tags,
+// species, pressure and provenance, and every field looks up as the writer computed it: catches a
+// wrong node order, field order, stride, or the wrong offset of mapped values.
 TEST(FlameletTableTest, ReadsTheFixture) {
     const Table t = Table::read(FIXTURE);
     EXPECT_EQ(t.model(), "fpv");
     EXPECT_EQ(t.thermodynamics(), "saghafian2015");
     EXPECT_EQ(t.species(), (std::vector<std::string>{"H2", "O2", "H2O", "N2"}));
     EXPECT_EQ(t.pressure(), 101325.0);
-    EXPECT_EQ(t.generator(), "mallard-test-fixture 1");
+    EXPECT_EQ(t.generator(), "mallard-test-fixture 2");
+    EXPECT_EQ(t.mechanism(), "h2o2.yaml sha256:0efc6c52862741a29e0c29b65d979c7d8cb409db5282bca83b9c5437b3d8c8d4");
+    EXPECT_FALSE(t.single());
+    EXPECT_TRUE(t.mapped());
     ASSERT_EQ(t.fields().size(), FIXTURE_FIELDS.size());
     std::vector<uint32_t> fields;
     for (const auto & name : FIXTURE_FIELDS) fields.push_back(field(t, name));
@@ -261,15 +299,61 @@ TEST(FlameletTableTest, ReadsTheFixture) {
     }
 }
 
+// Values mapped from the file and values read into memory look up bitwise identically, in float64
+// and float32 tables, and a float32 table looks up as its float64 source to float32 rounding:
+// catches a wrong offset or type of mapped values, and float32 values read as float64.
+TEST(FlameletTableTest, MappedAndReadValuesLookUpIdentically) {
+    const auto q = fixture_points(1222);
+    auto lookups = [&](const std::string & file, auto value) {
+        using Value = decltype(value);
+        const Table mapped = Table::read(file), read = Table::read(file, Table::Load::READ);
+        EXPECT_TRUE(mapped.mapped()) << file;
+        EXPECT_FALSE(read.mapped()) << file;
+        EXPECT_EQ(mapped.single(), (std::is_same_v<Value, float>)) << file;
+        const auto a = lookup_device(mapped.device<3, Value>(), q, all_fields(mapped));
+        const auto b = lookup_device(read.device<3, Value>(), q, all_fields(read));
+        EXPECT_EQ(a, b) << file;
+        return a;
+    };
+    const auto f64 = lookups(FIXTURE, 0.0);
+    const auto f32 = lookups(FIXTURE_F32, 0.0f);
+    const Table t = Table::read(FIXTURE);
+    const size_t nf = t.fields().size();
+    const flamelet::TableView<3, double, Kokkos::HostSpace> h = t.host<3>();
+    for (size_t k = 0; k < nf; k++) {
+        double scale = 0.0;
+        for (uint64_t i = k; i < h.values.size(); i += nf) scale = std::max(scale, std::abs(h.values(i)));
+        for (size_t i = 0; i < q.size(); i++) {
+            EXPECT_NEAR(f32[i * nf + k], f64[i * nf + k], 1.2e-7 * scale) << FIXTURE_FIELDS[k] << " at query " << i;
+        }
+    }
+    try {
+        Table::read(FIXTURE_F32).device<3>();
+        ADD_FAILURE() << "float32 values were looked up as float64";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("its values are float32, where this lookup reads float64"), std::string::npos)
+            << e.what();
+    }
+}
+
 // Files that break the format or the contract are refused with the file and the reason, never
 // read as garbage: catches a check that is dropped or that tests the wrong thing.
 TEST(FlameletTableTest, RefusesMalformedTables) {
-    const std::string bytes = read_bytes(FIXTURE);
-    const size_t data = bytes.find('\n', bytes.find('\n') + 1) + 1;
-    const size_t n_fields = FIXTURE_FIELDS.size();
-    auto expect_refused = [&](const std::string & name, const std::string & content, const std::string & reason) {
+    const Table fixture_table = Table::read(FIXTURE);
+    std::vector<std::string> names, units;
+    for (const auto & f : fixture_table.fields()) {
+        names.push_back(f.name);
+        units.push_back(f.units);
+    }
+    auto expect_refused = [&](const std::string & name, const std::function<void(hid_t)> & edit,
+                              const std::string & reason) {
         const std::string file = (rank_scratch_dir() / name).string();
-        std::ofstream(file, std::ios::binary) << content;
+        std::filesystem::copy_file(FIXTURE, file, std::filesystem::copy_options::overwrite_existing);
+        {
+            const std::lock_guard<std::mutex> lock(h5::mutex());
+            const h5::Handle h5(H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + file);
+            edit(h5);
+        }
         try {
             Table::read(file);
             ADD_FAILURE() << name << " was read";
@@ -279,42 +363,115 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
             EXPECT_NE(what.find(reason), std::string::npos) << name << ": " << what;
         }
     };
-    auto edit_header = [&](const std::string & from, const std::string & to) {
-        std::string b = bytes;
-        const size_t at = b.find(from);
-        EXPECT_LT(at, data) << from;
-        return at < data ? b.replace(at, from.size(), to) : b;
+    auto set_text = [](const hid_t object, const char * attribute, const std::string & value) {
+        h5::check(H5Adelete(object, attribute), attribute);
+        h5::write_string_scalar_attribute(object, attribute, value);
+    };
+    auto set_texts = [](const hid_t object, const char * attribute, const std::vector<std::string> & values) {
+        h5::check(H5Adelete(object, attribute), attribute);
+        h5::write_strings_attribute(object, attribute, values);
+    };
+    auto set_number = [](const hid_t parent, const char * group, const char * attribute, const double value) {
+        const h5::Handle g(H5Oopen(parent, group, H5P_DEFAULT), H5Oclose, group);
+        h5::set_attribute(g, attribute, value);
+    };
+    auto replaced = [](std::vector<std::string> v, const std::string & from, const std::string & to) {
+        std::replace(v.begin(), v.end(), from, to);
+        return v;
     };
     auto set_value = [&](const size_t node, const std::string & name, const double v) {
-        std::string b = bytes;
-        const size_t f = static_cast<size_t>(std::find(FIXTURE_FIELDS.begin(), FIXTURE_FIELDS.end(), name) - FIXTURE_FIELDS.begin());
-        std::memcpy(b.data() + data + (node * n_fields + f) * sizeof v, &v, sizeof v);
-        return b;
+        return [&names, node, name, v](const hid_t h5) {
+            const h5::Handle values(H5Dopen2(h5, "values", H5P_DEFAULT), H5Dclose, "values");
+            const h5::Handle space(H5Dget_space(values), H5Sclose, "space");
+            hsize_t dims[4] = {};
+            H5Sget_simple_extent_dims(space, dims, nullptr);
+            const hsize_t at[4] = {node / (dims[1] * dims[2]), node / dims[2] % dims[1], node % dims[2],
+                                   static_cast<hsize_t>(std::find(names.begin(), names.end(), name) - names.begin())};
+            h5::check(H5Sselect_elements(space, H5S_SELECT_SET, 1, at), "select");
+            const hsize_t one = 1;
+            const h5::Handle memory(H5Screate_simple(1, &one, nullptr), H5Sclose, "memory");
+            h5::check(H5Dwrite(values, H5T_NATIVE_DOUBLE, memory, space, H5P_DEFAULT, &v), "write");
+        };
     };
-    expect_refused("truncated.mtab", bytes.substr(0, bytes.size() - 8), "values, where its axes and fields need");
-    expect_refused("magic.mtab", "mallard-table 2\n" + bytes.substr(bytes.find('\n') + 1), "not a Mallard table");
-    expect_refused("nan.mtab", set_value(7, "T0", std::nan("")), "is not finite");
-    expect_refused("model.mtab", edit_header("\"model\":\"fpv\"", "\"model\":\"fgm\""),
+    auto on_values = [](const std::function<void(hid_t)> & edit) {
+        return [edit](const hid_t h5) {
+            const h5::Handle values(H5Dopen2(h5, "values", H5P_DEFAULT), H5Dclose, "values");
+            edit(values);
+        };
+    };
+
+    const std::string truncated = (rank_scratch_dir() / "truncated.h5").string();
+    std::filesystem::copy_file(FIXTURE, truncated, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::resize_file(truncated, std::filesystem::file_size(truncated) - 8);
+    const std::string text = (rank_scratch_dir() / "text.h5").string();
+    std::ofstream(text) << "mallard-table 1\n";
+    for (const std::string & file : {truncated, text}) {
+        try {
+            Table::read(file);
+            ADD_FAILURE() << file << " was read";
+        } catch (const std::runtime_error & e) {
+            EXPECT_NE(std::string(e.what()).find(file + ": it is not an HDF5 file, or it is damaged"), std::string::npos)
+                << e.what();
+        }
+    }
+    expect_refused("format.h5", [&](hid_t h5) { set_text(h5, "format", "mallard-mesh"); }, "it is not a Mallard table");
+    expect_refused("version.h5", [&](hid_t h5) { set_number(h5, ".", "version", 2.0); },
+                   "a Mallard table of version 2, which this version of Mallard does not read");
+    expect_refused("nan.h5", set_value(7, "T0", std::nan("")), "is not finite");
+    expect_refused("model.h5", [&](hid_t h5) { set_text(h5, "model", "fgm"); },
                    "model \"fgm\" is not supported by this version of Mallard (supported: fpv)");
-    expect_refused("thermo.mtab", edit_header("\"saghafian2015\"", "\"low-mach\""),
+    expect_refused("thermo.h5", [&](hid_t h5) { set_text(h5, "thermodynamics", "low-mach"); },
                    "thermodynamics \"low-mach\" is not supported");
-    expect_refused("units.mtab", edit_header("\"name\":\"mu\",\"units\":\"Pa s\"", "\"name\":\"mu\",\"units\":\"P\""),
-                   "the field \"mu\" is in \"P\", where Mallard reads \"Pa s\"");
-    expect_refused("missing.mtab", edit_header("\"name\":\"kappa\"", "\"name\":\"lambda\""), "no field \"kappa\"");
-    expect_refused("species.mtab", edit_header("\"H2O\",\"N2\"]", "\"H2O\"]"), "\"Y_N2\" is not of a species");
-    expect_refused("axes.mtab", edit_header("{\"name\":\"S\"", "{\"name\":\"chi\""), "axis 1 of a table of model \"fpv\" is \"S\"");
-    expect_refused("sha.mtab", edit_header("\"sha256\":\"", "\"sha256\":\"x"), "provenance.mechanism.sha256");
-    expect_refused("generator.mtab", edit_header("\"generator\":", "\"writer\":"), "provenance.generator");
-    expect_refused("Zst.mtab", edit_header("\"Z_st\":0.3", "\"Z_st\":1.3"), "model_data.Z_st");
-    expect_refused("gamma.mtab", set_value(5, "gamma0", 0.9), "the field \"gamma0\" is not above 1 at node 5");
-    expect_refused("fraction.mtab", set_value(3, "Y_O2", 1.5), "the field \"Y_O2\" is outside [0, 1] at node 3");
-    expect_refused("linear.mtab", set_value(1, "C", 0.5), "C is not linear in c at (Z, S) node 0");
-    expect_refused("name.mtab", edit_header("\"name\":\"Y_N2\"", "\"name\":\"Y N2\""), "field name \"Y N2\" is not of the form");
-    expect_refused("weights.mtab", edit_header("{\"H2O\":1.0}", "{\"H2O\":\"1\"}"), "model_data.progress_variable");
-    expect_refused("stream.mtab", edit_header("\"H2\":0.1,", "\"H2\":1.1,"), "model_data.streams.fuel.Y");
-    const Table t = Table::read(FIXTURE);
-    const std::vector<double> zeros(t.axes()[0].nodes.size() * t.axes()[2].nodes.size() * t.fields().size(), 0.0);
-    const Table two_axes("fpv", "saghafian2015", {t.axes()[0], t.axes()[2]}, t.fields(), zeros, "two axes");
+    expect_refused("units.h5", on_values([&](hid_t v) {
+        std::vector<std::string> u = units;
+        u[static_cast<size_t>(fixture_table.field("mu"))] = "P";
+        set_texts(v, "units", u);
+    }), "the field \"mu\" is in \"P\", where Mallard reads \"Pa s\"");
+    expect_refused("missing.h5", on_values([&](hid_t v) { set_texts(v, "fields", replaced(names, "kappa", "lambda")); }),
+                   "no field \"kappa\"");
+    expect_refused("species.h5", [&](hid_t h5) { set_texts(h5, "species", {"H2", "O2", "H2O"}); },
+                   "\"Y_N2\" is not of a species");
+    expect_refused("axes.h5", [&](hid_t h5) {
+        h5::check(H5Lmove(h5, "axes/S", h5, "axes/chi", H5P_DEFAULT, H5P_DEFAULT), "move");
+        on_values([&](hid_t v) { set_texts(v, "axes", {"Z", "chi", "c"}); })(h5);
+    }, "axis 1 of a table of model \"fpv\" is \"S\"");
+    expect_refused("axis.h5", [&](hid_t h5) { h5::check(H5Ldelete(h5, "axes/c", H5P_DEFAULT), "delete"); },
+                   "no valid dataset /axes/c");
+    expect_refused("shape.h5", on_values([&](hid_t v) {
+        std::vector<std::string> n = names, u = units;
+        n.push_back("extra");
+        u.push_back("1");
+        set_texts(v, "fields", n);
+        set_texts(v, "units", u);
+    }), "its values have shape (5, 3, 4, 15), where its axes and fields need (5, 3, 4, 16)");
+    expect_refused("sha.h5", [&](hid_t h5) {
+        const h5::Handle g(H5Gopen2(h5, "provenance/mechanism", H5P_DEFAULT), H5Gclose, "mechanism");
+        set_text(g, "sha256", "x");
+    }, "\"sha256\" on /provenance/mechanism");
+    expect_refused("generator.h5", [&](hid_t h5) {
+        h5::check(H5Lmove(h5, "provenance/generator", h5, "provenance/writer", H5P_DEFAULT, H5P_DEFAULT), "move");
+    }, "no valid group /provenance/generator");
+    expect_refused("input.h5", [&](hid_t h5) { h5::check(H5Ldelete(h5, "provenance/input", H5P_DEFAULT), "delete"); },
+                   "no valid dataset /provenance/input");
+    expect_refused("Zst.h5", [&](hid_t h5) { set_number(h5, "model_data", "Z_st", 1.3); },
+                   "attribute \"Z_st\" on /model_data");
+    expect_refused("gamma.h5", set_value(5, "gamma0", 0.9), "the field \"gamma0\" is not above 1 at node 5");
+    expect_refused("fraction.h5", set_value(3, "Y_O2", 1.5), "the field \"Y_O2\" is outside [0, 1] at node 3");
+    expect_refused("linear.h5", set_value(1, "C", 0.5), "C is not linear in c at (Z, S) node 0");
+    expect_refused("name.h5", on_values([&](hid_t v) { set_texts(v, "fields", replaced(names, "Y_N2", "Y N2")); }),
+                   "field name \"Y N2\" is not of the form");
+    expect_refused("weights.h5", [&](hid_t h5) {
+        const h5::Handle g(H5Gopen2(h5, "model_data/progress_variable", H5P_DEFAULT), H5Gclose, "weights");
+        set_text(g, "H2O", "1");
+    }, "attribute \"H2O\" on /model_data/progress_variable");
+    expect_refused("stream.h5", [&](hid_t h5) { set_number(h5, "model_data/streams/fuel/Y", "H2", 1.1); },
+                   "the mass fraction of H2 in /model_data/streams/fuel/Y is not in [0, 1]");
+
+    const std::vector<double> zeros(fixture_table.axes()[0].nodes.size() * fixture_table.axes()[2].nodes.size() *
+                                        fixture_table.fields().size(),
+                                    0.0);
+    const Table two_axes("fpv", "saghafian2015", {fixture_table.axes()[0], fixture_table.axes()[2]},
+                         fixture_table.fields(), zeros, "two axes");
     try {
         two_axes.fpv();
         ADD_FAILURE() << "a table of two axes has an FPV map";
@@ -322,3 +479,20 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
         EXPECT_NE(std::string(e.what()).find("a table of model \"fpv\" has 3 axes"), std::string::npos) << e.what();
     }
 }
+
+#else
+
+// A build without HDF5 refuses a table with an input error that says how to get HDF5, rather than
+// failing to parse it: catches the reader compiled out silently.
+TEST(FlameletTableTest, ReadingNeedsHdf5) {
+    try {
+        Table::read(FIXTURE);
+        ADD_FAILURE() << "a table was read without HDF5";
+    } catch (const InputError & e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find(FIXTURE), std::string::npos) << what;
+        EXPECT_NE(what.find("this build has no HDF5. Rebuild with -DMallard_ENABLE_HDF5=ON"), std::string::npos) << what;
+    }
+}
+
+#endif

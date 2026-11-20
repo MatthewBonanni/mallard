@@ -34,8 +34,8 @@ than non-reacting LES.
   Mallard's side is the format and the reader.
 - **A generic, versioned table format with provenance**
   ([table_format.md](table_format.md)): N axes of named control variables,
-  named fields, a species block, model and thermodynamics tags, read by every
-  build (no optional dependency) and by NumPy.
+  named fields, a species block, model and thermodynamics tags, in HDF5:
+  read by every build with HDF5 and by h5py, and mapped from the file.
 - **Device lookup** in the RHS and the output kernels: multilinear, a few cache
   lines per lookup, bitwise independent of the backend, thread and rank count.
 - **Ignorable when off.** A run without `gas = "flamelet"` compiles to and runs
@@ -66,13 +66,13 @@ than non-reacting LES.
 | 1 | Tables generated offline by an external library, `<generator, name TBD>`, that starts from FPVgen and runs Cantera's 1D flames (counterflow S-curves by two-point flame control; free flames for FGM) | A generator in Mallard's `tools/`; FlameMaster; a flamelet solver in Mallard | Generation is a separate product with its own users, tests and release cycle, and it will cover more models than Mallard reads. Mallard keeps only the contract |
 | 2 | Presumed PDFs integrated by the generator: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); copies of the laminar flamelet along the variance axis, as FPVgen does today | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
 | 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda`, with `C` linear in `c` (a checked part of the contract) | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
-| 4 | Mallard's table format ([table_format.md](table_format.md)): one magic line, one line of JSON (model and thermodynamics tags, axes, fields, species, pressure, model data, provenance), little-endian float64 values, node-major with a node's fields contiguous | HDF5; netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Readable in every build and with NumPy alone; self-describing; generic over models; one lookup reads 2^d short runs |
+| 4 | Mallard's table format in HDF5 ([table_format.md](table_format.md)): tags, species and pressure as root attributes, named axes and fields with units, model data and provenance as groups, and the values in one contiguous, unfiltered dataset, node-major with a node's fields contiguous, mapped from the file when its layout allows | A custom binary format (magic line, JSON header, raw values); netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Standard, self-describing, readable with h5py alone; generic over models; memory-mapped loading; one lookup reads 2^d short runs. HDF5 is optional in Mallard, but most CI jobs, the GPU suites, the containers and Spack have it, and it builds from its submodule |
 | 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Any number of axes, fixed at compile time per model so the corner loop unrolls; 64-bit offsets; weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
 | 6 | A third gas model, `gas = "flamelet"`, whose `Z` and `C` live in the existing species block, with the mixture path's functors templated on the gas model | A separate scalar block in `State`; control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
 | 7 | Compressible FPV thermodynamics after Saghafian et al. (2015): tabulated `T0`, `e0`, `R`, `gamma0`, `a_gamma`, closed form `T(e)` (thermodynamics tag `saghafian2015`) | Low-Mach FPV (tabulated `T`, `rho`); a Newton solve on tabulated `cp(T)` | Consistent energy with heat release and acoustics; closed form, no iteration; fits the Riemann solvers' `(gamma, e0)` surrogate (chemistry.md, decision 3) |
 | 8 | Unity Lewis number for all control variables, `rho D = kappa / cp`, with tables generated with unity-Lewis transport by default | Differential diffusion in the table | Consistent transport and table; differential diffusion is a generator option for later studies |
 | 9 | `omega_C` an explicit source in the RHS | A Strang-split implicit update of `C` | The FPV progress source is not stiff: its time scale is the resolved flame's, not the fastest radicals' |
-| 10 | Table values in float64 | float32 values | Simplest and exact; a float32 variant is a format version 2 question, for when lookups show up in profiles |
+| 10 | Table values in float64 or float32, lookups summed in double | float64 only | float32 halves a table's memory and lookup bandwidth at a relative error of 6e-8, for when lookups show up in profiles; float64 stays the default and is exact |
 
 ## 1. Models and control variables
 
@@ -146,10 +146,13 @@ format as new tags ([table_format.md](table_format.md#8-versioning-and-new-model
 
 The specification is [table_format.md](table_format.md). In short:
 
-- A magic line `mallard-table 1`, one line of JSON, then little-endian float64
-  values. The data is node-major with the last axis fastest, and the fields of
-  a node are contiguous: a lookup of `n` fields in `d` dimensions reads `2^d`
-  runs of `n` values.
+- An HDF5 file: the tags, species and pressure as attributes of the root,
+  each axis as a float64 dataset `/axes/<name>` with its units, and the values
+  as one dataset `/values` of shape `(n_0, ..., n_(d-1), n_fields)`, float64
+  or float32, contiguous and unfiltered, whose attributes name its axes,
+  fields and units. The data is node-major with the last axis fastest, and the
+  fields of a node are contiguous: a lookup of `n` fields in `d` dimensions
+  reads `2^d` runs of `n` values.
 - The format is generic. It has N axes of named control variables, named
   fields with units, and a species block (`Y_k` fields). A **model tag**
   (`fpv`) sets the axes and the model's fields. A **thermodynamics tag**
@@ -158,16 +161,38 @@ The specification is [table_format.md](table_format.md). In short:
   format. Mallard refuses tags it does not support, by name.
 - Provenance (generator and version, creation time, mechanism SHA-256, the
   generator's input verbatim) is required, so that a table can be regenerated
-  from its own header.
+  from its own file.
 - Mallard checks the format and the contract of the table's tags at setup:
-  the magic and version, the required members, the axes, the units of every
-  field it uses, physical bounds, `C` linear in `c`, the value count and
-  finiteness. Its errors name the file and the problem.
-- Why not HDF5: Mallard builds without it (`Mallard_ENABLE_HDF5` is optional),
-  and a table must be readable by every build and by NumPy alone. Tables are at
-  most a few hundred MB (200 x 30 x 100 nodes x 40 fields in float64 is 190 MB)
-  and are read once at setup.
-- Values are float64 (decision 10).
+  the format and version, the required attributes, groups and datasets, the
+  axes, the units of every field it uses, physical bounds, `C` linear in `c`,
+  the shape and finiteness. Its errors name the file and the problem.
+- Loading maps the values from the file (`H5Dget_offset`, then `mmap`) when
+  the dataset is contiguous, unfiltered, in native byte order and aligned, and
+  reads them with `H5Dread` otherwise. Both give bitwise identical lookups.
+
+**Why HDF5 and not a custom format.** The first version of this design used
+a custom format (a magic line, one line of JSON, raw little-endian float64),
+so that every build could read tables, HDF5 or not. HDF5 was chosen instead:
+
+- *Builds without HDF5.* Tabulated chemistry then needs HDF5, and a build
+  without it refuses a table with an input error that says how to rebuild.
+  That costs little: HDF5 is in 10 of CI's 18 backend jobs (`openmp`, `mpi`,
+  `mpi-3d`, `float-3d` of the gate; `serial-3d`, `clang-22` and four arm64
+  jobs), in the GPU suites (CUDA with a parallel HDF5), in the containers and
+  in Spack, and `-DUSE_SYSTEM_HDF5=OFF` builds it from its submodule wherever
+  a system HDF5 is missing. The jobs without it (`serial`, `float`, `gcc-16`,
+  `clang-23`, `clang-22-arm64`, macOS) test the refusal.
+- *Device builds.* None: tables are read on the host at setup and copied to
+  the device; HDF5 never appears in device code. The CUDA, HIP and SYCL
+  compile jobs build without HDF5, and the GPU suites with it.
+- *Load speed.* Equal or better: the values are one contiguous dataset, so
+  reading them is one `H5Dread` at disk speed, and mapping them costs nothing
+  until they are touched (measurements in the PR). The metadata are a few
+  dozen attributes.
+- *Gains.* A standard container that h5py, HDF5's tools (`h5dump`, `h5ls`)
+  and other codes read; attributes and groups instead of a JSON parser;
+  float32 in the same version; room for more datasets (for example
+  precomputed bounds) without a new layout.
 
 ## 4. Lookup on the device
 
@@ -197,8 +222,8 @@ The table is replicated on every rank and GPU (190 MB for the large example
 above; an A100 has 80 GB). Node-major with fields contiguous makes one lookup
 read `2^d n_fields` values in `2^d` contiguous runs; field-major would make it
 `2^d n_fields` scattered reads. Neighboring threads look up different points in
-either layout. To be measured in stage 2 against a field-major layout and
-float32 values. The FPV map reads the bounds of `C` at the ends of the `c` axis
+either layout. To be measured in stage 2 against a field-major layout, and
+float32 values against float64. The FPV map reads the bounds of `C` at the ends of the `c` axis
 from the `2^(D-1)` nodes of the `(Z, S)` cell alone.
 
 ### 4.3 The FPV map (decision 3)
@@ -348,7 +373,7 @@ equilibrium region is `C = "burnt"`, resolved through the table.
 ```toml
 [physics]
 gas = "flamelet"
-table = "h2_fpv.mtab"        # relative to the input file
+table = "h2_fpv.h5"          # relative to the input file
 variance = "algebraic"       # or "transported" (stage 3); ignored without [les]
 C_Z = 0.1                    # algebraic variance constant
 
@@ -456,9 +481,9 @@ Resolved with the maintainer before stage 2:
 3. **Progress-variable source (decision 9). Resolved:** `omega_C` is an explicit
    RHS source, because the FPV progress source is not stiff. The Strang-split
    fallback is dropped and is listed as a non-goal.
-4. **Table precision (decision 10). Resolved:** float64 for now. It is exact and
-   simple, tables are read once and fit in GPU memory. float32 is a later
-   format version if lookups show up in profiles.
+4. **Table precision (decision 10). Resolved:** float64 by default, float32
+   allowed in the same format version. float64 is exact; float32 halves the
+   memory and bandwidth of lookups if they show up in profiles.
 5. **Table generation. Resolved:** outside Mallard, in a separate library
    (`<generator, name TBD>`) that starts from FPVgen and credits it. Mallard
    specifies the format and reads it. Generation has its own users and tests

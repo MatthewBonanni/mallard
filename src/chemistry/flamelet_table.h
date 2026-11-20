@@ -1,7 +1,7 @@
 /**
  * @file flamelet_table.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Tabulated chemistry: Mallard's table format (.mtab, written by an
+ * @brief Tabulated chemistry: Mallard's table format (HDF5, written by an
  *        external table generator; specified in docs/design/table_format.md),
  *        multilinear lookup on the host and in device kernels,
  *        and the flamelet/progress-variable (FPV) map from the
@@ -18,7 +18,9 @@
 #define FLAMELET_TABLE_H
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -34,23 +36,25 @@ struct Point {
 
 /**
  * @brief A table of D axes in one memory space, copyable by value into kernels.
- *        Values are node-major (last axis fastest) with a node's fields
+ *        Values (float64 or float32; lookups sum in double either way) are
+ *        node-major (last axis fastest) with a node's fields
  *        contiguous, so one lookup of several fields reads 2^D short runs.
  *        D is a compile-time constant so that the corner loop unrolls and a
  *        Point stays in registers on GPUs. Results depend only on the query,
  *        never on the backend or the order of evaluation, so lookups are
  *        bitwise reproducible across ranks.
  */
-template <uint32_t D, typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
+template <uint32_t D, typename Value = double, typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct TableView {
     static_assert(D >= 1 && D <= 16, "a lookup reads 2^D nodes");
+    static_assert(std::is_same_v<Value, double> || std::is_same_v<Value, float>, "values are float64 or float32");
 
     uint32_t n_fields = 0;
     uint32_t n_nodes[D] = {};
     uint32_t axis_first[D] = {};  // axis a's nodes at axes(axis_first[a] ...)
     uint64_t stride[D] = {};      // values between neighboring nodes of axis a
     Kokkos::View<const double *, MemorySpace> axes;
-    Kokkos::View<const double *, MemorySpace> values;  // indexed in 64 bits: tables may exceed 2^31 values
+    Kokkos::View<const Value *, MemorySpace> values;  // indexed in 64 bits: tables may exceed 2^31 values
 
     /**
      * @brief The cell of axis a holding x, and the fraction across it; clamped to the axis' ends
@@ -117,8 +121,8 @@ struct TableView {
                     node += up * stride[a];
                     w *= up ? p.t[a] : 1.0 - p.t[a];
                 }
-                const double * row = values.data() + node;
-                for (uint32_t i = 0; i < n; i++) out[i] += w * row[fields[i]];
+                const Value * row = values.data() + node;
+                for (uint32_t i = 0; i < n; i++) out[i] += w * static_cast<double>(row[fields[i]]);
             }
         }
 };
@@ -128,9 +132,9 @@ struct TableView {
  *        variable normalized between the table's ends at that (Z, S)), on
  *        a TableView. Plain aggregate, captured by value in kernels.
  */
-template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
+template <typename Value = double, typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct FPV {
-    TableView<3, MemorySpace> table;
+    TableView<3, Value, MemorySpace> table;
     uint32_t field_C = 0;
 
     /** @brief Normalized variance of Z, clamped to [0, 1] (0 where Z (1 - Z) vanishes). */
@@ -144,8 +148,8 @@ struct FPV {
     /**
      * @brief The table point of a mean mixture fraction Z, its variance Zvar
      *        and the mean progress variable C. C between its table bounds
-     *        at (Z, S) is reproduced exactly by the C field; outside, it is
-     *        clamped to them.
+     *        at (Z, S) is reproduced exactly by the C field (to the rounding
+     *        of float32 values in a float32 table); outside, it is clamped to them.
      */
     KOKKOS_INLINE_FUNCTION Point<3> locate(const double Z, const double Zvar, const double C) const {
         Point<3> p;
@@ -161,10 +165,10 @@ struct FPV {
 };
 
 /**
- * @brief A table read from a .mtab file (docs/design/table_format.md): one
- *        line "mallard-table 1", one line of JSON (model and thermodynamics
- *        tags, axes, fields, species, pressure, model data, provenance), then
- *        the values as little-endian float64.
+ * @brief A table read from an HDF5 file (docs/design/table_format.md): the
+ *        model and thermodynamics tags, species and pressure as attributes,
+ *        the axes' nodes, the values (float64 or float32, node-major) with the
+ *        names and units of their fields, model data and provenance.
  */
 class Table {
     public:
@@ -182,11 +186,19 @@ class Table {
         };
 
         /**
+         * @brief How read() loads the values: MAP maps them from the file when its layout
+         *        allows (contiguous, unfiltered, native byte order, aligned), and reads them
+         *        otherwise; READ always reads them into memory.
+         */
+        enum class Load { MAP, READ };
+
+        /**
          * @brief Read a table file and check it against the format and the contract of its
          *        model and thermodynamics tags.
+         * @throws InputError in a build without HDF5
          * @throws std::runtime_error naming the file and what is wrong with it
          */
-        static Table read(const std::string & file);
+        static Table read(const std::string & file, Load load = Load::MAP);
 
         /**
          * @brief A table from its parts, for tests: checked as a container (axes, fields, values),
@@ -199,64 +211,90 @@ class Table {
         const std::string & thermodynamics() const { return m_thermodynamics; }
         const std::vector<Axis> & axes() const { return m_axes; }
         const std::vector<Field> & fields() const { return m_fields; }
-        const std::vector<double> & values() const { return m_values; }
         /** @brief The species of the species block; species k is the field "Y_k". */
         const std::vector<std::string> & species() const { return m_species; }
-        /** @brief The header's JSON text, model data and provenance included; empty for a table built from parts. */
-        const std::string & header() const { return m_header; }
         /** @brief The pressure the table was generated at (Pa); 0 for a table built from parts. */
         double pressure() const { return m_pressure; }
         /** @brief "<name> <version>" of the generator that wrote the table, for the run log. */
         const std::string & generator() const { return m_generator; }
+        /** @brief "<name> sha256:<hash>" of the mechanism the table was generated with, for the run log. */
+        const std::string & mechanism() const { return m_mechanism; }
+        /** @brief Whether the values are float32 (else float64). */
+        bool single() const { return m_single; }
+        /** @brief Whether the values are mapped from the file (else held in memory). */
+        bool mapped() const { return m_mapped; }
 
         /** @brief Index of the named field, or -1. */
         int32_t field(const std::string & name) const;
 
         /**
-         * @brief The table in host memory (views of this object's vectors).
-         * @throws std::runtime_error unless the table has D axes
+         * @brief The table in host memory: views of this object's storage, valid while it lives.
+         * @throws std::runtime_error unless the table has D axes and values of type Value
          */
-        template <uint32_t D>
-        TableView<D, Kokkos::HostSpace> host() const {
-            using Unmanaged = Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
-            return view<D, Kokkos::HostSpace>(Unmanaged(m_axis_nodes.data(), m_axis_nodes.size()),
-                                              Unmanaged(m_values.data(), m_values.size()));
+        template <uint32_t D, typename Value = double>
+        TableView<D, Value, Kokkos::HostSpace> host() const {
+            require_value(std::is_same_v<Value, float>);
+            using Unmanaged = Kokkos::MemoryTraits<Kokkos::Unmanaged>;
+            return view<D, Value, Kokkos::HostSpace>(
+                Kokkos::View<const double *, Kokkos::HostSpace, Unmanaged>(m_axis_nodes.data(), m_axis_nodes.size()),
+                Kokkos::View<const Value *, Kokkos::HostSpace, Unmanaged>(static_cast<const Value *>(m_values), m_n_values));
         }
 
         /**
-         * @brief The table copied to the default device's memory.
-         * @throws std::runtime_error unless the table has D axes
+         * @brief The table in the default device's memory: a copy, or on host backends the
+         *        storage itself (a mapped table then stays shared with the file's other readers),
+         *        valid while this object lives.
+         * @throws std::runtime_error unless the table has D axes and values of type Value
          */
-        template <uint32_t D>
-        TableView<D> device() const {
+        template <uint32_t D, typename Value = double>
+        TableView<D, Value> device() const {
             using Space = Kokkos::DefaultExecutionSpace::memory_space;
-            const TableView<D, Kokkos::HostSpace> h = host<D>();
-            Kokkos::View<double *, Space> axes("flamelet_axes", h.axes.size()), values("flamelet_values", h.values.size());
-            Kokkos::deep_copy(axes, h.axes);
-            Kokkos::deep_copy(values, h.values);
-            return view<D, Space>(axes, values);
+            const TableView<D, Value, Kokkos::HostSpace> h = host<D, Value>();
+            if constexpr (std::is_same_v<Space, Kokkos::HostSpace>) {
+                return h;
+            } else {
+                Kokkos::View<double *, Space> axes("flamelet_axes", h.axes.size());
+                Kokkos::View<Value *, Space> values("flamelet_values", h.values.size());
+                Kokkos::deep_copy(axes, h.axes);
+                Kokkos::deep_copy(values, h.values);
+                return view<D, Value, Space>(axes, values);
+            }
         }
 
         /**
          * @brief The FPV map of a table that meets the contract of model "fpv".
-         * @throws std::runtime_error naming what the table lacks
+         * @throws std::runtime_error naming what the table lacks, or unless its values are of type Value
          */
-        FPV<> fpv() const;
+        template <typename Value = double>
+        FPV<Value> fpv() const {
+            const uint32_t C = fpv_field();
+            return FPV<Value>{device<3, Value>(), C};
+        }
+
         /** @brief As fpv(), in host memory. */
-        FPV<Kokkos::HostSpace> fpv_host() const;
+        template <typename Value = double>
+        FPV<Value, Kokkos::HostSpace> fpv_host() const {
+            const uint32_t C = fpv_field();
+            return FPV<Value, Kokkos::HostSpace>{host<3, Value>(), C};
+        }
 
     private:
         Table() = default;
-        void finish();          // container checks, and gathers the axes' nodes
+        void finish();                // container checks, and gathers the axes' nodes
         void check_contract() const;  // the model's and thermodynamics' axes, fields and values
         uint32_t fpv_field() const;
         void require_axes(uint32_t d) const;
+        void require_value(bool single) const;
+        template <typename F>
+        decltype(auto) with_values(F && f) const {  // f(pointer to the values, float or double)
+            return m_single ? f(static_cast<const float *>(m_values)) : f(static_cast<const double *>(m_values));
+        }
 
-        template <uint32_t D, typename MemorySpace>
-        TableView<D, MemorySpace> view(Kokkos::View<const double *, MemorySpace> axis_nodes,
-                                       Kokkos::View<const double *, MemorySpace> values) const {
+        template <uint32_t D, typename Value, typename MemorySpace>
+        TableView<D, Value, MemorySpace> view(Kokkos::View<const double *, MemorySpace> axis_nodes,
+                                              Kokkos::View<const Value *, MemorySpace> values) const {
             require_axes(D);
-            TableView<D, MemorySpace> t;
+            TableView<D, Value, MemorySpace> t;
             t.n_fields = static_cast<uint32_t>(m_fields.size());
             uint32_t first = 0;
             for (uint32_t a = 0; a < D; a++) {
@@ -279,11 +317,15 @@ class Table {
         std::string m_thermodynamics;
         std::vector<Axis> m_axes;
         std::vector<Field> m_fields;
-        std::vector<double> m_values;
         std::vector<std::string> m_species;
         std::vector<double> m_axis_nodes;  // every axis' nodes, in order
-        std::string m_header;
+        std::shared_ptr<const void> m_storage;  // owns the values: a vector, or the file's mapping
+        const void * m_values = nullptr;
+        uint64_t m_n_values = 0;
+        bool m_single = false;
+        bool m_mapped = false;
         std::string m_generator;
+        std::string m_mechanism;
         double m_pressure = 0.0;
 };
 

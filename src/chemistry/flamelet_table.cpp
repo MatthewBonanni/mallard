@@ -12,32 +12,32 @@
 #include "flamelet_table.h"
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
-#include <cstring>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
 
 #include "common_io.h"
-#include "json.h"
+#include "input.h"
+
+#ifdef Mallard_HAS_HDF5
+#include <cstring>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "hdf5_util.h"
+#endif
 
 namespace flamelet {
 
 namespace {
 
-constexpr const char * MAGIC = "mallard-table 1";
-
 [[noreturn]] void fail(const std::string & where, const std::string & what) {
     throw std::runtime_error(where + ": " + what + " (Mallard's table format: docs/design/table_format.md)");
-}
-
-const json::Value & member(const json::Value & v, const std::string & key, const json::Value::Type type,
-                           const std::string & where, const std::string & path = "") {
-    const json::Value * m = v.find(key);
-    if (m == nullptr || m->type != type) fail(where, "the header has no valid \"" + path + key + "\"");
-    return *m;
 }
 
 enum class Bound { ANY, NON_NEGATIVE, POSITIVE, ABOVE_ONE, FRACTION };
@@ -128,6 +128,7 @@ const char * bound_text(const Bound b) {
     return "";
 }
 
+#ifdef Mallard_HAS_HDF5
 bool is_sha256(const std::string & s) {
     if (s.size() != 64) return false;
     for (const char ch : s) {
@@ -135,6 +136,7 @@ bool is_sha256(const std::string & s) {
     }
     return true;
 }
+#endif
 
 bool is_name(const std::string & s) {
     auto letter = [](const char ch) { return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'); };
@@ -145,25 +147,16 @@ bool is_name(const std::string & s) {
     return true;
 }
 
-double from_little_endian(double x) {
-    if constexpr (std::endian::native == std::endian::big) {
-        uint64_t u;
-        std::memcpy(&u, &x, sizeof u);
-        u = ((u & 0x00000000000000ffULL) << 56) | ((u & 0x000000000000ff00ULL) << 40) |
-            ((u & 0x0000000000ff0000ULL) << 24) | ((u & 0x00000000ff000000ULL) << 8) |
-            ((u & 0x000000ff00000000ULL) >> 8) | ((u & 0x0000ff0000000000ULL) >> 24) |
-            ((u & 0x00ff000000000000ULL) >> 40) | ((u & 0xff00000000000000ULL) >> 56);
-        std::memcpy(&x, &u, sizeof x);
-    }
-    return x;
-}
-
 } // namespace
 
 Table::Table(std::string model, std::string thermodynamics, std::vector<Axis> axes, std::vector<Field> fields,
              std::vector<double> values, const std::string & where)
     : m_where(where), m_model(std::move(model)), m_thermodynamics(std::move(thermodynamics)), m_axes(std::move(axes)),
-      m_fields(std::move(fields)), m_values(std::move(values)) {
+      m_fields(std::move(fields)) {
+    auto v = std::make_shared<std::vector<double>>(std::move(values));
+    m_values = v->data();
+    m_n_values = v->size();
+    m_storage = std::move(v);
     finish();
 }
 
@@ -187,16 +180,18 @@ void Table::finish() {
         nodes *= a.nodes.size();
         m_axis_nodes.insert(m_axis_nodes.end(), a.nodes.begin(), a.nodes.end());
     }
-    if (m_values.size() != nodes * m_fields.size()) {
-        fail(where, "it holds " + std::to_string(m_values.size()) + " values, where its axes and fields need " +
+    if (m_n_values != nodes * m_fields.size()) {
+        fail(where, "it holds " + std::to_string(m_n_values) + " values, where its axes and fields need " +
                         std::to_string(nodes * m_fields.size()));
     }
-    for (size_t i = 0; i < m_values.size(); i++) {
-        if (!std::isfinite(m_values[i])) {
-            fail(where, "the value of field \"" + m_fields[i % m_fields.size()].name + "\" at node " +
-                            std::to_string(i / m_fields.size()) + " is not finite");
+    with_values([&](const auto * v) {
+        for (uint64_t i = 0; i < m_n_values; i++) {
+            if (!std::isfinite(v[i])) {
+                fail(where, "the value of field \"" + m_fields[i % m_fields.size()].name + "\" at node " +
+                                std::to_string(i / m_fields.size()) + " is not finite");
+            }
         }
-    }
+    });
 }
 
 void Table::check_contract() const {
@@ -227,135 +222,353 @@ void Table::check_contract() const {
             fail(where, "the field \"" + std::string(need.name) + "\" is in \"" + m_fields[static_cast<size_t>(f)].units +
                             "\", where Mallard reads \"" + need.units + "\"");
         }
-        for (size_t i = static_cast<size_t>(f); i < m_values.size(); i += n_fields) {
-            if (!within(m_values[i], need.bound)) {
-                fail(where, "the field \"" + std::string(need.name) + "\" is " + bound_text(need.bound) + " at node " +
-                                std::to_string(i / n_fields));
+        with_values([&](const auto * v) {
+            for (uint64_t i = static_cast<uint64_t>(f); i < m_n_values; i += n_fields) {
+                if (!within(static_cast<double>(v[i]), need.bound)) {
+                    fail(where, "the field \"" + std::string(need.name) + "\" is " + bound_text(need.bound) +
+                                    " at node " + std::to_string(i / n_fields));
+                }
             }
-        }
+        });
     }
     if (&model == &fpv_contract()) {
-        // C linear in c at each (Z, S), so that the FPV map returns the transported C exactly
+        // C linear in c at each (Z, S), so that the FPV map returns the transported C exactly; float32
+        // tables to their rounding
         const size_t C = static_cast<size_t>(field("C"));
         const std::vector<double> & c = m_axes[2].nodes;
         const size_t n_c = c.size(), n_zs = m_axes[0].nodes.size() * m_axes[1].nodes.size();
-        double scale = 0.0;
-        for (size_t i = C; i < m_values.size(); i += n_fields) scale = std::max(scale, std::abs(m_values[i]));
-        for (size_t zs = 0; zs < n_zs; zs++) {
-            const double * row = m_values.data() + zs * n_c * n_fields + C;
-            const double lo = row[0], hi = row[(n_c - 1) * n_fields];
-            if (hi < lo) fail(where, "C decreases from c = 0 to c = 1 at (Z, S) node " + std::to_string(zs));
-            for (size_t k = 0; k < n_c; k++) {
-                if (std::abs(row[k * n_fields] - (lo + c[k] * (hi - lo))) > 1e-9 * scale) {
-                    fail(where, "C is not linear in c at (Z, S) node " + std::to_string(zs));
+        const double tolerance = m_single ? 1e-6 : 1e-9;
+        with_values([&](const auto * v) {
+            double scale = 0.0;
+            for (uint64_t i = C; i < m_n_values; i += n_fields) scale = std::max(scale, std::abs(static_cast<double>(v[i])));
+            for (size_t zs = 0; zs < n_zs; zs++) {
+                const auto * row = v + zs * n_c * n_fields + C;
+                const double lo = static_cast<double>(row[0]), hi = static_cast<double>(row[(n_c - 1) * n_fields]);
+                if (hi < lo) fail(where, "C decreases from c = 0 to c = 1 at (Z, S) node " + std::to_string(zs));
+                for (size_t k = 0; k < n_c; k++) {
+                    if (std::abs(static_cast<double>(row[k * n_fields]) - (lo + c[k] * (hi - lo))) > tolerance * scale) {
+                        fail(where, "C is not linear in c at (Z, S) node " + std::to_string(zs));
+                    }
                 }
             }
-        }
+        });
     }
 }
 
-Table Table::read(const std::string & file) {
-    std::ifstream in(file, std::ios::binary);
-    if (!in) throw cannot_read("table file", file);
-    std::string magic, header;
-    if (!std::getline(in, magic) || magic != MAGIC) {
-        fail(file, "it does not start with \"" + std::string(MAGIC) + "\": not a Mallard table, or a newer version");
+#ifdef Mallard_HAS_HDF5
+
+namespace {
+
+using h5::Handle;
+
+/** HDF5's own error printing off while the reader probes for objects and reports what is missing itself. */
+class Quiet {
+    public:
+        Quiet() {
+            H5Eget_auto2(H5E_DEFAULT, &func, &data);
+            H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
+        }
+        ~Quiet() { H5Eset_auto2(H5E_DEFAULT, func, data); }
+        Quiet(const Quiet &) = delete;
+        Quiet & operator=(const Quiet &) = delete;
+
+    private:
+        H5E_auto2_t func = nullptr;
+        void * data = nullptr;
+};
+
+struct Reader {
+    const std::string & file;
+
+    [[noreturn]] void missing(const std::string & what) const { fail(file, "it has no valid " + what); }
+    [[noreturn]] void missing(const std::string & name, const std::string & on) const {
+        missing("attribute \"" + name + "\" on " + on);
     }
-    if (!std::getline(in, header)) fail(file, "it ends before its header");
-    json::Value h;
-    try {
-        h = json::parse(header);
-    } catch (const std::exception & e) {
-        fail(file, std::string("its header is not valid JSON: ") + e.what());
+
+    Handle group(const hid_t parent, const std::string & path, const std::string & full) const {
+        const hid_t id = H5Gopen2(parent, path.c_str(), H5P_DEFAULT);
+        if (id < 0) missing("group " + full);
+        return Handle(id, H5Gclose, full);
     }
-    if (h.type != json::Value::Type::OBJECT) fail(file, "its header is not a JSON object");
-    using T = json::Value::Type;
-    if (member(h, "format", T::STRING, file).string != "mallard-table" ||
-        member(h, "version", T::NUMBER, file).number != 1.0) {
-        fail(file, "its header is not that of a Mallard table of version 1");
+
+    Handle dataset(const hid_t parent, const std::string & path, const std::string & full) const {
+        const hid_t id = H5Dopen2(parent, path.c_str(), H5P_DEFAULT);
+        if (id < 0) missing("dataset " + full);
+        return Handle(id, H5Dclose, full);
     }
+
+    Handle attribute(const hid_t object, const std::string & name, const std::string & on) const {
+        if (H5Aexists(object, name.c_str()) <= 0) missing(name, on);
+        return Handle(H5Aopen(object, name.c_str(), H5P_DEFAULT), H5Aclose, name);
+    }
+
+    /** A number: a scalar integer or floating-point attribute. */
+    double number(const hid_t object, const std::string & name, const std::string & on) const {
+        const Handle a = attribute(object, name, on);
+        const Handle type(H5Aget_type(a), H5Tclose, "H5Aget_type");
+        const Handle space(H5Aget_space(a), H5Sclose, "H5Aget_space");
+        const H5T_class_t c = H5Tget_class(type);
+        if ((c != H5T_INTEGER && c != H5T_FLOAT) || H5Sget_simple_extent_npoints(space) != 1) missing(name, on);
+        double v = 0.0;
+        if (H5Aread(a, H5T_NATIVE_DOUBLE, &v) < 0) missing(name, on);
+        return v;
+    }
+
+    /** The strings of an attribute or dataset of strings, variable or fixed length (h5py writes the first, C often the second). */
+    std::vector<std::string> strings(const hid_t object, const bool is_attribute, const std::string & what) const {
+        const Handle type(is_attribute ? H5Aget_type(object) : H5Dget_type(object), H5Tclose, "H5Aget_type");
+        const Handle space(is_attribute ? H5Aget_space(object) : H5Dget_space(object), H5Sclose, "H5Aget_space");
+        if (H5Tget_class(type) != H5T_STRING || H5Sget_simple_extent_ndims(space) > 1) missing(what);
+        const size_t n = static_cast<size_t>(H5Sget_simple_extent_npoints(space));
+        auto read = [&](const hid_t memory, void * buffer) {
+            const herr_t status = is_attribute ? H5Aread(object, memory, buffer)
+                                               : H5Dread(object, memory, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer);
+            if (status < 0) missing(what);
+        };
+        std::vector<std::string> out;
+        if (n == 0) return out;
+        if (H5Tis_variable_str(type) > 0) {
+            const Handle memory(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+            h5::check(H5Tset_size(memory, H5T_VARIABLE), "H5Tset_size");
+            h5::check(H5Tset_cset(memory, H5Tget_cset(type)), "H5Tset_cset");
+            std::vector<char *> buffer(n, nullptr);
+            read(memory, buffer.data());
+            for (const char * p : buffer) out.emplace_back(p ? p : "");
+#if H5_VERSION_GE(1, 12, 0)
+            H5Treclaim(memory, space, H5P_DEFAULT, buffer.data());
+#else
+            H5Dvlen_reclaim(memory, space, H5P_DEFAULT, buffer.data());
+#endif
+        } else {
+            const size_t width = H5Tget_size(type);
+            const Handle memory(H5Tcopy(type), H5Tclose, "H5Tcopy");
+            std::vector<char> buffer(n * width, '\0');
+            read(memory, buffer.data());
+            const bool spaces = H5Tget_strpad(type) == H5T_STR_SPACEPAD;
+            for (size_t i = 0; i < n; i++) {
+                const char * p = buffer.data() + i * width;
+                std::string s(p, std::find(p, p + width, '\0'));
+                while (spaces && !s.empty() && s.back() == ' ') s.pop_back();
+                out.push_back(std::move(s));
+            }
+        }
+        return out;
+    }
+
+    std::vector<std::string> texts(const hid_t object, const std::string & name, const std::string & on) const {
+        const Handle a = attribute(object, name, on);
+        return strings(a, true, "attribute \"" + name + "\" on " + on);
+    }
+
+    std::string text(const hid_t object, const std::string & name, const std::string & on) const {
+        const std::vector<std::string> s = texts(object, name, on);
+        if (s.size() != 1) missing(name, on);
+        return s[0];
+    }
+
+    /** The names of an object's attributes, in name order. */
+    static std::vector<std::string> attribute_names(const hid_t object) {
+        std::vector<std::string> names;
+        auto add = [](hid_t, const char * name, const H5A_info_t *, void * out) -> herr_t {
+            static_cast<std::vector<std::string> *>(out)->emplace_back(name);
+            return 0;
+        };
+        H5Aiterate2(object, H5_INDEX_NAME, H5_ITER_INC, nullptr, add, &names);
+        return names;
+    }
+};
+
+/**
+ * The values mapped from the file, with data pointing at the first; null when the dataset's layout
+ * does not allow it. The first and last values must read the same through HDF5, which guards the offset.
+ */
+std::shared_ptr<const void> map_values(const std::string & file, const hid_t dset, const hid_t file_type,
+                                       const hid_t native, const size_t size, const uint64_t n, const void *& data) {
+    const Handle dcpl(H5Dget_create_plist(dset), H5Pclose, "H5Dget_create_plist");
+    if (H5Pget_layout(dcpl) != H5D_CONTIGUOUS || H5Pget_nfilters(dcpl) != 0 || H5Tequal(file_type, native) <= 0) {
+        return nullptr;
+    }
+    const haddr_t offset = H5Dget_offset(dset);
+    const uint64_t bytes = n * size;
+    if (offset == HADDR_UNDEF || offset % size != 0) return nullptr;
+    const int fd = open(file.c_str(), O_RDONLY);
+    if (fd < 0) return nullptr;
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || static_cast<uint64_t>(st.st_size) < offset + bytes) {
+        close(fd);
+        return nullptr;
+    }
+    const uint64_t page = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+    const uint64_t start = offset / page * page, length = offset - start + bytes;
+    void * p = mmap(nullptr, static_cast<size_t>(length), PROT_READ, MAP_PRIVATE, fd, static_cast<off_t>(start));
+    close(fd);
+    if (p == MAP_FAILED) return nullptr;
+    std::shared_ptr<const void> mapping(p, [length](void * q) { munmap(q, static_cast<size_t>(length)); });
+    const char * first = static_cast<const char *>(p) + (offset - start);
+
+    const Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+    const int rank = H5Sget_simple_extent_ndims(space);
+    std::vector<hsize_t> dims(static_cast<size_t>(rank)), points(2 * dims.size(), 0);
+    H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+    for (size_t a = 0; a < dims.size(); a++) points[dims.size() + a] = dims[a] - 1;
+    h5::check(H5Sselect_elements(space, H5S_SELECT_SET, 2, points.data()), "H5Sselect_elements");
+    const hsize_t two = 2;
+    const Handle memory(H5Screate_simple(1, &two, nullptr), H5Sclose, "H5Screate_simple");
+    char ends[16] = {};
+    if (H5Dread(dset, native, memory, space, H5P_DEFAULT, ends) < 0 || std::memcmp(ends, first, size) != 0 ||
+        std::memcmp(ends + size, first + bytes - size, size) != 0) {
+        return nullptr;
+    }
+    data = first;
+    return mapping;
+}
+
+} // namespace
+
+#endif // Mallard_HAS_HDF5
+
+Table Table::read(const std::string & file, const Load load) {
+#ifndef Mallard_HAS_HDF5
+    (void)load;
+    throw InputError(file + ": tabulated chemistry reads tables from HDF5 files, and this build has no HDF5. Rebuild "
+                            "with -DMallard_ENABLE_HDF5=ON (add -DUSE_SYSTEM_HDF5=OFF to build the bundled HDF5). See "
+                            "docs/design/table_format.md.");
+#else
+    if (!std::ifstream(file, std::ios::binary)) throw cannot_read("table file", file);
     Table t;
     t.m_where = file;
-    t.m_header = header;
-    t.m_model = member(h, "model", T::STRING, file).string;
-    t.m_thermodynamics = member(h, "thermodynamics", T::STRING, file).string;
-    supported(model_contracts(), "model", t.m_model, file);
-    supported(thermo_contracts(), "thermodynamics", t.m_thermodynamics, file);
-    for (const auto & a : member(h, "axes", T::ARRAY, file).array) {
-        Axis axis;
-        axis.name = member(a, "name", T::STRING, file, "axes[].").string;
-        axis.units = member(a, "units", T::STRING, file, "axes[].").string;
-        for (const auto & v : member(a, "values", T::ARRAY, file, "axes[].").array) {
-            if (v.type != T::NUMBER) fail(file, "the axis \"" + axis.name + "\" has a node that is not a number");
-            axis.nodes.push_back(v.number);
+    {
+        const std::lock_guard<std::mutex> lock(h5::mutex());
+        const Quiet quiet;
+        const hid_t id = H5Fopen(file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (id < 0) fail(file, "it is not an HDF5 file, or it is damaged");
+        const Handle h5(id, H5Fclose, "opening " + file);
+        const Reader r{file};
+        if (H5Aexists(h5, "format") <= 0 || r.text(h5, "format", "/") != "mallard-table") {
+            fail(file, "it is not a Mallard table: its attribute \"format\" on / is not \"mallard-table\"");
         }
-        t.m_axes.push_back(std::move(axis));
-    }
-    for (const auto & f : member(h, "fields", T::ARRAY, file).array) {
-        t.m_fields.push_back(
-            {member(f, "name", T::STRING, file, "fields[].").string, member(f, "units", T::STRING, file, "fields[].").string});
-    }
-    for (const auto & s : member(h, "species", T::ARRAY, file).array) {
-        if (s.type != T::STRING) fail(file, "the header has no valid \"species\"");
-        t.m_species.push_back(s.string);
-    }
-    for (const auto & f : t.m_fields) {
-        if (f.name.starts_with("Y_") &&
-            std::find(t.m_species.begin(), t.m_species.end(), f.name.substr(2)) == t.m_species.end()) {
-            fail(file, "the field \"" + f.name + "\" is not of a species in \"species\"");
+        const double version = r.number(h5, "version", "/");
+        if (version != 1.0) {
+            std::ostringstream v;
+            v << version;
+            fail(file, "it is a Mallard table of version " + v.str() +
+                           ", which this version of Mallard does not read (it reads version 1)");
         }
-    }
-    t.m_pressure = member(h, "pressure", T::NUMBER, file).number;
-    if (!(t.m_pressure > 0.0)) fail(file, "the header has no valid \"pressure\"");
-    const json::Value model_data = member(h, "model_data", T::OBJECT, file);
-    if (t.m_model == "fpv") {
-        const double Z_st = member(model_data, "Z_st", T::NUMBER, file, "model_data.").number;
-        if (!(Z_st > 0.0 && Z_st < 1.0)) fail(file, "the header has no valid \"model_data.Z_st\"");
-        const json::Value weights = member(model_data, "progress_variable", T::OBJECT, file, "model_data.");
-        if (weights.members.empty()) fail(file, "the header has no valid \"model_data.progress_variable\"");
-        for (size_t k = 0; k < weights.members.size(); k++) {
-            if (weights.members[k].type != T::NUMBER) {
-                fail(file, "the weight of " + weights.names[k] + " in \"model_data.progress_variable\" is not a number");
+        t.m_model = r.text(h5, "model", "/");
+        t.m_thermodynamics = r.text(h5, "thermodynamics", "/");
+        supported(model_contracts(), "model", t.m_model, file);
+        supported(thermo_contracts(), "thermodynamics", t.m_thermodynamics, file);
+
+        const Handle values = r.dataset(h5, "values", "/values");
+        for (const std::string & name : r.texts(values, "axes", "/values")) {
+            if (!is_name(name)) fail(file, "the axis name \"" + name + "\" is not of the form [A-Za-z][A-Za-z0-9_]*");
+            Axis axis;
+            axis.name = name;
+            const std::string path = "/axes/" + name;
+            const Handle nodes = r.dataset(h5, "axes/" + name, path);
+            const Handle space(H5Dget_space(nodes), H5Sclose, "H5Dget_space");
+            const Handle type(H5Dget_type(nodes), H5Tclose, "H5Dget_type");
+            if (H5Tget_class(type) != H5T_FLOAT || H5Sget_simple_extent_ndims(space) != 1) {
+                fail(file, "its dataset " + path + " is not one-dimensional floating point");
+            }
+            axis.nodes.resize(static_cast<size_t>(H5Sget_simple_extent_npoints(space)));
+            if (!axis.nodes.empty() &&
+                H5Dread(nodes, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, axis.nodes.data()) < 0) {
+                fail(file, "its dataset " + path + " cannot be read");
+            }
+            axis.units = r.text(nodes, "units", path);
+            t.m_axes.push_back(std::move(axis));
+        }
+        const std::vector<std::string> names = r.texts(values, "fields", "/values");
+        const std::vector<std::string> units = r.texts(values, "units", "/values");
+        if (names.size() != units.size()) {
+            fail(file, "it has " + std::to_string(names.size()) + " field names and " + std::to_string(units.size()) +
+                           " units (attributes \"fields\" and \"units\" on /values)");
+        }
+        for (size_t i = 0; i < names.size(); i++) t.m_fields.push_back({names[i], units[i]});
+        t.m_species = r.texts(h5, "species", "/");
+        for (const auto & f : t.m_fields) {
+            if (f.name.starts_with("Y_") &&
+                std::find(t.m_species.begin(), t.m_species.end(), f.name.substr(2)) == t.m_species.end()) {
+                fail(file, "the field \"" + f.name + "\" is not of a species in the attribute \"species\" on /");
             }
         }
-        const json::Value streams = member(model_data, "streams", T::OBJECT, file, "model_data.");
-        for (const char * s : {"fuel", "oxidizer"}) {
-            const std::string path = "model_data.streams." + std::string(s) + ".";
-            const json::Value stream = member(streams, s, T::OBJECT, file, "model_data.streams.");
-            if (!(member(stream, "T", T::NUMBER, file, path).number > 0.0)) {
-                fail(file, "the header has no valid \"" + path + "T\"");
-            }
-            const json::Value Y = member(stream, "Y", T::OBJECT, file, path);
-            for (size_t k = 0; k < Y.members.size(); k++) {
-                if (Y.members[k].type != T::NUMBER || !within(Y.members[k].number, Bound::FRACTION)) {
-                    fail(file, "the mass fraction of " + Y.names[k] + " in \"" + path + "Y\" is not in [0, 1]");
+        t.m_pressure = r.number(h5, "pressure", "/");
+        if (!(t.m_pressure > 0.0)) r.missing("pressure", "/");
+
+        const Handle model_data = r.group(h5, "model_data", "/model_data");
+        if (t.m_model == "fpv") {
+            const double Z_st = r.number(model_data, "Z_st", "/model_data");
+            if (!(Z_st > 0.0 && Z_st < 1.0)) r.missing("Z_st", "/model_data");
+            const Handle weights = r.group(model_data, "progress_variable", "/model_data/progress_variable");
+            const std::vector<std::string> species = Reader::attribute_names(weights);
+            if (species.empty()) fail(file, "its group /model_data/progress_variable has no weights");
+            for (const auto & s : species) r.number(weights, s, "/model_data/progress_variable");
+            for (const char * s : {"fuel", "oxidizer"}) {
+                const std::string path = "/model_data/streams/" + std::string(s);
+                const Handle stream = r.group(model_data, "streams/" + std::string(s), path);
+                if (!(r.number(stream, "T", path) > 0.0)) r.missing("T", path);
+                const Handle Y = r.group(stream, "Y", path + "/Y");
+                for (const auto & k : Reader::attribute_names(Y)) {
+                    if (!within(r.number(Y, k, path + "/Y"), Bound::FRACTION)) {
+                        fail(file, "the mass fraction of " + k + " in " + path + "/Y is not in [0, 1]");
+                    }
                 }
             }
         }
+        const Handle provenance = r.group(h5, "provenance", "/provenance");
+        const Handle generator = r.group(provenance, "generator", "/provenance/generator");
+        t.m_generator = r.text(generator, "name", "/provenance/generator") + " " +
+                        r.text(generator, "version", "/provenance/generator");
+        r.text(provenance, "created", "/provenance");
+        const Handle input = r.dataset(provenance, "input", "/provenance/input");
+        if (r.strings(input, false, "dataset /provenance/input").size() != 1) r.missing("dataset /provenance/input");
+        const Handle mechanism = r.group(provenance, "mechanism", "/provenance/mechanism");
+        const std::string sha = r.text(mechanism, "sha256", "/provenance/mechanism");
+        if (!is_sha256(sha)) {
+            fail(file, "its attribute \"sha256\" on /provenance/mechanism is not 64 lowercase hexadecimal digits");
+        }
+        t.m_mechanism = r.text(mechanism, "name", "/provenance/mechanism") + " sha256:" + sha;
+
+        const Handle space(H5Dget_space(values), H5Sclose, "H5Dget_space");
+        std::vector<hsize_t> dims(static_cast<size_t>(std::max(H5Sget_simple_extent_ndims(space), 0)));
+        H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+        std::vector<hsize_t> need;
+        for (const Axis & a : t.m_axes) need.push_back(a.nodes.size());
+        need.push_back(t.m_fields.size());
+        if (dims != need) {
+            auto shape = [](const std::vector<hsize_t> & d) {
+                std::string s;
+                for (const hsize_t n : d) s += (s.empty() ? "" : ", ") + std::to_string(n);
+                return "(" + s + ")";
+            };
+            fail(file, "its values have shape " + shape(dims) + ", where its axes and fields need " + shape(need));
+        }
+        const Handle type(H5Dget_type(values), H5Tclose, "H5Dget_type");
+        const size_t size = H5Tget_size(type);
+        if (H5Tget_class(type) != H5T_FLOAT || (size != 4 && size != 8)) fail(file, "its values are not float64 or float32");
+        t.m_single = size == 4;
+        t.m_n_values = 1;
+        for (const hsize_t n : dims) t.m_n_values *= n;
+        const hid_t native = t.m_single ? H5T_NATIVE_FLOAT : H5T_NATIVE_DOUBLE;
+        if (load == Load::MAP) t.m_storage = map_values(file, values, type, native, size, t.m_n_values, t.m_values);
+        t.m_mapped = t.m_storage != nullptr;
+        if (!t.m_mapped) {
+            auto read = [&](auto storage) {
+                if (H5Dread(values, native, H5S_ALL, H5S_ALL, H5P_DEFAULT, storage->data()) < 0) {
+                    fail(file, "its values cannot be read");
+                }
+                t.m_values = storage->data();
+                t.m_storage = std::move(storage);
+            };
+            if (t.m_single) read(std::make_shared<std::vector<float>>(t.m_n_values));
+            else read(std::make_shared<std::vector<double>>(t.m_n_values));
+        }
     }
-    const json::Value provenance = member(h, "provenance", T::OBJECT, file);
-    const json::Value generator = member(provenance, "generator", T::OBJECT, file, "provenance.");
-    t.m_generator = member(generator, "name", T::STRING, file, "provenance.generator.").string + " " +
-                    member(generator, "version", T::STRING, file, "provenance.generator.").string;
-    member(provenance, "created", T::STRING, file, "provenance.");
-    member(provenance, "input", T::STRING, file, "provenance.");
-    const json::Value mechanism = member(provenance, "mechanism", T::OBJECT, file, "provenance.");
-    member(mechanism, "name", T::STRING, file, "provenance.mechanism.");
-    if (!is_sha256(member(mechanism, "sha256", T::STRING, file, "provenance.mechanism.").string)) {
-        fail(file, "the header has no valid \"provenance.mechanism.sha256\" (64 lowercase hexadecimal digits)");
-    }
-    const std::streamoff start = in.tellg();
-    in.seekg(0, std::ios::end);
-    const std::streamoff size = in.tellg() - start;
-    in.seekg(start);
-    if (start < 0 || size < 0 || !in) fail(file, "its data cannot be read");
-    if (size % static_cast<std::streamoff>(sizeof(double)) != 0) fail(file, "its data is not a whole number of float64 values");
-    t.m_values.resize(static_cast<size_t>(size) / sizeof(double));
-    if (!in.read(reinterpret_cast<char *>(t.m_values.data()), size)) fail(file, "its data cannot be read");
-    for (auto & v : t.m_values) v = from_little_endian(v);
     t.finish();
     t.check_contract();
     return t;
+#endif
 }
 
 int32_t Table::field(const std::string & name) const {
@@ -371,20 +584,17 @@ void Table::require_axes(const uint32_t d) const {
     }
 }
 
+void Table::require_value(const bool single) const {
+    if (single != m_single) {
+        fail(m_where, std::string("its values are ") + (m_single ? "float32" : "float64") + ", where this lookup reads " +
+                          (single ? "float32" : "float64"));
+    }
+}
+
 uint32_t Table::fpv_field() const {
     check_contract();
     if (m_model != "fpv") fail(m_where, "its model is \"" + m_model + "\", not \"fpv\"");
     return static_cast<uint32_t>(field("C"));
-}
-
-FPV<> Table::fpv() const {
-    const uint32_t C = fpv_field();
-    return FPV<>{device<3>(), C};
-}
-
-FPV<Kokkos::HostSpace> Table::fpv_host() const {
-    const uint32_t C = fpv_field();
-    return FPV<Kokkos::HostSpace>{host<3>(), C};
 }
 
 } // namespace flamelet

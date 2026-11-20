@@ -1,4 +1,4 @@
-# Table format for tabulated chemistry (`.mtab`, version 1)
+# Table format for tabulated chemistry (HDF5, version 1)
 
 Status: specified (#631). The contract between Mallard and the programs that
 write tables for it. Mallard reads tables and does not generate them: tables are
@@ -8,8 +8,8 @@ that writes this format works too. The reasons for the format are in
 [flamelet.md](flamelet.md#3-table-format-decision-4); this page is the
 specification.
 
-The words *must*, *must not* and *may* are requirements on writers; the checks
-Mallard makes are listed in [section 7](#7-what-mallard-checks).
+The words *must*, *must not*, *should* and *may* are requirements on writers;
+the checks Mallard makes are listed in [section 7](#7-what-mallard-checks).
 
 ## 1. Overview
 
@@ -27,51 +27,80 @@ first model Mallard reads. FGM/FPI, heat-loss axes, several streams and other
 thermodynamics are new tags and fields in the same format, not new formats
 ([section 8](#8-versioning-and-new-models)).
 
+A table is an HDF5 file (any extension; `.h5` by convention), readable with
+h5py alone ([section 9](#9-reading-a-table-with-h5py)). Mallard reads it in
+builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`; `-DUSE_SYSTEM_HDF5=OFF` builds
+the bundled HDF5); a build without HDF5 refuses a table with an input error
+that says so.
+
 ## 2. File layout
 
-A file (extension `.mtab`) is three parts, with nothing before, between or after
-them:
+| Object | Kind | Required | Contents |
+|---|---|---|---|
+| `/` | root group | yes | The attributes of [section 3](#3-attributes-of-the-root-group) |
+| `/values` | dataset | yes | The values: float64 or float32, shape `(n_0, ..., n_(d-1), n_fields)`, with attributes `axes`, `fields` and `units` (below) |
+| `/axes/<name>` | dataset | yes, one per axis | The nodes of axis `<name>`: float64, one-dimensional, at least 2 finite nodes, strictly increasing, not necessarily uniform; attribute `units` (string) |
+| `/model_data` | group | yes | Model-specific data ([section 5](#5-models)); empty if the model has none |
+| `/provenance` | group | yes | What made the table ([section 3.2](#32-provenance)) |
 
-1. **Magic line:** the ASCII bytes `mallard-table 1` and a line feed (0x0A). The
-   number is the format version.
-2. **Header:** one JSON object (RFC 8259, UTF-8) on one line, followed by a line
-   feed. It must not contain a raw line feed (strings escape it as `\n`). It
-   must not contain `NaN` or `Infinity`. Numbers must be written so that they
-   read back to the same binary64 value (shortest round-trip form, as Python's
-   `json` and `repr` write them).
-3. **Data:** the values as IEEE 754 binary64, **little-endian**, exactly
-   `n_0 n_1 ... n_(d-1) n_fields` values, where `n_a` is the node count of axis
-   `a` and `n_fields` the number of fields. The file ends after the last value.
+Attributes of `/values`:
 
-Order of the data: node-major, with the last axis varying fastest, and the
-fields of a node contiguous, in the header's order. The value of field `f` at
-node `(i_0, ..., i_(d-1))` is at index
+| Attribute | Type | Meaning |
+|---|---|---|
+| `axes` | array of strings | The axis names, in the order of the dataset's dimensions; each names a dataset `/axes/<name>` |
+| `fields` | array of strings | The field names, in the order of the last dimension. Names are unique and match `[A-Za-z][A-Za-z0-9_]*` |
+| `units` | array of strings | The units of each field, in the same order ([section 3.1](#31-units)) |
+
+Axis names match `[A-Za-z][A-Za-z0-9_]*` too. Strings may be variable or fixed
+length, ASCII or UTF-8 (h5py writes Python strings as variable-length UTF-8).
+Numbers in attributes are scalars of any integer or floating-point type.
+
+**The values.** `/values` holds IEEE 754 binary64 or binary32 values, and
+**must** be stored contiguously and without filters (no chunking, no
+compression), little-endian: h5py's and HDF5's default layout. The order is
+node-major, with the last axis varying fastest and the fields of a node
+contiguous: NumPy's C order of an array of shape
+`(n_0, ..., n_(d-1), n_fields)`, where `n_a` is the node count of axis `a`.
+The value of field `f` at node `(i_0, ..., i_(d-1))` is at index
 
 ```
 ((...((i_0 n_1 + i_1) n_2 + i_2)...) n_(d-1) + i_(d-1)) n_fields + f
 ```
 
-of the data, counted in values (multiply by 8 for the byte offset from the start
-of the data). This is NumPy's C order of an array of shape
-`(n_0, ..., n_(d-1), n_fields)`.
+counted in values from the dataset's start. Writers **should** align the
+dataset to its value size (h5py: `alignment_threshold=1,
+alignment_interval=8`; C: `H5Pset_alignment(fapl, 1, 8)`); HDF5 usually does
+without being asked.
 
-## 3. Header members
+**Loading.** Mallard maps the values from the file (`mmap`, at the offset
+`H5Dget_offset` returns) when the layout allows it: contiguous, unfiltered,
+in the machine's byte order, aligned to the value size, and the first and last
+values read the same through HDF5. Otherwise it reads them with `H5Dread`,
+which takes any layout HDF5 reads. Mapping makes loading cost nothing until the
+values are touched, and on CPU backends the ranks of a node share one copy of
+the table in the page cache. Do not overwrite a table while a run reads it:
+write a new file and rename it.
 
-| Member | Type | Required | Meaning |
+**float32.** Values may be float32 to halve the memory and bandwidth of
+lookups. The axes stay float64, and lookups sum in double precision, so a
+float32 table looks up as its float64 source to float32 rounding (a relative
+error of 6e-8 of the largest value in the lookup's cell). Mallard's checks
+([section 7](#7-what-mallard-checks)) hold for float32 tables, with the
+tolerance of the linearity of `C` in `c` relaxed from 1e-9 to 1e-6.
+
+## 3. Attributes of the root group
+
+| Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `format` | string | yes | `"mallard-table"` |
-| `version` | integer | yes | `1`; must equal the magic line's number |
+| `version` | integer | yes | `1` |
 | `model` | string | yes | Model tag ([section 5](#5-models)): what the axes and the model's fields mean |
 | `thermodynamics` | string | yes | Thermodynamics tag ([section 6](#6-thermodynamics)) |
-| `axes` | array of objects | yes | The control variables, in data order: `{"name", "units", "values"}`. `values` holds at least 2 finite nodes, strictly increasing. Nodes need not be uniform |
-| `fields` | array of objects | yes | The stored quantities, in data order: `{"name", "units"}`. Names are unique and match `[A-Za-z][A-Za-z0-9_]*` |
 | `species` | array of strings | yes | The species block, possibly empty: species names as in the mechanism. Species `k` is stored as the field `Y_k` (mass fraction, units `"1"`). Every field whose name starts with `Y_` must be in this list |
 | `pressure` | number | yes | The pressure the table was generated at, in Pa, positive |
-| `model_data` | object | yes | Model-specific metadata ([section 5](#5-models)); `{}` if the model has none |
-| `provenance` | object | yes | What made the table ([section 3.2](#32-provenance)) |
 
-Writers may add other members. Readers ignore members they do not know, so
-additions that old readers can ignore need no new version
+Writers may add other attributes, groups and datasets. Readers ignore what they
+do not know, so additions that old readers can ignore need no new version
 ([section 8](#8-versioning-and-new-models)).
 
 ### 3.1 Units
@@ -84,12 +113,14 @@ table is refused. Fields Mallard does not use may have any units string.
 
 ### 3.2 Provenance
 
-| Member | Type | Required | Meaning |
+The group `/provenance`:
+
+| Object | Kind | Required | Meaning |
 |---|---|---|---|
-| `generator` | object | yes | `{"name": string, "version": string}` of the program that wrote the table |
-| `created` | string | yes | Time of writing, RFC 3339 in UTC (`2026-11-15T12:00:00Z`) |
-| `mechanism` | object | yes | `{"name": string, "sha256": string}`: the mechanism file's name and the SHA-256 of its bytes, as 64 lowercase hexadecimal digits |
-| `input` | string | yes | The generator's input, verbatim, so that a table can be regenerated from its own header |
+| `generator` | group with string attributes `name`, `version` | yes | The program that wrote the table |
+| `created` | string attribute | yes | Time of writing, RFC 3339 in UTC (`2026-11-15T12:00:00Z`) |
+| `mechanism` | group with string attributes `name`, `sha256` | yes | The mechanism file's name and the SHA-256 of its bytes, as 64 lowercase hexadecimal digits |
+| `input` | scalar string dataset | yes | The generator's input, verbatim, so that a table can be regenerated from its own file. A dataset rather than an attribute, because attributes are limited to 64 KiB |
 | anything else | any | no | For example the versions of the generator's dependencies (Cantera), the generator's source revision, the transport model of the flamelets |
 
 Provenance must not hold personal data (user names, host names, paths below a
@@ -155,13 +186,13 @@ solver scales it to the local state (stage 2 decides the scaling, for example
 `(rho / rho0)^2` for a source that is second order in density). That is why
 `rho0` is required.
 
-`model_data`:
+`/model_data`:
 
-| Member | Type | Meaning |
+| Object | Kind | Meaning |
 |---|---|---|
-| `Z_st` | number in (0, 1) | Stoichiometric mixture fraction |
-| `progress_variable` | object, not empty | The weights `w_k` of `C`, numbers by species name |
-| `streams` | object | `{"fuel": {"T": K, "Y": {species: mass fraction}}, "oxidizer": {...}}`, which define `Z = 1` and `Z = 0`; `T` positive, mass fractions in [0, 1] |
+| `Z_st` | number attribute, in (0, 1) | Stoichiometric mixture fraction |
+| `progress_variable` | group, at least one attribute | The weights `w_k` of `C`: one number attribute per species, named by the species |
+| `streams/fuel`, `streams/oxidizer` | groups | The streams that define `Z = 1` and `Z = 0`: number attribute `T` (K, positive) and a group `Y` with one number attribute per species, its mass fraction in [0, 1] |
 
 ### 5.2 Reserved model tags
 
@@ -211,21 +242,21 @@ compressible models (for example a tabulated `cv(T)` per node).
 Mallard reads a table once at setup and refuses it, with the file name and the
 reason, unless:
 
-1. The magic line is exactly `mallard-table 1`.
-2. The header is one JSON object, `format` is `"mallard-table"` and `version`
-   is 1.
+1. The build has HDF5, and the file is an HDF5 file.
+2. The root's `format` is `"mallard-table"` and `version` is 1.
 3. `model` and `thermodynamics` are tags this version of Mallard supports. An
    unknown or reserved tag is refused by name, with the list of supported tags.
-4. Every required member is present with its type. `pressure` is positive.
-   `provenance.generator.name` and `version`, `created`, `input`,
-   `mechanism.name` and `mechanism.sha256` (64 lowercase hexadecimal digits)
-   are present. The model's `model_data` members are present and in range.
+4. Every required attribute, group and dataset is present with its type.
+   `pressure` is positive. `/provenance` has `generator` (`name`, `version`),
+   `created`, `input` and `mechanism` (`name`, `sha256` of 64 lowercase
+   hexadecimal digits). The model's `/model_data` is present and in range.
 5. There is at least one axis; neither the format nor Mallard limits their
-   number. Each axis has at least 2 finite, strictly increasing nodes. Field names are unique and of the form
-   `[A-Za-z][A-Za-z0-9_]*`.
+   number. Each axis has at least 2 finite, strictly increasing nodes. Axis and
+   field names are of the form `[A-Za-z][A-Za-z0-9_]*`, and field names are
+   unique; `fields` and `units` have the same length.
 6. Every `Y_` field is a species in `species`.
-7. The data holds exactly `prod(n_a) n_fields` values and every value is
-   finite.
+7. `/values` is float64 or float32, of shape `(n_0, ..., n_(d-1), n_fields)`,
+   and every value is finite.
 8. The model's axes have the required names, order, units and range.
 9. Every field required by the model, the thermodynamics, transport and the
    species block is present, with exactly the listed units, and its values
@@ -238,41 +269,46 @@ from the run's reference pressure by more than 10%.
 ## 8. Versioning and new models
 
 - Version 1 is this page. The version changes when the layout changes, when a
-  required member or field is added or removed, or when the meaning of an
-  existing member, field or tag changes. Mallard refuses versions it does not
-  know.
-- New optional header members, new optional fields, and new provenance members
+  required attribute, group, dataset or field is added or removed, or when the
+  meaning of an existing one or of a tag changes. Mallard refuses versions it
+  does not know.
+- New optional attributes, groups, datasets and fields, and new provenance,
   need no new version: readers ignore what they do not know.
 - New models and thermodynamics are new tags, specified here before Mallard
   reads them. They need no new version. A Mallard that does not support a tag
   refuses the table by name.
-- The values are binary64. A binary32 variant would be a new version, decided
-  when lookups show up in profiles.
+- Values are float64 or float32 within version 1 (section 2).
 
-## 9. Reading a table with NumPy
+## 9. Reading a table with h5py
 
 ```python
-import json
-import numpy as np
+import h5py
 
-with open("table.mtab", "rb") as f:
-    assert f.readline() == b"mallard-table 1\n"
-    header = json.loads(f.readline())
-    data = np.frombuffer(f.read(), dtype="<f8")
-shape = [len(a["values"]) for a in header["axes"]] + [len(header["fields"])]
-data = data.reshape(shape)
-T0 = data[..., [f["name"] for f in header["fields"]].index("T0")]
+with h5py.File("table.h5", "r") as f:
+    assert f.attrs["format"] == "mallard-table" and f.attrs["version"] == 1
+    values = f["values"]
+    axes = {a: f["axes"][a][()] for a in values.attrs["axes"]}
+    fields = list(values.attrs["fields"])
+    T0 = values[..., fields.index("T0")]  # shape (n_Z, n_S, n_c)
+    weights = dict(f["model_data/progress_variable"].attrs)
+    writer = f["provenance/input"][()].decode()
 ```
 
-## 10. Reference fixture
+Writing one takes the same calls in reverse; the fixture's writer below is a
+complete example.
 
-[`test/data/flamelet/fixture_fpv.mtab`](../../test/data/flamelet/fixture_fpv.mtab)
+## 10. Reference fixtures
+
+[`test/data/flamelet/fixture_fpv.h5`](../../test/data/flamelet/fixture_fpv.h5)
 is a small valid `fpv` / `saghafian2015` table (5 x 3 x 4 nodes, 15 fields,
-species H2, O2, H2O and N2). Its fields are synthetic functions, multilinear in
+species H2, O2, H2O and N2) in float64, and
+[`fixture_fpv_f32.h5`](../../test/data/flamelet/fixture_fpv_f32.h5) the same
+table in float32. Their fields are synthetic functions, multilinear in
 `(Z, S, c)`, so lookups reproduce them exactly, and `C = Y_H2O` as its
-`progress_variable` says. They test the format, not combustion. The script that wrote it is in its own `provenance.input`. A
-generator can compare its writer against this file, and Mallard's tests
-(`test/flamelet_table_test.cpp`) read it.
+`progress_variable` says. They test the format, not combustion. The h5py
+script that wrote them is in their own `/provenance/input`. A generator can
+compare its writer against these files, and Mallard's tests
+(`test/flamelet_table_test.cpp`) read them.
 
 ## References
 
