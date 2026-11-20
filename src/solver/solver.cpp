@@ -631,9 +631,8 @@ void Solver::trim_halo() {
     // Wall-model points: their cells and the vertex neighbors their gradients read
     for (const uint32_t c : wall_model_points.cells) {
         needed[c] = 1;
-        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
-            needed[mesh->h_cells_of_cell(k)] = 1;
-        }
+        const VertexNeighbors & neighbors = mesh->vertex_neighbors();
+        for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) needed[neighbors.h_cells(k)] = 1;
     }
     trim_halo_exchange(distribution, needed);
     halo = HaloExchange(distribution, halo.uses_nccl());
