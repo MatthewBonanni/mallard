@@ -11,6 +11,7 @@
 
 #include "solver.h"
 #include "boundary_coordinates.h"
+#include "boundary_profiles.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -928,6 +929,7 @@ void Solver::init_boundaries() {
                                      "bottom, top (back, front in 3D) for generated meshes",
                               .docs = "docs/guide/boundary_conditions.md"});
         }
+        const BoundaryProfiles profiles(bound, where_name);
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
         WallModelSpec wall_model_spec;
         if (bound.contains("wall_model")) {
@@ -955,7 +957,7 @@ void Solver::init_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), BoundaryValue::hint,
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound), BoundaryValue::hint,
                     boundary_variable::FIRST_LOCAL));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
@@ -988,13 +990,17 @@ void Solver::init_boundaries() {
             for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
             selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
         }
-        std::string coordinates;
+        std::string coordinates, data_summary;
         {
             std::vector<uint32_t> entry_faces;
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
-            const std::vector<uint16_t> used = local_coordinates_used(bound);
+            std::vector<uint16_t> used = local_coordinates_used(bound);
+            for (const uint16_t i : profiles.coordinates_used()) {
+                if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
+            }
+            std::sort(used.begin(), used.end());
             bool reads_n = false, reads_patch = false;
             for (const uint16_t i : used) {
                 const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
@@ -1052,11 +1058,12 @@ void Solver::init_boundaries() {
                 if (!reads_patch) throw unused_key(key, "u or v");
             }
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
-            if (!used.empty() && n_entry > 0) {
+            if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
                 const WallDistance none;
                 const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
-                const std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used,
-                                                                        walls, is_distributed(), coordinates);
+                std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used, walls,
+                                                                  is_distributed(), coordinates);
+                if (!profiles.empty()) data_summary = profiles.evaluate(*mesh, entry_faces, points, is_distributed());
                 for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
             }
         }
@@ -1172,6 +1179,7 @@ void Solver::init_boundaries() {
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
+        if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {

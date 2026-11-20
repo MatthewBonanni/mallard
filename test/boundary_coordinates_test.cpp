@@ -59,7 +59,7 @@ std::vector<uint32_t> zone_faces(const Mesh & mesh, const std::vector<std::strin
 
 std::vector<uint16_t> all_local() {
     std::vector<uint16_t> used;
-    for (uint16_t i = bv::FIRST_LOCAL; i < bv::COUNT; i++) used.push_back(i);
+    for (uint16_t i = bv::FIRST_LOCAL; i < bv::FIRST_DATA; i++) used.push_back(i);
     return used;
 }
 
@@ -387,7 +387,7 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
                          "wall_isothermal\"\nT = \"1 + n", ns_state()),
                  "is 0 on every face");
     expect_error(channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = \"0.5 + n\"\n", run, "wall_adiabatic"),
-                 "not on x, y, z or the local coordinates");
+                 "not on x, y, z, the local coordinates or data");
 #if N_DIM == 2
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + v\"\n", run),
                  "a 2D boundary is a curve");

@@ -52,6 +52,7 @@ add_library(MallardCore STATIC
     mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/boundary_coordinates.cpp
+    boundary/boundary_profiles.cpp
     boundary/patch_coordinates.cpp
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp

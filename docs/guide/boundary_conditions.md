@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 46 more.
+and 47 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -158,7 +158,8 @@ y"`, in SI units): wall temperatures and heat fluxes, outlet pressures, inflow
 and stagnation states, mass fluxes, wall velocities, far-field states and
 compositions. Expressions also read the boundary's
 [local coordinates](#local-coordinates): `u` and `v` from 0 to 1 across the
-boundary whatever its shape, and the wall distance `n`.
+boundary whatever its shape, and the wall distance `n`; and the columns of
+[profiles from data](#profiles-from-data).
 
 Vectors (`u` of `inlet_state`, `farfield` and walls; `mass_flux` of
 `inlet_mass_flow`) take either form:
@@ -514,6 +515,77 @@ Pitfalls:
   profiles around it in `sin` and `cos` of `theta`, which do not.
 - 2D runs have `u`, `n` and their lengths only: the error says so.
 
+## Profiles from data
+
+A `[[boundaries.data]]` table after a `[[boundaries]]` entry reads a profile
+from a CSV file, in the format and with the keys of
+[`[[initialize.data]]`](initialization.md#tabulated-data-and-point-clouds),
+and gives every column other than the coordinates to the entry's expressions
+as a variable `<name>_<column>`. Its `at` expressions read `x`, `y`, `z` and
+the [local coordinates](#local-coordinates), so one measured or precomputed
+boundary-layer profile fits every wall-bounded inlet, wherever it is and
+however it is turned:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = "bl_u * (1 + 0.05 * sin(2 * pi * 100 * t))"  # a speed along the inward normal
+p = 1.0e5
+T = "bl_T"
+
+[[boundaries.data]]
+name = "bl"
+file = "boundary_layer.csv"  # y,u,T: wall distance in mm
+at = ["n_m"]                 # the distance to the nearest wall, in meters
+units = { y = "mm" }
+interpolation = "cubic"
+```
+
+A coordinate in meters (`n_m`, `u_m`, `v_m`) keeps the table's own lengths,
+whatever the inlet's size; a normalized one (`n`, `u`, `v`, from 0 to 1)
+stretches the table over the boundary, so `at = ["u"]` with a table from 0 to
+1 fits a profile across an inlet of any width.
+
+**Names.** A column's name belongs to its table: expressions see a value
+column only as `<name>_<column>`, and a coordinate column is filled only by
+`at`, from the boundary's quantities. So any column may be named like a
+coordinate (a coordinate column `n_m` reads the boundary's `n_m` unless `at`
+says otherwise, and a value column `u` is the variable `bl_u`); only the
+variables `<name>_<column>` must be new names (`name = "u"` with a column `m`
+would make `u_m`, the boundary's coordinate, and is an error).
+
+The data are read once at setup, at each face center, and stored with the
+face like its coordinates: an expression of the data and `t` is evaluated on
+the device at the stage times like any other, with no work on the host and
+the same bits on every rank count. A table holds its end values beyond its
+range (a boundary-layer table up to its edge gives the free stream above
+it). The run log shows, per entry, which boundary quantity fills each
+coordinate column and its range at the faces, how many faces fall beyond the
+column, and each value variable's range, e.g. `data "bl" (boundary_layer.csv,
+table 41, cubic): column y <- boundary n_m, 0.000625 to 0.05 m, 24 faces
+beyond the column's 0 to 0.02 m take its end values; values bl_u 0 to 30,
+bl_T 300 to 340`, and the run block records the file's hash.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Prefix of the variables: `<name>_<column>` |
+| `file` | required | CSV file, relative to where Mallard runs |
+| `type` | `"table"` | `table` (on a grid of 1-3 coordinates, interpolated) or `points` (scattered, by nearest points) |
+| `coordinates` | first column (`table`); `x`, `y` (`z`) (`points`) | Names of the coordinate columns |
+| `at` | the coordinates, if named `x`, `y`, `z` or like a local coordinate | One expression of `x`, `y`, `z` and the local coordinates per coordinate (not of `t`) |
+| `interpolation` | `"linear"` | Tables: `linear` or `cubic` |
+| `neighbors` | 1 | Points: how many nearest points to weight (1-16) |
+| `units` | SI | Units of columns, e.g. `{y = "mm", T = "degC"}` |
+
+Pitfalls:
+
+- An entry's data have at most 16 value columns in all; data that none of
+  the entry's expressions read are an error.
+- `at` may not read `t`: read the data at a fixed place and combine them with
+  `t` in the entry's expressions.
+- `where`, `mdot` and an `average` outlet pressure do not read the data.
+
 ## Walls
 
 Walls are no-slip under `navier_stokes` and slip under `euler`. Every wall
@@ -572,11 +644,11 @@ T = 300.0                   # [K]; or an expression: "300 + 200 * x"
 
 *Used in:*
 [`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
+[`channel_inlet_data`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet-data),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
-[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
-and 1 more.
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180)
+and 2 more.
 
 **Imposes** the wall temperature `T` (required) and the wall velocity as
 `wall_adiabatic`: a single gas through the ghost density and the viscous
@@ -785,6 +857,7 @@ T = 300.0
 *Used in:*
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
+[`channel_inlet_data`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet-data),
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
 
 **Imposes** the mass flux, the temperature, the flow direction and the
@@ -878,7 +951,7 @@ p = 101325.0
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet),
 [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet)
-and 14 more.
+and 15 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);

@@ -159,9 +159,10 @@ std::string stress_names() {
 InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
+    const std::vector<std::string> variables = BoundaryValue::variables(boundary);
     auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
         varies = varies || BoundaryValue::is_expression(v);
-        return BoundaryValue(v, name, dimension);
+        return BoundaryValue(v, name, dimension, variables);
     };
     if (turbulence && contains_optional(*turbulence, "profile")) {
         if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {

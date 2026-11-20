@@ -36,23 +36,23 @@ std::string real(const double v) {
     return s.str();
 }
 
-/** @brief The local coordinates read by the strings of v, a value of a [[boundaries]] entry or below. */
-void collect_used(const Input & v, std::vector<bool> & used) {
+/** @brief The variables (of `variables`) read by the strings of v, a value of a [[boundaries]] entry or below. */
+void collect_used(const Input & v, const std::vector<std::string> & variables, std::vector<bool> & used) {
     if (v.is_string()) {
         try {
-            const kexpr::Program p("", v.as_string(), BoundaryValue::variables(), nullptr, boundary_variable::FIRST_LOCAL);
-            for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::COUNT; i++) {
+            const kexpr::Program p("", v.as_string(), variables, nullptr, boundary_variable::FIRST_LOCAL);
+            for (uint16_t i = 0; i < variables.size(); i++) {
                 if (p.uses(i)) used[i] = true;
             }
         } catch (const std::exception &) {
             // Not an expression: a quantity with a unit, a name or a file
         }
     } else if (v.is_array()) {
-        for (const Input & item : v.as_array()) collect_used(item, used);
+        for (const Input & item : v.as_array()) collect_used(item, variables, used);
     } else if (v.is_table()) {
         for (const auto & [key, item] : v.as_table().entries()) {
-            if (key != "corners" && key != "walls" && key != "where" && key != "name" && key != "type") {
-                collect_used(item, used);
+            if (key != "corners" && key != "walls" && key != "where" && key != "name" && key != "type" && key != "data") {
+                collect_used(item, variables, used);
             }
         }
     }
@@ -317,11 +317,17 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
 
 } // namespace
 
+std::vector<bool> variables_read(const Input & entry) {
+    const std::vector<std::string> variables = BoundaryValue::variables(entry);
+    std::vector<bool> used(variables.size(), false);
+    collect_used(entry, variables, used);
+    return used;
+}
+
 std::vector<uint16_t> local_coordinates_used(const Input & entry) {
-    std::vector<bool> used(boundary_variable::COUNT, false);
-    collect_used(entry, used);
+    const std::vector<bool> used = variables_read(entry);
     std::vector<uint16_t> list;
-    for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::COUNT; i++) {
+    for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::FIRST_DATA; i++) {
         if (used[i]) list.push_back(i);
     }
     return list;

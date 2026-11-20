@@ -637,7 +637,8 @@ without `direction` (a wall moving along its normal).
 
 Every number of a condition may be a number, a quantity with a unit
 (`"300 K"`, a quantity, not an expression) or an expression of `x`, `y`,
-`z`, `t` and the [local coordinates](#local-coordinates) in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
+`z`, `t`, the [local coordinates](#local-coordinates) and the
+[data](#boundariesdata) in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
 and `T0`, `mass_flux` and `T` of `inlet_mass_flow`, the wall velocity, `T`
 of `wall_isothermal`, `q` of `wall_heat_flux`, `p` of `outlet_pressure`, and
 for mixtures the inflow composition. They are evaluated at each face center,
@@ -683,6 +684,28 @@ entry that reads no coordinate they set. Guide:
 | `origin` | from the coordinate axes ([guide](guide/boundary_conditions.md#local-coordinates)) | A point [m] where `u` starts: `(u, v)` is (0, 0) at the corner of a four-sided patch nearest to it, `u` is 0 at the face of a ring or a disk nearest to it, or at the end of a 2D boundary nearest to it, at any distance; a point as near to two of them (within 1% of the patch's size) is an error. Not with four `corners` |
 | `toward` | from the coordinate axes | 3D, with `origin`: a point [m] `u` grows toward: along the side to the corner next to the origin's that is nearest to it, or around a ring or a disk the way that reaches it sooner |
 | `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` and `n_m` measure the distance from, of any type (a non-empty list) |
+
+### `[[boundaries.data]]`
+
+Tables and point clouds from CSV files in the format of
+[`[[initialize.data]]`](#initializedata), read once at each face of the
+`[[boundaries]]` entry they follow and given to its expressions as the
+variables `<name>_<column>` (at most 16 value columns per entry). They are
+not read by `where`, `mdot` or an `average` outlet `p`; data no expression
+reads are an error. The run log shows the range of each coordinate and
+variable at the faces and the faces outside a table. Guide:
+[profiles from data](guide/boundary_conditions.md#profiles-from-data).
+
+| Key | Description |
+|---|---|
+| `name` | Prefix of the variables (required) |
+| `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
+| `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
+| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
+| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the coordinates, if named `x`, `y`, `z` or like a local coordinate) |
+| `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
+| `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
+| `units` | Units of columns, e.g. `{y = "mm"}` (default SI) |
 
 ### Characteristic boundaries (`nscbc`)
 
