@@ -2220,14 +2220,15 @@ struct TENOFunctor {
         const uint32_t run = (n_points + PARTS - 1) / PARTS;
         const uint32_t p_end = Kokkos::min(n_points, (part + 1u) * run);
         bool admissible = true;
-        uint32_t f = 0;
+        uint32_t face = 0;
         PlanarFace nodes;
         for (uint32_t p = part * run; p < p_end; p++) {
             const uint8_t q = p % n_quad;
             if (q == 0 || p == part * run) {
-                f = faces_of_cell(f_begin + p / n_quad);
-                nodes = planar_nodes(f);
+                face = faces_of_cell(f_begin + p / n_quad);
+                nodes = planar_nodes(face);
             }
+            const uint32_t f = face;
             rtype psi[NK];
             if (!face_point_basis(f, q, i_cell, nodes, psi)) continue;
             rtype U_f[N_CONSERVATIVE];
