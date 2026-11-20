@@ -21,15 +21,6 @@ namespace divergence {
 const std::array<const char *, N_QUANTITIES> QUANTITY_NAMES = {"density", "pressure", "temperature", "mass fraction",
                                                                "velocity"};
 
-double cfl_limit(const TimeIntegratorType type) {
-    switch (type) {
-        case TimeIntegratorType::FE: return 1.0;
-        case TimeIntegratorType::SSPRK3: return 1.2;
-        case TimeIntegratorType::RK4: return 1.35;
-        default: return 2.2;
-    }
-}
-
 namespace {
 
 using logging::real;
