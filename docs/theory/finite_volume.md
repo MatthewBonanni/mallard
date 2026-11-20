@@ -418,11 +418,15 @@ face point:
     $e_0$). Each $Y_k$ whose face values would leave $[0, 1]$ by little
     then scales its own gradient so that they stay in, and the cell's most
     abundant species takes the gradient the others give up, so that the
-    gradients still sum to zero. A cut that changes $Y_k$ at a face by more
-    than $10^{-4}$ instead goes to the shared value: a cut of one species
-    alone is numerical diffusion of that species only, a differential
-    diffusion of order $u\,\Delta x$ when the cut is large, which slowed a
-    thickened flame by 6% of $s_L$. The
+    gradients still sum to zero. A cut that changes $Y_k$ at a face by
+    $c \geq 3\times10^{-4}$ instead goes to the shared value: a cut of one
+    species alone is numerical diffusion of that species only, a
+    differential diffusion of order $u\,\Delta x$ when the cut is large,
+    which slowed a thickened flame by 6% of $s_L$. Between
+    $3\times10^{-5}$ and $3\times10^{-4}$ a cut with own factor $s_k$
+    scales the shared value by $\sigma_k = 1 - (1 - s_k)\,w(c)$ and the
+    species' own gradient by $s_k/\sigma_k$, with $w$ a smoothstep in
+    $\log c$ from 0 to 1, so that the limiter is continuous in the data. The
     gradients of $\gamma$ and $e_0$, and the face density, change with that
     composition at the cell's $p$ and $T$:
     $\Delta\nabla\gamma = \sum_k \partial_{Y_k}\gamma\,\Delta\nabla Y_k$
