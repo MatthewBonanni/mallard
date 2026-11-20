@@ -515,9 +515,9 @@ TEST(ErrorMessages, CheckDiagnosticsNameTheirKeyLineAndColumn) {
     EXPECT_EQ(errors[0]["column"].number, 6.0);
     EXPECT_FALSE(errors[0]["missing"].boolean);
     // A warning of the setup is in the report, with the key its text starts with (rank 0's, which prints it)
-    if (!comm::is_root()) return;
     const std::string source = box() + "[source]\nrhoE = \"0.0\"\ntime_dependent = true\n";
     const json::Value diagnostics = check_diagnostics(source);
+    if (!comm::is_root()) return;
     const auto ignored = std::find_if(diagnostics.array.begin(), diagnostics.array.end(),
                                       [](const json::Value & d) { return d["code"].string == "W-KEY-IGNORED"; });
     ASSERT_NE(ignored, diagnostics.array.end());
