@@ -29,8 +29,8 @@ functions such as `sin` and `exp`.
 says so, the time `t` in seconds; sources also read the local and
 domain-averaged state ([Sources](sources.md)), initial states the columns of
 tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds)),
-boundary conditions the boundary's local coordinates `n`, `xi`, `eta`, `r`,
-`theta` and `s` ([Boundary conditions](boundary_conditions.md#local-coordinates))
+boundary conditions the boundary's local coordinates `u`, `v`, `n` and their
+lengths `u_m`, `v_m`, `n_m` ([Boundary conditions](boundary_conditions.md#local-coordinates))
 and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 **Operators and functions.**

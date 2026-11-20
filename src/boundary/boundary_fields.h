@@ -35,16 +35,19 @@ using Point = std::array<double, N_DIM>;
  */
 namespace boundary_variable {
 constexpr uint16_t T = 3;
-constexpr uint16_t N = 4;   // distance to the nearest wall
-constexpr uint16_t XI = 5;  // along the tangent axis of the zone's frame
+constexpr uint16_t N = 4;    // distance to the nearest wall over its largest value on the boundary
+constexpr uint16_t N_M = 5;  // distance to the nearest wall [m]
+constexpr uint16_t U = 6;    // along the boundary, 0 to 1
+constexpr uint16_t U_M = 7;  // u as a length [m]
 #if N_DIM == 2
-constexpr uint16_t S = 6;   // arc length along the zone
-constexpr uint16_t COUNT = 7;
+constexpr uint16_t COUNT = 8;
 #else
-constexpr uint16_t ETA = 6;    // along the second tangent axis
-constexpr uint16_t R = 7;      // hypot(xi, eta)
-constexpr uint16_t THETA = 8;  // atan2(eta, xi)
-constexpr uint16_t COUNT = 9;
+constexpr uint16_t V = 8;      // across the patch, 0 to 1
+constexpr uint16_t V_M = 9;    // v as a length [m]
+constexpr uint16_t R = 10;     // v of a ring or a disk
+constexpr uint16_t R_M = 11;   // v_m of a ring or a disk
+constexpr uint16_t THETA = 12; // 2 pi u of a ring or a disk
+constexpr uint16_t COUNT = 13;
 #endif
 constexpr uint16_t FIRST_LOCAL = N;
 } // namespace boundary_variable
