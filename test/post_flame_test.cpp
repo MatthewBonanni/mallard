@@ -261,7 +261,7 @@ TEST(PostFlameTest, AMirroredFlameAlongAnotherDirectionMeasuresTheSame) {
     const double s_x = number(*measure(x_series).find("summary"), "S_d");
     const double s_y = number(*measure(y_series).find("summary"), "S_d");
     EXPECT_GT(s_x, 0.0);
-    EXPECT_NEAR(s_y, s_x, 1e-6 * std::abs(s_x));
+    EXPECT_NEAR(s_y, s_x, roundoff(1e-11) * std::abs(s_x));
 }
 
 TEST(PostFlameTest, RefusesACaseWithoutChemistryAndAnUnknownSpecies) {
