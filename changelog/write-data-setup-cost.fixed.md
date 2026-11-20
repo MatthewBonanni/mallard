@@ -1,1 +1,1 @@
-- Setting up regions' cell fractions (region-subset `[[write_data]]`, sources, statistics and the rest) is about 1.4 times faster: cells outside a region's bounds are no longer sampled, and the sampler sums its finest level without its stack. The fractions are unchanged, bit for bit (#1173).
+- Setting up regions' cell fractions (region-subset `[[write_data]]`, sources, statistics and the rest) no longer samples the cells that lie outside a region's bounds, which are 0; the fractions are unchanged, bit for bit (#1173).

@@ -397,7 +397,7 @@ KOKKOS_INLINE_FUNCTION void clipped_simplex(const Shape<Distance> & shape, const
  *        sums are those of clipped_simplex. Every thread of the team calls it,
  *        with the same arguments.
  */
-template <typename Member, typename Distance>
+template <bool SMOOTH, typename Member, typename Distance>
 KOKKOS_INLINE_FUNCTION void team_clipped_simplex(const Member & member, const TeamScratch & scratch,
                                                  const Shape<Distance> & shape, const Planes & planes,
                                                  const bool axisymmetric, const double v0[4][3],
@@ -411,7 +411,7 @@ KOKKOS_INLINE_FUNCTION void team_clipped_simplex(const Member & member, const Te
         s.clipped = detail::clip(shape, planes, axisymmetric, v0, measure0, s.inside, s.total);
     }, sums);
     if (!sums.clipped) {
-        team_simplex(member, scratch, shape, axisymmetric, v0, measure0, inside, total);
+        team_simplex<SMOOTH>(member, scratch, shape, axisymmetric, v0, measure0, inside, total);
         return;
     }
     inside = sums.inside;
@@ -437,18 +437,18 @@ KOKKOS_INLINE_FUNCTION void clipped_cell(const Shape<Distance> & shape, const Pl
     });
 }
 
-/** @brief clipped_cell, with the threads of a team (team_clipped_simplex, team_straight_cell). */
-template <typename Member, typename Distance, typename Nodes>
+/** @brief clipped_cell, with the threads of a team (team_clipped_simplex<SMOOTH>, team_straight_cell<SMOOTH>). */
+template <bool SMOOTH, typename Member, typename Distance, typename Nodes>
 KOKKOS_INLINE_FUNCTION void team_clipped_cell(const Member & member, const TeamScratch & scratch,
                                               const Shape<Distance> & shape, const Planes & planes,
                                               const bool axisymmetric, const uint32_t n, const Nodes & node,
                                               double & inside, double & total) {
     if (!clips(shape, planes)) {
-        team_straight_cell(member, scratch, shape, axisymmetric, n, node, inside, total);
+        team_straight_cell<SMOOTH>(member, scratch, shape, axisymmetric, n, node, inside, total);
         return;
     }
     straight_simplices(n, node, [&](const double s[4][3], const double measure) {
-        team_clipped_simplex(member, scratch, shape, planes, axisymmetric, s, measure, inside, total);
+        team_clipped_simplex<SMOOTH>(member, scratch, shape, planes, axisymmetric, s, measure, inside, total);
     });
 }
 

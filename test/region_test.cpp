@@ -609,7 +609,7 @@ TEST(RegionTest, TeamsClipWhatOneThreadClips) {
         Kokkos::parallel_for("region_test", policy, [=](const Policy::member_type & member) {
             const auto scratch = region::sampler::team_scratch(member);
             double in = 0.0, all = 0.0;
-            region::sampler::team_clipped_cell(member, scratch, shape, planes, false, n, nodes, in, all);
+            region::sampler::team_clipped_cell<false>(member, scratch, shape, planes, false, n, nodes, in, all);
             const int i = member.league_rank() * member.team_size() + member.team_rank();
             out(i, 0) = in;
             out(i, 1) = all;
