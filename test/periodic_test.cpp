@@ -54,8 +54,13 @@ struct Case {
 };
 
 uint64_t vertex_neighbor_bytes(const memory::Tracker & tracker) {
+    // Kernels keep the device views alone, which are host memory only in host builds
     uint64_t bytes = 0;
-    for (const auto & [label, n] : tracker.live(false)) bytes += label.find("cells_of_cell") != std::string::npos ? n : 0;
+    for (const bool device : {false, true}) {
+        for (const auto & [label, n] : tracker.live(device)) {
+            bytes += label.find("cells_of_cell") != std::string::npos ? n : 0;
+        }
+    }
     return bytes;
 }
 
