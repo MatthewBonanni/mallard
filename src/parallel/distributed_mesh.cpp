@@ -1099,11 +1099,12 @@ std::shared_ptr<Mesh> restrict_local_mesh(const Mesh & mesh, Distribution & dist
         out->n_state_faces_count = std::max(out->n_state_faces_count, out->h_faces_of_cell(k) + 1);
     }
     // Cells keep all their vertex neighbors up to the first that lost one
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
     uint32_t complete = 0;
     for (; complete < std::min(n_kept, mesh.n_complete()) && old_cell[complete] == complete; complete++) {
         bool whole = true;
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(complete); k < mesh.h_offsets_cells_of_cell(complete + 1); k++) {
-            whole = whole && keep[mesh.h_cells_of_cell(k)];
+        for (uint32_t k = neighbors.h_offsets(complete); k < neighbors.h_offsets(complete + 1); k++) {
+            whole = whole && keep[neighbors.h_cells(k)];
         }
         if (!whole) break;
     }
