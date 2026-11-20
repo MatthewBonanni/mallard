@@ -50,6 +50,7 @@ set(MALLARD_TEST_SOURCES
     run_page_test.cpp
     error_messages_test.cpp
     boundary_coordinates_test.cpp
+    boundary_profiles_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
     health_test.cpp
@@ -104,6 +105,7 @@ else()
     teno3d_test.cpp
     riemann3d_test.cpp
     boundary3d_test.cpp
+    patch_coordinates_test.cpp
     gradient3d_test.cpp
     solver3d_test.cpp
     io3d_test.cpp

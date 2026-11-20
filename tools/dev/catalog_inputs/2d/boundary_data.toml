@@ -1,0 +1,52 @@
+# For the key catalog only (tools/dev/input_catalog.py): an inlet temperature from a
+# point cloud of [[boundaries.data]] in the wall distance, in mm.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 4
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+p = 101325.0
+T = 300.0
+u = [10.0, 0.0]
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 300.0
+rho_ref = 1.177
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = [10.0, 0.0]
+p = 101325.0
+T = "300 + 10 * wall_u"
+
+[[boundaries.data]]
+name = "wall"
+file = "../../../../examples/channel_inlet_data/poiseuille.csv"
+type = "points"
+coordinates = ["n_m"]
+neighbors = 2
+units = { n_m = "mm" }
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"

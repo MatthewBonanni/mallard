@@ -160,9 +160,10 @@ std::string stress_names() {
 InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
+    const std::vector<std::string> variables = BoundaryValue::variables(boundary);
     auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
         varies = varies || BoundaryValue::is_expression(v);
-        return BoundaryValue(v, name, dimension);
+        return BoundaryValue(v, name, dimension, variables);
     };
     if (turbulence && contains_optional(*turbulence, "profile")) {
         if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {
@@ -246,24 +247,37 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
         use.push_back(col);
     }
     columns.assign(use.size(), {});
+    size_t line_number = 1;
     while (std::getline(in, line)) {
+        line_number++;
         if (trim(line).empty()) continue;
+        const std::string at = key + ": " + file + ":" + std::to_string(line_number) + ": ";
         std::vector<double> row;
+        std::vector<std::string> items;
         std::stringstream s(line);
         std::string item;
         while (std::getline(s, item, ',')) {
             try {
                 row.push_back(std::stod(item));
             } catch (const std::exception &) {
-                throw InputError(key + ": " + file + ": not a number: \"" + item + "\".");
+                throw InputError(at + "not a number: \"" + item + "\".");
             }
+            items.push_back(trim(item));
         }
         if (row.size() != header.size()) {
-            throw InputError(key + ": " + file + ": a row has " + logging::count(row.size(), "value") + " for " +
+            throw InputError(at + logging::count(row.size(), "value") + " for " +
                              logging::count(header.size(), "column") + ".");
         }
+        std::vector<int> checked = {0};
+        checked.insert(checked.end(), use.begin(), use.end());
+        for (const int c : checked) {
+            const size_t i = static_cast<size_t>(c);
+            if (c >= 0 && !std::isfinite(row[i])) {
+                throw InputError(at + "column " + header[i] + " is \"" + items[i] + "\", not a finite number.");
+            }
+        }
         if (!coordinate.empty() && !(row[0] > coordinate.back())) {
-            throw InputError(key + ": " + file + ": the coordinate must increase from row to row.");
+            throw InputError(at + "the coordinate must increase from row to row.");
         }
         coordinate.push_back(row[0]);
         for (size_t c = 0; c < use.size(); c++) columns[c].push_back(use[c] < 0 ? 0.0 : row[static_cast<size_t>(use[c])]);

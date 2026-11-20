@@ -19,6 +19,7 @@
 
 #include "input.h"
 #include "synthetic_inflow.h"
+#include "tabulated.h"
 
 namespace {
 
@@ -39,29 +40,47 @@ std::string real(const double v) {
 
 const std::vector<std::string> & BoundaryValue::variables() {
 #if N_DIM == 2
-    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "s"};
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "n_m", "u", "u_m"};
 #else
-    static const std::vector<std::string> names = {"x", "y", "z", "t", "n", "xi", "eta", "r", "theta"};
+    static const std::vector<std::string> names = {"x", "y", "z", "t", "n",   "n_m", "u",
+                                                   "u_m", "v", "v_m", "r", "r_m", "theta"};
 #endif
+    return names;
+}
+
+std::vector<std::string> BoundaryValue::variables(const Input & entry) {
+    std::vector<std::string> names = variables();
+    if (!entry.is_table() || !entry.contains("data") || !entry.at("data").is_array()) return names;
+    for (const Input & d : entry.at("data").as_array()) {
+        for (const std::string & v : tabulated::entry_variables(d)) names.push_back(v);
+    }
+    if (names.size() > boundary_variable::COUNT) {
+        throw InputError({.key = "boundaries[name = \"" + find_value_or<std::string>(entry, "name", "") + "\"].data",
+                          .line = line_of(entry, "data"),
+                          .message = "has " + std::to_string(names.size() - boundary_variable::FIRST_DATA) +
+                                     " value columns, more than " + std::to_string(boundary_variable::MAX_DATA),
+                          .fix = "Keep the columns the entry reads, in files of their own",
+                          .docs = "docs/guide/boundary_conditions.md#profiles-from-data"});
+    }
     return names;
 }
 
 std::string BoundaryValue::hint(const std::string & symbol) {
 #if N_DIM == 2
-    if (symbol == "eta" || symbol == "r" || symbol == "theta") {
-        return " (" + symbol + " is a local coordinate of 3D boundaries; 2D boundaries have n, xi and s)";
-    }
-#else
-    if (symbol == "s") {
-        return " (s, the arc length along a boundary, exists in 2D only; 3D boundaries have n, xi, eta, r and theta)";
+    for (const char * name : {"v", "v_m", "r", "r_m", "theta"}) {
+        if (symbol == name) {
+            return " (" + symbol + " is a local coordinate of 3D boundaries; a 2D boundary is a curve, with n and u "
+                   "and their lengths n_m and u_m)";
+        }
     }
 #endif
     return expression_unit_hint(symbol);
 }
 
-BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension) {
+BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension,
+                             const std::vector<std::string> & variables) {
     if (is_expression(v)) {
-        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables(), BoundaryValue::hint,
+        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables, BoundaryValue::hint,
                                                    boundary_variable::FIRST_LOCAL);
     } else {
         program = constant(as_double(v, name, dimension), name);
@@ -71,7 +90,7 @@ BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Di
 bool BoundaryValue::is_expression(const Input & v) { return v.is_string() && !has_unit(v.as_string()); }
 
 double BoundaryValue::at(const FacePoint & x, const double t) const {
-    for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::COUNT; i++) {
+    for (uint16_t i = boundary_variable::FIRST_LOCAL; i < boundary_variable::FIRST_DATA; i++) {
         if (program->uses(i) && std::isnan(x[i])) {
             throw std::logic_error(variables()[i] + " was not computed for this face");
         }
@@ -99,8 +118,9 @@ DirectionKey::DirectionKey(const Input & entry, const std::string & where_) : wh
         throw InputError(where + ".direction must have " + std::to_string(N_DIM) +
                          " components, numbers or expressions of x, y, z, t.");
     }
+    const std::vector<std::string> variables = BoundaryValue::variables(entry);
     for (size_t i = 0; i < N_DIM; i++) {
-        components.emplace_back(items[i], where + ".direction[" + std::to_string(i) + "]", dim::none);
+        components.emplace_back(items[i], where + ".direction[" + std::to_string(i) + "]", dim::none, variables);
     }
 }
 
@@ -175,13 +195,14 @@ VectorKey::VectorKey(const Input & entry, const std::string & key, const std::st
 
 BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc, const std::string & where_)
     : type(bc.type), where(where_) {
+    const std::vector<std::string> variables = BoundaryValue::variables(input);
     auto read = [&](const char * key, const Dimension & dimension, BoundaryValue & v, bool & has, std::string & name) {
         name = key;
         if (const auto * t = input_detail::table_of(input)) {
             t->record_use(key, input_detail::real_use("number", dimension, "", true));
         }
         if (!input.contains(key)) return;
-        v = BoundaryValue(input.at(key), where + "." + key, dimension);
+        v = BoundaryValue(input.at(key), where + "." + key, dimension, variables);
         has = true;
     };
     auto read_vector = [&](const char * key, const Dimension & dimension) {
@@ -192,7 +213,8 @@ BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc
         directed = v.directed;
         direction = v.direction;
         for (size_t i = 0; i < v.items.size(); i++) {
-            u.emplace_back(v.items[i], where + "." + key + (v.speed ? "" : "[" + std::to_string(i) + "]"), dimension);
+            u.emplace_back(v.items[i], where + "." + key + (v.speed ? "" : "[" + std::to_string(i) + "]"), dimension,
+                           variables);
         }
     };
     switch (type) {
@@ -1017,10 +1039,11 @@ void DirichletStates::check() const {
 bool TimedInletTargets::depends_on_time(const Input & entry, const std::string & where) {
     const VectorKey u(entry, "u", where);
     if (u.speed && u.directed && u.direction.depends_on_time()) return true;
+    const std::vector<std::string> variables = BoundaryValue::variables(entry);
     for (size_t d = 0; d < u.items.size(); d++) {
         const Input & v = u.items[d];
         if (!BoundaryValue::is_expression(v)) continue;
-        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables(),
+        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), variables,
                                 BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
         if (p.uses(boundary_variable::T)) return true;
     }
@@ -1030,11 +1053,12 @@ bool TimedInletTargets::depends_on_time(const Input & entry, const std::string &
 void TimedInletTargets::add(const Input & entry, const std::string & where, const std::vector<int32_t> & chars_in,
                             const std::vector<FacePoint> & x_in, const std::vector<Point> & n_in) {
     const VectorKey u(entry, "u", where);
+    const std::vector<std::string> variables = BoundaryValue::variables(entry);
     std::array<uint32_t, N_DIM> slot{};
     for (size_t i = 0; i < u.items.size(); i++) {
         slot[i] = static_cast<uint32_t>(host_programs.size());
         const std::string key = where + ".u" + (u.speed ? "" : "[" + std::to_string(i) + "]");
-        host_programs.push_back(BoundaryValue(u.items[i], key, dim::velocity).compiled());
+        host_programs.push_back(BoundaryValue(u.items[i], key, dim::velocity, variables).compiled());
     }
     const bool timed_direction = u.speed && u.directed && u.direction.depends_on_time();
     std::array<int32_t, N_DIM> direction_slot{};
