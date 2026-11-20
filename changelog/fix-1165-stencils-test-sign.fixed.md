@@ -1,0 +1,1 @@
+- `stencils_test` indexes the stencil weights with one unsigned type throughout, so it compiles with `-Wsign-conversion` on macOS g++ with HDF5 (#1165).
