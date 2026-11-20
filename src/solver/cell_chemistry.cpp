@@ -663,19 +663,20 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
     }
     // Mass fractions, then the work memory of the reactor or of its explicit step (also enough for the activity
-    // and heat release kernels)
+    // and heat release kernels). Every view of a row per cell of the chunk is labeled "chem_work*" and counted
+    // here, the audit's clipped masses included
     const uint32_t reactor_size = ns + std::max(chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr),
                                                 options.explicit_step ? chemistry::explicit_reactor_work_size(kinetics)
                                                                       : 0u);
     forcing_offset = options.forced ? reactor_size : 0;
     const uint32_t work_size = reactor_size + (options.forced ? ns + 1 : 0);
-    const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0;
+    const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0 + 8.0 * ns;
     const size_t concurrency = static_cast<size_t>(Kokkos::DefaultExecutionSpace().concurrency());
     size_t chunk = std::max<size_t>(4096, 4 * concurrency);
     chunk = std::min<size_t>(chunk, static_cast<size_t>(double(memory::MAX_WORK_BYTES) / per_cell));
     chunk = std::max<size_t>(1, std::min<size_t>(chunk, n_cells));
     work = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work", chunk, work_size);
-    pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_pivot", chunk, ns + 1);
+    pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_work_pivot", chunk, ns + 1);
     active = Kokkos::View<uint32_t *>("chem_active", n_cells);
     queue = Kokkos::View<uint32_t *>("chem_queue", n_cells);
     cost = Kokkos::View<float *>("chem_queue_cost", n_cells);
@@ -870,7 +871,7 @@ CellChemistry::Statistics CellChemistry::statistics() const {
 void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
                           const Kokkos::View<uint8_t *> & repaired) {
     clip_recorder = recorder;
-    clipped_mass = Kokkos::View<double **, Kokkos::LayoutRight>("chem_clipped_mass", work.extent(0), gas.n_species);
+    clipped_mass = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work_clipped_mass", work.extent(0), gas.n_species);
     clip_sum = Kokkos::View<double *>("chem_clip_sum", gas.n_species);
     cell_volume = volume;
     cell_repaired = repaired;
