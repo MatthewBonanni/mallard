@@ -111,6 +111,7 @@ add_library(MallardCore STATIC
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
+    solver/solver_convective_flux.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
@@ -225,13 +226,17 @@ foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
 endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and the reconstruction stages its stencil loads on GPUs
-# only: contracting multiplies and adds into FMAs would round each differently
-# by where the compiler fuses, so neither file contracts and the hot loops
-# write their FMAs explicitly. [statistics.convergence] updates its estimate on
-# the device as the host does, bit for bit, and the device cuts isosurfaces
-# into the host's quadrature points (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp
-                       common/region_motion.cpp)
+# only; the Riemann solvers are inlined in several kernels. Contracting
+# multiplies and adds into FMAs would round each differently by where the
+# compiler fuses, so none of these files contracts and the hot loops write
+# their FMAs explicitly (fmadd). Every source that inlines the Riemann solvers
+# is listed, here and in test/CMakeLists.txt, so that they round alike in every
+# kernel and whichever copy of an inline function the linker keeps.
+# [statistics.convergence] updates its estimate on the device as the host does,
+# bit for bit, and the device cuts isosurfaces into the host's quadrature points
+# (region_motion.cpp)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/solver_convective_flux.cpp
+                       solver/statistical_convergence.cpp common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
