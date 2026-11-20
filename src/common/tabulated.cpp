@@ -421,8 +421,8 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
             if (from && contains_optional(*from, sc.name)) {
                 ref = find_double(*from, sc.name, sc.dimension);
             } else {
-                for (const auto & [name, value] : metadata.reference) {
-                    if (name == sc.name) ref = value;
+                for (const auto & [scale_name, value] : metadata.reference) {
+                    if (scale_name == sc.name) ref = value;
                 }
             }
             if (!(ref > 0.0)) {
