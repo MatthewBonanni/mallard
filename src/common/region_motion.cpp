@@ -18,6 +18,7 @@
 
 #include "curved.h"
 #include "expression.h"
+#include "region_cut.h"
 #include "mesh.h"
 #include "region_sampler.h"
 #include "units.h"
@@ -444,22 +445,24 @@ CrossedLevels::CrossedLevels(const Mesh & mesh, const Region & region, std::shar
     offsets = upload(h_offsets, "region_crossed_offsets");
     conditions = upload(h_conditions, "region_crossed_conditions");
     radii = upload(reads.radii, "region_crossed_radii");
-    cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
-    values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
+    m_cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
+    m_count = Kokkos::View<uint32_t>("region_crossed_count");
+    m_values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
 }
 
-Levels CrossedLevels::update(const double t) const {
-    m_levels->update(t);
+void CrossedLevels::select_cells() const {
     const auto L = m_levels->levels();
     const auto offsets_ = offsets;
     const auto conditions_ = conditions;
     const auto radii_ = radii;
-    const auto cells_ = cells;
+    const auto cells_ = m_cells;
+    const auto count_ = m_count;
     const bool all = every;
+    const uint32_t n = n_owned;
     const uint32_t n_pieces = static_cast<uint32_t>(offsets.extent(0)) - 1;
-    uint32_t n = 0;
+    if (n == 0) Kokkos::parallel_for("region_crossed_none", 1, KOKKOS_LAMBDA(const int) { count_() = 0; });
     // A cell the host keeps (|g| <= 1.01 |grad g| r for every condition of a piece) with a margin for round-off
-    Kokkos::parallel_scan("region_crossed_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
+    Kokkos::parallel_scan("region_crossed_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
         bool keep = all;
         for (uint32_t p = 0; p < n_pieces && !keep; p++) {
             keep = true;
@@ -470,26 +473,135 @@ Levels CrossedLevels::update(const double t) const {
                 keep = !(Kokkos::fabs(L(c, k, 0)) > 1.02 * Kokkos::sqrt(slope) * radii_(c));
             }
         }
-        if (!keep) return;
-        if (final) cells_(i) = c;
-        i++;
-    }, n);
-    const auto rows = Kokkos::make_pair(uint32_t(0), n);
-    const auto values_ = values;
+        if (keep && final) cells_(i) = c;
+        if (keep) i++;
+        if (final && c + 1 == n) count_() = i;
+    });
+    const auto values_ = m_values;
     const uint32_t n_k = m_levels->size();
     Kokkos::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= count_()) return;
         for (uint32_t k = 0; k < n_k; k++) {
             for (int d = 0; d <= N_DIM; d++) values_(i, k, d) = L(cells_(i), k, d);
         }
     });
+}
+
+void CrossedLevels::select(const Kokkos::View<const rtype> & time) const {
+    m_levels->update(time);
+    select_cells();
+}
+
+Levels CrossedLevels::update(const double t) const {
+    m_levels->update(t);
+    select_cells();
+    uint32_t n = 0;
+    Kokkos::deep_copy(Kokkos::View<uint32_t, Kokkos::HostSpace>(&n), m_count);
+    const auto rows = Kokkos::make_pair(uint32_t(0), n);
     Levels out;
-    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(cells, rows));
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(m_cells, rows));
     out.cells.assign(h_cells.data(), h_cells.data() + n);
     const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> h_values(
-        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, n_k);
-    Kokkos::deep_copy(h_values, Kokkos::subview(values, rows, Kokkos::ALL, Kokkos::ALL));
+        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, m_levels->size());
+    Kokkos::deep_copy(h_values, Kokkos::subview(m_values, rows, Kokkos::ALL, Kokkos::ALL));
     out.values = h_values;
     return out;
+}
+
+LevelCut::LevelCut(const Mesh & mesh, const uint32_t condition, std::shared_ptr<const CrossedLevels> crossed,
+                   const uint32_t capacity) :
+    m_crossed(std::move(crossed)), m_condition(condition), cell_coords(mesh.cell_coords) {
+    const uint32_t n_owned = mesh.n_owned();
+    std::vector<uint32_t> h_offsets{0}, h_nodes;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        const uint32_t n = mesh.h_n_nodes_of_cell(c);
+        if (n > cut::MAX_CELL_NODES) throw std::logic_error("region::LevelCut: a cell has more than 8 nodes.");
+        for (uint32_t k = 0; k < n; k++) h_nodes.push_back(mesh.h_node_of_cell(c, k));
+        h_offsets.push_back(static_cast<uint32_t>(h_nodes.size()));
+    }
+    offsets_nodes = upload(h_offsets, "region_cut_offsets");
+    nodes = upload(h_nodes, "region_cut_nodes");
+    const Kokkos::View<double *[3]> x("region_cut_node_coords", mesh.n_nodes);
+    const auto h_x = Kokkos::create_mirror_view(x);
+    for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+        for (int d = 0; d < 3; d++) h_x(n, d) = d < N_DIM ? double(mesh.h_node_coords(n, d)) : 0.0;
+    }
+    Kokkos::deep_copy(x, h_x);
+    node_coords = x;
+    row_offsets = Kokkos::View<uint32_t *>("region_cut_row_offsets", n_owned + 1);
+    m_cells = Kokkos::View<uint32_t *>("region_cut_cells", capacity);
+    m_points = Kokkos::View<double *[3]>("region_cut_points", capacity);
+    m_normals = Kokkos::View<double *[3]>("region_cut_normals", capacity);
+    m_weights = Kokkos::View<double *>("region_cut_weights", capacity);
+    m_total = Kokkos::View<uint32_t>("region_cut_total");
+}
+
+namespace {
+
+/** @brief level_cut of the crossed cell of row i, emitting into emit(x, w, n). */
+template <typename Emit>
+KOKKOS_INLINE_FUNCTION uint32_t cut_row(const uint32_t i, const uint32_t c, const Kokkos::View<const uint32_t *> & offsets,
+                                        const Kokkos::View<const uint32_t *> & nodes,
+                                        const Kokkos::View<const double *[3]> & x,
+                                        const Kokkos::View<const rtype *[N_DIM]> & centroids,
+                                        const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> & values,
+                                        const uint32_t k, const Emit & emit) {
+    cut::Vec v[cut::MAX_CELL_NODES], xc;
+    const uint32_t first = offsets(c), n = offsets(c + 1) - first;
+    for (uint32_t j = 0; j < n; j++) {
+        for (int d = 0; d < 3; d++) v[j].x[d] = x(nodes(first + j), d);
+    }
+    for (int d = 0; d < N_DIM; d++) xc.x[d] = double(centroids(c, d));
+    double L[N_DIM + 1];
+    for (int d = 0; d <= N_DIM; d++) L[d] = values(i, k, d);
+    return cut::level_cut(v, n, xc, L, emit);
+}
+
+} // namespace
+
+void LevelCut::select() const {
+    const auto cells_ = m_crossed->cells();
+    const auto count_ = m_crossed->count();
+    const auto values_ = m_crossed->values();
+    const auto offsets_ = offsets_nodes;
+    const auto nodes_ = nodes;
+    const auto x_ = node_coords;
+    const auto centroids = cell_coords;
+    const auto rows = row_offsets;
+    const auto out_cells = m_cells;
+    const auto out_points = m_points;
+    const auto out_normals = m_normals;
+    const auto out_weights = m_weights;
+    const auto total_ = m_total;
+    const uint32_t k = m_condition, n_rows = static_cast<uint32_t>(rows.extent(0)) - 1, cap = capacity();
+    Kokkos::parallel_for("region_cut_count", n_rows, KOKKOS_LAMBDA(const uint32_t i) {
+        const auto none = [](const cut::Vec &, double, const cut::Vec &) {};
+        rows(i) = i < count_() ? cut_row(i, cells_(i), offsets_, nodes_, x_, centroids, values_, k, none) : 0;
+    });
+    Kokkos::parallel_scan("region_cut_offsets", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i, uint32_t & sum, const bool final) {
+        const uint32_t n = i < n_rows ? rows(i) : 0;
+        if (final) rows(i) = sum;
+        sum += n;
+    });
+    Kokkos::parallel_for("region_cut_points", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i == n_rows) {
+            total_() = rows(n_rows);
+            return;
+        }
+        if (i >= count_() || rows(n_rows) > cap) return;
+        uint32_t s = rows(i);
+        const uint32_t c = cells_(i);
+        cut_row(i, c, offsets_, nodes_, x_, centroids, values_, k,
+                [&](const cut::Vec & p, const double w, const cut::Vec & n) {
+                    out_cells(s) = c;
+                    for (int d = 0; d < 3; d++) {
+                        out_points(s, d) = p.x[d];
+                        out_normals(s, d) = n.x[d];
+                    }
+                    out_weights(s) = w;
+                    s++;
+                });
+    });
 }
 
 MovingFractions::MovingFractions(const Mesh & mesh, const Region & region,
