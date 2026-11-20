@@ -195,6 +195,19 @@ class FaceReconstruction {
         virtual void discard_cell_face_values() {}
 
         /**
+         * @brief Bytes of the work memory needed only while face values are reconstructed (calc_face_values,
+         *        or from calc_cell_face_values to finish_cell_face_values); 0 if none.
+         */
+        virtual size_t scratch_bytes() const { return 0; }
+
+        /**
+         * @brief Keep that work memory in storage that other work uses at other times (memory::ScratchArena),
+         *        instead of the reconstruction's own allocation.
+         * @param storage scratch_bytes() bytes, aligned for rtype, that outlive the reconstruction's use.
+         */
+        virtual void place_scratch(void * /*storage*/) {}
+
+        /**
          * @brief Turn the velocity of the cell 1 sides of faces across
          *        rotational periodic boundaries, which the schemes reconstruct
          *        in cell 1's frame, into the face's (its cell 0's) frame, so
@@ -424,6 +437,8 @@ class TENO : public FaceReconstruction {
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool exchanges_partition_faces() const override { return true; }
         void discard_cell_face_values() override;
+        size_t scratch_bytes() const override;
+        void place_scratch(void * storage) override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
@@ -460,6 +475,9 @@ class TENO : public FaceReconstruction {
         // false: the central stencils alone, which cell_gradients and point_values read, and no
         // face values (output of states read from files); such tables are never written to the cache
         bool sector_stencils = true;
+        // false, set before init() by a caller that places the troubled passes' work memory (place_scratch):
+        // init() leaves it without memory
+        bool own_scratch = true;
         // Set before init() when distributed runs get the halo side of partition faces from their owners
         // (Solver::exchanges_partition_faces): the tables then cover only the owned cells and the halo cells
         // of halo_image_cells(), which are all whose reconstruction is evaluated

@@ -862,6 +862,115 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, ProbesOfWhereRegionsAreStagedWithoutStoppingTheDevice) {
+    // The blast's high-pressure gas, which spreads and fades: its reductions, by step and by time, and its time
+    // averages kept per cell
+    const std::string where = "{type = \"where\", condition = \"P > 1.25 and x > 0.2\"}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"hot\"\nregion = " + where + "\nfields = [\"RHO\", \"P\"]\ninterval = 3\n"
+              "reductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"{dir}/hot.csv\"\n"
+              "[[probes]]\nname = \"mean_hot\"\nregion = " + where + "\nfields = [\"P\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/mean_hot.csv\"\n"
+              "[[probes]]\nname = \"hot_t\"\nregion = " + where + "\nfields = [\"T\"]\n"
+              "time_interval = 0.013\nreductions = [\"integral\"]\nreductions_file = \"{dir}/hot_t.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("where_probes", c);
+    if (comm::is_root()) {
+        // The region shrinks as the blast fades: the measures of the first and last rows differ
+        const std::string & rows = o.files.at("hot.csv");
+        EXPECT_GT(std::count(rows.begin(), rows.end(), '\n'), 8);
+        const auto measure = [&](const size_t at) {
+            std::istringstream row(rows.substr(at));
+            std::string step, t, m;
+            std::getline(row, step, ',');
+            std::getline(row, t, ',');
+            std::getline(row, m, ',');
+            return std::stod(m);
+        };
+        const size_t first = rows.find("\n3,") + 1, last = rows.find_last_of('\n', rows.size() - 2) + 1;
+        ASSERT_NE(first, 0u);
+        EXPECT_GT(measure(first), 0.0);
+        EXPECT_NE(measure(first), measure(last));
+        EXPECT_GT(std::count(o.files.at("mean_hot.csv").begin(), o.files.at("mean_hot.csv").end(), '\n'), 4);
+        EXPECT_GT(std::count(o.files.at("hot_t.csv").begin(), o.files.at("hot_t.csv").end(), '\n'), 8);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("where_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfIsosurfacesAreStagedWithoutStoppingTheDevice) {
+    // The blast's isobar, which spreads and fades: its reductions, by step and by time, and its time averages kept
+    // per cell, each extracted by the host from the levels the device staged
+    const std::string iso = "{type = \"isosurface\", field = \"P\", value = 1.25}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"front\"\nregion = " + iso + "\nfields = [\"RHO\", \"P\", \"MEAN_P\"]\n"
+              "interval = 3\nreductions = [\"integral\", \"mean\", \"max\"]\nreductions_file = \"{dir}/front.csv\"\n"
+              "[[probes]]\nname = \"mean_front\"\nregion = " + iso + "\nfields = [\"P\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/mean_front.csv\"\n"
+              "[[probes]]\nname = \"front_t\"\nregion = " + iso + "\nfields = [\"T\"]\n"
+              "time_interval = 0.013\nreductions = [\"integral\"]\nreductions_file = \"{dir}/front_t.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("isosurface_probes", c);
+    if (comm::is_root()) {
+        // The isobar's length (area) changes as the blast spreads
+        const std::string & rows = o.files.at("front.csv");
+        EXPECT_GT(std::count(rows.begin(), rows.end(), '\n'), 8);
+        const auto measure = [&](const size_t at) {
+            std::istringstream row(rows.substr(at));
+            std::string step, t, m;
+            std::getline(row, step, ',');
+            std::getline(row, t, ',');
+            std::getline(row, m, ',');
+            return std::stod(m);
+        };
+        const size_t first = rows.find("\n3,") + 1, last = rows.find_last_of('\n', rows.size() - 2) + 1;
+        ASSERT_NE(first, 0u);
+        EXPECT_GT(measure(first), 0.0);
+        EXPECT_NE(measure(first), measure(last));
+        EXPECT_GT(std::count(o.files.at("mean_front.csv").begin(), o.files.at("mean_front.csv").end(), '\n'), 4);
+        EXPECT_GT(std::count(o.files.at("front_t.csv").begin(), o.files.at("front_t.csv").end(), '\n'), 8);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    EXPECT_EQ(run_case("isosurface_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfIsosurfacesCutOnTheDeviceAreStagedWithoutStoppingTheDevice) {
+    // The isobar's mass flux at each quadrature point (through its normal), the reconstruction there, and their
+    // time averages: cut and sampled by the device, then cut again by the host from the levels it staged
+    const std::string iso = "{type = \"isosurface\", field = \"P\", value = 1.25}";
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"flux\"\nregion = " + iso + "\nfields = [\"MASS_FLUX\", \"MEAN_P\"]\n"
+              "interval = 3\nreductions = [\"integral\", \"max\"]\nreductions_file = \"{dir}/flux.csv\"\n"
+              "[[probes]]\nname = \"points\"\nregion = " + iso + "\nfields = [\"RHO\", \"U\", \"T\"]\n"
+              "sampling = \"point\"\ninterval = 4\nreductions = [\"integral\", \"min\", \"max\"]\n"
+              "reductions_file = \"{dir}/points.csv\"\n"
+              "[[probes]]\nname = \"mean_flux\"\nregion = " + iso + "\nfields = [\"MASS_FLUX\"]\naverage = true\n"
+              "interval = 5\nreductions = [\"integral\"]\nreductions_file = \"{dir}/mean_flux.csv\"\n"
+              "[[probes]]\nname = \"flux_t\"\nregion = " + iso + "\nfields = [\"ENTHALPY_FLUX\"]\nsampling = \"point\"\n"
+              "time_interval = 0.013\nreductions = [\"integral\"]\nreductions_file = \"{dir}/flux_t.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("isosurface_cuts", c);
+    if (comm::is_root()) {
+        for (const char * f : {"flux.csv", "points.csv", "mean_flux.csv", "flux_t.csv"}) {
+            EXPECT_GT(std::count(o.files.at(f).begin(), o.files.at(f).end(), '\n'), 4) << f;
+        }
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"P\"]\n";
+    EXPECT_EQ(run_case("isosurface_cuts", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
     // A disk (sphere) growing from a corner covers more cells than its staging holds, at first on the ranks that
     // own the corner alone: every rank's host writes those steps and the device stages it anew
@@ -1244,6 +1353,31 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     const Outcome queued = run_case("sources_regions", c, 3);
     expect_graphed(queued, "sources_regions");
     EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
+    // More writers than a 64-bit mask holds; the last one, alone due at steps 6 and 18, follows the solution
+    std::string writers = "check_interval = 1000\n";
+    for (int k = 0; k < 65; k++) {
+        writers += "[[write_data]]\nprefix = \"{dir}/w" + std::to_string(k) + "\"\nformat = \"vtu\"\ninterval = 12\n"
+                   "fields = [\"RHO\"]\n";
+    }
+    Case c;
+    c.run = "n_steps = 26\ncfl = 0.5\n";
+    c.extra = writers + "[[write_data]]\nprefix = \"{dir}/region\"\nformat = \"vtu\"\ninterval = 6\n"
+                        "regions = [{type = \"where\", condition = \"x < 0.4 + t and RHO > 0\"}]\nfields = [\"P\"]\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("many_writers", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"w64_000024.vtu", "region_0_000006.vtu", "region_0_000024.vtu"}) {
+            EXPECT_TRUE(o.files.count(file) || o.files.count(file.substr(0, file.size() - 3) + "pvtu")) << file;
+        }
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    const Outcome queued = run_case("many_writers", c, 3);
+    expect_graphed(queued, "many_writers");
+    EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
