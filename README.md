@@ -64,6 +64,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](https://matthewbonanni.github.io/mallard/docs/guide/convergence/) of runs at several resolutions
   - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output
+  - `mallard post render` for images and movies of snapshots, headless: a field on the plane or a 3D slice, with its colorbar, as PNG, GIF or MP4
   - tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [run report](https://matthewbonanni.github.io/mallard/docs/guide/output/#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](https://matthewbonanni.github.io/mallard/docs/images/guide/run_report_sample.html))

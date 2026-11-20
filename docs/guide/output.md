@@ -1266,6 +1266,84 @@ them ([Averages of saved snapshots](statistics.md#averages-of-saved-snapshots-ma
 the observed order, the extrapolated value and the grid convergence index of
 their forces, integrals and probes ([Grid convergence](convergence.md)).
 
+### Images and movies: `mallard post render`
+
+`mallard post render` draws a field of snapshots as images and movies, with no
+display, ParaView or Python: on a cluster node, in a batch job, or at the end
+of a run script ([Command line](cli.md#mallard-post-render)). With no options
+it draws what a first look needs:
+
+```
+mallard post render solut/flow.vtkhdf --latest            # RHO.png: the last snapshot
+mallard post render solut/flow.vtkhdf                     # RHO.gif: every snapshot
+mallard post render solut/flow.vtkhdf --field T -o T.mp4  # a movie, through ffmpeg
+mallard post render 'solut/flow_*.vtkhdf' --times 0.1:0.5 --every 2 -o frames/rho_%04d.png
+```
+
+![The density of the 2D Riemann problem at t = 0.8, drawn by mallard post render](../images/guide/render-density-light.png#gh-light-mode-only)
+![The density of the 2D Riemann problem at t = 0.8, drawn by mallard post render](../images/guide/render-density-dark.png#gh-dark-mode-only)
+
+Each image has the time (and step), the field with its units over a
+colorbar, and a scale bar; `--title` adds a line above, `--bare` leaves only
+the plot, for composing figures. What it chooses, and how to change it:
+
+| Option | Default |
+|---|---|
+| `--field NAME` | `RHO`, else `T`, else `P`. A vector is drawn as its magnitude; `U_X` or `U[0]` is a component |
+| `--colormap NAME` | By the field: `coolwarm` centered on zero for values of both signs and signed fields (`VORTICITY_Z`, `DILATATION`), `inferno` for temperatures and heat release, `plasma` for species and mixture fractions, `gray_r` on a logarithmic scale for `SCHLIEREN`, `viridis` for the rest; any of them reversed as `NAME_r` |
+| `--range MIN,MAX`, `--log` | The least and greatest value drawn over every frame, so that colors mean the same in every frame |
+| `--view XMIN,XMAX,YMIN,YMAX` | Fitted to the cells drawn |
+| `--slice x\|y\|z[=POSITION]` | 3D files: `z` at the middle of the domain |
+| `--size WIDTH[xHEIGHT]` | 1280 pixels wide, as high as the view needs; text and lines grow with the width |
+| `--theme light\|dark` | `light`, the documentation's colors |
+| `--mesh`, `--probes FILES` | Off: the cells' edges; probe files' points, curves and surface outlines, labeled by name |
+| `-o FILE` | `FIELD.png` for one snapshot, `FIELD.gif` for several; `.mp4`, `.mov`, `.mkv`, `.webm` or numbered frames `name_%04d.png` |
+
+**Pixels and cells.** Each pixel shows the cell values under it: the
+area-weighted mean of the cells whose centers fall in the pixel where cells
+are smaller than pixels, so a fine mesh does not alias into noise, and
+otherwise the cell at the pixel's center, so a coarse mesh shows its cells as
+the flat averages a finite-volume solution holds. A series on one mesh is
+sampled once; each further frame costs reading its field.
+
+**3D.** A slice cuts every cell it crosses into the polygon of its cross
+section (`--slice z=0.05`), drawn in the plane's other two coordinates in
+order (`y, z` for `x`; `x, z` for `y`; `x, y` for `z`), which `--view` takes too.
+A plane through the faces between cells draws the cells below it.
+
+![Pressure of a 3D blast on the slice z = 0.5, with the cells cut](../images/guide/render-slice-light.png#gh-light-mode-only)
+![Pressure of a 3D blast on the slice z = 0.5, with the cells cut](../images/guide/render-slice-dark.png#gh-dark-mode-only)
+
+**Derived fields.** It draws what the files hold; derive the rest first with
+[`mallard post derive`](#derived-fields-after-the-run), whose snapshots it
+draws like any other:
+
+```
+mallard post derive solut/flow.vtkhdf --fields SCHLIEREN,VORTICITY
+mallard post render derived/derived.vtkhdf --field SCHLIEREN -o schlieren.mp4
+```
+
+![Numerical schlieren of the 2D Riemann problem](../images/guide/render-schlieren-light.png#gh-light-mode-only)
+![Numerical schlieren of the 2D Riemann problem](../images/guide/render-schlieren-dark.png#gh-dark-mode-only)
+
+**Formats.** PNG, numbered PNG frames and animated GIF need nothing outside
+Mallard (PNG files are smaller in builds with zlib). `.mp4`, `.mov` and `.mkv`
+(H.264) and `.webm` (VP9) are encoded by `ffmpeg`, which `mallard` finds on
+`PATH` and feeds the frames through a pipe; without it, the error says so
+and a `.gif` or frames work instead. GIF uses 240 levels of the colormap.
+
+**Pitfalls.** Restart files hold no mesh: write a snapshot of them first
+(`mallard post extract FILE --snapshot vtkhdf`). Quote patterns
+(`'solut/flow_*.vtkhdf'`) so that `mallard` orders the files, or let the
+shell expand them. A `.png` of several snapshots draws the last; name frames
+with `%04d` for each. Region outlines and 3D surface views are not drawn yet
+([#516](https://github.com/MatthewBonanni/mallard/issues/516)).
+
+On the same files it is 6 times faster than `tools/post/plot_vtu.py` on a small
+snapshot, 40 times on a 4-million-cell one, and 8 times faster than
+`tools/post/animate.py` on a 101-frame movie, in half the memory or less
+([measurements](../design/output_reader.md#mallard-post-render)).
+
 ### Comparing two solutions: `mallard diff`
 
 `mallard diff A B` tells whether two files hold the same solution and, if not,
@@ -1356,8 +1434,8 @@ in `tools/` (numpy, matplotlib; see
 | Script | Use |
 |---|---|
 | `mallard/` | The [Python package](python.md); its modules `vtu`, `vtkhdf`, `h5` and `tables` are the h5py and numpy readers these scripts use |
-| `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots |
-| `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
+| `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots, with contours or as a line (`mallard post render` draws a field's image) |
+| `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren beside it (`mallard post render` draws one field's movie) |
 | `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 

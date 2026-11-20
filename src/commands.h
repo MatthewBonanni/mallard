@@ -81,6 +81,12 @@ int average_main(const cli::Args & args);
 /** @brief The work of `mallard post average`, with MPI and Kokkos started (tests call it). */
 int post_average(const cli::Args & args);
 
+/** @brief `mallard post render FILE...`: images and movies of snapshots. */
+int render_main(const cli::Args & args);
+
+/** @brief The work of `mallard post render`, on this process alone (tests call it). */
+int post_render(const cli::Args & args);
+
 /** @brief `mallard pack RUN_DIR`: one archive that reproduces a run; `--verify ARCHIVE` checks one. */
 int pack_main(const cli::Args & args);
 
