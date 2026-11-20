@@ -578,6 +578,47 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
     ::testing::Values(IncrementalParam{"cartesian_prism", 4}, IncrementalParam{"cartesian_mixed", 4},
                       IncrementalParam{"cartesian_tet", 3}));
 
+TEST(TENO3DSetup, EveryCellsMomentsAreThoseOfItsOwnBox) {
+    // Stretched boxes all differ in size and aspect ratio; host backends compute the moments of
+    // several cells at once, and 7 x 5 x 3 cells leave a last group short of them
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 7\nNy = 5\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n"
+                          "stretching = [1.5, 0.8, 1.2]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    for (const int order : {3, 5}) {
+        auto teno = make_teno_with(mesh, bd, order, [](TENO & t) { t.share_tables = false; });
+        auto moments = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->moments);
+        ASSERT_EQ(moments.extent(0), mesh->n_cells);
+        // Mean of ((x - x_c) / h)^a over the box's extent along x, by a, then b, then c
+        const int nm = 2 * order - 3;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+            for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
+                for (uint32_t d = 0; d < 3; d++) {
+                    lo[d] = std::min(lo[d], double(mesh->h_node_coords(mesh->h_node_of_cell(c, k), d)));
+                    hi[d] = std::max(hi[d], double(mesh->h_node_coords(mesh->h_node_of_cell(c, k), d)));
+                }
+            }
+            const double h = std::cbrt(double(mesh->h_cell_volume(c)));
+            auto mean = [&](const uint32_t d, const int a) {
+                return a % 2 != 0 ? 0.0 : std::pow(0.5 * (hi[d] - lo[d]) / h, a) / (a + 1);
+            };
+            size_t k = 0;
+            for (int a = 0; a < nm; a++) {
+                for (int b = 0; a + b < nm; b++) {
+                    for (int e = 0; a + b + e < nm; e++, k++) {
+                        const double exact = mean(0, a) * mean(1, b) * mean(2, e);
+                        EXPECT_NEAR(moments(c, k), exact, roundoff(1e-13)) << "order " << order << ", cell " << c
+                                                                         << ", moment (" << a << ", " << b << ", " << e << ")";
+                    }
+                }
+            }
+            ASSERT_EQ(k, moments.extent(1));
+        }
+    }
+}
+
 TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
     // batches split the cells differently, and the host setup is the fallback
