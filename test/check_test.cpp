@@ -35,6 +35,7 @@
 #include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mesh_quality.h"
+#include "output_reader.h"
 #include "partition.h"
 #include "region_input.h"
 #include "report.h"
@@ -230,6 +231,45 @@ TEST(CheckBoundaries, ZonesWithoutAConditionAreNamed) {
     EXPECT_TRUE(mentions(r.errors(), "no condition for zone top (" + std::to_string(n_top) + " faces)"))
         << (first_error(r));
     EXPECT_FALSE(r.ok());
+    ASSERT_EQ(r.unassigned.size(), 1u);
+    EXPECT_EQ(r.unassigned[0].zone, "top");
+    EXPECT_EQ(r.unassigned[0].faces, n_top);
+}
+
+TEST(CheckBoundaries, ASetupStoppedByAZoneWithoutAConditionStillDrawsTheMesh) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_unassigned_view";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", {"left", "right", "bottom"}), options);
+    EXPECT_FALSE(r.setup_done);
+    EXPECT_FALSE(r.view_file.empty());
+    comm::barrier();
+    if (!comm::is_root()) return;
+#ifndef Mallard_HAS_HDF5
+    std::ifstream vtm(r.view_file);
+    const std::string text((std::istreambuf_iterator<char>(vtm)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("name=\"top\""), std::string::npos);
+#endif
+}
+
+TEST(CheckBoundaries, PeriodicPairsGiveTheirMapFacesAreaAndHowWellTheyMatch) {
+    const std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[periodic]]\nzones = [\"left\", \"right\"]\n",
+            N_DIM == 3 ? std::vector<std::string>{"bottom", "top", "back", "front"}
+                       : std::vector<std::string>{"bottom", "top"});
+    const CheckReport r = check(input);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_EQ(r.periodic.size(), 1u);
+    const CheckPeriodic & p = r.periodic[0];
+    EXPECT_EQ(p.zone_a, "left");
+    EXPECT_EQ(p.zone_b, "right");
+    EXPECT_FALSE(p.rotation);
+    EXPECT_NEAR(p.translation[0], 2.0, 1e-12);
+    EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 8u);
+    EXPECT_NEAR(p.area, N_DIM == 3 ? 0.25 : 1.0, 1e-12);
+    EXPECT_LT(p.node_offset_relative, roundoff(1e-10));
 }
 
 TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
@@ -423,6 +463,29 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
 }
 
+TEST(CheckOutput, InitialWritesTheInitialStateAsASnapshot) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_initial";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.initial = (dir / "initial").string();
+    std::string input = box();
+    input.replace(input.find("rho = \"1.0\""), 11, "rho = \"1 + x\"");
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_FALSE(r.initial_file.empty());
+    EXPECT_TRUE(output_files_enabled());
+    comm::barrier();
+    if (!comm::is_root() || comm::size() > 1) return;
+    const output::Contents file = output::open(r.initial_file);
+    const std::vector<double> rho = output::read(file, "RHO", 0);
+    ASSERT_EQ(rho.size(), N_DIM == 3 ? 256u : 128u);
+    // The cell averages of 1 + x over 16 cells across [0, 2]
+    EXPECT_NEAR(*std::min_element(rho.begin(), rho.end()), 1.0625, roundoff(1e-10));
+    EXPECT_NEAR(*std::max_element(rho.begin(), rho.end()), 2.9375, roundoff(1e-10));
+    EXPECT_EQ(output::read(file, "P", 0).size(), rho.size());
+}
+
 TEST(CheckUnits, PhysicsUnitsSetsTheUnitsOfWhatIsPrinted) {
     std::string nondimensional = box();
     nondimensional.replace(nondimensional.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"nondimensional\"");
@@ -543,6 +606,14 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
     EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
     EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
+    // Every wall face of an owned cell has its y+ for the case view, and no other face
+    uint64_t walls = 0;
+    for (const double y : r.face_y_plus) {
+        if (!std::isfinite(y)) continue;
+        walls++;
+        EXPECT_NEAR(y, r.y_plus_max, 1e-5 * r.y_plus_max);
+    }
+    EXPECT_EQ(comm::allreduce(walls, comm::Op::SUM), N_DIM == 3 ? 2u * 8u * 4u : 2u * 8u);
 }
 
 namespace {
@@ -671,6 +742,30 @@ TEST(MeshQualityMetrics, SkewedPairOfCellsAgainstHandComputedValues) {
     EXPECT_NEAR(q.cells[2][tri], std::sqrt(5.0) / std::sqrt(2.0), roundoff(1e-12));
     // The triangle's bottom leg: its centroid is 1/6 off the leg's midpoint, 1/3 above it
     EXPECT_NEAR(q.cells[0][tri], std::atan(0.5) * 180.0 / std::numbers::pi, roundoff(1e-10));
+}
+
+TEST(MeshQualityMetrics, HistogramsCountEveryCellFromTheSmallestValueToTheLargest) {
+    if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
+    Mesh stretched;
+    stretched.init(parse_input_string(
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 20\nLx = 1.0\nLy = 1.0\nstretching = [0.0, 2.0]\n"));
+    const MeshQuality q = mesh_quality(stretched);
+    const auto s = summarize(stretched, q, 1);
+    const QualitySummary & aspect = s[2];
+    ASSERT_EQ(aspect.counts.size(), QualitySummary::N_BINS);
+    EXPECT_EQ(std::accumulate(aspect.counts.begin(), aspect.counts.end(), uint64_t(0)), 80u);
+    EXPECT_EQ(aspect.min, *std::min_element(q.cells[2].begin(), q.cells[2].end()));
+    EXPECT_EQ(aspect.max, *std::max_element(q.cells[2].begin(), q.cells[2].end()));
+    const double width = (aspect.max - aspect.min) / double(QualitySummary::N_BINS);
+    for (size_t k = 0; k < QualitySummary::N_BINS; k++) {
+        const auto n = std::count_if(q.cells[2].begin(), q.cells[2].end(), [&](double v) {
+            const double lo = aspect.min + width * double(k);
+            return v >= lo - 1e-12 && (k + 1 == QualitySummary::N_BINS ? true : v < lo + width - 1e-12);
+        });
+        EXPECT_EQ(aspect.counts[k], uint64_t(n)) << k;
+    }
+    const std::string json = histogram_json(aspect);
+    EXPECT_EQ(json.rfind("{\"edges\": [", 0), 0u) << json;
 }
 
 TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {

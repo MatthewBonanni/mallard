@@ -704,10 +704,12 @@ std::string quality_json(const std::array<QualitySummary, MeshQuality::N_METRICS
                      json::Object().add("value", c.value).add("cell", c.cell).raw("x", x + "]").str();
         }
         o.raw(MeshQuality::FIELDS[m], json::Object()
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", worst + "]")
                                           .str());
     }
