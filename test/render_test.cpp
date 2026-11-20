@@ -286,6 +286,8 @@ TEST(RenderTest, ColorbarTicksAreRoundAndWithinTheRange) {
         const std::vector<double> t = render::ticks({a, b, false});
         ASSERT_GE(t.size(), 2u);
         EXPECT_LE(t.size(), 11u);
+        const std::vector<std::string> labels = render::tick_labels(t);
+        EXPECT_EQ(std::adjacent_find(labels.begin(), labels.end()), labels.end()) << a << " " << b;
         for (const double x : t) {
             EXPECT_GE(x, a - 1e-9 * std::abs(b - a));
             EXPECT_LE(x, b + 1e-9 * std::abs(b - a));

@@ -1339,8 +1339,10 @@ shell expand them. A `.png` of several snapshots draws the last; name frames
 with `%04d` for each. Region outlines and 3D surface views are not drawn yet
 ([#516](https://github.com/MatthewBonanni/mallard/issues/516)).
 
-Against the Python scripts it replaces on the same files, it is
-BENCH_SUMMARY ([measurements](../design/output_reader.md#mallard-post-render)).
+On the same files it is 6 times faster than `tools/post/plot_vtu.py` on a small
+snapshot, 40 times on a 4-million-cell one, and 8 times faster than
+`tools/post/animate.py` on a 101-frame movie, in half the memory or less
+([measurements](../design/output_reader.md#mallard-post-render)).
 
 ### Comparing two solutions: `mallard diff`
 

@@ -301,3 +301,39 @@ the smooth Taylor-Green vortex they agree to 1-2% away from the box's faces
 (2 cells), which ParaView does not know are periodic (14% for `Q_CRITERION`
 over the whole box); behind the shocks of the double Mach reflection the
 gradient of a discontinuity depends on the method, and they differ at order one.
+
+## `mallard post render`
+
+`post render` draws snapshots with the same reader, so it needs no Python, no
+VTK and no display, and reads only the field it draws. Each pixel takes the
+area-weighted mean of the cells whose centroids it holds, or else the value of
+the cell under its center, so a mesh finer than the image is averaged rather
+than sampled; the pixel-to-cell map is built once per mesh and reused for
+every frame of a series. Images are 8-bit palette PNG (zlib when the build has
+it, else a built-in deflate) and GIF (its own LZW encoder); other movie
+formats go to an `ffmpeg` executable through a pipe, so no new library is
+linked.
+
+### Cost against the Python scripts
+
+The same files drawn by `mallard post render` and by the scripts it replaces,
+`tools/post/plot_vtu.py` (matplotlib `tripcolor`) and `tools/post/animate.py`
+(pixel-to-cell lookup, matplotlib, `ffmpeg`), at their default sizes. One
+CPU-only Linux container on an AMD EPYC 7763, 16 threads, `mallard` built with
+GCC 15.2 (Release, OpenMP, HDF5, zlib), Python 3.14, matplotlib 3.10, ffmpeg
+8.0; wall time and peak resident memory (`/usr/bin/time`, which includes
+`ffmpeg`), the better of 2 runs:
+
+| Files | `post render` | Python |
+|---|---|---|
+| 2D Riemann, 200² quadrilaterals, one snapshot (5 MB), PNG | 0.15 s, 0.07 GB | `plot_vtu.py`: 1.0 s, 0.13 GB |
+| 2D Riemann, 2048² quadrilaterals, one snapshot (0.5 GB), PNG | 1.1 s, 0.8 GB | `plot_vtu.py`: 49 s, 4.2 GB |
+| 3D box, 128³ hexahedra (0.4 GB), PNG of the slice z = π | 0.43 s, 0.41 GB | `plot_vtu.py --slice z`: 2.5 s, 0.87 GB |
+| 2D Riemann, 400² quadrilaterals, 101 snapshots (0.5 GB), movie | MP4: 6.9 s, 1.0 GB; GIF: 6.8 s, 0.13 GB | `animate.py` (MP4 and GIF): 54 s, 2.2 GB |
+
+Most of the MP4's memory is `ffmpeg`'s H.264 encoder; GIF frames are encoded
+by `mallard` itself. Agreement: rendered with `--bare --colormap gray
+--range 0.1,1.8`, the 200² snapshot's pixels equal, at 800, 1000 and 138
+pixels wide, those of an independent lookup in Python (the cell under each
+pixel center or, at 138 pixels, the mean of the cells centered in the pixel)
+quantized to the same 240 levels, every pixel.

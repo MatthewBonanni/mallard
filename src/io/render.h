@@ -124,6 +124,9 @@ struct Scale {
  *         ten, or powers of ten on a logarithmic scale; the ends if there are fewer than two. */
 std::vector<double> ticks(const Scale & scale);
 
+/** @brief The ticks' labels: %g with four significant digits, or as many more as tell them apart. */
+std::vector<std::string> tick_labels(const std::vector<double> & ticks);
+
 /** @brief A drawing over the plot: segments and points in plane coordinates, labeled. */
 struct Overlay {
     std::vector<std::array<std::array<double, 2>, 2>> segments;

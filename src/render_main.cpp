@@ -525,7 +525,7 @@ int render_files(const cli::Args & args) {
         if (!(scale.lo > 0.0)) throw UsageError("--log takes a positive --range");
     }
     if (!(scale.hi > scale.lo)) {
-        const double pad = std::max(std::abs(scale.lo) * 1e-6, 1e-30);
+        const double pad = std::max(std::abs(scale.lo) * 1e-3, 1e-30);
         scale.lo -= pad;
         scale.hi += pad;
     }

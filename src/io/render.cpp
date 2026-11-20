@@ -345,7 +345,7 @@ Layout layout(const Window & window, uint32_t width, uint32_t height, bool bare,
     const int64_t line = image::GLYPH_HEIGHT * s;
     const int64_t margin = bare ? 0 : 8 * s;
     const int64_t top = bare ? 0 : margin + (l.title ? line + 4 * s : 0) + line + 4 * s;
-    const int64_t right = bare ? 0 : 8 * s + 6 * s + 5 * s + 9 * image::GLYPH_ADVANCE * s + margin;
+    const int64_t right = bare ? 0 : 8 * s + 6 * s + 3 * s + 10 * image::GLYPH_ADVANCE * s + margin;
     const int64_t bottom = bare ? 0 : 4 * s + s + 3 * s + line + margin;
     const double aspect = (window.y1 - window.y0) / (window.x1 - window.x0);
     const auto even = [](int64_t v) { return uint32_t(std::max<int64_t>(2, v + (v & 1))); };
@@ -411,6 +411,15 @@ std::vector<double> ticks(const Scale & scale) {
 }
 
 std::string number(double x) { return logging::format("%.4g", x); }
+
+std::vector<std::string> tick_labels(const std::vector<double> & ticks) {
+    std::vector<std::string> out(ticks.size());
+    for (int digits = 4; digits <= 15; digits++) {
+        for (size_t i = 0; i < ticks.size(); i++) out[i] = logging::format("%.*g", digits, ticks[i]);
+        if (std::adjacent_find(out.begin(), out.end()) == out.end()) break;
+    }
+    return out;
+}
 
 image::Indexed draw(const Layout & l, const Frame & f, unsigned threads) {
     image::Indexed img(l.width, l.height, BACKGROUND);
@@ -491,12 +500,15 @@ image::Indexed draw(const Layout & l, const Frame & f, unsigned threads) {
         const auto k = uint8_t(std::min<int64_t>(N_LEVELS - 1, (bh - 1 - r) * int64_t(N_LEVELS) / std::max<int64_t>(bh, 1)));
         img.fill(bx0, py0 + r, bx1, py0 + r + 1, k);
     }
-    for (const double t : ticks(f.scale)) {
-        const double v = log ? std::log(t) : t;
+    const std::vector<double> tick = ticks(f.scale);
+    const std::vector<std::string> labels = tick_labels(tick);
+    for (size_t i = 0; i < tick.size(); i++) {
+        const double v = log ? std::log(tick[i]) : tick[i];
         if (hi <= lo || v < lo - 1e-12 * std::abs(lo) || v > hi + 1e-12 * std::abs(hi)) continue;
         const int64_t ty = py1 - 1 - std::llround((v - lo) / (hi - lo) * double(bh - 1));
         img.fill(bx1, ty - (s - 1) / 2, bx1 + 3 * s, ty + s / 2 + 1, FOREGROUND);
-        image::text(img, bx1 + 5 * s, ty - (image::GLYPH_ASCENT * s) / 2, number(t), s, FOREGROUND);
+        image::text(img, bx1 + 3 * s + image::GLYPH_ADVANCE * s, ty - (image::GLYPH_ASCENT * s) / 2, labels[i], s,
+                    FOREGROUND);
     }
 
     // The scale bar: a round length near a fifth of the width
