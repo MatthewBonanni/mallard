@@ -599,7 +599,13 @@ TEST(MeshBlockTest, CellsOfFacesAreTheSameWithWideNodeIds) {
     std::vector<std::array<int64_t, 2>> face_cells;
     if (comm::rank() == 0) {
         for (size_t c = 0; c < cells.size(); c++) {
-            for (const auto & local : cell_local_faces(uint32_t(cells[c].size()))) {
+            std::vector<std::vector<uint8_t>> sides;
+            if constexpr (N_DIM == 2) {
+                for (uint8_t k = 0; k < 4; k++) sides.push_back({k, uint8_t((k + 1) % 4)});
+            } else {
+                sides = cell_local_faces(8);
+            }
+            for (const auto & local : sides) {
                 std::vector<uint64_t> face;
                 for (uint8_t k : local) face.push_back(cells[c][k]);
                 std::vector<uint64_t> key = face;
