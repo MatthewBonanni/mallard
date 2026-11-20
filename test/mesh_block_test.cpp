@@ -30,6 +30,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "mesh_file.h"
+#include "read_parallel.h"
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "scratch.h"
@@ -563,6 +564,25 @@ TEST(MeshBlockTest, NodeTagsFindTheirNodesAcrossTheirWholeRange) {
             EXPECT_EQ(block.cell_nodes, cases[k].expected) << "case " << k;
         }
     }
+}
+
+/**
+ * @brief Sparse node tags clustered in value (most in a narrow band, two near
+ *        2^64, unevenly many per rank) split into ranges that each hold their
+ *        rank's share of the tags, so no rank holds most of the tag table.
+ */
+TEST(MeshBlockTest, ClusteredNodeTagsSplitIntoRangesOfEqualCounts) {
+    const int r = comm::rank(), p = comm::size();
+    std::vector<uint64_t> tags;
+    for (uint64_t k = 0; k < uint64_t(40 + 7 * r); k++) tags.push_back(uint64_t(r) + uint64_t(p) * k + 1);
+    if (r == 0) tags.insert(tags.end(), {~uint64_t(0), ~uint64_t(0) - 5});
+    const uint64_t n = comm::allreduce(uint64_t(tags.size()), comm::Op::SUM);
+    const std::vector<uint64_t> boundaries = parallel_read::balanced_boundaries(tags);
+    ASSERT_EQ(boundaries.size(), size_t(p - 1));
+    std::vector<uint64_t> count(size_t(p), 0);
+    for (uint64_t t : tags) count[size_t(std::lower_bound(boundaries.begin(), boundaries.end(), t) - boundaries.begin())]++;
+    comm::allreduce(std::span<uint64_t>(count), comm::Op::SUM);
+    for (int q = 0; q < p; q++) EXPECT_EQ(count[size_t(q)], block_begin(n, q + 1, p) - block_begin(n, q, p)) << "range " << q;
 }
 
 TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {

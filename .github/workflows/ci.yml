@@ -33,6 +33,7 @@ on:
       - 'docs/guide/input_files.md'
       - 'docs/guide/output.md'
       - 'docs/guide/running.md'
+      - 'docs/input.md'
       - 'docs/input-keys/**'
   workflow_dispatch:
     inputs:
@@ -170,12 +171,13 @@ jobs:
           echo "changed=$(tools/dev/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
           # Documentation alone needs none of the build jobs, except the pages the tests read:
           # boundary_types_test and cli_test read guide pages, check_test those of
-          # diagnostic_code::ALL, cli_test the key catalog docs/input-keys/
+          # diagnostic_code::ALL, error_messages_test docs/input.md, cli_test the key catalog
+          # docs/input-keys/
           if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(git rev-parse "$base")" = "$(git rev-parse HEAD)" ]; then
             echo code=false >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$' \
               || git diff --name-only "$base" HEAD \
-              | grep -qE '^docs/(guide/(boundary_conditions|cli|input_files|output|running)\.md$|input-keys/)'; then
+              | grep -qE '^docs/(guide/(boundary_conditions|cli|input_files|output|running)\.md$|input\.md$|input-keys/)'; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo code=false >> "$GITHUB_OUTPUT"

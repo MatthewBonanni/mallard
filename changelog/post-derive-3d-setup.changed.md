@@ -1,0 +1,1 @@
+- TENO's 3D setup on CPU backends computes the cells' moments four cells at a time, each with the operations it had alone: the moments take a third of the time and are bitwise the same. `mallard post derive` of a 64³ TENO5 Taylor-Green vortex takes 58 s instead of 66 s at 2 threads; derived fields and every TENO table are unchanged (#935).

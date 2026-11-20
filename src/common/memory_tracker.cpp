@@ -49,7 +49,7 @@ constexpr Rule RULES[] = {
     {"scalar_", true, C::FACES}, {"image_point_W", false, C::FACES}, {"teno_troubled", true, C::FACES},
     {"teno_n_troubled", false, C::FACES}, {"teno_selection", false, C::FACES}, {"cell_transport", false, C::FACES},
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
-    {"transport_gradients", false, C::FACES},
+    {"transport_gradients", false, C::FACES}, {"stage_scratch", false, C::FACES},
     // TENO setup's workspace
     {"teno_batch_", true, C::SETUP},
     // The setup's geometry of every cell (freed with it)
@@ -81,7 +81,7 @@ constexpr Rule RULES[] = {
     {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     {"region_moving_", true, C::MODELS}, {"region_motions", false, C::MODELS}, {"region_steps", false, C::MODELS},
     // Chemistry, thermodynamics and transport
-    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
+    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", true, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},
     {"production", false, C::CHEMISTRY}, {"hrr", false, C::CHEMISTRY}, {"radiation_", true, C::CHEMISTRY},
     // Statistics, probes and run health

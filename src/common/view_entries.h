@@ -48,8 +48,16 @@ KOKKOS_INLINE_FUNCTION void load_row(const View & v, const uint32_t r, T * out) 
     }
 }
 
-/** @brief Record the cells on this rank, halo included, for the limit check() reports. */
+/** @brief Record the cells on this rank, halo included, for the limit check() reports, and restart
+ *         entries_per_cell(). */
 void set_cells(uint64_t n);
+
+/**
+ * @brief The most entries per cell of any View that check() has seen since set_cells(), of those whose
+ *        memory category is proportional to the cells (memory::scales_with_cells); 0 if none. MAX over it is
+ *        the most cells, halo included, that fit on a rank.
+ */
+double entries_per_cell();
 
 /**
  * @brief Reject a View that needs more than MAX entries.
