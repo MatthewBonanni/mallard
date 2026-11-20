@@ -31,7 +31,7 @@ state management, its own tests) lives there.
 - [Prototype findings](#prototype-findings)
 - [MVP and milestones](#mvp-and-milestones)
 - [Follow-ups](#follow-ups)
-- [Open questions](#open-questions)
+- [Decisions on the design round's questions](#decisions-on-the-design-rounds-questions)
 
 ## Decisions
 
@@ -56,9 +56,11 @@ state management, its own tests) lives there.
    the user's kubeconfig context. Jobs, helper pods and viewer jobs are
    short-lived and torn down by idle timeouts that do not depend on the GUI
    staying open.
-6. **Every file shows where it lives.** Local, or a named remote, always visible;
-   no silent copies. Copies are explicit transfers with sizes, time estimates,
-   resumption, SHA-256 checks and a record.
+6. **Every file shows where it lives, and is known by its content.** Local, or a
+   named remote, always visible; no silent copies. Outputs are immutable objects
+   identified by their SHA-256 (append-only streams by length and prefix hash),
+   so a copy is identical or absent, never stale. Copies are explicit transfers
+   with sizes, time estimates, resumption and checks.
 7. **Results are rendered next to the data by default.** A short-lived viewer job
    (a Slurm job, or a pod on the volume) streams images or in-memory geometry to
    the UI through an SSH tunnel or a port-forward. Local copies are something the
@@ -66,9 +68,12 @@ state management, its own tests) lives there.
 8. **One backend abstraction** covers local, SSH with Slurm (PBS and LSF through
    small adapters) and Kubernetes; remote-to-remote moves are a route of the same
    transfer engine.
-9. **Remotes are global, projects reference them by name.** The project file is
-   shareable text with no secrets; per-user and per-machine state stays in the
-   user config directory.
+9. **Remotes are global, projects reference them by name.** The project files
+   are committed text with no secrets that record runs' identity only;
+   per-user state stays in the user config directory and where copies exist in a
+   per-machine cache.
+10. **uv everywhere**, for the GUI and Mallard: `uv tool`, `uv venv`, `uv pip`,
+    `uvx` in docs, scripts and installers, never plain pip, venv or pipx.
 
 ## Architecture
 
@@ -148,6 +153,14 @@ Rules:
 
 ## Where state lives
 
+Three places, by who owns the state and whether it is authoritative:
+
+| Where | What | Shared | Authoritative |
+|---|---|---|---|
+| User config directory | remotes, settings | no | yes, for this user |
+| Project directory (committed) | `mallard-project.toml`, `mallard-runs/<run>.toml`: identity only | yes, through git | yes |
+| User cache directory | where copies of objects are, transfer state, measured throughput | no | never: rebuilt from the data |
+
 ### Global, per user: the user config directory
 
 `~/.config/mallard-gui/` (the platform's config directory on macOS and Windows):
@@ -159,7 +172,7 @@ Rules:
   result); defaults (partition or queue, account, GPU type); storage roots
   (scratch, project space, or a PVC and its mount path); viewer-job settings
   (partition, size, walltime, idle timeout); cached probe results (which
-  remotes reach which directly, measured throughput per route).
+  remotes reach which directly, and how).
 - `settings.toml`: theme, density, units, window layout, recent projects.
 - `remote-ids.toml`: which local remote holds runs recorded under another remote
   id (see below).
@@ -171,7 +184,7 @@ image, an object store key) goes in the OS keychain, never in a file.
 ### Per project: `mallard-project.toml` and `mallard-runs/`
 
 A project is the directory that holds `input.toml` (a case folder or a
-repository). The GUI writes:
+repository). The GUI writes two kinds of committed files:
 
 - **`mallard-project.toml`**, next to `input.toml`: a visible, self-describing
   name rather than a hidden directory, so users see it, commit it and know what
@@ -179,17 +192,20 @@ repository). The GUI writes:
   the project uses, by name, with only overrides that belong to the project
   (account, partition, run-directory root on that remote); the inputs (which
   `.toml` files are cases); saved views and plots.
-- **`mallard-runs/<run>.toml`**, one file per run: the run's name, `run_id`
-  (from its run log), the remote's name and id, the run directory there, the job
-  id, the Mallard install and version, and its data record: the copies that
-  exist outside the run's home and the transfer records. One file per run keeps
-  diffs small and lets runs started by different people merge without conflicts,
-  as `docs/input-keys/` does for keys.
+- **`mallard-runs/<run>.toml`**, one file per run, committed: the run's durable
+  identity only. Its `run_id` (from its run log), its home (the remote's name
+  and stable id, and the run directory there), the SHA-256 of the input it ran,
+  the Mallard version and install, the job id, and status pointers (the outcome
+  and the last snapshot and restart, by path and SHA-256, as the run log's end
+  record gives them). One file per run keeps diffs small and lets runs started
+  by different people merge without conflicts.
 
-Neither file duplicates solver keys or the run log: what a run wrote is read
-from its `mallard.jsonl` wherever it lives; the per-run file records only what
-the run log cannot know (where copies are, what was moved, when). Files are
-written with one item per line and sorted keys, so they diff and merge cleanly.
+They hold no copy or sync state: where copies of a run's files exist is
+per-machine knowledge and lives in the [cache index](#the-cache-index). A run's
+file changes when the run starts, when it ends (status pointers), and when it is
+moved (its home); nothing else. Neither file duplicates solver keys or the run
+log. Files are written with one item per line and sorted keys, so they diff and
+merge cleanly.
 
 ```toml
 # mallard-project.toml
@@ -213,43 +229,28 @@ colormap = "vik"
 schema = "mallard-run-record"
 version = 1
 run_id = "3a256c99-a024-4845-8b46-5848d430e28b"
-remote = {name = "hpc", id = "5f0c1e2a-7d4b-4a51-9a52-0d2b9e4f6c11"}
-directory = "/scratch/project/cylinder/runs/re100-fine"
-job = "48213"
+home = {remote = "hpc", remote_id = "5f0c1e2a-7d4b-4a51-9a52-0d2b9e4f6c11", directory = "/scratch/project/cylinder/runs/re100-fine"}
+input_sha256 = "9b1f…"
 mallard = "0.11.0-cuda"
-
-[[copies]]                     # a file present somewhere other than the run's home
-path = "solut/cylinder_000060.vtkhdf"
-at = "local:runs/re100-fine/solut/cylinder_000060.vtkhdf"
-sha256 = "cc3b0d4d…"
-copied = 2026-11-20T13:40:00Z
-
-[[transfers]]
-started = 2026-11-20T13:40:00Z
-from = "hpc"
-to = "local"
-route = "direct"
-files = 2
-bytes = 4200000
-result = "verified"
+job = "48213"
+outcome = "finished"
+last_snapshot = {path = "solut/cylinder_000160.vtkhdf", sha256 = "41d2…"}
+last_restart = {path = "solut/restart_2066000.restart", sha256 = "c07a…"}
 ```
 
 **Shared with a teammate.** Remote names are looked up in the teammate's own
-`remotes.toml`. A run records its remote's name and id: if the teammate has no
-remote of that name, or one with another id, the GUI shows the run as "on hpc
-(not one of your remotes)" and asks which of their remotes holds it; it checks
-the answer by reading `mallard.jsonl` in the recorded directory there and
-comparing `run_id`, then stores the mapping in the teammate's `remote-ids.toml`,
-not in the project. The same happens when a user renames a remote.
+`remotes.toml`. A run records its home remote's name and id: if the teammate
+has no remote of that name, or one with another id, the GUI shows the run as "on
+hpc (not one of your remotes)" and asks which of their remotes holds it; it
+checks the answer by reading `mallard.jsonl` in the recorded directory there and
+comparing `run_id`, then stores the mapping in the teammate's
+`remote-ids.toml`, not in the project. The same happens when a user renames a
+remote.
 
-**Missing or stale.** The project file and the per-run files can be rebuilt:
-the GUI scans the project directory and each referenced remote's run root for
-`mallard.jsonl` files, identifies runs by `run_id`, and identifies local copies
-by SHA-256 against the run logs' output records. A per-run file whose run
-directory has disappeared is shown as such, never deleted automatically.
-
-**Committed or ignored**: `mallard-project.toml` is meant to be committed;
-whether `mallard-runs/` is committed by default is an [open question](#open-questions).
+**Missing or damaged.** The run files can be rebuilt: the GUI scans the project
+directory and each referenced remote's run root for `mallard.jsonl` files and
+identifies runs by `run_id`. A run file whose run directory has disappeared is
+shown as such, never deleted automatically.
 
 ## Case setup
 
@@ -355,7 +356,8 @@ with what their kubeconfig allows; nothing cluster-wide is installed.
 Where they differ: Kubernetes has no login node, so every remote command needs a
 pod (startup of a few seconds, hidden by keeping one helper pod while the GUI is
 active); the scheduler is Kubernetes itself (or Kueue where installed) rather
-than a batch queue; multi-node runs need the MPI Operator. SSH clusters have a
+than a batch queue; multi-node runs need the MPI Operator, which comes after
+the MVP (single-node `Job`s first). SSH clusters have a
 shared filesystem the login node sees directly, and job-step attachment
 (`srun --overlap`) instead of `exec`.
 
@@ -383,34 +385,65 @@ shared filesystem the login node sees directly, and job-step attachment
 
 ## Data: locations, manifest and transfers
 
-### The manifest
+### Content addressing
 
-For each run, the GUI builds a manifest from:
+Every file a run writes is identified by its content, not by its path or by
+where a copy happens to be:
 
-- the run log's output records (path, kind, step, `t`, bytes, SHA-256 of every
-  file written);
-- the files the run read (input, mesh, mechanism, data tables), as
-  `mallard pack` already lists them with their roles and SHA-256;
-- the per-run record (copies elsewhere, transfers).
+- **Objects**: snapshots, restart files, extracts and the files a run read
+  (input, mesh, mechanism, data tables) are written once and identified by their
+  SHA-256, which the run log's output records already hold (and `mallard pack`
+  for the files read). A copy is either byte-identical to the object, or it does
+  not exist; nothing can be "stale". Two runs that wrote the same bytes share
+  one object.
+- **Streams**: the run log, probe, force and integral CSV files and progress
+  only ever grow while a run continues. A copy of a stream is a prefix of it,
+  verified by the SHA-256 of that prefix: it is never stale, only shorter, and
+  syncing it means appending the missing bytes.
+- **Derived files** (the series indexes `.pvd`, `.vtkhdf.series`, `.xmf`, the
+  run report `report.html`) are regenerated from objects and the run log where
+  they are needed, not transferred as data.
 
-A new `mallard files RUN_DIR --format json` subcommand returns the first two
-for a run directory, adding files present but not recorded (`.partial` files,
-files a run still writing has not recorded yet) and, with `--hash`, the SHA-256
-of chosen files or of a byte range of one (to resume and verify a transfer). It
-runs wherever the run lives, so nothing but `mallard` is needed there.
+What makes this hold, and where Mallard does not yet, checked against the
+current code:
 
-Every file has one of these states per location:
+| Output | Behavior today | Fits |
+|---|---|---|
+| Restart files | written as `.partial`, renamed when complete | object |
+| Snapshots with `series = false`, VTU, per-step VTP | one file per snapshot | object |
+| Run log, CSV probes, forces, integrals | appended when a run continues from a restart; truncated by a fresh start in the same directory | stream (a fresh start is a new stream: the prefix hash no longer matches, and the run's `start` record has a new `run_id`) |
+| VTKHDF series (`series = true`, the default; boundary and region writers always), HDF5 and VTKHDF probes | every snapshot appended into one HDF5 file, rewritten in place | no: mutable until the run ends |
+| Snapshots and restart files after a rewind (resuming from an earlier restart) | files of the same names overwritten as the run reaches them again | path reused for new content; the old object is gone |
+| Series indexes, `report.html` | rewritten | derived |
 
-| State | Meaning |
-|---|---|
-| present | the file is there and its SHA-256 matches the run log's record |
-| absent | not there |
-| partial | a transfer was interrupted; resumes from its offset |
-| stale | a copy whose source has since changed (the run rewrote it, or a newer record exists) |
-| local only | an input edited locally and not yet staged |
+Until Mallard makes them write-once (a [follow-up](#follow-ups)), the GUI treats
+a single-file series as one object only once its run has ended and the end
+record carries its final SHA-256, and as a live file (viewable remotely, not
+copyable as an object) before that; a rewind shows as the old object being
+gone from the run's home.
+
+### The manifest and the cache index
+
+A run's manifest is what `mallard files RUN_DIR --format json` returns where the
+run lives: every object with its SHA-256, size, kind, step and `t`; every
+stream with its length and the SHA-256 of its prefix up to that length; the
+files present but not recorded (`.partial` files, a run still writing). Nothing
+but `mallard` is needed on the remote.
+
+Where copies of objects exist is a **cache index** in the user cache directory
+(`~/.cache/mallard-gui/`): for each location (local, or a remote id), which
+object hashes it holds at which paths and how long each stream copy is, plus
+interrupted transfers and the throughput measured per route. It is per machine,
+never committed and never authoritative: it is rebuilt by asking each location
+for its manifest (`mallard files --hash` hashes what the run log does not
+record) and by hashing local files, and an entry the location contradicts is
+dropped.
 
 The run's home (where it ran) is always shown with its path, as
-`hpc:/scratch/…/re100-fine`; a local copy shows as `local:runs/re100-fine/…`.
+`hpc:/scratch/…/re100-fine`; a copy shows as `local:runs/re100-fine/…`. Each
+file has, per location, one of three states: present (an object there, or a
+stream prefix with its length), absent, or partial (a transfer interrupted,
+resumable).
 
 ### Selecting what to move
 
@@ -418,40 +451,43 @@ Selections are by what users think in, not by path: one snapshot; snapshots of
 a time or step range; probes, forces and integrals only; restart files (the
 newest, or one chosen); a decimated surface (made next to the data by the
 viewer or `mallard post extract`, see [follow-ups](#follow-ups)); the case
-inputs; or the whole run. Before anything moves the GUI shows the file count,
-total size and an estimated time per route from the throughput measured on
-earlier transfers of that route (cached in the global config), or a short probe
-the first time.
+inputs; or the whole run. Before anything moves the GUI shows the object count,
+total size (objects the destination already holds are skipped and shown as
+such) and an estimated time per route from the throughput measured on earlier
+transfers of that route, or a short probe the first time.
 
 ### The transfer engine
 
-One engine for every route; a route is a pair of endpoints and a method:
+A transfer is "fetch the object with SHA-256 H into location L, from any
+location that has it" (and, for a stream, "append bytes N onward"). Sources come
+from the cache index and are confirmed by their manifests; the engine picks the
+cheapest route, which the user can override:
 
 - **local ↔ remote**: rsync over the SSH master connection
   (`--partial --append-verify`) where the remote has rsync, else a stream with
   byte offsets; through the helper pod for Kubernetes.
-- **remote ↔ remote, funneled**: the source's stream is piped into the
+- **remote ↔ remote, direct**, when one can reach the other: rsync from one
+  login node to the other with the user's forwarded SSH agent (or a jump host);
+  a shared filesystem mounted on both (no copy at all, the object is already
+  there); a Kubernetes pod pulling from an SSH remote only if the user opts in to
+  storing a key as a secret.
+- **remote ↔ remote, funneled**: the source's stream piped into the
   destination's through the local machine, never written to local disk
   (`ssh A 'tail -c +N file' | ssh B 'cat >> file.partial'`, or the `kubectl
   exec` equivalent).
-- **remote ↔ remote, direct**: from one remote to the other when they can reach
-  each other: rsync from one login node to the other through a jump host or the
-  user's forwarded agent (opt-in per remote pair), a shared filesystem mounted on
-  both (no copy at all), or a Kubernetes pod pulling from an SSH remote where the
-  user has given it a key as a secret.
 
-Every transfer is per file, resumable (a `.partial` file and its offset), and
-ends with a SHA-256 check against the manifest (computed by `mallard files
---hash` on the destination), then the rename. The result is recorded in the
-run's `mallard-runs/<run>.toml`: the copy (location, path, SHA-256, time) and
-the transfer (route, files, bytes, result).
+Every object lands as a `.partial` file, resumes from its length (from any
+source holding the same hash, so an interrupted copy from one remote can finish
+from another), and is renamed only after its SHA-256 matches H, computed by
+`mallard files --hash` on the destination. Streams are appended and their new
+prefix hash checked. The cache index records the result; nothing committed
+changes.
 
 **Detecting a direct route**: a probe from each remote to the other
-(`ssh -o BatchMode=yes <other> true`, with and without agent forwarding;
-for shared filesystems, a marker file written in one storage root and looked for
-in the other), cached with its date in the global remote config and rerun when a
-direct transfer fails. The GUI picks the fastest route that works (direct over
-funneled) and shows the choice, which the user can override.
+(`ssh -A -o BatchMode=yes <other> true` through the master connection; for
+shared filesystems, a marker file written in one storage root and looked for in
+the other), cached with its date in the global remote config and rerun when a
+direct transfer fails.
 
 **Moving a case or a run to another remote.** The user picks the whole run, or
 the inputs plus a chosen restart (to continue there), or selected outputs. For a
@@ -459,9 +495,10 @@ continuation, the GUI checks the restart on the destination before moving the
 gigabytes: the destination's `mallard info RESTART --format json` must read it
 (format version, dimension, precision, species); the rank count does not matter,
 since a restart reads bitwise the same on any number of ranks
-([Initialization](../guide/initialization.md)). After the move the run shows as
-present on both, or as moved if the user then asks to delete the source. The
-source is cleaned only on explicit request, listing what will be deleted.
+([Initialization](../guide/initialization.md)). A copy leaves the run's home as
+it was: the objects are now present at both places. A move changes the run's
+home in `mallard-runs/<run>.toml`, the only committed change; the old home is
+cleaned only on explicit request, listing what will be deleted.
 
 ![The data manager: files of a run with their state at each location, and a transfer with its route and estimate](../images/design/gui-data-manager-light.svg#gh-light-mode-only)
 ![The data manager: files of a run with their state at each location, and a transfer with its route and estimate](../images/design/gui-data-manager-dark.svg#gh-dark-mode-only)
@@ -512,8 +549,9 @@ version>` built by the GUI repository's CI from the Mallard image of a pinned
 version (with VTK's offscreen build and trame added), used as is on Kubernetes
 and through Apptainer on SSH clusters; where there is no container runtime, the
 remote install puts the same pinned Python environment next to the Mallard
-install (see [Installation](#installation)). Whether that counts as "Mallard
-only" is an [open question](#open-questions).
+install: a uv-managed environment (`uv venv` with pinned, hashed requirements)
+beside the Mallard install of the same version, created and removed with it
+(see [Installation](#installation)).
 
 **Cost and queue wait.** One viewer per remote per GUI session, reused for every
 run and snapshot; started when the user opens a 3D view (or ahead of it, if the
@@ -532,8 +570,9 @@ it.
 3. the viewer's websocket carried over the SSH channel's standard input and
    output (`ssh login srun --jobid=<id> --overlap mallard-viewer --stdio`),
    relayed to a local port by the GUI: works wherever `srun --overlap` does;
-4. the viewer on the login node itself, opt-in, small and with a short timeout,
-   where the site's policy allows it;
+4. the viewer on the login node itself, only as an explicit fallback the user
+   chooses each time, with a warning that login nodes are shared, small and with
+   a short timeout;
 5. no live view: images rendered in a batch job (`mallard post render`,
    [#516](https://github.com/MatthewBonanni/mallard/issues/516)) and shown from
    the files.
@@ -571,7 +610,7 @@ uv first where it is missing. `[solver]` depends on the `mallard-python` wheel o
 Linux x86-64 and arm64; the reader libraries it already plans to carry come with
 them. Why this one:
 
-- **uv/pip**: one command on every platform, an isolated environment, fast, no
+- **uv**: one command on every platform, an isolated environment, fast, no
   administrator rights, and the Python ecosystem trame and VTK already ship in
   (VTK's wheels are the supported binaries).
 - **conda-forge**: good for VTK, but a second ecosystem to keep current and slow
@@ -595,12 +634,14 @@ match what the GUI needs:
      scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
      for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
   2. **Choose**, in this order: a prebuilt relocatable archive for the
-     architecture and backend (CPU, CUDA, HIP; a new release artifact),
+     architecture and backend (CPU, CUDA, HIP; a new release artifact; built
+     against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
+     `module load`),
      downloaded by the login node from the GitHub release with its SHA-256
      checked; the release's container image through Apptainer (`apptainer pull`)
      for single-node runs; a Spack build in user space with the detected
-     compilers, MPI and GPU toolkits as externals, run as a batch job (best for
-     multi-node runs with the site's MPI; slow).
+     compilers, MPI and GPU toolkits as externals, run as a batch job: the
+     fallback for clusters that need their own MPI (Open MPI); slow.
   3. **Install** into `<root>/mallard/<version>-<variant>/` with an
      `install.toml` (version, variant, artifact and SHA-256, how it was
      installed), recorded in the global remote config. Versions live side by
@@ -617,7 +658,15 @@ match what the GUI needs:
   digest; a short pod checks that the namespace can pull it (image pull secrets
   are the user's) and runs the same verification.
 
-Installation leaves files only; nothing runs afterwards.
+Where the remote has no container runtime, the install also creates the
+viewer's uv environment beside it (uv itself is a single static binary placed in
+the install). Installation leaves files only; nothing runs afterwards.
+
+**Windows** runs the GUI only: the solver runs on remotes, or locally in WSL
+(the GUI treats WSL as a local remote).
+
+Once the GUI exists, `mallard gui` becomes a thin launcher in the solver that
+starts an installed GUI (or says how to install it with uv).
 
 ### What the release pipeline must produce
 
@@ -651,7 +700,7 @@ same process.
 **Recommendation: Tauri** wrapping the web UI, with the Python backend bundled
 as a sidecar (PyInstaller): a small shell, signed installers and updates on
 the three platforms, and the same backend as `uv tool install`. `mallard-gui
---app` with pywebview is the zero-extra-dependency desktop mode for pip users,
+--app` with pywebview is the zero-extra-dependency desktop mode for `uv tool` users,
 and the interim one until the Tauri bundle exists. Electron's only advantage is
 uniform WebGL, which matters only in geometry mode; image mode does not need it.
 WebKitGTK's WebGL on Linux has to be measured in the first desktop milestone.
@@ -667,8 +716,9 @@ Contemporary, precise and calm: engineering software that is dense but legible,
 with nothing decorative. The quality bar is that of the best current tools
 (Linear and Figma for fit and finish, ParaView for what CFD users expect to be
 able to do), not their look. The GUI shares its design tokens (colors, fonts,
-spacing, radii) with the redesigned website, which records them; the mockups
-below use provisional values until that file exists.
+spacing, radii) with the redesigned website: the token file lives in the website
+repository and the GUI pins it by version. The mockups below use provisional
+values until that file exists.
 
 ![Case setup: the setup steps with their status, the mesh with its zones, the problems panel, and the selected zone's boundary condition with an inline error](../images/design/gui-case-setup-light.svg#gh-light-mode-only)
 ![Case setup: the setup steps with their status, the mesh with its zones, the problems panel, and the selected zone's boundary condition with an inline error](../images/design/gui-case-setup-dark.svg#gh-dark-mode-only)
@@ -749,7 +799,8 @@ tested like any other.
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | missing | `mallard version --format json` |
-| Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files and ranges) |
+| Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
+| Write-once outputs | restarts and per-snapshot files are; single-file series and rewinds are not | write-once series and rewinds |
 | Install verification | missing | `mallard install verify` |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
@@ -828,16 +879,19 @@ data that never moves silently.**
    path or module line, verified by the capabilities query); stage inputs, check
    on the login node, submit, follow the queue, the run log, probes and forces;
    stop and checkpoint.
-6. The data manager: the manifest, states per location, selections, sizes and
-   estimates, resumable verified transfers between local and the remote,
-   recorded in `mallard-runs/`.
+6. The data manager on content addressing: the manifest, states per location,
+   selections, sizes and estimates, resumable transfers of objects by SHA-256
+   and of streams by prefix between local and the remote, tracked in the
+   per-machine cache index.
 7. The viewer job on a CPU partition through an SSH tunnel: one snapshot's field
    on surfaces and slices, image mode, idle timeout and cleanup.
 
 Mallard prerequisites of the MVP: the catalog with types, units, descriptions,
 variants and a schema version (#1256, at least for the keys of the guided
-steps); partial-input `list keys`; structured diagnostics; the capabilities
-query; `mallard files`; a way to turn control files on from the command line.
+steps); partial-input `list keys` (#1311); structured diagnostics (#1312); the
+capabilities query (#1314); `mallard files` (#1317); a way to turn control files
+on from the command line (#1316). Write-once series (#1326) can follow: until
+then single-file series are copied only once their run has ended.
 
 **After the MVP:**
 
@@ -850,81 +904,58 @@ query; `mallard files`; a way to turn control files on from the command line.
 
 ## Follow-ups
 
-Proposed issues, for approval before filing.
+Filed, each part of #346.
 
 **Mallard**
 
-1. **Catalog for the GUI** (extends #1256): a schema version; types, units,
-   descriptions and guide anchors for every key; variants of arrays of tables by
-   discriminator; roles of string keys (mesh, mechanism, restart, data file);
-   basic or expert; display order; typed defaults; exported from the binary with
-   no data directory.
-2. **`list keys` and `check` on partial inputs**: report the keys that apply and
-   the ones missing instead of failing on a missing mesh file or stop condition.
-3. **Structured check diagnostics**: `key`, `line` and element index fields;
-   setup warnings in the JSON; independent errors reported together where the
-   setup can continue.
-4. **Case-view block metadata and a geometry-only view**: each block's key path,
-   element index and kind; a `--view` that skips stencils and numerics, measured
-   on a large 3D mesh.
-5. **Capabilities query**: `mallard version --format json` with the build and
-   the version of every interface.
-6. **JSON Schemas of the interfaces** in `docs/schemas/`, tested in CI, and the
-   examples' JSON uploaded as a CI artifact for the GUI's fixtures.
-7. **Control files from the command line**: implement `--set KEY=VALUE` (listed
-   in [Command line](cli.md)), or turn control files on by default, and add the
-   `SET` control file so `set` works without job-step attachment (#346).
-8. **`mallard files RUN_DIR`**: the manifest (recorded outputs, files read,
-   unrecorded files) and `--hash` of files and byte ranges.
-9. **Restart readability in `info`**: a field saying whether this build can
-   continue from a restart, and why not (dimension, precision, format version,
-   species).
-10. **Decimated extraction**: `mallard post extract` of surfaces and slices with
-    decimation, for viewing over slow links and the no-viewer fallback;
-    `post render` (#516) for images in batch jobs.
-11. **`mallard install verify`**: the environment check plus a quick template
-    run, with a JSON verdict.
+| What | Issue |
+|---|---|
+| The catalog for the GUI: schema version, types, units, descriptions, variants of arrays of tables, roles of file keys, display hints, typed defaults, exported from the binary | [#1256](https://github.com/MatthewBonanni/mallard/issues/1256) (extended in a comment) |
+| `list keys` and `check` on partial inputs | [#1311](https://github.com/MatthewBonanni/mallard/issues/1311) |
+| Structured check diagnostics, setup warnings in the JSON, several errors at once | [#1312](https://github.com/MatthewBonanni/mallard/issues/1312) |
+| Case-view block metadata and a geometry-only `--view` | [#1313](https://github.com/MatthewBonanni/mallard/issues/1313) |
+| `mallard version --format json`, the capabilities query | [#1314](https://github.com/MatthewBonanni/mallard/issues/1314) |
+| JSON Schemas of the interfaces, tested in CI; the examples' JSON as a CI artifact | [#1315](https://github.com/MatthewBonanni/mallard/issues/1315) |
+| `--set KEY=VALUE` (or control files on by default) and a `SET` control file | [#1316](https://github.com/MatthewBonanni/mallard/issues/1316) |
+| `mallard files RUN_DIR`: objects by SHA-256, streams by length and prefix hash, `--hash` of files, ranges and prefixes | [#1317](https://github.com/MatthewBonanni/mallard/issues/1317) |
+| `mallard info RESTART`: whether this build can continue from it | [#1318](https://github.com/MatthewBonanni/mallard/issues/1318) |
+| `mallard post extract` of decimated surfaces and slices; `post render` ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) for batch images | [#1319](https://github.com/MatthewBonanni/mallard/issues/1319) |
+| `mallard install verify` | [#1320](https://github.com/MatthewBonanni/mallard/issues/1320) |
+| Write-once outputs: single-file series and rewinds modify files in place | [#1326](https://github.com/MatthewBonanni/mallard/issues/1326) |
 
 **Release pipeline**
 
-12. **Wheels with the solver**: `mallard-python` wheels carrying the CPU
-    `mallard` executables for macOS arm64 and manylinux x86-64 and arm64
-    (extends #792).
-13. **Relocatable archives** per architecture and backend (CPU, CUDA 12, CUDA
-    13, ROCm) with SHA-256 sums; the MPI strategy is an open question.
-14. **`release-manifest.json`** listing every artifact, image digest and
-    interface version.
+| What | Issue |
+|---|---|
+| `mallard-python` wheels with the CPU `mallard` executables (extends #792) | [#1321](https://github.com/MatthewBonanni/mallard/issues/1321) |
+| Relocatable archives per architecture and backend, against the MPICH ABI | [#1322](https://github.com/MatthewBonanni/mallard/issues/1322) |
+| `release-manifest.json` of artifacts, digests and interface versions | [#1323](https://github.com/MatthewBonanni/mallard/issues/1323) |
 
-**Website**
+**Website**: the builder generated from the exported catalog, without its
+hard-coded boundary fields:
+[mallard-website #85](https://github.com/MatthewBonanni/mallard-website/issues/85)
+(supersedes website #62).
 
-15. **Builder from the exported catalog**: once follow-up 1 lands, the builder
-    reads the exported catalog and drops its hard-coded `BC_FIELDS` and zone
-    lists (supersedes website #62).
+**Later**: `mallard gui`, a thin launcher, once the GUI exists. **GUI repository**
+(once created): the MVP above, the viewer image and the compatibility matrix.
 
-**GUI repository** (once created): the MVP above, the viewer image, and the
-compatibility matrix.
+## Decisions on the design round's questions
 
-## Open questions
-
-1. **Viewer software on clusters without containers**: is a pinned Python
-   environment (trame, VTK) next to the Mallard install acceptable under
-   "nothing installed beyond Mallard", or must the viewer be container-only
-   (Apptainer) there?
-2. **Remote-to-remote direct routes**: may the GUI use SSH agent forwarding to a
-   login node (opt-in per remote pair), and may a Kubernetes pod be given an SSH
-   key as a secret to pull from a cluster?
-3. **MPI in prebuilt archives**: build against the MPICH ABI (Cray MPICH, Intel
-   MPI, MVAPICH), wait for the MPI 5 standard ABI, ship per-MPI variants, or keep
-   multi-node runs on Spack builds and archives single-node?
-4. **`mallard-runs/` in git**: committed by default (shared record of where
-   data is) or ignored (per-user state)?
-5. **Windows**: GUI only with remote runs (and WSL for a local solver), or a
-   native Windows solver build?
-6. **A `mallard gui` subcommand** in the solver that starts the GUI when it is
-   installed, for discoverability?
-7. **Kubernetes multi-node**: is the MPI Operator in scope for the GUI, or
-   single-node Jobs only at first?
-8. **Login-node viewer** as a fallback: offer it at all, given site policies?
-9. **Shared design tokens**: where the website's token file lives and how the
-   GUI pins it (a published package, or a vendored copy per release).
-10. **The `mallard-gui` name** on PyPI and as the repository name.
+1. **Viewer on clusters without containers**: a uv-managed environment pinned
+   beside the Mallard install of the same version.
+2. **Direct remote-to-remote copies** use SSH agent forwarding. No key is stored
+   as a Kubernetes secret unless the user opts in.
+3. **MPI in prebuilt archives**: the MPICH ABI where possible; Spack builds for
+   clusters that need their own MPI.
+4. **`mallard-runs/` is committed.** It holds only runs' durable identity, so it
+   changes when a run starts, ends or moves.
+5. **Windows**: the GUI only; the solver on remotes or in WSL.
+6. **`mallard gui`**: a thin launcher in the solver, once the GUI exists.
+7. **Kubernetes multi-node** (the MPI Operator): after the MVP.
+8. **Login-node viewer**: only as an explicit fallback, with a warning that
+   login nodes are shared.
+9. **Design tokens**: the file lives in the website repository; the GUI pins it
+   by version.
+10. **Name**: `mallard-gui`, for the repository and on PyPI.
+11. **Data model**: content addressing. Immutable objects by SHA-256, append-only
+    streams by prefix, identity committed, copies in a per-machine cache.

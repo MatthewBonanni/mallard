@@ -276,7 +276,7 @@ def data_manager(P):
     chrome(s, "Data / re100-fine", "hpc · Slurm", "Data")
     x0 = 76
     s.text(x0, 86, "Files of re100-fine", 20, weight=600)
-    s.text(x0, 108, "run 3a256c99  ·  home: hpc:/scratch/project/runs/re100-fine  ·  manifest from mallard.jsonl", 12, P["muted"], mono=True)
+    s.text(x0, 108, "run 3a256c99  ·  home: hpc:/scratch/project/runs/re100-fine  ·  objects by SHA-256", 12, P["muted"], mono=True)
     for i, f in enumerate(["All", "Snapshots", "Restarts", "Probes & forces", "Inputs"]):
         fx = x0 + [0, 48, 148, 236, 366][i]
         active = i == 0
@@ -291,7 +291,7 @@ def data_manager(P):
         s.text(tx + cx, 192, name, 11.5, P["muted"], 600, mono=name in ("hpc", "local", "k8s-lab"))
     s.line(tx, 204, tx + tw, 204, P["border"])
     rows = [("cylinder_000060.vtkhdf", "snapshot", "60.0", "412 MB", "s", "s", ""),
-            ("cylinder_000070.vtkhdf", "snapshot", "70.0", "412 MB", "s", "stale", ""),
+            ("cylinder_000070.vtkhdf", "snapshot", "70.0", "412 MB", "s", "s", ""),
             ("cylinder_000080.vtkhdf", "snapshot", "80.0", "412 MB", "s", "", ""),
             ("cylinder_000090.vtkhdf", "snapshot", "90.0", "412 MB", "s", "part", ""),
             ("cylinder_000099.vtkhdf", "snapshot", "99.0", "412 MB", "s", "", ""),
@@ -315,16 +315,13 @@ def data_manager(P):
         for cx, st in ((610, a), (680, b), (750, c)):
             if st == "s":
                 s.circle(tx + cx + 12, y - 4, 5, P["ok"])
-            elif st == "stale":
-                s.circle(tx + cx + 12, y - 4, 5, "none", P["warn"], 2)
-                s.text(tx + cx + 22, y, "stale", 10.5, P["warn"])
             elif st == "part":
                 s.add(f'<path d="M{tx + cx + 12} {y - 9} a5 5 0 0 1 0 10 z" fill="{P["accent"]}"/>')
                 s.circle(tx + cx + 12, y - 4, 5, "none", P["accent"], 1.5)
                 s.text(tx + cx + 22, y, "41 %", 10.5, P["accent"], mono=True)
             else:
                 s.circle(tx + cx + 12, y - 4, 5, "none", P["faint"], 1)
-    s.text(tx + 16, H - 34, "● present   ○ absent   ◐ partial (resumable)   stale: the source changed since the copy",
+    s.text(tx + 16, H - 34, "● present (SHA-256 matches the run log)   ○ absent   ◐ partial (resumes from any copy with the same hash)",
            11.5, P["muted"])
 
     px = tx + tw + 16
@@ -347,7 +344,7 @@ def data_manager(P):
         s.text(px + 52, y + 19, r, 12.5, weight=500)
         s.text(px + 52, y + 35, est, 11.5, P["muted"], mono=True)
     s.text(px + 18, 528, "Checked by SHA-256 against the run log's records.", 11.5, P["muted"])
-    s.text(px + 18, 546, "Recorded in mallard-runs/re100-fine.toml.", 11.5, P["muted"])
+    s.text(px + 18, 546, "Indexed on this machine; nothing committed changes.", 11.5, P["muted"])
     s.rect(px + 18, 568, pw - 36, 38, P["accent"], r=8)
     s.text(px + pw / 2, 592, "Copy 1.24 GB", 13, P["surface"], 600, anchor="middle")
     s.text(px + 18, 640, "HISTORY", 11, P["faint"], 600)

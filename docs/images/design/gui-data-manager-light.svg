@@ -25,7 +25,7 @@
 <rect x="20" y="292" width="16" height="16" rx="4" fill="none" stroke="#71717a" stroke-width="1.5"/>
 <text x="28" y="322" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#71717a" text-anchor="middle">Remotes</text>
 <text x="76" y="86" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="20" font-weight="600" fill="#18181b" text-anchor="start">Files of re100-fine</text>
-<text x="76" y="108" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#71717a" text-anchor="start" font-feature-settings="'tnum'">run 3a256c99  ·  home: hpc:/scratch/project/runs/re100-fine  ·  manifest from mallard.jsonl</text>
+<text x="76" y="108" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#71717a" text-anchor="start" font-feature-settings="'tnum'">run 3a256c99  ·  home: hpc:/scratch/project/runs/re100-fine  ·  objects by SHA-256</text>
 <rect x="76" y="124" width="40" height="26" rx="13" fill="#ccfbf1"/>
 <text x="96" y="141" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#0f766e" text-anchor="middle">All</text>
 <rect x="124" y="124" width="92" height="26" rx="13" fill="#ffffff" stroke="#e4e4e7" stroke-width="1"/>
@@ -61,8 +61,7 @@
 <text x="496" y="264" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#18181b" text-anchor="start" font-feature-settings="'tnum'">70.0</text>
 <text x="586" y="264" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#18181b" text-anchor="start" font-feature-settings="'tnum'">412 MB</text>
 <circle cx="698.0" cy="260.0" r="5.0" fill="#3f6212"/>
-<circle cx="768.0" cy="260.0" r="5.0" fill="none" stroke="#b54708" stroke-width="2"/>
-<text x="778" y="264" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" font-weight="400" fill="#b54708" text-anchor="start">stale</text>
+<circle cx="768.0" cy="260.0" r="5.0" fill="#3f6212"/>
 <circle cx="838.0" cy="260.0" r="5.0" fill="none" stroke="#a1a1aa" stroke-width="1"/>
 <rect x="77" y="277" width="818" height="34" rx="0" fill="#ccfbf1"/>
 <rect x="92" y="286" width="14" height="14" rx="3" fill="#0f766e" stroke="#0f766e" stroke-width="1"/>
@@ -136,7 +135,7 @@
 <circle cx="698.0" cy="532.0" r="5.0" fill="#3f6212"/>
 <circle cx="768.0" cy="532.0" r="5.0" fill="#3f6212"/>
 <circle cx="838.0" cy="532.0" r="5.0" fill="#3f6212"/>
-<text x="92" y="766" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start">● present   ○ absent   ◐ partial (resumable)   stale: the source changed since the copy</text>
+<text x="92" y="766" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start">● present (SHA-256 matches the run log)   ○ absent   ◐ partial (resumes from any copy with the same hash)</text>
 <rect x="912" y="164" width="348" height="616" rx="10" fill="#ffffff" stroke="#e4e4e7" stroke-width="1"/>
 <text x="930" y="192" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#18181b" text-anchor="start">Copy 3 files</text>
 <text x="930" y="214" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#71717a" text-anchor="start" font-feature-settings="'tnum'">1.24 GB  ·  1 partial, resumes at 41 %</text>
@@ -156,7 +155,7 @@
 <text x="964" y="467" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="500" fill="#18181b" text-anchor="start">view remotely instead</text>
 <text x="964" y="483" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start" font-feature-settings="'tnum'">no copy · viewer job</text>
 <text x="930" y="528" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start">Checked by SHA-256 against the run log's records.</text>
-<text x="930" y="546" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start">Recorded in mallard-runs/re100-fine.toml.</text>
+<text x="930" y="546" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#71717a" text-anchor="start">Indexed on this machine; nothing committed changes.</text>
 <rect x="930" y="568" width="312" height="38" rx="8" fill="#0f766e"/>
 <text x="1086.0" y="592" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">Copy 1.24 GB</text>
 <text x="930" y="640" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a1a1aa" text-anchor="start">HISTORY</text>
