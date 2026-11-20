@@ -288,6 +288,8 @@ class Probes {
         bool reads_intervals(size_t k) const;
         /** @brief Probe k's samples are selected anew at each write: it samples a moving region or an isosurface. */
         bool moves(size_t k) const;
+        /** @brief Whether stage can reduce probe k on the device: not of an isosurface, whose samples the host extracts. */
+        bool reduces_staged(size_t k) const;
         /** @brief Probe k's region follows the solution: its selection reads ProbeFields::W. */
         bool follows_solution(size_t k) const;
         /**
@@ -530,6 +532,7 @@ class Probes {
                 Kokkos::View<ProbeTerm *> terms;
                 Kokkos::View<ProbeOutput *> outputs;
                 Kokkos::View<double *> weights;                     // of the reduced samples; empty: 1
+                Kokkos::View<const uint32_t> count;                 // moving regions: the first count() are reduced
                 Kokkos::View<double *[3]> positions;                // moments: of the reduced samples, from the center
                 Kokkos::View<double **, Kokkos::LayoutRight> values;  // (sample, term)
                 ExactSums sums;
@@ -537,6 +540,16 @@ class Probes {
                 Kokkos::View<int64_t *> point;                      // one-point probes: its values' bits
                 // Averaging probes: the means of the local nodes and quadrature points, the host's as of resume_staged
                 Kokkos::View<double **, Kokkos::LayoutRight> mean_nodes, mean_quadrature;
+                // Averaging moving regions (cell_means), per owned cell: mean_quadrature the means of f V q, with
+                // the means of f V and whether the averages hold the cell (the host's mean_cells); and each one's
+                // covered sample (-1: none), and the cells held (the first held_count()) with their weights and
+                // mean values, reduced
+                Kokkos::View<double *> mean_weights;
+                Kokkos::View<uint32_t *> held;
+                Kokkos::View<int32_t *> sample_of;
+                Kokkos::View<uint32_t *> held_cells;
+                Kokkos::View<uint32_t> held_count;
+                Kokkos::View<double **, Kokkos::LayoutRight> held_values;
                 bool means_current = false;
                 bool summed = false;                                // some value is of the sums
                 bool use_nccl = false;
