@@ -63,10 +63,11 @@ std::string read_bytes(const std::string & file) {
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-/** @brief Fields fields at each query point q[i] (n_axes coordinates each), looked up in a device kernel. */
-std::vector<double> lookup_device(const flamelet::TableView<> & t, const std::vector<std::vector<double>> & q,
+/** @brief Fields fields at each query point q[i] (D coordinates each), looked up in a device kernel. */
+template <uint32_t D>
+std::vector<double> lookup_device(const flamelet::TableView<D> & t, const std::vector<std::vector<double>> & q,
                                   const std::vector<uint32_t> & fields) {
-    const uint32_t n = static_cast<uint32_t>(q.size()), nf = static_cast<uint32_t>(fields.size()), na = t.n_axes;
+    const uint32_t n = static_cast<uint32_t>(q.size()), nf = static_cast<uint32_t>(fields.size()), na = D;
     Kokkos::View<double **, Kokkos::LayoutRight> d_q("q", n, na), d_out("out", n, nf);
     Kokkos::View<uint32_t *> d_f("fields", nf);
     auto h_q = Kokkos::create_mirror_view(d_q);
@@ -78,7 +79,7 @@ std::vector<double> lookup_device(const flamelet::TableView<> & t, const std::ve
     Kokkos::deep_copy(d_q, h_q);
     Kokkos::deep_copy(d_f, h_f);
     Kokkos::parallel_for("lookup", n, KOKKOS_LAMBDA(const uint32_t i) {
-        const flamelet::Point p = t.locate(&d_q(i, 0));
+        const flamelet::Point<D> p = t.locate(&d_q(i, 0));
         t.evaluate(p, d_f.data(), nf, &d_out(i, 0));
     });
     auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
@@ -105,7 +106,7 @@ std::vector<double> fpv_device(const flamelet::FPV<> & fpv, const std::vector<st
     Kokkos::deep_copy(d_q, h_q);
     Kokkos::deep_copy(d_f, h_f);
     Kokkos::parallel_for("fpv", n, KOKKOS_LAMBDA(const uint32_t i) {
-        const flamelet::Point p = fpv.locate(d_q(i, 0), d_q(i, 1), d_q(i, 2));
+        const flamelet::Point<3> p = fpv.locate(d_q(i, 0), d_q(i, 1), d_q(i, 2));
         fpv.table.evaluate(p, d_f.data(), nf, &d_out(i, 0));
     });
     auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_out);
@@ -150,11 +151,57 @@ TEST(FlameletTableTest, LookupIsExactForMultilinearFunctions) {
     std::vector<std::vector<double>> q;
     for (int i = 0; i < 200; i++) q.push_back({u(rng), -1.0 + 3.5 * u(rng), u(rng), 1.0 + 3.0 * u(rng)});
     q.push_back({-0.5, 3.0, 2.0, 0.0});  // outside every axis: the corner node
-    const auto out = lookup_device(t.device(), q, {1, 0});
+    const auto out = lookup_device(t.device<4>(), q, {1, 0});
     for (size_t i = 0; i < q.size(); i++) {
         auto c = [&](size_t a) { return std::clamp(q[i][a], axes[a].nodes.front(), axes[a].nodes.back()); };
         EXPECT_NEAR(out[2 * i], f1(c(0), c(1), c(2), c(3)), 1e-12) << i;
         EXPECT_NEAR(out[2 * i + 1], f0(c(0), c(1), c(2), c(3)), 1e-12) << i;
+    }
+}
+
+// The reader and the lookup take any number of axes: six, past any fixed limit, are exact for a
+// multilinear function too. Catches an axis limit or a stride that holds only for few axes.
+TEST(FlameletTableTest, LookupTakesAnyNumberOfAxes) {
+    constexpr uint32_t D = 6;
+    std::vector<Table::Axis> axes;
+    for (uint32_t a = 0; a < D; a++) {
+        Table::Axis axis{"x" + std::to_string(a), {}, "1"};
+        for (uint32_t i = 0; i < 2 + a % 3; i++) axis.nodes.push_back(static_cast<double>(i * i) - static_cast<double>(a));
+        axes.push_back(axis);
+    }
+    auto f = [](const std::vector<double> & x) {
+        double v = 1.0, product = 1.0;
+        for (size_t a = 0; a < x.size(); a++) {
+            v += static_cast<double>(a + 1) * x[a];
+            product *= 0.5 + 0.1 * x[a];
+        }
+        return v + product;
+    };
+    std::vector<double> values;
+    std::vector<size_t> i(D, 0);
+    while (i[0] < axes[0].nodes.size()) {
+        std::vector<double> x(D);
+        for (uint32_t a = 0; a < D; a++) x[a] = axes[a].nodes[i[a]];
+        values.push_back(f(x));
+        for (uint32_t a = D; a-- > 0;) {
+            if (++i[a] < axes[a].nodes.size() || a == 0) break;
+            i[a] = 0;
+        }
+    }
+    const Table t("test", "test", axes, {{"f", "1"}}, values);
+    std::mt19937 rng(6);
+    std::uniform_real_distribution<double> u(-0.1, 1.1);
+    std::vector<std::vector<double>> q;
+    for (int k = 0; k < 200; k++) {
+        std::vector<double> x(D);
+        for (uint32_t a = 0; a < D; a++) x[a] = axes[a].nodes.front() + u(rng) * (axes[a].nodes.back() - axes[a].nodes.front());
+        q.push_back(x);
+    }
+    const auto out = lookup_device(t.device<D>(), q, {0});
+    for (size_t k = 0; k < q.size(); k++) {
+        std::vector<double> c(D);
+        for (uint32_t a = 0; a < D; a++) c[a] = std::clamp(q[k][a], axes[a].nodes.front(), axes[a].nodes.back());
+        EXPECT_NEAR(out[k], f(c), 1e-12 * (1.0 + std::abs(f(c)))) << k;
     }
 }
 
@@ -170,7 +217,7 @@ TEST(FlameletTableTest, FpvReproducesTheProgressVariable) {
     std::vector<double> expected;
     for (int i = 0; i < 300; i++) {
         const double Z = u(rng), S = u(rng) * u(rng);
-        flamelet::Point p;
+        flamelet::Point<3> p;
         host.table.locate_axis(0, Z, p.lo[0], p.t[0]);
         host.table.locate_axis(1, S, p.lo[1], p.t[1]);
         p.t[2] = 0.0;
@@ -204,7 +251,7 @@ TEST(FlameletTableTest, ReadsTheFixture) {
     std::vector<std::vector<double>> q;
     for (int i = 0; i < 200; i++) q.push_back({u(rng), u(rng), u(rng)});
     for (double Z : t.axes()[0].nodes) q.push_back({Z, 1.0, 0.25});
-    const auto out = lookup_device(t.device(), q, fields);
+    const auto out = lookup_device(t.device<3>(), q, fields);
     for (size_t i = 0; i < q.size(); i++) {
         for (size_t k = 0; k < fields.size(); k++) {
             const double expected = fixture(k, q[i][0], q[i][1], q[i][2]);

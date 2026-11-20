@@ -220,9 +220,8 @@ reason, unless:
    `provenance.generator.name` and `version`, `created`, `input`,
    `mechanism.name` and `mechanism.sha256` (64 lowercase hexadecimal digits)
    are present. The model's `model_data` members are present and in range.
-5. The axes are between 1 and 4 in number. The format sets no limit; this
-   version of Mallard reads up to 4. Each axis has at least 2 finite,
-   strictly increasing nodes. Field names are unique and of the form
+5. There is at least one axis; neither the format nor Mallard limits their
+   number. Each axis has at least 2 finite, strictly increasing nodes. Field names are unique and of the form
    `[A-Za-z][A-Za-z0-9_]*`.
 6. Every `Y_` field is a species in `species`.
 7. The data holds exactly `prod(n_a) n_fields` values and every value is

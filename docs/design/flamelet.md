@@ -67,7 +67,7 @@ than non-reacting LES.
 | 2 | Presumed PDFs integrated by the generator: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); copies of the laminar flamelet along the variance axis, as FPVgen does today | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
 | 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda`, with `C` linear in `c` (a checked part of the contract) | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
 | 4 | Mallard's table format ([table_format.md](table_format.md)): one magic line, one line of JSON (model and thermodynamics tags, axes, fields, species, pressure, model data, provenance), little-endian float64 values, node-major with a node's fields contiguous | HDF5; netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Readable in every build and with NumPy alone; self-describing; generic over models; one lookup reads 2^d short runs |
-| 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Up to 4 axes, 64-bit offsets, weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
+| 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Any number of axes, fixed at compile time per model so the corner loop unrolls; 64-bit offsets; weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
 | 6 | A third gas model, `gas = "flamelet"`, whose `Z` and `C` live in the existing species block, with the mixture path's functors templated on the gas model | A separate scalar block in `State`; control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
 | 7 | Compressible FPV thermodynamics after Saghafian et al. (2015): tabulated `T0`, `e0`, `R`, `gamma0`, `a_gamma`, closed form `T(e)` (thermodynamics tag `saghafian2015`) | Low-Mach FPV (tabulated `T`, `rho`); a Newton solve on tabulated `cp(T)` | Consistent energy with heat release and acoustics; closed form, no iteration; fits the Riemann solvers' `(gamma, e0)` surrogate (chemistry.md, decision 3) |
 | 8 | Unity Lewis number for all control variables, `rho D = kappa / cp`, with tables generated with unity-Lewis transport by default | Differential diffusion in the table | Consistent transport and table; differential diffusion is a generator option for later studies |
@@ -173,12 +173,17 @@ The specification is [table_format.md](table_format.md). In short:
 
 ### 4.1 Multilinear lookup (decision 5)
 
-`flamelet::TableView` is a plain aggregate of two rank-1 Views (axis nodes,
-values, the latter indexed in 64 bits) and the axis sizes, captured by value in
-kernels. `locate(q)` finds each coordinate's cell by bisection on its axis
+`flamelet::TableView<D>` is a plain aggregate of two rank-1 Views (axis nodes,
+values, the latter indexed in 64 bits), the axis sizes and strides, captured by
+value in kernels. The reader takes any number of axes; the lookup's dimension
+`D` is a template parameter, set by the model (3 for `fpv`), so the `2^D`
+corner loop unrolls and a point's `D` cells and fractions stay in registers on
+GPUs. `locate(q)` finds each coordinate's cell by bisection on its axis
 (non-uniform axes; clamped to the ends, NaN to the first node) and the fraction
-across it; `evaluate(point, fields, n, out)` sums the `2^d` corners with their
-weights once for all requested fields. The order of the sum is fixed, so the
+across it. The bisection's trip count depends on the axis alone and its steps
+are selects, not branches on the query, so neighboring threads do not diverge.
+`evaluate(point, fields, n, out)` sums the `2^D` corners with their weights once
+for all requested fields, without branches on the weights. The order of the sum is fixed, so the
 result depends only on the query: bitwise identical across backends, thread
 counts and ranks, and in captured steps.
 
@@ -193,7 +198,8 @@ above; an A100 has 80 GB). Node-major with fields contiguous makes one lookup
 read `2^d n_fields` values in `2^d` contiguous runs; field-major would make it
 `2^d n_fields` scattered reads. Neighboring threads look up different points in
 either layout. To be measured in stage 2 against a field-major layout and
-float32 values.
+float32 values. The FPV map reads the bounds of `C` at the ends of the `c` axis
+from the `2^(D-1)` nodes of the `(Z, S)` cell alone.
 
 ### 4.3 The FPV map (decision 3)
 

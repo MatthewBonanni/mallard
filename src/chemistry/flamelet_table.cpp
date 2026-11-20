@@ -158,24 +158,6 @@ double from_little_endian(double x) {
     return x;
 }
 
-template <typename MemorySpace>
-TableView<MemorySpace> make_view(const std::vector<Table::Axis> & axes, const uint32_t n_fields,
-                                 Kokkos::View<const double *, MemorySpace> axis_values,
-                                 Kokkos::View<const double *, MemorySpace> values) {
-    TableView<MemorySpace> t;
-    t.n_axes = static_cast<uint32_t>(axes.size());
-    t.n_fields = n_fields;
-    uint32_t first = 0;
-    for (uint32_t a = 0; a < t.n_axes; a++) {
-        t.n_nodes[a] = static_cast<uint32_t>(axes[a].nodes.size());
-        t.axis_first[a] = first;
-        first += t.n_nodes[a];
-    }
-    t.axes = axis_values;
-    t.values = values;
-    return t;
-}
-
 } // namespace
 
 Table::Table(std::string model, std::string thermodynamics, std::vector<Axis> axes, std::vector<Field> fields,
@@ -187,10 +169,7 @@ Table::Table(std::string model, std::string thermodynamics, std::vector<Axis> ax
 
 void Table::finish() {
     const std::string & where = m_where;
-    if (m_axes.empty() || m_axes.size() > MAX_AXES) {
-        fail(where, std::to_string(m_axes.size()) + " axes, where this version of Mallard reads 1 to " +
-                        std::to_string(MAX_AXES));
-    }
+    if (m_axes.empty()) fail(where, "no axes");
     if (m_fields.empty()) fail(where, "no fields");
     std::unordered_set<std::string> names;
     for (const auto & f : m_fields) {
@@ -386,20 +365,10 @@ int32_t Table::field(const std::string & name) const {
     return -1;
 }
 
-TableView<Kokkos::HostSpace> Table::host() const {
-    using Unmanaged = Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
-    return make_view<Kokkos::HostSpace>(m_axes, static_cast<uint32_t>(m_fields.size()),
-                                        Unmanaged(m_axis_nodes.data(), m_axis_nodes.size()),
-                                        Unmanaged(m_values.data(), m_values.size()));
-}
-
-TableView<> Table::device() const {
-    using Space = Kokkos::DefaultExecutionSpace::memory_space;
-    const TableView<Kokkos::HostSpace> h = host();
-    Kokkos::View<double *, Space> axes("flamelet_axes", h.axes.size()), values("flamelet_values", h.values.size());
-    Kokkos::deep_copy(axes, h.axes);
-    Kokkos::deep_copy(values, h.values);
-    return make_view<Space>(m_axes, h.n_fields, axes, values);
+void Table::require_axes(const uint32_t d) const {
+    if (m_axes.size() != d) {
+        fail(m_where, "it has " + std::to_string(m_axes.size()) + " axes, where this lookup reads " + std::to_string(d));
+    }
 }
 
 uint32_t Table::fpv_field() const {
@@ -410,12 +379,12 @@ uint32_t Table::fpv_field() const {
 
 FPV<> Table::fpv() const {
     const uint32_t C = fpv_field();
-    return FPV<>{device(), C};
+    return FPV<>{device<3>(), C};
 }
 
 FPV<Kokkos::HostSpace> Table::fpv_host() const {
     const uint32_t C = fpv_field();
-    return FPV<Kokkos::HostSpace>{host(), C};
+    return FPV<Kokkos::HostSpace>{host<3>(), C};
 }
 
 } // namespace flamelet
