@@ -453,7 +453,7 @@ void Solver::update_transport() {
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
         Kokkos::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
-                                 viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                 viscous_gradient(), transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport});
     });
 }

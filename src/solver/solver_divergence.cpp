@@ -516,6 +516,7 @@ std::vector<divergence::Cause> Solver::write_divergence_report(Evidence & e, con
             subset.cells.push_back(c);
             subset.fractions[c] = 1.0;
         }
+        if (is_mixture()) stage_mixture_fractions(true, false);
         copy_device_to_host();
         std::vector<Data> fields;
         std::vector<std::string> names;

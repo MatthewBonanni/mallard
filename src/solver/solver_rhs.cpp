@@ -232,7 +232,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         if (local_faces.size() > 0) launch_convective_flux(local_faces);
         face_exchange.start(comm_space, face_solution);
         if (viscous_gradients_due) {
-            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         face_exchange.finish(comm_space, face_solution);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
@@ -255,7 +255,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
         if (viscous_gradients_due && !own_faces) {
-            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            Kokkos::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (wall_model_on) update_wall_model();
@@ -402,7 +402,7 @@ uint32_t Solver::n_gradient_cells() const {
 }
 
 void Solver::update_upwind_sensor() {
-    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+    Kokkos::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
     Kokkos::parallel_for("upwind_sensor", n_gradient_cells(),
                          UpwindSensorFunctor{viscous_gradients, cell_upwind, hybrid_threshold, hybrid_floor});
 }
