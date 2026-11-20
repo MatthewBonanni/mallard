@@ -284,6 +284,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         if (e.region) {
             const Input & value = *e.region;
             const region::Region & r = regions.get(value, where + ".region");
+            region::require_full_dimension(r, value, where + ".region");
             moves = r.moving() || r.solution();
             const uint32_t n_parts = per_copy ? std::max<uint32_t>(1, static_cast<uint32_t>(r.copies().size())) : 1;
             parts.assign(n_parts, Part{});

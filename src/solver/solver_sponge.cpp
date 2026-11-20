@@ -86,6 +86,7 @@ void Solver::init_sponges(region::Regions & regions) {
         std::shared_ptr<region::MovingFractions> moving;
         if (sponge.contains("region")) {
             const region::Region & r = regions.get(sponge.at("region"), where + ".region");
+            region::require_full_dimension(r, sponge.at("region"), where + ".region");
             if (r.moving() || r.solution()) {
                 std::shared_ptr<const region::SolutionLevels> levels;
                 if (r.solution()) {
