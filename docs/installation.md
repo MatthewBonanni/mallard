@@ -29,6 +29,7 @@ Mallard supports the two newest major releases of GCC and of Clang, the current 
 | AMD GPUs | x86-64 | ROCm's Clang | 4.2 | ROCm 10.1 | `ci.yml/hip` (compile) |
 | Intel GPUs | x86-64 | oneAPI `icpx` | 4.2 | oneAPI 2026.2 | `ci.yml/sycl` (compile) |
 | Containers (`docker/`), Spack on Ubuntu | x86-64, arm64 | GCC 15 | 4.2, 4.4 | CUDA 13.5 | `release.yml/cpu`, `release.yml/cuda`, `release.yml/spack` |
+| Relocatable archives (built on AlmaLinux 8, run on glibc 2.28 and newer) | x86-64, arm64 | GCC 16 (gcc-toolset) | manylinux's | | `release.yml/archive` |
 
 The GPU builds are compiled in CI on every change to device code; only the NVIDIA A100 also runs them ([GPU CI](guide/support.md#builds)). ROCm and oneAPI are tested on x86-64 only.
 
