@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -96,6 +97,13 @@ struct LevelCells {
     bool every = false;
 };
 LevelCells level_cells(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief The condition (its column of the levels) a surface is cut from alone, as region::cut::level_cut cuts
+ *        it: of a region of a single piece cut from one condition's levels, unclipped and facing out of it, on a
+ *        mesh without curved geometry; else nothing.
+ */
+std::optional<uint32_t> single_level(const Mesh & mesh, const Region & region);
 
 /**
  * @brief Extracts the elements of a region of lower dimension than a mesh
