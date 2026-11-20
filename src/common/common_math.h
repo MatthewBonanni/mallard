@@ -13,6 +13,7 @@
 #define COMMON_MATH_H
 
 #include <array>
+#include <cmath>
 #include <vector>
 #include <limits>
 
@@ -27,6 +28,37 @@ KOKKOS_INLINE_FUNCTION double rounded_product(const double a, const double b) {
 #endif
     volatile double p = a * b;
     return p;
+}
+
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+inline constexpr bool HOST_FMA = true;
+#else
+inline constexpr bool HOST_FMA = false;
+#endif
+
+/**
+ * @brief a b + c, fused where the hardware fuses (std::fma would be a library
+ *        call on CPUs without FMA). Sources compiled without contraction
+ *        (mallard_no_contraction) write their FMAs with it, so that their
+ *        results do not depend on where the compiler would fuse.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype fmadd(const rtype a, const rtype b, const rtype c) {
+    KOKKOS_IF_ON_DEVICE((return Kokkos::fma(a, b, c);))
+    KOKKOS_IF_ON_HOST((
+        if constexpr (HOST_FMA) {
+            return std::fma(a, b, c);
+        } else {
+            return a * b + c;
+        }))
+}
+
+/** @brief a . b with fmadd, accumulated left to right. */
+template <uint32_t N> KOKKOS_INLINE_FUNCTION
+rtype fma_dot(const rtype * a, const rtype * b) {
+    rtype q = a[0] * b[0];
+    for (uint32_t i = 1; i < N; i++) q = fmadd(a[i], b[i], q);
+    return q;
 }
 
 /** @brief SplitMix64 finalizer: a well-mixed 64-bit hash of z, the same on every device and rank. */
