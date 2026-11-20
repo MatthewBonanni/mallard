@@ -67,6 +67,21 @@ constexpr uint32_t MAX_PLANES = 255;
  */
 constexpr uint32_t LATTICE_ZERO = 512u | (512u << 10) | (512u << 20);
 
+// The search adds layers while it has gathered at most the largest central stencil, up to
+// LARGE_SEARCH_LAYERS, then while at most wide_search_cells(nss) for the sector stencils, up to
+// WIDE_SEARCH_LAYERS; search_depths follows it
+constexpr int LARGE_SEARCH_LAYERS = 64;
+constexpr int WIDE_SEARCH_LAYERS = 6;
+
+KOKKOS_INLINE_FUNCTION
+constexpr uint32_t wide_search_cells(const uint16_t nss) { return 8u * nss; }
+
+/** @brief Largest central stencil of nk monomials (Setup3D). */
+inline uint16_t largest_central_3d(const uint8_t nk) { return static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64; }
+
+/** @brief Largest central stencil of nk monomials (Setup2D). */
+inline uint16_t largest_central_2d(const uint8_t nk) { return static_cast<uint16_t>(std::ceil(3.5 * nk)); }
+
 /** @brief Most turns about a periodic rotation's axis a search can make (one per layer). */
 constexpr int MAX_TURNS = 64;
 
@@ -1622,7 +1637,7 @@ struct CellSetup {
 
         // Large central stencil: the smallest within MAX_LEBESGUE_3D, else the
         // smallest within LEBESGUE_SLACK of the best conditioned one
-        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, 64, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, LARGE_SEARCH_LAYERS, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_large > layers_used ? depth_large : layers_used;
         int entries_depth = 0;
@@ -1732,7 +1747,7 @@ struct CellSetup {
 
         // Small sector stencils, one per face: entries whose direction from the
         // centroid lies in the cone spanned by the face's vertices
-        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, wide_search_cells(nss), WIDE_SEARCH_LAYERS, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_wide > layers_used ? depth_wide : layers_used;
         gather_depth = uint8_t(layers_used);
@@ -2806,7 +2821,7 @@ struct CellTeam {
         tm.team_barrier();
         fill_hash(tm, ws, hash_pos, ctl, 1);
 
-        const int depth_large = reach(tm, ws, base, hash_pos, ctl, end, c.ns_max, 64);
+        const int depth_large = reach(tm, ws, base, hash_pos, ctl, end, c.ns_max, LARGE_SEARCH_LAYERS);
         if (!ctl[SEARCH_OK]) return OUT_OF_SCRATCH;
         int layers_used = depth_large;
         int entries_depth = 0, n_entries = 0;
@@ -2945,8 +2960,8 @@ struct CellTeam {
         }
 
         // Sector stencils
-        if (reach_grows(ctl, end, 8 * uint32_t(c.nss), 6)) fill_hash(tm, ws, hash_pos, ctl, end[ctl[N_END] - 1]);
-        const int depth_wide = reach(tm, ws, base, hash_pos, ctl, end, 8 * uint32_t(c.nss), 6);
+        if (reach_grows(ctl, end, wide_search_cells(c.nss), WIDE_SEARCH_LAYERS)) fill_hash(tm, ws, hash_pos, ctl, end[ctl[N_END] - 1]);
+        const int depth_wide = reach(tm, ws, base, hash_pos, ctl, end, wide_search_cells(c.nss), WIDE_SEARCH_LAYERS);
         if (!ctl[SEARCH_OK]) return OUT_OF_SCRATCH;
         layers_used = depth_wide > layers_used ? depth_wide : layers_used;
         gather_depth = uint8_t(layers_used);
@@ -3571,7 +3586,7 @@ class Setup3D {
             wall_nk = opt.curved_wall_degree < opt.degree ? teno::n_dof(opt.curved_wall_degree) : nk;
             wall_ns = opt.wall_ns;
             nss = opt.nss;
-            ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
+            ns_max = largest_central_3d(nk);
             nss_max = 2 * nss;
             pyramid_ns = pyramid_start(opt.degree, ns);
             pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);
@@ -4705,7 +4720,7 @@ struct CellSetup2D {
         // Large central stencil, grown until the least-squares system has full
         // rank and is well conditioned: the smallest within MAX_LEBESGUE_2D,
         // else the one of the smallest Lebesgue constant
-        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, 64, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, LARGE_SEARCH_LAYERS, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_large > layers_used ? depth_large : layers_used;
         int entries_depth = 0;
@@ -4822,7 +4837,7 @@ struct CellSetup2D {
 
         // Small sector stencils, one per face: entries whose offset from the
         // centroid lies in the cone spanned by the face's vertices
-        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, wide_search_cells(nss), WIDE_SEARCH_LAYERS, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_wide > layers_used ? depth_wide : layers_used;
         gather_depth = uint8_t(layers_used);
@@ -4993,7 +5008,7 @@ class Setup2D {
             wall_r = opt.curved_wall_degree < opt.degree ? opt.curved_wall_degree : opt.degree;
             wall_ns = opt.wall_ns;
             nss = opt.nss;
-            ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk));
+            ns_max = largest_central_2d(nk);
             nss_max = 2 * nss;
             const uint32_t n_cells = mesh.n_cells;
             using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
@@ -5547,6 +5562,61 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     // 2D: a third spacing at the geometric mean of the other two changes neither their ratio nor the metric
     if constexpr (N_DIM == 2) spread[8] = std::sqrt(std::max(0.0, spread[0] * spread[4] - spread[1] * spread[3]));
     return spacing_metric(spread);
+}
+
+
+std::vector<uint8_t> search_depths(const Mesh & mesh, const Options & options, const std::vector<uint32_t> & cells) {
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+#if N_DIM == 2
+    Geometry2D<HostMem> g;
+#else
+    Geometry<HostMem> g;
+#endif
+    g.offsets_cells_of_cell = neighbors.h_offsets;
+    g.cells_of_cell = neighbors.h_cells;
+    g.cells_of_cell_shift.rows = neighbors.h_shift.rows;
+    g.n_complete = mesh.n_complete();
+    g.shift_lattice = decltype(g.shift_lattice)("teno_search_shift_lattice", mesh.shift_lattice.size());
+    for (size_t s = 0; s < mesh.shift_lattice.size(); s++) {
+        for (size_t a = 0; a < 3; a++) g.shift_lattice(s, a) = mesh.shift_lattice[s][a];
+    }
+    const uint32_t n_large = N_DIM == 3 ? largest_central_3d(options.nk) : largest_central_2d(options.nk);
+    const uint32_t n_wide = wide_search_cells(options.nss);
+    struct Visits {
+        uint32_t * visit_cell;
+        uint32_t * visit_lattice;
+        uint64_t * hash;
+    };
+    std::vector<uint8_t> depths(cells.size());
+    using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
+    Kokkos::parallel_for("teno_search_depths", HostRange(0, cells.size()), [&](const size_t t) {
+        // Unlike the setup's fixed scratch, grown until the search fits
+        for (uint32_t visit_cap = 1024;; visit_cap *= 2) {
+            const uint32_t hash_cap = 4 * visit_cap;
+            std::vector<uint32_t> visit_cell(visit_cap), visit_lattice(visit_cap);
+            std::vector<uint64_t> hash(hash_cap, ~uint64_t(0));
+            const Visits w{visit_cell.data(), visit_lattice.data(), hash.data()};
+            uint32_t end[66];
+            int n_end = 1;
+            end[0] = 1;
+            bool exhausted = false, truncated = false, ok = true;
+            uint32_t n_hash = 0;
+            w.visit_cell[0] = cells[t];
+            w.visit_lattice[0] = LATTICE_ZERO;
+            insert_visit(w, hash_cap, n_hash, cells[t], LATTICE_ZERO);
+            int depth = reach_layers(g, w, hash_cap, visit_cap, n_large, LARGE_SEARCH_LAYERS, end, n_end, exhausted, n_hash,
+                                     truncated, ok);
+            if (ok && options.sector_stencils) {
+                depth = std::max(depth, reach_layers(g, w, hash_cap, visit_cap, n_wide, WIDE_SEARCH_LAYERS, end, n_end,
+                                                     exhausted, n_hash, truncated, ok));
+            }
+            if (ok) {
+                depths[t] = static_cast<uint8_t>(depth);
+                return;
+            }
+        }
+    });
+    return depths;
 }
 
 }  // namespace teno_setup

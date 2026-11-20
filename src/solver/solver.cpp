@@ -233,13 +233,16 @@ void Solver::setup_from_input() {
         init_physics();
         init_boundaries();
     });
-    timed_phase("numerics", [&] { init_numerics(); });
-    while (halo_too_shallow()) {
+    // The halo holds every layer the stencil searches visit before the numerics are set up on it
+    while (halo_too_shallow(stencil_reach().get())) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
-            init_numerics();
         });
+    }
+    timed_phase("numerics", [&] { init_numerics(); });
+    if (halo_too_shallow(dynamic_cast<const TENO *>(face_reconstruction.get()))) {
+        throw std::logic_error("TENO: the stencil searches need a deeper halo than find_gather_depth found");
     }
     trim_halo();
     describe_partition_surface();
@@ -682,9 +685,19 @@ void Solver::describe_partition_surface() {
     p.received_all = total[2];
 }
 
-bool Solver::halo_too_shallow() {
+std::unique_ptr<TENO> Solver::stencil_reach() {
+    const Input reconstruction = toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+    if (!is_distributed() || find_value_or<std::string>(reconstruction, "type", "FO") != "TENO") return nullptr;
+    auto teno = std::make_unique<TENO>();
+    timed_phase("stencil reach (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
+        configure_teno(*teno);
+        teno->find_gather_depth(reconstruction);
+    });
+    return teno;
+}
+
+bool Solver::halo_too_shallow(const TENO * teno) {
     if (!is_distributed()) return false;
-    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     // Every rank takes part in the reduction below, also those without image neighbors
     const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
     if (teno == nullptr && !wall_model_on && !images) return false;
@@ -1568,6 +1581,15 @@ void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
     update_inflow(t_eval, c);
 }
 
+void Solver::configure_teno(TENO & teno) const {
+    teno.set_mesh(mesh);
+    teno.set_boundaries(boundary_data);
+    teno.partition_faces_exchanged = is_distributed() && !is_mixture() && teno.exchanges_partition_faces();
+    teno.own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
+    // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
+    if (state_reader && !writes_stencils()) teno.sector_stencils = false;
+}
+
 void Solver::init_numerics() {
     const Input face_reconstruction_input =
         toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
@@ -1622,12 +1644,7 @@ void Solver::init_numerics() {
 
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
-        teno->partition_faces_exchanged = exchanges_partition_faces();
-        teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
-        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
-        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
-    }
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) configure_teno(*teno);
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
