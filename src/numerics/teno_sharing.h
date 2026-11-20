@@ -38,8 +38,8 @@ constexpr int SHARE_GRID_BITS = 30;
 
 /** @brief An entry on the grid of a table of exponent exp (frexp's of its largest |entry|). */
 template <typename T>
-KOKKOS_INLINE_FUNCTION int64_t on_grid(const T v, const int exp) {
-    return static_cast<int64_t>(Kokkos::round(Kokkos::ldexp(double(v), SHARE_GRID_BITS - exp)));
+KOKKOS_INLINE_FUNCTION int64_t on_grid(const T v, const int exp, const int bits = SHARE_GRID_BITS) {
+    return static_cast<int64_t>(Kokkos::round(Kokkos::ldexp(double(v), bits - exp)));
 }
 
 /** @brief The FNV-1a hash h extended by the bytes of value, lowest first. */
@@ -62,7 +62,8 @@ KOKKOS_INLINE_FUNCTION uint64_t fnv(uint64_t h, const T value) {
  */
 template <typename Entry, typename Order>
 KOKKOS_INLINE_FUNCTION uint64_t canonicalize(const Entry & v, const uint32_t width, const uint16_t * segments,
-                                             const int n_segments, const Order & order, int & exponent) {
+                                             const int n_segments, const Order & order, int & exponent,
+                                             const int bits = SHARE_GRID_BITS) {
     uint32_t n = 0;
     for (int k = 0; k < n_segments; k++) n += segments[k];
     double magnitude = 0.0;
@@ -75,7 +76,7 @@ KOKKOS_INLINE_FUNCTION uint64_t canonicalize(const Entry & v, const uint32_t wid
     // Stable: an insertion sort by the slots' entries on the grid, lexicographically
     auto less = [&](const uint16_t a, const uint16_t b) {
         for (uint32_t l = 0; l < width; l++) {
-            const int64_t qa = on_grid(v(a * width + l), e), qb = on_grid(v(b * width + l), e);
+            const int64_t qa = on_grid(v(a * width + l), e, bits), qb = on_grid(v(b * width + l), e, bits);
             if (qa != qb) return qa < qb;
         }
         return false;
@@ -97,7 +98,7 @@ KOKKOS_INLINE_FUNCTION uint64_t canonicalize(const Entry & v, const uint32_t wid
         first = end;
     }
     for (uint32_t s = 0; s < n; s++) {
-        for (uint32_t l = 0; l < width; l++) hash = fnv(hash, on_grid(v(order(s) * width + l), e));
+        for (uint32_t l = 0; l < width; l++) hash = fnv(hash, on_grid(v(order(s) * width + l), e, bits));
     }
     return hash;
 }
@@ -129,15 +130,18 @@ struct CanonicalTable {
     std::vector<uint16_t> order;     // (canonical slot): the stencil's slot
     std::vector<uint16_t> segments;  // slots of each segment
     int exponent = 0;                // of the table's largest |entry|, as frexp gives it
+    int bits = SHARE_GRID_BITS;      // the grid: 2^-bits of that magnitude
     uint64_t hash = 1469598103934665603ULL;
 
     CanonicalTable() = default;
 
     template <typename T>
-    CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes)
-        : order(std::accumulate(segment_sizes.begin(), segment_sizes.end(), size_t(0))), segments(std::move(segment_sizes)) {
+    CanonicalTable(const T * pinv, const uint32_t width, std::vector<uint16_t> segment_sizes,
+                   const int grid_bits = SHARE_GRID_BITS)
+        : order(std::accumulate(segment_sizes.begin(), segment_sizes.end(), size_t(0))), segments(std::move(segment_sizes)),
+          bits(grid_bits) {
         hash = canonicalize(HostEntries<T>{pinv}, width, segments.data(), int(segments.size()), HostOrder{order.data()},
-                            exponent);
+                            exponent, bits);
     }
 };
 
@@ -173,10 +177,10 @@ class TableStore {
                                      [&](const size_t i) {
                     const T * a = ordered(m[i].cell);
                     const T * b = m[i].held >= 0 ? ordered(uint32_t(m[i].held)) : shapes[m[i].shape].values.data();
-                    const int e = canonical[m[i].cell].exponent;
+                    const int e = canonical[m[i].cell].exponent, bits = canonical[m[i].cell].bits;
                     uint8_t equal = 1;
                     for (size_t k = 0; k < shapes[m[i].shape].values.size() && equal; k++) {
-                        equal = on_grid(a[k], e) == on_grid(b[k], e);
+                        equal = on_grid(a[k], e, bits) == on_grid(b[k], e, bits);
                     }
                     same[i] = equal;
                 });
@@ -393,6 +397,7 @@ class TableStore {
             kept.order.resize(t.order.size());
             kept.segments = t.segments;
             kept.exponent = t.exponent;
+            kept.bits = t.bits;
             const uint64_t h = keyed ? hash : t.hash;
             kept.hash = h;
             shapes.push_back(Shape{h, gid, std::move(kept), v != nullptr ? std::vector<T>(v, v + n) : std::vector<T>(n), keyed});
@@ -406,14 +411,15 @@ class TableStore {
         }
 
         bool same_layout(const size_t k, const CanonicalTable & t) const {
-            return shapes[k].canonical.exponent == t.exponent && shapes[k].canonical.segments == t.segments;
+            return shapes[k].canonical.exponent == t.exponent && shapes[k].canonical.bits == t.bits &&
+                   shapes[k].canonical.segments == t.segments;
         }
 
         bool same_shape(const size_t k, const CanonicalTable & t, const T * v) const {
             if (!same_layout(k, t)) return false;
             const Shape & s = shapes[k];
             for (size_t i = 0; i < s.values.size(); i++) {
-                if (on_grid(s.values[i], t.exponent) != on_grid(v[i], t.exponent)) return false;
+                if (on_grid(s.values[i], t.exponent, t.bits) != on_grid(v[i], t.exponent, t.bits)) return false;
             }
             return true;
         }

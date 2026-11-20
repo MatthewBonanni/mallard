@@ -22,7 +22,7 @@ namespace memory {
 enum class Category : uint8_t {
     STATE,           ///< Solution, Runge-Kutta stages and right-hand sides, cell fields
     FACES,           ///< Face states and fluxes, gradients, limiters, reconstruction buffers
-    TABLES,          ///< Reconstruction tables: TENO stencils, pseudo-inverses, indicator matrices
+    TABLES,          ///< Reconstruction tables: TENO stencils, pseudo-inverses, indicator matrices; MUSCL rows
     MESH,            ///< Connectivity, geometry, quadrature, zones
     MODELS,          ///< Boundary conditions, sources, sponges, LES and wall models
     CHEMISTRY,       ///< Mechanism, thermodynamic and transport tables, chemistry workspace
@@ -30,7 +30,7 @@ enum class Category : uint8_t {
     OUTPUT,          ///< Host staging of output fields and device mirrors
     HALO,            ///< Halo exchange buffers
     WORK,            ///< Work memory in rows of a number set by the device, MAX_WORK_BYTES at most: chemistry's
-    SETUP,           ///< Setup workspace, freed after setup: the initial solution's chunks, TENO's batches
+    SETUP,           ///< Setup workspace, freed after setup: the initial solution's chunks, TENO's batches, MUSCL's table build
     RUNTIME,         ///< Kokkos' own scratch, and GrowingBuffer pages beyond what it holds
     OTHER,           ///< A label no rule names: give it a category in memory_tracker.cpp
 };
