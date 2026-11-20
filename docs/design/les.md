@@ -615,8 +615,9 @@ at every face quadrature point, with the same reconstructed states.
   `kappa = 1e-5` a compression without vorticity is a shock above
   `|div u| h / c = kappa sqrt(theta_* / (1 - theta_*))`, 1.4e-5, about a
   hundred times single precision's round-off at Mach 1; the double Mach
-  reflection then flags 15%, and every cell compressing at `|div u| h / c`
-  above 0.05 (the shocks) is flagged as before. Scaling with `c / h` makes
+  reflection then flags 15%, and the cells compressing at `|div u| h / c`
+  above 0.05 (the shocks) are flagged as before (98.6% of them, as without
+  `eps`). Scaling with `c / h` makes
   `eps` a rate squared in any units, needs no reference velocity or length
   from the input, and follows the mesh. A larger `kappa` would also keep
   acoustic noise central (a freestream's, #1270): a wave of 1% of `c` over
@@ -627,10 +628,13 @@ at every face quadrature point, with the same reconstructed states.
   has no dissipation of its own: on Sod's problem (200 cells) the L1 density
   error rises by 1-6% at `kappa = 1e-3` and 24-27% at `0.01` (MUSCL with
   either central state, TENO 5), while up to `kappa = 3e-5` it is unchanged
-  or lower. In the Mach 1.7 wall-modeled channel the sensor flags 0.02% of
+  or lower. On the double Mach reflection, against a run on four times the
+  cells, the density error is 0.8% lower at `kappa = 1e-5` and 46% higher
+  at 0.01. In the Mach 1.7 wall-modeled channel the sensor flags 0.02% of
   the cells whatever `kappa`, and `Re_tau`, `B_q` and `T_c / T_w` differ by
-  less than their statistical uncertainty between `kappa` = 0, 3e-3 and
-  0.01. So the default only removes round-off; raising `kappa` to 0.01
+  less than their statistical uncertainty between `kappa` = 0, 1e-5, 3e-3
+  and 0.01 (`Re_tau` +3.0% from the DNS without `eps`, +2.8% with the
+  default). So the default only removes round-off; raising `kappa` to 0.01
   trades the noise damping for less upwinding in quiet, irrotational
   regions. `dilatation_scale = 0` restores the sensor without `eps`.
 - Species stay upwinded by the mass flux (Larrouturou) with the blended
