@@ -35,6 +35,7 @@
 #include "diagnostic_code.h"
 #include "face_reconstruction.h"
 #include "growing_buffer.h"
+#include "view_entries.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -2453,7 +2454,7 @@ struct TENOFunctor {
                 f[j] = s < ns ? stencil.face(s) : -1;
             }
             for (uint32_t j = 0; j < PER; j++) {
-                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
+                if (c[j] >= 0) view_entries::load_row<N_CONSERVATIVE>(W, static_cast<uint32_t>(c[j]), W_e[j]);
             }
             for (uint32_t j = 0; j < PER; j++) {
                 if (c[j] < 0) continue;
