@@ -892,7 +892,7 @@ void Solver::init_dynamic_efficiency() {
     tfles_test[1] = Kokkos::View<rtype *[3]>("tfles_test_b", mesh->n_cells);
 }
 
-void Solver::init_reaction_sensor(const Input & combustion) {
+void Solver::read_reaction_sensor(const Input & combustion) {
     const derived::MixtureFraction z = derived::mixture_fraction(
         input, combustion, "les.combustion", *mixture_model, "docs/guide/les.md#non-premixed-and-partially-premixed-flames");
     const std::string name = find_value_or<std::string>(
@@ -914,8 +914,6 @@ void Solver::init_reaction_sensor(const Input & combustion) {
     auto h = Kokkos::create_mirror_view(thickened_flame.z_weights);
     for (size_t i = 0; i < z.weights.size(); i++) h(i) = z.weights[i];
     Kokkos::deep_copy(thickened_flame.z_weights, h);
-    tfles_test[0] = Kokkos::View<rtype *[3]>("tfles_sensor_a", mesh->n_cells);
-    tfles_test[1] = Kokkos::View<rtype *[3]>("tfles_sensor_b", mesh->n_cells);
 }
 
 void Solver::update_partially_stirred_reactor() {
@@ -1007,10 +1005,34 @@ void Solver::thicken_transport() {
                                         mixture.n_species});
 }
 
-void Solver::init_les() {
+void Solver::read_les() {
     if (!les_on) return;
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");
+    if (les.reconstruction_gradients && face_reconstruction_type != FaceReconstructionType::TENO) {
+        throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
+                         "central polynomials of a TENO reconstruction, but this run reconstructs with " +
+                         FACE_RECONSTRUCTION_NAMES.at(face_reconstruction_type) +
+                         ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key "
+                         "(docs/guide/les.md).");
+    }
+    if (!input.at("les").contains("combustion")) return;
+    if (!reacting || !is_viscous()) {
+        throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
+    }
+    const Input & combustion = input.at("les").at("combustion");
+    if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
+        pasr = PartiallyStirredReactor::from_input(combustion);
+        pasr_on = true;
+        return;
+    }
+    thickened_flame = ThickenedFlame::from_input(combustion);
+    tfles_on = true;
+    if (thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION) read_reaction_sensor(combustion);
+}
+
+void Solver::init_les() {
+    if (!les_on) return;
     les_delta = Kokkos::View<rtype *>("les_delta", mesh->n_cells);
     auto h_delta = Kokkos::create_mirror_view(les_delta);
     for (uint32_t c = 0; c < mesh->n_cells; c++) h_delta(c) = std::pow(mesh->h_cell_volume(c), 1.0_r / N_DIM);
@@ -1046,13 +1068,6 @@ void Solver::init_les() {
     Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
     h_les_coefficients = pinned_mirrors(les_coefficients);
     if (les.reconstruction_gradients) {
-        if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
-            throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
-                             "central polynomials of a TENO reconstruction, but this run reconstructs with " +
-                             FACE_RECONSTRUCTION_NAMES.at(face_reconstruction->get_type()) +
-                             ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key "
-                             "(docs/guide/les.md).");
-        }
         reconstruction_gradients.polynomial =
             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("les_polynomial_gradients", mesh->n_cells);
         dynamic_cast<TENO &>(*face_reconstruction).smooth_gradients = reconstruction_gradients.polynomial;
@@ -1064,22 +1079,17 @@ void Solver::init_les() {
         }
         les_velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("les_velocity_gradients", mesh->n_cells);
     }
-    if (!input.at("les").contains("combustion")) return;
-    if (!reacting || !is_viscous()) {
-        throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
-    }
-    const Input & combustion = input.at("les").at("combustion");
-    if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
-        pasr = PartiallyStirredReactor::from_input(combustion);
-        pasr_on = true;
+    if (pasr_on) {
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);
         h_chem_time_scale = pinned_mirrors(chem_time_scale);
         Kokkos::deep_copy(chem_time_scale, 1.0_r);
         return;
     }
-    thickened_flame = ThickenedFlame::from_input(input.at("les").at("combustion"));
-    tfles_on = true;
-    if (thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION) init_reaction_sensor(combustion);
+    if (!tfles_on) return;
+    if (thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION) {
+        tfles_test[0] = Kokkos::View<rtype *[3]>("tfles_sensor_a", mesh->n_cells);
+        tfles_test[1] = Kokkos::View<rtype *[3]>("tfles_sensor_b", mesh->n_cells);
+    }
     Kokkos::deep_copy(Kokkos::subview(les_state, 2), thickened_flame.beta);
     tfles_fields = Kokkos::View<rtype *[3]>("tfles_fields", mesh->n_cells);
     h_tfles_fields = pinned_mirrors(tfles_fields);
