@@ -44,6 +44,17 @@ constexpr double MAX_LEBESGUE_3D = 4.0;
 // smallest stencil within this factor of the best one found; the best alone is
 // often the largest stencil, and markedly less accurate
 constexpr double LEBESGUE_SLACK = 1.25;
+// On the pyramid lattice, the linearized scheme of the odd degrees grows with
+// every stencil within the Lebesgue bound below about 2.5 times the monomials
+// of degree r + 1, a threshold found by von Neumann analysis (#236)
+constexpr double PYRAMID_ODD_FACTOR = 2.5;
+
+/** @brief Central stencil size to start from on a pyramid, at degree r, given the size ns elsewhere. */
+inline uint16_t pyramid_start(const uint8_t r, const uint16_t ns) {
+    if (r % 2 == 0) return ns;
+    const auto n = static_cast<uint16_t>(std::ceil(PYRAMID_ODD_FACTOR * teno::n_dof(static_cast<uint8_t>(r + 1))));
+    return n > ns ? n : ns;
+}
 
 /**
  * @brief Coordinate axes along which a cell's neighbors all lie level with
@@ -229,6 +240,7 @@ struct Options {
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
     double stencil_factor = 2.0;     // central stencil size per fitted monomial
     std::vector<double> face_points;  // 2D: the face quadrature's points on [-1, 1]
+    bool sector_stencils = true;      // false: the central stencils alone, without sectors or smoothness matrices
 };
 
 /** @brief Timings of the last setup, in seconds. */
@@ -270,11 +282,12 @@ class SetupHandle {
         const Timings & timings() const;
 
         /**
-         * @brief The central moments of cells [0, n_rows), from which the
-         *        troubled passes form the smoothness matrices: the setup's own
-         *        array if it has n_rows rows (3D; empty in 2D).
+         * @brief The central moments of cells [0, n_direct) followed by those of
+         *        the cells extra, from which the troubled passes form the
+         *        smoothness matrices: the setup's own array if that is all of
+         *        them (3D; empty in 2D).
          */
-        teno::Moments moments(uint32_t n_rows) const;
+        teno::Moments moments(uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const;
 
     private:
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;

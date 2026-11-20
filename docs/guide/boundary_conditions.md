@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 45 more.
+and 46 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -156,7 +156,9 @@ Every prescribed number may be a number (SI units), a quantity with a unit
 (`"300 K"`, `"1 bar"`) or an expression of `x`, `y`, `z` and `t` (`"300 + 50 *
 y"`, in SI units): wall temperatures and heat fluxes, outlet pressures, inflow
 and stagnation states, mass fluxes, wall velocities, far-field states and
-compositions.
+compositions. Expressions also read the boundary's
+[local coordinates](#local-coordinates): the wall distance `n`, `xi` and `eta`
+along the boundary, `r` and `theta` about its center, the arc length `s`.
 
 Vectors (`u` of `inlet_state`, `farfield` and walls; `mass_flux` of
 `inlet_mass_flow`) take either form:
@@ -266,6 +268,139 @@ Pitfalls:
 - With `average = true`, `p` is one target for the whole outlet: it may
   depend on `t`, not on `x`, `y`, `z`.
 
+## Local coordinates
+
+Expressions of a `[[boundaries]]` entry also read coordinates of the
+boundary itself, so one profile fits an inlet wherever it sits and however
+it is turned: a boundary layer in the distance from the wall, a pipe profile
+in the radius from the inlet's center.
+
+```toml
+# examples/channel_inlet: plane Poiseuille flow from the inlet's own wall distance n
+[[boundaries]]
+name = "left"
+type = "inlet_mass_flow"
+mdot = 0.1               # bulk velocity 0.1 across the channel of height 1
+profile = "n * (1 - n)"  # zero on both walls (n = 0), largest at the center (n = 0.5)
+T = 0.7142857142857143
+```
+
+| Variable | Runs | Meaning | Unit |
+|---|---|---|---|
+| `n` | 2D, 3D | Distance from the face center to the nearest wall face | m |
+| `xi` | 2D, 3D | Coordinate along the frame's tangent, from its origin | m |
+| `eta` | 3D | Coordinate along the frame's second tangent (span), from its origin | m |
+| `r` | 3D | Distance from the origin in the boundary's plane: `hypot(xi, eta)` | m |
+| `theta` | 3D | Angle from the tangent toward the span: `atan2(eta, xi)`, in (-pi, pi] | rad |
+| `s` | 2D | Arc length along the boundary, from its end with the lowest `xi` | m |
+
+![The local coordinates of an inlet: its frame (origin, inward normal, tangent), a face's wall distance n, xi and arc length s; in 3D, xi, eta, r and theta in the inlet's plane](../images/guide/boundary_frame-light.svg#gh-light-mode-only)
+![The local coordinates of an inlet: its frame (origin, inward normal, tangent), a face's wall distance n, xi and arc length s; in 3D, xi, eta, r and theta in the inlet's plane](../images/guide/boundary_frame-dark.svg#gh-dark-mode-only)
+
+*The frame of an inlet and the coordinates of one of its faces
+(`tools/docs/inlets.py`).*
+
+They are available in every value of the entry (`u`, `direction`, `p`, `T`,
+`p0`, `T0`, `mass_flux`, `profile`, `q`, `X` and `Y`, `dirichlet` states and
+the `turbulence` table's `reynolds_stress`), alone or with `x`, `y`, `z` and
+`t`: `"30 * min(n / 0.01, 1)^(1/7) * (1 + 0.05 * sin(2 * pi * 100 * t))"`
+pulses the boundary layer. `where` selects faces by `x`, `y`, `z` only (the
+frame is built from the faces it selects), and `mdot` and an `average`
+outlet pressure, totals over the boundary, read neither.
+
+**The frame.** Each entry has one frame, from all of its faces (after
+`where`), the same on every rank:
+
+- **origin**: the area-weighted center of the faces;
+- **normal**: their area-weighted mean normal, into the domain;
+- **tangent**: the coordinate axis after the normal's dominant one (x to y,
+  y to x in 2D; x to y, y to z, z to x in 3D), made perpendicular to the
+  normal. An inlet in the `x = 0` plane has its tangent along +y, so `xi` is
+  `y` minus the inlet's center;
+- **span** (3D): perpendicular to both, its largest component positive (+z
+  for that inlet).
+
+`frame = { origin = [...], normal = [...], tangent = [...] }` overrides any of
+them: `origin = [0, 0]` measures `xi` from the corner rather than the
+center, and a `tangent` is made perpendicular to the normal. The run log
+shows each entry's frame and the range of every coordinate its expressions
+read, as `local coordinates: frame origin (0, 0.05), normal (1, 0), tangent
+(0, 1); n 0.000625 to 0.05`, so a misplaced frame is visible before the run
+starts.
+
+**The wall distance** `n` is the exact distance from the face center to the
+nearest wall face: to segments in 2D and to the faces' triangles in 3D, so
+it holds on curved and slanted walls, in corners (a rectangular duct's
+inlet gets the distance to its nearest side) and on inlets that do not touch
+a wall. By default the walls are the faces of every `wall_adiabatic`,
+`wall_isothermal` and `wall_heat_flux` entry; `walls = ["bottom"]` names the
+zones instead, of any type (a symmetry plane too). A curved wall counts by
+its straight faces.
+
+**The arc length** `s` (2D) runs along the faces from their end with the
+lowest `xi` (of two ends at the same `xi`, the one with the lower x, then
+y), so it is the distance along the boundary on a curved inlet. It
+needs the faces to form one open curve; a closed curve or several pieces
+are an error naming the entry (split it with `where`, or use `xi` or `n`).
+In 3D a curved surface has no single arc length: use `xi`, `eta` or `r`,
+`theta`.
+
+A 1/7 power-law boundary layer of thickness 0.01 m on every wall an inlet
+touches, a fully developed pipe flow of bulk velocity 10 m/s on a circular inlet of
+radius 0.02 m (3D), wherever the pipe is and however it is turned, and a
+mass-flow inlet shaped like a boundary layer:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = ["30 * min(n / 0.01, 1)^(1/7)", "0"]
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "pipe_inlet"
+type = "inlet_state"
+u = "20 * (1 - (r / 0.02)^2)"  # a speed along the inward normal
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "slot"
+type = "inlet_mass_flow"
+mdot = 0.05
+profile = "min(n / 0.002, 1)^(1/7)"  # rescaled so that the faces carry mdot
+T = 300.0
+walls = ["slot_wall"]
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `frame.origin` | the area-weighted center of the entry's faces | Origin of `xi`, `eta`, `r`, `theta` [m] |
+| `frame.normal` | the area-weighted mean inward normal | Normal of the frame (normalized) |
+| `frame.tangent` | the axis after the normal's dominant one | Direction of `xi`, made perpendicular to the normal |
+| `walls` | every wall entry's faces | Zones `n` measures the distance from |
+
+Pitfalls:
+
+- The coordinates are computed once at setup, at the face centers, from the
+  mesh the run starts with; a profile is sampled at the face centers, so a
+  boundary layer needs faces finer than its thickness to be resolved.
+- On a closed surface (the whole surface of a cylinder) the normals cancel
+  and the frame has no normal: give `frame.normal`, or split the zone.
+- A local variable named like a coordinate (`var r := sqrt(x^2 + y^2)`)
+  hides it inside that expression, so expressions written before the local
+  coordinates keep their meaning.
+- On an inlet oblique to the axes (near 45 degrees), the dominant axis of the
+  normal, and so the default tangent, can flip with round-off between two
+  meshes of the same inlet: give `frame.tangent` there.
+- On a wall entry that reads `n`, the default walls include the entry
+  itself, so `n` is 0 on every face, which is an error: name the other walls
+  in `walls`. `walls` and `frame` are errors on an entry whose expressions
+  don't read the coordinates they set.
+- 2D runs have no `eta`, `r`, `theta`, and 3D runs no `s`: the error says
+  which coordinates the run has.
+
 ## Walls
 
 Walls are no-slip under `navier_stokes` and slip under `euler`. Every wall
@@ -323,11 +458,12 @@ T = 300.0                   # [K]; or an expression: "300 + 200 * x"
 ```
 
 *Used in:*
+[`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
-[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
+and 1 more.
 
 **Imposes** the wall temperature `T` (required) and the wall velocity as
 `wall_adiabatic`: a single gas through the ghost density and the viscous
@@ -535,6 +671,7 @@ T = 300.0
 
 *Used in:*
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
+[`channel_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inlet),
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
 
 **Imposes** the mass flux, the temperature, the flow direction and the
@@ -628,7 +765,7 @@ p = 101325.0
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet),
 [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet)
-and 13 more.
+and 14 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);
@@ -829,8 +966,8 @@ axis = [0.0, 0.0, 1.0]
 [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
-[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d)
-and 13 more.
+[`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
+and 14 more.
 
 Rules: zone B must match zone A node for node (to 1e-6 of the zones' shortest
 edge) after the translation or rotation, and a node without a partner is
@@ -858,7 +995,7 @@ nscbc = { L = 0.1 }        # a length of the domain [m]; sigma = 0.25 by default
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body)
-and 1 more.
+and 2 more.
 
 `nscbc` makes `outlet_pressure` and `inlet_state` Navier–Stokes
 characteristic boundary conditions, partially non-reflecting (Poinsot & Lele

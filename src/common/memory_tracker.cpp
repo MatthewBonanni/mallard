@@ -50,7 +50,7 @@ constexpr Rule RULES[] = {
     {"scalar_", true, C::FACES}, {"image_point_W", false, C::FACES}, {"teno_troubled", true, C::FACES},
     {"teno_n_troubled", false, C::FACES}, {"teno_selection", false, C::FACES}, {"cell_transport", false, C::FACES},
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
-    {"transport_gradients", false, C::FACES},
+    {"transport_gradients", false, C::FACES}, {"stage_scratch", false, C::FACES},
     // TENO setup's workspace
     {"teno_batch_", true, C::SETUP},
     // The setup's geometry of every cell (freed with it)

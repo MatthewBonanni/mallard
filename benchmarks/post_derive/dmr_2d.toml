@@ -61,6 +61,7 @@ check_nan = true
 [numerics.face_reconstruction]
 type = "TENO"
 order = 5
+cache_file = "teno.cache"
 
 [physics]
 type = "euler"

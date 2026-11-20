@@ -38,7 +38,9 @@ add_library(MallardCore STATIC
     mesh/mesh_io.cpp
     mesh/read_cgns.cpp
     mesh/read_fluent.cpp
+    mesh/read_gmsh.cpp
     mesh/read_openfoam.cpp
+    mesh/read_parallel.cpp
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
@@ -49,6 +51,7 @@ add_library(MallardCore STATIC
     mesh/zone.cpp
     mesh/box_tree.cpp
     boundary/boundary.cpp
+    boundary/boundary_coordinates.cpp
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
@@ -224,18 +227,13 @@ endforeach()
 # and on the device, and the reconstruction stages its stencil loads on GPUs
 # only: contracting multiplies and adds into FMAs would round each differently
 # by where the compiler fuses, so neither file contracts and the hot loops
-# write their FMAs explicitly
-set(teno_sources numerics/teno_setup.cpp numerics/teno.cpp)
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
-    # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
-    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(${teno_sources} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
-endif()
+# write their FMAs explicitly. [statistics.convergence] updates its estimate on
+# the device as the host does, bit for bit, and the device cuts isosurfaces
+# into the host's quadrature points (region_motion.cpp)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp
+                       common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
 endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)

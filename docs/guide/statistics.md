@@ -81,6 +81,10 @@ monitored values, cell by cell.
   per average) and a little more work per sample; no communication.
 - `confidence` (default 0.95) sets the confidence. Restart files carry the
   batches, so a continued run continues them bitwise.
+- A probe's `min` and `max` of intervals that are all NaN are `inf` and
+  `-inf`, so a trigger such as `line_max_CI_MEAN_P < 0.01` holds before two
+  batches have closed. Require a closed interval too:
+  `line_max_CI_MEAN_P < 0.01 and line_min_CI_MEAN_P < 1e300`.
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`

@@ -71,6 +71,8 @@ RULES = {
         (lambda t: num(t).get("convective_flux") == "hybrid", None),
     ("les.md", "## Thickened flames: `[les.combustion]`"):
         (lambda t: t.get("les", {}).get("combustion", {}).get("model") == "tfles", None),
+    ("les.md", "### Non-premixed and partially premixed flames"):
+        (lambda t: t.get("les", {}).get("combustion", {}).get("sensor") == "reaction", "no example yet"),
     ("les.md", "### PaSR (experimental)"):
         (lambda t: t.get("les", {}).get("combustion", {}).get("model") == "pasr", "no example yet"),
     ("les.md", "## Wall models: `wall_model`"): (lambda t: any("wall_model" in b for b in boundaries(t)), None),
