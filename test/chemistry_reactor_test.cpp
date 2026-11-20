@@ -551,7 +551,7 @@ TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) { expect_ig
 TEST(ChemistryReactorTest, BdfIgnitionDelaysAndEquilibriumMatchCantera) {
     // The same criteria with BDF, at atol 1e-14: its error estimate is that of the solution it keeps (RODAS
     // keeps its order-4 solution and estimates the order-3 one's error), so at atol 1e-10 the radicals below
-    // it are left to drift during H2's induction, and its delays come out up to 3% early (2.3% for H2/air at 1000 K, phi 0.5)
+    // it are left to drift during H2's induction, and its delays come out up to 3% early
     ReactorOptions options;
     options.method = Integrator::BDF;
     options.atol_Y = 1e-14;
