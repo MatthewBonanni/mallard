@@ -106,7 +106,7 @@ needs is in a message.
   rare), `run.event` (records of a run the client follows, see
   [Runs](#runs-and-sessions)).
 - Notifications from the client: `$/cancel {"id": 7}` stops request 7 at its
-  next phase boundary; it then answers error -32800 (cancelled).
+  next phase boundary; it then answers error -32800 (canceled).
 
 **Parameters** are objects, never positional arrays. Paths are relative to the
 session's working directory unless the case is open, then relative to the
@@ -121,15 +121,19 @@ is normative: a request without one is a bug (see
 
 | Method | Parameters | Result (schema) | One-shot |
 |---|---|---|---|
-| `initialize` | `client` (name, version), `require` (schema names and the major versions the client reads) | `mallard-capabilities`: version, build, dimensions, every interface's schema and version, the session's methods | `mallard version --format json` |
+| `initialize` | `client` (name, version), `require` (schema names and the major versions the client reads) | `mallard-capabilities`: version, build, dimensions, every interface's schema and version, the session's methods, `devices` and `control` (see [What the GUI needs](#what-the-gui-needs)) | `mallard version --format json` |
 | `shutdown` | none | `null`; the session exits after answering | none needed (a process exit) |
-| `case.open` | `input` (path) or `text` with `path` (unsaved text, located for relative paths) | `mallard-case`: input path, dimension, sections, the mesh's identity (file, bytes, SHA-256 when hashed), what was set up and its timings | `mallard check INPUT --format json --setup-only` (*new*) |
+| `case.open` | `input` (path), `text` (optional: unsaved text, located at `input` for relative paths) | `mallard-case`: input path, dimension, the mesh files read so far; later the mesh's identity and what was set up | none needed (session plumbing: a one-shot opens its input itself) |
 | `case.update` | `text` (the whole input) | as `case.open`, plus `changed` (key paths that differ) and `invalidated` (setup stages to redo) | none needed (a one-shot always starts from the file) |
 | `case.close` | none | `null`; frees the case | none needed |
 | `case.check` | `partial`, `ranks`, `memory`, `throughput`, `steps`, `mesh_fields` | `mallard-check` | `mallard check INPUT --format json [--partial] [--ranks N] ...` |
 | `case.keys` | `section` | `mallard-key-catalog` (the keys this case reads, with `complete`, `missing`, `diagnostics` of [#1311](https://github.com/MatthewBonanni/mallard/issues/1311)) | `mallard list keys [SECTION] INPUT --format json` |
-| `keys.catalog` | `section` | `mallard-key-catalog` (every key there is) | `mallard list keys [SECTION] --format json` |
-| `case.view` | `dir`, `geometry_only` | `mallard-case-view`: the files written in `dir` (`case.vtm` and its pieces, SVG images) and every block with its kind, key path, element and zone ([#1313](https://github.com/MatthewBonanni/mallard/issues/1313)) | `mallard check INPUT --view DIR [--geometry-only]` |
+| `keys.catalog` | `section` | `mallard-key-catalog` (every key there is, and every section's `form`) | `mallard list keys [SECTION] --format json` |
+| `units.catalog` | none | `mallard-unit-catalog`: every unit Mallard accepts, with its dimension and exact factor | `mallard list units --format json` (*new*) |
+| `case.files` | none | `mallard-case-files`: every file the input names, for staging | `mallard files INPUT --format json` (*new*, with [#1317](https://github.com/MatthewBonanni/mallard/issues/1317)) |
+| `case.boundary_values` | `zones`, `fields`, `dir` | `mallard-boundary-values`: Mallard's own evaluation of each boundary's prescribed values at its faces, with inflow estimates | `mallard check INPUT --boundary-values DIR` (*new*) |
+| `file.info` | `file` | `mallard-file-info`: what a restart, snapshot, mesh or run file holds, and whether this build continues from a restart | `mallard info FILE --format json` |
+| `case.view` | `dir`, `geometry_only` | `mallard-case-view`: the files written in `dir` (`case.vtm` and its pieces, SVG images) and every block with its kind, key path, element and zone ([#1313](https://github.com/MatthewBonanni/mallard/issues/1313)); each boundary zone's coordinate frame | `mallard check INPUT --view DIR [--geometry-only]` |
 | `case.initial_state` | `dir` or `prefix`, `fields` | `mallard-snapshot` of the initial solution written, with field ranges | `mallard check INPUT --initial-state PREFIX` (*new*) |
 | `mesh.info` | `file` (default: the case's mesh) | `mallard-mesh-info`: format, cells by type, bounds, boundary and cell zones with faces, areas and bounds | `mallard info MESH --format json` |
 | `mesh.quality` | `n_worst`, `fields` (prefix of the mesh-field snapshot) | `mallard-mesh-quality`: per metric max, mean, limit, count above it, worst cells with ids and centers | `mallard info MESH --format json` (its `quality` member), `check --mesh-fields` |
@@ -154,6 +158,25 @@ Rules for the table:
   stdout carries only JSON.
 - **Requests that need a case** answer -32001 (`no case`) before `case.open`.
 
+## What the GUI needs
+
+Each of these is a temporary workaround in the GUI today, mostly parsing help
+text or re-implementing Mallard in Python. Each becomes data from Mallard
+itself, with a schema and a one-shot, and the workaround is deleted when its
+request lands.
+
+| Need | Today in the GUI | Request and member |
+|---|---|---|
+| Capabilities: GPUs, the keys `ctl set` accepts, `SET`-file support | parses `check --help` and `ctl --help` | `initialize` = `version --format json` ([#1331](https://github.com/MatthewBonanni/mallard/pull/1331)) gains `devices` (backend, count, name and memory of each device visible) and `control` (socket commands; each `set` key with its type, units and whether it takes a writer's prefix or index; the control files read; `set_file` once [#1334](https://github.com/MatthewBonanni/mallard/pull/1334) lands; the routes `ctl` can take from here). `ctl` validates `set` from the same table, so the two cannot drift |
+| Boundary coordinate origin per face (where `s` starts) | guesses from the zone's bounds | `case.view`: each boundary zone's frame (origin, direction of `s`, normal, length), the values the boundary profiles evaluate with |
+| Inflow profile samples per face | evaluates `u` expressions with its own restricted evaluator | `case.boundary_values`: every prescribed value (`u`, `p`, `T`, species, profiles, data files) evaluated by the boundary itself at each face center, written per zone to `dir` (face id, center, `s`, values), with per-zone min, mean, max in the result. No expression evaluator outside Mallard |
+| Inflow estimates for mass-flow and stagnation inlets | none | `case.boundary_values`: the face speed, density and mass flux the boundary computes against the initial state, marked `estimated` (the state at the run's first step differs) |
+| Unit table: dimensions and exact factors per key | hand-copied table | `units.catalog`: each unit with its SI dimension exponents, exact factor (a decimal string, not a rounded double) and offset (temperatures); the key catalog's `units` names a dimension, so a key's accepted units are those of its dimension |
+| Array-or-table typing of sections ([#1256](https://github.com/MatthewBonanni/mallard/issues/1256)) | infers from examples | the key catalog's `sections`: each section's `form` (`table`, `array` of tables, or `named` tables), from the declarations of #1256 |
+| Restart and snapshot metadata | `mallard info FILE --format json` | `file.info`, the same handler, with `mallard-file-info` |
+| Restart compatibility for this build ([#1318](https://github.com/MatthewBonanni/mallard/issues/1318)) | none | `file.info`'s `continuable`: `true`, or `false` with diagnostics (dimension, precision, format version, species or mechanism against the open case, mesh against the open case's mesh) |
+| The files an input names, for staging ([#1256](https://github.com/MatthewBonanni/mallard/issues/1256)) | scans the TOML for known keys | `case.files`: each file with its key path, role (mesh, data, mechanism, restart, points, profile), path as written and resolved, whether it exists, bytes and SHA-256 when asked; and the directories the run will write. From the setup's read record, so a new file key cannot be missed |
+
 ## One code path: the CLI parity rule
 
 Every request is a handler:
@@ -173,14 +196,16 @@ std::span<const Method> methods();
 ```
 
 - **One-shot commands call handlers.** `mallard check INPUT --format json`
-  builds `params` from its arguments, makes a fresh `Context`, calls
-  `case.open` then `case.check`, and prints the result. With `--format text`
+  builds its options from its arguments, makes a fresh `Context`, opens the
+  input in it and runs the same `check_case` that `case.check` runs, and
+  prints the result. Relative paths in params resolve against the session's
+  working directory, as they do for the one-shot. With `--format text`
   it renders the same result as text. The text renderers read only the result
   object, so nothing reaches the text that the JSON lacks.
 - **The method table links to the command table.** Each method names the
   command row (`cli::commands()`, [Command line](cli.md)) that is its one-shot;
   a test fails if a method has none (outside the four marked "none needed",
-  which are session plumbing), if the command does not accept `--format json`,
+  and the `case.*` plumbing), if the command does not accept `--format json`,
   or if the JSON of the one-shot and the session's result differ for the same
   case (after removing timings).
 - **Session-only state is a cache, never a behavior.** The session may answer
@@ -249,7 +274,7 @@ Two different things, never mixed:
 | Code | Meaning |
 |---|---|
 | -32700, -32600, -32601, -32602, -32603 | JSON-RPC: parse error, invalid request (batches included), no such method, invalid parameters (with `data.errors`: the schema paths that failed), internal error (a bug: with the exception's text) |
-| -32800 | Cancelled by `$/cancel` |
+| -32800 | Canceled by `$/cancel` |
 | -32001 | No case open |
 | -32002 | The input cannot be parsed as TOML (`data.diagnostics` with line and column) |
 | -32003 | A file the request needs cannot be read (`data.path`) |
@@ -353,14 +378,38 @@ So an edit of `run.cfl` reruns only the run parameters and the time-step check,
 an edit of a boundary's `T` reruns boundaries, the initial state and the
 checks that read them, and an edit of `mesh.filename` reruns everything.
 
-**The first implementation caches the mesh**, the stage that dominates at
-scale: the mesh read and the built local mesh (connectivity, geometry, halo),
-keyed by the keys `init_mesh` reads (`[mesh]`, `[parallel]`, `[periodic]`,
-`[[mesh.curved]]`) and the mesh file's identity. Later stages rerun on each
-`case.check`; they are cached one by one where a measurement shows they matter
-(numerics' TENO tables are the next candidate, already cached on disk by
-their own key). Whether a stage is valid is decided by its read record, never
-by a hand-written list of keys, so a new key cannot be forgotten.
+**Where the time goes.** Setup phases of `mallard check` on a 2,974,386-cell
+tetrahedral sphere (3D, 8 threads, one CPU node):
+
+| Phase | Time |
+|---|---|
+| mesh (read 3.0 s, build connectivity and geometry) | 8.1 s |
+| numerics (stencils, reconstruction tables) | 11.3 s |
+| fields and output | 6.2 s |
+| initial solution | 4.0 s |
+| whole setup, and the one-shot's wall time | 29.7 s, 31.7 s |
+
+No one stage dominates, so the goal needs every stage cached, not the mesh
+alone.
+
+**Caching in stages.** The first implementation keeps the mesh files read
+(keyed by path, size and modification time) and answers a repeated request on
+unchanged text from memory; every `case.check` after an edit still sets the
+case up. Then, each a pull request with its measurement:
+
+1. the built mesh, keyed by the keys `init_mesh` reads and the files'
+   identity. The setup mutates the mesh after building it (`apply_curved`,
+   `make_axisymmetric`, `release_setup_data`), so the cache keeps the mesh
+   before those and setup works on a copy, or the mutations become stages of
+   their own;
+2. numerics: stencils and reconstruction tables, keyed by the mesh and the
+   `[numerics]` keys read;
+3. fields, regions and the initial state, keyed the same way.
+
+A cached stage replays the key lookups it recorded into the new `Input`, so
+unused-key detection and the key listings stay exact. Whether a stage is valid
+is decided by its read record, never by a hand-written list of keys, so a new
+key cannot be forgotten.
 
 **Large cases** keep the [scale rules of the GUI](gui.md#scale): nothing
 O(cells) crosses stdout; geometry goes to files near the data; cuts and picks
@@ -368,9 +417,10 @@ return bounded results. Above what one process holds, the session runs on N
 ranks under the cluster's launcher (see [Lifecycle](#lifecycle)), as a job, not
 on a login node.
 
-**Measured** (to fill in with the implementation): `check` after an edit
-outside `[mesh]`, session against one-shot, on the 3D meshes of
-`benchmarks/` up to the largest a CPU pod holds.
+**Measured** with the first implementation, on the same mesh: `initialize`
+0.006 s; first `case.check` 31.6 s; `case.update` of `run.cfl` and
+`case.check` 30.2 s (the mesh file not read again); a repeated `case.check`
+on unchanged text 0.000 s; the one-shot `mallard check` 31.4 s.
 
 ## Runs and sessions
 
@@ -580,25 +630,34 @@ Each step is a pull request with its tests, docs (`docs/guide/session.md` for
 the protocol, the command pages, `docs/input.md` for keys) and changelog.
 
 1. **This design** (docs only), with [The GUI](gui.md) pointing here.
-2. **Schemas and conformance** for the existing interfaces: `schemas/`, the
-   test validator, schemas of the check report, key catalog, capabilities, run
-   log, run block, run directory; installed; listed by `version --format json`.
-   After #1331.
+2. **Schemas of the other interfaces**, once #1331 lands: capabilities, run
+   log, run block, run directory, control; listed by `version --format json`,
+   whose result becomes `initialize`'s (with the `schema` member it adds to
+   the check report and key catalog). `schemas/`, the validator and the first
+   schemas come with step 3.
 3. **The session and the handlers**: `session::methods()`, `mallard session`
    with `initialize`, `shutdown`, `case.open`, `case.update`, `case.close`,
    `case.check`, `case.keys`, `keys.catalog`, `$/cancel`, `$/progress`; the
    one-shots `check --format json` and `list keys --format json` through the
-   handlers; the mesh cache; `docs/guide/session.md`; latency measurements.
-   After #1332.
-4. **Run control**: the endpoint record and the run registry, the control
+   handlers; the mesh-file cache; schemas of the check report, key catalog,
+   diagnostics, case and session messages with their conformance tests;
+   `docs/guide/session.md`; latency measurements. After #1332.
+4. **Stage caches** ([#1346](https://github.com/MatthewBonanni/mallard/issues/1346); see [Performance](#performance-on-massive-meshes)): the
+   built mesh, then numerics, then fields and the initial state, each with
+   the check-after-edit latency it buys.
+5. **Run control**: the endpoint record and the run registry, the control
    protocol version 2 with acknowledgments, `control` records in the run log,
    routing in `mallard ctl` (socket, Slurm, Kubernetes, SSH for PBS and LSF,
    signals, files), `run.control`, `run.status`, `run.follow`. After #1334.
-5. **Launch**: `mallard -i INPUT --detach`, `run.launch`.
-6. **Case view and mesh**: `case.view` with block metadata and
-   `--geometry-only` (#1313), `mesh.info`, `mesh.quality`,
+6. **Launch**: `mallard -i INPUT --detach`, `run.launch`.
+7. **Case view and mesh**: `case.view` with block metadata, boundary
+   frames and `--geometry-only` (#1313), `mesh.info`, `mesh.quality`,
    `case.initial_state`.
-7. **Cuts and picks**: the spatial index, `mesh.cut`, `mesh.pick` and their
+8. **What the GUI needs**, one pull request each, each deleting its GUI
+   workaround: `devices` and `control` in the capabilities (after #1331);
+   `file.info` with `continuable` (#1318); `units.catalog` and section forms
+   (with #1256); `case.files`; `case.boundary_values` with inflow estimates.
+9. **Cuts and picks**: the spatial index, `mesh.cut`, `mesh.pick` and their
    one-shots.
-8. **Parallel sessions** on N ranks, measured on the largest mesh of the
+10. **Parallel sessions** on N ranks, measured on the largest mesh of the
    benchmarks.
