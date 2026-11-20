@@ -72,14 +72,21 @@ dataset to its value size (h5py: `alignment_threshold=1,
 alignment_interval=8`; C: `H5Pset_alignment(fapl, 1, 8)`); HDF5 usually does
 without being asked.
 
-**Loading.** Mallard maps the values from the file (`mmap`, at the offset
+**Loading.** On CPU backends, where lookups run on the host copy, Mallard
+reads the values into memory with `H5Dread`, which takes any layout HDF5
+reads. Each rank then holds its own copy (192 MB for the design notes' large
+example; the page cache's copy is reclaimable). Mapping the file instead would
+keep one copy per node in the page cache, but lookups on it ran about 20%
+slower: page-cache pages are 4 KiB on typical kernels (no transparent huge
+pages for files, nor for shared memory where `shmem_enabled` is `never`),
+while the read copy gets huge pages, and page-cache pages ran slower than
+anonymous 4 KiB pages too. On GPU backends the host copy only stages the copy
+to the device, so Mallard maps the values from the file (`mmap`, at the offset
 `H5Dget_offset` returns) when the layout allows it: contiguous, unfiltered,
 in the machine's byte order, aligned to the value size, and the first and last
-values read the same through HDF5. Otherwise it reads them with `H5Dread`,
-which takes any layout HDF5 reads. Mapping makes loading cost nothing until the
-values are touched, and on CPU backends the ranks of a node share one copy of
-the table in the page cache. Do not overwrite a table while a run reads it:
-write a new file and rename it.
+values read the same through HDF5; otherwise it reads them. Both paths give
+bitwise identical values. Do not overwrite a table while a run reads it: write
+a new file and rename it.
 
 **float32.** Values may be float32 to halve the memory and bandwidth of
 lookups. The axes stay float64, and lookups sum in double precision, so a

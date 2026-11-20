@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -218,6 +219,22 @@ TEST(FlameletTableTest, LookupTakesAnyNumberOfAxes) {
 
 namespace {
 
+// GPU builds map the values to stage them for the device; host builds read them into memory
+constexpr bool MAPPED = !std::is_same_v<Kokkos::DefaultExecutionSpace::memory_space, Kokkos::HostSpace>;
+
+/** @brief The values of /values exactly as HDF5 reads them, as bytes. */
+std::vector<char> h5_values(const std::string & file, const size_t value_size) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    const h5::Handle h5(H5Fopen(file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + file);
+    const h5::Handle values(H5Dopen2(h5, "values", H5P_DEFAULT), H5Dclose, "values");
+    const h5::Handle space(H5Dget_space(values), H5Sclose, "space");
+    std::vector<char> bytes(static_cast<size_t>(H5Sget_simple_extent_npoints(space)) * value_size);
+    h5::check(H5Dread(values, value_size == 4 ? H5T_NATIVE_FLOAT : H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                      bytes.data()),
+              "reading values");
+    return bytes;
+}
+
 /** @brief Random points of the fixture's (Z, S, c) space, a fifth of them outside it. */
 std::vector<std::vector<double>> fixture_points(const uint32_t seed) {
     std::mt19937 rng(seed);
@@ -280,7 +297,7 @@ TEST(FlameletTableTest, ReadsTheFixture) {
     EXPECT_EQ(t.generator(), "mallard-test-fixture 2");
     EXPECT_EQ(t.mechanism(), "h2o2.yaml sha256:0efc6c52862741a29e0c29b65d979c7d8cb409db5282bca83b9c5437b3d8c8d4");
     EXPECT_FALSE(t.single());
-    EXPECT_TRUE(t.mapped());
+    EXPECT_EQ(t.mapped(), MAPPED);
     ASSERT_EQ(t.fields().size(), FIXTURE_FIELDS.size());
     std::vector<uint32_t> fields;
     for (const auto & name : FIXTURE_FIELDS) fields.push_back(field(t, name));
@@ -299,21 +316,22 @@ TEST(FlameletTableTest, ReadsTheFixture) {
     }
 }
 
-// Values mapped from the file and values read into memory look up bitwise identically, in float64
-// and float32 tables, and a float32 table looks up as its float64 source to float32 rounding:
+// The loaded values (mapped in GPU builds, read in host builds) are bitwise those HDF5 reads, in
+// float64 and float32 tables, and a float32 table looks up as its float64 source to float32 rounding:
 // catches a wrong offset or type of mapped values, and float32 values read as float64.
-TEST(FlameletTableTest, MappedAndReadValuesLookUpIdentically) {
+TEST(FlameletTableTest, LoadedValuesAreThoseHdf5Reads) {
     const auto q = fixture_points(1222);
     auto lookups = [&](const std::string & file, auto value) {
         using Value = decltype(value);
-        const Table mapped = Table::read(file), read = Table::read(file, Table::Load::READ);
-        EXPECT_TRUE(mapped.mapped()) << file;
-        EXPECT_FALSE(read.mapped()) << file;
-        EXPECT_EQ(mapped.single(), (std::is_same_v<Value, float>)) << file;
-        const auto a = lookup_device(mapped.device<3, Value>(), q, all_fields(mapped));
-        const auto b = lookup_device(read.device<3, Value>(), q, all_fields(read));
-        EXPECT_EQ(a, b) << file;
-        return a;
+        const Table t = Table::read(file);
+        EXPECT_EQ(t.mapped(), MAPPED) << file;
+        EXPECT_EQ(t.single(), (std::is_same_v<Value, float>)) << file;
+        const flamelet::TableView<3, Value, Kokkos::HostSpace> h = t.host<3, Value>();
+        const std::vector<char> expected = h5_values(file, sizeof(Value));
+        EXPECT_EQ(h.values.size() * sizeof(Value), expected.size()) << file;
+        EXPECT_EQ(std::memcmp(h.values.data(), expected.data(), std::min(expected.size(), h.values.size() * sizeof(Value))), 0)
+            << file;
+        return lookup_device(t.device<3, Value>(), q, all_fields(t));
     };
     const auto f64 = lookups(FIXTURE, 0.0);
     const auto f32 = lookups(FIXTURE_F32, 0.0f);

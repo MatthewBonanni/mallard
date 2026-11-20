@@ -186,19 +186,15 @@ class Table {
         };
 
         /**
-         * @brief How read() loads the values: MAP maps them from the file when its layout
-         *        allows (contiguous, unfiltered, native byte order, aligned), and reads them
-         *        otherwise; READ always reads them into memory.
-         */
-        enum class Load { MAP, READ };
-
-        /**
          * @brief Read a table file and check it against the format and the contract of its
-         *        model and thermodynamics tags.
+         *        model and thermodynamics tags. Builds for a GPU map the values from the file
+         *        when its layout allows (contiguous, unfiltered, native byte order, aligned),
+         *        since they only stage them for the copy to the device; other builds, and files
+         *        that cannot be mapped, read them into memory.
          * @throws InputError in a build without HDF5
          * @throws std::runtime_error naming the file and what is wrong with it
          */
-        static Table read(const std::string & file, Load load = Load::MAP);
+        static Table read(const std::string & file);
 
         /**
          * @brief A table from its parts, for tests: checked as a container (axes, fields, values),
@@ -221,7 +217,7 @@ class Table {
         const std::string & mechanism() const { return m_mechanism; }
         /** @brief Whether the values are float32 (else float64). */
         bool single() const { return m_single; }
-        /** @brief Whether the values are mapped from the file (else held in memory). */
+        /** @brief Whether the values are mapped from the file (GPU builds), else read into memory. */
         bool mapped() const { return m_mapped; }
 
         /** @brief Index of the named field, or -1. */
@@ -242,8 +238,7 @@ class Table {
 
         /**
          * @brief The table in the default device's memory: a copy, or on host backends the
-         *        storage itself (a mapped table then stays shared with the file's other readers),
-         *        valid while this object lives.
+         *        storage itself, valid while this object lives.
          * @throws std::runtime_error unless the table has D axes and values of type Value
          */
         template <uint32_t D, typename Value = double>

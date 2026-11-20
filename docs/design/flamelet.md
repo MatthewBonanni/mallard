@@ -35,7 +35,7 @@ than non-reacting LES.
 - **A generic, versioned table format with provenance**
   ([table_format.md](table_format.md)): N axes of named control variables,
   named fields, a species block, model and thermodynamics tags, in HDF5:
-  read by every build with HDF5 and by h5py, and mapped from the file.
+  read by every build with HDF5 and by h5py.
 - **Device lookup** in the RHS and the output kernels: multilinear, a few cache
   lines per lookup, bitwise independent of the backend, thread and rank count.
 - **Ignorable when off.** A run without `gas = "flamelet"` compiles to and runs
@@ -66,7 +66,7 @@ than non-reacting LES.
 | 1 | Tables generated offline by an external library, `<generator, name TBD>`, that starts from FPVgen and runs Cantera's 1D flames (counterflow S-curves by two-point flame control; free flames for FGM) | A generator in Mallard's `tools/`; FlameMaster; a flamelet solver in Mallard | Generation is a separate product with its own users, tests and release cycle, and it will cover more models than Mallard reads. Mallard keeps only the contract |
 | 2 | Presumed PDFs integrated by the generator: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); copies of the laminar flamelet along the variance axis, as FPVgen does today | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
 | 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda`, with `C` linear in `c` (a checked part of the contract) | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
-| 4 | Mallard's table format in HDF5 ([table_format.md](table_format.md)): tags, species and pressure as root attributes, named axes and fields with units, model data and provenance as groups, and the values in one contiguous, unfiltered dataset, node-major with a node's fields contiguous, mapped from the file when its layout allows | A custom binary format (magic line, JSON header, raw values); netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Standard, self-describing, readable with h5py alone; generic over models; memory-mapped loading; one lookup reads 2^d short runs. HDF5 is optional in Mallard, but most CI jobs, the GPU suites, the containers and Spack have it, and it builds from its submodule |
+| 4 | Mallard's table format in HDF5 ([table_format.md](table_format.md)): tags, species and pressure as root attributes, named axes and fields with units, model data and provenance as groups, and the values in one contiguous, unfiltered dataset, node-major with a node's fields contiguous, read into memory on CPU backends and mapped from the file to stage the copy on GPU backends | A custom binary format (magic line, JSON header, raw values); netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Standard, self-describing, readable with h5py alone; generic over models; one lookup reads 2^d short runs. HDF5 is optional in Mallard, but most CI jobs, the GPU suites, the containers and Spack have it, and it builds from its submodule |
 | 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Any number of axes, fixed at compile time per model so the corner loop unrolls; 64-bit offsets; weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
 | 6 | A third gas model, `gas = "flamelet"`, whose `Z` and `C` live in the existing species block, with the mixture path's functors templated on the gas model | A separate scalar block in `State`; control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
 | 7 | Compressible FPV thermodynamics after Saghafian et al. (2015): tabulated `T0`, `e0`, `R`, `gamma0`, `a_gamma`, closed form `T(e)` (thermodynamics tag `saghafian2015`) | Low-Mach FPV (tabulated `T`, `rho`); a Newton solve on tabulated `cp(T)` | Consistent energy with heat release and acoustics; closed form, no iteration; fits the Riemann solvers' `(gamma, e0)` surrogate (chemistry.md, decision 3) |
@@ -166,9 +166,15 @@ The specification is [table_format.md](table_format.md). In short:
   the format and version, the required attributes, groups and datasets, the
   axes, the units of every field it uses, physical bounds, `C` linear in `c`,
   the shape and finiteness. Its errors name the file and the problem.
-- Loading maps the values from the file (`H5Dget_offset`, then `mmap`) when
-  the dataset is contiguous, unfiltered, in native byte order and aligned, and
-  reads them with `H5Dread` otherwise. Both give bitwise identical lookups.
+- Loading reads the values into memory (`H5Dread`) on CPU backends. On GPU
+  backends, where the host copy only stages the copy to the device, it maps
+  them from the file (`H5Dget_offset`, then `mmap`) when the dataset is
+  contiguous, unfiltered, in native byte order and aligned. Both give bitwise
+  identical values. Mapping on CPU backends would keep one copy per node in
+  the page cache instead of one per rank, but lookups on page-cache pages ran
+  about 20% slower than on the read copy, which gets transparent huge pages;
+  page-cache and shared-memory pages get none on typical kernels
+  ([table_format.md](table_format.md#2-file-layout)).
 
 **Why HDF5 and not a custom format.** The first version of this design used
 a custom format (a magic line, one line of JSON, raw little-endian float64),
@@ -186,8 +192,7 @@ so that every build could read tables, HDF5 or not. HDF5 was chosen instead:
   the device; HDF5 never appears in device code. The CUDA, HIP and SYCL
   compile jobs build without HDF5, and the GPU suites with it.
 - *Load speed.* Equal or better: the values are one contiguous dataset, so
-  reading them is one `H5Dread` at disk speed, and mapping them costs nothing
-  until they are touched (measurements in the PR). The metadata are a few
+  reading them is one `H5Dread` at disk speed (measurements in the PR). The metadata are a few
   dozen attributes.
 - *Gains.* A standard container that h5py, HDF5's tools (`h5dump`, `h5ls`)
   and other codes read; attributes and groups instead of a JSON parser;

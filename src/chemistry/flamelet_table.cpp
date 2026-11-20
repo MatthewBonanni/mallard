@@ -23,13 +23,19 @@
 #include "input.h"
 
 #ifdef Mallard_HAS_HDF5
+#include "hdf5_util.h"
+
+// GPU builds map the values: they only stage them for the copy to the device. Host builds read them
+// into memory, where lookups run on them: lookups on page-cache pages, which get no huge pages, ran
+// about 20% slower (docs/design/table_format.md, section 2)
+#if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP) || defined(KOKKOS_ENABLE_SYCL)
+#define FLAMELET_MAP_VALUES
 #include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include "hdf5_util.h"
+#endif
 #endif
 
 namespace flamelet {
@@ -378,6 +384,7 @@ struct Reader {
     }
 };
 
+#ifdef FLAMELET_MAP_VALUES
 /**
  * The values mapped from the file, with data pointing at the first; null when the dataset's layout
  * does not allow it. The first and last values must read the same through HDF5, which guards the offset.
@@ -422,14 +429,14 @@ std::shared_ptr<const void> map_values(const std::string & file, const hid_t dse
     data = first;
     return mapping;
 }
+#endif
 
 } // namespace
 
 #endif // Mallard_HAS_HDF5
 
-Table Table::read(const std::string & file, const Load load) {
+Table Table::read(const std::string & file) {
 #ifndef Mallard_HAS_HDF5
-    (void)load;
     throw InputError(file + ": tabulated chemistry reads tables from HDF5 files, and this build has no HDF5. Rebuild "
                             "with -DMallard_ENABLE_HDF5=ON (add -DUSE_SYSTEM_HDF5=OFF to build the bundled HDF5). See "
                             "docs/design/table_format.md.");
@@ -551,7 +558,9 @@ Table Table::read(const std::string & file, const Load load) {
         t.m_n_values = 1;
         for (const hsize_t n : dims) t.m_n_values *= n;
         const hid_t native = t.m_single ? H5T_NATIVE_FLOAT : H5T_NATIVE_DOUBLE;
-        if (load == Load::MAP) t.m_storage = map_values(file, values, type, native, size, t.m_n_values, t.m_values);
+#ifdef FLAMELET_MAP_VALUES
+        t.m_storage = map_values(file, values, type, native, size, t.m_n_values, t.m_values);
+#endif
         t.m_mapped = t.m_storage != nullptr;
         if (!t.m_mapped) {
             auto read = [&](auto storage) {
