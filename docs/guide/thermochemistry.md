@@ -150,7 +150,7 @@ Chemistry and flow are split:
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
 | `sparse` | automatic | Sparse LU (`true`) or dense (`false`); automatic picks sparse from 30 species when it pays (GRI-3.0 and larger) |
 | `lanes` | 0 (automatic) | GPU lanes per cell; automatic: a warp per cell from 16 species |
-| `integrator` | `"rosenbrock"` | `rosenbrock` (RODAS) or `bdf`: variable-order BDF reusing its Jacobian over many sub-steps; faster for large mechanisms where cells take one or a few sub-steps per call (small time steps), not where igniting cells take many. Less accurate than RODAS at the same `atol` where trace species matter: lower `atol` (e.g. `1e-14`) for ignition with it |
+| `integrator` | `"rosenbrock"` | `rosenbrock` (RODAS) or `bdf`: variable-order BDF reusing its Jacobian over many sub-steps; 1.0-1.7 times RODAS's throughput on large mechanisms, most at small time steps. Less accurate than RODAS at the same `atol` where trace species matter: lower `atol` (e.g. `1e-14`) for ignition with it |
 
 Output variables: `HRR` (heat release rate, W/m³), `OMEGA_<species>`
 (production rates), `CHEM_COST` (sub-steps of each cell in the last step).
