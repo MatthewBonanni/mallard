@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
+    json_test.cpp
     view_entries_test.cpp
     kexpr_test.cpp
     region_test.cpp
