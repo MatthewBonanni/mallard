@@ -653,8 +653,15 @@ Who follows the solution, and when:
 - `[[probes]]`: at each write, a `where` region's fractions and an
   isosurface's elements, extracted anew, and at each sample of a probe with
   `average = true`. The measure column of the reductions file is the region's
-  at that time. The run-health timing row `regions` is
-  the time this takes.
+  at that time. A `where` region's fractions are computed on the device, in
+  the step graph when steps run ahead (`[run] step_queue`). So are the cells
+  an isosurface crosses, with their levels and values, when it is sampled as
+  cell averages without normals: the host extracts its elements from them
+  while the device steps on. One that reads normals (fluxes) or point values
+  is cut and sampled at its quadrature points by the device too, when it is
+  cut from one condition alone, unclipped, on a mesh without curved cells;
+  any other is extracted and sampled by the host, which stops the queue at
+  its writes. The run-health timing row `regions` is the time the host takes.
 - `[[write_data]]`: at each write, a `where` region's cells (those of positive
   fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
   [snapshot](output.md#snapshots-of-regions) is a mesh of its own.
@@ -682,7 +689,8 @@ both), so it covers its whole measure in the domain. There is no key; a region
 that crosses no periodic boundary is unchanged. Copies wrap each on their own,
 and a moving region wraps while it stays within one period of where it is at
 `t = 0`. `mallard check` and the run log
-note `wrapped across periodic boundaries (N images)`.
+note `wrapped across periodic boundaries (N images)`, counting the region
+itself. A region with more than 4096 images that meet the domain is an error.
 
 ![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-light.svg#gh-light-mode-only)
 ![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-dark.svg#gh-dark-mode-only)

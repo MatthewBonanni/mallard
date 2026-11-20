@@ -702,7 +702,8 @@ consecutive steps are not fused yet (each half restarts RODAS from the
 cell's last sub-step, so the cost of the split is one extra Jacobian per
 cell and step; fusing is an optimization for later). Owned cells are
 processed in chunks sized to keep the per-cell work memory (mass fractions,
-RODAS vectors and two `(Ns + 1)^2` matrices) under 1 GiB; in each chunk a
+RODAS vectors, two `(Ns + 1)^2` matrices, pivots and the audit's clipped
+species masses) under 1 GiB; in each chunk a
 kernel flags the cells that need chemistry (`T >= T_frozen` and
 `dt/2 max_k |W_k omega_k / rho| > atol / 100` at the current state), a scan
 compacts them into a queue, and one thread per queued cell integrates.

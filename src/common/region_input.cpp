@@ -1060,10 +1060,16 @@ class Parser {
             Filled f;
             f.kind = op == Kind::UNION ? Filled::Kind::UNION
                                        : (op == Kind::INTERSECTION ? Filled::Kind::INTERSECTION : Filled::Kind::DIFFERENCE);
-            if (type == "difference") f.parts.push_back(place(ps[0], where));
-            if (!shapes.empty()) {
-                Parsed joined = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
+            if (type == "difference" && ps[0].filled < 0 && !shapes.empty()) {
+                shapes.insert(shapes.begin(), &ps[0]);
+                Parsed joined = join_nodes(shapes, Kind::DIFFERENCE);
                 f.parts.push_back(place(joined, where));
+            } else {
+                if (type == "difference") f.parts.push_back(place(ps[0], where));
+                if (!shapes.empty()) {
+                    Parsed joined = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
+                    f.parts.push_back(place(joined, where));
+                }
             }
             for (Parsed * p : mesh_parts) f.parts.push_back(place(*p, where));
             f.cells = true;
@@ -1460,19 +1466,24 @@ Definition definition(Parser & parser, Parsed & p, const std::string & where, co
     return d;
 }
 
+constexpr int MAX_IMAGES = 4096;
+constexpr int MAX_IMAGE_CANDIDATES = 1000000;
+
 /**
  * @brief The steps from the world's frame to each image of a region in the
  *        periodic lattice of the mesh, the region itself first: the images
  *        whose box meets the domain's (a moving region's: within a period of
  *        it), along the directions in which the region's box is finite.
  */
-std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array<Vec, 2> & box, const bool moving) {
+std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array<Vec, 2> & box, const bool moving,
+                                      const std::string & where, const std::size_t line) {
     const size_t n = mesh.translations.size();
     std::vector<std::vector<Step>> out = {{}};
     if (n == 0) return out;
     auto finite = [&](const size_t i) { return std::isfinite(box[0][i]) && std::isfinite(box[1][i]); };
     std::array<Vec, 2> reach = mesh.domain;
     std::vector<int> range(n, 0), low(n, 0);
+    auto bounded = [](const double r) { return static_cast<int>(std::min(r, double(MAX_IMAGE_CANDIDATES) + 1.0)); };
     for (size_t l = 0; l < n; l++) {
         const Vec & v = mesh.translations[l];
         if (static_cast<int>(l) == mesh.rotation) {
@@ -1480,7 +1491,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             for (size_t i = 0; i < N_DIM; i++) across = across && (finite(i) || std::abs(mesh.axis[i]) == 1.0);
             // Every other sector once: a half turn is reached one way only
             const double turns = 360.0 / std::abs(mesh.angle);
-            range[l] = across ? std::min(32, static_cast<int>(std::floor(0.5 * turns + 1e-9))) : 0;
+            range[l] = across ? bounded(std::floor(0.5 * turns + 1e-9)) : 0;
             low[l] = -range[l] + (range[l] > 0 && std::abs(2.0 * range[l] - turns) < 1e-9 ? 1 : 0);
             continue;
         }
@@ -1494,7 +1505,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             extent += std::abs(v[i] / length) * (std::max(box[1][i], mesh.domain[1][i]) - std::min(box[0][i], mesh.domain[0][i]));
         }
         if (!along) continue;
-        range[l] = std::min(16, std::max(moving ? 1 : 0, static_cast<int>(std::ceil(extent / length))));
+        range[l] = std::max(moving ? 1 : 0, bounded(std::ceil(extent / length)));
         low[l] = -range[l];
         if (moving) {
             for (size_t i = 0; i < 3; i++) {
@@ -1502,6 +1513,17 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
                 reach[1][i] += std::abs(v[i]);
             }
         }
+    }
+    double candidates = 1.0;
+    for (size_t l = 0; l < n; l++) candidates *= double(range[l] - low[l] + 1);
+    const std::string fix =
+        "Shorten the region along the periodic directions, or leave it unbounded along them (such as a half_space)";
+    if (candidates > double(MAX_IMAGE_CANDIDATES)) {
+        fail(where, line,
+             "spans too many periods of the mesh to wrap across its periodic boundaries: " +
+                 std::to_string(static_cast<uint64_t>(candidates)) + " images to test against the domain, at most " +
+                 std::to_string(MAX_IMAGE_CANDIDATES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
     }
     const double tol = 1e-9 * norm({mesh.domain[1][0] - mesh.domain[0][0], mesh.domain[1][1] - mesh.domain[0][1],
                                     mesh.domain[1][2] - mesh.domain[0][2]});
@@ -1557,6 +1579,12 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
         }
         if (l == n) break;
     }
+    if (out.size() > static_cast<size_t>(MAX_IMAGES)) {
+        fail(where, line,
+             "wraps across periodic boundaries into " + std::to_string(out.size()) + " images, at most " +
+                 std::to_string(MAX_IMAGES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
+    }
     return out;
 }
 
@@ -1575,7 +1603,7 @@ Definition parse(const Input & value, const std::string & where, const Input * n
     std::vector<std::vector<Step>> wraps = {{}};
     if (mesh && !mesh->translations.empty() && !own_mesh_parts) {
         const Region unwrapped{Definition(d)};
-        wraps = images(*mesh, bounds(unwrapped), unwrapped.moving());
+        wraps = images(*mesh, bounds(unwrapped), unwrapped.moving(), where, line_of(value));
     }
     if (wraps.size() > 1) {
         Parser again;
