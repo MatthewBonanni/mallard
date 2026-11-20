@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+<rect x="0" y="0" width="1280" height="800" rx="0" fill="#0e0f11"/>
+<rect x="0" y="0" width="1280" height="48" rx="0" fill="#16171a"/>
+<line x1="0.0" y1="48.0" x2="1280.0" y2="48.0" stroke="#2a2b30" stroke-width="1"/>
+<circle cx="24.0" cy="24.0" r="9.0" fill="#2dd4bf"/>
+<text x="42" y="29" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#ececee" text-anchor="start">cylinder-re100</text>
+<text x="160" y="29" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#62626a" text-anchor="start">/</text>
+<text x="174" y="29" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#9b9ba3" text-anchor="start">Case setup</text>
+<rect x="300" y="14" width="47.2" height="20" rx="10" fill="#123a36"/>
+<text x="323.6" y="28" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#2dd4bf" text-anchor="middle">Local</text>
+<rect x="900" y="12" width="220" height="24" rx="6" fill="#1c1d21" stroke="#2a2b30" stroke-width="1"/>
+<text x="912" y="28" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#62626a" text-anchor="start">Search keys, runs, actions</text>
+<text x="1108" y="28" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#62626a" text-anchor="end" font-feature-settings="'tnum'">Ctrl K</text>
+<rect x="0" y="48" width="56" height="752" rx="0" fill="#16171a"/>
+<line x1="56.0" y1="48.0" x2="56.0" y2="800.0" stroke="#2a2b30" stroke-width="1"/>
+<rect x="8" y="58" width="40" height="44" rx="8" fill="#123a36"/>
+<rect x="20" y="68" width="16" height="16" rx="4" fill="none" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="28" y="98" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#2dd4bf" text-anchor="middle">Case</text>
+<rect x="20" y="124" width="16" height="16" rx="4" fill="none" stroke="#9b9ba3" stroke-width="1.5"/>
+<text x="28" y="154" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#9b9ba3" text-anchor="middle">Runs</text>
+<rect x="20" y="180" width="16" height="16" rx="4" fill="none" stroke="#9b9ba3" stroke-width="1.5"/>
+<text x="28" y="210" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#9b9ba3" text-anchor="middle">Data</text>
+<rect x="20" y="236" width="16" height="16" rx="4" fill="none" stroke="#9b9ba3" stroke-width="1.5"/>
+<text x="28" y="266" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#9b9ba3" text-anchor="middle">View</text>
+<rect x="20" y="292" width="16" height="16" rx="4" fill="none" stroke="#9b9ba3" stroke-width="1.5"/>
+<text x="28" y="322" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="9" font-weight="500" fill="#9b9ba3" text-anchor="middle">Remotes</text>
+<rect x="56" y="48" width="220" height="752" rx="0" fill="#16171a"/>
+<line x1="276.0" y1="48.0" x2="276.0" y2="800.0" stroke="#2a2b30" stroke-width="1"/>
+<text x="76" y="80" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#62626a" text-anchor="start">SETUP</text>
+<circle cx="84.0" cy="105.0" r="4.0" fill="#a3e635"/>
+<text x="98" y="109" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Mesh</text>
+<circle cx="84.0" cy="141.0" r="4.0" fill="#a3e635"/>
+<text x="98" y="145" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Physics</text>
+<rect x="64" y="162" width="204" height="30" rx="6" fill="#123a36"/>
+<circle cx="84.0" cy="177.0" r="4.0" fill="#f97066"/>
+<text x="98" y="181" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="#2dd4bf" text-anchor="start">Boundaries</text>
+<text x="256" y="181" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#f97066" text-anchor="end" font-feature-settings="'tnum'">1</text>
+<circle cx="84.0" cy="213.0" r="4.0" fill="#a3e635"/>
+<text x="98" y="217" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Initial state</text>
+<circle cx="84.0" cy="249.0" r="4.0" fill="#a3e635"/>
+<text x="98" y="253" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Numerics</text>
+<circle cx="84.0" cy="285.0" r="4.0" fill="#fdb022"/>
+<text x="98" y="289" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Output</text>
+<text x="256" y="289" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#fdb022" text-anchor="end" font-feature-settings="'tnum'">1</text>
+<circle cx="84.0" cy="321.0" r="4.0" fill="#a3e635"/>
+<text x="98" y="325" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Probes &amp; regions</text>
+<circle cx="84.0" cy="357.0" r="4.0" fill="#62626a"/>
+<text x="98" y="361" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">Check &amp; run</text>
+<text x="76" y="420" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#62626a" text-anchor="start">BOUNDARY ZONES</text>
+<rect x="78" y="438" width="10" height="10" rx="2" fill="#56b4e9"/>
+<text x="96" y="448" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="13" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">cylinder</text>
+<text x="256" y="448" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="end">wall_adiabatic</text>
+<rect x="78" y="468" width="10" height="10" rx="2" fill="#e69f00"/>
+<text x="96" y="478" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="13" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">farfield</text>
+<text x="256" y="478" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="end">farfield</text>
+<text x="76" y="530" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#9b9ba3" text-anchor="start" font-feature-settings="'tnum'">cylinder.msh</text>
+<text x="76" y="548" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#62626a" text-anchor="start" font-feature-settings="'tnum'">1 536 quads · 2 zones</text>
+<rect x="276" y="48" width="664" height="632" rx="0" fill="#0e0f11"/>
+<circle cx="608.0" cy="330.0" r="26.0" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="33.9" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="44.4" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="58.3" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="76.5" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="100.7" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="132.5" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="174.5" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="230.0" fill="none" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="634.0" y1="330.0" x2="838.0" y2="330.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="633.8" y1="333.4" x2="836.0" y2="360.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="633.1" y1="336.7" x2="830.2" y2="389.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="632.0" y1="339.9" x2="820.5" y2="418.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="630.5" y1="343.0" x2="807.2" y2="445.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="628.6" y1="345.8" x2="790.5" y2="470.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="626.4" y1="348.4" x2="770.6" y2="492.6" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="623.8" y1="350.6" x2="748.0" y2="512.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="621.0" y1="352.5" x2="723.0" y2="529.2" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="617.9" y1="354.0" x2="696.0" y2="542.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="614.7" y1="355.1" x2="667.5" y2="552.2" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="611.4" y1="355.8" x2="638.0" y2="558.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="608.0" y1="356.0" x2="608.0" y2="560.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="604.6" y1="355.8" x2="578.0" y2="558.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="601.3" y1="355.1" x2="548.5" y2="552.2" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="598.1" y1="354.0" x2="520.0" y2="542.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="595.0" y1="352.5" x2="493.0" y2="529.2" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="592.2" y1="350.6" x2="468.0" y2="512.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="589.6" y1="348.4" x2="445.4" y2="492.6" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="587.4" y1="345.8" x2="425.5" y2="470.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="585.5" y1="343.0" x2="408.8" y2="445.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="584.0" y1="339.9" x2="395.5" y2="418.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="582.9" y1="336.7" x2="385.8" y2="389.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="582.2" y1="333.4" x2="380.0" y2="360.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="582.0" y1="330.0" x2="378.0" y2="330.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="582.2" y1="326.6" x2="380.0" y2="300.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="582.9" y1="323.3" x2="385.8" y2="270.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="584.0" y1="320.1" x2="395.5" y2="242.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="585.5" y1="317.0" x2="408.8" y2="215.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="587.4" y1="314.2" x2="425.5" y2="190.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="589.6" y1="311.6" x2="445.4" y2="167.4" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="592.2" y1="309.4" x2="468.0" y2="147.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="595.0" y1="307.5" x2="493.0" y2="130.8" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="598.1" y1="306.0" x2="520.0" y2="117.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="601.3" y1="304.9" x2="548.5" y2="107.8" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="604.6" y1="304.2" x2="578.0" y2="102.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="608.0" y1="304.0" x2="608.0" y2="100.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="611.4" y1="304.2" x2="638.0" y2="102.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="614.7" y1="304.9" x2="667.5" y2="107.8" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="617.9" y1="306.0" x2="696.0" y2="117.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="621.0" y1="307.5" x2="723.0" y2="130.8" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="623.8" y1="309.4" x2="748.0" y2="147.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="626.4" y1="311.6" x2="770.6" y2="167.4" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="628.6" y1="314.2" x2="790.5" y2="190.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="630.5" y1="317.0" x2="807.2" y2="215.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="632.0" y1="320.1" x2="820.5" y2="242.0" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="633.1" y1="323.3" x2="830.2" y2="270.5" stroke="#3a3b41" stroke-width="0.8"/>
+<line x1="633.8" y1="326.6" x2="836.0" y2="300.0" stroke="#3a3b41" stroke-width="0.8"/>
+<circle cx="608.0" cy="330.0" r="230.0" fill="none" stroke="#e69f00" stroke-width="3"/>
+<circle cx="608.0" cy="330.0" r="26.0" fill="none" stroke="#56b4e9" stroke-width="3.5"/>
+<rect x="292" y="64" width="210" height="28" rx="14" fill="#16171a" stroke="#2a2b30" stroke-width="1"/>
+<text x="306" y="82" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="start">Zones  ·  Regions  ·  Probes  ·  Quality</text>
+<rect x="778.0" y="160" width="140" height="26" rx="6" fill="#16171a" stroke="#e69f00" stroke-width="1"/>
+<text x="788.0" y="177" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">farfield · 64 faces</text>
+<line x1="306.0" y1="610.0" x2="406.0" y2="610.0" stroke="#9b9ba3" stroke-width="1.5"/>
+<text x="306" y="626" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#9b9ba3" text-anchor="start" font-feature-settings="'tnum'">10 D</text>
+<rect x="276" y="680" width="664" height="120" rx="0" fill="#16171a"/>
+<line x1="276.0" y1="680.0" x2="940.0" y2="680.0" stroke="#2a2b30" stroke-width="1"/>
+<text x="292" y="704" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#62626a" text-anchor="start">PROBLEMS</text>
+<text x="376" y="704" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#62626a" text-anchor="start">mallard check · 0.14 s · on input change</text>
+<circle cx="298.0" cy="728.0" r="4.0" fill="#f97066"/>
+<text x="310" y="732" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#f97066" text-anchor="start" font-feature-settings="'tnum'">E-INPUT</text>
+<text x="426" y="732" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#ececee" text-anchor="start">boundaries.farfield.T: required for farfield</text>
+<text x="924" y="732" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'">line 34</text>
+<circle cx="298.0" cy="750.0" r="4.0" fill="#fdb022"/>
+<text x="310" y="754" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#fdb022" text-anchor="start" font-feature-settings="'tnum'">W-FORMAT-VTU</text>
+<text x="426" y="754" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#ececee" text-anchor="start">write_data: VTU files, build has no HDF5</text>
+<text x="924" y="754" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'">line 72</text>
+<circle cx="298.0" cy="772.0" r="4.0" fill="#9b9ba3"/>
+<text x="310" y="776" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="600" fill="#9b9ba3" text-anchor="start" font-feature-settings="'tnum'">W-DNS-ETA</text>
+<text x="426" y="776" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#ececee" text-anchor="start">cells of 6.4 eta on average: refine or use [les]</text>
+<text x="924" y="776" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'"></text>
+<rect x="940" y="48" width="340" height="752" rx="0" fill="#16171a"/>
+<line x1="940.0" y1="48.0" x2="940.0" y2="800.0" stroke="#2a2b30" stroke-width="1"/>
+<rect x="960" y="68" width="10" height="10" rx="2" fill="#e69f00"/>
+<text x="978" y="78" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="15" font-weight="600" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">farfield</text>
+<text x="960" y="100" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#9b9ba3" text-anchor="start">Boundary condition of zone farfield</text>
+<text x="960" y="128" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#9b9ba3" text-anchor="start">type</text>
+<rect x="960" y="134" width="300" height="30" rx="6" fill="#1c1d21" stroke="#2a2b30" stroke-width="1"/>
+<text x="970" y="154" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#ececee" text-anchor="start">farfield</text>
+<path d="M1240 146 l5 5 l5 -5" stroke="#9b9ba3" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+<text x="960" y="188" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#9b9ba3" text-anchor="start">u  velocity</text>
+<rect x="960" y="194" width="300" height="30" rx="6" fill="#1c1d21" stroke="#2a2b30" stroke-width="1"/>
+<text x="970" y="214" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="13" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">[69.4, 0.0]</text>
+<text x="1250" y="214" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'">m/s</text>
+<text x="960" y="248" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#9b9ba3" text-anchor="start">p  pressure</text>
+<rect x="960" y="254" width="300" height="30" rx="6" fill="#1c1d21" stroke="#2a2b30" stroke-width="1"/>
+<text x="970" y="274" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="13" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">101 325</text>
+<text x="1250" y="274" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'">Pa</text>
+<text x="960" y="308" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#9b9ba3" text-anchor="start">T  temperature</text>
+<rect x="960" y="314" width="300" height="30" rx="6" fill="#1c1d21" stroke="#f97066" stroke-width="1.5"/>
+<text x="970" y="334" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="13" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'"></text>
+<text x="1250" y="334" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#9b9ba3" text-anchor="end" font-feature-settings="'tnum'">K</text>
+<text x="960" y="360" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" font-weight="400" fill="#f97066" text-anchor="start">Required for farfield. E-INPUT  ·  docs</text>
+<text x="960" y="386" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#9b9ba3" text-anchor="start">Expert</text>
+<path d="M1010 381 l4 4 l4 -4" stroke="#9b9ba3" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+<line x1="960.0" y1="404.0" x2="1260.0" y2="404.0" stroke="#2a2b30" stroke-width="1"/>
+<text x="960" y="428" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11.5" font-weight="400" fill="#62626a" text-anchor="start" font-feature-settings="'tnum'">boundaries[1]  ·  input.toml line 30</text>
+<rect x="960" y="740" width="140" height="36" rx="8" fill="#16171a" stroke="#2a2b30" stroke-width="1"/>
+<text x="1030" y="763" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="#ececee" text-anchor="middle">Check</text>
+<rect x="1112" y="740" width="148" height="36" rx="8" fill="#2dd4bf"/>
+<text x="1186" y="763" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#16171a" text-anchor="middle">Run locally</text>
+</svg>
