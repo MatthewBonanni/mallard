@@ -21,6 +21,8 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "input.h"
+
 namespace tabulated {
 
 /** @brief Coordinates of a data set, at most. */
@@ -217,6 +219,9 @@ struct Csv {
 /** @brief Read a CSV file; errors name the file and line, and link docs (page#anchor of the key that reads it). */
 Csv read_csv(const std::string & file, const std::string & docs);
 
+/** @brief The column names of a CSV file (its header); empty if it cannot be read. */
+std::vector<std::string> read_header(const std::string & file);
+
 /** @brief Data sets on the host, gathered for the device. */
 class Data {
     public:
@@ -260,6 +265,48 @@ class Data {
         std::vector<TreeNode> m_nodes;
         std::vector<uint32_t> m_order;
 };
+
+/** @brief An entry of [[initialize.data]] or [[boundaries.data]], its file read into a data set. */
+struct Entry {
+    std::string name, file;
+    std::vector<std::string> coordinates;  // the coordinate columns
+    std::vector<std::string> variables;    // <name>_<column> of the other columns: the set's fields, in order
+    uint32_t set = 0;
+    std::string kind;                      // the set's type and size, for the run log
+};
+
+/**
+ * @brief Read a data entry's keys name, file, type, coordinates,
+ *        interpolation, neighbors and units, and add its file to data; where
+ *        the set is read (at, region) is the caller's.
+ * @param where The entry's key, for messages.
+ * @param docs The guide section for messages.
+ */
+Entry read_entry(const Input & e, const std::string & where, const std::string & docs, Data & data);
+
+/**
+ * @brief The variables of a data entry, from the header of its file alone,
+ *        as read_entry names them; empty where they cannot be told (read_entry
+ *        then says why).
+ */
+std::vector<std::string> entry_variables(const Input & e);
+
+/** @brief The column of a variable <name>_<column> of an entry. */
+std::string column_of(const Entry & entry, const std::string & variable);
+
+/**
+ * @brief The error for a variable <name>_<column> that is already a name of
+ *        the expressions: a coordinate (of `coordinates`, e.g. "boundary"), or
+ *        another entry's variable.
+ */
+InputError taken(const Input & e, const std::string & where, const std::string & docs, const Entry & entry,
+                 const std::string & variable, bool coordinate, const std::string & side);
+
+/** @brief "a", "a or b", "a, b or c". */
+std::string one_of(const std::vector<std::string> & names);
+
+/** @brief How the run log shows the expression at that fills a column: bare if it is a name, else quoted. */
+std::string at_text(const std::string & at, const std::vector<std::string> & names);
 
 } // namespace tabulated
 
