@@ -1,0 +1,1 @@
+- 3D TENO no longer stores the quadrature points of planar faces: the kernels place them from the faces' nodes with the setup's roundings, so a mesh without curved faces needs about 0.5 KB less device memory per hexahedron at TENO5. Results are bitwise unchanged and the time per step does not grow (#978).
