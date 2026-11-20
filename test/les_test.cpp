@@ -912,7 +912,7 @@ namespace {
 /**
  * @brief Upwind fractions of 1 mm cells of air at rest, each with dilatation
  *        div[i] and vorticity omega[i] (SI), in units of length L and time T
- *        (in metres and seconds).
+ *        (in meters and seconds).
  */
 std::vector<double> sensor_decisions(const std::vector<double> & div, const std::vector<double> & omega, const double L,
                                      const double T) {
