@@ -1229,6 +1229,21 @@ void download_tables(const TENO & scheme, const HostIndex & large_index, const H
     small_rows(scheme).download(scheme.stencil_small, small_index, c0, n_small, tables);
 }
 
+/** @brief Renumber the cells of the entries of packed stencils that are no images by new_cell; the entries it maps to -1. */
+uint64_t renumber_cells(const teno::PackedStencils & packed, const Kokkos::View<int32_t *> & new_cell) {
+    auto slots = packed.cells;
+    uint64_t dropped = 0;
+    Kokkos::parallel_reduce("teno_renumber_cells", Kokkos::RangePolicy<>(0, slots.extent(0)),
+                            KOKKOS_LAMBDA(const uint64_t k, uint64_t & n) {
+        const int32_t e = slots(k);
+        if (e < 0) return;
+        const int32_t d = new_cell(e);
+        n += d < 0 ? 1u : 0u;
+        slots(k) = d;
+    }, dropped);
+    return dropped;
+}
+
 } // namespace
 
 TENO::TENO() {
@@ -3765,17 +3780,7 @@ bool TENO::carry_tables() {
     Kokkos::View<int32_t *> d_new_cell(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_new_cell"), new_cell.size());
     Kokkos::deep_copy(d_new_cell, HostUnmanaged<const int32_t>(new_cell.data(), new_cell.size()));
     for (teno::PackedStencils * packed : {&from.stencil_large, &from.stencil_small}) {
-        auto slots = packed->cells;
-        uint64_t dropped = 0;
-        Kokkos::parallel_reduce("teno_carry_cells", Kokkos::RangePolicy<>(0, slots.extent(0)),
-                                KOKKOS_LAMBDA(const uint64_t k, uint64_t & n) {
-            const int32_t e = slots(k);
-            if (e < 0) return;
-            const int32_t d = d_new_cell(e);
-            n += d < 0 ? 1u : 0u;
-            slots(k) = d;
-        }, dropped);
-        if (dropped > 0) throw std::logic_error("TENO: a carried stencil reads a dropped cell");
+        if (renumber_cells(*packed, d_new_cell) > 0) throw std::logic_error("TENO: a carried stencil reads a dropped cell");
         if (packed->images.extent(0) == 0) continue;
         auto h_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), packed->images);
         for (size_t k = 0; k < h_images.extent(0); k += 2) {
