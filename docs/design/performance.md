@@ -956,6 +956,32 @@ verification manual instead of bitwise identity ([CONTRIBUTING.md](../../CONTRIB
 none of the three relaxations above qualifies, so none was kept, and the TENO setup keeps its host and device
 tables equal.
 
+### 17. Convective flux without contraction (#1253)
+
+The Riemann solvers are inline functions, and where nvcc and Clang contract their multiplies and adds into
+FMAs depends on the kernel they are inlined in: the same flux rounded differently in `convective_flux` and in a
+reconstruction kernel computing it on its own (#965), by about 1e-15. The sources that call them
+(`solver_convective_flux.cpp` and three tests) are compiled without contraction, as `teno.cpp` is, and the
+solvers, the flux functors and the low-Mach and hybrid blends write their FMAs explicitly (`fmadd`, `fma_dot`):
+every product added to something, as the compiler would have fused it. Configuring fails if another source
+names `riemann::` without the same flags. Measured on one A100 (CUDA 13.5, Release, three runs each;
+`convective_flux` is the mean over 60 (`teno5_3d`, 20 steps) or 300 (`sphere_3d`, 100 steps) launches, Nsight
+Systems):
+
+| case | `main` | no contraction, no explicit FMAs | this change |
+|---|---|---|---|
+| `teno5_3d`, `convective_flux` | 3.46 ms | 3.71 ms (+7.2%) | **3.18 ms (-8.0%)** |
+| `teno5_3d`, step | 105 ms (8.41-8.44M cells/s) | 106 ms (8.36-8.37M) | **104 ms (8.48-8.51M)** |
+| `sphere_3d` (MUSCL, 500 steps), `convective_flux` | 94.7 us | 98.2 us (+3.7%) | **88.0 us (-7.0%)** |
+| `sphere_3d`, step | 7.33-7.36 ms | 7.30-7.40 ms | 7.32-7.35 ms |
+
+Without contraction and without explicit FMAs the flux is 4-7% slower; with them it is 7-8% faster than `main`,
+whose contraction does not fuse every product (for example `0.5 W[0] |u|^2` into the energy, or the HLLC star
+state). Results change in the last bits once: after 20 steps of `teno5_3d` the cells differ from `main` by at most
+3.5e-15 of each field's maximum (`mallard diff`), 1.5e-12 for the momentum along z, which starts at zero. The block-face flux of #965 (design 1, computed in the TENO smooth
+pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
+(`teno5_3d`, 20 steps).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

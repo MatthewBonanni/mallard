@@ -20,6 +20,7 @@
 #include <complex>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <string>
@@ -327,6 +328,26 @@ TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
         const double q[2] = {std::uniform_real_distribution<double>(0, 1)(rng), std::uniform_real_distribution<double>(0, 1.7)(rng)};
         EXPECT_NEAR(h(0, 0, q), f(q[0], q[1]), 1e-12);
     }
+}
+
+TEST(InitialStateTest, DataFilesRejectValuesThatAreNotFinite) {
+    for (const std::string v : {"nan", "inf", "-Infinity"}) {
+        const std::string file = write_temp("mallard_not_finite_" + v + ".csv", "s, u\n0, 1\n1, " + v + "\n");
+        try {
+            tabulated::read_csv(file, "docs/guide/initialization.md#tabulated-data-and-point-clouds");
+            ADD_FAILURE() << v << " was accepted";
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find(file + ":3: column u is \"" + v + "\""), std::string::npos) << e.what();
+        }
+    }
+    tabulated::Data data;
+    try {
+        data.add_table({{0.0, 1.0}}, {{1.0, 2.0}, {1.0, std::nan("")}}, false, "t");
+        ADD_FAILURE() << "nan was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("row 2 of value column 2"), std::string::npos) << e.what();
+    }
+    EXPECT_THROW(data.add_points({{0.0, 1.0}}, {{1.0, std::numeric_limits<double>::infinity()}}, 1, "p"), InputError);
 }
 
 TEST(InitialStateTest, PointCloudsFindTheirNearestPoints) {
