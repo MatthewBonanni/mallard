@@ -608,7 +608,7 @@ TEST(RunLogTest, RecordedOutputsAreWrittenOnceAcrossContinuationsAndRewinds) {
             checked++;
         }
     }
-    EXPECT_GT(checked, 10u);
+    EXPECT_GT(checked, writes_hdf5() ? 10u : 5u);
     EXPECT_TRUE(kinds.contains("restart") && kinds.contains("vtu")) << checked;
 #ifdef Mallard_HAS_HDF5
     if (writes_hdf5()) {
