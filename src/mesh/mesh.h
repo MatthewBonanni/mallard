@@ -15,6 +15,7 @@
 #include <array>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -170,6 +171,22 @@ AxisymmetricCell axisymmetric_cell(const std::vector<std::array<rtype, N_DIM>> &
 struct MeshBlock;
 struct PeriodicNodes;
 
+/**
+ * @brief The vertex neighbors of every cell (the cells sharing a node with it,
+ *        or a periodic node class), CSR, each by increasing global id, and the
+ *        shift row of each: vertex neighbor k of a cell is at
+ *        Q cell_coords(cells(k)) + shifts(shift(k)). shift holds no rows when
+ *        no neighbor crosses a periodic boundary.
+ */
+struct VertexNeighbors {
+    Kokkos::View<uint32_t *> offsets;
+    Kokkos::View<uint32_t *> cells;
+    ShiftRows shift;
+    Kokkos::View<uint32_t *>::host_mirror_type h_offsets;
+    Kokkos::View<uint32_t *>::host_mirror_type h_cells;
+    HostShiftRows h_shift;
+};
+
 class Mesh {
     public:
         /**
@@ -318,10 +335,10 @@ class Mesh {
         void compute_face_centroids();
 
         /**
-         * @brief Compute the vertex-neighbor adjacency, then allocate and
-         *        compute all derived geometry (face areas and normals, cell
-         *        volumes and centroids, face centroids) from the node
-         *        coordinates and connectivity.
+         * @brief Find the periodic shift rows, then allocate and compute all
+         *        derived geometry (face areas and normals, cell volumes and
+         *        centroids, face centroids) from the node coordinates and
+         *        connectivity.
          */
         void compute_geometry();
 
@@ -343,10 +360,13 @@ class Mesh {
         void h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const;
 
         /**
-         * @brief Build the vertex-neighbor (cells sharing a node) adjacency on
-         *        the device.
+         * @brief The vertex neighbors, built on first use: the mesh does not
+         *        hold them until then, and after release_setup_data only the
+         *        kernels that kept their views do (a later call builds them
+         *        again, the same). Host loops on several threads call it
+         *        first outside them.
          */
-        void compute_cell_neighbors();
+        const VertexNeighbors & vertex_neighbors() const;
 
         /**
          * @brief Copy mesh data from host to device.
@@ -361,9 +381,9 @@ class Mesh {
         /**
          * @brief Drop what only the setup reads: the node coordinates and the
          *        cells' and faces' node lists on the device, the zones' device
-         *        lists, and the host vertex-neighbor lists. Kernels that read
-         *        the nodes later keep their own views (2D TENO); output keeps
-         *        the host nodes and connectivity.
+         *        lists, and the vertex neighbors. Kernels that read the nodes
+         *        or the vertex neighbors later keep their own views (2D TENO,
+         *        vertex gradients); output keeps the host nodes and connectivity.
          */
         void release_setup_data();
 
@@ -579,18 +599,14 @@ class Mesh {
         Kokkos::View<uint32_t *> nodes_of_face;
         Kokkos::View<uint32_t *> offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<uint32_t *> cells_of_cell;            // Vertex neighbors (CSR)
-        Kokkos::View<uint32_t *> offsets_cells_of_cell;
         // Periodic maps: row 0 is the identity. Cell 1 of face f, seen from
-        // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)); vertex
-        // neighbor k of a cell is at Q cell_coords(cells_of_cell(k)) +
-        // shifts(cells_of_cell_shift(k)), with Q that row of shift_rotations
-        // (empty, and Q the identity, without rotational pairs).
-        // cells_of_cell_shift holds no rows when no neighbor crosses a periodic boundary
+        // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)), with Q that
+        // row of shift_rotations (empty, and Q the identity, without
+        // rotational pairs). The rows of the vertex neighbors' shifts are
+        // numbered with the mesh, after the faces'
         Kokkos::View<rtype *[N_DIM]> shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]> shift_rotations;
         Kokkos::View<uint8_t *> face_shift;
-        ShiftRows cells_of_cell_shift;
 
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
@@ -605,12 +621,9 @@ class Mesh {
         Kokkos::View<uint32_t *>::host_mirror_type h_nodes_of_face;
         Kokkos::View<uint32_t *>::host_mirror_type h_offsets_nodes_of_face;
         Kokkos::View<int32_t *[2]>::host_mirror_type h_cells_of_face;
-        Kokkos::View<uint32_t *>::host_mirror_type h_cells_of_cell;
-        Kokkos::View<uint32_t *>::host_mirror_type h_offsets_cells_of_cell;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
         Kokkos::View<rtype *[N_DIM][N_DIM]>::host_mirror_type h_shift_rotations;
         Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
-        HostShiftRows h_cells_of_cell_shift;
 
         // Periodicity (host): the translation of each lattice direction (zero
         // for the rotation's), the rotation, the zones the pairs joined, and
@@ -657,9 +670,19 @@ class Mesh {
                                         uint8_t n_order,
                                         std::vector<uint32_t> & neighbors) const;
 
+        /**
+         * @brief Number the shift rows of the vertex neighbors after the
+         *        faces', and check that no cell touches itself or another cell
+         *        both directly and across a periodic boundary; then fill the
+         *        shift views.
+         */
+        void compute_periodic_shifts();
+        VertexNeighbors build_vertex_neighbors() const;
+
         MeshType type = MeshType::FROM_FILE;
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
+        mutable std::optional<VertexNeighbors> m_vertex_neighbors;
 };
 
 #endif // MESH_H

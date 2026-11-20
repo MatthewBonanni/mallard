@@ -103,9 +103,10 @@ cmake --build build -j
     `uint16_t` wrap the offset, and the build rejects them.
   - Data lives in `Kokkos::View`s in the default memory space; copy to the host
     with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
-  - A View of rank 2 or more holds at most 2^31 entries: Kokkos computes its offset
-    in the common type of the indices, which can be `int`, and every allocation is
-    checked (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
+  - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
+    in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
+    (`src/CMakeLists.txt`), and every allocation is checked
+    (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
     with 64 bits, as `teno::PackedStencils` does.
   - Results must not depend on the backend, thread count or rank count: reductions
     that feed the solution must be deterministic (the suite checks bitwise
@@ -228,8 +229,11 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
-  x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
-  suites are split across several jobs (`CI / mpi-3d-1of4`, ...) on one build
+  x86-64. The MPI builds check the bounds of every Kokkos View access
+  (`-DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON`), so an index out of range aborts the test that
+  reaches it, naming the View, even when only several ranks or a large mesh reach it; build
+  the same way to reproduce such a failure. Each job also shows on the PR as its own status,
+  `CI / <job>`; the longest suites are split across several jobs (`CI / mpi-3d-1of6`, ...) on one build
   (`CI / build-mpi-3d`), each running a share of the tests of about equal duration
   (`tools/dev/test_split.py`, from the durations of `main`'s newest passed run, or else
   `tools/dev/test_times.json`, which `test_split.py refresh` rewrites), and the suites without MPI run as several processes at once, so a test must

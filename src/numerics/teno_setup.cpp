@@ -3577,11 +3577,12 @@ class Setup3D {
             pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);
             const uint32_t n_cells = mesh.n_cells;
 
+            const VertexNeighbors & neighbors = mesh.vertex_neighbors();
             Geometry<HostMem> & h = host;
             h.cell_coords = mesh.h_cell_coords;
-            h.offsets_cells_of_cell = mesh.h_offsets_cells_of_cell;
-            h.cells_of_cell = mesh.h_cells_of_cell;
-            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
+            h.offsets_cells_of_cell = neighbors.h_offsets;
+            h.cells_of_cell = neighbors.h_cells;
+            h.cells_of_cell_shift.rows = neighbors.h_shift.rows;
             h.offsets_faces_of_cell = mesh.h_offsets_faces_of_cell;
             h.faces_of_cell = mesh.h_faces_of_cell;
             h.offsets_nodes_of_face = mesh.h_offsets_nodes_of_face;
@@ -3682,9 +3683,9 @@ class Setup3D {
 
             Geometry<DefaultMem> & d = device;
             d.cell_coords = mesh.cell_coords;
-            d.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
-            d.cells_of_cell = mesh.cells_of_cell;
-            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
+            d.offsets_cells_of_cell = neighbors.offsets;
+            d.cells_of_cell = neighbors.cells;
+            d.cells_of_cell_shift.rows = neighbors.shift.rows;
             d.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
             d.faces_of_cell = mesh.faces_of_cell;
             d.offsets_nodes_of_face = mesh.offsets_nodes_of_face;
@@ -4997,6 +4998,7 @@ class Setup2D {
             const uint32_t n_cells = mesh.n_cells;
             using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
 
+            const VertexNeighbors & neighbors = mesh.vertex_neighbors();
             Geometry2D<HostMem> & h = host;
             h.cell_coords = mesh.h_cell_coords;
             h.face_normals = mesh.h_face_normals;
@@ -5004,15 +5006,15 @@ class Setup2D {
             h.node_coords = mesh.h_node_coords;
             h.shifts = mesh.h_shifts;
             h.face_area = mesh.h_face_area;
-            h.offsets_cells_of_cell = mesh.h_offsets_cells_of_cell;
-            h.cells_of_cell = mesh.h_cells_of_cell;
+            h.offsets_cells_of_cell = neighbors.h_offsets;
+            h.cells_of_cell = neighbors.h_cells;
             h.offsets_faces_of_cell = mesh.h_offsets_faces_of_cell;
             h.faces_of_cell = mesh.h_faces_of_cell;
             h.offsets_nodes_of_face = mesh.h_offsets_nodes_of_face;
             h.nodes_of_face = mesh.h_nodes_of_face;
             h.offsets_nodes_of_cell = mesh.h_offsets_nodes_of_cell;
             h.nodes_of_cell = mesh.h_nodes_of_cell;
-            h.cells_of_cell_shift.rows = mesh.h_cells_of_cell_shift.rows;
+            h.cells_of_cell_shift.rows = neighbors.h_shift.rows;
             h.face_shift = mesh.h_face_shift;
             h.cells_of_face = mesh.h_cells_of_face;
             h.n_complete = mesh.n_complete();
@@ -5137,15 +5139,15 @@ class Setup2D {
             d.node_coords = mesh.node_coords;
             d.shifts = mesh.shifts;
             d.face_area = mesh.face_area;
-            d.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
-            d.cells_of_cell = mesh.cells_of_cell;
+            d.offsets_cells_of_cell = neighbors.offsets;
+            d.cells_of_cell = neighbors.cells;
             d.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
             d.faces_of_cell = mesh.faces_of_cell;
             d.offsets_nodes_of_face = mesh.offsets_nodes_of_face;
             d.nodes_of_face = mesh.nodes_of_face;
             d.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
             d.nodes_of_cell = mesh.nodes_of_cell;
-            d.cells_of_cell_shift.rows = mesh.cells_of_cell_shift.rows;
+            d.cells_of_cell_shift.rows = neighbors.shift.rows;
             d.face_shift = mesh.face_shift;
             d.cells_of_face = mesh.cells_of_face;
             d.quad_points = quad_points;
@@ -5498,9 +5500,10 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     // Reused by each thread: an allocation per cell cost as much as the metric
     static thread_local std::vector<Point> offsets;
     offsets.assign(1, Point{0.0, 0.0, 0.0});
-    for (uint32_t k = mesh.h_offsets_cells_of_cell(i); k < mesh.h_offsets_cells_of_cell(i + 1); k++) {
-        const uint8_t s = mesh.h_cells_of_cell_shift(k);
-        const uint32_t c = mesh.h_cells_of_cell(k);
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    for (uint32_t k = neighbors.h_offsets(i); k < neighbors.h_offsets(i + 1); k++) {
+        const uint8_t s = neighbors.h_shift(k);
+        const uint32_t c = neighbors.h_cells(k);
         Point d = {0.0, 0.0, 0.0};
         if (mesh.h_rotated_row(s)) {
             rtype x[N_DIM], y[N_DIM];
