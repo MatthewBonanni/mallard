@@ -45,7 +45,7 @@
 #
 #   python ../../tools/setup/flame_reference.py --single h2 4.0 300 .
 #   python flame_vortex.py h2_phi4_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
-#       --r 4 --u 30 --cfl 0.8
+#       --r 4 --u 30 --cfl 0.8 --explicit-step
 #
 # For the sweep, the same with --r R --u U into run directories (and --cells 24
 # for r = 1), plus the controls --r 4 --u 0 --flame-times 5.2 and --r 1 --u 0
@@ -161,6 +161,7 @@ transport = "mixture_averaged"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
+explicit_step = true
 
 [output]
 check_interval = 2000
