@@ -28,19 +28,19 @@ after its usual command:
 |---|---|---|
 | [Container](../installation.md#container) | `docker run --rm -v "$PWD:/work" ghcr.io/matthewbonanni/mallard python3 script.py` | |
 | [Spack](../installation.md#spack) | `spack install mallard && spack load mallard` | `~python` |
-| [From source](../installation.md#from-source) | `cmake --install build`, then `pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
+| [From source](../installation.md#from-source) | `cmake --install build`, then `uv pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
 
 The package is `tools/mallard` of the Mallard repository
-(`share/mallard/tools/mallard` of an install; its distribution name, for pip,
+(`share/mallard/tools/mallard` of an install; its distribution name, for uv,
 is `mallard-python`). A build writes its library,
 `build/src/libmallard2d.so` (`.dylib` on macOS), next to `build/src/mallard`,
 and `cmake --install` installs it in `PREFIX/lib`; a build with
 `-DMallard_DIM=3` gives `libmallard3d`, and either reads the output of both
 dimensions. From a build or an install, add the package to a Python
-environment with [uv](https://docs.astral.sh/uv/) or pip:
+environment with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv && uv pip install -e tools        # in the repository; or: pip install -e tools
+uv venv && uv pip install -e tools        # in the repository
 uv pip install PREFIX/share/mallard/tools  # from an install
 ```
 
