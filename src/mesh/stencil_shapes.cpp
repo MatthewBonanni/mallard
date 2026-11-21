@@ -165,6 +165,8 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
         const uint64_t name = std::hash<std::string>{}(zone.get_name()) | 1;
         for (size_t k = 0; k < zone.h_faces.extent(0); k++) face_zone[zone.h_faces(k)] = name;
     }
+    // Built here: the threads only read them
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
     Kokkos::parallel_for("stencil_shapes_near_faces", Kokkos::RangePolicy<Host>(0, n), [&](const uint32_t c) {
         if (has[c]) return;
         Reached at;
@@ -176,12 +178,12 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
                 const uint32_t d = at.cells[q];
                 if (d >= mesh.n_complete()) return;  // its vertex neighbors are not all on this rank
                 const std::array<double, N_DIM> t_d = at.shift[q];
-                for (uint32_t k = mesh.h_offsets_cells_of_cell(d); k < mesh.h_offsets_cells_of_cell(d + 1); k++) {
-                    const uint8_t row = mesh.h_cells_of_cell_shift(k);
+                for (uint32_t k = neighbors.h_offsets(d); k < neighbors.h_offsets(d + 1); k++) {
+                    const uint8_t row = neighbors.h_shift(k);
                     if (mesh.h_rotated_row(row)) return;
                     std::array<double, N_DIM> t = t_d;
                     if (row != 0) FOR_I_DIM t[i] += double(mesh.h_shifts(uint32_t(row), i));
-                    const size_t found = at.insert(mesh.h_cells_of_cell(k), t);
+                    const size_t found = at.insert(neighbors.h_cells(k), t);
                     // A cell reached across two different periodic shifts: no frame
                     FOR_I_DIM if (std::abs(at.shift[found][i] - t[i]) > QUANTUM * h[c]) return;
                 }

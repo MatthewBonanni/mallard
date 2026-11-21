@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "example_inputs.h"
 #include "json.h"
+#include "particles.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -297,11 +298,20 @@ struct Outcome {
     std::vector<std::string> warnings;
 };
 
+/** @brief Distributed runs with particles step on the host, which moves the particles between ranks. */
+bool migrates_particles(const Solver & solver) { return solver.get_particles() && solver.get_particles()->migrates(); }
+
 /**
  * @brief Queued steps take the graph's step path on every backend; its capture records no fence, allocation or
  *        host copy.
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
+    if (Solver::are_cuda_graphs_off()) return;
+    if (migrates_particles(solver)) {
+        EXPECT_EQ(solver.device_steps_unsupported(), "particles migrate between ranks through the host");
+        EXPECT_EQ(guard.captures(), 0u);
+        return;
+    }
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
     if (solver.get_step() > 1) {
         EXPECT_GT(guard.captures(), 0u);
@@ -546,7 +556,7 @@ TEST(StepQueueTest, OutputsByStep) {
 #ifdef KOKKOS_ENABLE_CUDA
     const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
     EXPECT_EQ(fallback.graph_steps, 0u);
-    if (comm::is_root()) {
+    if (comm::is_root() && !Solver::are_cuda_graphs_off()) {
         ASSERT_EQ(fallback.warnings.size(), 1u);
         EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
     }
@@ -646,6 +656,7 @@ namespace {
 
 /** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
 void expect_graphed(const Outcome & o, const std::string & what) {
+    if (Solver::are_cuda_graphs_off()) return;
 #ifdef KOKKOS_ENABLE_CUDA
     EXPECT_GT(o.graph_steps, 0u) << what;
 #endif
@@ -1261,7 +1272,9 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
                    statistics;
     Case bare = c;
     bare.extra = "check_interval = 4\n" + statistics;
-    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    }
 }
 
 namespace {
@@ -1352,7 +1365,9 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     bare.extra = base;
     const Outcome queued = run_case("sources_regions", c, 3);
     expect_graphed(queued, "sources_regions");
-    EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
@@ -1377,7 +1392,9 @@ TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("many_writers", c, 3);
     expect_graphed(queued, "many_writers");
-    EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
@@ -1400,7 +1417,9 @@ TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("fused_outputs", c, 3), quiet = run_case("fused_outputs_bare", bare, 3);
     expect_graphed(queued, "fused_outputs");
-    EXPECT_EQ(queued.queued, quiet.queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, quiet.queued);
+    }
     ASSERT_EQ(queued.U.size(), quiet.U.size());
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
@@ -1440,7 +1459,9 @@ TEST(StepQueueTest, OutputsOfAveragedSpectraAndPhasesAreStagedWithoutStoppingThe
     bare.extra = "check_interval = 1000\n" + statistics;
     const Outcome queued = run_case("spectra_phases", c, 3);
     expect_graphed(queued, "spectra_phases");
-    EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
@@ -1724,6 +1745,7 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
     // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
     // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;
@@ -1751,6 +1773,7 @@ struct ExampleOutcome {
     uint64_t step = 0, rejected = 0, queued = 0;
     rtype t = 0.0;
     std::vector<std::string> rows;
+    bool host_steps = false;
 };
 
 ExampleOutcome run_example(const ExampleCase & c, const int depth) {
@@ -1778,6 +1801,7 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
+    o.host_steps = migrates_particles(solver);
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
@@ -1800,7 +1824,11 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
     // A progress row every step, also of runs with fused chemistry
-    EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    if (queued.host_steps) {
+        EXPECT_EQ(queued.queued, 0u);
+    } else {
+        EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    }
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);

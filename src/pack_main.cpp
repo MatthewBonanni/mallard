@@ -27,6 +27,7 @@
 #include "commands.h"
 #include "common_io.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "diagnostic_code.h"
 #include "log.h"
@@ -39,8 +40,8 @@ namespace {
 using logging::count;
 using logging::item;
 
-constexpr const char * SCHEMA = "mallard-pack";
-constexpr int VERSION = 1;
+constexpr const char * SCHEMA = interfaces::PACK.name;
+constexpr int VERSION = interfaces::PACK.version;
 constexpr const char * MANIFEST = "manifest.json";
 constexpr const char * RUN_RECORD = "run.json";
 constexpr const char * CASE = "case";
