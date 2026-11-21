@@ -17,6 +17,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -454,15 +455,15 @@ TEST_F(AirScalars, TraceSpeciesAtItsBoundLimitsOnlyItself) {
     }
 }
 
-TEST_F(AirScalars, OnlyCutsUpToOwnCutMaxLimitOnlyTheirSpecies) {
+TEST_F(AirScalars, CutsUpToOwnCutLoLimitOnlyTheirSpeciesAndFromOwnCutHiAllScalars) {
     // The N2 trace next to two zeros: its cell's neighbor without it needs
-    // its N2 cut by trace / 4 at the far face. Below OWN_CUT_MAX only N2 is
-    // cut and HE keeps its linear profile; above, the cut limits every
-    // scalar, HE included, since cutting N2 alone where it vanishes over a
-    // cell would diffuse it alone
-    const double limit = 4.0 * double(OWN_CUT_MAX);
-    expect_he_linear(*mesh, reconstruct("none", trace_composition(NX, 0.99 * limit)).Y, "below OWN_CUT_MAX");
-    const FaceStates face = reconstruct("none", trace_composition(NX, 1.01 * limit));
+    // its N2 cut by trace / 4 at the far face. Below OWN_CUT_LO only N2 is
+    // cut and HE keeps its linear profile; above OWN_CUT_HI, the cut limits
+    // every scalar, HE included, since cutting N2 alone where it vanishes
+    // over a cell would diffuse it alone
+    expect_he_linear(*mesh, reconstruct("none", trace_composition(NX, 0.99 * 4.0 * double(OWN_CUT_LO))).Y,
+                     "below OWN_CUT_LO");
+    const FaceStates face = reconstruct("none", trace_composition(NX, 1.01 * 4.0 * double(OWN_CUT_HI)));
     double HE_off = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t side = 0; side < 2; side++) {
@@ -473,11 +474,46 @@ TEST_F(AirScalars, OnlyCutsUpToOwnCutMaxLimitOnlyTheirSpecies) {
                                                          double(mesh->h_face_coords(f, 1)))));
         }
     }
-    EXPECT_GT(HE_off, 1.0e-3) << "above OWN_CUT_MAX";
+    EXPECT_GT(HE_off, 1.0e-3) << "above OWN_CUT_HI";
+}
+
+TEST_F(AirScalars, FaceValuesAreContinuousAsACutCrossesFromOwnToShared) {
+    // The N2 trace swept so that its cut goes from OWN_CUT_LO / 2 to
+    // 2 OWN_CUT_HI in small steps: the face values of every scalar must move
+    // in small steps too. A switch between the species' own slope and the
+    // shared limiter moves HE and the thermodynamics of the cells next to the
+    // trace by their whole change at once (issue #1242)
+    constexpr size_t STEPS = 80;
+    const double c_first = 0.5 * double(OWN_CUT_LO), ratio = 4.0 * double(OWN_CUT_HI) / double(OWN_CUT_LO);
+    std::vector<FaceStates> faces;
+    for (size_t i = 0; i <= STEPS; i++) {
+        const double cut = c_first * std::pow(ratio, double(i) / double(STEPS));
+        faces.push_back(reconstruct("none", trace_composition(NX, 4.0 * cut)));
+    }
+    const auto value = [&](const FaceStates & face, const uint32_t f, const uint8_t side, const uint32_t j) {
+        return j < N_AIR ? double(face.Y(f, side, j)) : double(face.thermo(f, 0, side, j - N_AIR));
+    };
+    for (uint32_t j = 0; j < N_AIR + 2; j++) {
+        double range = 0.0, step = 0.0;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            for (uint8_t side = 0; side < 2; side++) {
+                const int32_t c = mesh->h_cells_of_face(f, side);
+                if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
+                const double first = value(faces[0], f, side, j);
+                for (size_t i = 1; i <= STEPS; i++) {
+                    const double v = value(faces[i], f, side, j);
+                    range = std::max(range, std::abs(v - first));
+                    step = std::max(step, std::abs(v - value(faces[i - 1], f, side, j)));
+                }
+            }
+        }
+        EXPECT_GT(range, 0.0) << "scalar " << j;
+        EXPECT_LT(step, 0.1 * range) << "scalar " << j << ": the largest step of a face value against its whole change";
+    }
 }
 
 TEST_P(ScalarLimiters, MassFractionsStayInBoundsWithTheirThermodynamics) {
-    // N2 = 0.5 next to 0 is cut beyond OWN_CUT_MAX, which limits all scalars;
+    // N2 = 0.5 next to 0 is cut beyond OWN_CUT_HI, which limits all scalars;
     // Barth-Jespersen limits a trace (1e-6) without any cut at all
     std::vector<double> traces = {0.5};
     if (GetParam() == "barth_jespersen") traces.push_back(1.0e-6);
@@ -559,3 +595,54 @@ TEST(TENOScalarsTest, RoundOffTraceSpeciesKeepsThetaAtOneAndStaysNonNegative) {
 
 INSTANTIATE_TEST_SUITE_P(Reconstruction, MeshTypes,
                          ::testing::Values("cartesian", "cartesian_tri", "wedge"));
+
+TEST(MUSCL2D, FusedAndBlockPathsGiveTheSeparateKernelsFaceValuesAndLimitersBitwise) {
+    // A blast in a box with walls, and in one periodic in x: every cell has a row, and the walls' cells read
+    // their faces
+    for (const bool periodic : {false, true}) {
+        Input input = parse_toml(std::string("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 10\n") +
+                                 (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n" : ""));
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init(input);
+        mesh->copy_host_to_device();
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const double x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+            const bool inside = (x - 0.45) * (x - 0.45) + (y - 0.4) * (y - 0.4) < 0.06;
+            h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+            h_W(c, 1) = static_cast<rtype>(0.1 * std::sin(3.0 * x));
+            h_W(c, 2) = static_cast<rtype>(0.1 * std::cos(2.0 * y));
+            h_W(c, 3) = inside ? 1.0_r : 0.1_r;
+        }
+        Kokkos::deep_copy(W, h_W);
+        auto results = [&](const bool block_path, const bool fused) {
+            auto muscl = std::make_unique<MUSCL>();
+            muscl->set_mesh(mesh);
+            muscl->set_boundaries(bd);
+            muscl->block_path = block_path;
+            muscl->init(parse_toml("type = \"MUSCL\"\n"));
+            EXPECT_EQ(muscl->n_table_cells, uint64_t(mesh->n_cells)) << "periodic " << periodic;
+            EXPECT_EQ(muscl->n_block_cells, block_path ? uint64_t(periodic ? 12 * 8 : 10 * 8) : 0u) << "periodic " << periodic;
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
+            if (fused) {
+                muscl->calc_cell_face_values(Kokkos::DefaultExecutionSpace(), W, face_W, IndexSet{{}, 0, mesh->n_cells});
+            } else {
+                muscl->calc_face_values(W, face_W);
+            }
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            auto phi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), muscl->limiters);
+            std::vector<rtype> out(h.data(), h.data() + h.span());
+            out.insert(out.end(), phi.data(), phi.data() + phi.span());
+            return out;
+        };
+        const auto separate = results(false, false);
+        for (const bool block_path : {false, true}) {
+            for (const bool fused : {false, true}) {
+                EXPECT_TRUE(results(block_path, fused) == separate)
+                    << "periodic " << periodic << ", block path " << block_path << ", fused " << fused;
+            }
+        }
+    }
+}

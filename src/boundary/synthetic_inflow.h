@@ -35,11 +35,11 @@ constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
 /**
  * @brief Mean velocity and Reynolds stress of an `inlet_state` with `nscbc` at
  *        given points: `u` (components or a speed along `direction`, numbers or
- *        expressions in x, y, z), and with a
+ *        expressions of the boundary's variables), and with a
  *        `[boundaries.turbulence]` table its `reynolds_stress` (numbers or
- *        expressions), or both from its `profile`, a CSV file of plane
- *        averages (mallard post average --homogeneous: a coordinate column, `MEAN_U_*` and
- *        `COV_U_*_U_*`) interpolated linearly along that coordinate.
+ *        expressions), or both from its `profile`: the columns `MEAN_U_*` and
+ *        `COV_U_*_U_*` of a data entry (mallard post average --homogeneous
+ *        writes them), read at the faces like any [[boundaries.data]].
  */
 class InletProfile {
     public:
@@ -57,19 +57,22 @@ class InletProfile {
         /** @brief Reynolds stress in N_STRESS order (zero without turbulence). */
         std::array<double, N_STRESS> stress_at(const FacePoint & x) const;
 
+        /**
+         * @brief The columns of a profile's header that turbulence.profile
+         *        reads: MEAN_U_<X>, and COV_U_<r>_U_<c> of the diagonal and of the
+         *        off-diagonal entries present (in either order); empty for an
+         *        empty header.
+         */
+        static std::vector<std::string> profile_columns(const std::vector<std::string> & header);
+
     private:
         bool uniform_ = true;
         std::vector<BoundaryValue> u;       // per component, or the speed alone
         bool speed = false, directed = false;
         DirectionKey direction;
         std::vector<BoundaryValue> stress;  // per N_STRESS component, empty without turbulence
-        // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
-        int axis = -1;
-        std::vector<double> coordinate;
-        std::vector<std::vector<double>> columns;
 
-        void read_table(const Input & turbulence, const std::string & where);
-        double table(size_t column, double s) const;
+        void read_profile(const Input & boundary, const std::string & where, const std::vector<std::string> & variables);
 };
 
 /**

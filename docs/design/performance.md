@@ -329,8 +329,8 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
-  rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
+- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+  further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
 - The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
@@ -960,6 +960,81 @@ state). Results change in the last bits once: after 20 steps of `teno5_3d` the c
 3.5e-15 of each field's maximum (`mallard diff`), 1.5e-12 for the momentum along z, which starts at zero. The block-face flux of #965 (design 1, computed in the TENO smooth
 pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
 (`teno5_3d`, 20 steps).
+
+### 18. Mesh build memory (#964)
+
+Peak heap in use (glibc `mallinfo2`, bytes per local cell, the highest rank) while building 1M-cell meshes, and
+build times of rank 0 (s, best and worst of two runs), on `main` and with the change; Linux x86_64, GCC, Release,
+double, 2 threads, MPI on 1 or 3 ranks (`DistributedMesh`, as `mallard` builds a mesh for a run). Generated
+meshes, and a Gmsh file of the same box; "built" is the finished mesh.
+
+| peak / built, B per cell; time, s | serial | | distributed, 1 rank | | distributed, 3 ranks | |
+|---|---|---|---|---|---|---|
+| hexahedra $100^3$ | 513 / 504 → 407 / 398 | 3.74-3.86 → 3.38-3.46 | 532 → 426 | 5.45-5.60 → 4.88-4.92 | 604 → 465 | 2.21-2.38 → 1.89-2.08 |
+| periodic hexahedra | 546 / 537 → 413 / 404 | 4.84-4.96 → 4.35-4.37 | 561 → 428 | 7.47-7.58 → 6.27-6.29 | 571 → 446 | 2.94-3.03 → 2.52-2.59 |
+| Kuhn tetrahedra $56^3 \times 6$ | 537 / 531 → 262 / 256 | 3.10-3.13 → 1.94-2.18 | 550 → 331 | 3.92-4.19 → 2.87-2.89 | 547 → 276 | 1.62-1.86 → 1.25-1.37 |
+| Gmsh hexahedra $100^3$ | 521 / 508 → 415 / 402 | 3.76-4.26 → 3.31-3.35 | 536 → 430 | 5.86-6.00 → 4.95-4.99 | 560 → 435 | 2.48-2.56 → 2.09-2.19 |
+| quadrilaterals $1000^2$ | 255 / 254 → 219 / 218 | 1.33-1.35 → 1.14-1.16 | 276 → 252 | 2.08 → 1.78 | 324 → 294 | 0.86-0.94 → 0.78-0.84 |
+| periodic quadrilaterals | 270 / 269 → 226 / 225 | 1.98-2.12 → 1.83-1.85 | 290 → 246 | 3.41-3.44 → 2.69-2.72 | 323 → 295 | 1.23-1.27 → 1.02-1.06 |
+| triangles $700^2 \times 2$ | 222 / 222 → 170 / 170 | 0.93-0.94 → 0.70 | 239 → 223 | 1.57 → 1.28 | 253 → 228 | 0.65-0.71 → 0.58-0.64 |
+| Gmsh quadrilaterals $1000^2$ | 263 / 258 → 227 / 222 | 1.59-1.64 → 1.41-1.44 | 281 → 281 | 2.38-2.57 → 2.01-2.13 | 303 → 283 | 1.14-1.15 → 0.85-0.90 |
+
+- **Vertex neighbors on first use.** `cells_of_cell` and its offsets and shift rows (106 B per hexahedron, 275 B
+  per Kuhn tetrahedron, 36 B per quadrilateral) are built by `Mesh::vertex_neighbors()` when first read, not
+  with the mesh, and freed with the setup's data: only the kernels that read them in the step keep them (the
+  vertex gradient of viscous fluxes, the hybrid sensor and MUSCL, the LES filters through it, moving regions).
+  Building them takes 0.49 s per million hexahedra and 1.1 s per million tetrahedra, as before, at the first
+  reader. Their periodic shift rows are still numbered with the mesh, so the `shifts` table and the checks of
+  periodic directions are unchanged.
+- **Face matching and node directory in rounds.** `DistributedMesh` sends the faces in four rounds of a hash
+  bucket, and the node directory's records in four rounds of node ranges: on 3 ranks of hexahedra the
+  construction peaked at 604 B per cell and now at 320, the distribution at 540 and now at 465. The records of a round are
+  sorted as records, stably: `std::sort` of an index took twice as long on some meshes' rounds.
+
+Distributed builds now peak in the distribution (465 B per hexahedron on 3 ranks against 419 built, 331 per
+tetrahedron on 1 rank against 266): the cells sent to their owners next to the block. A whole run (Kokkos host
+allocations, CPU, 10 steps) holds less after setup when no step kernel reads the vertex neighbors: 134 B per cell
+less on the $64^3$ Taylor-Green vortex with TENO5 (6,660 → 6,526 B per cell; 5,440 → 5,309 on 3 ranks), 44 B on
+$512^2$ quadrilaterals (2,476 → 2,432). With GPUs that is device memory, and the host copies of the lists go too.
+The runs' peaks are set later, in the numerics setup, and do not change; nor do viscous runs, which keep the lists.
+Setup and step times are within the run-to-run spread (Taylor-Green, 10 steps: 17.86 → 17.73 s). Meshes are
+bitwise those of `main` on every rank (a hash of every array), and `mallard diff` finds the states of 10-step runs
+(inviscid and viscous, 2D and 3D, hexahedra and tetrahedra, dynamic Smagorinsky LES) the same bit for bit on 1 and
+3 ranks.
+
+### 19. Troubled scratch for a quarter of the cells (#978)
+
+The troubled passes' scratch (central coefficients and the sector coefficients of every face) had room for half
+the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond it are done in further
+rounds. Every round below a capacity of 1 recomputes its cells' central coefficients, so results do not depend
+on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02 against 1 and 0.5).
+
+The cases of section 15 (perfect gas on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra, LES, the propane
+flame on $48 \times 24^2$ / $24 \times 12^2 \times 6$, GRI-Mech 3.0 on $32 \times 16^2$), 3D TENO5 unless
+stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell and the cells that fit
+on an A100-80GB.
+
+| bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
+|---|---|---|---|---|---|---|---|
+| capacity 0.5 | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,212 / 8,419,977 | 8,383 / 9,252,886 | 12,046 / 6,432,167 |
+| capacity 0.25 | 6,678 / 11,773,594 | 6,534 / 12,031,826 | 6,718 / 11,703,485 | 6,574 / 11,958,618 | 8,332 / 9,309,270 | 7,503 / 10,338,158 | 11,413 / 6,789,351 |
+
+| perfect gas, bytes per cell, cells per A100-80GB | TENO3, hexahedra | tetrahedra | TENO4, hexahedra | tetrahedra | TENO6, hexahedra | tetrahedra |
+|---|---|---|---|---|---|---|
+| capacity 0.5 | 4,973 / 15,808,529 | 5,740 / 13,696,969 | 5,371 / 14,636,220 | 6,183 / 12,715,675 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
+| capacity 0.25 | 4,343 / 18,101,651 | 5,110 / 15,385,696 | 4,641 / 16,938,167 | 5,453 / 14,418,008 | 7,292 / 10,781,086 | 7,684 / 10,230,998 |
+
+880 bytes less per cell at TENO5 (630 at TENO3, 730 at TENO4, 1,090 at TENO6): 13% more cells per A100-80GB
+for a perfect gas at TENO5, 11-12% for the 6-species flame, 6% with GRI-Mech (whose setup peak binds).
+Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps, on a CPU). On one A100-80GB
+(CUDA 13.5), restart files after 100 steps are bitwise identical with capacities 0.25 and 0.125 on the $96^3$
+Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex, and on the
+2D Riemann problem with 0.25 and 0.125 against 1.
+
+The smaller scratch adds two rounds of the five troubled kernels per stage, which find no work in smooth flows:
+under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), and a capacity of 0.125 is within
+1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
+recomputes the central coefficients, so 2D keeps 1.
 
 ## Scaling (one node)
 
