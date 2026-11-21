@@ -10,6 +10,7 @@
  */
 
 #include "time_integrator.h"
+#include "gated.h"
 
 #include <initializer_list>
 #include <utility>
@@ -17,14 +18,14 @@
 
 void axpby(const rtype a_host, const State & x, const rtype b, const State & y, const rtype * a_device) {
     StateView x_flow = x.flow, y_flow = y.flow;
-    Kokkos::parallel_for("axpby", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("axpby", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
         const rtype a = a_device ? *a_device : a_host;
         FOR_I_CONSERVATIVE y_flow(i_cell, i) = a * x_flow(i_cell, i) + b * y_flow(i_cell, i);
     });
     if (x.species.span() == 0) return;
     const rtype * x_s = x.species.data();
     rtype * y_s = y.species.data();
-    Kokkos::parallel_for("axpby_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
+    gated::parallel_for("axpby_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
         const rtype a = a_device ? *a_device : a_host;
         y_s[k] = a * x_s[k] + b * y_s[k];
     });
@@ -32,13 +33,13 @@ void axpby(const rtype a_host, const State & x, const rtype b, const State & y, 
 
 void lerp(const rtype a, const State & x, const State & y) {
     StateView x_flow = x.flow, y_flow = y.flow;
-    Kokkos::parallel_for("lerp", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("lerp", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE y_flow(i_cell, i) += a * (x_flow(i_cell, i) - y_flow(i_cell, i));
     });
     if (x.species.span() == 0) return;
     const rtype * x_s = x.species.data();
     rtype * y_s = y.species.data();
-    Kokkos::parallel_for("lerp_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
+    gated::parallel_for("lerp_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
         y_s[k] += a * (x_s[k] - y_s[k]);
     });
 }
@@ -142,7 +143,7 @@ struct Stage3S {
 
 void stage_3s(const Stage3S st, const size_t n, rtype * y, rtype * s, rtype * y0, const rtype * k, rtype * err,
               const rtype dt_host, const rtype * dt_device) {
-    Kokkos::parallel_for("low_storage_stage", n, KOKKOS_LAMBDA(const size_t j) {
+    gated::parallel_for("low_storage_stage", n, KOKKOS_LAMBDA(const size_t j) {
         const rtype dt = dt_device ? *dt_device : dt_host;
         const rtype h = st.beta * dt;
         if (err) {
@@ -170,7 +171,7 @@ void stage_3s(const Stage3S st, const size_t n, rtype * y, rtype * s, rtype * y0
 /** @brief One stage of the 2N method: D = A D + dt k (D = dt k if first), Y += B D. */
 void stage_2n(const rtype a, const rtype b, const bool first, const size_t n, rtype * y, rtype * d, const rtype * k,
               const rtype dt_host, const rtype * dt_device) {
-    Kokkos::parallel_for("low_storage_2n_stage", n, KOKKOS_LAMBDA(const size_t j) {
+    gated::parallel_for("low_storage_2n_stage", n, KOKKOS_LAMBDA(const size_t j) {
         const rtype dt = dt_device ? *dt_device : dt_host;
         const rtype d_j = first ? dt * k[j] : a * d[j] + dt * k[j];
         d[j] = d_j;
