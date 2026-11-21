@@ -1870,13 +1870,31 @@ void Solver::init_run_parameters() {
                               .fix = "Give the time step in seconds, or use cfl for one that adapts to the flow"});
         }
     }
-    n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
+    n_steps = find_optional<uint64_t>(input, "run", "n_steps", "no step limit");
+    t_stop = find_real_optional(input, "run", "t_stop", dim::time, "no simulated-time limit");
+    t_wall_stop = find_real_optional(input, "run", "t_wall_stop", dim::time, "no wall-clock limit");
+    for (const auto & [key, limit, none] : {std::tuple{"n_steps", n_steps ? rtype(*n_steps) : 1.0_r, "step limit"},
+                                            {"t_stop", t_stop.value_or(1.0_r), "simulated-time limit"},
+                                            {"t_wall_stop", t_wall_stop.value_or(1.0_r), "wall-clock limit"}}) {
+        if (!(limit > 0.0_r)) {
+            throw InputError({.key = std::string("run.") + key,
+                              .line = line_of(run, key),
+                              .message = "must be positive",
+                              .fix = std::string("Leave ") + key + " out for no " + none +
+                                     " (before 0.12.0, 0 or a negative value meant that)"});
+        }
+    }
     cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true) && !cuda_graphs_off;
-    t_stop = find_real_or(input, "run", "t_stop", dim::time, -1.0);
-    t_wall_stop = find_real_or(input, "run", "t_wall_stop", dim::time, -1.0);
     keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
     control_socket = find_value_or<bool>(input, "run", "control_socket", true);
-    control_file_interval = find_value_or<uint64_t>(input, "run", "control_file_interval", 0);
+    control_file_interval = find_optional<uint64_t>(input, "run", "control_file_interval", "control files are not polled");
+    if (control_file_interval == 0u) {
+        throw InputError({.key = "run.control_file_interval",
+                          .line = line_of(run, "control_file_interval"),
+                          .message = "must be positive",
+                          .fix = "Leave control_file_interval out to never look for control files (before 0.12.0, 0 "
+                                 "meant that)"});
+    }
     step_queue_depth = find_value_or<uint64_t>(input, "run", "step_queue", 3);
     if (step_queue_depth > 64) {
         throw InputError({.key = "run.step_queue",
@@ -2663,7 +2681,7 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     if (LES::in_input(input)) {
         names.emplace_back("MU_T");
         if (input.at("les").contains("combustion")) {
-            if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
+            if (find_value<std::string>(input.at("les").at("combustion"), "model") == "pasr") {
                 names.emplace_back("PASR_KAPPA");
             } else {
                 for (const char * name : {"TF_F", "TF_E", "TF_OMEGA"}) names.emplace_back(name);
@@ -2766,7 +2784,7 @@ int Solver::run_loop() {
     publishing = control_enabled && control_socket && comm::is_root() && server.start();
     control_stop = {};
     trigger_stop = {};
-    if (control_file_interval > 0) control_files_polled = step / control_file_interval;
+    if (control_file_interval) control_files_polled = step / *control_file_interval;
     wall_time_reached = false;
     checkpoint_requested = false;
 
@@ -2841,7 +2859,7 @@ int Solver::run_loop() {
                 continue;
             }
             // Acted on by every rank after the next step, whose time-step reduction carries it
-            if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
+            if (t_wall_stop && timer.seconds() >= double(*t_wall_stop)) run_control::request(run_control::WALL_TIME);
             Kokkos::Timer step_timer;
             calc_dt();
             take_step();
@@ -2927,18 +2945,18 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
 RunEnd Solver::stop_reason() const {
     if (!control_stop.empty()) return control_stop;
     if (!trigger_stop.empty()) return trigger_stop;
-    if (n_steps > 0 && step >= n_steps) return {"finished", "n_steps", "n_steps = " + logging::count(n_steps) + " reached"};
+    if (n_steps && step >= *n_steps) return {"finished", "n_steps", "n_steps = " + logging::count(*n_steps) + " reached"};
     // Within round-off: an output time n * time_interval that rounds just below t_stop lands there
-    if (t_stop > 0 && t >= t_stop_reached()) {
-        return {"finished", "t_stop", "t_stop = " + logging::real(double(t_stop)) + " reached"};
+    if (t_stop && t >= t_stop_reached()) {
+        return {"finished", "t_stop", "t_stop = " + logging::real(double(*t_stop)) + " reached"};
     }
-    if (wall_time_reached) {
-        return {"wall_time_limit", "", "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached"};
+    if (wall_time_reached && t_wall_stop) {
+        return {"wall_time_limit", "", "t_wall_stop = " + logging::duration(double(*t_wall_stop)) + " reached"};
     }
     return {};
 }
 
-rtype Solver::t_stop_reached() const { return t_stop - precision_tol(1e-9, 1e-5) * t_stop; }
+rtype Solver::t_stop_reached() const { return *t_stop - precision_tol(1e-9, 1e-5) * *t_stop; }
 
 bool Solver::state_needed() const {
     if (!stop_reason().empty() || checkpoint_requested || step % check_interval == 0) return true;
@@ -2954,9 +2972,9 @@ bool Solver::state_needed() const {
 
 double Solver::progress() const {
     double f = 0.0;
-    if (n_steps > 0) f = std::max(f, static_cast<double>(step) / static_cast<double>(n_steps));
-    if (t_stop > 0) f = std::max(f, static_cast<double>(t / t_stop));
-    if (t_wall_stop > 0) f = std::max(f, timer.seconds() / double(t_wall_stop));
+    if (n_steps) f = std::max(f, static_cast<double>(step) / static_cast<double>(*n_steps));
+    if (t_stop) f = std::max(f, static_cast<double>(t / *t_stop));
+    if (t_wall_stop) f = std::max(f, timer.seconds() / double(*t_wall_stop));
     return std::min(f, 1.0);
 }
 
@@ -3129,8 +3147,8 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
                                            .dt = double(dt_fixed),
                                            .controlled = step_controller.enabled(),
                                            .n_steps = n_steps,
-                                           .t_stop = double(t_stop),
-                                           .wall_stop = double(t_wall_stop)});
+                                           .t_stop = t_stop ? std::optional(double(*t_stop)) : std::nullopt,
+                                           .wall_stop = t_wall_stop ? std::optional(double(*t_wall_stop)) : std::nullopt});
     if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
     numerics.add(face_reconstruction->summary());
     if (!block_path_setting.empty()) numerical.emplace_back("Structured blocks", block_path_setting);
@@ -3594,7 +3612,7 @@ void Solver::update_p_max() {
 }
 
 rtype Solver::next_target_time(const bool unstaged) const {
-    rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
+    rtype t_target = t_stop.value_or(std::numeric_limits<rtype>::infinity());
     t_target = std::min(t_target, next_landing_time());
     for (const auto & writer : data_writers) {
         if (!(unstaged && staged_outputs)) t_target = std::min(t_target, writer->next_time());

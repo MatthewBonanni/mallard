@@ -670,7 +670,7 @@ Dimension variable_dimension(const std::string & name) {
 
 void PhaseAverage::read_variables(const Input & table) {
     const std::string key = "statistics.phase";
-    bins = find_value_or<uint32_t>(table, "bins", 0);
+    bins = find_value<uint32_t>(table, "bins");
     if (bins == 0) throw InputError(key + ".bins must be positive.");
     fields = find_value_or<std::vector<std::string>>(table, "fields", {});
     if (fields.empty()) throw InputError(key + ".fields: list at least one variable.");
@@ -696,7 +696,7 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
     const bool triggered = table.contains("probe");
     if (periodic == triggered) throw InputError(key + ": give either period or probe (with variable and level).");
     if (periodic) {
-        period = find_double_or(table, "period", dim::time, 0.0);
+        period = find_double(table, "period", dim::time);
         if (!(period > 0.0)) throw InputError(key + ".period must be positive.");
         t_reference = find_double_or(table, "t_reference", dim::time, 0.0);
     } else {

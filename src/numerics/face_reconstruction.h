@@ -15,6 +15,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -469,7 +470,7 @@ class TENO : public FaceReconstruction {
         rtype stencil_factor = 2.0;
         rtype sigma_threshold = 1.0e-3_r;
         rtype sigma_upper = 1.0e-2_r;
-        rtype C_T = -1.0;  // Fixed cutoff; negative selects the adaptive cutoff
+        std::optional<rtype> C_T;  // Fixed cutoff; empty selects the adaptive cutoff
         bool characteristic = true;
         bool bound_preserving = false;
         // Stencils take mirror images across curved wall and symmetry faces too

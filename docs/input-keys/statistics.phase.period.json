@@ -1,9 +1,9 @@
 {
- "default": "0.0",
  "dimension": "time (s)",
  "dims": [
   2
  ],
+ "required": true,
  "set_in": [
   "tools/dev/catalog_inputs/2d/statistics.toml"
  ],

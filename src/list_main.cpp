@@ -365,6 +365,7 @@ std::string key_units(const json::Value & k) {
 std::string key_default(const json::Value & k) {
     if (const json::Value * r = k.find("required"); r && r->boolean) return "required";
     if (const json::Value * d = k.find("default")) return d->string;
+    if (const json::Value * u = k.find("unset")) return "unset: " + u->string;
     std::string out;
     if (const json::Value * by_dim = k.find("defaults_by_dim")) {
         for (const std::string & dim : by_dim->keys()) {

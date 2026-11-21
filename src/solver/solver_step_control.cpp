@@ -12,6 +12,7 @@
 #include "solver.h"
 
 #include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -35,11 +36,14 @@ void Solver::init_error_control() {
     if (double_flux) {
         throw InputError("[numerics.error_control] is not available with numerics.double_flux.");
     }
-    const rtype tolerance = find_real_or(table, "tolerance", dim::none, -1.0_r);
-    const rtype abs_tol = find_real_or(table, "abs_tolerance", dim::none, tolerance);
-    const rtype rel_tol = find_real_or(table, "rel_tolerance", dim::none, tolerance);
-    if (!(abs_tol > 0.0_r) || !(rel_tol >= 0.0_r)) {
-        throw InputError("numerics.error_control: give tolerance (or abs_tolerance > 0 and rel_tolerance >= 0).");
+    const std::optional<rtype> tolerance =
+        find_real_optional(table, "tolerance", dim::none, "abs_tolerance and rel_tolerance set the tolerances");
+    std::optional<rtype> abs_tol = find_real_optional(table, "abs_tolerance", dim::none, "tolerance");
+    std::optional<rtype> rel_tol = find_real_optional(table, "rel_tolerance", dim::none, "tolerance");
+    if (!abs_tol) abs_tol = tolerance;
+    if (!rel_tol) rel_tol = tolerance;
+    if (!abs_tol || !rel_tol || !(*abs_tol > 0.0_r) || !(*rel_tol >= 0.0_r)) {
+        throw InputError("numerics.error_control: give tolerance > 0 (or abs_tolerance > 0 and rel_tolerance >= 0).");
     }
     std::array<rtype, 3> beta = time_integrator->get_controller_beta();
     if (table.contains("beta")) {
@@ -47,7 +51,7 @@ void Solver::init_error_control() {
         if (b.size() != 3) throw InputError("numerics.error_control.beta must have three entries.");
         for (size_t i = 0; i < 3; i++) beta[i] = static_cast<rtype>(b[i]);
     }
-    step_controller.init(abs_tol, rel_tol, beta, time_integrator->get_error_order());
+    step_controller.init(*abs_tol, *rel_tol, beta, time_integrator->get_error_order());
     characteristic_start = Kokkos::View<rtype *[2]>("char_state_start", boundary_data.char_faces.extent(0));
 }
 

@@ -626,7 +626,7 @@ ClosedDuct closed_heated_duct(const std::string & inlet, const std::string & sch
     };
     Solver start;
     start.set_distributed(false);
-    start.init(parse_toml("[run]\nn_steps = 0\ncfl = 0.5\n" + init + common));
+    start.init(parse_toml("[run]\nn_steps = 1\ncfl = 0.5\n" + init + common));
     start.copy_device_to_host();
     Solver solver;
     solver.set_distributed(false);

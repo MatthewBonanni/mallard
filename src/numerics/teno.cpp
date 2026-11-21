@@ -1254,7 +1254,13 @@ void TENO::read_options(const Input & input) {
         find_value_or<int>(input, "small_stencil_size", (N_DIM == 2) ? 10 : 2 * teno::NK_SMALL));
     sigma_threshold = find_real_or(input, "troubled_threshold", dim::none, 1.0e-3_r);
     sigma_upper = find_real_or(input, "troubled_upper", dim::none, 1.0e-2_r);
-    C_T = find_real_or(input, "C_T", dim::none, -1.0);
+    C_T = find_real_optional(input, "C_T", dim::none, "adaptive cutoff from the troubled-cell measure");
+    if (C_T && !(*C_T > 0.0_r)) {
+        throw InputError({.key = "numerics.face_reconstruction.C_T",
+                          .line = line_of(input, "C_T"),
+                          .message = "must be positive",
+                          .fix = "Leave C_T out for the adaptive cutoff (before 0.12.0, a negative value meant that)"});
+    }
     characteristic = find_value_or<bool>(input, "characteristic", true);
     max_condition = find_real_or(input, "max_condition", dim::none, 1.0e8);
     bound_preserving = find_value_or<bool>(input, "bound_preserving", false);
@@ -1268,7 +1274,7 @@ void TENO::read_options(const Input & input) {
         throw std::runtime_error("TENO curved_wall_degree must be between 2 and " + std::to_string(teno::MAX_DEGREE) + ".");
     }
     curved_wall_degree = uint8_t(wall_degree);
-    cache_file = find_value_or<std::string>(input, "cache_file", "");
+    cache_file = find_optional<std::string>(input, "cache_file", "no stencil cache").value_or("");
     // Single-precision builds store their tables so anyway
     single_tables = find_value_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);
     if (single_tables && N_DIM != 3) throw std::runtime_error("TENO: single_precision_tables is for 3D runs.");
@@ -1371,7 +1377,7 @@ report::Summary TENO::summary() const {
     report::Summary s;
     s.setting("Reconstruction", logging::format("TENO, order %d (degree %d)", degree + 1, degree));
     s.setting("TENO switch", std::string("characteristic ") + (characteristic ? "yes" : "no") + ", bound-preserving " +
-                                 (bound_preserving ? "yes" : "no") + (C_T > 0.0_r ? "" : ", C_T adaptive"));
+                                 (bound_preserving ? "yes" : "no") + (C_T ? "" : ", C_T adaptive"));
     if (!setup_status.empty()) s.setting("TENO setup", setup_status);
     if (!cache_status.empty()) s.setting("TENO cache", cache_status);
     if (share_tables) {
@@ -1393,7 +1399,7 @@ report::Summary TENO::summary() const {
                    "by boundaries");
     }
     s.quantity("TENO troubled_threshold", logging::real(double(sigma_threshold)), "-", "switch");
-    if (C_T > 0.0_r) s.quantity("TENO C_T", logging::real(double(C_T)), "-", "cutoff");
+    if (C_T) s.quantity("TENO C_T", logging::real(double(*C_T)), "-", "cutoff");
     return s;
 }
 
@@ -1554,7 +1560,7 @@ struct TENOFunctor {
 
     rtype sigma_threshold;
     rtype sigma_upper;
-    rtype C_T;
+    rtype C_T;  // fixed cutoff, or 0 for the adaptive one
     bool characteristic;
     bool bound_preserving;
     rtype gamma;
@@ -2894,7 +2900,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
                                  const IndexSet & cells, bool troubled_pass) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
-    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+    Functor functor{sigma_threshold, sigma_upper, C_T.value_or(0.0_r), characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
@@ -2981,7 +2987,7 @@ template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const uint32_t n_cells) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
-    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+    Functor functor{sigma_threshold, sigma_upper, C_T.value_or(0.0_r), characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
@@ -2997,7 +3003,7 @@ template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
-    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+    Functor functor{sigma_threshold, sigma_upper, C_T.value_or(0.0_r), characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
@@ -3019,7 +3025,7 @@ template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<rtype *, Kokkos::LayoutStride> mu,
                          Kokkos::View<rtype *> source, const uint32_t n_cells) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
-    Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
+    Functor functor{sigma_threshold, sigma_upper, C_T.value_or(0.0_r), characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                     offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,

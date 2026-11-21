@@ -2137,7 +2137,7 @@ int flame(const cli::Args & args) {
     Oxygen oxygen;
     if (chosen < 0) {
         const std::string mechanism = find_value<std::string>(input, "physics", "mechanism");
-        const std::string phase = find_value_or<std::string>(input, "physics", "phase", "");
+        const std::string phase = find_optional<std::string>(input, "physics", "phase", "the mechanism's first phase").value_or("");
         oxygen = oxygen_of(chemistry::read_mechanism(mechanism, phase), species);
     }
     double phi = std::numeric_limits<double>::quiet_NaN();

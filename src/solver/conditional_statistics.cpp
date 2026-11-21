@@ -29,7 +29,7 @@ namespace {
 
 /** @brief A key that holds one string or an array of them. */
 std::vector<std::string> strings(const Input & table, const std::string & key) {
-    if (table.contains(key) && table.at(key).is_string()) return {find_value_or<std::string>(table, key, "")};
+    if (table.contains(key) && table.at(key).is_string()) return {find_value<std::string>(table, key)};
     return find_value_or<std::vector<std::string>>(table, key, {});
 }
 

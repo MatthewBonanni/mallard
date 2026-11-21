@@ -1,8 +1,8 @@
 {
- "default": "0",
  "dims": [
   2
  ],
+ "required": true,
  "set_in": [
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml"

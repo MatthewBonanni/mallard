@@ -283,7 +283,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
     // from boundaries, on cells whose edges, areas and volumes all differ
     std::ostringstream s;
     const uint32_t nx = 12, ny = 7;
-    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << nx << "\nNy = " << ny
+    s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << nx << "\nNy = " << ny
       << "\nLx = 1.3\nLy = 0.6\n"
       << (N_DIM == 3 ? "Nz = 5\nLz = 0.45\n" : "")
       << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
@@ -337,7 +337,7 @@ TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
     // the extents' ratios (0.2, 0.5), against the volume width
     auto input = [](const std::string & width) {
         std::ostringstream s;
-        s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
+        s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
           << "Lx = 0.8\nLy = 0.4\nLz = 0.5\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
           << "u = [\"0.4 * sin(7.853981633974483 * y)\", \"0.3 * sin(12.566370614359172 * z)\", "
@@ -417,7 +417,7 @@ TEST(LESSolver, DynamicConstantIsGalileanAndScaleInvariant) {
 
 TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
     const uint32_t n = N_DIM == 2 ? 32 : 24;
-    auto solver = make_solver(periodic_box("cartesian", n, "[les]\nmodel = \"wale\"\nC = 0.5\n", "", "n_steps = 0\ncfl = 0.5\n"));
+    auto solver = make_solver(periodic_box("cartesian", n, "[les]\nmodel = \"wale\"\nC = 0.5\n", "", "n_steps = 1\ncfl = 0.5\n"));
     const KineticEnergyBudget b = solver->kinetic_energy_budget();
     const auto mesh = solver->get_mesh();
 
@@ -464,7 +464,7 @@ namespace {
  */
 std::string cubic_box(const uint32_t n, const std::string & les, const std::string & teno = "") {
     std::ostringstream s;
-    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+    s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
       << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n" : "")
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"10.0\"\n"
       << (N_DIM == 3 ? "u = [\"0.3 * x^3 - 0.5 * x * y^2 + 0.2 * z^2\", \"0.4 * y^3 + 0.6 * x^2 * z\", "
@@ -781,7 +781,7 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
     // KEEP's momentum flux C mean(u) + mean(p) n leaves the pressure work as
     // the whole convective kinetic-energy rate, on any mesh
     const uint32_t n = N_DIM == 2 ? 12 : 6;
-    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 0\ncfl = 0.5\n");
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 1\ncfl = 0.5\n");
     // A threshold of 1 never selects the Riemann solver
     auto central = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
                                "[numerics.hybrid]\nsensor_threshold = 1.0\n");
@@ -807,7 +807,7 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     // error of p div u instead
     std::ostringstream s;
     const uint32_t n = N_DIM == 2 ? 16 : 8;
-    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
+    s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
       << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
                                                 : std::string("[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * x\"\np = \"1000.0\"\n"
@@ -961,7 +961,7 @@ TEST(HybridFlux, SensorIgnoresRoundOffCompressions) {
 }
 
 TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
-    const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 0\ncfl = 0.5\n");
+    const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 1\ncfl = 0.5\n");
     EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"cell_averages\"\n"), InputError);
     EXPECT_THROW(make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
                              "[numerics.hybrid]\ncentral = \"keep\"\n"),

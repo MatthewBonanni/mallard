@@ -854,7 +854,8 @@ constexpr Command COMMANDS[] = {
         .description =
             "Without an input file, lists the key catalog docs/input-keys/: every key the examples and "
             "tutorials read, by table, with its type, units (of a number with a physical dimension), default "
-            "(or required) and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
+            "(or required, or for a key with no default what leaving it out means: unset: no wall-clock limit) "
+            "and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
             "lists the keys its setup reads, the same columns and whether the input sets each: what mallard check "

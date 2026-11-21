@@ -265,20 +265,20 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     double x = 0.0;
     const bool is_uint = parse_uint(value, n), is_time = parse_time(value, x);
     if (key == "n_steps" || key == "t_stop" || key == "t_wall_stop") {
-        const uint64_t old_n_steps = n_steps;
-        const rtype old_t_stop = t_stop, old_t_wall_stop = t_wall_stop;
+        const std::optional<uint64_t> old_n_steps = n_steps;
+        const std::optional<rtype> old_t_stop = t_stop, old_t_wall_stop = t_wall_stop;
         std::string old;
         if (key == "n_steps") {
             if (!is_uint) return rejected("expected a non-negative integer (0: no step limit)");
-            old = std::to_string(n_steps);
-            n_steps = n;
+            old = n_steps ? std::to_string(*n_steps) : "none";
+            n_steps = n > 0 ? std::optional(n) : std::nullopt;
         } else {
             if (!is_time) return rejected("expected a time in seconds or with a unit, e.g. 2h (0 or less: no limit)");
-            rtype & target = key == "t_stop" ? t_stop : t_wall_stop;
-            old = logging::real(double(target));
-            target = x > 0.0 ? static_cast<rtype>(x) : rtype(-1);
+            std::optional<rtype> & target = key == "t_stop" ? t_stop : t_wall_stop;
+            old = target ? logging::real(double(*target)) : "none";
+            target = x > 0.0 ? std::optional(static_cast<rtype>(x)) : std::nullopt;
         }
-        const bool none = n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0);
+        const bool none = !n_steps && !t_stop && !t_wall_stop;
         if (none || !apply) {
             n_steps = old_n_steps;
             t_stop = old_t_stop;
@@ -376,8 +376,8 @@ void Solver::write_checkpoint() {
 
 void Solver::poll_control_files() {
     // Once per interval of the steps the host has taken, also while steps run ahead of it
-    if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
-    control_files_polled = step / control_file_interval;
+    if (!control_file_interval || step / *control_file_interval == control_files_polled || !comm::is_root()) return;
+    control_files_polled = step / *control_file_interval;
     std::error_code error;
     if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
     if (std::filesystem::remove("STOP", error)) {
@@ -388,10 +388,10 @@ void Solver::poll_control_files() {
 
 std::string Solver::stop_conditions() const {
     std::string text;
-    if (n_steps > 0) text += "n_steps = " + std::to_string(n_steps);
-    if (t_stop > 0) text += (text.empty() ? "" : ", ") + std::string("t_stop = ") + logging::real(double(t_stop));
-    if (t_wall_stop > 0) {
-        text += (text.empty() ? "" : ", ") + std::string("t_wall_stop = ") + logging::real(double(t_wall_stop)) + " s";
+    if (n_steps) text += "n_steps = " + std::to_string(*n_steps);
+    if (t_stop) text += (text.empty() ? "" : ", ") + std::string("t_stop = ") + logging::real(double(*t_stop));
+    if (t_wall_stop) {
+        text += (text.empty() ? "" : ", ") + std::string("t_wall_stop = ") + logging::real(double(*t_wall_stop)) + " s";
     }
     for (size_t i = 0; i < triggers.size(); i++) {
         const Triggers::Trigger & trigger = triggers[i];

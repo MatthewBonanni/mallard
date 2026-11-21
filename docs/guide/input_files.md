@@ -651,11 +651,13 @@ short. Without `check.statistics` the mean `eta` stands for the whole domain, so
 
 `--catalog keys.json` also writes, as JSON, every key the setup looked up for
 this input: whether the input set it, the type the setup reads it as, its
-physical dimension (see [units](#units)), its default (as TOML) or that it is
-required, and the values it accepts, by path
+physical dimension (see [units](#units)), its default (as TOML), that it is
+required, or, for a key with no default, what leaving it out means (`"unset":
+"no wall-clock limit"`: the feature is off, or the run chooses), and the values
+it accepts, by path
 (`numerics.riemann_solver`, `boundaries.type`). It is written even when the
 setup stops on an error, with the keys read up to there. The setup's accessors
-(`find_value`, `find_value_or`, `find_real_or` and `find_option` in
+(`find_value`, `find_value_or`, `find_optional`, `find_real_or` and `find_option` in
 `src/common/input.h`) record these, so the catalog is what the code does; a key
 the setup reads only when present, which it tests with `contains_optional`, is
 optional.
@@ -669,7 +671,7 @@ that every key this reference documents is in it and that the defaults it states
 match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
-each key's type, units, default and accepted values; `mallard list keys
+each key's type, units, default (`unset: ...` for a key with none) and accepted values; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
 whether the input sets each key), and a section keeps one table or key path:
 

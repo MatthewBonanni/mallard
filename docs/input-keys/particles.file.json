@@ -1,10 +1,10 @@
 {
- "default": "\"\"",
  "dims": [
   2
  ],
  "set_in": [
   "examples/tracer_vortex/input.toml"
  ],
- "type": "string"
+ "type": "string",
+ "unset": "no particle file"
 }

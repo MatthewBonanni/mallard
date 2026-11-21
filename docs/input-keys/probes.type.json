@@ -1,11 +1,11 @@
 {
- "default": "\"\"",
  "dims": [
   2,
   3
  ],
  "set_in": [],
  "type": "string",
+ "unset": "point or line, from point or start and end",
  "values": [
   "arc",
   "circle",

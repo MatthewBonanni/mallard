@@ -18,6 +18,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -43,6 +44,7 @@ struct KeyUse {
     Dimension dimension{};  // of a number; dim::none if it has none
     std::string fallback;   // the value used when absent, as TOML writes it
     bool required = false;
+    std::string unset;      // what absence means for a key with no default ("no wall-clock limit"), or empty
 };
 
 /**
@@ -330,7 +332,7 @@ inline const Input * lookup(const Input * table, const std::string & key, KeyUse
 
 /** @brief The KeyUse of a real-valued key of this dimension, with this fallback text or required. */
 inline KeyUse real_use(const std::string & type, const Dimension & dimension, std::string fallback, bool required) {
-    return {type, dimension, std::move(fallback), required};
+    return {type, dimension, std::move(fallback), required, ""};
 }
 
 /** @brief What a value of type T is called in messages: "an integer", "an array of strings". */
@@ -407,7 +409,7 @@ T find_value(const Input & v, const Tables &... keys) {
     const std::string & key = path[sizeof...(Tables) - 1];
     const Input * table = sizeof...(Tables) == 1 ? input_detail::holder(v, key) : input_detail::holder(v, path[0], key);
     const std::string name = sizeof...(Tables) == 1 ? key : path[0] + "." + key;
-    const Input * value = input_detail::lookup(table, key, {input_detail::type_name<T>(), {}, "", true});
+    const Input * value = input_detail::lookup(table, key, {input_detail::type_name<T>(), {}, "", true, ""});
     if (!value) throw missing_key(table ? *table : v, name);
     return input_detail::get<T>(*value, name);
 }
@@ -415,15 +417,37 @@ T find_value(const Input & v, const Tables &... keys) {
 template <typename T>
 T find_value_or(const Input & v, const std::string & key, const T & fallback) {
     const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
-                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
+                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false, ""});
     return value ? input_detail::get<T>(*value, key) : fallback;
 }
 
 template <typename T>
 T find_value_or(const Input & v, const std::string & table_name, const std::string & key, const T & fallback) {
     const Input * value = input_detail::lookup(input_detail::holder(v, table_name, key), key,
-                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
+                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false, ""});
     return value ? input_detail::get<T>(*value, table_name + "." + key) : fallback;
+}
+
+/**
+ * Optional keys with no default: absent, the feature they set is off or the run
+ * chooses, which `unset` says for the key catalog ("no wall-clock limit"). Such a
+ * key never takes a value that stands for "off" (-1, 0, "").
+ */
+template <typename T>
+std::optional<T> find_optional(const Input & v, const std::string & key, const std::string & unset) {
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
+                                               {input_detail::type_name<T>(), {}, "", false, unset});
+    if (!value) return std::nullopt;
+    return input_detail::get<T>(*value, key);
+}
+
+template <typename T>
+std::optional<T> find_optional(const Input & v, const std::string & table_name, const std::string & key,
+                               const std::string & unset) {
+    const Input * value = input_detail::lookup(input_detail::holder(v, table_name, key), key,
+                                               {input_detail::type_name<T>(), {}, "", false, unset});
+    if (!value) return std::nullopt;
+    return input_detail::get<T>(*value, table_name + "." + key);
 }
 
 /**
@@ -498,6 +522,22 @@ inline rtype find_real_or(const Input & v, const std::string & table, const std:
         input_detail::holder(v, table, key), key,
         input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
     return value ? as_real(*value, table + "." + key, dimension) : fallback;
+}
+
+/** @brief An optional real-valued key with no default; `unset` says what absence means (see find_optional). */
+inline std::optional<rtype> find_real_optional(const Input & v, const std::string & key, const Dimension & dimension,
+                                               const std::string & unset) {
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key, {"number", dimension, "", false, unset});
+    if (!value) return std::nullopt;
+    return as_real(*value, key, dimension);
+}
+
+inline std::optional<rtype> find_real_optional(const Input & v, const std::string & table, const std::string & key,
+                                               const Dimension & dimension, const std::string & unset) {
+    const Input * value =
+        input_detail::lookup(input_detail::holder(v, table, key), key, {"number", dimension, "", false, unset});
+    if (!value) return std::nullopt;
+    return as_real(*value, table + "." + key, dimension);
 }
 
 inline std::vector<rtype> as_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {

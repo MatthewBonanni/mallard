@@ -123,7 +123,7 @@ TEST(ThickenedFlame, ReactionRatesAreDividedByTheThickening) {
         const uint32_t ns = static_cast<uint32_t>(thick.get_species_names().size());
         double change = 0.0, diff = 0.0;
         Solver initial;
-        initial.init(parse_toml(uniform_box("n_steps = 0\ndt = 1e-6\n", "")));
+        initial.init(parse_toml(uniform_box("n_steps = 1\ndt = 1e-6\n", "")));
         initial.copy_device_to_host();
         for (uint32_t k = 0; k < ns; k++) {
             change = std::max(change, std::abs(double(plain.h_species(0, k) - initial.h_species(0, k))));
@@ -267,7 +267,10 @@ TEST(ThickenedFlame, InputErrors) {
 
 namespace {
 
-/** @brief The uniform box with cells of side h (or of composition X), run as given and copied to the host. */
+/** @brief The run of a box that uniform_cells sets up without taking a step. */
+const std::string SETUP_ONLY = "n_steps = 1\ndt = 1e-6\n";
+
+/** @brief The uniform box with cells of side h (or of composition X), run as given (or set up only) and copied to the host. */
 std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, const std::string & combustion,
                                       const std::string & X = "") {
     std::string input = uniform_box(run, combustion);
@@ -285,7 +288,7 @@ std::unique_ptr<Solver> uniform_cells(const double h, const std::string & run, c
     if (N_DIM == 3) set("Lz", 3 * h);
     auto solver = std::make_unique<Solver>();
     solver->init(parse_toml(input));
-    if (run.find("n_steps = 0") == std::string::npos) solver->run();
+    if (run != SETUP_ONLY) solver->run();
     solver->copy_device_to_host();
     return solver;
 }
@@ -454,7 +457,7 @@ TEST(PartiallyStirredReactor, ReactionRatesAreScaledByTheReactingFraction) {
     std::ostringstream run;
     run << std::setprecision(17) << "n_steps = 1\ndt = " << 2e-6 * kappa << "\n";
     auto plain = uniform_cells(h, run.str(), "");
-    auto initial = uniform_cells(h, "n_steps = 0\ndt = 1e-6\n", "");
+    auto initial = uniform_cells(h, SETUP_ONLY, "");
     double change = 0.0, diff = 0.0;
     for (uint32_t k = 0; k < mixed->get_species_names().size(); k++) {
         change = std::max(change, std::abs(double(plain->h_species(0, k) - initial->h_species(0, k))));

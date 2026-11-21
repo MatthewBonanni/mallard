@@ -1,9 +1,9 @@
 {
- "default": "-1.0",
  "dims": [
   2,
   3
  ],
  "set_in": [],
- "type": "number"
+ "type": "number",
+ "unset": "adaptive cutoff from the troubled-cell measure"
 }

@@ -68,8 +68,8 @@ struct TimeSetup {
     bool use_cfl = true;
     double cfl = 0.0, dt = 0.0;  // the fixed time step, or the first one with a controller, s
     bool controlled = false;      // the step controller sets dt after the first step
-    uint64_t n_steps = 0;         // 0: no limit, as t_stop and wall_stop
-    double t_stop = 0.0, wall_stop = 0.0;  // s
+    std::optional<uint64_t> n_steps{};        // empty: no limit, as t_stop and wall_stop
+    std::optional<double> t_stop{}, wall_stop{};  // s
 };
 
 /** @brief Quantity rows of the time step and the stops. */

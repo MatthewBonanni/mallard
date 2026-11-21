@@ -101,10 +101,11 @@ int32_t most_abundant(const chemistry::Mechanism & mech, const std::vector<doubl
 }
 
 int32_t species_of(const Input & table, const std::string & key, const MixtureModel & mixture, int32_t fallback) {
-    const std::string name = find_value_or<std::string>(table, key, "");
-    if (name.empty()) return fallback;
-    const int32_t k = mixture.mechanism().species_index(name);
-    if (k < 0) throw mixture.unknown_species(table, key, name);
+    const std::optional<std::string> name =
+        find_optional<std::string>(table, key, "the streams' most abundant fuel or oxidizer species");
+    if (!name) return fallback;
+    const int32_t k = mixture.mechanism().species_index(*name);
+    if (k < 0) throw mixture.unknown_species(table, key, *name);
     return k;
 }
 

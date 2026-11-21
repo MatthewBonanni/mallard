@@ -20,6 +20,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "check.h"
@@ -96,6 +97,31 @@ TEST(ErrorMessages, ValueOfTheWrongTypeIsAnErrorWithTheFix) {
     expect_parts(run_error(replaced(box(), "Nx = 16", "Nx = -4")), {"mesh.Nx: -4 is out of range"});
     expect_parts(run_error(box("t_stop = 0.5\ncfl = 0.8\nkeep_last_good = \"false\"\n")),
                  {"run.keep_last_good", "must be true or false", "Remove the quotes: false"});
+}
+
+TEST(ErrorMessages, OldOffValuesOfKeysWithNoDefaultSayToLeaveThemOut) {
+    for (const auto & [run, key, fix] :
+         {std::tuple{"t_stop = -1.0\nn_steps = 10\n", "run.t_stop", "Leave t_stop out for no simulated-time limit"},
+          {"t_stop = 0.5\nt_wall_stop = -1.0\n", "run.t_wall_stop", "Leave t_wall_stop out for no wall-clock limit"},
+          {"t_stop = 0.5\nn_steps = 0\n", "run.n_steps", "Leave n_steps out for no step limit"},
+          {"t_stop = 0.5\ncontrol_file_interval = 0\n", "run.control_file_interval",
+           "Leave control_file_interval out to never look for control files"}}) {
+        const std::string input = box(std::string(run) + "cfl = 0.8\n");
+        const std::string name = std::string(key).substr(4);
+        EXPECT_EQ(run_error(input).rfind(line_prefix(input, name + " =") + key + ": must be positive. " + fix, 0), 0u)
+            << run_error(input);
+    }
+    const std::string teno = replaced(box(), "\"HLLC\"\n", "\"HLLC\"\n[numerics.face_reconstruction]\n"
+                                                              "type = \"TENO\"\norder = 3\nC_T = -1.0\n");
+    EXPECT_NE(run_error(teno).find("numerics.face_reconstruction.C_T: must be positive. Leave C_T out for the "
+                                   "adaptive cutoff"),
+              std::string::npos)
+        << run_error(teno);
+    const std::string controlled =
+        replaced(box(), "\"HLLC\"\n", "\"HLLC\"\ntime_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\n"
+                                         "tolerance = -1.0\n");
+    EXPECT_NE(run_error(controlled).find("numerics.error_control: give tolerance > 0"), std::string::npos)
+        << run_error(controlled);
 }
 
 TEST(ErrorMessages, ArrayOfTablesWrittenAsATableSaysToDoubleTheBrackets) {

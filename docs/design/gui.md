@@ -268,6 +268,11 @@ once in the code that reads them, exported by `mallard list keys --format json`)
   rule; expressions a code field listing the variables they read (`x`, `y`, `t`,
   `u`, `v`, `n`); basic or expert a disclosure level; description and guide
   anchor the help.
+- **Defaults and absence**: a key has a default (`default`), is required, or
+  has no default and says what leaving it out means (`unset`, e.g. `"no
+  wall-clock limit"`: the feature is off, or the run chooses), so a field shows
+  either the value it falls back to or that it is off or automatic, never a
+  sentinel value such as `-1`.
 - **What applies**: after each edit (debounced), the GUI asks the case's
   `mallard list keys INPUT --format json` which keys this input reads, so the
   form shows exactly the keys that apply (the boundary fields of the chosen

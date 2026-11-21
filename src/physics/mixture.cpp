@@ -24,7 +24,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
     }
     MixtureModel model;
     const std::string mechanism = find_value<std::string>(physics, "mechanism");
-    const std::string phase = find_value_or<std::string>(physics, "phase", "");
+    const std::string phase = find_optional<std::string>(physics, "phase", "the mechanism's first phase").value_or("");
     try {
         model.mech = chemistry::read_mechanism(mechanism, phase);
     } catch (const std::runtime_error & e) {
