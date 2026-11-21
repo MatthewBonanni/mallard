@@ -15,6 +15,7 @@
 #include "input.h"
 
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -191,6 +192,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     if (resume_output) {
         triggers.restore(restart.attributes);
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
+        if (triggers.statistics_stopped()) statistics.set_start(std::numeric_limits<rtype>::infinity());
     }
     // States read for post-processing never continue the averages they hold
     if (!state_reader) {
