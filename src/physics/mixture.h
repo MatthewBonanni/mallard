@@ -149,7 +149,8 @@ class MixtureModel {
 
 /**
  * @brief Chemistry integrator options from the optional [chemistry] table:
- *        rtol, atol (on mass fractions), max_steps (sub-steps per call),
+ *        integrator (rosenbrock or bdf), rtol, atol (on mass fractions),
+ *        max_steps (sub-steps per call),
  *        sparse (the linear solver; automatic by default, see use_sparse_lu).
  */
 chemistry::ReactorOptions reactor_options(const Input & input);

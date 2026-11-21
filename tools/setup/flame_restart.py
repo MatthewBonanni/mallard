@@ -22,7 +22,7 @@ of --perturb reference thicknesses. --explicit-step sets [chemistry]
 explicit_step = true, as the flame examples do (docs/design/chemistry.md,
 issue #1090). Writes RUN_DIR/input.toml and
 RUN_DIR/flame.restart (float64, double builds); the output series
-RUN_DIR/solut/flame is what tools/post/flame_speed.py reads.
+RUN_DIR/solut/flame is what mallard post flame reads.
 """
 import argparse
 import os

@@ -134,6 +134,7 @@ Source::Source(std::shared_ptr<const Mesh> mesh_in, const std::vector<std::vecto
     if (options.degree > MAX_DEGREE) {
         throw InputError("initialize.degree must be at most " + std::to_string(MAX_DEGREE) + ".");
     }
+    neighbors = mesh->vertex_neighbors();
     n_owned = mesh->n_owned();
     n_vars = static_cast<uint32_t>(values.size());
     n_max = n_monomials(options.degree);
@@ -223,7 +224,7 @@ void Source::fit(const std::vector<uint8_t> & need) const {
 
 void Source::fit(uint32_t c) const {
     const Mesh & m = *mesh;
-    const bool shifted = m.h_cells_of_cell_shift.rows.extent(0) > 0;
+    const bool shifted = neighbors.h_shift.rows.extent(0) > 0;
     // Rings of vertex neighbors, gathered as the stencils need them, each cell with its translation into c's frame
     std::unordered_map<uint32_t, Point> offset{{c, Point{}}};
     struct Member {
@@ -238,12 +239,12 @@ void Source::fit(uint32_t c) const {
         for (; gathered < r; gathered++) {
             next.clear();
             for (uint32_t a : ring) {
-                for (uint32_t k = m.h_offsets_cells_of_cell(a); k < m.h_offsets_cells_of_cell(a + 1); k++) {
-                    const uint32_t b = m.h_cells_of_cell(k);
+                for (uint32_t k = neighbors.h_offsets(a); k < neighbors.h_offsets(a + 1); k++) {
+                    const uint32_t b = neighbors.h_cells(k);
                     if (offset.count(b)) continue;
                     Point o = offset[a];
                     if (shifted) {
-                        const uint8_t row = m.h_cells_of_cell_shift(k);
+                        const uint8_t row = neighbors.h_shift(k);
                         for (size_t d = 0; d < N_DIM; d++) o[d] += double(m.h_shifts(row, d));
                     }
                     offset.emplace(b, o);
@@ -347,11 +348,10 @@ void Source::fit(uint32_t c) const {
 
 void Source::limit(uint32_t c) const {
     if (degree[c] == 0) return;
-    const Mesh & m = *mesh;
     std::vector<double> lo(n_vars), hi(n_vars);
     for (uint32_t v = 0; v < n_vars; v++) lo[v] = hi[v] = values[v][c];
-    for (uint32_t k = m.h_offsets_cells_of_cell(c); k < m.h_offsets_cells_of_cell(c + 1); k++) {
-        const uint32_t b = m.h_cells_of_cell(k);
+    for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) {
+        const uint32_t b = neighbors.h_cells(k);
         for (uint32_t v = 0; v < n_vars; v++) {
             lo[v] = std::min(lo[v], values[v][b]);
             hi[v] = std::max(hi[v], values[v][b]);

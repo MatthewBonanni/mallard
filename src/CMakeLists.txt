@@ -7,6 +7,7 @@ add_library(MallardCore STATIC
     common/region_input.cpp
     common/region_mesh.cpp
     common/region_motion.cpp
+    common/region_surface.cpp
     io/case_view.cpp
     io/case_image.cpp
     common/tabulated.cpp
@@ -52,6 +53,8 @@ add_library(MallardCore STATIC
     mesh/box_tree.cpp
     boundary/boundary.cpp
     boundary/boundary_coordinates.cpp
+    boundary/boundary_profiles.cpp
+    boundary/patch_coordinates.cpp
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
@@ -109,6 +112,7 @@ add_library(MallardCore STATIC
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
+    solver/solver_convective_flux.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
@@ -152,9 +156,13 @@ target_include_directories(MallardCore PUBLIC
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
-# Kokkos computes a View's offset in the common type of its indices, so indices
-# that are all narrower than int (uint8_t, uint16_t) wrap the offset and alias
-# entries. Mallard compiles against a copy of Kokkos_View.hpp that rejects them.
+# Kokkos computes a View's offset in the common type of its indices: all-int indices
+# wrap it past 2^31 entries, and indices all narrower than int (uint8_t, uint16_t)
+# much sooner, aliasing entries. Mallard compiles against a copy of Kokkos_View.hpp
+# that computes a signed 32-bit offset as unsigned (the same offset for valid indices,
+# at the same width), so offsets reach 2^32 entries (common/view_entries.h), and that
+# rejects indices all narrower than int.
+set(view_offset_patched FALSE)
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_VIEW_HEADER Kokkos_View.hpp PATHS ${kokkos_includes} NO_DEFAULT_PATH NO_CACHE)
@@ -166,24 +174,39 @@ if(Mallard_KOKKOS_VIEW_HEADER)
     string(CONCAT narrow "\"Kokkos computes this View offset in the common type of the indices, which wraps when all "
                          "of them are narrower than int: make one index at least 32 bits (see src/CMakeLists.txt)\"")
     set(offset_anchor "    using idx_type = std::common_type_t<IndexOffsets...>;\n")
-    set(offset_check "    static_assert(sizeof(idx_type) >= sizeof(int), ${narrow});\n")
-    set(stride_anchor "      std::index_sequence<0>, IndexOffset index_offset) const {\n")
-    string(CONCAT stride_check "    static_assert(!std::is_same_v<typename base_t::layout_type, Kokkos::layout_stride> ||\n"
-                               "                  sizeof(IndexOffset) >= sizeof(int), ${narrow});\n")
+    string(CONCAT offset_patch
+        "    using common_idx_type = std::common_type_t<IndexOffsets...>;\n"
+        "    static_assert(sizeof(common_idx_type) >= sizeof(int), ${narrow});\n"
+        "    using idx_type = std::conditional_t<std::is_signed_v<common_idx_type> && sizeof(common_idx_type) == 4,\n"
+        "                                        uint32_t, common_idx_type>;\n")
+    set(stride_anchor "      return index_offset * static_cast<IndexOffset>(m_map.stride(0));\n")
+    string(CONCAT stride_patch
+        "    {\n"
+        "      static_assert(sizeof(IndexOffset) >= sizeof(int), ${narrow});\n"
+        "      using idx_type = std::conditional_t<std::is_signed_v<IndexOffset> && sizeof(IndexOffset) == 4, uint32_t,\n"
+        "                                          IndexOffset>;\n"
+        "      return static_cast<idx_type>(index_offset) * static_cast<idx_type>(m_map.stride(0));\n"
+        "    }\n")
     string(FIND "${kokkos_view}" "${offset_anchor}" offset_found)
     string(FIND "${kokkos_view}" "${stride_anchor}" stride_found)
     if(offset_found GREATER_EQUAL 0 AND stride_found GREATER_EQUAL 0)
-        string(REPLACE "${offset_anchor}" "${offset_anchor}${offset_check}" kokkos_view "${kokkos_view}")
-        string(REPLACE "${stride_anchor}" "${stride_anchor}${stride_check}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${offset_anchor}" "${offset_patch}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${stride_anchor}" "${stride_patch}" kokkos_view "${kokkos_view}")
         file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded "${kokkos_view}")
         configure_file(${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded
                        ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard/Kokkos_View.hpp COPYONLY)
         target_include_directories(MallardCore SYSTEM BEFORE PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard)
+        target_compile_definitions(MallardCore PUBLIC Mallard_UNSIGNED_VIEW_OFFSETS)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${Mallard_KOKKOS_VIEW_HEADER})
+        set(view_offset_patched TRUE)
     elseif(NOT USE_SYSTEM_KOKKOS)
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_View.hpp no longer computes View offsets as the "
-                            "narrow-index guard expects; update the guard for this Kokkos version.")
+                            "offset patch expects; update the patch for this Kokkos version.")
     endif()
+endif()
+if(NOT view_offset_patched)
+    message(WARNING "Mallard: this Kokkos's Kokkos_View.hpp does not compute View offsets as src/CMakeLists.txt "
+                    "expects, so multi-dimensional Views are limited to 2^31 entries.")
 endif()
 
 # Input (common/input.h) records the keys setup reads, and its accessors how it reads
@@ -223,13 +246,19 @@ foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
 endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and the reconstruction stages its stencil loads on GPUs
-# only: contracting multiplies and adds into FMAs would round each differently
-# by where the compiler fuses, so neither file contracts and the hot loops
-# write their FMAs explicitly. [statistics.convergence] updates its estimate on
-# the device as the host does, bit for bit, and the device cuts isosurfaces
-# into the host's quadrature points (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp
-                       common/region_motion.cpp)
+# only; the Riemann solvers are inlined in several kernels. Contracting
+# multiplies and adds into FMAs would round each differently by where the
+# compiler fuses, so none of these files contracts and the hot loops write
+# their FMAs explicitly (fmadd). Every source that inlines the Riemann solvers
+# is listed, here and in test/CMakeLists.txt, so that they round alike in every
+# kernel and whichever copy of an inline function the linker keeps. MUSCL's
+# fused cell kernel inlines the functions of its separate gradient, limiter and
+# face kernels, which nvcc would fuse differently in each, so that file does not
+# contract either. [statistics.convergence] updates its estimate on the device
+# as the host does, bit for bit, and the device cuts isosurfaces into the host's
+# quadrature points (region_motion.cpp)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+                       solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
@@ -260,10 +289,10 @@ add_custom_target(mallard_git_version COMMAND ${git_version_command}
 add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
-# Kokkos computes the offset of a multi-dimensional View in the common type of its
-# indices, at most 32 bits (signed or not) in Mallard, so a View with more entries
-# would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp that
-# checks every allocation against common/view_entries.h.
+# A multi-dimensional View's offset is 32 bits (unsigned with the offset patch above,
+# else possibly signed), so a View with more entries than common/view_entries.h
+# allows would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp
+# that checks every allocation against it.
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_BASIC_VIEW_HEADER View/Kokkos_BasicView.hpp PATHS ${kokkos_includes}
@@ -295,7 +324,7 @@ endif()
 if(NOT basic_view_patched)
     if(USE_SYSTEM_KOKKOS)
         message(WARNING "Mallard: this Kokkos's View/Kokkos_BasicView.hpp does not allocate as the View size check "
-                        "in src/CMakeLists.txt expects, so Views past 2^31 entries are not rejected.")
+                        "in src/CMakeLists.txt expects, so oversized Views are not rejected.")
     else()
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_BasicView.hpp no longer allocates as the View "
                             "size check expects; update the check for this Kokkos version.")
