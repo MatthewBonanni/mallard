@@ -201,23 +201,100 @@ TEST(FlameletLESTest, EddyDiffusivityMixesZAndEnthalpyAlike) {
     }
 }
 
-// Flamelet LES (algebraic variance, eddy diffusivities, the source of C at the variance) of a stratified
-// vortex: bit for bit on any rank count, the halo cells' variances exchanged from their owners, with
-// the step graph and without. Catches halo variances from truncated stencils and work the graph misses.
-TEST(FlameletLESTest, MatchesSerialWithAndWithoutStepGraphs) {
+// The second moment Z2 of a linear Z = 0.2 + 0.6 y / L in uniform shear: the eddy diffusion of Z2 = Z^2 + Zvar
+// produces 2 (D + D_t) |grad Z|^2, of which the resolved dissipation 2 D |grad Z|^2 takes D's share, so the
+// variance, zero at the start, relaxes as Zvar_eq (1 - exp(-t / tau)) to Zvar_eq = 2 D_t Delta^2 |grad Z|^2 /
+// (C_chi (D + D_t)) with tau = Delta^2 / (C_chi (D + D_t)), Delta = h. Catches the resolved dissipation or the
+// subgrid one missing, chi_sgs without D or D_t, of the wrong width or constant, Z2 without the eddy
+// diffusivity, and an initial Z2 other than Z^2.
+TEST(FlameletLESTest, SecondMomentRelaxesToItsEquilibrium) {
+    const double L = 0.01, h = L / 32, p = 1000.0, T = 300.0, U = 58.0, C_s = 3.0, G = U / L, C_chi = 3.0;
+    const double rho = p / (287.0 * T), D = 0.0263 / (rho * 1004.5), dt = 4.0e-7, g = 0.6 / L;
+    const double D_t = C_s * C_s * h * h * G / 0.9, t_end = 10 * dt;
+    const double tau = h * h / (C_chi * (D + D_t)), Zvar_eq = 2.0 * D_t * h * h * g * g / (C_chi * (D + D_t));
     std::ostringstream input;
+    input << std::setprecision(17) << "[run]\nn_steps = 10\ndt = " << dt << "\n[mesh]\ntype = \"cartesian\"\n"
+          << "Nx = 4\nNy = 32\nLx = " << 4 * h << "\nLy = " << L << "\n"
+          << (N_DIM == 3 ? "Nz = 1\nLz = " + std::to_string(h) + "\n" : std::string()) << periodic_sides("x")
+          << (N_DIM == 3 ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                           "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                         : "")
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\nu = [" << U << ", 0.0"
+          << (N_DIM == 3 ? ", 0.0]" : "]") << "\n"
+          << "[initialize]\ntype = \"analytical\"\np = \"" << p << "\"\nT = \"" << T << "\"\nu = [\"" << G
+          << " * y\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"]" : "]") << "\nZ = \"0.2 + " << g << " * y\"\nC = \"0\"\n"
+          << physics("solver_mixing.h5", "variance = \"transported\"\nC_chi = 3.0\n") << smagorinsky(C_s);
+    SCOPED_TRACE(input.str());
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input.str()));
+    solver.copy_device_to_host();
+    const auto mesh = solver.get_mesh();
+    auto coords = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->cell_coords);
+    const auto variance = [&](const uint32_t c) {
+        const double r = double(solver.h_conservatives(c, 0)), Z = double(solver.h_species(c, 0)) / r;
+        return double(solver.h_species(c, 2)) / r - Z * Z;
+    };
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) EXPECT_NEAR(variance(c), 0.0, tol(1e-15, 1e-7));
+    solver.run();
+    solver.copy_device_to_host();
+    const double expected = Zvar_eq * (1.0 - std::exp(-t_end / tau));
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        const double y = double(coords(c, 1));
+        if (y < 4 * h || y > L - 4 * h) continue;
+        EXPECT_NEAR(variance(c), expected, tol(2e-3, 5e-2) * expected) << y;
+        checked++;
+    }
+    EXPECT_GT(checked, 20u);
+    EXPECT_GT(t_end / tau, 0.5);
+}
+
+// Inlets carry the laminar second moment Z2 = Z^2: a gas of uniform Z = 0.3 fed by an inlet at that Z (a number,
+// an expression of space and one of time, which the device evaluates) keeps Z2 = 0.09. Catches inlets whose Z2
+// is not completed from their Z.
+TEST(FlameletLESTest, InletsCarryTheLaminarSecondMoment) {
+    const double h = 0.125;
+    for (const std::string Z : {"0.3", "\"0.3 + 0.0 * y\"", "\"0.3 + 0.0 * t\""}) {
+        std::ostringstream input;
+        const std::string u = N_DIM == 2 ? "[10.0, 0.0]" : "[10.0, 0.0, 0.0]";
+        input << std::setprecision(17) << "[run]\nn_steps = 20\ndt = 1.0e-4\n"
+              << strip(8, h, "type = \"inlet_state\"\nu = " + u + "\np = 1.0e5\nT = 300.0\nZ = " + Z + "\nC = 0.0\n")
+              << "[initialize]\np = 1.0e5\nT = 300.0\nu = " << u << "\nZ = 0.3\nC = 0.0\n"
+              << physics("solver_mixing.h5", "variance = \"transported\"\n") << smagorinsky(0.17);
+        SCOPED_TRACE(input.str());
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(input.str()));
+        solver.run();
+        solver.copy_device_to_host();
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            EXPECT_NEAR(double(solver.h_species(c, 2)) / double(solver.h_conservatives(c, 0)), 0.09, tol(1e-12, 1e-6));
+        }
+    }
+}
+
+// Flamelet LES (algebraic or transported variance, eddy diffusivities, the source of C at the variance) of a
+// stratified vortex: bit for bit on any rank count, the halo cells' algebraic variances exchanged from their
+// owners, with the step graph and without. Catches halo variances from truncated stencils and work the graph
+// misses.
+TEST(FlameletLESTest, MatchesSerialWithAndWithoutStepGraphs) {
     const double L = 0.01;
-    input << std::setprecision(17) << "[run]\nn_steps = 6\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\n"
-          << "Nx = 12\nNy = 12\nLx = " << L << "\nLy = " << L << "\n"
-          << (N_DIM == 3 ? "Nz = 4\nLz = 0.004\n" : "")
-          << periodic_sides(N_DIM == 2 ? "xy" : "xyz")
-          << "[initialize]\ntype = \"analytical\"\np = \"1e5\"\nT = \"300\"\n"
-          << "u = [\"30 * sin(628.3185307179586 * y)\", \"-20 * sin(628.3185307179586 * x)\""
-          << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
-          << "Z = \"0.5 + 0.3 * sin(628.3185307179586 * x) * cos(628.3185307179586 * y)\"\nC = \"0.1\"\n"
-          << physics("solver_variance.h5", "C_Z = 4.0\n")
-          << (N_DIM == 2 ? "[les]\nmodel = \"vreman\"\n" : "[les]\nmodel = \"sigma\"\n");
-    expect_matches_serial_with_and_without_step_graphs(input.str());
+    for (const std::string variance : {"C_Z = 4.0\n", "variance = \"transported\"\n"}) {
+        std::ostringstream input;
+        input << std::setprecision(17) << "[run]\nn_steps = 6\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\n"
+              << "Nx = 12\nNy = 12\nLx = " << L << "\nLy = " << L << "\n"
+              << (N_DIM == 3 ? "Nz = 4\nLz = 0.004\n" : "") << periodic_sides(N_DIM == 2 ? "xy" : "xyz")
+              << "[initialize]\ntype = \"analytical\"\np = \"1e5\"\nT = \"300\"\n"
+              << "u = [\"30 * sin(628.3185307179586 * y)\", \"-20 * sin(628.3185307179586 * x)\""
+              << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
+              << "Z = \"0.5 + 0.3 * sin(628.3185307179586 * x) * cos(628.3185307179586 * y)\"\nC = \"0.1\"\n"
+              << physics("solver_variance.h5", variance)
+              << (N_DIM == 2 ? "[les]\nmodel = \"vreman\"\n" : "[les]\nmodel = \"sigma\"\n");
+        SCOPED_TRACE(variance);
+        expect_matches_serial_with_and_without_step_graphs(input.str());
+    }
 }
 
 #endif

@@ -404,6 +404,7 @@ class CompositionExpressions {
             if (mixture.tabulated()) {
                 for (size_t i = 0; i < listed.size(); i++) f[static_cast<size_t>(listed[i])] = std::max(value[i], 0.0);
                 if (burnt) f[flamelet::Gas<>::C] = mixture.flamelet().burnt_progress(f[flamelet::Gas<>::Z]);
+                mixture.flamelet().host().complete(f);
                 return f;
             }
             double sum = 0.0;

@@ -1061,7 +1061,9 @@ void Solver::init_les() {
     if (mixture.tabulated()) {
         flamelet_variance = Kokkos::View<rtype *>("flamelet_variance", mesh->n_cells);
         h_flamelet_variance = pinned_mirrors(flamelet_variance);
-        if (halo.active()) flamelet_halo = State("flamelet_variance_halo", mesh->n_cells, 1);
+        if (halo.active() && !mixture.flamelet.second_moment) {
+            flamelet_halo = State("flamelet_variance_halo", mesh->n_cells, 1);
+        }
         mixture.flamelet.variance = flamelet_variance;
     }
     les_state = Kokkos::View<double *>("les_state", 3);

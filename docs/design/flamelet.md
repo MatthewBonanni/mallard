@@ -466,6 +466,26 @@ the normalized `c` and one step of the source at it; the decay of a cosine of
 with enthalpy mixing with `Z` only when `Pr_t = Sc_t`; and bit-for-bit
 agreement on any rank count and with step graphs.
 
+### 5.7 Stage 3 as built: the transported second moment
+
+`variance = "transported"` adds `Z2` to the species block after `Z` and `C`
+(`flamelet::Gas::second_moment`), so storage, transport, reconstruction, halo
+exchange, restart and output come with it, and the variance is the pointwise
+`Z2 - Z^2` of every cell, with no exchange. Its sink, `2 rho D |grad Z|^2 +
+C_chi rho (D + D_t) Zvar / Delta^2`, is an explicit source beside that of `C`,
+from the transport gradient of `Z`, the conducted `kappa / cp` and the SGS
+coefficient `mu_t / Sc_t`. Inlets carry `Z2 = Z^2` (laminar), completed from
+their `Z` wherever compositions are made (`flamelet::Gas::complete`), and fresh
+initial states start at `Z2 = Z^2` of the cell averages: the averages of a
+pointwise `Z^2` would hold the variance of the profile within each cell.
+
+`C_chi` defaults to 2, not to the
+`2 / C_Z = 20` that would match the algebraic model's equilibrium: the sink
+relaxes in `Delta^2 / (C_chi (D + D_t))`, which the viscous time step resolves
+only for `C_chi` of a few. The test relaxes a linear `Z` in uniform shear from
+zero variance to `2 D_t Delta^2 |grad Z|^2 / (C_chi (D + D_t))`, exact on a
+uniform mesh because the discrete diffusion of `Z^2` is `2 |grad Z|^2` there.
+
 ## 6. Interaction with the existing models
 
 - **Finite-rate chemistry:** exclusive. `gas = "flamelet"` loads no mechanism
@@ -499,7 +519,7 @@ agreement on any rank count and with step graphs.
 [physics]
 gas = "flamelet"
 table = "h2_fpv.h5"          # relative to the directory the run starts in
-variance = "algebraic"       # with [les] only; "transported" is to come
+variance = "algebraic"       # with [les] only; or "transported" (C_chi = 2)
 C_Z = 0.1                    # algebraic variance constant
 
 [[boundaries]]
