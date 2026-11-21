@@ -559,11 +559,12 @@ Options:
                             T, p0, T0, mass_flux, q) and the velocity it
                             prescribes; for inlet_stagnation and
                             inlet_mass_flow, the density, velocity, speed, mass
-                            flux into the domain (rho_u_n) and pressure its flux
-                            makes of the initial state, estimated (the state at
-                            the first step differs). With --format json, the
-                            report's boundary_values gives each file and each
-                            column's min, area mean and max. Default: none.
+                            flux into the domain (rho_u_n) and pressure it
+                            settles at against the initial pressure inside,
+                            estimated (the first steps' transient differs). With
+                            --format json, the report's boundary_values gives
+                            each file and each column's min, area mean and max.
+                            Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).

@@ -764,10 +764,13 @@ its expressions read (`u`, `u_m`, `n`, ...), every key the entry prescribes
 (`u`, `p`, `T`, `p0`, `T0`, `mass_flux`, `q`, by component as `u[0]`) and,
 for `inlet_state`, `farfield` and moving walls, the velocity it prescribes
 (`u_x`, ...). An `inlet_stagnation` or `inlet_mass_flow` sets its velocity
-from the state inside, so for those the file has the inflow its flux makes of
-the initial state: `rho`, `u_x`, ..., `speed`, `rho_u_n` (the mass flux into
-the domain) and `p`. These are estimates: the state at the run's first step
-differs. The JSON report's `boundary_values` (schema
+from the state inside, so for those the file has the inflow it settles at
+once the initial pressure inside reaches it: `rho`, `u_x`, ..., `speed`,
+`rho_u_n` (the mass flux into the domain) and `p`, the cell's pressure (a
+stagnation inlet's state on its isentrope there, at rest where the pressure
+inside is above `p0`; a mass-flow inlet's density at its `T`). These are
+estimates: the transient of the first steps differs, and a cell flowing
+supersonically through a stagnation inlet keeps the state the flux makes of it. The JSON report's `boundary_values` (schema
 `mallard-boundary-values`, the result of the [session](session.md)'s
 `case.boundary_values`) names each file and gives each column's `units`,
 `estimated`, `min`, area-weighted `mean` and `max`.
