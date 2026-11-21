@@ -326,6 +326,19 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
 
+## Lagrangian particles
+
+- <a id="schiller-naumann-1933"></a>L. Schiller and A. Naumann, Über die grundlegenden Berechnungen bei der Schwerkraftaufbereitung, *Z. Ver. Dtsch. Ing.* 77, 318–320 (1933).
+  Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`).
+- <a id="singh-2022"></a>N. Singh, M. Kroells, C. Li, E. Ching, M. Ihme, C. J. Hogan and T. E. Schwartzentruber, General drag coefficient for flow over spherical particles, *AIAA J.* 60, 587–597 (2022). [doi:10.2514/1.J060648](https://doi.org/10.2514/1.J060648), [arXiv:2012.04813](https://arxiv.org/abs/2012.04813)
+  Used in: `drag = "singh"` of solid particles (`src/particles/particle_forces.h`, Appendix C).
+- <a id="maxey-riley-1983"></a>M. R. Maxey and J. J. Riley, Equation of motion for a small rigid sphere in a nonuniform flow, *Phys. Fluids* 26, 883–889 (1983). [doi:10.1063/1.864230](https://doi.org/10.1063/1.864230)
+  Used in: the `"pressure_gradient"` and `"added_mass"` forces of solid particles.
+- <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
+  Used in: the `"saffman_lift"` force of solid particles.
+- <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
+  Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
+
 ## Derived output fields
 
 - <a id="hunt-wray-moin-1988"></a>J. C. R. Hunt, A. A. Wray and P. Moin, Eddies, streams, and convergence zones in turbulent flows, Center for Turbulence Research, Proceedings of the Summer Program 1988, 193–208 (1988).
