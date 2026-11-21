@@ -177,6 +177,7 @@ OTHER_GUARDS = [
     ("src/mesh/read_gmsh.cpp", "parametric nodes are not supported"),
     ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
+    ("src/solver/solver.cpp", "is not available yet with chemistry.coupling"),
     ("src/solver/solver.cpp", "is not available for gas mixtures yet"),
     ("src/solver/solver.cpp", "is not available for axisymmetric runs yet"),
     ("src/solver/solver.cpp", "is not available with LES yet"),
