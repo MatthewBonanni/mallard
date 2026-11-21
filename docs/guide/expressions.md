@@ -38,6 +38,7 @@ and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 | What | Syntax |
 |---|---|
+| Grouping | `( )`, `[ ]` or `{ }`, each closed by its own kind (`(x + 1]` is an error), nested at most 256 deep |
 | Arithmetic | `+ - * / % ^`; `^` binds from the right and above unary minus (`-x^2` is `-(x^2)`); `2x`, `2(x + 1)` and `(x)(y)` multiply |
 | Comparisons | `< <= > >= == !=` (also `=` and `<>`), giving 1 or 0 |
 | Logic | `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `&`, `\|`, `not(x)`; any value other than 0 is true |
