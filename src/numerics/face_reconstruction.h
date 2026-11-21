@@ -554,7 +554,7 @@ class TENO : public FaceReconstruction {
         // Queued cells per round of the troubled passes, as a fraction of the
         // reconstructed cells (scratch slots); later rounds recompute the
         // central coefficients the smooth pass could not keep
-        rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
+        rtype troubled_capacity = N_DIM == 3 ? 0.25 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each table row's stencil search visited (host);
