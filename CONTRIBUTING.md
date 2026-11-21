@@ -284,7 +284,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)), so the sanitized tests run
   with `MALLARD_TEST_CUDA_GRAPHS=off`: every solver as with `[run] cuda_graphs = false`, and
   the assertions that steps were graphed are skipped. `racecheck` fails on hazards it rates as
-  errors, not on its warnings, which Kokkos' reductions of large values raise. `--full` adds
+  errors, not on its warnings, which Kokkos' reductions of large values raise. `memcheck` and
+  `initcheck` skip the CUDA API errors that NCCL and Open MPI make and handle
+  (`tools/dev/compute_sanitizer_suppressions.xml`), and `memcheck` reports explicit API errors
+  only: the driver's log lines cannot be suppressed. `--full` adds
   `initcheck`, `memcheck` on the whole suite but the chemistry reactor tests (hours), and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
   across the network).
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
