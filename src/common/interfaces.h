@@ -25,6 +25,7 @@ struct Schema {
 inline constexpr Schema CAPABILITIES = {"mallard-capabilities", 1};   // mallard version --format json
 inline constexpr Schema KEY_CATALOG = {"mallard-key-catalog", 1};     // mallard list keys --format json
 inline constexpr Schema CHECK_REPORT = {"mallard-check", 1};          // mallard check --format json
+inline constexpr Schema BOUNDARY_VALUES = {"mallard-boundary-values", 1}; // mallard check --boundary-values DIR
 inline constexpr Schema CASE_VIEW = {"mallard-case-view", 1};         // mallard check --view DIR --format json's view
 inline constexpr Schema RUN_DIRECTORY = {"mallard-run-directory", 1}; // mallard info RUN_DIR --format json
 inline constexpr Schema RUN_CONTROL = {"mallard-run-control", 2};     // mallard ctl, the control socket

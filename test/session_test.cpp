@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cctype>
+#include <cmath>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
@@ -352,6 +353,77 @@ TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
         EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-12);
         EXPECT_NEAR(after["origin"].array[1].number - before["origin"].array[1].number,
                     before["u_direction"].array[1].number * before["length"].number, 1e-9);
+    }
+}
+
+/** @brief A CSV file as columns by name. */
+std::map<std::string, std::vector<double>> csv_columns(const std::string & path) {
+    std::ifstream in(path);
+    std::string line, cell;
+    std::getline(in, line);
+    std::vector<std::string> names;
+    for (std::istringstream header(line); std::getline(header, cell, ',');) names.push_back(cell);
+    std::map<std::string, std::vector<double>> columns;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        for (const std::string & name : names) {
+            std::getline(row, cell, ',');
+            columns[name].push_back(cell == "null" ? std::nan("") : std::stod(cell));
+        }
+    }
+    return columns;
+}
+
+TEST(SessionTest, BoundaryValuesAreTheBoundariesOwnWithTheInflowOfMassFlowInlets) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    const std::string u = Mallard_DIM == 3 ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
+    const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    const std::string outlet = "name = \"outlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    ASSERT_NE(text.find(inlet), std::string::npos);
+    text.replace(text.find(inlet), inlet.size(),
+                 "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\n"
+                 "T = \"0.7142857142857143 * (1 + 0.1 * u)\"\n");
+    ASSERT_NE(text.find(outlet), std::string::npos);
+    text.replace(text.find(outlet), outlet.size(),
+                 "name = \"outlet\"\ntype = \"inlet_mass_flow\"\nmass_flux = 0.15\nT = 0.7142857142857143\n");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-boundary-values"}});
+    const json::Value values = response(list, 1)["result"];
+    const Result check = run({"check", "case.toml", "--boundary-values", "values", "--format", "json"});
+    ASSERT_EQ(check.status, 0) << check.err;
+    EXPECT_EQ(json::dump(values), json::dump(json::parse(check.out)["boundary_values"]));
+    EXPECT_EQ(violations("mallard-check", json::parse(check.out)), "");
+
+    std::map<std::string, json::Value> entries;
+    for (const json::Value & e : values["entries"].array) entries[e["zone"].string] = e;
+    ASSERT_EQ(entries.size(), Mallard_DIM == 3 ? 6u : 4u) << json::dump(values);
+    for (const auto & [zone, e] : entries) {
+        const auto columns = csv_columns(e["file"].string);
+        ASSERT_EQ(columns.size(), e["columns"].array.size() + 1) << zone;
+        EXPECT_EQ(columns.at("face").size(), static_cast<size_t>(e["faces"].number)) << zone;
+    }
+    // The profile, as the boundary evaluates it at each face from its own u
+    const auto in = csv_columns(entries["inlet"]["file"].string);
+    ASSERT_TRUE(in.count("T") && in.count("u")) << json::dump(entries["inlet"]);
+    for (size_t k = 0; k < in.at("T").size(); k++) {
+        EXPECT_NEAR(in.at("T")[k], 0.7142857142857143 * (1 + 0.1 * in.at("u")[k]), 1e-12);
+    }
+    // The mass-flow inlet's flux makes the prescribed mass flux of the initial state
+    const auto out = csv_columns(entries["outlet"]["file"].string);
+    ASSERT_TRUE(out.count("rho_u_n") && out.count("speed")) << json::dump(entries["outlet"]);
+    for (size_t k = 0; k < out.at("rho_u_n").size(); k++) {
+        EXPECT_NEAR(out.at("rho_u_n")[k], 0.15, 1e-9);
+        EXPECT_GT(out.at("speed")[k], 0.0);
+    }
+    for (const json::Value & c : entries["outlet"]["columns"].array) {
+        EXPECT_EQ(c["estimated"].boolean, c["name"].string == "rho_u_n" || c["name"].string == "speed" ||
+                                              c["name"].string == "rho" || c["name"].string == "p" ||
+                                              c["name"].string.rfind("u_", 0) == 0) << c["name"].string;
     }
 }
 

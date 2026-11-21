@@ -92,6 +92,7 @@ add_library(MallardCore STATIC
     solver/probe_spectra.cpp
     solver/probes.cpp
     solver/solver.cpp
+    solver/solver_boundary_values.cpp
     solver/solver_check.cpp
     solver/solver_mesh_fields.cpp
     solver/check_report.cpp

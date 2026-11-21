@@ -874,6 +874,12 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
+        /**
+         * @brief Each [[boundaries]] entry's values at its faces at the current time, as the boundary evaluates them,
+         *        and for stagnation and mass-flow inlets the inflow its flux makes of the cells' state: one CSV file
+         *        per entry in dir and the summary (mallard-boundary-values). Collective.
+         */
+        std::string boundary_values(const std::string & dir) const;
         /** @brief The frame of each [[boundaries]] entry's local coordinates, for the case view. Collective. */
         void check_frames(CheckReport & r) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;

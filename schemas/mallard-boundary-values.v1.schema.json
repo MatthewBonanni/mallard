@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-boundary-values.v1.schema.json",
+  "title": "Each [[boundaries]] entry's values at its faces: case.boundary_values, and the boundary_values member of mallard check --boundary-values DIR --format json",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "t",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mallard-boundary-values"
+    },
+    "version": {
+      "const": 1
+    },
+    "t": {
+      "type": "number",
+      "description": "the time the values are evaluated at [s]"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entry",
+          "index",
+          "zone",
+          "condition",
+          "file",
+          "faces",
+          "columns"
+        ],
+        "properties": {
+          "entry": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "of the entry in [[boundaries]]"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string",
+            "description": "CSV: face (a key every partition agrees on), then the columns, one row per face"
+          },
+          "faces": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "units",
+                "estimated",
+                "min",
+                "mean",
+                "max"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "units": {
+                  "type": "string"
+                },
+                "estimated": {
+                  "type": "boolean",
+                  "description": "the inflow the flux makes of the initial state, not a prescribed value"
+                },
+                "min": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "mean": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "description": "weighted by the faces' areas"
+                },
+                "max": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
