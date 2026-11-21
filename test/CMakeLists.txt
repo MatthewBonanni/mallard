@@ -12,6 +12,7 @@ set(MALLARD_TEST_SOURCES
     region_mesh_test.cpp
     region_motion_test.cpp
     region_sampler_test.cpp
+    region_surface_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
@@ -61,6 +62,7 @@ set(MALLARD_TEST_SOURCES
     post_extract_test.cpp
     post_derive_test.cpp
     post_average_test.cpp
+    post_flame_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
@@ -117,6 +119,8 @@ set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_
 
 # The compiled expressions round every operation on its own, and so must their hand-written references
 mallard_no_contraction(kexpr_test.cpp)
+# They inline the Riemann solvers, which src/CMakeLists.txt compiles without contraction
+mallard_no_contraction(riemann_solver_test.cpp riemann3d_test.cpp mixture_test.cpp)
 target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")
 add_dependencies(mallard-test mallard)

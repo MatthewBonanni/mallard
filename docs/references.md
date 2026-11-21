@@ -267,6 +267,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: collapsed (conical product) Gauss rules on triangles and tetrahedra, for TENO-E moments and 3D analytical initial conditions (`src/numerics/teno.cpp`, `src/solver/solver_initialize.cpp`). Gauss–Legendre rules integrate the faces.
 - <a id="kuhn-1960"></a>H. W. Kuhn, Some combinatorial lemmas in topology, *IBM J. Res. Dev.* 4, 518–524 (1960). [doi:10.1147/rd.45.0518](https://doi.org/10.1147/rd.45.0518)
   Used in: `type = "cartesian_tet"`, six tetrahedra per block of a generated box.
+- <a id="baerentzen-aanaes-2005"></a>J. A. Bærentzen and H. Aanæs, Signed distance computation using the angle weighted pseudonormal, *IEEE Trans. Vis. Comput. Graph.* 11, 243–253 (2005). [doi:10.1109/TVCG.2005.49](https://doi.org/10.1109/TVCG.2005.49)
+  Used in: the sign of the distance to the closed surfaces of regions from STL and OBJ files (`src/common/geometry.h`).
+- <a id="ericson-2005"></a>C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann (2005).
+  Used in: the closest point on a triangle (§5.1.5) and the bounding volume hierarchy of regions from STL and OBJ files.
 
 ## Parallelism, meshes and software
 

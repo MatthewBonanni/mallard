@@ -302,6 +302,7 @@ struct Outcome {
  *        host copy.
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
+    if (Solver::are_cuda_graphs_off()) return;
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
     if (solver.get_step() > 1) {
         EXPECT_GT(guard.captures(), 0u);
@@ -546,7 +547,7 @@ TEST(StepQueueTest, OutputsByStep) {
 #ifdef KOKKOS_ENABLE_CUDA
     const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
     EXPECT_EQ(fallback.graph_steps, 0u);
-    if (comm::is_root()) {
+    if (comm::is_root() && !Solver::are_cuda_graphs_off()) {
         ASSERT_EQ(fallback.warnings.size(), 1u);
         EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
     }
@@ -646,6 +647,7 @@ namespace {
 
 /** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
 void expect_graphed(const Outcome & o, const std::string & what) {
+    if (Solver::are_cuda_graphs_off()) return;
 #ifdef KOKKOS_ENABLE_CUDA
     EXPECT_GT(o.graph_steps, 0u) << what;
 #endif
@@ -1261,7 +1263,9 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
                    statistics;
     Case bare = c;
     bare.extra = "check_interval = 4\n" + statistics;
-    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    }
 }
 
 namespace {
@@ -1352,7 +1356,9 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     bare.extra = base;
     const Outcome queued = run_case("sources_regions", c, 3);
     expect_graphed(queued, "sources_regions");
-    EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
@@ -1377,7 +1383,9 @@ TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("many_writers", c, 3);
     expect_graphed(queued, "many_writers");
-    EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
@@ -1400,7 +1408,9 @@ TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("fused_outputs", c, 3), quiet = run_case("fused_outputs_bare", bare, 3);
     expect_graphed(queued, "fused_outputs");
-    EXPECT_EQ(queued.queued, quiet.queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, quiet.queued);
+    }
     ASSERT_EQ(queued.U.size(), quiet.U.size());
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
@@ -1440,7 +1450,9 @@ TEST(StepQueueTest, OutputsOfAveragedSpectraAndPhasesAreStagedWithoutStoppingThe
     bare.extra = "check_interval = 1000\n" + statistics;
     const Outcome queued = run_case("spectra_phases", c, 3);
     expect_graphed(queued, "spectra_phases");
-    EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
@@ -1724,6 +1736,7 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
     // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
     // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;

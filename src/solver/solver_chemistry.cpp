@@ -41,10 +41,6 @@ void Solver::init_chemistry() {
     if (!input.contains("chemistry")) return;
     const Input & table = input.at("chemistry");
     if (!find_value_or<bool>(table, "enabled", true)) return;
-    const std::string integrator = find_value_or<std::string>(table, "integrator", "rosenbrock");
-    if (integrator != "rosenbrock") {
-        throw InputError("chemistry.integrator = \"" + integrator + "\" is not one of: rosenbrock.");
-    }
     const std::string coupling = find_value_or<std::string>(table, "coupling", "strang");
     if (coupling != "strang" && coupling != "simpler") {
         throw InputError("chemistry.coupling = \"" + coupling + "\" is not one of: strang, simpler.");

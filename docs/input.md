@@ -901,13 +901,13 @@ cell over `dt` under its chemistry plus that constant source, then lets
 the flow correct over the second half of the step with `T(U) - T(U^n)`:
 steady states of chemistry and transport stay exactly steady at any `dt`
 (see the [thermochemistry guide](guide/thermochemistry.md#finite-rate-chemistry)). The integrator
-is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
-double precision in every build.
+is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, or a
+variable-order BDF, in double precision in every build.
 
 | Key | Description |
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
-| `integrator` | `rosenbrock` (the default and only choice so far) |
+| `integrator` | `rosenbrock` (default; RODAS) or `bdf` (variable-order BDF, orders 1-5, with the Jacobian and its factorization kept over many sub-steps; CVODE's strategy). BDF is faster where cells take one or a few sub-steps per call, as at the small time steps of detonations and compressible flames (n-dodecane and n-hexane at `dt` = 1e-8 s: 1.4-1.7 times RODAS's throughput on CPUs, up to 1.4 on an A100), and gains less at larger time steps, since every call restarts it at order 1 (1.1-1.5 times at 1e-6 s). Its error estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate than RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`, within 2e-5 at `1e-14`); see the [design notes](design/chemistry.md#bdf-integrator-issue-143) |
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
@@ -1658,6 +1658,7 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)) |
 | `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, `Y_<species>`, `MACH`, `H`, `X_<species>`, `VORTICITY` (3D: `VORTICITY_X`, `_Y`, `_Z`) and `Q_CRITERION` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
 | `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
@@ -1738,7 +1739,8 @@ curve with filled regions clip it: the parts inside them (outside the
 subtracted ones), keeping its dimension and orientation; the surface or curve
 comes first in a `difference`.
 
-The surfaces of primitives (and 3D flat surfaces and curves) are exact: their
+The surfaces of primitives (and 3D flat surfaces and curves) are exact (`stl`
+and `obj`: their triangles; 2D: the segments of their section): their
 parameters cut into patches about half a cell wide with Gauss points; planes,
 boundary zones and the faces around regions of the mesh are cut or taken
 exactly from the cells; boundaries of booleans and `implicit` regions are
