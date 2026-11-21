@@ -71,7 +71,7 @@ constexpr Rule RULES[] = {
     {"face_quad_", true, C::MESH}, {"face_image", true, C::MESH}, {"image_", true, C::MESH},
     {"face_bc", false, C::MESH}, {"face_shift", false, C::MESH}, {"shift", true, C::MESH},
     {"rotated_faces", false, C::MESH}, {"local_faces", false, C::MESH}, {"partition_faces", false, C::MESH},
-    {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
+    {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH}, {"flux_normals", false, C::MESH},
     {"vertex_gradient_weights", true, C::MESH}, {"points", false, C::MESH}, {"weights", false, C::MESH},
     // Boundaries, sources, sponges, LES and wall models
     {"face_char", false, C::MODELS}, {"face_state", true, C::MODELS}, {"bc_", true, C::MODELS},

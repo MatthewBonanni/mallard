@@ -1602,6 +1602,9 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
                     std::vector<curved::Vec3> x;
                     std::vector<double> w;
                     mesh.curved_geometry->cell_rule(c, N_DIM == 2 ? 10 : 8, x, w);
+                    if (mesh.axisymmetric) {
+                        for (size_t q = 0; q < w.size(); q++) w[q] *= x[q][1];
+                    }
                     curved_points.insert(curved_points.end(), x.begin(), x.end());
                     curved_weights.insert(curved_weights.end(), w.begin(), w.end());
                 }

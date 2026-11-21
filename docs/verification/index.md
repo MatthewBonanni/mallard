@@ -8,7 +8,7 @@ described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-165 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
+167 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
 <!-- END GENERATED summary -->
 
 ## How the tables are made
@@ -283,6 +283,8 @@ the reconstruction's), and the viscous residual of Poiseuille pipe flow.
 | TENO3 | triangles | mean residual error, manufactured solution | 16 → 32 | 2.33e-02 → 4.83e-03 | 2 | 2.27 | > 1.7 | pass |
 | TENO4 | triangles | mean residual error, manufactured solution | 16 → 32 | 7.91e-03 → 7.38e-04 | 3 | 3.42 | > 2.7 | pass |
 | TENO5 | triangles | mean residual error, manufactured solution | 16 → 32 | 8.73e-03 → 5.94e-05 | 4 | 7.20 | > 3.7 | pass |
+| TENO3 | quadrilaterals, curved walls | mean residual error, spherical shell | 8 → 16 | 2.70e-03 → 4.25e-04 | 2 | 2.67 | > 1.7 | pass |
+| TENO4 | quadrilaterals, curved walls | mean residual error, spherical shell | 8 → 16 | 7.15e-04 → 8.14e-05 | 3 | 3.14 | > 2.7 | pass |
 <!-- END GENERATED table-axisymmetric -->
 
 ## Curved boundaries
