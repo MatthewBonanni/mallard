@@ -91,6 +91,7 @@ void StepController::update(const rtype dt_host, const rtype * dt_device, const 
     });
     restore_rejected(s, u.flow.data(), u0.flow.data(), u.flow.span());
     if (u.species.span() > 0) restore_rejected(s, u.species.data(), u0.species.data(), u.species.span());
+    if (u.particles.span() > 0) restore_rejected(s, u.particles.data(), u0.particles.data(), u.particles.span());
 }
 
 rtype StepController::read(const Slot slot) const {

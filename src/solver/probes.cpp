@@ -2312,23 +2312,25 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     probes.push_back(std::move(probe_ptr));
 }
 
-std::string Probes::set_interval(const std::string & name, uint64_t steps, bool snapshot) {
+std::string Probes::set_interval(const std::string & name, uint64_t steps, bool snapshot, const bool apply) {
     for (auto & p : probes) {
         if (p->name != name || p->snapshot != snapshot) continue;
         if (p->interval == 0) return "is written every time_interval; set that instead";
         if (steps == 0) return "interval must be positive";
+        if (!apply) return "";
         p->interval = steps;
         return "";
     }
     return snapshot ? "no [[write_data]] with prefix " + name : "no [[probes]] named " + name;
 }
 
-std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot) {
+std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot, const bool apply) {
     for (auto & p : probes) {
         if (p->name != name || p->snapshot != snapshot) continue;
         if (p->interval > 0) return "is written every interval steps; set that instead";
         if (!(value > 0.0_r)) return "time_interval must be positive";
         if (p->spectra) return "keeps its time_interval: its spectra need equally spaced samples";
+        if (!apply) return "";
         p->time_interval = value;
         p->n_written = static_cast<uint64_t>(std::floor(t / value + precision_tol(1e-9, 1e-5))) + 1;
         return "";

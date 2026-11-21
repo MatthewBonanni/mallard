@@ -232,10 +232,16 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
         if (local_faces.size() > 0) launch_convective_flux(local_faces);
         face_exchange.start(comm_space, face_solution);
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
+        if (polynomial_viscous) {
+            polynomials = dynamic_cast<const TENO &>(*face_reconstruction).polynomials;
+            polynomial_exchange.start(comm_space, polynomials);
+        }
         if (viscous_gradients_due) {
             gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
         }
         face_exchange.finish(comm_space, face_solution);
+        if (polynomial_viscous) polynomial_exchange.finish(comm_space, polynomials);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         if (partition_faces.size() > 0) launch_convective_flux(partition_faces);
     } else {
@@ -267,6 +273,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
                                              viscous_gradients, boundary_data, face_flux, physics, axisymmetric,
                                              mesh->cell_covariance, les_coefficients};
         viscous_functor.wall_model = wall_model.out;
+        if (polynomial_viscous) set_polynomial_flux(viscous_functor);
         parallel_for_set<HeavyBounds>("viscous_flux", rhs_faces, viscous_functor);
         if (budget_pass) budget_rates_of_fluxes(1);
     }
@@ -309,6 +316,17 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         parallel_for_set<HeavyBounds>("viscous_flux", rhs_faces, viscous_functor);
         budget_rates_of_fluxes(2);
     }
+}
+
+void Solver::set_polynomial_flux(ViscousFluxFunctor & functor) const {
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    functor.polynomials = CellPolynomials{teno.polynomials, mesh->cell_coords, teno.degree};
+    functor.points = FacePoints{teno.quadrature_face.points, teno.offsets_nodes_of_face, teno.nodes_of_face,
+                                teno.node_coords, mesh->face_coords, teno.face_quad_points};
+    functor.face_solution = face_solution;
+    functor.quad_weights = teno.quadrature_face.weights;
+    functor.face_weights = flux_weights;
+    functor.quad_normals = teno.face_quad_normals;
 }
 
 void Solver::start_reconstruction(StateView solution) {

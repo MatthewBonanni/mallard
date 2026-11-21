@@ -30,7 +30,6 @@ constexpr bool stage_through_host = false;
 constexpr bool stage_through_host = !device_is_host_accessible;
 #endif
 
-constexpr int FACE_TAG = 1;
 #endif
 
 // A cell has fewer faces than this
@@ -117,8 +116,8 @@ FacePlan plan_face_exchange(const Distribution & dist, const Mesh & mesh, const 
     return plan;
 }
 
-FaceExchange::FaceExchange(const FacePlan & plan, const uint8_t n_quad, const bool nccl_)
-    : ranks(plan.neighbors), nccl(nccl_), n_values(uint32_t(n_quad) * N_CONSERVATIVE) {
+FaceExchange::FaceExchange(const FacePlan & plan, const uint8_t n_quad, const bool nccl_, const int tag_)
+    : ranks(plan.neighbors), nccl(nccl_), tag(tag_), n_values(uint32_t(n_quad) * N_CONSERVATIVE) {
     if (nccl && !comm::nccl_available()) throw std::logic_error("FaceExchange: built without NCCL");
     send_faces = flatten(plan.send_faces, send_offsets, "face_exchange_send_faces");
     recv_faces = flatten(plan.recv_faces, recv_offsets, "face_exchange_recv_faces");
@@ -172,12 +171,12 @@ void FaceExchange::start(const Kokkos::DefaultExecutionSpace & exec,
     requests.assign(2 * ranks.size(), MPI_REQUEST_NULL);
     for (size_t n = 0; n < ranks.size(); n++) {
         MPI_Irecv(recv_ptr + size_t(recv_offsets[n]) * stride,
-                  static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * stride), type, ranks[n], FACE_TAG,
+                  static_cast<int>((recv_offsets[n + 1] - recv_offsets[n]) * stride), type, ranks[n], tag,
                   comm::communicator(), &requests[n]);
     }
     for (size_t n = 0; n < ranks.size(); n++) {
         MPI_Isend(send_ptr + size_t(send_offsets[n]) * stride,
-                  static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * stride), type, ranks[n], FACE_TAG,
+                  static_cast<int>((send_offsets[n + 1] - send_offsets[n]) * stride), type, ranks[n], tag,
                   comm::communicator(), &requests[ranks.size() + n]);
     }
 #else

@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
+    json_test.cpp
     view_entries_test.cpp
     kexpr_test.cpp
     region_test.cpp
@@ -73,6 +74,8 @@ set(MALLARD_TEST_SOURCES
     step_queue_test.cpp
     gated_test.cpp
     statistical_convergence_test.cpp
+    particles_test.cpp
+    viscous_order_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES
