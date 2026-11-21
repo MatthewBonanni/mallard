@@ -382,7 +382,6 @@ std::vector<CapturedWarning> WarningCapture::take() {
 }
 
 void warning(std::string_view code, std::string_view message) {
-    if (!comm::is_root()) return;
     {
         const std::lock_guard<std::mutex> lock(capture_mutex);
         if (capture) {
@@ -390,6 +389,7 @@ void warning(std::string_view code, std::string_view message) {
             return;
         }
     }
+    if (!comm::is_root()) return;
     close_phase();
     std::cout << std::flush;
     std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;

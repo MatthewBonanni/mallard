@@ -135,8 +135,8 @@ struct CapturedWarning {
 };
 
 /**
- * @brief While one lives, warning() keeps its warnings for it to take instead of printing them: mallard check
- *        reports the warnings of the setup with its own.
+ * @brief While one lives, warning() keeps its warnings for it to take instead of printing them, on every rank:
+ *        mallard check reports the warnings of the setup with its own.
  */
 class WarningCapture {
     public:
