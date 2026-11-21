@@ -258,7 +258,7 @@ TEST(ParticleInjectionTest, AZoneInjectorSpreadsByAreaAlongItsInwardNormal) {
         EXPECT_LE(r.x[0], 2.0 * 0.2 + ROUND_OFF);
         y.push_back(r.x[1]);
         if (N_DIM == 3) z.push_back(r.x[N_DIM - 1] / 0.5);
-        EXPECT_EQ(r.d, 1e-3);
+        EXPECT_EQ(r.d, static_cast<double>(static_cast<rtype>(1e-3)));
     }
     const auto uniform = [](double x) { return std::clamp(x, 0.0, 1.0); };
     EXPECT_LT(ks_distance(y, uniform), ks_critical(y.size()));
