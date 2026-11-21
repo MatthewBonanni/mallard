@@ -300,6 +300,12 @@ void summary_section(report::Text & text, const RunSummary & s) {
                                            "%", "", "chemistry load balancing"}});
         }
     }
+    if (s.reacting && s.chemistry_explicit >= 0.0) {
+        rows.push_back({Status::NONE, {"integrations by an explicit step", format("%.1f", 100.0 * s.chemistry_explicit),
+                                       "%", "", "explicit_step"}});
+        rows.push_back({Status::NONE, {"cells whose last explicit step failed", format("%.0f", s.chemistry_marked),
+                                       "cells", "", "at the end"}});
+    }
     if (s.writers) {
         const auto [value, bytes_unit] = bytes_parts(s.bytes);
         rows.push_back({Status::NONE, {"written", value, bytes_unit, "",
