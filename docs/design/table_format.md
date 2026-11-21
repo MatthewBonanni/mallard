@@ -93,7 +93,7 @@ lookups. The axes stay float64, and lookups sum in double precision, so a
 float32 table looks up as its float64 source to float32 rounding (a relative
 error of 6e-8 of the largest value in the lookup's cell). Mallard's checks
 ([section 7](#7-what-mallard-checks)) hold for float32 tables, with the
-tolerance of the linearity of `C` in `c` relaxed from 1e-9 to 1e-6.
+tolerance of the linearity of `C` in `Lambda` relaxed from 1e-9 to 1e-6.
 
 ## 3. Attributes of the root group
 
@@ -171,21 +171,26 @@ node exactly 1:
 | Axis | Meaning |
 |---|---|
 | `Z` | Mean mixture fraction (Bilger) |
-| `S` | Normalized variance `Zvar / (Z (1 - Z))` |
-| `c` | Normalized mean progress variable: `(C - C_min) / (C_max - C_min)` at that `(Z, S)` |
+| `Sz` | Normalized variance `Zvar / (Z (1 - Z))` |
+| `Lambda` | Normalized mean progress variable: `(C - C_min) / (C_max - C_min)` at that `(Z, Sz)` |
+
+The axis names are FPVgen's: `Sz` its normalized variance and `Lambda` its
+normalized progress variable Λ (FPVgen's field `PROG_NORM`). `Lambda` is not
+Ihme & Pitsch's flamelet parameter `C(Z_st)`
+([flamelet.md](flamelet.md#1-models-and-control-variables)).
 
 Fields:
 
 | Field | Units | Meaning | Check |
 |---|---|---|---|
-| `C` | `1` | Mean progress variable `sum_k w_k Y_k` | >= 0; linear in `c` at each `(Z, S)` (below) |
+| `C` | `1` | Mean progress variable `sum_k w_k Y_k` | >= 0; linear in `Lambda` at each `(Z, Sz)` (below) |
 | `omega_C` | `kg m-3 s-1` | Mean source of `rho C` at the tabulated state | finite |
 | `rho0` | `kg m-3` | Density of the tabulated state | > 0 |
 
-**`C` must be linear in `c`** at every `(Z, S)` node:
-`C(i, j, k) = C(i, j, 0) + c_k (C(i, j, last) - C(i, j, 0))`, to 1e-9 of the
+**`C` must be linear in `Lambda`** at every `(Z, Sz)` node:
+`C(i, j, k) = C(i, j, 0) + Lambda_k (C(i, j, last) - C(i, j, 0))`, to 1e-9 of the
 largest `|C|` in the table, with `C(i, j, last) >= C(i, j, 0)`. Mallard then maps
-a transported `C` to `c` from the two ends alone, and the lookup returns the
+a transported `C` to `Lambda` from the two ends alone, and the lookup returns the
 transported `C` exactly ([flamelet.md](flamelet.md#43-the-fpv-map-decision-3)).
 
 `omega_C` is tabulated at the flamelet's density `rho0`. The compressible
@@ -207,8 +212,8 @@ These tags are reserved for the models the generator will add. Their contracts
 will be specified here when Mallard reads them. Until then, Mallard refuses
 them by name:
 
-- `fgm`, `fpi`: premixed and partially premixed manifolds, axes `Z`, `S`, `c`;
-- `slfm`: steady laminar flamelets, axes `Z`, `S`, `chi_st`;
+- `fgm`, `fpi`: premixed and partially premixed manifolds, axes `Z`, `Sz`, `Lambda`;
+- `slfm`: steady laminar flamelets, axes `Z`, `Sz`, `chi_st`;
 - `fpv-h`: FPV with an enthalpy-defect axis `h_defect` (heat loss);
 - names for several streams (two mixture fractions) when they are designed.
 
@@ -268,7 +273,7 @@ reason, unless:
 9. Every field required by the model, the thermodynamics, transport and the
    species block is present, with exactly the listed units, and its values
    meet the listed checks.
-10. Model-specific checks pass. For `fpv`, `C` is linear in `c`.
+10. Model-specific checks pass. For `fpv`, `C` is linear in `Lambda`.
 
 At run time (stage 2), Mallard also warns when the table's `pressure` differs
 from the run's reference pressure by more than 10%.
@@ -296,7 +301,7 @@ with h5py.File("table.h5", "r") as f:
     values = f["values"]
     axes = {a: f["axes"][a][()] for a in values.attrs["axes"]}
     fields = list(values.attrs["fields"])
-    T0 = values[..., fields.index("T0")]  # shape (n_Z, n_S, n_c)
+    T0 = values[..., fields.index("T0")]  # shape (n_Z, n_Sz, n_Lambda)
     weights = dict(f["model_data/progress_variable"].attrs)
     writer = f["provenance/input"][()].decode()
 ```
@@ -311,7 +316,7 @@ is a small valid `fpv` / `saghafian2015` table (5 x 3 x 4 nodes, 15 fields,
 species H2, O2, H2O and N2) in float64, and
 [`fixture_fpv_f32.h5`](../../test/data/flamelet/fixture_fpv_f32.h5) the same
 table in float32. Their fields are synthetic functions, multilinear in
-`(Z, S, c)`, so lookups reproduce them exactly, and `C = Y_H2O` as its
+`(Z, Sz, Lambda)`, so lookups reproduce them exactly, and `C = Y_H2O` as its
 `progress_variable` says. They test the format, not combustion. The h5py
 script that wrote them is in their own `/provenance/input`. A generator can
 compare its writer against these files, and Mallard's tests
