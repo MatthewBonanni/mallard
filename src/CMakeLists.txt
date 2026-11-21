@@ -24,6 +24,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
+    common/file_hash.cpp
     common/provenance.cpp
     common/sha256_hw.cpp
     common/snapshot_block.cpp

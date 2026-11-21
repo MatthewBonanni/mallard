@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -19,6 +20,7 @@
 #include "compression.h"
 #include "comm.h"
 #include "data_writer.h"
+#include "file_hash.h"
 #include "json.h"
 #include "mesh_block.h"
 #include "output_reader.h"
@@ -137,6 +139,49 @@ TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     // The same bytes under another name are another mesh
     std::filesystem::rename(dir / "mesh" / "faces", dir / "mesh" / "owner");
     EXPECT_NE(provenance::sha256_file((dir / "mesh").string()), tree);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, FilesOfSeveralChunksHashAsTheTreeOfTheirChunksHashes) {
+    if (!comm::is_root()) return;
+    const auto dir = scratch_dir() / "mallard_chunk_tree";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    constexpr uint64_t chunk = 1000;
+    std::string content;
+    for (int i = 0; content.size() < 2500; i++) content += std::to_string(i) + ",";
+    content.resize(2500);
+    const std::string file = (dir / "data").string();
+    std::ofstream(file, std::ios::binary) << content;
+    const std::vector<std::string> pieces = {provenance::sha256(content.substr(0, 1000)),
+                                             provenance::sha256(content.substr(1000, 1000)),
+                                             provenance::sha256(content.substr(2000))};
+    EXPECT_EQ(file_hash::chunks(file, 0, 3, chunk), pieces);
+    EXPECT_EQ(file_hash::chunks(file, 1, 3, chunk), std::vector<std::string>(pieces.begin() + 1, pieces.end()));
+    EXPECT_TRUE(file_hash::chunks(file, 0, 4, chunk).empty());
+    std::string digests;
+    for (const std::string & hex : pieces) {
+        for (size_t i = 0; i < hex.size(); i += 2) digests += static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16));
+    }
+    const file_hash::Hash tree = file_hash::of_file(file, chunk);
+    EXPECT_TRUE(tree.sha256.empty());
+    EXPECT_EQ(tree.sha256_tree, provenance::sha256(digests));
+    EXPECT_EQ(tree.chunks, pieces);
+    EXPECT_EQ(tree.chunk_bytes, chunk);
+    // One chunk, or none: the file's SHA-256
+    EXPECT_EQ(file_hash::of_file(file, 2500).sha256, provenance::sha256(content));
+    std::ofstream((dir / "empty").string(), std::ios::binary).flush();
+    EXPECT_EQ(file_hash::of_file((dir / "empty").string(), chunk).sha256, provenance::sha256(""));
+    // A record verifies the file by the hash it gives
+    json::Object record;
+    file_hash::add(record, tree);
+    EXPECT_EQ(file_hash::matches(file, json::parse(record.str())), std::optional<bool>(true));
+    EXPECT_EQ(file_hash::matches(file, json::parse("{\"sha256\":\"" + provenance::sha256(content) + "\"}")),
+              std::optional<bool>(true));
+    EXPECT_EQ(file_hash::matches(file, json::parse("{}")), std::nullopt);
+    content[1500] ^= 1;
+    std::ofstream(file, std::ios::binary) << content;
+    EXPECT_EQ(file_hash::matches(file, json::parse(record.str())), std::optional<bool>(false));
     std::filesystem::remove_all(dir);
 }
 
