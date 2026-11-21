@@ -1433,11 +1433,15 @@ TEST(CheckBoundaries, ReportsEachPeriodicPairWithItsMapFacesAreaAndNodeOffset) {
         EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 4u);
         EXPECT_NEAR(p.area, N_DIM == 3 ? L * L : L, roundoff(1e-12));
         EXPECT_EQ(q["faces"].number, double(p.faces));
-        EXPECT_EQ(q["node_offset_max"].number, 0.0);
+        if (p.offsets_known) {
+            EXPECT_EQ(q["node_offset_max"].number, 0.0);
+        } else {
+            EXPECT_EQ(q.find("node_offset_max"), nullptr);
+        }
     }
     EXPECT_EQ(r.periodic[0].zone_a, "left");
     EXPECT_EQ(r.periodic[1].zone_b, "top");
-    if constexpr (N_DIM == 2) {
+    if (N_DIM == 2 && comm::size() == 1) {
         // Node 10 of the mesh file (x = 1, on right) moved off its partner on left, within the matching tolerance
         const double eps = sizeof(rtype) == sizeof(double) ? 1e-9 : 1e-5;
         std::istringstream in(jittered_periodic_mesh_2d(4));

@@ -611,8 +611,9 @@ void Solver::check_periodic(CheckReport & r) const {
             if (d2 > 0.0) lows[j] = std::min(lows[j], std::sqrt(d2));
         }
     }
-    // Each node against the image of its class's key, by the map of its lattice offset
-    const bool classes = !mesh->h_node_key.empty();
+    // Each node against the image of its class's key, by the map of its lattice offset (the classes of the whole
+    // mesh: a rank's part has its own nodes)
+    const bool classes = !is_distributed() && !mesh->h_node_key.empty();
     for (uint32_t n = 0; classes && n < mesh->h_node_key.size(); n++) {
         const uint32_t key = mesh->h_node_key[n];
         if (key == n) continue;
@@ -634,7 +635,7 @@ void Solver::check_periodic(CheckReport & r) const {
     comm::allreduce(std::span<double>(sums), comm::Op::SUM);
     comm::allreduce(std::span<double>(lows), comm::Op::MIN);
     comm::allreduce(std::span<double>(offsets), comm::Op::MAX);
-    const bool known = comm::allreduce(uint32_t(classes), comm::Op::MIN) == 1;
+    const bool known = classes;
     for (size_t j = 0; j < n_directions; j++) {
         CheckPeriodic & p = r.periodic[j];
         p.faces = static_cast<uint64_t>(sums[2 * j]);
