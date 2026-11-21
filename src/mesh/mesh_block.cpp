@@ -439,7 +439,8 @@ std::string mesh_filename(const Input & input) {
                                  (given ? "" : " (mesh.msh is the default when [mesh] gives no type or filename)"),
                       .fix = "Set filename in [mesh] to your mesh file (relative paths start from the directory "
                              "Mallard runs in), or generate a mesh with type = \"cartesian\" and Nx, Ny, Lx, Ly",
-                      .docs = "docs/guide/meshes.md"});
+                      .docs = "docs/guide/meshes.md",
+                      .missing = true});
 }
 
 InputError mesh_type_dimension_error(const Input & input, const std::string & type) {
