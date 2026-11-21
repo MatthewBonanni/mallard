@@ -606,6 +606,37 @@ at every face quadrature point, with the same reconstructed states.
   0). Shocks therefore keep the full Riemann solver and TENO's
   shock-capturing; vortical and expansion regions, and flames (expansions),
   get the central flux.
+- **`eps = (kappa c / h)^2`**, with the cell's sound speed `c`, its size
+  `h = V^(1/d)` and `kappa` = `dilatation_scale` (default `1e-5`). Without
+  it, any compression with little vorticity has `theta ~ 1`, round-off ones
+  in uniform flow included: 30% of the cells of the double Mach reflection
+  (480 x 120 triangles, TENO 5), mostly in the gas at rest ahead of the
+  shocks, were "shocks" whose decision depended on round-off. With
+  `kappa = 1e-5` a compression without vorticity is a shock above
+  `|div u| h / c = kappa sqrt(theta_* / (1 - theta_*))`, 1.4e-5, about a
+  hundred times single precision's round-off at Mach 1; the double Mach
+  reflection then flags 15%, and the cells compressing at `|div u| h / c`
+  above 0.05 (the shocks) are flagged as before (98.6% of them, as without
+  `eps`). Scaling with `c / h` makes
+  `eps` a rate squared in any units, needs no reference velocity or length
+  from the input, and follows the mesh. A larger `kappa` would also keep
+  acoustic noise central (a freestream's, #1270): a wave of 1% of `c` over
+  20 cells compresses at `|div u| h / c` = 3e-3, a shock at 0.05 and more,
+  so `kappa = 0.01` separates them, as Hendrickson, Kartha & Candler (2018)
+  reduce the sensor where the dilatation is small. But upwinding the
+  compressions of grid-scale noise is what damps it where the central flux
+  has no dissipation of its own: on Sod's problem (200 cells) the L1 density
+  error rises by 1-6% at `kappa = 1e-3` and 24-27% at `0.01` (MUSCL with
+  either central state, TENO 5), while up to `kappa = 3e-5` it is unchanged
+  or lower. On the double Mach reflection, against a run on four times the
+  cells, the density error is 0.8% lower at `kappa = 1e-5` and 46% higher
+  at 0.01. In the Mach 1.7 wall-modeled channel the sensor flags 0.02% of
+  the cells whatever `kappa`, and `Re_tau`, `B_q` and `T_c / T_w` differ by
+  less than their statistical uncertainty between `kappa` = 0, 1e-5, 3e-3
+  and 0.01 (`Re_tau` +3.0% from the DNS without `eps`, +2.8% with the
+  default). So the default only removes round-off; raising `kappa` to 0.01
+  trades the noise damping for less upwinding in quiet, irrotational
+  regions. `dilatation_scale = 0` restores the sensor without `eps`.
 - Species stay upwinded by the mass flux (Larrouturou) with the blended
   mass flux, so mass fractions stay in [0, 1] and sum to one; their
   numerical diffusion is not part of the kinetic-energy budget and is
@@ -1734,6 +1765,7 @@ with the stage that implements them.
 - Germano, Piomelli, Moin & Cabot 1991, *Phys. Fluids A* 3, 1760. [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
 - Ghosal 1996, *J. Comput. Phys.* 125, 187. [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
 - Haselbacher & Vasilyev 2003, *J. Comput. Phys.* 187, 197. [doi:10.1016/S0021-9991(03)00095-0](https://doi.org/10.1016/S0021-9991%2803%2900095-0)
+- Hendrickson, Kartha & Candler 2018, AIAA Paper 2018-3710. [doi:10.2514/6.2018-3710](https://doi.org/10.2514/6.2018-3710)
 - Jameson 2008, *J. Sci. Comput.* 34, 188. [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
 - Kuya, Totani & Kawai 2018, *J. Comput. Phys.* 375, 823. [doi:10.1016/j.jcp.2018.08.058](https://doi.org/10.1016/j.jcp.2018.08.058)
 - Lee & Moser 2015, *J. Fluid Mech.* 774, 395. [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)
