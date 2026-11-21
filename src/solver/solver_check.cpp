@@ -52,15 +52,6 @@ constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'0
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
-/** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
-double cfl_limit(const TimeIntegratorType type) {
-    switch (type) {
-        case TimeIntegratorType::SSPRK3: return 1.2;
-        case TimeIntegratorType::RK4: return 1.35;
-        default: return std::numeric_limits<double>::infinity();
-    }
-}
-
 } // namespace
 
 void Solver::report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const {
