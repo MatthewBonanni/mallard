@@ -77,7 +77,7 @@
                 },
                 "estimated": {
                   "type": "boolean",
-                  "description": "the inflow the flux makes of the initial state, not a prescribed value"
+                  "description": "the inflow the inlet settles at against the initial pressure inside, not a prescribed value"
                 },
                 "min": {
                   "type": [
