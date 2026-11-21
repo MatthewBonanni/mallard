@@ -62,6 +62,7 @@ constexpr Rule RULES[] = {
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
     {"teno_entry_rotations", false, C::SETUP}, {"teno_boundary_faces", false, C::SETUP},
     {"teno_", true, C::TABLES},
+    {"muscl_table_", true, C::SETUP}, {"muscl_", true, C::TABLES},
     // Mesh, geometry and quadrature
     {"node_coords", false, C::MESH}, {"nodes_of_", true, C::MESH}, {"cells_of_", true, C::MESH},
     {"faces_of_cell", false, C::MESH}, {"offsets_", true, C::MESH}, {"cell_coords", false, C::MESH},

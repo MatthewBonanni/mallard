@@ -1,0 +1,1 @@
+- A rank can hold twice as many cells before a multi-dimensional array reaches the most entries Kokkos can address: the limit rises from 2^31 to 2^32 entries, about 16 M cells per rank in 3D at fifth order instead of 8 M (#990).

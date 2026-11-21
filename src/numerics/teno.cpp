@@ -35,6 +35,7 @@
 #include "diagnostic_code.h"
 #include "face_reconstruction.h"
 #include "growing_buffer.h"
+#include "view_entries.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -1528,38 +1529,6 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     if (subset == nullptr) n_sector_unavailable = n_invalid_small;
 }
 
-#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
-[[maybe_unused]] constexpr bool HOST_FMA = true;
-#else
-[[maybe_unused]] constexpr bool HOST_FMA = false;
-#endif
-
-/**
- * @brief a b + c, fused where the hardware fuses (std::fma would be a library
- *        call on CPUs without FMA). teno.cpp is compiled without contraction,
- *        so these are its only FMAs and its results do not depend on how the
- *        compiler schedules a kernel.
- */
-KOKKOS_INLINE_FUNCTION
-rtype fmadd(const rtype a, const rtype b, const rtype c) {
-    KOKKOS_IF_ON_DEVICE((return Kokkos::fma(a, b, c);))
-    KOKKOS_IF_ON_HOST((
-        if constexpr (HOST_FMA) {
-            return std::fma(a, b, c);
-        } else {
-            return a * b + c;
-        }))
-}
-
-/** @brief a . a, with fmadd. */
-template <uint8_t N>
-KOKKOS_INLINE_FUNCTION
-rtype norm2(const rtype * a) {
-    rtype q = a[0] * a[0];
-    for (uint8_t i = 1; i < N; i++) q = fmadd(a[i], a[i], q);
-    return q;
-}
-
 /**
  * @brief Per-cell TENO-E reconstruction of degree DEG to the quadrature points
  *        of all of the cell's faces. SmoothPass finishes the cells below the
@@ -1723,7 +1692,7 @@ struct TENOFunctor {
     void conservatives_of(const rtype * W_e, rtype * U) const {
         U[0] = W_e[0];
         FOR_I_DIM U[1 + i] = W_e[0] * W_e[1 + i];
-        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], norm2<N_DIM>(W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
+        U[N_DIM + 1] = fmadd(0.5_r * W_e[0], fma_dot<N_DIM>(W_e + 1, W_e + 1), W_e[N_DIM + 1] / (gamma - 1.0_r));
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1744,7 +1713,7 @@ struct TENOFunctor {
         } else {
             Wq[0] = U[0];
             FOR_I_DIM Wq[1 + i] = U[1 + i] / U[0];
-            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], norm2<N_DIM>(Wq + 1), U[N_DIM + 1]);
+            Wq[N_DIM + 1] = (gamma - 1.0_r) * fmadd(-0.5_r * U[0], fma_dot<N_DIM>(Wq + 1, Wq + 1), U[N_DIM + 1]);
         }
     }
 
@@ -2103,7 +2072,7 @@ struct TENOFunctor {
                 f[j] = s < ns ? stencil.face(s) : -1;
             }
             for (uint32_t j = 0; j < PER; j++) {
-                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
+                if (c[j] >= 0) view_entries::load_row<N_CONSERVATIVE>(W, static_cast<uint32_t>(c[j]), W_e[j]);
             }
             for (uint32_t j = 0; j < PER; j++) {
                 if (c[j] < 0) continue;
@@ -2437,7 +2406,18 @@ struct TENOFunctor {
             g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
             sum_small += g_small[s];
         }
-        const bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        if constexpr (DEG == 3) {
+            // A face whose own sector is the smoothest candidate while another is cut looks away from a
+            // discontinuity in or next to the cell; the cubic passes the cutoff there but overshoots (#977).
+            // Mirror-image sectors tie to round-off, and both of their faces must decide alike
+            constexpr rtype tie = (sizeof(rtype) == sizeof(double)) ? 1.0e-8_r : 1.0e-4_r;
+            if (use_large && valid[k] && si_small[k] <= si_min * (1.0_r + tie)) {
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (valid[s] && g_small[s] / sum_small < cutoff) use_large = false;
+                }
+            }
+        }
         rtype w_small[teno::MAX_FACES] = {};
         if (!use_large) {
             rtype n_kept = 0.0;
@@ -3525,11 +3505,12 @@ std::vector<uint32_t> TENO::cells_within_reach(const std::vector<uint32_t> & cha
         if (distance[c] == FAR) frontier.push_back(c);
         distance[c] = 0;
     }
+    const VertexNeighbors & neighbors = mesh->vertex_neighbors();
     for (uint8_t d = 1; d <= max_depth && !frontier.empty(); d++) {
         next.clear();
         for (const uint32_t c : frontier) {
-            for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
-                const uint32_t nb = mesh->h_cells_of_cell(k);
+            for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) {
+                const uint32_t nb = neighbors.h_cells(k);
                 if (distance[nb] != FAR) continue;
                 distance[nb] = d;
                 next.push_back(nb);

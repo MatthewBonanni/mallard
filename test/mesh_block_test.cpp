@@ -585,6 +585,61 @@ TEST(MeshBlockTest, ClusteredNodeTagsSplitIntoRangesOfEqualCounts) {
     for (int q = 0; q < p; q++) EXPECT_EQ(count[size_t(q)], block_begin(n, q + 1, p) - block_begin(n, q, p)) << "range " << q;
 }
 
+/**
+ * @brief Cells rebuilt from faces are the same whether the faces travel as
+ *        32-bit words or, with a node past 2^32, as 64-bit ones (no mesh file
+ *        in the tests is that large).
+ */
+TEST(MeshBlockTest, CellsOfFacesAreTheSameWithWideNodeIds) {
+    // Two quadrilaterals (2D) or hexahedra (3D) sharing a side, by their faces, all on rank 0
+    const std::vector<std::vector<uint64_t>> cells = N_DIM == 2 ? std::vector<std::vector<uint64_t>>{{0, 1, 4, 3}, {1, 2, 5, 4}}
+                                                                : std::vector<std::vector<uint64_t>>{{0, 1, 4, 3, 6, 7, 10, 9}, {1, 2, 5, 4, 7, 8, 11, 10}};
+    std::map<std::vector<uint64_t>, size_t> face_of;
+    std::vector<std::vector<uint64_t>> faces;
+    std::vector<std::array<int64_t, 2>> face_cells;
+    if (comm::rank() == 0) {
+        for (size_t c = 0; c < cells.size(); c++) {
+            std::vector<std::vector<uint8_t>> sides;
+            if constexpr (N_DIM == 2) {
+                for (uint8_t k = 0; k < 4; k++) sides.push_back({k, uint8_t((k + 1) % 4)});
+            } else {
+                sides = cell_local_faces(8);
+            }
+            for (const auto & local : sides) {
+                std::vector<uint64_t> face;
+                for (uint8_t k : local) face.push_back(cells[c][k]);
+                std::vector<uint64_t> key = face;
+                std::sort(key.begin(), key.end());
+                const auto [it, added] = face_of.emplace(key, faces.size());
+                if (added) {
+                    faces.push_back(face);
+                    face_cells.push_back({int64_t(c), -1});
+                } else {
+                    face_cells[it->second][1] = int64_t(c);
+                }
+            }
+        }
+    }
+    auto read = [&](uint64_t offset) {
+        parallel_read::Records records;
+        std::vector<uint64_t> ids;
+        for (size_t f = 0; f < faces.size(); f++) {
+            for (uint64_t n : faces[f]) records.words.push_back(n + offset);
+            records.end_record();
+            ids.push_back(f);
+        }
+        MeshBlock block;
+        parallel_read::cells_of_faces(cells.size(), std::move(ids), std::move(records),
+                                      std::vector<std::array<int64_t, 2>>(face_cells), "test", block);
+        return block;
+    };
+    const MeshBlock narrow = read(0), wide = read(uint64_t(1) << 32);
+    EXPECT_EQ(comm::allreduce(narrow.n_cells(), comm::Op::SUM), cells.size());
+    EXPECT_EQ(wide.cell_offsets, narrow.cell_offsets);
+    ASSERT_EQ(wide.cell_nodes.size(), narrow.cell_nodes.size());
+    for (size_t k = 0; k < narrow.cell_nodes.size(); k++) EXPECT_EQ(wide.cell_nodes[k], narrow.cell_nodes[k] + (uint64_t(1) << 32));
+}
+
 TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
     // 2D: scale [2, 3], rotate 90 deg, translate [1, -1]: (x, y) -> (1 - 3y, 2x - 1).
     // 3D: scale 2, rotate 120 deg about [1, 1, 1] (cycles the axes), translate [1, 2, 3]: (x, y, z) -> (2z + 1, 2x + 2, 2y + 3)
