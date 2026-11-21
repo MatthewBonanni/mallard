@@ -727,6 +727,39 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
     });
 }
 
+std::string case_view_json(const CheckReport & r) {
+    if (r.view_file.empty()) return "null";
+    const auto vec = [](const std::array<double, 3> & v) {
+        return "[" + json::number(v[0]) + ", " + json::number(v[1]) + ", " + json::number(v[2]) + "]";
+    };
+    const auto text_or_null = [](const std::string & t) { return t.empty() ? std::string("null") : json::quote(t); };
+    std::vector<std::string> files = {r.view_file};
+    files.insert(files.end(), r.view_images.begin(), r.view_images.end());
+    return json::Object()
+        .add("schema", interfaces::CASE_VIEW.name)
+        .add("version", interfaces::CASE_VIEW.version)
+        .raw("files", array_json(files, [](const std::string & f) { return json::quote(f); }))
+        .raw("blocks", array_json(r.view_blocks,
+                                  [&](const CheckViewBlock & b) {
+                                      return json::Object()
+                                          .add("name", b.name)
+                                          .add("kind", b.kind)
+                                          .raw("condition", text_or_null(b.condition))
+                                          .add("label", b.label)
+                                          .str();
+                                  }))
+        .raw("frames", array_json(r.frames,
+                                  [&](const CheckFrame & f) {
+                                      json::Object o;
+                                      o.add("entry", f.entry).add("zone", f.zone);
+                                      if (!f.error.empty()) return o.raw("shape", "null").add("error", f.error).str();
+                                      o.add("shape", f.shape).raw("origin", vec(f.origin)).raw("u_direction", vec(f.u_direction));
+                                      o.raw("normal", vec(f.normal)).add("length", f.length);
+                                      return o.raw("width", N_DIM == 3 ? json::number(f.width) : "null").raw("error", "null").str();
+                                  }))
+        .str();
+}
+
 std::string check_json(const CheckReport & r) {
     json::Object o;
     o.add("schema", interfaces::CHECK_REPORT.name).add("version", interfaces::CHECK_REPORT.version);
@@ -779,6 +812,7 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.raw("view", case_view_json(r));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));

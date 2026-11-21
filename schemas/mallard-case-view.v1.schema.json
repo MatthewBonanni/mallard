@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-case-view.v1.schema.json",
+  "title": "The case view written: case.view, and the view member of mallard check --view DIR --format json",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "files",
+    "blocks",
+    "frames"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mallard-case-view"
+    },
+    "version": {
+      "const": 1
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "the ParaView file, then the images"
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "condition",
+          "label"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "the block's name in the ParaView file"
+          },
+          "kind": {
+            "enum": [
+              "mesh",
+              "boundary",
+              "cell_zone",
+              "region",
+              "probe",
+              "snapshot",
+              "periodic"
+            ]
+          },
+          "condition": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "boundary zones: the type of their condition"
+          },
+          "label": {
+            "type": "string",
+            "description": "as the images label it"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "frames": {
+      "type": "array",
+      "description": "per [[boundaries]] entry: where its local coordinates u, v start and which way u grows",
+      "items": {
+        "type": "object",
+        "required": [
+          "entry",
+          "zone",
+          "shape",
+          "error"
+        ],
+        "properties": {
+          "entry": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "shape": {
+            "enum": [
+              "curve",
+              "four-sided",
+              "ring",
+              "disk",
+              null
+            ],
+            "description": "null when the faces have no u"
+          },
+          "origin": {
+            "$ref": "#/$defs/vector",
+            "description": "2D: the end u starts from; 3D: the face center nearest to u = v = 0 [m]"
+          },
+          "u_direction": {
+            "$ref": "#/$defs/vector",
+            "description": "unit vector along which u grows at origin"
+          },
+          "normal": {
+            "$ref": "#/$defs/vector",
+            "description": "the inward unit normal at the origin"
+          },
+          "length": {
+            "type": "number",
+            "minimum": 0,
+            "description": "2D: the curve's length; 3D: the largest u_m of a face center [m]"
+          },
+          "width": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "3D: the largest v_m of a face center [m]; 2D: null"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "why the faces have no u (not one open curve or patch)"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "$defs": {
+    "vector": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "number"
+      }
+    }
+  },
+  "additionalProperties": true
+}

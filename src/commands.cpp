@@ -110,7 +110,10 @@ constexpr Option CHECK_OPTIONS[] = {
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
      "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
-     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. With --format "
+     "json, the report's view lists the files, every block with its kind and condition, and the frame of each "
+     "boundary's local coordinates: where u starts, which way it grows, the inward normal and the length. "
+     "Default: none."},
     KOKKOS,
 };
 
@@ -1406,6 +1409,7 @@ std::string capabilities_json() {
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
                                  .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
                                  .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))

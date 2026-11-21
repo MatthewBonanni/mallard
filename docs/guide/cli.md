@@ -547,7 +547,11 @@ Options:
                             every boundary labeled by its name and condition and
                             every region and probe by its name, a legend, axes,
                             a scale bar and the domain's extent in its units.
-                            Default: none.
+                            With --format json, the report's view lists the
+                            files, every block with its kind and condition, and
+                            the frame of each boundary's local coordinates:
+                            where u starts, which way it grows, the inward
+                            normal and the length. Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
