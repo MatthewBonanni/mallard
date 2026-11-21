@@ -205,6 +205,14 @@ struct ShapeGroups {
      *        from the records of those it holds (empty for the others) (collective).
      */
     void exchange(std::vector<std::vector<uint64_t>> & records) const;
+
+    /**
+     * @brief For slots 0..n of a batch, slot t of group slot_group[t] (NONE:
+     *        fitted) and refitted if refit[t]: the first slot of its group
+     *        that took the group's record, or t itself if it was fitted or
+     *        refitted (see PackedRows::add_batch()).
+     */
+    static std::vector<uint32_t> first_slots(const uint32_t * slot_group, const uint8_t * refit, uint32_t n);
 };
 
 } // namespace teno
