@@ -27,6 +27,7 @@
 #include "log.h"
 #include "provenance.h"
 #include "remap.h"
+#include "run_log.h"
 
 enum class InitType {
     CONSTANT,
@@ -204,6 +205,18 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;
+    // A rewind sets aside the files of the steps it repeats, before any writer continues
+    std::vector<std::string> writers = probes.files();
+    for (const auto & writer : data_writers) writers.push_back(writer->get_prefix());
+    if (checkpoint_writer) writers.push_back(checkpoint_writer->get_prefix());
+    std::string error;
+    try {
+        run_log::supersede(step, provenance::run_id(), writers);
+    } catch (const std::exception & e) {
+        error = e.what();
+    }
+    if (comm::size() > 1) error = comm::broadcast(error);
+    if (!error.empty()) throw std::runtime_error(error);
     for (auto & writer : data_writers) {
         const std::string name = writer->snapshot_attribute();
         writer->resume(step, t, name.empty() ? nullptr : restart.attribute(name));

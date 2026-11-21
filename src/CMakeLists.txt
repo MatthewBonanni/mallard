@@ -24,6 +24,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
+    common/file_hash.cpp
     common/provenance.cpp
     common/sha256_hw.cpp
     common/snapshot_block.cpp
@@ -132,6 +133,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
