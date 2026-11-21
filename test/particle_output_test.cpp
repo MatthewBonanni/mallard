@@ -34,7 +34,6 @@
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
-#endif
 
 namespace {
 
@@ -91,8 +90,6 @@ struct Snapshot {
     int64_t step = -1;
     std::map<uint64_t, std::vector<double>> particles;
 };
-
-#ifdef Mallard_HAS_HDF5
 
 /** @brief Every snapshot of a particle VTKHDF file, with the named point fields (vectors as 3 columns). */
 std::vector<Snapshot> read_particles(const std::string & filename, const std::vector<std::string> & fields,
@@ -161,8 +158,6 @@ std::map<std::string, std::vector<double>> datasets(const std::string & filename
     return out;
 }
 
-#endif
-
 /** @brief The output records of a run log. */
 std::vector<json::Value> output_records(const std::string & log) {
     std::vector<json::Value> out;
@@ -178,8 +173,6 @@ std::vector<json::Value> output_records(const std::string & log) {
 const double U[3] = {0.3, -0.2, 0.1};
 
 } // namespace
-
-#ifdef Mallard_HAS_HDF5
 
 TEST(ParticleSnapshotsTest, EverySnapshotHoldsEveryParticleAtItsStepWithItsFields) {
     // Steps 0 (start), 10 and 20 (interval) and 25 (end); with and without step graphs, which stage the snapshots on
@@ -361,7 +354,9 @@ TEST(ParticleSnapshotsTest, ARestartContinuesTheSeriesAsTheUninterruptedRun) {
             EXPECT_EQ(b[k].step, a[k].step);
             EXPECT_EQ(b[k].particles, a[k].particles) << mode << "snapshot " << k;
         }
-        if (combined) EXPECT_EQ(datasets(file("continued")), datasets(file("straight")));
+        if (combined) {
+            EXPECT_EQ(datasets(file("continued")), datasets(file("straight")));
+        }
     }
 }
 
