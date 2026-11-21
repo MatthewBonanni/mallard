@@ -1531,11 +1531,23 @@ Accepted cells leave the queue (a second scan of the flags) before it is
 ordered by cost and balanced across ranks, so the RODAS kernels, unchanged,
 integrate only the others, with no idle lanes for the cells that finished;
 an accepted step counts one sub-step and leaves `CHEM_H` as it was. A
-failed step negates `CHEM_H` (issue #1089), and a negative `CHEM_H` is no
+failed step negates `CHEM_H` (issue #1089; without a last sub-step,
+`-h_initial`, RODAS's first one), and a negative `CHEM_H` is no
 candidate: RODAS starts from its magnitude and keeps the sign as long as its
 proposal covers a call, so a cell that stays stiff (burnt gas) tries once,
 not every call, and tries again once its sub-steps have fallen short of a
-call (a front passing) and grown back. The
+call (a front passing) and grown back. The run's summary reports the share
+of integrations the explicit steps took and the cells marked at the end.
+
+A smaller `dt` does not clear the mark, although the stiffness bound
+`h lambda <= 2.5` may then hold. Keeping the `dt` of the failure in
+`CHEM_H` instead of RODAS's proposal was tried and rejected: with fused
+Strang half steps the calls alternate between `dt/2` and `dt`, so a
+half-step call retries every marked cell, and seeding RODAS from the
+failed call's `dt` rather than its proposal costs a sub-step in the next
+full call (burnt H2/air: 45 to 81 sub-steps over 5 steps of a
+9-cell box) and changes results. A separate per-cell `dt` would have to
+travel with restarts and the balancing. The
 explicit pass is one kernel over the queue, by one thread or the lanes of
 a team per cell like RODAS, and one scan, all on the device: no host work
 and graph-capturable. Whether a cell takes the explicit step depends only
@@ -1564,14 +1576,20 @@ The H2 flame's explicit steps take nearly half of its chemistry time off.
 burning out in hot gas); about half the cells that try the explicit step
 fail, most of them burnt gas whose fractional-order fuel consumption is
 stiff, and as each of them tries once rather than every call its chemistry
-stays within 0.5% of RODAS alone. Off by default (issue #1090: enabling it
-where it pays).
+stays within 1% of RODAS alone. Off by default (issue #1090: enabling it
+where it pays). `flame_3d`'s differences above predate the per-species
+bounds of the mass fractions ([reconstruction](#reconstruction), issue
+#1169): its 0D reactors agree to 1e-11 with and without the option, and
+the shared limiter amplified that noise; with the bounds, `explicit_step`
+moves its temperature by 1.5e-7 K.
 `ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
 bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
 of `T`, against RODAS's own 5e-5 from Cantera;
 `ReactingTest.CellsWhoseExplicitStepFailedStopTryingIt` checks that a
 failed step leaves RODAS's state and proposal bitwise as without the option,
-with `CHEM_H` negated, and that an ignition's short sub-steps clear it.
+with `CHEM_H` negated, also in a cell's first call (there, in single
+precision, the proposal only to rounding), and that an ignition's short
+sub-steps clear it.
 
 ### BDF integrator (issue #143)
 
