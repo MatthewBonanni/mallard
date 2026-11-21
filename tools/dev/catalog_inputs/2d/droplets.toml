@@ -1,0 +1,59 @@
+# For the key catalog only (tools/dev/input_catalog.py): evaporating droplets
+# with every key of [particles] and [particles.liquid] they read given.
+
+[run]
+n_steps = 1
+dt = 1e-5
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 0.01
+Ly = 0.01
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+p = 101325.0
+T = 1000.0
+u = [0.0, 0.0]
+X = { O2 = 0.21, N2 = 0.79 }
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../../mechanisms/h2o2.yaml"
+transport = "mixture_averaged"
+
+[particles]
+type = "droplet"
+diameter = 50e-6
+temperature = 300.0
+velocity = [1.0, 0.0]
+evaporation = "d2_law"
+minimum_diameter = 1e-6
+drag = "schiller_naumann"
+gravity = [0.0, -9.81]
+coupling = "two-way"
+weight = 100.0
+deposition_width = 1e-3
+points = [[0.005, 0.005]]
+
+[particles.liquid]
+species = "H2O"
+density = 958.0
+specific_heat = 4216.0
+latent_heat = 2.257e6
+boiling_temperature = 373.15
+boiling_pressure = 101325.0
+critical_temperature = 647.1
+critical_pressure = 22.064e6
+antoine = [10.19621, 1730.63, -39.724]

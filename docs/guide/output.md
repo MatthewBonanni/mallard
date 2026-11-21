@@ -129,9 +129,9 @@ other fields.
 |  | `TF_OMEGA` | `1` | flame sensor | [les.combustion] (TFLES) | write_data |
 |  | `PASR_KAPPA` | `1` | PaSR reacting fraction | [les.combustion] model = "pasr" | write_data |
 | sources | `SOURCE_<A>` | `A's s-1` | source of A, per second | [[sources]] or [source] | write_data |
-| particles | `PARTICLE_VOLUME_FRACTION` | `1` | particle volume fraction | [particles] type = "solid" | write_data |
-|  | `PARTICLE_NUMBER_DENSITY` | `m-3` | particles per volume | [particles] type = "solid" | write_data |
-|  | `PARTICLE_U` | `m s-1` | mass-weighted mean particle velocity (vector) | [particles] type = "solid" | write_data |
+| particles | `PARTICLE_VOLUME_FRACTION` | `1` | particle volume fraction | [particles] type = "solid" or "droplet" | write_data |
+|  | `PARTICLE_NUMBER_DENSITY` | `m-3` | particles per volume | [particles] type = "solid" or "droplet" | write_data |
+|  | `PARTICLE_U` | `m s-1` | mass-weighted mean particle velocity (vector) | [particles] type = "solid" or "droplet" | write_data |
 |  | `PARTICLE_SOURCE_<A>` | `A's s-1` | particle coupling source of A, per second | [particles] coupling = "two-way" | write_data |
 | statistics | `MEAN_<A>` | `A's` | time average of A | [statistics] fields with A, or [[probes]] averaging A | write_data, probes |
 |  | `COV_<A>_<B>` | `A's times B's` | covariance of A and B | [statistics] products with A*B | write_data, probes |
