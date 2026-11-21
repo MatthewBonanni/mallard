@@ -225,6 +225,13 @@ class Solver {
         std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value, bool apply = true);
 
         /**
+         * @brief Applies "key=value" settings with apply_setting, each accepted one recorded as a set event of
+         *        the run log with its source ("mallard ctl", "SET file", "--set"): whether all were accepted, and
+         *        a line per setting.
+         */
+        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source);
+
+        /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
          *        with the next step's first half (Strang splitting).
