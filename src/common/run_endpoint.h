@@ -15,12 +15,13 @@
 #include <optional>
 #include <string>
 
+#include "interfaces.h"
 #include "json.h"
 
 namespace run_endpoint {
 
-inline constexpr const char * SCHEMA = "mallard-run-endpoint";
-inline constexpr int VERSION = 1;
+inline constexpr const char * SCHEMA = interfaces::RUN_ENDPOINT.name;
+inline constexpr int VERSION = interfaces::RUN_ENDPOINT.version;
 inline constexpr const char * FILE_NAME = "mallard.run.json";
 
 /** @brief What the run knows of itself at a change of state. */

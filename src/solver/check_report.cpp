@@ -16,6 +16,7 @@
 
 #include "check.h"
 #include "comm.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "report.h"
@@ -728,7 +729,7 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
 
 std::string check_json(const CheckReport & r) {
     json::Object o;
-    o.add("version", 1);
+    o.add("schema", interfaces::CHECK_REPORT.name).add("version", interfaces::CHECK_REPORT.version);
     o.add("status", std::string(report::status_name(r.status())));
     o.add("errors", uint64_t(r.errors().size())).add("warnings", uint64_t(r.warnings().size()));
     o.raw("input_file", r.input_file.empty() ? "null" : json::quote(r.input_file))

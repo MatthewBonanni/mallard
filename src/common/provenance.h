@@ -32,6 +32,11 @@ constexpr int VERSION = 3;
 inline constexpr const char * ATTRIBUTE = "mallard_run";
 inline constexpr const char * LEGACY_ATTRIBUTE = "provenance";
 
+/** @brief The block's code (version and commit), build and dependencies objects, as JSON. */
+std::string code();
+std::string build();
+std::string dependencies();
+
 /** @brief SHA-256 (FIPS 180-4) of data given in parts. */
 class Sha256 {
     public:

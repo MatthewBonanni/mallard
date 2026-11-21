@@ -31,6 +31,27 @@ A few things hold for every command:
   `list`, `post extract`, `post convergence`) are functions of the
   [Python package](python.md), `mallard.info(path)` and `mallard.post.extract(files, latest=True)`,
   which run the command and return its JSON as a dict.
+- **Programs that drive Mallard** (a GUI, a workflow tool) start with
+  `mallard version --format json`: its build and the schema of each interface
+  below. Each interface's JSON carries the same `schema` and integer `version`;
+  an addition (a member, a record type) keeps the version, and a change that
+  breaks a reader increments it.
+
+| Interface | Where | Schema |
+|---|---|---|
+| Capabilities | `mallard version --format json` | `mallard-capabilities` |
+| Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
+| Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
+| Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
+| Snapshot block | every snapshot and restart file | `mallard-snapshot` |
+| Probe sampling block | probe files | `mallard-probe-sampling` |
+| Run directory | `mallard info RUN_DIR --format json` | `mallard-run-directory` |
+| Run control | `mallard ctl`, the control socket ([Running](running.md#controlling-a-run-from-anywhere)) | `mallard-run-control` |
+| Run endpoint | `mallard.run.json` and the run registry ([Running](running.md#the-endpoint-record)) | `mallard-run-endpoint` |
+| Run launch | `mallard -i INPUT --detach` | `mallard-run-launch` |
+| Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
+| Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
 
 ## Shell completion
 
@@ -134,6 +155,9 @@ Commands:
     mallard post average      Means, RMS, covariances, PDFs and conditional
                               statistics over saved snapshots, as [statistics]
                               keeps them
+    mallard post flame        Position, thermal thickness, consumption and
+                              displacement speed of a premixed flame in saved
+                              snapshots
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -144,7 +168,7 @@ Commands:
     mallard test              Run the unit and regression tests
     mallard completion        Print the shell completion script for bash, zsh or
                               fish
-    mallard --version         Print the version
+    mallard version           Print the version, or what this build supports
 
 Options:
   -i FILE                  The input file (TOML). Required.
@@ -950,7 +974,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 Usage: mallard post <command> [options]
 
 Commands on a run's output: probes, integrals, snapshots, derived fields and
-averages of it, and the grid convergence of several runs.
+averages of it, the speeds of a premixed flame in it, and the grid convergence
+of several runs.
 
 Commands:
   mallard post extract        Probes, region integrals and snapshots of existing
@@ -961,6 +986,9 @@ Commands:
   mallard post average        Means, RMS, covariances, PDFs and conditional
                               statistics over saved snapshots, as [statistics]
                               keeps them
+  mallard post flame          Position, thermal thickness, consumption and
+                              displacement speed of a premixed flame in saved
+                              snapshots
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -1283,6 +1311,94 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-average
 ```
 
+### mallard post flame
+
+```text
+Usage: mallard post flame FILE... [--direction x|y|z] [--species NAME] [--burnt-temperature T] [--reference-speed S_L] [-o DIR]
+
+Sets up the case of a series of restart files or snapshots of a premixed flame,
+planar on average, and measures the flame in each: its profile along --direction
+(each row the mean over the other directions, weighted by cell volume), with the
+fresh gas at its colder end and the burnt gas at the other, gives its position
+x_f, where T is midway between the fresh temperature T_u and the burnt T_b (the
+peak, or --burnt-temperature); its thermal thickness delta_T = (T_b - T_u) / max
+|dT/dx|, and max |dT/dx| itself; its consumption speed S_c = -int omega_k dx /
+(rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which in a steady flame is
+the flame speed, in any frame; and its displacement speed S_d, the speed of x_f
+relative to the fresh gas.
+
+The production rates are the run's own: the OMEGA_* fields of snapshots that
+hold them with T, RHO, the velocity and Y_* (read on the mesh alone), else
+computed from each stored state by the case's chemistry (restart files,
+snapshots of the state). The report gives the consumption speed and the
+thickness averaged over the last third of the series and the displacement speed
+from x_f fitted over its last half, which settle once the flame is steady,
+against --reference-speed if given; OUTPUT/NAME.csv has a row per snapshot.
+
+FILE, the case and the choice of snapshots are as for mallard post extract: the
+case comes from -i, else from FILE's run block, and its mesh must be the file's;
+the snapshots' steps and times are those the files record, in increasing time.
+The states are read one at a time. Under mpirun -n N the cells are split over N
+ranks.
+
+Options:
+  --direction x|y|z      The direction the flame propagates along: the profile
+                         is along it, each row the mean over the other
+                         directions, weighted by cell volume. Default: x.
+  --species NAME         The species whose consumption gives the consumption
+                         speed: the deficient reactant (H2 of a lean H2/air
+                         flame, O2 of a rich one). Default: from the equivalence
+                         ratio of the fresh gas in the first snapshot, the fuel
+                         when it is at most 1.01, else the oxidizer; of several,
+                         the one the flame depletes most, relative to its fresh
+                         mass fraction.
+  --burnt-temperature T  The burnt gas temperature T_b, in K, of x_f and
+                         delta_T: e.g. the adiabatic equilibrium temperature,
+                         where the burnt gas of a short domain has not reached
+                         it. Default: the peak temperature of each snapshot.
+  --reference-speed S_L  A laminar flame speed to compare with, in m/s
+                         (Cantera's): the report gives the errors of the
+                         consumption and displacement speeds. Default: none.
+  --rtol R               Cells share a row of the profile where their centers
+                         agree to R times the mesh's extent along --direction.
+                         Default: 1e-6.
+  -i FILE                The input file of the case: its mesh, physics and
+                         chemistry. Default: the input in the run block of FILE
+                         (Mallard 0.10 and later record it resolved), whose mesh
+                         file, mechanism and TENO cache_file resolve from the
+                         run's directory.
+  --name NAME            The name of the table: NAME.csv. Default: flame.
+  --steps LIST           The snapshots of these steps, separated by commas
+                         (--steps 100,200). Default: every snapshot.
+  --times T|T1:T2        The snapshot nearest to simulated time T, or every one
+                         with T1 <= t <= T2, in seconds. Default: every
+                         snapshot.
+  --every N              Every Nth of the snapshots selected, starting with the
+                         first. Default: 1.
+  --latest               Only the last snapshot selected.
+  -o, --output DIR       The directory the table goes to. Default: flame.
+  --format text|json     text: sections and tables, with the units of every
+                         quantity; json: the same as one JSON object, for
+                         scripts. Default: text.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
+
+Examples:
+  $ mallard post flame solut/flame.vtkhdf
+  $ mallard post flame solut/flame.vtkhdf --reference-speed 2.33237
+  $ mallard post flame solut/restart_*.restart --species O2 --times 2e-4:6e-4
+  $ mallard post flame solut/flame.vtkhdf --format json | jq .summary
+
+Exit status:
+  0  the flame was measured in every snapshot
+  1  a file cannot be read, the case cannot be set up or has no chemistry, a snapshot holds no flame, or the file is not of its mesh
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-flame
+```
+
 ### mallard post convergence
 
 ```text
@@ -1510,22 +1626,43 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-completion
 ```
 
-### mallard --version
+### mallard version
 
 ```text
-Usage: mallard --version
+Usage: mallard version [--format text|json]
+       mallard --version
 
 Prints the version of this build: the git description of the commit it was built
 from, else the release.
 
+With --format json, one JSON object for programs that drive Mallard, such as a
+GUI or a workflow tool, to learn what this mallard supports before using it: the
+version and commit (mallard), the build (dimension, precision, Kokkos backends,
+MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the versions of the libraries it
+uses (dependencies), the dimensions of the solvers installed with it (mallard
+--dim 3 version --format json describes the 3D one's build), and under
+interfaces the schema name and version of every machine-readable output: the key
+catalog, the check report, the run log, the run, snapshot and probe sampling
+blocks of output files, the run directory report, run control (with its commands
+and control files), the grid convergence report and the pack manifest. Each of
+these carries the same schema and version fields; an addition keeps the version,
+a change that breaks a reader increments it.
+
 Options:
-  -h, --help  Show this page.
+  --format text|json  text: the version alone, as mallard --version prints it;
+                      json: the version, commit, build and dependencies, the
+                      dimensions of the solvers installed with it, and the
+                      schema and version of every machine-readable interface,
+                      for programs that drive Mallard. Default: text.
+  -h, --help          Show this page.
 
 Examples:
   $ mallard --version
+  $ mallard version --format json
 
 Exit status:
-  0  always
+  0  printed
+  2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-version
 ```

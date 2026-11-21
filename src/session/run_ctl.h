@@ -15,12 +15,13 @@
 #include <string>
 #include <vector>
 
+#include "interfaces.h"
 #include "json.h"
 
 namespace run_ctl {
 
-inline constexpr const char * LAUNCH_SCHEMA = "mallard-run-launch";
-inline constexpr int LAUNCH_VERSION = 1;
+inline constexpr const char * LAUNCH_SCHEMA = interfaces::RUN_LAUNCH.name;
+inline constexpr int LAUNCH_VERSION = interfaces::RUN_LAUNCH.version;
 
 /** @brief A control request for a run. */
 struct Request {

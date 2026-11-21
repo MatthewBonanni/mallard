@@ -3078,7 +3078,8 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     if (reacting) {
         numerical.emplace_back("Chemistry", logging::count(uint64_t(kinetics.n_reactions), "reaction") + ", " +
                                                 (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
-                                                (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
+                                                (fuse_chemistry ? " (half steps fused)" : "") +
+                                                (chemistry_options.method == chemistry::Integrator::BDF ? ", BDF, " : ", RODAS, ") +
                                                 (cell_chemistry.lanes() == 1
                                                      ? std::string("one thread per cell")
                                                      : std::to_string(cell_chemistry.lanes()) + " lanes per cell"));

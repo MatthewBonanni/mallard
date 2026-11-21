@@ -25,6 +25,7 @@
 #include "diagnostic_code.h"
 #include "field_units.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh_quality.h"
@@ -434,6 +435,7 @@ std::string key_listing_json(const json::Value & catalog, const std::vector<std:
     json::Object selected;
     for (const std::string & key : keys) selected.raw(key, json::dump(catalog[key]));
     json::Object out;
+    out.add("schema", interfaces::KEY_CATALOG.name).add("version", interfaces::KEY_CATALOG.version);
     out.raw("input", null_or(per_case ? per_case->input : "")).raw("section", null_or(section)).raw("keys", selected.str());
     if (per_case) {
         out.add("complete", per_case->complete)
