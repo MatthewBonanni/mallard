@@ -67,7 +67,7 @@ than non-reacting LES.
 |---|---|---|---|
 | 1 | Tables generated offline by an external library, `<generator, name TBD>`, that starts from FPVgen and runs Cantera's 1D flames (counterflow S-curves by two-point flame control; free flames for FGM) | A generator in Mallard's `tools/`; FlameMaster; a flamelet solver in Mallard | Generation is a separate product with its own users, tests and release cycle, and it will cover more models than Mallard reads. Mallard keeps only the contract |
 | 2 | Presumed PDFs integrated by the generator: beta in Z, exact for piecewise-linear profiles through the incomplete beta function; delta in the progress parameter | Quadrature of the PDF (singular at 0 and 1); copies of the laminar flamelet along the variance axis, as FPVgen does today | Exact, no quadrature parameter, no singularity; the variance axis then means what it says |
-| 3 | FPV tables indexed by the normalized mean progress variable `c` in place of `Lambda`, with `C` linear in `c` (a checked part of the contract) | `Lambda` axis with a search for `Lambda(C)` per lookup; `C` axis on a different grid per `(Z, S)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
+| 3 | FPV tables indexed by the normalized mean progress variable `Lambda` (FPVgen's), in place of the flamelet label `C_st = C(Z_st)`, with `C` linear in `Lambda` (a checked part of the contract) | `C_st` axis with a search for `C_st(C)` per lookup; `C` axis on a different grid per `(Z, Sz)` | One lookup path, no iteration on the device; `C` is reproduced exactly (section 4.3) |
 | 4 | Mallard's table format in HDF5 ([table_format.md](table_format.md)): tags, species and pressure as root attributes, named axes and fields with units, model data and provenance as groups, and the values in one contiguous, unfiltered dataset, node-major with a node's fields contiguous, read into memory on CPU backends and mapped from the file to stage the copy on GPU backends | A custom binary format (magic line, JSON header, raw values); netCDF; CSV; CharLES^X's HDF5 layout (FPVgen's output today) | Standard, self-describing, readable with h5py alone; generic over models; one lookup reads 2^d short runs. HDF5 is optional in Mallard, but most CI jobs, the GPU suites, the containers and Spack have it, and it builds from its submodule |
 | 5 | Own lookup (`src/chemistry/flamelet_table.h`), not `tabulated::Data` | Extend `tabulated` | Any number of axes, fixed at compile time per model so the corner loop unrolls; 64-bit offsets; weights computed once for many fields; `tabulated` serves single-field boundary and source tables |
 | 6 | A third gas model, `gas = "flamelet"`, whose `Z` and `C` live in the existing species block, with the mixture path's functors templated on the gas model | A separate scalar block in `State`; control variables beside a mechanism's species; one-way passive scalars | Reuses the species transport, halo exchange, restart and time integration unchanged; the thermodynamics comes from the table (section 5) |
@@ -80,18 +80,29 @@ than non-reacting LES.
 
 | Model | Flamelets | Control variables (transported) | Table axes | Source |
 |---|---|---|---|---|
-| SLFM | steady counterflow, stable branch | `Z`, `Zvar` (+ `chi` from a closure) | `Z`, `S`, `chi_st` | none |
-| FPV | steady counterflow S-curve (stable, unstable) | `Z`, `Zvar`, `C` | `Z`, `S`, `c` | `omega_C` |
-| FGM | free premixed flames over equivalence ratio | `Z`, `Zvar`, `C` (or `c`) | `Z`, `S`, `c` | `omega_C` |
+| SLFM | steady counterflow, stable branch | `Z`, `Zvar` (+ `chi` from a closure) | `Z`, `Sz`, `chi_st` | none |
+| FPV | steady counterflow S-curve (stable, unstable) | `Z`, `Zvar`, `C` | `Z`, `Sz`, `Lambda` | `omega_C` |
+| FGM | free premixed flames over equivalence ratio | `Z`, `Zvar`, `C` (or `Lambda`) | `Z`, `Sz`, `Lambda` | `omega_C` |
 | + heat loss | burner-stabilized or radiating flamelets | + enthalpy `h` | + `h_defect` | |
 | + slow species | unsteady flamelets, or a transported `Y_NO` with tabulated production and consumption | + `Y_NO` | as the base model | split source (Ihme & Pitsch 2008c) |
 
 `Z` is Bilger's mixture fraction (Bilger, Stårner & Kee 1990), `Zvar` its
-subgrid variance, `S = Zvar / (Z (1 - Z))` the normalized variance in [0, 1],
+subgrid variance, `Sz = Zvar / (Z (1 - Z))` the normalized variance in [0, 1],
 `C = sum_k w_k Y_k` the progress variable (weights in the table input; `Y_H2O`
-for hydrogen, `Y_CO2 + Y_CO + Y_H2O + Y_H2` for hydrocarbons), `Lambda` the
-flamelet parameter (`C` at the stoichiometric `Z`, Ihme & Pitsch 2008a), and
-`c` the normalized mean progress variable of decision 3.
+for hydrogen, `Y_CO2 + Y_CO + Y_H2O + Y_H2` for hydrocarbons), `C_st` the
+flamelet parameter (`C` at the stoichiometric `Z`), and
+`Lambda = (C - C_min) / (C_max - C_min)` the normalized mean progress variable
+of decision 3, between the least and largest `C` of the table at that
+`(Z, Sz)`.
+
+The names are FPVgen's: `Sz` is its normalized variance axis and `Lambda` its
+normalized progress variable (its field `PROG_NORM`, plotted as Λ; FPVgen's
+CharLES^X tables name that axis `C`). FPVgen normalizes each laminar
+flamelet's `C` by the least and largest `C` of all flamelets at the same `Z`;
+Mallard's `Lambda` is the same normalization at each `(Z, Sz)` after PDF
+integration (at `Sz = 0`, of the laminar flamelets). Ihme & Pitsch (2008a) write Λ for
+the flamelet parameter `C(Z_st)`, which is `C_st` here: it labels flamelets
+in generation and is not a table axis.
 
 ## 2. Table generation (external)
 
@@ -108,12 +119,12 @@ What Mallard needs from the generator, for `fpv` tables:
   flame control (the continuation of Nishioka, Law & Takeno 1996, as in
   Cantera's `diffusion_flame_continuation` sample and FPVgen) walks the stable
   branch to extinction and continues on the unstable branch. The mixing
-  solution closes the table at `Lambda = 0`. For LES of lifted flames the lower
+  solution closes the table at `C_st = 0`. For LES of lifted flames the lower
   part of the unstable branch matters (Ihme & See 2010).
-- **The laminar table `phi(Z, Lambda)`.** Each flamelet is mapped to Bilger's
-  `Z` and labeled by `Lambda = C(Z_st)` (Ihme & Pitsch 2008a).
-- **Presumed PDFs (decision 2).** `P(Z, Lambda) = beta(Z; Z_mean, S)
-  delta(Lambda - Lambda_mean)`. For a field piecewise linear in `Z` on a fine
+- **The laminar table `phi(Z, C_st)`.** Each flamelet is mapped to Bilger's
+  `Z` and labeled by `C_st = C(Z_st)` (Ihme & Pitsch 2008a).
+- **Presumed PDFs (decision 2).** `P(Z, C_st) = beta(Z; Z_mean, Sz)
+  delta(C_st - C_st_mean)`. For a field piecewise linear in `Z` on a fine
   grid, the beta mean is a fixed linear combination of the nodal values:
 
   $$
@@ -121,17 +132,17 @@ What Mallard needs from the generator, for `fpv` tables:
   $$
 
   with `F = I(Z; a, b)` the regularized incomplete beta function, `G = Z_mean
-  I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/S - 1)`,
-  `b = (1 - Z_mean)(1/S - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
-  exact for any singularity of the PDF at 0 and 1. `S = 0` is the laminar
-  value, and `S = 1` gives the two pure streams. FPVgen today fills the
+  I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/Sz - 1)`,
+  `b = (1 - Z_mean)(1/Sz - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
+  exact for any singularity of the PDF at 0 and 1. `Sz = 0` is the laminar
+  value, and `Sz = 1` gives the two pure streams. FPVgen today fills the
   variance axis with copies of the laminar flamelet; the generator replaces
   that with this integration. A first implementation, verified against an
   independent integration by parts, is in the history of #1222 and can seed
   the generator.
-- **The `Lambda -> c` remap (decision 3).** After integration, each `(Z, S)`
-  column is retabulated against `c`, with `C` exactly linear in `c` (a checked
-  part of the format). `C` must increase with `Lambda` at each `(Z, S)`. Where
+- **The `C_st -> Lambda` remap (decision 3).** After integration, each `(Z, Sz)`
+  column is retabulated against `Lambda`, with `C` exactly linear in `Lambda` (a checked
+  part of the format). `C` must increase with `C_st` at each `(Z, Sz)`. Where
   integration breaks monotonicity, the generator follows the running maximum
   and reports how many nodes did.
 - **The fields of the contract**: `C`, `omega_C`, `rho0`, the Saghafian
@@ -166,7 +177,7 @@ The specification is [table_format.md](table_format.md). In short:
   from its own file.
 - Mallard checks the format and the contract of the table's tags at setup:
   the format and version, the required attributes, groups and datasets, the
-  axes, the units of every field it uses, physical bounds, `C` linear in `c`,
+  axes, the units of every field it uses, physical bounds, `C` linear in `Lambda`,
   the shape and finiteness. Its errors name the file and the problem.
 - Loading reads the values into memory (`H5Dread`) on CPU backends. On GPU
   backends, where the host copy only stages the copy to the device, it maps
@@ -230,30 +241,30 @@ above; an A100 has 80 GB). Node-major with fields contiguous makes one lookup
 read `2^d n_fields` values in `2^d` contiguous runs; field-major would make it
 `2^d n_fields` scattered reads. Neighboring threads look up different points in
 either layout. To be measured in stage 2 against a field-major layout, and
-float32 values against float64. The FPV map reads the bounds of `C` at the ends of the `c` axis
-from the `2^(D-1)` nodes of the `(Z, S)` cell alone.
+float32 values against float64. The FPV map reads the bounds of `C` at the ends of the `Lambda` axis
+from the `2^(D-1)` nodes of the `(Z, Sz)` cell alone.
 
 ### 4.3 The FPV map (decision 3)
 
-The transported `(Z, Zvar, C)` is mapped to the table's `(Z, S, c)`:
+The transported `(Z, Zvar, C)` is mapped to the table's `(Z, Sz, Lambda)`:
 
-1. `S = Zvar / (Z (1 - Z))`, clamped to [0, 1] (0 where `Z (1 - Z)` < 1e-12).
-2. `C_min` and `C_max`: the table's `C` at `(Z, S, c = 0)` and `(Z, S, c = 1)`.
-3. `c = (C - C_min) / (C_max - C_min)`, clamped to [0, 1] (0 where the span
-   vanishes: at `Z = 0`, `Z = 1` and `S = 1` every `Lambda` gives the same
+1. `Sz = Zvar / (Z (1 - Z))`, clamped to [0, 1] (0 where `Z (1 - Z)` < 1e-12).
+2. `C_min` and `C_max`: the table's `C` at `(Z, Sz, Lambda = 0)` and `(Z, Sz, Lambda = 1)`.
+3. `Lambda = (C - C_min) / (C_max - C_min)`, clamped to [0, 1] (0 where the span
+   vanishes: at `Z = 0`, `Z = 1` and `Sz = 1` every `C_st` gives the same
    state).
 
-The format requires `C` exactly linear in `c` at each `(Z, S)` node, so the
+The format requires `C` exactly linear in `Lambda` at each `(Z, Sz)` node, so the
 multilinear lookup of `C` returns the transported `C` itself (to round-off)
 wherever it lies within the bounds: the table cannot drift from the transported
 variable it is indexed by. Three lookups of one field and one of all the fields
-needed; no iteration. The `Lambda` alternative needs a search (bisection or
-Newton) for `Lambda(Z, S, C)` per lookup, with a data-dependent iteration count
-on the device; tabulating `C` on a different grid per `(Z, S)` needs the same
+needed; no iteration. The `C_st` alternative needs a search (bisection or
+Newton) for `C_st(Z, Sz, C)` per lookup, with a data-dependent iteration count
+on the device; tabulating `C` on a different grid per `(Z, Sz)` needs the same
 search in disguise.
 
-`C` must increase with `Lambda` at each `(Z_mean, S)` for `c` to be a coordinate.
-`Lambda` is chosen because it is monotonic along the S-curve at `Z_st`; away
+`C` must increase with `C_st` at each `(Z_mean, Sz)` for `Lambda` to be a coordinate.
+`C_st` is chosen because it is monotonic along the S-curve at `Z_st`; away
 from it the generator checks monotonicity after integration and follows the
 running maximum where it fails, reporting how many nodes did. In the first
 draft's H2/N2 table none did (the only non-monotonic nodes were those where `C`
@@ -380,14 +391,14 @@ tables with exact answers: the closed-form `T(e)` against a quadrature of
 `cv`, device lookups against the multilinear source, the error-function
 mixing of `Z` at uniform `T`, a closed reactor following the tabulated source,
 and the exact traveling front of `C_t = D C_xx + k C^2 (1 - C)`, which checks
-diffusivity, source and the map `C -> c` together.
+diffusivity, source and the map `C -> Lambda` together.
 
 - **Output.** The table's species, `T0` (as `T_TABLE`) and the optional `HRR`
   field are computed on the host when the output is staged, from the host copy
   of the table: output is infrequent, so they add no device kernel and nothing
   to the step. `HRR` is scaled by `(rho / rho0)^2` like `omega_C`, since both
-  are rates of the same reactions. `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`
-  are the derived fields of the catalog, `Z` and the table's normalized `c`.
+  are rates of the same reactions. `MIXTURE_FRACTION` and `FPV_LAMBDA`
+  are the derived fields of the catalog, `Z` and the table's `Lambda`.
   Probes and statistics of the table fields are left for later.
 - **Table pressure.** The setup compares the initial pressure field (its
   extremes over all ranks) and the prescribed pressures of `inlet_state`,
@@ -454,14 +465,14 @@ Cantera.
   `grad T`), and `Z` and `C` take `mu_t / Sc_t` without the molar mass the
   mixtures' mixture-averaged form carries. The time step bounds use `R` and
   `cp` of the table at the cell's variance.
-- **Variance in the table.** The FPV map's `S = Zvar / (Z (1 - Z))` axis
+- **Variance in the table.** The FPV map's `Sz = Zvar / (Z (1 - Z))` axis
   already ran from 0 to 1 in the stage-1 reader; the clip `Zvar <= Z (1 - Z)`
   keeps lookups at the edge instead of relying on the map's clamp.
 
-The tests (`test/flamelet_les_test.cpp`) use a table linear in `S` in every
+The tests (`test/flamelet_les_test.cpp`) use a table linear in `Sz` in every
 field the solver reads, so lookups at the variance are exact: the variance of a
 linear `Z` against `C_Z h^2 |grad Z|^2`, and `p`, `T`, `rho`, `mu`, `Y_H2O`,
-the normalized `c` and one step of the source at it; the decay of a cosine of
+the normalized `Lambda` and one step of the source at it; the decay of a cosine of
 `Z` in uniform shear at `(D + nu_t / Sc_t) k^2` with the Smagorinsky `nu_t`,
 with enthalpy mixing with `Z` only when `Pr_t = Sc_t`; and bit-for-bit
 agreement on any rank count and with step graphs.
@@ -480,7 +491,7 @@ agreement on any rank count and with step graphs.
   flame, thickening the progress-variable equation (`D -> E F D`,
   `omega_C -> E omega_C / F`) is the standard combination (e.g. Kuenne et al.
   2011); it reuses `ThickenedFlame` and its dynamic efficiency unchanged, with
-  the sensor on `c` instead of `T`. Stage 5.
+  the sensor on `Lambda` instead of `T`. Stage 5.
 - **PaSR:** not applicable (it scales finite-rate rates).
 - **Radiation:** the optically thin model needs `T` and `X_H2O`, `X_CO2` from the
   table; it then removes enthalpy, which needs the enthalpy-defect axis (stage
@@ -488,7 +499,7 @@ agreement on any rank count and with step graphs.
 - **Double flux:** applies unchanged to the surrogate `(gamma, e0)`.
 - **Output, probes, statistics:** table fields are derived fields
   (`src/solver/derived_catalog.h`): `T`, `Y_<species>` of the table's species,
-  `HRR`, `omega_C`, `Z`, `Zvar`, `C`, `c`; probes and statistics read them
+  `HRR`, `omega_C`, `Z`, `Zvar`, `C`, `Lambda`; probes and statistics read them
   as they read the mixture's.
 - **Determinism and step graphs:** lookups are pointwise kernels without host
   work; no new reduction or exchange.
@@ -541,9 +552,9 @@ Each must fail under a plausible bug (CONTRIBUTING.md).
   name outside the allowed form, a `Y_` field outside the species block, wrong
   axes or too few of them, bad provenance, `Z_st` out of range, a weight of `C`
   that is not a number, a stream mass fraction outside [0, 1], `gamma0 <= 1`, a
-  mass fraction outside [0, 1], and `C` not linear in `c`.
+  mass fraction outside [0, 1], and `C` not linear in `Lambda`.
 - **Generation** (the generator library): beta weights against an independent
-  integration, the PDF limits, the `Lambda -> c` remap, and off-table flamelets
+  integration, the PDF limits, the `C_st -> Lambda` remap, and off-table flamelets
   against direct Cantera solutions. The first draft of #1222 measured, on a
   41 x 5 x 21 H2/N2 table, `T` within 4.6 K of an off-table Cantera flamelet.
 - **Stage 2**: the gas model's `cell_state` against the table's `T0`, `p` at

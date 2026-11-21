@@ -76,9 +76,9 @@ std::string smagorinsky(double C, const std::string & extra = "") {
 
 // Z = 0.2 + 0.6 x on cells of side h has the algebraic variance Zvar = C_Z h^2 0.36: the left cell's gradient
 // takes the inlet's Z at its face, the right cell's mirrors Z across the symmetry plane (a quarter of it).
-// S = Zvar / (Z (1 - Z)), and the variance table's fields are linear in S: the initial state holds the given
-// p and T at R = 287 + 100 S, the written MU = 1.8e-5 (1 + S), Y_H2O = 0.1 S and the variance itself,
-// c = C / (0.2 (1 + S)), and one step adds omega_C = 1e4 S (rho / rho0)^2 to rho C (C is uniform and the gas
+// Sz = Zvar / (Z (1 - Z)), and the variance table's fields are linear in Sz: the initial state holds the given
+// p and T at R = 287 + 100 Sz, the written MU = 1.8e-5 (1 + Sz), Y_H2O = 0.1 Sz and the variance itself,
+// Lambda = C / (0.2 (1 + Sz)), and one step adds omega_C = 1e4 Sz (rho / rho0)^2 to rho C (C is uniform and the gas
 // at rest). Catches a variance of the wrong width, constant or gradient, inlet faces missing from it, and every
 // lookup that stays at the laminar flamelet: the initial conversion, the cell states, transport, the source of
 // C and the output fields; with a large C_Z, the clip at Z (1 - Z), the table's edge.
@@ -95,7 +95,7 @@ TEST(FlameletLESTest, AlgebraicVarianceEntersEveryLookup) {
               << zero_velocity() << "\nZ = \"0.2 + 0.6 * x\"\nC = \"0.1\"\n"
               << physics("solver_variance.h5", "C_Z = " + std::to_string(C_Z) + "\n") << smagorinsky(0.17)
               << "[[write_data]]\nprefix = \"" << prefix << "\"\nformat = \"vtu\"\ninterval = 1000000\n"
-              << "fields = [\"MIXTURE_FRACTION_VARIANCE\", \"MU\", \"Y_H2O\", \"PROGRESS_VARIABLE\"]\n";
+              << "fields = [\"MIXTURE_FRACTION_VARIANCE\", \"MU\", \"Y_H2O\", \"FPV_LAMBDA\"]\n";
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(input.str()));
@@ -103,34 +103,34 @@ TEST(FlameletLESTest, AlgebraicVarianceEntersEveryLookup) {
         solver.write_output_of_state(false);
         const output::Contents file = output::open(prefix + "_000000.vtu");
         std::map<std::string, std::vector<double>> written;
-        for (const char * name : {"MIXTURE_FRACTION_VARIANCE", "MU", "Y_H2O", "PROGRESS_VARIABLE"}) {
+        for (const char * name : {"MIXTURE_FRACTION_VARIANCE", "MU", "Y_H2O", "FPV_LAMBDA"}) {
             written[name] = output::read(file, name, 0);
         }
         const auto mesh = solver.get_mesh();
         const uint32_t n = mesh->n_owned();
-        std::vector<double> rho(n), rhoC(n), S(n);
+        std::vector<double> rho(n), rhoC(n), Sz(n);
         for (uint32_t c = 0; c < n; c++) {
             rho[c] = double(solver.h_conservatives(c, 0));
             rhoC[c] = double(solver.h_species(c, 1));
             const double Z = double(solver.h_species(c, 0)) / rho[c];
             const double grad = Z > 0.8 - 0.6 * h ? 0.3 : 0.6;
             const double Zvar = std::min(C_Z * h * h * grad * grad, Z * (1.0 - Z));
-            S[c] = Zvar / (Z * (1.0 - Z));
+            Sz[c] = Zvar / (Z * (1.0 - Z));
             EXPECT_NEAR(written["MIXTURE_FRACTION_VARIANCE"][c], Zvar, tol(1e-12, 1e-6)) << Z;
             EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), p, tol(1e-9, 1e-2) * p) << Z;
             EXPECT_NEAR(double(solver.h_primitives(c, N_DIM + 1)), T, tol(1e-9, 1e-2) * T) << Z;
-            EXPECT_NEAR(rho[c], p / ((287.0 + 100.0 * S[c]) * T), tol(1e-12, 1e-6) * rho[c]) << Z;
-            EXPECT_NEAR(written["MU"][c], 1.8e-5 * (1.0 + S[c]), tol(1e-12, 1e-6) * 1.8e-5) << Z;
-            EXPECT_NEAR(written["Y_H2O"][c], 0.1 * S[c], tol(1e-12, 1e-6)) << Z;
-            EXPECT_NEAR(written["PROGRESS_VARIABLE"][c], 0.5 / (1.0 + S[c]), tol(1e-12, 1e-6)) << Z;
+            EXPECT_NEAR(rho[c], p / ((287.0 + 100.0 * Sz[c]) * T), tol(1e-12, 1e-6) * rho[c]) << Z;
+            EXPECT_NEAR(written["MU"][c], 1.8e-5 * (1.0 + Sz[c]), tol(1e-12, 1e-6) * 1.8e-5) << Z;
+            EXPECT_NEAR(written["Y_H2O"][c], 0.1 * Sz[c], tol(1e-12, 1e-6)) << Z;
+            EXPECT_NEAR(written["FPV_LAMBDA"][c], 0.5 / (1.0 + Sz[c]), tol(1e-12, 1e-6)) << Z;
         }
-        EXPECT_GT(*std::max_element(S.begin(), S.end()), 0.09);
+        EXPECT_GT(*std::max_element(Sz.begin(), Sz.end()), 0.09);
 
         solver.run();
         solver.copy_device_to_host();
         for (uint32_t c = 0; c < n; c++) {
-            const double r = rho[c] / rho0, expected = 1.0e4 * S[c] * r * r * dt;
-            EXPECT_NEAR(double(solver.h_species(c, 1)) - rhoC[c], expected, tol(1e-6, 1e-2) * expected) << S[c];
+            const double r = rho[c] / rho0, expected = 1.0e4 * Sz[c] * r * r * dt;
+            EXPECT_NEAR(double(solver.h_species(c, 1)) - rhoC[c], expected, tol(1e-6, 1e-2) * expected) << Sz[c];
         }
     }
 }

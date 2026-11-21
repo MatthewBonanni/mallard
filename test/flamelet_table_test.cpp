@@ -44,26 +44,26 @@ const std::string FIXTURE = source_dir() + "/test/data/flamelet/fixture_fpv.h5";
 const std::string FIXTURE_F32 = source_dir() + "/test/data/flamelet/fixture_fpv_f32.h5";
 
 // The fixture's fields, as the writer in test/data/flamelet/fixture_fpv.h5 (/provenance/input) computes them:
-// multilinear in (Z, S, c), so multilinear lookups reproduce them anywhere in the table. fixture_fpv_f32.h5
+// multilinear in (Z, Sz, Lambda), so multilinear lookups reproduce them anywhere in the table. fixture_fpv_f32.h5
 // holds them rounded to float32.
 const std::vector<std::string> FIXTURE_FIELDS = {"C",     "omega_C", "rho0", "T0",   "e0",   "R",     "gamma0", "a_gamma",
                                                  "mu",    "kappa",   "cp",   "Y_H2", "Y_O2", "Y_H2O", "Y_N2"};
-double fixture(const size_t f, const double Z, const double S, const double c) {
+double fixture(const size_t f, const double Z, const double Sz, const double Lambda) {
     switch (f) {
-        case 0: return c * (0.1 + 0.2 * Z) * (1.0 - 0.5 * S);
-        case 1: return 40.0 * c * (1.0 + Z) * (1.0 - S);
-        case 2: return 1.2 - 0.8 * c + 0.1 * Z;
-        case 3: return 300.0 + 1500.0 * c * (1.0 - 0.5 * S) + 20.0 * Z;
-        case 4: return -2.0e5 + 1.2e6 * c - 1.0e5 * Z;
+        case 0: return Lambda * (0.1 + 0.2 * Z) * (1.0 - 0.5 * Sz);
+        case 1: return 40.0 * Lambda * (1.0 + Z) * (1.0 - Sz);
+        case 2: return 1.2 - 0.8 * Lambda + 0.1 * Z;
+        case 3: return 300.0 + 1500.0 * Lambda * (1.0 - 0.5 * Sz) + 20.0 * Z;
+        case 4: return -2.0e5 + 1.2e6 * Lambda - 1.0e5 * Z;
         case 5: return 287.0 * (1.0 + Z);
-        case 6: return 1.4 - 0.1 * c - 0.05 * Z;
-        case 7: return -1.0e-4 * (1.0 + c);
-        case 8: return 1.8e-5 * (1.0 + c) * (1.0 + 0.1 * Z);
-        case 9: return 0.026 * (1.0 + 2.0 * c) * (1.0 + 0.1 * S);
-        case 10: return 1000.0 * (1.0 + 0.4 * Z) * (1.0 + 0.2 * c);
-        case 11: return 0.1 * Z * (1.0 - c);
-        case 12: return 0.23 * (1.0 - Z) * (1.0 - c);
-        case 13: return c * (0.1 + 0.2 * Z) * (1.0 - 0.5 * S);
+        case 6: return 1.4 - 0.1 * Lambda - 0.05 * Z;
+        case 7: return -1.0e-4 * (1.0 + Lambda);
+        case 8: return 1.8e-5 * (1.0 + Lambda) * (1.0 + 0.1 * Z);
+        case 9: return 0.026 * (1.0 + 2.0 * Lambda) * (1.0 + 0.1 * Sz);
+        case 10: return 1000.0 * (1.0 + 0.4 * Z) * (1.0 + 0.2 * Lambda);
+        case 11: return 0.1 * Z * (1.0 - Lambda);
+        case 12: return 0.23 * (1.0 - Z) * (1.0 - Lambda);
+        case 13: return Lambda * (0.1 + 0.2 * Z) * (1.0 - 0.5 * Sz);
         default: return 0.7 - 0.1 * Z;
     }
 }
@@ -235,7 +235,7 @@ std::vector<char> h5_values(const std::string & file, const size_t value_size) {
     return bytes;
 }
 
-/** @brief Random points of the fixture's (Z, S, c) space, a fifth of them outside it. */
+/** @brief Random points of the fixture's (Z, Sz, Lambda) space, a fifth of them outside it. */
 std::vector<std::vector<double>> fixture_points(const uint32_t seed) {
     std::mt19937 rng(seed);
     std::uniform_real_distribution<double> u(-0.1, 1.1);
@@ -253,8 +253,8 @@ std::vector<uint32_t> all_fields(const Table & t) {
 } // namespace
 
 // The FPV map returns the transported C itself wherever C lies between the table's bounds at
-// (Z, S), and the bounds outside, in float64 tables and to float32 rounding in float32 tables:
-// catches a normalization of c against the wrong bounds.
+// (Z, Sz), and the bounds outside, in float64 tables and to float32 rounding in float32 tables:
+// catches a normalization of Lambda against the wrong bounds.
 TEST(FlameletTableTest, FpvReproducesTheProgressVariable) {
     auto check = [](const Table & t, auto value, const double tolerance) {
         using Value = decltype(value);
@@ -265,17 +265,17 @@ TEST(FlameletTableTest, FpvReproducesTheProgressVariable) {
         std::vector<std::array<double, 3>> q;
         std::vector<double> expected;
         for (int i = 0; i < 300; i++) {
-            const double Z = u(rng), S = u(rng) * u(rng);
+            const double Z = u(rng), Sz = u(rng) * u(rng);
             flamelet::Point<3> p;
             host.table.locate_axis(0, Z, p.lo[0], p.t[0]);
-            host.table.locate_axis(1, S, p.lo[1], p.t[1]);
+            host.table.locate_axis(1, Sz, p.lo[1], p.t[1]);
             p.t[2] = 0.0;
             const double lo = host.table(p, C);
             p.lo[2] = host.table.n_nodes[2] - 2;
             p.t[2] = 1.0;
             const double hi = host.table(p, C);
             const double target = lo + (-0.2 + 1.4 * u(rng)) * (hi - lo);
-            q.push_back({Z, S * Z * (1.0 - Z), target});
+            q.push_back({Z, Sz * Z * (1.0 - Z), target});
             expected.push_back(std::clamp(target, lo, hi));
         }
         const auto out = fpv_device(t.fpv<Value>(), q, {C});
@@ -450,11 +450,11 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
     expect_refused("species.h5", [&](hid_t h5) { set_texts(h5, "species", {"H2", "O2", "H2O"}); },
                    "\"Y_N2\" is not of a species");
     expect_refused("axes.h5", [&](hid_t h5) {
-        h5::check(H5Lmove(h5, "axes/S", h5, "axes/chi", H5P_DEFAULT, H5P_DEFAULT), "move");
-        on_values([&](hid_t v) { set_texts(v, "axes", {"Z", "chi", "c"}); })(h5);
-    }, "axis 1 of a table of model \"fpv\" is \"S\"");
-    expect_refused("axis.h5", [&](hid_t h5) { h5::check(H5Ldelete(h5, "axes/c", H5P_DEFAULT), "delete"); },
-                   "no valid dataset /axes/c");
+        h5::check(H5Lmove(h5, "axes/Sz", h5, "axes/chi", H5P_DEFAULT, H5P_DEFAULT), "move");
+        on_values([&](hid_t v) { set_texts(v, "axes", {"Z", "chi", "Lambda"}); })(h5);
+    }, "axis 1 of a table of model \"fpv\" is \"Sz\"");
+    expect_refused("axis.h5", [&](hid_t h5) { h5::check(H5Ldelete(h5, "axes/Lambda", H5P_DEFAULT), "delete"); },
+                   "no valid dataset /axes/Lambda");
     expect_refused("shape.h5", on_values([&](hid_t v) {
         std::vector<std::string> n = names, u = units;
         n.push_back("extra");
@@ -475,7 +475,7 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
                    "attribute \"Z_st\" on /model_data");
     expect_refused("gamma.h5", set_value(5, "gamma0", 0.9), "the field \"gamma0\" is not above 1 at node 5");
     expect_refused("fraction.h5", set_value(3, "Y_O2", 1.5), "the field \"Y_O2\" is outside [0, 1] at node 3");
-    expect_refused("linear.h5", set_value(1, "C", 0.5), "C is not linear in c at (Z, S) node 0");
+    expect_refused("linear.h5", set_value(1, "C", 0.5), "C is not linear in Lambda at (Z, Sz) node 0");
     expect_refused("name.h5", on_values([&](hid_t v) { set_texts(v, "fields", replaced(names, "Y_N2", "Y N2")); }),
                    "field name \"Y N2\" is not of the form");
     expect_refused("weights.h5", [&](hid_t h5) {
