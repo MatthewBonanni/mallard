@@ -282,13 +282,12 @@ void time_step_section(report::Text & text, const CheckReport & r) {
     const std::string basis = r.dt_limit == "CFL"      ? "run.cfl times the time step at CFL 1"
                               : r.dt_limit == "sponge" ? "the sponges' stable step, below run.cfl's"
                                                        : "run.dt";
-    const bool limited = std::isfinite(r.cfl_limit);
-    const Status cfl = !limited ? Status::NONE : r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
+    const Status cfl = r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
     std::vector<Row> rows = {
         {Status::NONE, {"time step dt", g4(r.dt), "s", "", basis}},
         {cfl,
-         {"CFL number", format("%.3g", r.cfl), "dimensionless", limited ? "<= " + g4(r.cfl_limit) : "",
-          limited ? r.integrator + "'s stability limit for smooth flow" : "no limit known for " + r.integrator}},
+         {"CFL number", format("%.3g", r.cfl), "dimensionless", "<= " + g4(r.cfl_limit),
+          r.integrator + "'s stability limit for smooth flow"}},
         {Status::NONE, {"time step at CFL 1", g4(r.dt_cfl1), "s", "", "the smallest over the cells"}},
         {Status::NONE, {"CFL-limiting cell", count(r.limiting_cell), "global id", "", "at " + point(r.limiting_x)}},
         {Status::NONE,

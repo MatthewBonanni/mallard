@@ -72,6 +72,7 @@
 #include "input_upgrade.h"
 #include "region_input.h"
 #include "stencils.h"
+#include "particles.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -817,8 +818,12 @@ class Solver {
         /** @brief Collects the health report now, as a progress row does (collective). */
         void report_health();
 
-        /** @brief The solution: flow block and species partial densities. */
-        State state() const { return State(conservatives, species); }
+        /** @brief The solution: flow block, species partial densities and the particle block. */
+        State state() const { return State(conservatives, species, particles ? particles->values() : ParticleView()); }
+
+        /** @brief The particles ([particles]), or null. */
+        const Particles * get_particles() const { return particles.get(); }
+        Particles * get_particles() { return particles.get(); }
 
         /** @brief Names of the transported species, empty for a single gas. */
         const std::vector<std::string> & get_species_names() const { return species_names; }
@@ -943,6 +948,9 @@ class Solver {
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
+        void init_particles(region::Regions & regions);  // [particles], before allocate_time_stepping
+        void write_particle_probes();   // [[particles.probes]] due at this step
+        std::unique_ptr<Particles> particles;
         /**
          * @brief stage_scratch: the reconstructions' work memory and face_thermo and face_mdot (from the
          *        reconstruction to the species slots) share it with cell_diffusion, transport_values and
