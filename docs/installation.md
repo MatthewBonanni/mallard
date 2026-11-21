@@ -44,11 +44,11 @@ The GPU builds are compiled in CI on every change to device code; only the NVIDI
 - **Ubuntu 26.04**: `sudo apt-get install g++ cmake` installs GCC 15 and CMake 4.2; `sudo apt-get install clang-22` adds Clang 22 (configure with `-DCMAKE_CXX_COMPILER=clang++-22`).
 - **Debian 13**: its GCC 14 is too old; use Clang 22 and, with `trixie-backports` enabled, the backported CMake: `sudo apt-get install clang-22 libomp-22-dev && sudo apt-get install -t trixie-backports cmake`.
 - **Fedora 44**: `sudo dnf install gcc-c++ cmake` installs GCC 16 and CMake 4.3.
-- **Older Ubuntu or Debian releases**: Clang 22 or 23 from [apt.llvm.org](https://apt.llvm.org), and CMake from `pip install cmake`.
+- **Older Ubuntu or Debian releases**: Clang 22 or 23 from [apt.llvm.org](https://apt.llvm.org), and CMake from `uv tool install cmake`.
 - **macOS**: install the current Xcode (26.4 or newer, for Apple Clang 21) from the App Store, or Homebrew's GCC: `brew install gcc cmake`, then configure with `-DCMAKE_CXX_COMPILER=g++-16`.
 - **Anywhere with Docker or Apptainer**: the [container images](#container) have Mallard built; `docker/Dockerfile` builds them from a checkout with their own toolchain (`docker build -f docker/Dockerfile -t mallard .`).
 
-A CMake older than 4.2 is replaced the same way (`spack install cmake`, `brew install cmake`, or `pip install cmake`).
+A CMake older than 4.2 is replaced the same way (`spack install cmake`, `brew install cmake`, or `uv tool install cmake`).
 
 ### MPI
 
@@ -205,7 +205,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 Every build makes the library of the [Python package](guide/python.md); after `cmake --install`, one command adds the package (distribution `mallard-python`, imported as `mallard`) to a Python environment (3.10 or newer; it brings numpy):
 
 ```sh
-pip install $HOME/mallard/share/mallard/tools     # or: uv pip install, or pip install -e tools in the repository
+uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
 It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF` builds without the library ([Python](guide/python.md#installing)).
