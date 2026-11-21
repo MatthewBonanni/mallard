@@ -1,10 +1,11 @@
 # Installation
 
-Three ways to install Mallard, quickest first:
+Four ways to install Mallard, quickest first:
 
 | | Best for | Compiling |
 |---|---|---|
 | [Container](#container) (Docker, Apptainer, Kubernetes) | Trying Mallard; workstations; GPU nodes; Kubernetes clusters | None |
+| [Relocatable archive](#relocatable-archive) | Linux clusters with an MPICH-based MPI; no container runtime | None |
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
@@ -12,7 +13,7 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
-Each also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
+Each but the archive also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
 
 ## Supported platforms
 
@@ -28,6 +29,7 @@ Mallard supports the two newest major releases of GCC and of Clang, the current 
 | AMD GPUs | x86-64 | ROCm's Clang | 4.2 | ROCm 10.1 | `ci.yml/hip` (compile) |
 | Intel GPUs | x86-64 | oneAPI `icpx` | 4.2 | oneAPI 2026.2 | `ci.yml/sycl` (compile) |
 | Containers (`docker/`), Spack on Ubuntu | x86-64, arm64 | GCC 15 | 4.2, 4.4 | CUDA 13.5 | `release.yml/cpu`, `release.yml/cuda`, `release.yml/spack` |
+| Relocatable archives (built on AlmaLinux 8, run on glibc 2.28 and newer) | x86-64, arm64 | GCC 16 (gcc-toolset) | manylinux's | | `release.yml/archive` |
 
 The GPU builds are compiled in CI on every change to device code; only the NVIDIA A100 also runs them ([GPU CI](guide/support.md#builds)). ROCm and oneAPI are tested on x86-64 only.
 
@@ -98,7 +100,23 @@ cd examples/sod && apptainer exec ../../mallard.sif mallard -i input.toml
 
 For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`.
 
+[`docker/mallard.def`](https://github.com/MatthewBonanni/mallard/blob/main/docker/mallard.def) builds the same image with a run script and a self-test (`apptainer test mallard.sif`), from any tag or digest: `apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.12.0 mallard.sif docker/mallard.def`, then `apptainer run mallard.sif -i input.toml`.
+
 On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, and resumes from a restart file after preemption; an `MPIJob` ([Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator)) runs it across nodes, with the images' Open MPI in the launcher and the workers ([manifests and guide](guide/running.md#kubernetes)). On clusters with their own MPI and no Kubernetes, run across nodes with Spack or a source build.
+
+## Relocatable archive
+
+From 0.12.0, each release attaches an archive of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer):
+
+```sh
+v=0.12.0 a=mallard-$v-linux-$(uname -m)-cpu.tar.gz
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a.sha256
+sha256sum -c $a.sha256 && tar -xzf $a
+mallard-$v-linux-$(uname -m)-cpu/bin/mallard install verify
+```
+
+It carries MPICH's library, so it runs on one node as it is. Across nodes, load the site's MPI built on MPICH (Cray MPICH, Intel MPI, MVAPICH, MPICH: the MPICH ABI, `libmpi.so.12`) with `module load` first, and start it with the site's launcher (`srun`, `mpiexec`): its library on `LD_LIBRARY_PATH` replaces the archive's. Open MPI sites use Spack or a source build. `share/mallard/archive.toml` names the archive's variant and glibc floor, and `release-manifest.json`, beside the archives on the release, lists every archive and image with its SHA-256 or digest (what the [GUI](https://github.com/MatthewBonanni/mallard/blob/main/docs/design/gui.md) installs from). The archive has no Python package: use a container or Spack for it.
 
 ## Spack
 
