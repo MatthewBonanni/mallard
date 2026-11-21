@@ -1075,7 +1075,7 @@ tested like any other.
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
 | Write-once outputs | restarts and per-snapshot files are; single-file series and rewinds are not | write-once series and rewinds |
-| Install verification | missing | `mallard install verify` |
+| Install verification | done: `mallard install verify --format json` (#1320) | none |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
 ## Prototype findings
