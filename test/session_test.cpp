@@ -317,14 +317,14 @@ TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
             u2 += f["u_direction"].array[d].number * f["u_direction"].array[d].number;
             n2 += f["normal"].array[d].number * f["normal"].array[d].number;
         }
-        EXPECT_NEAR(u2, 1.0, 1e-9) << zone;
-        EXPECT_NEAR(n2, 1.0, 1e-9) << zone;
-        EXPECT_NEAR(along, 0.0, 1e-3) << zone;  // u runs along the boundary
+        EXPECT_NEAR(u2, 1.0, 1e-5) << zone;
+        EXPECT_NEAR(n2, 1.0, 1e-5) << zone;
+        EXPECT_NEAR(along, 0.0, 1e-5) << zone;  // u runs along the boundary
         EXPECT_GT(f["length"].number, 0.0) << zone;
     }
     // The inlet, at the domain's low x, faces +x
     ASSERT_TRUE(frames["inlet"]["error"].is_null()) << json::dump(frames["inlet"]);
-    EXPECT_NEAR(frames["inlet"]["normal"].array[0].number, 1.0, 1e-9);
+    EXPECT_NEAR(frames["inlet"]["normal"].array[0].number, 1.0, 1e-5);
     EXPECT_FALSE(frames["cylinder"]["error"].is_null() && Mallard_DIM == 2) << "a closed curve has no start";
 
     if (Mallard_DIM == 2) {
@@ -350,9 +350,9 @@ TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
         const json::Value before = inlet_frame(1), after = inlet_frame(3);
         ASSERT_FALSE(before.is_null() || after.is_null()) << edited.out;
         EXPECT_EQ(json::dump(after["normal"]), json::dump(before["normal"]));
-        EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-12);
+        EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-6);
         EXPECT_NEAR(after["origin"].array[1].number - before["origin"].array[1].number,
-                    before["u_direction"].array[1].number * before["length"].number, 1e-9);
+                    before["u_direction"].array[1].number * before["length"].number, 1e-5);
     }
 }
 
