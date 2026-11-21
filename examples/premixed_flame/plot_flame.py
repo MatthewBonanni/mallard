@@ -13,9 +13,16 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/post"))
-from flame_speed import profile  # noqa: E402
-from mallard.vtu import snapshot  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard.vtu import read_vtu_cells, snapshot  # noqa: E402
+
+
+def profile(path):
+    pts, conn, offs, _, arrays = read_vtu_cells(path)
+    starts = np.concatenate([[0], offs[:-1]])
+    x = np.array([pts[conn[s:e], 0].mean() for s, e in zip(starts, offs)])
+    order = np.argsort(x)
+    return arrays["TIME"], x[order], {k: v[order] for k, v in arrays.items() if np.ndim(v) == 1 and v.size == x.size}
 
 
 def last_profile(run_dir):

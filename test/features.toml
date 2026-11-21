@@ -224,6 +224,10 @@
 ]
 "PeriodicFile3D.ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms" = ["euler", "teno3", "hllc", "ssprk3", "periodic"]
 
+[post_flame_test]
+"PostFlameTest.ConsumptionSpeedBurnsTheFuelTheStripLoses" =["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3", "restart"]
+"PostFlameTest.AMirroredFlameAlongAnotherDirectionMeasuresTheSame" = ["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3", "restart"]
+
 [preset_validation_test]
 "PresetValidation.SecondOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "muscl", "rhll", "ssprk3"]
 "PresetValidation.FirstOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "fo", "hll", "ssprk3"]

@@ -211,7 +211,7 @@ repository). The GUI writes two kinds of committed files:
   by different people merge without conflicts.
 
 They hold no copy or sync state: where copies of a run's files exist is
-per-machine knowledge and lives in the [cache index](#the-cache-index). A run's
+per-machine knowledge and lives in the [cache index](#the-manifest-and-the-cache-index). A run's
 file changes when the run starts, when it ends (status pointers), and when it is
 moved (its home); nothing else. Neither file duplicates solver keys or the run
 log. Files are written with one item per line and sorted keys, so they diff and
