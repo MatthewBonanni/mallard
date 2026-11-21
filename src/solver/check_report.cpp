@@ -26,12 +26,31 @@ using report::Row;
 using report::Status;
 using Kind = report::Column::Kind;
 
-void CheckReport::error(const std::string & code, const std::string & message) {
-    diagnostics.push_back({Status::ERROR, code, message});
+void CheckReport::error(const std::string & code, const std::string & message, KeyLocation where) {
+    diagnostics.push_back({Status::ERROR, code, message, std::move(where)});
 }
 
-void CheckReport::warning(const std::string & code, const std::string & message) {
-    diagnostics.push_back({Status::WARNING, code, message});
+void CheckReport::warning(const std::string & code, const std::string & message, KeyLocation where) {
+    diagnostics.push_back({Status::WARNING, code, message, std::move(where)});
+}
+
+KeyLocation input_key(const Input & input, const std::string & key, const size_t line) {
+    KeyLocation where = locate_key(input, key, line);
+    return where.key.empty() ? KeyLocation{key, line, 0} : where;
+}
+
+void CheckReport::input_error(const InputError & e, const std::string & file, const Input & input) {
+    if (const auto * several = dynamic_cast<const InputErrors *>(&e)) {
+        for (const InputError & one : several->errors) input_error(one, file, input);
+        return;
+    }
+    std::string text = e.what();
+    if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
+    while (!text.empty() && text.back() == '\n') text.pop_back();
+    const Diagnostic & d = e.diagnostic;
+    KeyLocation where = d.key.empty() ? locate_message(input, text) : input_key(input, d.key, d.line);
+    if (where.line == 0) where = {where.key, d.line, d.column};
+    error(e.code, (file.empty() ? "" : file + ": ") + text, std::move(where));
 }
 
 std::vector<std::string> CheckReport::errors() const {
@@ -639,6 +658,9 @@ std::string diagnostics_json(const CheckReport & r) {
             .add("severity", std::string(report::status_name(d.severity)))
             .add("code", d.code)
             .add("message", d.message)
+            .raw("key", d.where.key.empty() ? "null" : json::quote(d.where.key))
+            .raw("line", d.where.line > 0 ? std::to_string(d.where.line) : "null")
+            .raw("column", d.where.column > 0 ? std::to_string(d.where.column) : "null")
             .add("docs", d.docs())
             .str();
     });

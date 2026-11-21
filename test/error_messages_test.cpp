@@ -468,3 +468,111 @@ TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {
     ASSERT_EQ(report.errors().size(), 1u);
     EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
 }
+
+namespace {
+
+CheckReport check_of(const std::string & input) {
+    Solver solver;
+    return solver.check(parse_input_string(input), CheckOptions());
+}
+
+/** @brief The column of the first occurrence of needle on its line, from 1. */
+size_t column_of(const std::string & text, const std::string & needle) {
+    const size_t at = text.find(needle);
+    const size_t start = text.rfind('\n', at);
+    return at - (start == std::string::npos ? 0 : start + 1) + 1;
+}
+
+/** @brief The diagnostics of a code, in order. */
+std::vector<CheckDiagnostic> of_code(const CheckReport & report, const std::string & code) {
+    std::vector<CheckDiagnostic> out;
+    for (const CheckDiagnostic & d : report.diagnostics) {
+        if (d.code == code) out.push_back(d);
+    }
+    return out;
+}
+
+void expect_at(const CheckDiagnostic & d, const std::string & key, size_t line, size_t column = 0) {
+    EXPECT_EQ(d.where.key, key) << d.message;
+    EXPECT_EQ(d.where.line, line) << d.message;
+    if (column > 0) EXPECT_EQ(d.where.column, column) << d.message;
+}
+
+} // namespace
+
+TEST(ErrorMessages, CheckGivesEachInputErrorItsFullKeyLineAndColumn) {
+    const std::string wrong_type = replaced(box(), "Nx = 16", "Nx = 16.0");
+    const CheckReport a = check_of(wrong_type);
+    ASSERT_EQ(of_code(a, diagnostic_code::INPUT).size(), 1u);
+    expect_at(of_code(a, diagnostic_code::INPUT)[0], "mesh.Nx", size_t(line_number(wrong_type, "Nx = ")),
+              column_of(wrong_type, "16.0"));
+
+    // An entry named in the message, and a key of the second writer that the message gives without its index
+    const std::string named = replaced(box(), "name = \"left\"", "name = \"inlet\"");
+    const CheckReport b = check_of(named);
+    ASSERT_FALSE(of_code(b, diagnostic_code::INPUT).empty());
+    expect_at(of_code(b, diagnostic_code::INPUT)[0], "boundaries[0].name", size_t(line_number(named, "\"inlet\"")));
+    const std::string writers = box() + "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 5\n"
+                                        "[[write_data]]\nprefix = \"b\"\nfields = [\"P\"]\ntime_interval = -1.0\n";
+    const CheckReport c = check_of(writers);
+    ASSERT_EQ(of_code(c, diagnostic_code::INPUT).size(), 1u);
+    expect_at(of_code(c, diagnostic_code::INPUT)[0], "write_data[1].time_interval",
+              size_t(line_number(writers, "time_interval")), column_of(writers, "-1.0"));
+
+    // An error given as text, that starts with its table
+    const std::string text = box() + "[numerics.error_control]\n";
+    const CheckReport d = check_of(text);
+    ASSERT_FALSE(of_code(d, diagnostic_code::INPUT).empty());
+    expect_at(of_code(d, diagnostic_code::INPUT)[0], "numerics.error_control",
+              size_t(line_number(text, "[numerics.error_control]")));
+
+    // An unknown key, and a syntax error, which has a line and column but no key
+    const std::string unknown = replaced(box(), "Nx = 16", "Nxx = 16");
+    const CheckReport e = check_of(unknown);
+    ASSERT_EQ(of_code(e, diagnostic_code::KEY_UNUSED).size(), 1u);
+    expect_at(of_code(e, diagnostic_code::KEY_UNUSED)[0], "mesh.Nxx", size_t(line_number(unknown, "Nxx")),
+              column_of(unknown, "Nxx = 16") + 6);
+    try {
+        parse_input_string("[mesh]\nNx = 16 16\n");
+        FAIL() << "no syntax error";
+    } catch (const InputError & error) {
+        EXPECT_EQ(error.diagnostic.line, 2u);
+        EXPECT_GT(error.diagnostic.column, 0u);
+    }
+}
+
+TEST(ErrorMessages, CheckReportsTheErrorsOfEveryBoundaryEntryAndWriterAtOnce) {
+    std::vector<std::string> zones = {"left", "right", "bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    std::string input = box("t_stop = 0.5\ncfl = 0.8\n", "", zones);
+    input = replaced(input, "name = \"left\"\ntype = \"symmetry\"", "name = \"left\"\ntype = \"wal\"");
+    input = replaced(input, "name = \"right\"\ntype = \"symmetry\"", "name = \"rigth\"\ntype = \"symmetry\"");
+    const CheckReport report = check_of(input);
+    const std::vector<CheckDiagnostic> errors = of_code(report, diagnostic_code::INPUT);
+    // Zone right has no condition, since its entry failed; left's entry failed too, so it is not listed
+    ASSERT_EQ(errors.size(), 3u) << check_text(report, false);
+    expect_at(errors[0], "boundaries[0].type", size_t(line_number(input, "\"wal\"")));
+    expect_at(errors[1], "boundaries[1].name", size_t(line_number(input, "\"rigth\"")));
+    expect_at(errors[2], "boundaries", size_t(line_number(input, "[[boundaries]]")));
+    EXPECT_NE(errors[2].message.find("no condition for zone right"), std::string::npos) << errors[2].message;
+    EXPECT_EQ(errors[2].message.find("zone left"), std::string::npos) << errors[2].message;
+    expect_parts(run_error(input), {"3 errors in the input:", "\"wal\" is not accepted", "\"rigth\"", "zone right"});
+
+    const std::string writers = box() + "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 0\n"
+                                        "[[write_data]]\nprefix = \"b\"\nfields = [\"P\"]\ninterval = 5\n"
+                                        "[[write_data]]\nprefix = \"c\"\nfields = [\"P\"]\ntime_interval = -1.0\n";
+    const std::vector<CheckDiagnostic> writer_errors = of_code(check_of(writers), diagnostic_code::INPUT);
+    ASSERT_EQ(writer_errors.size(), 2u);
+    expect_at(writer_errors[0], "write_data[0].interval", size_t(line_number(writers, "interval = 0")));
+    expect_at(writer_errors[1], "write_data[2].time_interval", size_t(line_number(writers, "time_interval")));
+}
+
+TEST(ErrorMessages, CheckReportsTheWarningsOfTheSetupAtTheirKey) {
+    const std::string two = N_DIM == 3 ? ", 0.1" : "";
+    const std::string input = box() + "[[probes]]\nname = \"wake\"\nfields = [\"P\"]\nstart = [1.5, 0.5" + two +
+                              "]\nend = [3.5, 0.5" + two + "]\nn_points = 5\n";
+    const CheckReport report = check_of(input);
+    const std::vector<CheckDiagnostic> outside = of_code(report, diagnostic_code::PROBE_OUTSIDE);
+    ASSERT_EQ(outside.size(), 1u) << check_text(report, false);
+    expect_at(outside[0], "probes[0]", size_t(line_number(input, "[[probes]]")));
+}

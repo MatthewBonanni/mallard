@@ -256,6 +256,9 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
     EXPECT_TRUE(mentions(fast.warnings(), "stability limit of SSPRK3"));
     EXPECT_TRUE(fast.ok());  // a warning, not an error
+    ASSERT_FALSE(fast.diagnostics.empty());
+    EXPECT_EQ(fast.diagnostics.back().where.key, "run.cfl");
+    EXPECT_EQ(fast.diagnostics.back().where.line, 3u);
 }
 
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
@@ -855,6 +858,8 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
                                         "\np = 1.0\nT = 1.0\n"));
     EXPECT_TRUE(mentions(r.errors(), "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
         << (first_error(r));
+    ASSERT_FALSE(r.diagnostics.empty());
+    EXPECT_EQ(r.diagnostics.back().where.key, "sponges[0].region");
 }
 
 TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitErrors) {
@@ -1330,7 +1335,15 @@ TEST(CheckReportJson, ReadsBackTheReportsNumbersAndDiagnostics) {
         EXPECT_EQ(d["message"].string, r.diagnostics[i].message);
         EXPECT_EQ(d["severity"].string, report::status_name(r.diagnostics[i].severity));
         EXPECT_EQ(d["docs"].string, r.diagnostics[i].docs());
+        const KeyLocation & where = r.diagnostics[i].where;
+        EXPECT_EQ(d["key"].is_null() ? "" : d["key"].string, where.key);
+        EXPECT_EQ(d["line"].is_null() ? 0.0 : d["line"].number, double(where.line));
+        EXPECT_EQ(d["column"].is_null() ? 0.0 : d["column"].number, double(where.column));
     }
+    const auto unused = std::find_if(r.diagnostics.begin(), r.diagnostics.end(),
+                                     [](const CheckDiagnostic & d) { return d.code == diagnostic_code::KEY_UNUSED; });
+    ASSERT_NE(unused, r.diagnostics.end());
+    EXPECT_GT(unused->where.line, 0u);
     ASSERT_EQ(v["unused_keys"].array.size(), 1u);
     EXPECT_EQ(v["unused_keys"].array[0]["suggestion"].string, "numerics.riemann_solver");
     EXPECT_EQ(v["time_step"]["dt"].number, r.dt);

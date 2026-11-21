@@ -79,20 +79,31 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_only = true;
 
     memory::Tracker tracker;
+    logging::WarningCapture setup_warnings;
+    auto report_warnings = [&] {
+        for (const logging::CapturedWarning & w : setup_warnings.take()) {
+            r.warning(w.code, w.message, locate_message(input, w.message));
+        }
+    };
     try {
         init(input_in);
         r.setup_done = true;
     } catch (const InputError & e) {
-        r.error(diagnostic_code::INPUT, (options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
+        r.input_error(e, options.input_file, input);
     } catch (const std::exception & e) {
-        r.error(diagnostic_code::SETUP, error_text(e));
+        const std::string text = error_text(e);
+        r.error(diagnostic_code::SETUP, text, locate_message(input, text));
     }
+    report_warnings();
     for (const Diagnostic & key : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
-        r.error(diagnostic_code::KEY_UNUSED, describe(key));
+        r.error(diagnostic_code::KEY_UNUSED, describe(key), input_key(input, key.key, key.line));
     }
-    for (const auto & finding : deprecated_keys) r.warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
+    for (const auto & finding : deprecated_keys) {
+        r.warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding),
+                  input_key(input, finding.key, finding.line));
+    }
     const ResolvedInput resolved = resolve_input(input);
     if (r.setup_done) r.resolved = resolved.toml;
     if (!options.catalog_file.empty() && comm::is_root()) {
@@ -114,6 +125,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
+    report_warnings();
     return r;
 }
 
@@ -540,9 +552,11 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
 
 void Solver::check_settings(CheckReport & r) const {
     if (r.cfl > r.cfl_limit) {
-        r.warning(diagnostic_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
-                                                         "limit of %s for smooth flow: lower run.cfl (or run.dt)",
-                                                         r.cfl, r.cfl_limit, r.integrator.c_str()));
+        r.warning(diagnostic_code::CFL_LIMIT,
+                  logging::format("CFL %.3g at the initial state is above %.3g, the stability limit of %s for smooth "
+                                  "flow: lower run.cfl (or run.dt)",
+                                  r.cfl, r.cfl_limit, r.integrator.c_str()),
+                  input_key(input, r.dt_limit == "fixed" ? "run.dt" : "run.cfl"));
     }
 }
 
@@ -840,7 +854,8 @@ void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
  * @brief Warnings for a region from a surface file whose box (in m) is likely in the wrong units, far smaller
  *        or larger than the domain's, or reaches outside it (covers: it touches cells).
  */
-void check_surface_file(CheckReport & r, const std::string & label, const Box & b, const Box & domain, const bool covers) {
+void check_surface_file(CheckReport & r, const std::string & label, const KeyLocation & where, const Box & b,
+                        const Box & domain, const bool covers) {
     double size = 0.0, across = 0.0;
     bool beyond = false;
     for (size_t i = 0; i < N_DIM; i++) {
@@ -857,10 +872,11 @@ void check_surface_file(CheckReport & r, const std::string & label, const Box & 
     if (size > 10.0 * across || size < 1e-3 * across) {
         r.warning(diagnostic_code::REGION_SCALE,
                   spans + ": " + logging::real(size > across ? size / across : across / size) + " times " +
-                      (size > across ? "larger" : "smaller") + ", which is likely a unit error: check its units");
+                      (size > across ? "larger" : "smaller") + ", which is likely a unit error: check its units",
+                  where);
     } else if (beyond && covers) {
         r.warning(diagnostic_code::REGION_PARTLY_OUTSIDE,
-                  spans + ": its part outside the domain is left out (--view shows both)");
+                  spans + ": its part outside the domain is left out (--view shows both)", where);
     }
 }
 
@@ -906,6 +922,8 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
+        KeyLocation where = locate_key(input, label);
+        if (where.key.empty()) where = locate_key(input, "regions." + label);
         const case_view::Kind kind = label.starts_with("probes[")       ? case_view::Kind::PROBE
                                      : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                                         : case_view::Kind::REGION;
@@ -928,7 +946,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
                                   [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
         if (g.from_file) {
             g.box = region::bounds(*region);
-            check_surface_file(r, label, g.box, domain, m.cells > 0);
+            check_surface_file(r, label, where, g.box, domain, m.cells > 0);
         }
         r.regions.push_back(g);
         if (m.cells == 0) {
@@ -938,7 +956,8 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
             r.error(outside ? diagnostic_code::REGION_OUTSIDE : diagnostic_code::REGION_EMPTY,
                     "region " + label + (outside ? " lies outside the domain" : " covers no cell of the mesh") +
                         ": it spans " + box_text(b) + " m, the domain " + box_text(domain) +
-                        " m: move or resize it (--view shows both)");
+                        " m: move or resize it (--view shows both)",
+                    where);
         }
         blocks.push_back(std::move(m.block));
     }

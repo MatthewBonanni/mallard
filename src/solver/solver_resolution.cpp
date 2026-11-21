@@ -257,7 +257,8 @@ CheckFields Solver::check_resolution(CheckReport & r) {
             r.warning(diagnostic_code::TFLES_THICKENING,
                       format("TFLES thickens the flame up to F = %.3g (n_res Delta / delta_L): above %.0f the flame's "
                              "response to turbulence is unreliable; refine the mesh or lower les.combustion.n_res",
-                             r.tfles_thickening_max, TFLES_THICKENING));
+                             r.tfles_thickening_max, TFLES_THICKENING),
+                      input_key(input, "les.combustion.n_res"));
         }
         std::vector<double> across(n_owned);
         for (uint32_t c = 0; c < n_owned; c++) across[c] = delta_L / delta[c];

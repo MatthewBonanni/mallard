@@ -59,10 +59,14 @@ struct CheckDiagnostic {
     report::Status severity = report::Status::ERROR;  // ERROR or WARNING
     std::string code;                                 // one of diagnostic_code::ALL
     std::string message;
+    KeyLocation where;                                // the input key it concerns, if any
 
     /** @brief The page and anchor that explain the code: "docs/guide/input_files.md#w-cfl-limit". */
     std::string docs() const;
 };
+
+/** @brief Where a diagnostic about key is: located in input (locate_key), else key and line as given. */
+KeyLocation input_key(const Input & input, const std::string & key, std::size_t line = 0);
 
 /** @brief A boundary zone with its condition. */
 struct CheckBoundary {
@@ -228,8 +232,13 @@ struct CheckReport {
     double cells_per_delta_L_min = 0.0, cells_per_delta_L_max = 0.0;
     double tfles_thickening_max = 0.0;           // TFLES' largest F = n_res Delta / delta_L
 
-    void error(const std::string & code, const std::string & message);
-    void warning(const std::string & code, const std::string & message);
+    void error(const std::string & code, const std::string & message, KeyLocation where = {});
+    void warning(const std::string & code, const std::string & message, KeyLocation where = {});
+    /**
+     * @brief An E-INPUT error for e, or one for each error of an InputErrors, prefixed with file if not empty: at
+     *        its key, located in input, or else at the key its message starts with.
+     */
+    void input_error(const InputError & e, const std::string & file, const Input & input);
     /** @brief The messages of the errors (of the warnings), in order. */
     std::vector<std::string> errors() const;
     std::vector<std::string> warnings() const;

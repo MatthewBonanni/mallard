@@ -137,6 +137,7 @@ Input parse_input_string(const std::string & text, const std::string & name = "i
 struct Diagnostic {
     std::string key{};                // e.g. "mesh.Nxx" or "boundaries[2].tpye"
     std::size_t line = 0;             // 0 if unknown
+    std::size_t column = 0;           // 0 if unknown
     std::string message{};            // what is wrong
     std::vector<std::string> valid{}; // accepted values, if a closed set
     std::string suggestion{};         // full path of the likely intended key (or value, or unit), or empty
@@ -195,6 +196,36 @@ struct InputError : std::runtime_error {
     const char * code = diagnostic_code::INPUT;
 };
 
+/**
+ * @brief Errors of independent parts of the input (boundary entries, writers), which setup found all before it
+ *        stopped: what() lists their messages, each a line.
+ */
+struct InputErrors : InputError {
+    explicit InputErrors(std::vector<InputError> errors_in);
+    std::vector<InputError> errors;
+};
+
+/** @brief The errors of independent parts of the input, kept so that setup reports them all at once. */
+class InputErrorList {
+    public:
+        /** @brief Keeps e, or each error of an InputErrors. */
+        void add(const InputError & e);
+        /** @brief Runs part, keeping the InputError it throws. */
+        template <typename F> void attempt(F && part) {
+            try {
+                part();
+            } catch (const InputError & e) {
+                add(e);
+            }
+        }
+        bool empty() const { return errors.empty(); }
+        /** @brief Throws the errors kept: one as it is, several as InputErrors. */
+        void throw_if_any() const;
+
+    private:
+        std::vector<InputError> errors;
+};
+
 /** @brief A required key that is absent: names it, the line of its table, and its docs. */
 InputError missing_key(const Input & table, const std::string & key, const std::string & fix = "");
 
@@ -207,6 +238,28 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
+
+/** @brief Where a diagnostic is in the input: the full path of its key, with array indices, and its line and column. */
+struct KeyLocation {
+    std::string key;         // "boundaries[1].T"; empty if not found
+    std::size_t line = 0;    // 0 if unknown
+    std::size_t column = 0;  // of the value; 0 if unknown or the key is absent
+};
+
+/**
+ * @brief The key a diagnostic names, as a full path of the input: key may leave out the tables around it ("T"
+ *        for boundaries[1].T), the index of an array of tables (write_data.format) or give an entry by name
+ *        (boundaries[name = "inlet"].T); line, if known, picks among the candidates (the line of the value or of
+ *        its table). A key absent from the input counts if setup looked it up. Empty key if none matches.
+ */
+KeyLocation locate_key(const Input & input, const std::string & key, std::size_t line = 0);
+
+/**
+ * @brief The key a message starts with, after "line N: ", located as locate_key does: "mesh.Nx must be ...",
+ *        "boundaries[name = \"inlet\"].T: ...", "[run] t_wall_stop ...", "[[write_data]] writes ...".
+ *        Empty key if the message starts with no key of the input.
+ */
+KeyLocation locate_message(const Input & input, const std::string & message);
 
 /** @brief A key setup looked up, as the accessors recorded it, and the value the run used. */
 struct KeyRecord {
