@@ -6,12 +6,14 @@ set(MALLARD_TEST_SOURCES
     derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
+    json_test.cpp
     view_entries_test.cpp
     kexpr_test.cpp
     region_test.cpp
     region_mesh_test.cpp
     region_motion_test.cpp
     region_sampler_test.cpp
+    region_surface_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
@@ -61,6 +63,7 @@ set(MALLARD_TEST_SOURCES
     post_extract_test.cpp
     post_derive_test.cpp
     post_average_test.cpp
+    post_flame_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
@@ -70,6 +73,7 @@ set(MALLARD_TEST_SOURCES
     inlet_test.cpp
     step_queue_test.cpp
     statistical_convergence_test.cpp
+    viscous_order_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

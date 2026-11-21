@@ -28,6 +28,8 @@ inline constexpr const char * MEMORY_DEVICE = "E-MEMORY-DEVICE";  // the peak ex
 inline constexpr const char * VIEW_ENTRIES = "E-VIEW-ENTRIES";    // a part needs more entries than a View addresses
 inline constexpr const char * REGION_EMPTY = "E-REGION-EMPTY";
 inline constexpr const char * REGION_OUTSIDE = "E-REGION-OUTSIDE";
+inline constexpr const char * REGION_PARTLY_OUTSIDE = "W-REGION-PARTLY-OUTSIDE";  // a region from a surface file
+inline constexpr const char * REGION_SCALE = "W-REGION-SCALE";  // a region from a surface file far smaller or larger
 inline constexpr const char * PROBE_OUTSIDE = "W-PROBE-OUTSIDE";  // part of a probe outside the domain, not sampled
 inline constexpr const char * QUALITY_NON_ORTHOGONALITY = "W-QUALITY-NON-ORTHOGONALITY";
 inline constexpr const char * QUALITY_SKEWNESS = "W-QUALITY-SKEWNESS";
@@ -90,11 +92,12 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 58> ALL = {{
+inline constexpr std::array<Entry, 60> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
-    {REGION_OUTSIDE, CHECK_PAGE}, {PROBE_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
+    {REGION_OUTSIDE, CHECK_PAGE}, {REGION_PARTLY_OUTSIDE, CHECK_PAGE}, {REGION_SCALE, CHECK_PAGE},
+    {PROBE_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
     {QUALITY_ASPECT_RATIO, CHECK_PAGE}, {QUALITY_VOLUME_RATIO, CHECK_PAGE}, {CFL_LIMIT, CHECK_PAGE},
     {TFLES_THICKENING, CHECK_PAGE}, {WALL_Y_PLUS, CHECK_PAGE}, {WALL_SPACING, CHECK_PAGE},
     {WALL_MODEL_EXCHANGE, CHECK_PAGE}, {DNS_ETA, CHECK_PAGE}, {SIZING_FIXED, CHECK_PAGE}, {SIZING_PARTS, CHECK_PAGE},

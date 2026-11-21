@@ -15,7 +15,12 @@
 #include "commands.h"
 #include "front_end.h"
 #include "input_upgrade.h"
+#include "interfaces.h"
+#include "json.h"
+#include "provenance.h"
 #include "run_control.h"
+#include "run_log.h"
+#include "snapshot_block.h"
 #include "diagnostic_code.h"
 #include "log.h"
 
@@ -319,6 +324,43 @@ constexpr Option AVERAGE_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option FLAME_OPTIONS[] = {
+    {"--direction", "", "x|y|z",
+     "The direction the flame propagates along: the profile is along it, each row the mean over the other "
+     "directions, weighted by cell volume. Default: x."},
+    {"--species", "", "NAME",
+     "The species whose consumption gives the consumption speed: the deficient reactant (H2 of a lean H2/air "
+     "flame, O2 of a rich one). Default: from the equivalence ratio of the fresh gas in the first snapshot, the "
+     "fuel when it is at most 1.01, else the oxidizer; of several, the one the flame depletes most, relative to "
+     "its fresh mass fraction."},
+    {"--burnt-temperature", "", "T",
+     "The burnt gas temperature T_b, in K, of x_f and delta_T: e.g. the adiabatic equilibrium temperature, "
+     "where the burnt gas of a short domain has not reached it. Default: the peak temperature of each snapshot."},
+    {"--reference-speed", "", "S_L",
+     "A laminar flame speed to compare with, in m/s (Cantera's): the report gives the errors of the "
+     "consumption and displacement speeds. Default: none."},
+    {"--rtol", "", "R",
+     "Cells share a row of the profile where their centers agree to R times the mesh's extent along "
+     "--direction. Default: 1e-6."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics and chemistry. Default: the input in the run block of FILE "
+     "(Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO cache_file resolve from "
+     "the run's directory."},
+    {"--name", "", "NAME", "The name of the table: NAME.csv. Default: flame."},
+    {"--steps", "", "LIST",
+     "The snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "The snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: every "
+     "snapshot."},
+    {"--every", "", "N", "Every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Only the last snapshot selected."},
+    {"--output", "-o", "DIR", "The directory the table goes to. Default: flame."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option CONVERGENCE_OPTIONS[] = {
     {"--quantity", "", "NAMES",
      "The quantities to study, separated by commas: TABLE:COLUMN (integrals:rho2, forces_wall:F_x), a column "
@@ -409,6 +451,13 @@ constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
+constexpr Option VERSION_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: the version alone, as mallard --version prints it; json: the version, commit, build and "
+     "dependencies, the dimensions of the solvers installed with it, and the schema and version of every "
+     "machine-readable interface, for programs that drive Mallard. Default: text."},
+};
+
 int new_main(const Args & args) {
     if (args.has("--list")) {
         logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
@@ -450,8 +499,58 @@ int completion_main(const Args & args) {
     return 0;
 }
 
-int version_main(const Args &) {
-    std::cout << "Mallard " << mallard_version() << std::endl;
+std::string strings_json(std::span<const char * const> items) {
+    std::string out = "[";
+    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
+    return out + "]";
+}
+
+std::string schema_json(const char * schema, int version) {
+    return json::Object().add("schema", schema).add("version", version).str();
+}
+
+std::string capabilities_json() {
+    std::string dimensions = "[";
+    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
+    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
+    control.pop_back();
+    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
+    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
+    const std::string list = json::Object()
+                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
+                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
+                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
+                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
+                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
+                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
+                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
+                                 .raw("run_control", control)
+                                 .raw("convergence", entry(interfaces::CONVERGENCE))
+                                 .raw("pack", entry(interfaces::PACK))
+                                 .str();
+    return json::Object()
+        .add("schema", interfaces::CAPABILITIES.name)
+        .add("version", interfaces::CAPABILITIES.version)
+        .raw("mallard", provenance::code())
+        .raw("build", provenance::build())
+        .raw("dependencies", provenance::dependencies())
+        .raw("dimensions", dimensions + "]")
+        .raw("interfaces", list)
+        .str();
+}
+
+int version_main(const Args & args) {
+    const std::string format = args.value_or("--format", "text");
+    if (format != "text" && format != "json") {
+        return usage_error(*command("version"), "--format takes text or json, not " + format);
+    }
+    if (format == "json") {
+        std::cout << capabilities_json() << std::endl;
+    } else {
+        std::cout << "Mallard " << mallard_version() << std::endl;
+    }
     return 0;
 }
 
@@ -966,6 +1065,46 @@ constexpr Command COMMANDS[] = {
         .run = average_main,
     },
     {
+        .name = "post flame",
+        .group = "Post",
+        .summary = "Position, thermal thickness, consumption and displacement speed of a premixed flame in saved "
+                   "snapshots",
+        .synopsis = "mallard post flame FILE... [--direction x|y|z] [--species NAME] [--burnt-temperature T] "
+                    "[--reference-speed S_L] [-o DIR]",
+        .description =
+            "Sets up the case of a series of restart files or snapshots of a premixed flame, planar on average, and "
+            "measures the flame in each: its profile along --direction (each row the mean over the other "
+            "directions, weighted by cell volume), with the fresh gas at its colder end and the burnt gas at the "
+            "other, gives its position x_f, where T is midway between the fresh temperature T_u and the burnt "
+            "T_b (the peak, or --burnt-temperature); its thermal thickness delta_T = (T_b - T_u) / max |dT/dx|, "
+            "and max |dT/dx| itself; its consumption speed S_c = -int omega_k "
+            "dx / (rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which in a steady flame is the flame speed, "
+            "in any frame; and its displacement speed S_d, the speed of x_f relative to the fresh gas.\n"
+            "\n"
+            "The production rates are the run's own: the OMEGA_* fields of snapshots that hold them with T, RHO, "
+            "the velocity and Y_* (read on the mesh alone), else computed from each stored state by the case's "
+            "chemistry (restart files, snapshots of the state). The report gives the consumption speed and the "
+            "thickness averaged over the last third of the series and the displacement speed from x_f fitted over its last half, which settle once the flame is "
+            "steady, against --reference-speed if given; OUTPUT/NAME.csv has a row per snapshot.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; the snapshots' steps and times are those "
+            "the files record, in increasing time. The states are read one at a time. Under mpirun -n N the cells "
+            "are split over N ranks.",
+        .options = FLAME_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post flame solut/flame.vtkhdf\n"
+                    "$ mallard post flame solut/flame.vtkhdf --reference-speed 2.33237\n"
+                    "$ mallard post flame solut/restart_*.restart --species O2 --times 2e-4:6e-4\n"
+                    "$ mallard post flame solut/flame.vtkhdf --format json | jq .summary",
+        .exit_status = "0  the flame was measured in every snapshot\n"
+                       "1  a file cannot be read, the case cannot be set up or has no chemistry, a snapshot holds no "
+                       "flame, or the file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = flame_main,
+    },
+    {
         .name = "post convergence",
         .group = "Post",
         .summary = "Order of accuracy, extrapolated value and grid convergence index (GCI) of runs at several "
@@ -1097,17 +1236,32 @@ constexpr Command COMMANDS[] = {
         .run = completion_main,
     },
     {
-        .name = "--version",
+        .name = "version",
+        .alias = "--version",
         .group = "Maintain",
-        .summary = "Print the version",
-        .synopsis = "mallard --version",
+        .summary = "Print the version, or what this build supports",
+        .synopsis = "mallard version [--format text|json]\n"
+                    "mallard --version",
         .description =
             "Prints the version of this build: the git description of the commit it was built from, else the "
-            "release.",
-        .options = {},
+            "release.\n"
+            "\n"
+            "With --format json, one JSON object for programs that drive Mallard, such as a GUI or a workflow "
+            "tool, to learn what this mallard supports before using it: the version and commit (mallard), the "
+            "build (dimension, precision, Kokkos backends, MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the "
+            "versions of the libraries it uses (dependencies), the dimensions of the solvers installed with it "
+            "(mallard --dim 3 version --format json describes the 3D one's build), and under interfaces the "
+            "schema name and version of every machine-readable output: the key catalog, the check report, the "
+            "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run control (with "
+            "its commands and control files), the grid convergence report and the pack manifest. Each of these "
+            "carries the same schema and version fields; an addition keeps the version, a change that breaks "
+            "a reader increments it.",
+        .options = VERSION_OPTIONS,
         .arguments = {},
-        .examples = "$ mallard --version",
-        .exit_status = "0  always",
+        .examples = "$ mallard --version\n"
+                    "$ mallard version --format json",
+        .exit_status = "0  printed\n"
+                       "2  usage error",
         .run = version_main,
     },
 };
@@ -1116,7 +1270,7 @@ constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

@@ -183,7 +183,9 @@ std::vector<Node> nodes() {
     Node & root = out.front();
     for (const Option & o : global_options()) add_option(root.options, o);
     for (const Command & c : commands()) {
-        if (c.name.starts_with('-')) root.options.push_back({{std::string(c.name)}, false, false, {}, brief(c.summary)});
+        for (const std::string_view name : {c.name, c.alias}) {
+            if (name.starts_with('-')) root.options.push_back({{std::string(name)}, false, false, {}, brief(c.summary)});
+        }
     }
     for (Node & n : out) n.options.push_back({{"--help", "-h"}, false, false, {}, "Show the page of this command"});
     return out;
