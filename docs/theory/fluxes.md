@@ -279,6 +279,7 @@ on that side (`riemann::SideThermo`):
 
     exact at contacts between different gases for any averaged sound speed,
     and equal to the single-gas Roe solver for one gas.
+
 - **Rusanov** and **KEEP** use each side's own $a$ and
     $e = p/((\gamma - 1)\rho) + e_0$.
 - The low-Mach correction uses each side's own $\gamma$ in its Mach number.
