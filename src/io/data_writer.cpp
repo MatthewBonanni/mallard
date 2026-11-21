@@ -28,6 +28,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -320,6 +321,8 @@ void DataWriter::init(const Input & input,
         const bool series = find_value<bool>(input, "series");
         one_file = one_file && series;
     }
+    // The collection of the mesh and its particles is the series index
+    combined = combined && one_file;
 
     if (cell_subset) {
         if (format != DataFormat::VTU && format != DataFormat::VTKHDF) {
@@ -436,10 +439,9 @@ OutputSummary DataWriter::particle_summary() const {
     std::string contents = particles->region.empty() ? "every particle" : "the particles in " + particles->region;
     contents += ": positions, ID";
     for (const auto & f : particles->fields) contents += ", " + f.name;
-    if (combined) contents += ", a block of the mesh's file (ParaView 6.0 and later)";
-    const std::string file_prefix = combined ? prefix : particles->prefix;
+    if (combined) contents += ", a block of the series index (ParaView 6.0 and later)";
     return {.kind = "particles",
-            .file = file_prefix + (one_file ? ".vtkhdf" : "_*.vtkhdf"),
+            .file = combined ? prefix + ".vtkhdf" : particles->prefix + (one_file ? ".vtkhdf" : "_*.vtkhdf"),
             .steps = interval,
             .seconds = interval > 0 ? 0.0 : double(time_interval),
             .contents = contents};
@@ -517,6 +519,7 @@ void DataWriter::start_record(uint64_t step, double t, const std::string & kind,
     in_flight->kind = kind;
     in_flight->path = path;
     in_flight->reason = reason;
+    in_flight->chunk_bytes = file_hash::chunk_bytes();
 }
 
 void DataWriter::hash_written() {
@@ -527,14 +530,23 @@ void DataWriter::hash_written() {
 void DataWriter::queue_hashing(std::unique_ptr<InFlight> w) {
     if (!w) return;
     if (!w->hash.empty()) {
+        // A shared file is complete, and has its name, once every rank is here
+        const bool shared = std::ranges::any_of(w->hash, &ToHash::shared);
+        if (shared) comm::barrier();
         // The record waits for its hashes, and only a full queue holds up the run
         const auto start = std::chrono::steady_clock::now();
-        w->hashed = HashQueue::instance().submit([p = w.get()]() {
+        w->hashed = HashQueue::instance().submit([p = w.get(), rank = uint64_t(comm::rank()),
+                                                  ranks = uint64_t(comm::size())]() {
             const auto hashing = std::chrono::steady_clock::now();
             for (const ToHash & h : p->hash) {
-                WrittenFile f = written_file(h.file, h.contents);
-                f.path = h.name;
-                p->files.push_back(std::move(f));
+                Hashed out{.file = {.path = h.name, .bytes = file_bytes(h.file), .hash = {}}, .shared = h.shared, .first = 0};
+                if (h.contents && std::filesystem::exists(h.file)) {
+                    const uint64_t n = file_hash::n_chunks(out.file.bytes, p->chunk_bytes);
+                    out.first = h.shared ? n * rank / ranks : 0;
+                    const uint64_t last = h.shared ? n * (rank + 1) / ranks : n;
+                    out.file.hash.chunks = file_hash::chunks(h.file, out.first, last, p->chunk_bytes);
+                }
+                p->hashed_files.push_back(std::move(out));
             }
             p->seconds = seconds_since(hashing);
         });
@@ -553,25 +565,56 @@ void DataWriter::record_hashed(bool wait) {
         if (!done) return;
         if (w.hashed.valid()) w.hashed.get();
         t_hashing += w.seconds;
-        if (collective) {
-            std::string mine;
-            for (const WrittenFile & f : w.files) {
-                mine += f.path + "\n" + std::to_string(f.bytes) + "\n" + f.sha256 + "\n";
-            }
-            w.files.clear();
-            for (const std::string & theirs : comm::allgather(mine)) {
-                std::istringstream in(theirs);
-                WrittenFile f;
-                std::string bytes;
-                while (std::getline(in, f.path) && std::getline(in, bytes) && std::getline(in, f.sha256)) {
-                    f.bytes = std::stoull(bytes);
-                    w.files.push_back(f);
-                }
-            }
-        }
+        gather_hashes(w, collective);
         logging::written(w.step, w.t, w.kind, w.path, w.reason, prefix, w.files);
         if (w.kind != "particles") last_record = Recorded{w.step, w.t, w.kind, w.path};
         recording.pop_front();
+    }
+}
+
+void DataWriter::gather_hashes(InFlight & w, bool collective) const {
+    std::vector<Hashed> all = std::move(w.hashed_files);
+    if (collective) {
+        std::string mine;
+        for (const Hashed & h : all) {
+            mine += h.file.path + "\n" + std::to_string(h.file.bytes) + "\n" + std::to_string(int(h.shared)) + "\n" +
+                    std::to_string(h.first) + "\n" + std::to_string(h.file.hash.chunks.size()) + "\n";
+            for (const std::string & c : h.file.hash.chunks) mine += c + "\n";
+        }
+        all.clear();
+        for (const std::string & theirs : comm::allgather(mine)) {
+            std::istringstream in(theirs);
+            Hashed h;
+            std::string bytes, shared, first, n;
+            while (std::getline(in, h.file.path) && std::getline(in, bytes) && std::getline(in, shared) &&
+                   std::getline(in, first) && std::getline(in, n)) {
+                h.file.bytes = std::stoull(bytes);
+                h.shared = shared == "1";
+                h.first = std::stoull(first);
+                h.file.hash.chunks.resize(std::stoull(n));
+                for (std::string & c : h.file.hash.chunks) std::getline(in, c);
+                all.push_back(h);
+            }
+        }
+    }
+    // A shared file's shares, in rank order, are its chunks in order
+    w.files.clear();
+    std::vector<std::vector<std::string>> chunks;
+    std::vector<uint64_t> expected;
+    std::map<std::string, size_t> shared_at;
+    for (Hashed & h : all) {
+        const auto [it, added] = h.shared ? shared_at.emplace(h.file.path, w.files.size())
+                                          : std::pair{shared_at.end(), true};
+        if (added) {
+            w.files.push_back({.path = h.file.path, .bytes = h.file.bytes, .hash = {}});
+            chunks.emplace_back();
+            expected.push_back(file_hash::n_chunks(h.file.bytes, w.chunk_bytes));
+        }
+        auto & list = chunks[added ? chunks.size() - 1 : it->second];
+        list.insert(list.end(), h.file.hash.chunks.begin(), h.file.hash.chunks.end());
+    }
+    for (size_t i = 0; i < w.files.size(); i++) {
+        if (chunks[i].size() == expected[i]) w.files[i].hash = file_hash::of_chunks(std::move(chunks[i]), w.chunk_bytes);
     }
 }
 
@@ -608,12 +651,19 @@ void DataWriter::publish_restart(bool wait) {
     if (collective) written = comm::allreduce(written, comm::Op::MIN);
     if (error) std::rethrow_exception(error);
     if (!written) throw std::runtime_error("Another rank could not write its part of " + partial + ".");
+    int32_t renamed = 1;
+    std::error_code rename_error;
     if (comm::is_root()) {
-        std::error_code rename_error;
         std::filesystem::rename(partial, last_file, rename_error);
-        if (rename_error) throw cannot_write("the restart file", last_file);
-        if (in_flight) in_flight->hash.push_back({last_file, last_file});
+        renamed = !rename_error;
     }
+    if (collective) renamed = comm::allreduce(renamed, comm::Op::MIN);
+    if (rename_error) {
+        errno = rename_error.value();
+        throw cannot_write("the restart file", last_file);
+    }
+    if (!renamed) throw std::runtime_error("Rank 0 could not give " + partial + " its name " + last_file + ".");
+    if (in_flight && (collective || comm::is_root())) in_flight->hash.push_back({last_file, last_file, true, collective});
     hash_written();
 }
 
@@ -691,12 +741,15 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            if (root && !hdf5_mesh_written) in_flight->hash.push_back({prefix + "_mesh.h5", prefix + "_mesh.h5"});
-            if (root) in_flight->hash.push_back({last_file, last_file});
-            auto job = [this, stem, block, root, values = capture(mesh->n_owned()), series = history]() {
+            const bool new_mesh = !hdf5_mesh_written && !hdf5_reuse_mesh;
+            if ((root || collective) && new_mesh) {
+                in_flight->hash.push_back({prefix + "_mesh.h5", prefix + "_mesh.h5", true, collective});
+            }
+            if (root || collective) in_flight->hash.push_back({last_file, last_file, true, collective});
+            auto job = [this, stem, block, root, new_mesh, values = capture(mesh->n_owned()), series = history]() {
                 if (!hdf5_mesh_written) {
                     write_hdf5_mesh();
-                    if (root) {
+                    if (root && new_mesh) {
                         publish_file("the HDF5 mesh file", prefix + "_mesh.h5");
                         n_bytes += file_bytes(prefix + "_mesh.h5");
                     }
@@ -711,24 +764,31 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             run(std::move(job), !collective);
         }
     } else if (format == DataFormat::VTKHDF) {
-        const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
+        // A file per snapshot, written once; with series, an index of them as the series file
+        const std::string filename = stem + ".vtkhdf";
         last_file = filename;
         history.push_back({double(t), static_cast<int64_t>(step), filename});
         start_record(step, double(t), "vtkhdf", filename, block.reason);
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            // A series in one file is appended to in place: its size, but no hash of the whole file at every step
-            if (root) in_flight->hash.push_back({filename, filename, !one_file});
-            auto job = [this, filename, block, root,
-                        values = capture(mesh->n_owned(), subset), list = history]() {
-                const uint64_t before = one_file ? file_bytes(filename) : 0;
-                const bool created = !(one_file && vtkhdf_steps > 0);
+            const bool mesh_file = writes_vtkhdf_mesh();
+            if (root || collective) {
+                if (mesh_file) in_flight->hash.push_back({vtkhdf_mesh_file(), vtkhdf_mesh_file(), true, collective});
+                in_flight->hash.push_back({filename, filename, true, collective});
+            }
+            auto job = [this, filename, block, root, mesh_file, values = capture(mesh->n_owned(), subset),
+                        list = history]() {
                 write_vtkhdf(filename, block, values);
                 if (root) {
-                    // A file of the mesh and its particles is complete once the particles are in it
-                    if (created && !combined) publish_file("the VTKHDF file", filename);
-                    n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
-                    if (!one_file) write_vtkhdf_series(list);
+                    publish_file("the VTKHDF file", filename);
+                    n_bytes += file_bytes(filename) + (mesh_file ? file_bytes(vtkhdf_mesh_file()) : 0);
+                    if (one_file) {
+                        series_steps.push_back(vtkhdf_series::describe(filename).at(0));
+                        // A collection with the particles is written once they are
+                        if (!combined) vtkhdf_series::write_index(prefix + ".vtkhdf", series_steps);
+                    } else {
+                        write_vtkhdf_series(list);
+                    }
                 }
             };
             run(std::move(job), !collective);
@@ -775,54 +835,52 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
 void DataWriter::write_particle_snapshot(const uint64_t step, const rtype t, const bool force, ParticleCloud cloud) {
     const bool distributed = mesh->n_global_cells > 0;
     const bool root = comm::is_root();
-    const uint64_t number = interval > 0 ? step : n_snapshots;
-    std::ostringstream stem;
-    stem << (combined ? prefix : particles->prefix) << "_" << std::setw(LEN_STEP) << std::setfill('0') << number;
-    const std::string filename = one_file ? (combined ? prefix : particles->prefix) + ".vtkhdf" : stem.str() + ".vtkhdf";
+    const bool collective = distributed && comm::size() > 1;
+    const std::string filename = particle_file(interval > 0 ? step : n_snapshots);
     const Block block = particle_block(step, t, force);
-    const uint64_t k = one_file ? particles->steps : 0;
-    if (one_file) particles->steps = k + 1;
-    if (combined) {
-        // A block of the mesh's file, which its output record holds
-        if (!distributed && !root) return;
-        auto job = [this, filename, k, block, root, cloud = std::move(cloud)]() {
-            const auto start = std::chrono::steady_clock::now();
-            // The mesh's snapshot counted nothing of a file it created
-            const uint64_t before = root && k > 0 ? file_bytes(filename) : 0;
-            write_particles(filename, k, block, cloud);
-            if (root) {
-                if (k == 0) publish_file("the VTKHDF file", filename);
-                n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
-            }
-            t_writing += seconds_since(start);
-        };
-        run_after_pending(std::move(job), !(distributed && comm::size() > 1));
-        return;
+    particles->history.push_back({double(t), static_cast<int64_t>(step), filename});
+    // A collection's particles are part of the mesh's record; separate ones have their own
+    InFlight * record = in_flight.get();
+    if (!combined) {
+        particles->in_flight = std::make_unique<InFlight>();
+        record = particles->in_flight.get();
+        record->step = step;
+        record->t = double(t);
+        record->kind = "particles";
+        record->path = filename;
+        record->reason = block.reason;
+        record->chunk_bytes = file_hash::chunk_bytes();
     }
-    particles->in_flight = std::make_unique<InFlight>();
-    InFlight & record = *particles->in_flight;
-    record.step = step;
-    record.t = double(t);
-    record.kind = "particles";
-    record.path = filename;
-    record.reason = block.reason;
-    if (!one_file) particles->history.push_back({double(t), static_cast<int64_t>(step), filename});
     if (!distributed && !root) return;
-    // A series in one file is appended to: its size, but no hash of the whole file at every step
-    if (root) record.hash.push_back({filename, filename, !one_file});
-    auto job = [this, filename, k, block, root, cloud = std::move(cloud), series = particles->history]() {
+    if (root || collective) record->hash.push_back({filename, filename, true, collective});
+    auto job = [this, filename, block, root, cloud = std::move(cloud), series = particles->history]() {
         const auto start = std::chrono::steady_clock::now();
-        const uint64_t before = root && k > 0 ? file_bytes(filename) : 0;
-        write_particles(filename, k, block, cloud);
+        write_particles(filename, block, cloud);
         if (root) {
-            if (k == 0) publish_file("the particle snapshot", filename);
-            n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
-            if (!one_file) write_series_index(particles->prefix, series);
+            publish_file("the particle snapshot", filename);
+            n_bytes += file_bytes(filename);
+            if (one_file) {
+                particles->series_steps.push_back(vtkhdf_series::describe(filename).at(0));
+                if (combined) {
+                    vtkhdf_series::write_collection(prefix + ".vtkhdf", file_format::VTKHDF_OUTPUT.version,
+                                                    {{MESH_BLOCK, series_steps}, {PARTICLE_BLOCK, particles->series_steps}});
+                } else {
+                    vtkhdf_series::write_index(particles->prefix + ".vtkhdf", particles->series_steps);
+                }
+            } else {
+                write_series_index(particles->prefix, series);
+            }
         }
         t_writing += seconds_since(start);
     };
     // Parallel HDF5 writes collectively through MPI, which only the main thread calls
-    run_after_pending(std::move(job), !(distributed && comm::size() > 1));
+    run_after_pending(std::move(job), !collective);
+}
+
+std::string DataWriter::particle_file(const uint64_t number) const {
+    std::ostringstream stem;
+    stem << particles->prefix << "_" << std::setw(LEN_STEP) << std::setfill('0') << number;
+    return stem.str() + ".vtkhdf";
 }
 
 void DataWriter::run_after_pending(std::function<void()> job, const bool allow_async) {
@@ -866,7 +924,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
     }
     const int64_t version = format == DataFormat::RESTART  ? file_format::RESTART.version
                             : format == DataFormat::HDF5   ? file_format::HDF5_OUTPUT.version
-                            : format == DataFormat::VTKHDF ? vtkhdf_version()
+                            : format == DataFormat::VTKHDF ? VTKHDF_MESH_VERSION
                                                            : file_format::VTU_OUTPUT.version;
     return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
                                 version, std::move(list));
@@ -911,6 +969,8 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     }
     history.clear();
     if (format == DataFormat::HDF5) {
+        hdf5_mesh_written = false;
+        hdf5_reuse_mesh = std::filesystem::exists(prefix + "_mesh.h5");
         resume_xdmf(t);
     } else if (format == DataFormat::VTKHDF) {
         resume_vtkhdf(t);
@@ -919,7 +979,7 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     }
     if (particles) resume_particles(t);
     n_snapshots = mesh_output ? history.size() : particles->history.size();
-    if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots || one_file) return;
+    if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots) return;
     // The index lost entries: never overwrite a snapshot still on disk
     n_snapshots = static_cast<uint64_t>(*n_before);
     while (snapshot_exists(n_snapshots)) n_snapshots++;

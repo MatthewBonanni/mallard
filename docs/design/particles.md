@@ -446,13 +446,18 @@ global sort (or a gather) at every snapshot for an order that readers and
 ParaView do not need. A snapshot costs one kernel over the slots and a copy of
 the live particles, so it scales with the particles per rank.
 
-With mesh fields too, the default file is a VTKHDF 2.1
-`PartitionedDataSetCollection` (`VTKHDF/mesh`, `VTKHDF/particles`, an
-`Assembly` of soft links), each block a temporal dataset of its own steps,
-which VTK reads from 9.5 (ParaView 6.0). Mesh-only files keep the plain
-`UnstructuredGrid` layout (VTKHDF 2.0, ParaView 5.12), and particle-only files
-are plain temporal `PolyData`: `particles = "separate"` produces exactly the
-two plain files, so ParaView 5.12 remains supported by a key.
+Each snapshot's particles are a file of their own, a non-temporal `PolyData`,
+following the write-once series of the mesh (`docs/design/output_objects.md`):
+a file is written once and never reopened, and the series file indexes the
+files through virtual datasets. With mesh fields too, the default series file
+is a VTKHDF 2.1 `PartitionedDataSetCollection` (`VTKHDF/mesh`,
+`VTKHDF/particles`, an `Assembly` of soft links), each block a temporal
+dataset of its own steps, which VTK reads from 9.5 (ParaView 6.0). Mesh-only
+series keep the plain `UnstructuredGrid` index (VTKHDF 2.0, ParaView 5.12),
+and particle-only series a plain temporal `PolyData` index:
+`particles = "separate"` produces exactly the two plain series, so ParaView
+5.12 remains supported by a key. The collection index is rewritten from the
+two blocks' step lists, as the plain index is (`vtkhdf_series::write_collection`).
 
 Crossings (`[[particles.crossings]]`) are events, not states, so they are
 appended on the device during the step and written by the host after it.
