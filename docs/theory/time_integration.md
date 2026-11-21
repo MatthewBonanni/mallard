@@ -47,6 +47,7 @@ step, at its first stage.
     the last stage is the convex combination
     $\tfrac13\mathbf{U}^n + \tfrac23(\cdots)$, written as an interpolation so
     that its weights sum to one exactly in floating point.
+
 - **RK4**, the classical four-stage, fourth-order method
     ([Kutta 1901](../references.md#kutta-1901)):
 
