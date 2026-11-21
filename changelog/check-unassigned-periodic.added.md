@@ -1,0 +1,1 @@
+- `mallard check` lists the boundary zones without a condition (`unassigned` in its JSON, with their faces), also when the setup stops on them, and every periodic pair as the mesh joined it (`periodic`: its zones, translation or rotation, face pairs, area, and how far its nodes are from their partners' images) (#1312).

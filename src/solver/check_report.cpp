@@ -166,15 +166,34 @@ void input_section(report::Text & text, const CheckReport & r) {
 }
 
 void boundaries_section(report::Text & text, const CheckReport & r) {
-    text.section("Boundaries", Status::OK);
-    text.note("Every boundary face has a condition: " + count(r.boundaries.size(), "zone") +
-              " (periodic zones are paired, not listed).");
-    if (r.boundaries.empty()) return;
+    text.section("Boundaries", r.unassigned.empty() ? Status::OK : Status::ERROR);
+    if (r.unassigned.empty()) {
+        text.note("Every boundary face has a condition: " + count(r.boundaries.size(), "zone") +
+                  (r.periodic.empty() ? " (periodic zones are paired, not listed)." : ", and the periodic pairs."));
+    } else {
+        text.note(count(r.unassigned.size(), "zone") + " without a condition (E-INPUT).");
+    }
+    if (r.boundaries.empty() && r.unassigned.empty() && r.periodic.empty()) return;
     std::vector<Row> rows;
     for (const CheckBoundary & b : r.boundaries) {
         std::string details = b.details;
         if (!b.turbulence.empty()) details += (details.empty() ? "" : "\n") + ("inflow turbulence: " + b.turbulence);
         rows.push_back({Status::OK, {b.zone, b.condition, count(b.faces), details.empty() ? "-" : details}});
+    }
+    for (const CheckUnassigned & u : r.unassigned) rows.push_back({Status::ERROR, {u.zone, "none", count(u.faces), "-"}});
+    for (const CheckPeriodic & p : r.periodic) {
+        std::string map;
+        if (p.rotation) {
+            map = "rotation by " + logging::real(p.angle) + " deg about (";
+            for (size_t i = 0; i < N_DIM; i++) map += (i ? ", " : "") + logging::real(p.center[i]);
+        } else {
+            map = "translation (";
+            for (size_t i = 0; i < N_DIM; i++) map += (i ? ", " : "") + logging::real(p.translation[i]);
+        }
+        map += ") m";
+        if (p.offsets_known) map += ", nodes within " + logging::real(p.node_offset_relative) + " of an edge";
+        const std::string zones = p.zone_a.empty() ? "-" : p.zone_a + " / " + p.zone_b;
+        rows.push_back({Status::OK, {zones, "periodic", count(p.faces), map}});
     }
     text.table({"zone", "condition", "faces", "details"}, rows);
 }
@@ -713,7 +732,7 @@ std::string check_text(const CheckReport & r, const bool color) {
     overview(text, r);
     if (!environment_only(r)) {
         input_section(text, r);
-        if (r.setup_done) boundaries_section(text, r);
+        if (r.setup_done || !r.unassigned.empty()) boundaries_section(text, r);
         regions_section(text, r);
         if (r.has_quality) quality_section(text, r);
         if (r.dt > 0.0) time_step_section(text, r);
@@ -754,6 +773,23 @@ std::string check_json(const CheckReport & r) {
                   .add("details", b.details)
                   .add("turbulence", b.turbulence)
                   .str();
+          }));
+    o.raw("unassigned", array_json(r.unassigned, [](const CheckUnassigned & u) {
+              return json::Object().add("zone", u.zone).add("faces", u.faces).str();
+          }));
+    o.raw("periodic", array_json(r.periodic, [](const CheckPeriodic & p) {
+              json::Object pair;
+              pair.raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
+                  .add("map", p.rotation ? "rotation" : "translation")
+                  .raw("translation", p.rotation ? "null" : point_json(p.translation))
+                  .raw("angle", p.rotation ? json::number(p.angle) : "null")
+                  .raw("center", p.rotation ? point_json(p.center) : "null")
+                  .add("faces", p.faces)
+                  .add("area", p.area);
+              if (p.offsets_known) {
+                  pair.add("node_offset_max", p.node_offset_max).add("node_offset_relative", p.node_offset_relative);
+              }
+              return pair.str();
           }));
     o.raw("regions", array_json(r.regions, [](const CheckRegion & g) {
               return json::Object()

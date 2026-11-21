@@ -77,6 +77,26 @@ struct CheckBoundary {
     std::string turbulence;  // its synthetic inflow turbulence, or empty
 };
 
+/** @brief A boundary zone with faces that have no condition: the setup stops on it (E-INPUT). */
+struct CheckUnassigned {
+    std::string zone;
+    uint64_t faces = 0;  // without a condition, over every rank
+};
+
+/** @brief A periodic pair (a lattice direction of the mesh's periodicity) as the mesh joined it. */
+struct CheckPeriodic {
+    std::string zone_a, zone_b;   // empty if the direction joins several pairs or zones it does not name
+    bool rotation = false;
+    std::array<double, N_DIM> translation{};  // m
+    double angle = 0.0;                       // degrees
+    std::array<double, 3> center{};           // m
+    uint64_t faces = 0;                       // face pairs, over every rank
+    double area = 0.0;                        // of one side (2D: length), m^2
+    bool offsets_known = false;               // node offsets measured (the nodes' periodic classes are known)
+    double node_offset_max = 0.0;             // largest distance of a node from its partner's image, m
+    double node_offset_relative = 0.0;        // that over the shortest edge of the pair's faces
+};
+
 /** @brief A region on the mesh: one of the mesh's own (the domain, its zones) or one the case uses. */
 struct CheckRegion {
     std::string name;
@@ -151,6 +171,8 @@ struct CheckReport {
     CheckEnvironment environment;
 
     std::vector<CheckBoundary> boundaries;
+    std::vector<CheckUnassigned> unassigned;  // also when the setup stopped on them
+    std::vector<CheckPeriodic> periodic;
     std::vector<CheckRegion> regions;
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
