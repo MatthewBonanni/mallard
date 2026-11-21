@@ -495,7 +495,9 @@ std::vector<CheckDiagnostic> of_code(const CheckReport & report, const std::stri
 void expect_at(const CheckDiagnostic & d, const std::string & key, size_t line, size_t column = 0) {
     EXPECT_EQ(d.where.key, key) << d.message;
     EXPECT_EQ(d.where.line, line) << d.message;
-    if (column > 0) EXPECT_EQ(d.where.column, column) << d.message;
+    if (column > 0) {
+        EXPECT_EQ(d.where.column, column) << d.message;
+    }
 }
 
 } // namespace
