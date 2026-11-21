@@ -60,6 +60,7 @@ struct Run {
     std::string start_line;
     std::vector<json::Value> outputs;
     std::vector<std::string> changes;  ///< `mallard ctl set` requests acted on
+    std::vector<std::string> options;  ///< settings of --set, "key=value"
 };
 
 Run last_run(const std::string & log) {
@@ -85,6 +86,8 @@ Run last_run(const std::string & log) {
             run.end = v;
         } else if (type == "output" && text(v.find("run_id")) == text(run.start.find("run_id"))) {
             run.outputs.push_back(v);
+        } else if (type == "event" && text(v.find("kind")) == "set" && text(v.find("source")) == "--set") {
+            run.options.push_back(text(v.find("setting")));
         } else if (type == "event" && text(v.find("kind")) == "set") {
             run.changes.push_back("step " + text(v.find("step")) + ": " + text(v.find("text")));
         }
@@ -371,6 +374,7 @@ int pack(const cli::Args & args) {
         const auto [type, file] = initialize_of(input->find("text")->string);
         if (type != "restart" || file != text(restart->find("file"))) command += " --restart " + text(restart->find("file"));
     }
+    for (const std::string & setting : run.options) command += " --set " + setting;
     for (const std::string & change : run.changes) {
         notes.push_back("Changed while it ran (mallard ctl set), which a rerun does not repeat: " + change + ".");
     }
