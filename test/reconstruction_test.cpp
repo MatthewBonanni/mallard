@@ -609,7 +609,8 @@ TEST(MUSCL2D, FusedAndBlockPathsGiveTheSeparateKernelsFaceValuesAndLimitersBitwi
         Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
         auto h_W = Kokkos::create_mirror_view(W);
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
-            const double x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+            const double x = static_cast<double>(mesh->h_cell_coords(c, 0));
+            const double y = static_cast<double>(mesh->h_cell_coords(c, 1));
             const bool inside = (x - 0.45) * (x - 0.45) + (y - 0.4) * (y - 0.4) < 0.06;
             h_W(c, 0) = inside ? 1.0_r : 0.125_r;
             h_W(c, 1) = static_cast<rtype>(0.1 * std::sin(3.0 * x));
