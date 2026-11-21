@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "comm.h"
+#include "common_typedef.h"
 #include "data_paths.h"
 #include "json.h"
 #include "json_schema.h"
@@ -231,16 +232,15 @@ std::vector<json::Value> control_records(const std::string & dir) {
 
 /** @brief A long run in a fresh directory: the input's [run] extra lines, its registry in the test's directory. */
 std::string write_case(const std::string & name, const std::string & run_extra = "") {
+    const bool three = Mallard_DIM == 3;
     fs::create_directories(name);
     std::ofstream(name + "/input.toml")
         << "[run]\nn_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n" << run_extra
-        << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
-        << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\n"
-        << "p = \"x < 0.4 ? 2.0 : 1.0\"\n"
-        << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
-        << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
-        << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
-        << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+        << "[mesh]\ntype = \"cartesian\"\nNx = 6\nNy = 5\nLx = 1.0\nLy = 1.0\n"
+        << (three ? "Nz = 2\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+        << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x\"\n"
+        << (three ? "u = [\"0.2\", \"0.1\", \"0.0\"]\n" : "u = [\"0.2\", \"0.1\"]\n") << "p = \"1.0\"\n"
         << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         << "[output]\ncheck_interval = 1000000\n"
         << "[[write_data]]\nprefix = \"restart\"\nformat = \"restart\"\ninterval = 100000000\n";
@@ -506,7 +506,8 @@ TEST(RunCtlProcessTest, ASessionLaunchesARunThatOutlivesItAndControlsIt) {
         EXPECT_EQ(session.call(3, "run.launch", "{}")["error"]["code"].number, session::code::UNSAVED);
     }
     // The session has ended; the run goes on
-    ASSERT_TRUE(wait_until([&] { return state_of(dir) == "running"; })) << read_text(dir + "/mallard.out");
+    wait_until([&] { return state_of(dir) != "setup"; });
+    ASSERT_EQ(state_of(dir), "running") << read_text(dir + "/mallard.out");
     {
         Session session(".");
         const json::Value stopped =
