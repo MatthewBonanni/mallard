@@ -101,7 +101,7 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
     e.n_cells = n_cells_global;
     e.n_ranks = comm::size();
     e.integrator = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
-    e.limit = divergence::cfl_limit(time_integrator->get_type());
+    e.limit = cfl_limit(time_integrator->get_type());
     e.use_cfl = use_cfl;
     e.error_control = step_controller.enabled();
     e.cfl_input = double(cfl);
