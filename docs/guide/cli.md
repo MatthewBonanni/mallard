@@ -1055,9 +1055,10 @@ Options:
                          input's [regions] or of the mesh, or an inline TOML
                          table, as [[write_data]] region takes it. Default: the
                          whole mesh.
-  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, every
-                         snapshot in one file, or .vtu files with a .pvd index.
-                         Default: vtkhdf, or vtu in builds without HDF5.
+  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, the
+                         series of a file per snapshot, or .vtu files with a
+                         .pvd index. Default: vtkhdf, or vtu in builds without
+                         HDF5.
   --name NAME            The name of the snapshots: NAME.vtkhdf. Default:
                          derived.
   --steps LIST           Derive the snapshots of these steps, separated by
