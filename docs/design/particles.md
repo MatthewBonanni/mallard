@@ -267,7 +267,7 @@ linear in time, so the scheme needs no stage weights from the integrators;
 with the explicit rates below the threshold, the order is kept on both sides
 (for FE, which has sum b_i c_i = 0, it is first order, as FE is). The
 threshold 1 is where the explicit RK4 error overtakes the exponential one in
-a decaying-forcing experiment (RK4 crossover near h = 0.9; SSPRK3 favours the
+a decaying-forcing experiment (RK4 crossover near h = 0.9; SSPRK3 favors the
 exponential everywhere). The old stiff limit (velocity set to v_eq) was first
 order in tau / dt near the switch; at tau = 0.02, RK4 and h = 1.25 the
 trajectory error drops from 9e-4 to 3e-6.
