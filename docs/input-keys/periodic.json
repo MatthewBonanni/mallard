@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "array",
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/cbc_les/input.toml",

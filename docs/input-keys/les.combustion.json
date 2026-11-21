@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "table",
  "set_in": [
   "examples/flame_turbulence/les.toml",
   "examples/triple_flame/tfles/input.toml"

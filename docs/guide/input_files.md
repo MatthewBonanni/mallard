@@ -677,7 +677,9 @@ that every key this reference documents is in it and that the defaults it states
 match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
-each key's type, units, default and accepted values; `mallard list keys
+each key's type, units, default and accepted values, and each table's form:
+a `table`, an `array` of tables (`[[boundaries]]`) or `named` entries under
+names the input chooses (`[regions]`, `X`), the `form` of its JSON; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
 whether the input sets each key), and a section keeps one table or key path.
 For an input still being written it lists the keys the setup read before it

@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "table",
  "set_in": [
   "examples/channel_les/input.toml",
   "examples/channel_les/input_590.toml",

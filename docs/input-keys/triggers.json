@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "array",
  "set_in": [
   "examples/forced_isotropic_turbulence/input.toml",
   "examples/source_regions/input.toml"

@@ -1,0 +1,1 @@
+- The key catalog (`mallard list keys`, `mallard check --catalog`, the session's `keys.catalog` and `case.keys`) gives each table's `form`: `table`, `array` of tables or `named` entries under names the input chooses, so an editor builds its forms without guessing from examples. See [The key catalog](docs/guide/input_files.md#the-key-catalog).

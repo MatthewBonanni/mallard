@@ -415,6 +415,7 @@ struct Resolver {
             std::optional<Input> resolved;
             if (const auto entry = entries.find(key); entry != entries.end()) {
                 record.set = true;
+                record.iterated = entry->second.is_table() && entry->second.as_table().lookups_made().all;
                 resolved = value(entry->second, record.path, record.use.dimension);
                 if (!resolved->is_table() && !table_array(*resolved)) record.value = inline_text(*resolved);
             } else if (!record.use.type.empty() && !record.use.required && !record.use.fallback.empty()) {
@@ -463,12 +464,53 @@ ResolvedInput resolve_input(const Input & input) {
     return resolved;
 }
 
+namespace {
+
+/**
+ * @brief Each table's form, from the paths of the keys read in it: "array" (of tables, [[boundaries]]),
+ *        "named" (entries under names of the input's choosing: setup iterates it and reads no key it lacks, as
+ *        X, or the catalog names its entries <name>, as [regions]) or "table".
+ */
+std::map<std::string, std::string> section_forms(const std::vector<KeyRecord> & records) {
+    std::map<std::string, std::string> forms;
+    std::map<std::string, bool> named;  // by table path, with indices
+    for (const KeyRecord & record : records) {
+        const std::string & path = record.path;
+        for (size_t i = 0; i < path.size(); i++) {
+            if (path[i] == '[' && path.find("].", i) == path.find(']', i)) forms[catalog_path(path.substr(0, i))] = "array";
+            if (path[i] == '.' && path[i - 1] != ']') forms.emplace(catalog_path(path.substr(0, i)), "table");
+        }
+        if (record.iterated) named.emplace(path, true);
+    }
+    for (const KeyRecord & record : records) {
+        const size_t dot = record.path.rfind('.');
+        if (dot == std::string::npos) continue;
+        if (const auto table = named.find(record.path.substr(0, dot)); table != named.end() && !record.set) {
+            table->second = false;
+        }
+    }
+    std::map<std::string, bool> all_named;  // by catalog path: named in every instance
+    for (const auto & [path, is_named] : named) {
+        const auto [it, added] = all_named.emplace(catalog_path(path), is_named);
+        if (!added) it->second = it->second && is_named;
+    }
+    for (auto & [path, form] : forms) {
+        const auto all = all_named.find(path);
+        // The catalog's own <name> (regions.<name>) marks a table read by the names its entries are given
+        if (form == "table" && ((all != all_named.end() && all->second) || forms.count(path + ".<name>"))) form = "named";
+    }
+    return forms;
+}
+
+} // namespace
+
 std::string key_catalog(const ResolvedInput & resolved) {
     struct Entry {
         KeyUse use;
         std::vector<std::string> values;
         bool set = false;
     };
+    const std::map<std::string, std::string> forms = section_forms(resolved.keys);
     std::map<std::string, Entry> keys;
     for (const auto & record : resolved.keys) {
         if (!record.by_name) continue;
@@ -495,6 +537,7 @@ std::string key_catalog(const ResolvedInput & resolved) {
                 out += ", \"default\": " + json_string(entry.use.fallback);
             }
         }
+        if (const auto form = forms.find(path); form != forms.end()) out += ", \"form\": " + json_string(form->second);
         if (!entry.values.empty()) {
             out += ", \"values\": [";
             for (size_t i = 0; i < entry.values.size(); i++) out += (i ? ", " : "") + json_string(entry.values[i]);
