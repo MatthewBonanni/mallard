@@ -35,6 +35,7 @@
 #include "diagnostic_code.h"
 #include "face_reconstruction.h"
 #include "growing_buffer.h"
+#include "view_entries.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -1602,6 +1603,34 @@ struct TENOFunctor {
     // Rotational periodicity: TENO::entry_rotations
     Kokkos::View<rtype *[N_DIM][N_DIM]> entry_rotations;
     Kokkos::View<int32_t *> boundary_faces;
+    // TENO::polynomials: when allocated, the smooth passes also write their cells' central coefficients there
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials{};
+
+    /** @brief Coefficients [l0, l1) of cell i_cell's central polynomial, a(l, var), into polynomials. */
+    template <typename A>
+    KOKKOS_INLINE_FUNCTION
+    void store_polynomial(const uint32_t i_cell, A && a, const uint8_t l0 = 0, const uint8_t l1 = NK) const {
+        const rtype inv_h = 1.0_r / scale(i_cell);
+        uint8_t degree = 1;
+        rtype factor = inv_h;
+        for (uint8_t d = 1; d < DEG && teno::n_dof(d) <= l0; d++) {
+            degree++;
+            factor *= inv_h;
+        }
+        for (uint8_t l = l0; l < l1; l++) {
+            if (l == teno::n_dof(degree)) {
+                degree++;
+                factor *= inv_h;
+            }
+            FOR_I_CONSERVATIVE polynomials(i_cell >> 1, l, i_cell & 1u, i) = a(l, i) * factor;
+        }
+    }
+
+    /** @brief Marks cell i_cell's polynomial as unusable: TENO selects stencils there, or its face values are the mean. */
+    KOKKOS_INLINE_FUNCTION
+    void mark_troubled_polynomial(const uint32_t i_cell) const {
+        polynomials(i_cell >> 1, 0, i_cell & 1u, 0) = Kokkos::Experimental::quiet_NaN_v<rtype>;
+    }
 
     /** @brief The velocity of W_e by row `row` of entry_rotations. */
     KOKKOS_INLINE_FUNCTION
@@ -1933,6 +1962,13 @@ struct TENOFunctor {
         }
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         sigma_out(i_cell) = sigma;
+        if (polynomials.extent(0)) {
+            if (sigma >= sigma_threshold) {
+                mark_troubled_polynomial(i_cell);
+            } else {
+                store_polynomial(i_cell, [&](const uint8_t l, const uint8_t i) { return aK[l][i]; });
+            }
+        }
         if (sigma >= sigma_threshold) {
             const uint32_t j = Kokkos::atomic_fetch_add(&n_troubled(), 1u);
             troubled_cells(j) = i_cell;
@@ -1972,6 +2008,8 @@ struct TENOFunctor {
             }
         }
         if (!admissible) {
+            // The viscous flux would pair the polynomial's gradients with the cell mean
+            if (polynomials.extent(0)) mark_troubled_polynomial(i_cell);
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
                 const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 0 : 1;
@@ -2071,7 +2109,7 @@ struct TENOFunctor {
                 f[j] = s < ns ? stencil.face(s) : -1;
             }
             for (uint32_t j = 0; j < PER; j++) {
-                if (c[j] >= 0) FOR_I_CONSERVATIVE W_e[j][i] = W(c[j], i);
+                if (c[j] >= 0) view_entries::load_row<N_CONSERVATIVE>(W, static_cast<uint32_t>(c[j]), W_e[j]);
             }
             for (uint32_t j = 0; j < PER; j++) {
                 if (c[j] < 0) continue;
@@ -2164,6 +2202,19 @@ struct TENOFunctor {
         team.team_barrier();
         const int slot = smooth_team[lane];
         const bool smooth = slot < 0;
+        if (active && polynomials.extent(0)) {
+            if (!smooth) {
+                if (part == 0) mark_troubled_polynomial(i_cell);
+            } else {
+                with_chunk(part, [&](auto C) {
+                    constexpr uint8_t L0 = decltype(C)::value * CHUNK;
+                    constexpr uint8_t L1 = (L0 + CHUNK < NK) ? L0 + CHUNK : NK;
+                    store_polynomial(
+                        i_cell, [&](const uint8_t l, const uint8_t i) { return aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane]; },
+                        L0, L1);
+                });
+            }
+        }
         if (active && !smooth && slot < static_cast<int>(coeffs.extent(0))) {
             with_chunk(part, [&](auto C) {
                 constexpr uint8_t L0 = decltype(C)::value * CHUNK;
@@ -2207,6 +2258,7 @@ struct TENOFunctor {
         if (!admissible) admissible_team[lane] = 0;
         team.team_barrier();
         if (!admissible_team[lane]) {
+            if (part == 0 && polynomials.extent(0)) mark_troubled_polynomial(i_cell);
             rtype W0[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
             for (uint32_t p = part; p < n_points; p += PARTS) {
@@ -2405,7 +2457,18 @@ struct TENOFunctor {
             g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
             sum_small += g_small[s];
         }
-        const bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        if constexpr (DEG == 3) {
+            // A face whose own sector is the smoothest candidate while another is cut looks away from a
+            // discontinuity in or next to the cell; the cubic passes the cutoff there but overshoots (#977).
+            // Mirror-image sectors tie to round-off, and both of their faces must decide alike
+            constexpr rtype tie = (sizeof(rtype) == sizeof(double)) ? 1.0e-8_r : 1.0e-4_r;
+            if (use_large && valid[k] && si_small[k] <= si_min * (1.0_r + tie)) {
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (valid[s] && g_small[s] / sum_small < cutoff) use_large = false;
+                }
+            }
+        }
         rtype w_small[teno::MAX_FACES] = {};
         if (!use_large) {
             rtype n_kept = 0.0;
@@ -2841,6 +2904,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     n_troubled,
                     solution, face_solution, cells, smooth_gradients, cell_gamma, cell_molar_mass, selection,
                     entry_rotations, boundary_faces};
+    functor.polynomials = polynomials;
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
     // A cell's place in the queue follows the order of the atomic increments.
@@ -3493,11 +3557,12 @@ std::vector<uint32_t> TENO::cells_within_reach(const std::vector<uint32_t> & cha
         if (distance[c] == FAR) frontier.push_back(c);
         distance[c] = 0;
     }
+    const VertexNeighbors & neighbors = mesh->vertex_neighbors();
     for (uint8_t d = 1; d <= max_depth && !frontier.empty(); d++) {
         next.clear();
         for (const uint32_t c : frontier) {
-            for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
-                const uint32_t nb = mesh->h_cells_of_cell(k);
+            for (uint32_t k = neighbors.h_offsets(c); k < neighbors.h_offsets(c + 1); k++) {
+                const uint32_t nb = neighbors.h_cells(k);
                 if (distance[nb] != FAR) continue;
                 distance[nb] = d;
                 next.push_back(nb);

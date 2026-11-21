@@ -388,7 +388,7 @@ std::string python_check(const std::string & script, const std::set<std::string>
     return "PYTHON=\"${PYTHON:-python3}\"\n"
            "\"$PYTHON\" -c \"import " + modules + "\" 2>/dev/null || {\n"
            "    echo \"" + script + ": needs Python with " + join(packages, " ") + ":\" >&2\n"
-           "    echo \"    pip install " + join(packages, " ") + "\" >&2\n"
+           "    echo \"    uv pip install " + join(packages, " ") + "\" >&2\n"
            "    echo \"or point PYTHON to a Python that has them: PYTHON=/path/to/python ./" + script + "\" >&2\n"
            "    exit 1\n"
            "}\n";
@@ -404,7 +404,7 @@ std::string step_script(const std::string & name, const std::string & about,
     for (const auto & c : commands) {
         if (c.rfind("gmsh ", 0) == 0 && s.find("command -v gmsh") == std::string::npos) {
             s += "command -v gmsh > /dev/null || {\n"
-                 "    echo \"" + name + ": needs the gmsh command: pip install gmsh, or https://gmsh.info\" >&2\n"
+                 "    echo \"" + name + ": needs the gmsh command: uv pip install gmsh, or https://gmsh.info\" >&2\n"
                  "    exit 1\n"
                  "}\n";
         }
@@ -464,7 +464,7 @@ std::string readme(const Template & t, const Manifest & m, bool mesh, bool init,
     r += "```\n\n";
     r += "`MALLARD=/path/to/mallard ./run.sh` runs another build of Mallard";
     if (!packages.empty()) {
-        r += "; the Python scripts need " + join(packages, ", ") + " (`pip install " + join(packages, " ") +
+        r += "; the Python scripts need " + join(packages, ", ") + " (`uv pip install " + join(packages, " ") +
              "`), and `PYTHON=/path/to/python` picks the interpreter";
     }
     r += ".\n\n## Files\n\n";
@@ -636,7 +636,7 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     if (!init.empty()) std::cout << "  ./init.sh\n";
     std::cout << "  ./run.sh      # " << (quick ? "quick version" : t.cost) << "\n";
     if (!post.empty()) std::cout << "  ./post.sh\n";
-    if (!packages.empty()) std::cout << "(the Python scripts need: pip install " << join(packages, " ") << ")\n";
+    if (!packages.empty()) std::cout << "(the Python scripts need: uv pip install " << join(packages, " ") << ")\n";
     return 0;
 }
 

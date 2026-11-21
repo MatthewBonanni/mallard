@@ -2,7 +2,7 @@
 
     python examples/premixed_flame/flame_sweep.py setup FULL_DIR RUNS_DIR [--fuel ch4] [--phi 0.6 ...]
         [--transport mix unity] [--cells 20] [--cfl 1.0] [--flame-times 5]
-    python examples/premixed_flame/flame_sweep.py report RUNS_DIR [--csv OUT.csv] [--png OUT.png]
+    python examples/premixed_flame/flame_sweep.py report RUNS_DIR [--mallard EXE] [--csv OUT.csv] [--png OUT.png]
 
 setup writes one run per fuel, phi, transport model, resolution and CFL with
 tools/setup/flame_restart.py, from the full solutions of tools/setup/flame_reference.py
@@ -10,8 +10,9 @@ tools/setup/flame_restart.py, from the full solutions of tools/setup/flame_refer
 outputs per flame time delta_T / S_L and a restart file every half flame time
 (RUN_DIR/restart/) to resume from.
 
-report reads every run in RUNS_DIR and, against Cantera's flame speed S_L
-(examples/premixed_flame/reference/flames.csv), gives the consumption speed
+report measures every run in RUNS_DIR with mallard post flame and, against
+Cantera's flame speed S_L (examples/premixed_flame/reference/flames.csv),
+gives the consumption speed
 S_c averaged over the last flame time, its spread (largest minus smallest
 over the last two flame times, relative to S_c), the displacement speed S_d
 (inflow speed minus the front's drift, fitted over the last flame time), and,
@@ -23,6 +24,7 @@ and the CFL 1 runs' errors for each resolution.
 """
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -33,9 +35,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/post"))
 from flame_reference import FUELS, MODELS, case_name  # noqa: E402
-from flame_speed import analyze  # noqa: E402
 from plot_flame import compare  # noqa: E402
 
 REF_DIR = os.path.join(ROOT, "examples", "premixed_flame", "reference")
@@ -69,9 +69,18 @@ def setup(args):
                                 f"time_interval = {tau / 2:.17g}\n")
 
 
-def measure(run_dir, ref):
+def analyze(run_dir, mallard):
+    """t, S_c, x_f and u_u of every output of the run, from mallard post flame."""
+    index = next(os.path.join("solut", "flame" + e) for e in (".vtkhdf", ".vtkhdf.series")
+                 if os.path.exists(os.path.join(run_dir, "solut", "flame" + e)))
+    out = subprocess.run([mallard, "post", "flame", index, "--format", "json", "-o", "flame"], cwd=run_dir,
+                         check=True, capture_output=True, text=True).stdout
+    return np.array([(r["snapshot"]["t"], r["S_c"], r["x_f"], r["u_u"]) for r in json.loads(out)["snapshots"]])
+
+
+def measure(run_dir, ref, mallard):
     S_L, tau = float(ref["S_L"]), float(ref["delta_T"]) / float(ref["S_L"])
-    rows = analyze(run_dir)
+    rows = analyze(run_dir, mallard)
     t, S_c, x_f, u_in = rows.T
     end = t[-1]
     last = t >= end - tau * (1 + 1e-6)
@@ -91,11 +100,11 @@ def report(args):
         m = RUN.match(name)
         run_dir = os.path.join(args.runs_dir, name)
         if not m or not any(os.path.exists(os.path.join(run_dir, "solut", "flame" + index))
-                            for index in (".vtkhdf", ".vtkhdf.series", ".pvd")):
+                            for index in (".vtkhdf", ".vtkhdf.series")):
             continue
         ref = dict(refs[m["case"]], case=m["case"])
         r = dict(fuel=m["fuel"], phi=float(m["phi"]), transport=m["model"], cells=float(m["cells"]),
-                 cfl=float(m["cfl"]), S_L=float(ref["S_L"]), **measure(run_dir, ref))
+                 cfl=float(m["cfl"]), S_L=float(ref["S_L"]), **measure(run_dir, ref, args.mallard))
         results.append(r)
     for r in results:
         r["vs_cfl1"] = float("nan")
@@ -169,6 +178,7 @@ def main():
     s.add_argument("--flame-times", type=float, default=5.0)
     r = sub.add_parser("report")
     r.add_argument("runs_dir")
+    r.add_argument("--mallard", default="mallard", help="the mallard executable (default: mallard on PATH)")
     r.add_argument("--csv")
     r.add_argument("--png")
     args = ap.parse_args()
