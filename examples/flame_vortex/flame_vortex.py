@@ -2,7 +2,7 @@
 
     python examples/flame_vortex/flame_vortex.py FULL.csv MECHANISM PHASE RUN_DIR --r R --u U
         [--cells 12] [--cfl 0.4] [--flame-times T] [--outputs 100] [--transport mixture_averaged]
-        [--radiation cantera|tnf]
+        [--radiation cantera|tnf] [--explicit-step]
 
 A planar flame in its frame (tools/setup/flame_restart.py: the fresh gas enters on
 the left at the flame speed S_L, cells of delta / --cells, delta the thermal
@@ -77,6 +77,7 @@ def main():
     ap.add_argument("--outputs", type=int, default=100)
     ap.add_argument("--transport", default="mixture_averaged")
     ap.add_argument("--radiation", choices=["cantera", "tnf"], help="as tools/setup/flame_restart.py")
+    ap.add_argument("--explicit-step", action="store_true", help="as tools/setup/flame_restart.py")
     args = ap.parse_args()
 
     data = np.loadtxt(args.full, delimiter=",", skiprows=1)
@@ -99,6 +100,8 @@ def main():
            "--t-stop", f"{t_stop:.9e}", "--outputs", str(args.outputs)]
     if args.radiation:
         cmd += ["--radiation", args.radiation]
+    if args.explicit_step:
+        cmd += ["--explicit-step"]
     subprocess.run(cmd, check=True)
     shutil.copyfile(args.full, os.path.join(args.run_dir, "planar_full.csv"))
 
