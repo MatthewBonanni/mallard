@@ -799,16 +799,18 @@ std::string DataWriter::cell_methods(const std::string & name) const {
     return snapshot_block::cell_methods(f);
 }
 
-std::string DataWriter::set_interval(uint64_t steps) {
+std::string DataWriter::set_interval(uint64_t steps, const bool apply) {
     if (interval == 0) return "is written every time_interval; set that instead";
     if (steps == 0) return "interval must be positive";
+    if (!apply) return "";
     interval = steps;
     return "";
 }
 
-std::string DataWriter::set_time_interval(rtype value, rtype t) {
+std::string DataWriter::set_time_interval(rtype value, rtype t, const bool apply) {
     if (interval > 0) return "is written every interval steps; set that instead";
     if (!(value > 0.0_r)) return "time_interval must be positive";
+    if (!apply) return "";
     time_interval = value;
     n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
     return "";

@@ -201,6 +201,11 @@ chemistry::ReactorOptions reactor_options(const Input & input) {
     chemistry::ReactorOptions options;
     if (!input.contains("chemistry")) return options;
     const Input & table = input.at("chemistry");
+    const std::string integrator = find_value_or<std::string>(table, "integrator", "rosenbrock");
+    if (integrator != "rosenbrock" && integrator != "bdf") {
+        throw not_accepted(table, "chemistry.integrator", integrator, {"bdf", "rosenbrock"});
+    }
+    options.method = integrator == "bdf" ? chemistry::Integrator::BDF : chemistry::Integrator::RODAS;
     options.integrator.rtol = find_double_or(table, "rtol", dim::none, options.integrator.rtol);
     options.atol_Y = find_double_or(table, "atol", dim::none, options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");

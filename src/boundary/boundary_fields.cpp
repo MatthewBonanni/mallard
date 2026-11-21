@@ -17,6 +17,7 @@
 #include <sstream>
 
 #include "input.h"
+#include "json.h"
 #include "synthetic_inflow.h"
 #include "tabulated.h"
 
@@ -27,6 +28,24 @@ std::shared_ptr<kexpr::Program> constant(const double v, const std::string & nam
     std::ostringstream text;
     text << std::setprecision(17) << v;
     return std::make_shared<kexpr::Program>(name, text.str(), BoundaryValue::variables());
+}
+
+/** @brief turbulence.profile of a [[boundaries]] entry, if it is a string. */
+const Input * profile_value(const Input & entry) {
+    if (!entry.is_table() || !entry.contains("turbulence")) return nullptr;
+    const Input & t = entry.at("turbulence");
+    if (!t.is_table() || !t.contains("profile") || !t.at("profile").is_string()) return nullptr;
+    return &t.at("profile");
+}
+
+/** @brief Whether a data entry of the list has this name. */
+bool is_data_name(const std::vector<Input> & list, const std::string & name) {
+    for (const Input & d : list) {
+        if (d.is_table() && d.contains("name") && d.at("name").is_string() && d.at("name").as_string() == name) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string real(const double v) {
@@ -47,10 +66,37 @@ const std::vector<std::string> & BoundaryValue::variables() {
     return names;
 }
 
+std::vector<Input> BoundaryValue::data_entries(const Input & entry) {
+    std::vector<Input> list;
+    if (!entry.is_table()) return list;
+    if (entry.contains("data") && entry.at("data").is_array()) {
+        for (const Input & d : entry.at("data").as_array()) list.push_back(d);
+    }
+    const Input * profile = profile_value(entry);
+    if (!profile || is_data_name(list, profile->as_string())) return list;
+    const std::string file = profile->as_string();
+    std::string text = "name = \"profile\"\nfile = " + json::quote(file) + "\n";
+    const std::vector<std::string> columns = InletProfile::profile_columns(tabulated::read_header(file));
+    if (!columns.empty()) {
+        text += "columns = [";
+        for (size_t i = 0; i < columns.size(); i++) text += (i ? ", " : "") + json::quote(columns[i]);
+        text += "]\n";
+    }
+    list.push_back(parse_input_string(text, "turbulence.profile"));
+    return list;
+}
+
+std::string BoundaryValue::profile_data(const Input & entry) {
+    const Input * profile = profile_value(entry);
+    if (!profile) return "";
+    std::vector<Input> list;
+    if (entry.contains("data") && entry.at("data").is_array()) list = entry.at("data").as_array();
+    return is_data_name(list, profile->as_string()) ? profile->as_string() : "profile";
+}
+
 std::vector<std::string> BoundaryValue::variables(const Input & entry) {
     std::vector<std::string> names = variables();
-    if (!entry.is_table() || !entry.contains("data") || !entry.at("data").is_array()) return names;
-    for (const Input & d : entry.at("data").as_array()) {
+    for (const Input & d : data_entries(entry)) {
         for (const std::string & v : tabulated::entry_variables(d)) names.push_back(v);
     }
     if (names.size() > boundary_variable::COUNT) {
@@ -58,7 +104,7 @@ std::vector<std::string> BoundaryValue::variables(const Input & entry) {
                           .line = line_of(entry, "data"),
                           .message = "has " + std::to_string(names.size() - boundary_variable::FIRST_DATA) +
                                      " value columns, more than " + std::to_string(boundary_variable::MAX_DATA),
-                          .fix = "Keep the columns the entry reads, in files of their own",
+                          .fix = "Read only the columns the entry uses, with columns = [...] in each data entry",
                           .docs = "docs/guide/boundary_conditions.md#profiles-from-data"});
     }
     return names;

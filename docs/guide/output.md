@@ -585,7 +585,7 @@ check_interval = 100   # a progress row every 100 steps
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 54 more.
+and 55 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),
@@ -855,7 +855,7 @@ memory after setup in the `start` record's `check`:
 |---|---|
 | `status`, `diagnostics` | As in [the check's JSON](input_files.md#the-report-as-json): `ok` or `warning`, and the warnings with their codes (`W-QUALITY-SKEWNESS`, `W-CFL-LIMIT`, `W-WALL-Y-PLUS`, ...) |
 | `mesh_quality`, `resolution` | As in the check's JSON, with the 3 worst cells of each metric |
-| `time_step` | `integrator`, `cfl_limit` (its stability limit for smooth flow, `null` if none is known), `set_by` (`CFL` or `fixed`), and `cfl` (`run.cfl`) when set by CFL |
+| `time_step` | `integrator`, `cfl_limit` (its stability limit for smooth flow), `set_by` (`CFL` or `fixed`), and `cfl` (`run.cfl`) when set by CFL |
 | `memory` | Bytes of the rank that uses the most, after setup: `host`, `host_peak`, `device`, `device_total` (`null` where unknown) |
 
 It costs one pass over the cells and faces, timed as the setup phase "mesh
@@ -1036,7 +1036,7 @@ after it are that run's), and the run record's `start` record.
 | `schema`, `version` | `"mallard-run"`, 3 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
 | `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
-| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `hdf5_parallel` (HDF5 built with MPI), `kaminpar`, `species_layout` |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `hdf5_parallel` (HDF5 built with MPI), `kaminpar`, `cgns`, `zlib`, `species_layout` |
 | `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |

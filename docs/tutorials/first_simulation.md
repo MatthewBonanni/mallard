@@ -27,8 +27,8 @@ The commands below use the CPU build; the CUDA build runs the same inputs with `
 The post-processing scripts in `tools/` need a few Python packages:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install numpy scipy matplotlib h5py imageio imageio-ffmpeg
+uv venv
+uv pip install numpy scipy matplotlib h5py imageio imageio-ffmpeg
 ```
 
 ## 2. Create and run the Sod shock tube
@@ -81,7 +81,7 @@ PYTHON=../../.venv/bin/python ./post.sh
 **Your own analysis in Python.** The [Python package](../guide/python.md) reads the output into numpy arrays through Mallard's own reader. The build above made its library; install the package into the virtual environment:
 
 ```bash
-../../.venv/bin/pip install -e ../../tools
+uv pip install --python ../../.venv -e ../../tools
 PATH=$PWD/../../build/src:$PATH ../../.venv/bin/python
 ```
 

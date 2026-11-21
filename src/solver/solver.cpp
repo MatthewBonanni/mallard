@@ -17,6 +17,7 @@
 #include "input.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <cmath>
 #include <cstddef>
 #include <iomanip>
@@ -249,11 +250,14 @@ void Solver::setup_from_input() {
     block_owners.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
         // Output of states read from files takes no steps
-        if (!state_reader) allocate_time_stepping();
+        if (!state_reader) {
+            init_particles(*used_regions);
+            allocate_time_stepping();
+        }
         init_les();
         init_rhs_split();
-        used_regions = std::make_unique<region::Regions>(input, *mesh);
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -729,8 +733,11 @@ void Solver::init_rhs_split() {
         }
         local_faces = IndexSet::of(local, "local_faces");
         partition_faces = IndexSet::of(remote, "partition_faces");
-        face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
-                                     static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+        const FacePlan plan = plan_face_exchange(distribution, *mesh, needed);
+        face_exchange = FaceExchange(plan, static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+        if (polynomial_viscous) init_polynomial_exchange(plan, needed);
+    } else if (polynomial_viscous) {
+        allocate_polynomials(mesh->n_reconstructed());
     }
 
     // Early: the cells independent of the halo among [0, n_interior()), where the numbering puts them
@@ -754,6 +761,54 @@ void Solver::init_rhs_split() {
                                        : Kokkos::DefaultExecutionSpace();
         if (own_faces) comm_space = comm::high_priority_space();
     }
+}
+
+void Solver::allocate_polynomials(const uint32_t n_cells) {
+    auto & teno = dynamic_cast<TENO &>(*face_reconstruction);
+    teno.polynomials = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("viscous_polynomials", (n_cells + 1) / 2,
+                                                                 teno.n_dof_large);
+}
+
+void Solver::init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed) {
+    // Rows of cell c are (c / 2, side c % 2) of the polynomials: a FaceExchange of NK points per side sends them
+    uint32_t n = mesh->n_reconstructed();
+    for (const RemoteFaceSide & r : needed) n = std::max(n, r.cell + 1);
+    allocate_polynomials(n);
+    auto rows = [&](const std::vector<std::vector<uint32_t>> & face_lists,
+                    const std::vector<std::vector<uint8_t>> & side_lists, std::vector<std::vector<uint32_t>> & row_lists,
+                    std::vector<std::vector<uint8_t>> & lane_lists, std::vector<std::vector<uint64_t>> & global) {
+        row_lists.assign(face_lists.size(), {});
+        lane_lists.assign(face_lists.size(), {});
+        global.assign(face_lists.size(), {});
+        // Both ends list a neighbor's cells in the same order, so each keeps the first of repeated cells
+        for (size_t k = 0; k < face_lists.size(); k++) {
+            std::unordered_set<uint32_t> seen;
+            for (size_t j = 0; j < face_lists[k].size(); j++) {
+                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(face_lists[k][j], side_lists[k][j]));
+                if (!seen.insert(c).second) continue;
+                row_lists[k].push_back(c >> 1);
+                lane_lists[k].push_back(static_cast<uint8_t>(c & 1u));
+                global[k].push_back(mesh->h_global_cell(c));
+            }
+        }
+    };
+    FacePlan plan;
+    plan.neighbors = faces.neighbors;
+    std::vector<std::vector<uint64_t>> send_cells, recv_cells;
+    rows(faces.send_faces, faces.send_sides, plan.send_faces, plan.send_sides, send_cells);
+    rows(faces.recv_faces, faces.recv_sides, plan.recv_faces, plan.recv_sides, recv_cells);
+    // That order is the plan's: check once that each neighbor sends the cells, in the order, this rank expects
+    std::vector<std::vector<uint64_t>> to_rank(static_cast<size_t>(comm::size()));
+    for (size_t k = 0; k < plan.neighbors.size(); k++) to_rank[static_cast<size_t>(plan.neighbors[k])] = send_cells[k];
+    const auto from_rank = comm::alltoallv(to_rank);
+    for (size_t k = 0; k < plan.neighbors.size(); k++) {
+        if (from_rank[static_cast<size_t>(plan.neighbors[k])] != recv_cells[k]) {
+            throw std::logic_error("init_polynomial_exchange: rank " + std::to_string(plan.neighbors[k]) +
+                                   " sends other cells than rank " + std::to_string(comm::rank()) + " expects");
+        }
+    }
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    polynomial_exchange = FaceExchange(plan, teno.n_dof_large, halo.uses_nccl(), 2);
 }
 
 void Solver::init_physics() {
@@ -1633,7 +1688,16 @@ void Solver::init_numerics() {
                           .fix = "Set coupling = \"strang\" in [chemistry], or remove double_flux"});
     }
 
-    rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) { calc_rhs(solution, rhs, t_stage, c); };
+    rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) {
+        calc_rhs(solution, rhs, t_stage, c);
+        if (particles) {
+            if (particles->reads_time()) set_stage_time(t_stage, c);
+            // The first stage of every integrator is the step's start, c = 0
+            particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient,
+                                viscous_gradients, c == 0.0_r, stage_time, dt,
+                                recording_step ? step_dt_device() : nullptr);
+        }
+    };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
@@ -1648,6 +1712,7 @@ void Solver::init_numerics() {
         throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
+    init_viscous_gradients(teno);
     if (hybrid_flux && simpler) {
         throw InputError({.key = "numerics.convective_flux",
                           .line = line_of(input.at("numerics"), "convective_flux"),
@@ -1682,6 +1747,48 @@ void Solver::init_numerics() {
                           .fix = "The defaults are sensor_threshold = 0.65 and upwind_floor = 0.0"});
     }
     init_error_control();
+}
+
+void Solver::init_viscous_gradients(const TENO * teno) {
+    const std::string gradients = find_value_or<std::string>(input, "numerics", "viscous_gradients", "least_squares");
+    record_options("numerics.viscous_gradients", {"least_squares", "reconstruction"});
+    if (gradients != "least_squares" && gradients != "reconstruction") {
+        throw not_accepted(input.at("numerics"), "numerics.viscous_gradients", gradients,
+                           {"least_squares", "reconstruction"});
+    }
+    polynomial_viscous = gradients == "reconstruction";
+    if (!polynomial_viscous) return;
+    auto unavailable = [&](const std::string & why, const std::string & fix) {
+        return InputError({.key = "numerics.viscous_gradients",
+                           .line = line_of(input.at("numerics"), "viscous_gradients"),
+                           .message = "\"reconstruction\" " + why,
+                           .fix = fix + ", or remove viscous_gradients",
+                           .docs = "docs/guide/numerics.md#viscous-gradients"});
+    };
+    if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
+    if (!physics.is_viscous()) {
+        throw unavailable("has no effect without viscosity", "Set type = \"navier_stokes\" in [physics]");
+    }
+    if (teno == nullptr) {
+        throw unavailable("needs the TENO reconstruction, whose polynomials it differentiates",
+                          "Set type = \"TENO\" in [numerics.face_reconstruction]");
+    }
+    if (teno->degree < 3) {
+        throw unavailable("gains nothing with TENO of order 3, whose face gradients are second order as the "
+                          "least-squares ones",
+                          "Set order = 4 or more in [numerics.face_reconstruction]");
+    }
+    if (axisymmetric) throw unavailable("is not available for axisymmetric runs yet", "Use a planar run");
+    if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
+    if (hybrid_flux) {
+        throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");
+    }
+    if (mesh->curved_geometry) {
+        throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
+    }
+    if (mesh->is_rotational()) {
+        throw unavailable("is not available with rotational periodicity yet", "Use translational periodicity");
+    }
 }
 
 void Solver::describe_block_path() {
@@ -2222,7 +2329,8 @@ void Solver::allocate_time_stepping() {
     face_storage = Kokkos::View<rtype *>("face_solution", std::max(n_states, n_slots));
     face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>(face_storage.data(), n_faces, n_quad);
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", n_faces);
-    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
+    const size_t n_particle_values = particles ? particles->n_values() : 0;
+    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species, n_particle_values);
     if (is_mixture()) {
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), n_faces, 2, n_species);
         if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", n_faces);
@@ -2231,11 +2339,38 @@ void Solver::allocate_time_stepping() {
     rhs_vec.clear();
     solution_vec.push_back(state());
     for (uint8_t i = 1; i < time_integrator->get_n_solution_vectors(); i++) {
-        solution_vec.emplace_back("solution", mesh->n_cells, n_species);
+        solution_vec.emplace_back("solution", mesh->n_cells, n_species, n_particle_values);
     }
     for (uint8_t i = 0; i < time_integrator->get_n_rhs_vectors(); i++) {
-        rhs_vec.emplace_back("rhs", mesh->n_cells, n_species);
+        rhs_vec.emplace_back("rhs", mesh->n_cells, n_species, n_particle_values);
     }
+}
+
+void Solver::init_particles(region::Regions & regions) {
+    if (!Particles::configured(input)) return;
+    if (simpler) {
+        throw InputError(Diagnostic{.key = "particles",
+                                    .line = line_of(input.at("particles")),
+                                    .message = "is not available yet with chemistry.coupling = \"simpler\"",
+                                    .docs = "docs/guide/particles.md"});
+    }
+    // A restart file's particles continue; a file without them (or a remap) seeds them from [particles]
+    std::optional<RestartArrays> restart;
+    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart" &&
+        input.at("initialize").contains("file")) {
+        const std::string file = find_value<std::string>(input, "initialize", "file");
+        std::ifstream in(file, std::ios::binary);
+        if (in) restart = read_restart_header(in, file).arrays;
+    }
+    particles = std::make_unique<Particles>();
+    particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
+                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics);
+    if (particles->reads_time() && !stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
+    if (!viscous_gradients.is_allocated()) {
+        viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+        viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
+    }
+    for (auto & setting : particles->settings()) mesh_setup.settings.push_back(setting);
 }
 
 void Solver::copy_host_to_device() {
@@ -2311,6 +2446,7 @@ void Solver::output_arrays_to_host() {
         copy(h_unflushed_chem_h, unflushed_chem_h);
     }
     allocate_restart_mirrors();
+    if (particles) particles->stage_output();
     if (step_controller.enabled()) copy(h_step_control, step_controller.slots());
     if (characteristic_state_set) copy(h_char_state, boundary_data.char_state);
 }
@@ -2632,6 +2768,10 @@ int Solver::run_loop() {
         // A restart's pending half step, where this run does not fuse it into its first step
         if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
         if (!reacting || simpler) chemistry_pending = 0.0;
+        if (particles && particles->starts_at_gas_velocity()) {
+            update_cell_W();
+            particles->start_velocity(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+        }
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
@@ -2716,6 +2856,7 @@ int Solver::run_loop() {
     probes.finish(step, t);
     copy_device_to_host();
     write_data(true);
+    if (particles) particles->write(step, static_cast<double>(t));
     const snapshot_block::Reason reason(snapshot_block::reason::STOP);
     const std::string restart_file =
         control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
@@ -2757,6 +2898,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
     write_integrals();
     // Probes first, so that triggers read this step's values and restarts carry their state
     write_probes();
+    write_particle_probes();
     update_convergence();
     act_on_triggers();
     write_data();
@@ -2800,7 +2942,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t) || probes.averages_due(step, t);
+           probes.due(step, t) || probes.averages_due(step, t) || (particles && particles->probes_due(step));
 }
 
 double Solver::progress() const {
@@ -3026,7 +3168,8 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     if (reacting) {
         numerical.emplace_back("Chemistry", logging::count(uint64_t(kinetics.n_reactions), "reaction") + ", " +
                                                 (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
-                                                (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
+                                                (fuse_chemistry ? " (half steps fused)" : "") +
+                                                (chemistry_options.method == chemistry::Integrator::BDF ? ", BDF, " : ", RODAS, ") +
                                                 (cell_chemistry.lanes() == 1
                                                      ? std::string("one thread per cell")
                                                      : std::to_string(cell_chemistry.lanes()) + " lanes per cell"));
@@ -3122,6 +3265,9 @@ void Solver::print_summary(const RunEnd & end) const {
     if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
     if (convergence.enabled()) s.files.push_back({"convergence", 0, convergence.file_name()});
     for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
+    if (particles) {
+        for (const auto & file : particles->probe_files()) s.files.push_back({"particle probes", 0, file});
+    }
     report::Text text(logging::color_stdout());
     summary_section(text, s);
     if (run_health.on) health_section(text, run_health.last);
@@ -3282,6 +3428,13 @@ void Solver::write_probes() {
     probes.write(step, t, probe_fields(fluxes));
 }
 
+void Solver::write_particle_probes() {
+    if (!particles || !particles->probes_due(step)) return;
+    update_cell_W();
+    particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+    particles->write_probes(step, static_cast<double>(t));
+}
+
 void Solver::sample_probe_averages() {
     const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on);
     if (cell_W) {
@@ -3299,6 +3452,9 @@ RestartArrays Solver::restart_arrays() const {
     RestartArrays arrays = statistics.arrays();
     for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
     for (auto && a : convergence.arrays()) arrays.push_back(std::move(a));
+    if (particles) {
+        for (auto && a : particles->restart_arrays()) arrays.push_back(std::move(a));
+    }
     return arrays;
 }
 
@@ -3374,6 +3530,10 @@ void Solver::take_step() {
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
     run_health.ledger.end_step(static_cast<double>(dt));
+    if (particles) {
+        particles->relocate();
+        particles->migrate();
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -3428,6 +3588,7 @@ void Solver::update_p_max() {
 
 rtype Solver::next_target_time(const bool unstaged) const {
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
+    t_target = std::min(t_target, next_landing_time());
     for (const auto & writer : data_writers) {
         if (!(unstaged && staged_outputs)) t_target = std::min(t_target, writer->next_time());
     }
@@ -3491,6 +3652,7 @@ struct TimeStepFunctor {
     BoundaryData boundaries;
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
+    rtype viscous_stiffness = 1.0_r;  // the viscous operator's spectral radius over the compact one's
 
     KOKKOS_INLINE_FUNCTION
     void cell_W(const int32_t i_cell, rtype * W) const {
@@ -3551,7 +3713,7 @@ struct TimeStepFunctor {
                 coeff = Kokkos::fmax(4.0_r / 3.0_r * (mu + mu_t), physics.gamma * (mu / physics.Pr + mu_t / Pr_t)) /
                         W[0];
             }
-            sum += 4.0_r * coeff * sum_area2 / cell_volume(i_cell);
+            sum += 4.0_r * viscous_stiffness * coeff * sum_area2 / cell_volume(i_cell);
             if (radius_coords.extent(0) > 0) {
                 // Decay of u_r by the hoop stress
                 const rtype r = radius_coords(i_cell, 1);
@@ -3582,6 +3744,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             boundary_data,
                             mesh->periodic_maps(),
                             mesh->face_shift};
+    // Reconstruction gradients: 1D symbol up to 8.2 / h^2 (central stencils fitted exactly; 5.5 by least squares)
+    // against the compact gradients' 4 / h^2, with the jump damping of 4/3
+    if (polynomial_viscous) functor.viscous_stiffness = 2.05_r;
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {

@@ -19,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 #include "common_io.h"
 #include "compression.h"
@@ -98,6 +99,14 @@ std::string corner_type_name(int dim, uint64_t corners) {
 
 void count_types(MeshSummary & m, const std::map<std::string, uint64_t> & counts) {
     m.cell_types.assign(counts.begin(), counts.end());
+}
+
+/** @brief Adds cells counted by type code to the summary, naming each code once. */
+template <typename Name>
+void count_codes(MeshSummary & m, const std::map<int64_t, uint64_t> & codes, Name name) {
+    std::map<std::string, uint64_t> counts(m.cell_types.begin(), m.cell_types.end());
+    for (const auto & [code, n] : codes) counts[name(code)] += n;
+    count_types(m, counts);
 }
 
 /** @brief Bounds of points stored with `width` coordinates each. */
@@ -499,9 +508,9 @@ void read_vtu_mesh(MeshSummary & m, const VtkXml & x) {
     m.n_points += x.piece_count("NumberOfPoints");
     m.n_cells += x.piece_count("NumberOfCells");
     if (const XmlArray * types = x.find("Cells", "types")) {
-        std::map<std::string, uint64_t> counts(m.cell_types.begin(), m.cell_types.end());
-        for (const double t : x.values(*types)) counts[vtk_type_name(static_cast<int>(t))]++;
-        count_types(m, counts);
+        std::map<int64_t, uint64_t> codes;
+        for (const double t : x.values(*types)) codes[static_cast<int64_t>(t)]++;
+        count_codes(m, codes, [](int64_t t) { return vtk_type_name(static_cast<int>(t)); });
     }
     if (const XmlArray * points = x.find("Points", "")) {
         MeshSummary piece;
@@ -1091,9 +1100,9 @@ Contents open_vtkhdf(const std::string & path) {
         c.format = "VTKHDF";
         if (c.version >= 0) file_format::check_version(file_format::VTKHDF_OUTPUT, path, c.version);
         m.n_cells = first_count(top, "NumberOfCells");
-        std::map<std::string, uint64_t> counts;
-        for (const uint8_t t : all<uint8_t>(top, "Types")) counts[vtk_type_name(t)]++;
-        count_types(m, counts);
+        std::map<int64_t, uint64_t> codes;
+        for (const uint8_t t : all<uint8_t>(top, "Types")) codes[t]++;
+        count_codes(m, codes, [](int64_t t) { return vtk_type_name(static_cast<int>(t)); });
     } else if (type == "PolyData") {
         c.kind = Kind::probe;
         c.format = "VTKHDF";
@@ -1168,16 +1177,24 @@ void read_output_mesh(MeshSummary & m, hid_t file) {
     bound(m, all<double>(nodes, "coordinates"), d.size() == 2 ? d[1] : 1);
     Handle cells(H5Gopen2(file, "cells", H5P_DEFAULT), H5Gclose, "opening cells");
     const std::vector<int64_t> offsets = all<int64_t>(cells, "offsets");
-    const std::vector<int64_t> topology = all<int64_t>(cells, "topology");
     m.n_cells = offsets.empty() ? 0 : offsets.size() - 1;
     static const std::map<int64_t, int> XDMF_TO_VTK = {{4, 5}, {5, 9}, {6, 10}, {7, 14}, {8, 13}, {9, 12}};
-    std::map<std::string, uint64_t> counts;
-    for (size_t i = 0; i + 1 < offsets.size(); i++) {
-        const int64_t code = topology.at(static_cast<size_t>(offsets[i]));
-        const auto it = XDMF_TO_VTK.find(code);
-        counts[it == XDMF_TO_VTK.end() ? "XDMF type " + std::to_string(code) : vtk_type_name(it->second)]++;
+    // Each cell's code from the topology read a few million entries at a time, not whole
+    const uint64_t size = dims(cells, "topology").at(0);
+    std::map<int64_t, uint64_t> codes;
+    for (size_t i = 0; i < m.n_cells;) {
+        const uint64_t first = static_cast<uint64_t>(offsets[i]);
+        if (first >= size) throw std::runtime_error("reading topology: a cell offset past its end");
+        const std::vector<int64_t> part =
+            rows<int64_t>(cells, "topology", first, std::min<uint64_t>(uint64_t{1} << 22, size - first));
+        for (; i < m.n_cells && static_cast<uint64_t>(offsets[i]) - first < part.size(); i++) {
+            codes[part[static_cast<size_t>(offsets[i]) - first]]++;
+        }
     }
-    count_types(m, counts);
+    count_codes(m, codes, [](int64_t code) {
+        const auto it = XDMF_TO_VTK.find(code);
+        return it == XDMF_TO_VTK.end() ? "XDMF type " + std::to_string(code) : vtk_type_name(it->second);
+    });
 }
 
 Contents open_h5(const std::string & path) {
@@ -1296,9 +1313,8 @@ Geometry read_vtkhdf_geometry(const std::string & path) {
         return std::pair{all<uint64_t>(group, "Connectivity"), offsets};
     };
     if (exists(top, "Types")) {
-        auto [connectivity, offsets] = cells(top);
-        append_cells(g, connectivity, std::vector<uint64_t>(offsets.begin() + 1, offsets.end()), 0,
-                     all<uint8_t>(top, "Types"));
+        std::tie(g.connectivity, g.offsets) = cells(top);
+        g.types = all<uint8_t>(top, "Types");
         return g;
     }
     for (const char * kind : {"Vertices", "Lines", "Polygons"}) {
@@ -1329,6 +1345,10 @@ Geometry read_output_mesh_geometry(const std::string & path) {
     const std::vector<int64_t> topology = all<int64_t>(cells, "topology");
     static const std::map<int64_t, std::pair<uint8_t, size_t>> XDMF_TO_VTK = {
         {4, {5, 3}}, {5, {9, 4}}, {6, {10, 4}}, {7, {14, 5}}, {8, {13, 6}}, {9, {12, 8}}};
+    const size_t n_cells = offsets.empty() ? 0 : offsets.size() - 1;
+    g.connectivity.reserve(topology.size() - std::min(n_cells, topology.size()));
+    g.offsets.reserve(n_cells + 1);
+    g.types.reserve(n_cells);
     for (size_t i = 0; i + 1 < offsets.size(); i++) {
         const size_t at = static_cast<size_t>(offsets[i]);
         const auto it = XDMF_TO_VTK.find(topology.at(at));
@@ -1601,6 +1621,7 @@ std::vector<double> read_all(const Contents & file, const std::string & field) {
     std::vector<double> out;
     for (size_t k = 0; k < file.snapshots.size(); k++) {
         const std::vector<double> v = read(file, field, k);
+        if (k == 0) out.reserve(v.size() * file.snapshots.size());
         out.insert(out.end(), v.begin(), v.end());
     }
     return out;
