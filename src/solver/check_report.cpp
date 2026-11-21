@@ -778,8 +778,8 @@ std::string check_json(const CheckReport & r) {
               return json::Object().add("zone", u.zone).add("faces", u.faces).str();
           }));
     o.raw("periodic", array_json(r.periodic, [](const CheckPeriodic & p) {
-              json::Object o;
-              o.raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
+              json::Object pair;
+              pair.raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
                   .add("map", p.rotation ? "rotation" : "translation")
                   .raw("translation", p.rotation ? "null" : point_json(p.translation))
                   .raw("angle", p.rotation ? json::number(p.angle) : "null")
@@ -787,9 +787,9 @@ std::string check_json(const CheckReport & r) {
                   .add("faces", p.faces)
                   .add("area", p.area);
               if (p.offsets_known) {
-                  o.add("node_offset_max", p.node_offset_max).add("node_offset_relative", p.node_offset_relative);
+                  pair.add("node_offset_max", p.node_offset_max).add("node_offset_relative", p.node_offset_relative);
               }
-              return o.str();
+              return pair.str();
           }));
     o.raw("regions", array_json(r.regions, [](const CheckRegion & g) {
               return json::Object()
