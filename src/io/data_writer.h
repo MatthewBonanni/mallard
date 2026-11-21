@@ -136,6 +136,12 @@ struct RestartHeader {
 RestartHeader read_restart_header(std::ifstream & in, const std::string & filename);
 
 /**
+ * @brief Why this build cannot continue from a restart file with this header, as read_restart would refuse it
+ *        (precision, dimension, missing flow variables, compression without zlib); empty if it can.
+ */
+std::vector<std::string> restart_incompatibilities(const RestartHeader & h, const std::string & filename);
+
+/**
  * @brief Read a restart file written by a DataWriter with format = "restart":
  *        every cell, or with cells, only those global cells (fields then hold
  *        their values in the order of cells).

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-file-info.v1.schema.json",
+  "title": "What an output or restart file holds: file.info, and mallard info FILE --format json",
+  "type": "object",
+  "required": ["schema", "path", "kind", "format", "version", "dim", "precision", "compressed", "global_order", "mesh",
+               "snapshots", "fields", "species", "continuable", "incompatibilities", "run", "sampling", "notes"],
+  "properties": {
+    "schema": {"const": "mallard-file-info"},
+    "path": {"type": "string"},
+    "kind": {"enum": ["mesh", "snapshot", "restart", "probe", "table"]},
+    "format": {"type": "string", "description": "VTKHDF, VTU, restart, ..."},
+    "version": {"type": ["integer", "null"], "description": "the file's format version (not this schema's, which is 1)"},
+    "dim": {"type": ["integer", "null"]},
+    "precision": {"enum": ["double", "single", null]},
+    "compressed": {"type": "boolean"},
+    "global_order": {"type": "boolean"},
+    "mesh": {"type": "object", "additionalProperties": true},
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["t", "step", "file", "index", "run_id", "snapshot"],
+        "additionalProperties": true
+      }
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "components", "units", "long_name", "location", "min", "max"],
+        "additionalProperties": true
+      }
+    },
+    "species": {"type": "array", "items": {"type": "string"}},
+    "restart": {"type": "object", "description": "a restart file's attributes, arrays and boundary faces", "additionalProperties": true},
+    "continuable": {"type": ["boolean", "null"], "description": "a restart file: whether the build that answers continues from it; null for other files"},
+    "incompatibilities": {"type": "array", "items": {"type": "string"}, "description": "why it does not, each as the run would refuse the file"},
+    "run": {"type": ["object", "null"], "additionalProperties": true},
+    "sampling": {"type": ["object", "null"], "additionalProperties": true},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

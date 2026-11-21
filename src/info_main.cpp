@@ -428,6 +428,8 @@ void print_fields(const output::Contents & c) {
 
 void print_restart(const output::Contents & c) {
     const RestartHeader & r = c.restart;
+    const std::vector<std::string> why = restart_incompatibilities(r, c.path);
+    item("Continuable", why.empty() ? "yes, by this build" : "no, by this build: " + list_text(why, " "));
     if (!r.attributes.empty()) {
         logging::section("Solver state", "units not recorded");
         std::vector<std::vector<std::string>> rows;
@@ -796,6 +798,12 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
 
 } // namespace
 
+std::string file_info_json(const std::string & path) {
+    output::Contents c = output::open(path);
+    if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
+    return output::to_json(c);
+}
+
 int info_main(const cli::Args & args) {
     int argc = args.argc;
     char ** argv = args.argv;
@@ -817,14 +825,14 @@ int info_main(const cli::Args & args) {
         if (args.has("--html")) {
             return cli::usage_error(*cli::command("info"), "--html takes a run directory, not " + path);
         }
+        if (args.value_or("--format", "text") == "json" && !args.has("--input")) {
+            std::cout << file_info_json(path) << "\n";
+            return 0;
+        }
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
-        if (args.value_or("--format", "text") == "json") {
-            std::cout << output::to_json(c) << "\n";
-        } else {
-            print_contents(c);
-        }
+        print_contents(c);
     } catch (const std::exception & e) {
         logging::error(diagnostic_code::INFO, std::string("mallard info: ") + e.what());
         return 1;

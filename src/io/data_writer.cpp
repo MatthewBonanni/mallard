@@ -1403,26 +1403,47 @@ RestartHeader read_restart_header(std::ifstream & in, const std::string & filena
     return h;
 }
 
+std::vector<std::string> restart_incompatibilities(const RestartHeader & h, const std::string & filename) {
+    std::vector<std::string> why;
+    if (h.real_size != sizeof(rtype)) {
+        why.push_back("Restart file " + filename + " was written with a different floating-point precision.");
+    }
+    const uint64_t n_vars = h.names.size();
+    if (h.version == 1 && n_vars != N_CONSERVATIVE) {
+        why.push_back("Restart file " + filename + " has " + std::to_string(n_vars) + " variables per cell (a " +
+                      std::to_string(n_vars - 2) + "D run), but Mallard was built with Mallard_DIM = " +
+                      std::to_string(N_DIM) + " (" + std::to_string(N_CONSERVATIVE) + " variables).");
+    }
+    if (h.chunk_cells > 0 && !compression::have_zlib()) {
+        why.push_back("Restart file " + filename +
+                      " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
+    }
+    if (h.version > 1) {
+        const bool has_z = std::find(h.names.begin(), h.names.end(), "RHOU_Z") != h.names.end();
+        if (has_z != (N_DIM == 3)) {
+            why.push_back("Restart file " + filename + " holds a " + std::string(has_z ? "3" : "2") +
+                          "D run, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
+            return why;
+        }
+        for (const auto & name : CONSERVATIVE_NAMES) {
+            if (std::find(h.names.begin(), h.names.end(), name) == h.names.end()) {
+                why.push_back("Restart file " + filename + " has no variable " + name + ".");
+            }
+        }
+    }
+    return why;
+}
+
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells) {
     std::ifstream in(filename, std::ios::binary);
     if (!in.good()) {
         throw cannot_read("the restart file", filename);
     }
     const RestartHeader h = read_restart_header(in, filename);
-    if (h.real_size != sizeof(rtype)) {
-        throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
+    if (const std::vector<std::string> why = restart_incompatibilities(h, filename); !why.empty()) {
+        throw std::runtime_error(why.front());
     }
     const uint64_t n_vars = h.names.size(), n_faces = h.n_faces, chunk_cells = h.chunk_cells;
-    if (h.version == 1 && n_vars != N_CONSERVATIVE) {
-        throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
-                                 " variables per cell (a " + std::to_string(n_vars - 2) +
-                                 "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
-                                 " (" + std::to_string(N_CONSERVATIVE) + " variables).");
-    }
-    if (chunk_cells > 0 && !compression::have_zlib()) {
-        throw std::runtime_error("Restart file " + filename +
-                                 " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
-    }
     RestartData data;
     data.step = h.step;
     data.t = h.t;
@@ -1432,18 +1453,6 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     data.arrays = h.arrays;
     data.provenance = h.provenance;
     data.snapshot = h.snapshot;
-    if (h.version > 1) {
-        const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
-        if (has_z != (N_DIM == 3)) {
-            throw std::runtime_error("Restart file " + filename + " holds a " + std::string(has_z ? "3" : "2") +
-                                     "D run, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
-        }
-        for (const auto & name : CONSERVATIVE_NAMES) {
-            if (std::find(data.names.begin(), data.names.end(), name) == data.names.end()) {
-                throw std::runtime_error("Restart file " + filename + " has no variable " + name + ".");
-            }
-        }
-    }
     const std::streamoff header = static_cast<std::streamoff>(h.data_offset);
     const std::vector<uint64_t> & chunk_at = h.chunk_at;
     // Chunk c of variable v of a version 5 file, decompressed
