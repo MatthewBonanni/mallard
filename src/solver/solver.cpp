@@ -287,6 +287,7 @@ void Solver::read_input() {
     read_mesh_keys();
     read_boundaries();
     read_numerics();
+    read_les();
 }
 
 void Solver::read_mesh_keys() {
