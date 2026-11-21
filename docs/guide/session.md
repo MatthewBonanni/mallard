@@ -20,12 +20,12 @@ Each request with a one-shot command runs the same code as that command, so its 
 
 | Method | Params | Result | Same as |
 |---|---|---|---|
-| `initialize` | | `mallard-capabilities`: the version, build and `dimension`, the schema of every interface, every method with its one-shot command and result schema, `devices` (the backend, each GPU visible with its `name` and `memory` in bytes, the host's `cpu` and `threads`), `control` (the socket's `commands`; under `settings` every key `mallard ctl set` takes, with its `type` (`count` or `time`), `units`, and `selector`, what names its element: `prefix_or_index`, `name` or `zone`; the control `files`; the `routes` `mallard ctl` tries, in order, each `available` if a program it runs is on `PATH` here), and the open case | `mallard version --format json` |
+| `initialize` | | `mallard-capabilities`: the version, build and `dimension`, the schema of every interface, every method with its one-shot command and result schema, `devices` (the backend, each GPU visible with its `name` and `memory` in bytes, the host's `cpu` and `threads`), `control` (the socket's `commands`; under `settings` every key `mallard ctl set` takes, with its `type` (`count` or `time`), `units`, and `selector`, what names its element: `prefix_or_index`, `name` or `zone`; the control `files`; the `routes` `mallard ctl` tries, in order, each `available` if a program it runs is on `PATH` here), `check` (the `options` `mallard check` takes, so that a client can tell whether this build has one, and `memory_gpus`: each GPU `--memory` takes by its `key`, with its `name` and `bytes`), and the open case | `mallard version --format json` |
 | `case.open` | `input` (path), `text` (optional: the input's text, if it differs from the file) | the case (`mallard-case`) | |
 | `case.update` | `text`: the whole input | the case, with `changed`: the key paths whose values differ | |
 | `case.close` | | `null` | |
 | `case.check` | the options of `mallard check` by name: `partial`, `ranks`, `memory`, `throughput`, `steps`, `mesh_fields`, `stencils`, `cells`, `region`, `weights`, `catalog`, `view`, `restart` | `mallard-check` | `mallard check INPUT --format json` |
-| `case.view` | `dir`: where to write it | `mallard-case-view`: the files written, every block, and the frame of each boundary's local coordinates ([The case view](input_files.md#the-case-view)) | `mallard check INPUT --view DIR --format json` (its `view`) |
+| `case.view` | `dir`: where to write it; or `frames_only`: `true` to write nothing | `mallard-case-view`: the files written, every block, and the frame of each boundary's local coordinates ([The case view](input_files.md#the-case-view)); with `frames_only`, the frames alone (`files` and `blocks` empty), without drawing the view | `mallard check INPUT --view DIR --format json` (its `view`) |
 | `case.boundary_values` | `dir`: where to write them | `mallard-boundary-values`: per `[[boundaries]]` entry, the file of its values at each face and each column's range; estimated inflow of stagnation and mass-flow inlets ([Boundary values](input_files.md#boundary-values)) | `mallard check INPUT --boundary-values DIR --format json` (its `boundary_values`) |
 | `case.keys` | `section` (optional) | `mallard-key-catalog` | `mallard list keys [SECTION] INPUT --format json` |
 | `case.files` | `sha256` (optional, default `false`) | `mallard-case-files`: the input and every file its setup read, with role, path as written and resolved, `exists`, `bytes`, `sha256` ([The other commands](input_files.md#the-other-commands)) | `mallard files INPUT --format json [--sha256]` |
@@ -57,6 +57,7 @@ A problem of the case is not an error of the request: `case.check` succeeds and 
 | -32603 | An internal error of Mallard (please report it) |
 | -32800 | Canceled |
 | -32001 | No case is open: send `case.open` first |
+| -32002 | The case cannot be set up, so the request has no result: `data.diagnostics` lists why (as `case.check` would) |
 | -32003 | A file cannot be read; `data.path` names it |
 | -32004 | Timeout: `data.phase` says what was awaited (`accepted`, `done`) |
 | -32005 | No such run, or it ended (`data.outcome`) |

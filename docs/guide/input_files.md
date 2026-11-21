@@ -682,7 +682,9 @@ each key's type, units, default and accepted values, and each table's form:
 a `table`, an `array` of tables (`[[boundaries]]`) or `named` entries under
 names the input chooses (`[regions]`, `X`), the `form` of its JSON; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
-whether the input sets each key), and a section keeps one table or key path.
+whether the input sets each key; an optional table the input does not set,
+as `[boundaries.turbulence]`, has the `type` and `form` of the general
+catalog), and a section keeps one table or key path.
 For an input still being written it lists the keys the setup read before it
 stopped, with exit status 0 when the only errors are
 [missing pieces](#diagnostics); its JSON then has `complete: false`, `missing`

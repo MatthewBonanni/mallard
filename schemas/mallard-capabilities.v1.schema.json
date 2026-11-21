@@ -3,7 +3,7 @@
   "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-capabilities.v1.schema.json",
   "title": "What a Mallard build supports: mallard version --format json, and the session's initialize (with case)",
   "type": "object",
-  "required": ["schema", "version", "mallard", "build", "dependencies", "dimensions", "dimension", "interfaces", "methods", "devices", "control"],
+  "required": ["schema", "version", "mallard", "build", "dependencies", "dimensions", "dimension", "interfaces", "methods", "devices", "control", "check"],
   "properties": {
     "schema": {"const": "mallard-capabilities"},
     "version": {"const": 1},
@@ -93,6 +93,28 @@
               "kind": {"enum": ["socket", "srun", "kubectl", "ssh", "signal", "file"]},
               "programs": {"type": "array", "items": {"type": "string"}},
               "available": {"type": "boolean"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "check": {
+      "type": "object",
+      "required": ["options", "memory_gpus"],
+      "properties": {
+        "options": {"type": "array", "items": {"type": "string"}, "description": "every option mallard check takes (\"--memory\", \"--view\", ...): whether this build has one"},
+        "memory_gpus": {
+          "type": "array",
+          "description": "the GPUs --memory (case.check's memory) takes by name",
+          "items": {
+            "type": "object",
+            "required": ["key", "name", "bytes"],
+            "properties": {
+              "key": {"type": "string", "description": "the name --memory takes (\"a100-80\")"},
+              "name": {"type": "string", "description": "the GPU (\"A100-80GB\")"},
+              "bytes": {"type": "integer", "minimum": 0, "description": "its memory, as the driver reports it"}
             },
             "additionalProperties": true
           }

@@ -1499,6 +1499,15 @@ std::string capabilities_json() {
                                            .raw("files", strings_json(run_control::FILES))
                                            .raw("routes", run_ctl::routes_json(run_ctl::here()))
                                            .str();
+    std::string check_options = "[", gpus = "[";
+    for (const cli::Option & o : cli::command("check")->options) {
+        if (!o.name.ends_with('*')) check_options += (check_options.size() > 1 ? "," : "") + json::quote(std::string(o.name));
+    }
+    for (const MemoryGpu & g : memory_gpus()) {
+        gpus += (gpus.size() > 1 ? "," : "") +
+                json::Object().add("key", std::string(g.key)).add("name", std::string(g.name)).add("bytes", g.bytes).str();
+    }
+    const std::string check = json::Object().raw("options", check_options + "]").raw("memory_gpus", gpus + "]").str();
     return json::Object()
         .add("schema", interfaces::CAPABILITIES.name)
         .add("version", interfaces::CAPABILITIES.version)
@@ -1511,5 +1520,6 @@ std::string capabilities_json() {
         .raw("methods", session::methods_json())
         .raw("devices", devices_json())
         .raw("control", control_member)
+        .raw("check", check)
         .str();
 }
