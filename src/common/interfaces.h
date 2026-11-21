@@ -28,6 +28,7 @@ inline constexpr Schema UNIT_CATALOG = {"mallard-unit-catalog", 1};   // mallard
 inline constexpr Schema CHECK_REPORT = {"mallard-check", 1};          // mallard check --format json
 inline constexpr Schema BOUNDARY_VALUES = {"mallard-boundary-values", 1}; // mallard check --boundary-values DIR
 inline constexpr Schema CASE_VIEW = {"mallard-case-view", 1};         // mallard check --view DIR --format json's view
+inline constexpr Schema CASE_FILES = {"mallard-case-files", 1};       // mallard files INPUT --format json
 inline constexpr Schema FILE_INFO = {"mallard-file-info", 1};         // mallard info FILE --format json
 inline constexpr Schema RUN_DIRECTORY = {"mallard-run-directory", 1}; // mallard info RUN_DIR --format json
 inline constexpr Schema RUN_CONTROL = {"mallard-run-control", 2};     // mallard ctl, the control socket

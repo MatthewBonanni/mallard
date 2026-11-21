@@ -25,6 +25,7 @@
 #include "check.h"
 #include "input.h"
 #include "json.h"
+#include "provenance.h"
 
 class MeshFileCache;
 
@@ -111,7 +112,8 @@ class Context {
 /** @brief What mallard check finds of a case: its report, and the key catalog of its setup. */
 struct CheckResult {
     CheckReport report;
-    std::string catalog;  // key_catalog, as mallard check --catalog writes it
+    std::string catalog;                      // key_catalog, as mallard check --catalog writes it
+    std::vector<provenance::FileRead> files;  // what the setup read, also when it stopped at an error
 };
 
 /**
@@ -149,6 +151,13 @@ const Method * method(std::string_view name);
 int serve(std::istream & in, std::ostream & out, Context & context);
 
 /** @brief A string member of params, else fallback. @throws Error for a member of another type */
+/**
+ * @brief The JSON of mallard files INPUT --format json and of case.files (mallard-case-files): the input and every
+ *        file its setup read, with its role, path as given and resolved, whether it exists, its size and, with
+ *        sha256, its SHA-256.
+ */
+std::string case_files_json(const std::string & input, const CheckResult & result, bool sha256);
+
 std::string string_param(const json::Value & params, const std::string & name, const std::string & fallback = "");
 
 /** @brief A boolean member of params, else fallback. @throws Error for a member of another type */
