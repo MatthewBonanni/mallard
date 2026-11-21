@@ -512,9 +512,15 @@ namespace {
     std::string text = e.what();
     if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
     while (!text.empty() && text.back() == '\n') text.pop_back();
-    throw InputError(text + "\nThe input is not valid TOML there. Common causes: text values without quotes "
+    InputError error(text + "\nThe input is not valid TOML there. Common causes: text values without quotes "
                             "(type = \"euler\"), a missing = or closing bracket, or a key set twice. See "
                             "docs/guide/input_files.md#anatomy-of-an-input.");
+    if (!e.errors().empty() && !e.errors().front().locations().empty()) {
+        const auto & location = e.errors().front().locations().front().first;
+        error.diagnostic.line = location.first_line_number();
+        error.diagnostic.column = location.first_column_number();
+    }
+    throw error;
 }
 
 /** @brief Rejects values deeper than max_nesting (the root table is depth 0), before anything recurses. */
@@ -640,6 +646,243 @@ size_t line_of(const Input & v) {
 size_t line_of(const Input & table, const std::string & key) {
     if (table.is_table() && table.as_table().entries().count(key)) return line_of(table.as_table().entries().at(key));
     return line_of(table);
+}
+
+namespace {
+
+/** @brief A part of a key path: a key, an index ([2]) or the entry of an array of tables by a field ([name = "inlet"]). */
+struct PathPart {
+    enum class Kind { NAME, INDEX, MATCH } kind = Kind::NAME;
+    std::string name;  // the key, or the field matched
+    std::string value;
+    size_t index = 0;
+};
+
+bool key_char(const char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-'; }
+
+/** @brief The end of the bracketed part at text[begin] == '[', past its ']' (a quoted ']' does not close it), or npos. */
+size_t bracket_end(const std::string & text, const size_t begin) {
+    bool quoted = false;
+    for (size_t i = begin + 1; i < text.size(); i++) {
+        if (text[i] == '"') quoted = !quoted;
+        if (quoted) continue;
+        if (text[i] == ']') return i + 1;
+        if (text[i] == '[') return std::string::npos;
+    }
+    return std::string::npos;
+}
+
+std::string trimmed(const std::string & s) {
+    const size_t begin = s.find_first_not_of(' ');
+    return begin == std::string::npos ? "" : s.substr(begin, s.find_last_not_of(' ') - begin + 1);
+}
+
+/** @brief The parts of a key path ("boundaries[name = \"inlet\"].u[0]"); false if it is not one. */
+bool path_parts(const std::string & path, std::vector<PathPart> & parts) {
+    size_t i = 0;
+    while (i < path.size()) {
+        if (path[i] == '[') {
+            const size_t end = bracket_end(path, i);
+            if (end == std::string::npos || parts.empty()) return false;
+            const std::string inner = trimmed(path.substr(i + 1, end - i - 2));
+            PathPart part;
+            const size_t eq = inner.find('=');
+            if (!inner.empty() && inner.size() < 10 &&
+                std::all_of(inner.begin(), inner.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })) {
+                part.kind = PathPart::Kind::INDEX;
+                part.index = std::stoul(inner);
+            } else if (eq != std::string::npos) {
+                part.kind = PathPart::Kind::MATCH;
+                part.name = trimmed(inner.substr(0, eq));
+                part.value = trimmed(inner.substr(eq + 1));
+                if (part.value.size() >= 2 && part.value.front() == '"' && part.value.back() == '"') {
+                    part.value = part.value.substr(1, part.value.size() - 2);
+                }
+                if (part.name.empty()) return false;
+            } else {
+                return false;
+            }
+            parts.push_back(part);
+            i = end;
+            continue;
+        }
+        if (path[i] == '.') {
+            if (parts.empty()) return false;
+            i++;
+        }
+        size_t end = i;
+        while (end < path.size() && key_char(path[end])) end++;
+        if (end == i) return false;
+        parts.push_back({PathPart::Kind::NAME, path.substr(i, end - i), "", 0});
+        i = end;
+    }
+    return !parts.empty();
+}
+
+/** @brief A key path a diagnostic's key may be: its line and column, and the line of the table holding it. */
+struct KeyCandidate {
+    std::string key;
+    size_t line = 0, column = 0, table_line = 0;
+};
+
+/**
+ * @brief The paths parts[i...] lead to from v (at path, in a table on table_line): a key part applies to each entry
+ *        of an array of tables, and the last part may be a key absent from its table that setup looked up.
+ */
+void follow(const Input & v, const std::vector<PathPart> & parts, const size_t i, const std::string & path,
+            const size_t table_line, std::vector<KeyCandidate> & out) {
+    if (i == parts.size()) {
+        const auto location = v.location();
+        out.push_back({path, location.is_ok() ? location.first_line_number() : 0,
+                       location.is_ok() ? location.first_column_number() : 0, table_line});
+        return;
+    }
+    const PathPart & part = parts[i];
+    if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t k = 0; k < array.size(); k++) {
+            if (part.kind == PathPart::Kind::INDEX && k != part.index) continue;
+            const std::string at = path + "[" + std::to_string(k) + "]";
+            if (part.kind == PathPart::Kind::NAME) {
+                follow(array[k], parts, i, at, table_line, out);
+            } else if (part.kind == PathPart::Kind::INDEX) {
+                follow(array[k], parts, i + 1, at, table_line, out);
+            } else if (array[k].is_table()) {
+                const auto & entries = array[k].as_table().entries();
+                const auto field = entries.find(part.name);
+                if (field != entries.end() && field->second.is_string() && field->second.as_string() == part.value) {
+                    follow(array[k], parts, i + 1, at, table_line, out);
+                }
+            }
+        }
+        return;
+    }
+    if (part.kind != PathPart::Kind::NAME || !v.is_table()) return;
+    const auto & table = v.as_table();
+    const size_t here = line_of(v);
+    const std::string key = join(path, part.name);
+    const auto it = table.entries().find(part.name);
+    if (it != table.entries().end()) {
+        follow(it->second, parts, i + 1, key, here, out);
+    } else if (i + 1 == parts.size() && table.lookups_made().keys.count(part.name)) {
+        out.push_back({key, here, 0, here});
+    }
+}
+
+void collect_tables(const Input & v, const std::string & path, std::vector<std::pair<const Input *, std::string>> & out) {
+    if (v.is_table()) {
+        if (!path.empty()) out.emplace_back(&v, path);
+        for (const auto & [key, value] : v.as_table().entries()) collect_tables(value, join(path, key), out);
+    } else if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t k = 0; k < array.size(); k++) collect_tables(array[k], path + "[" + std::to_string(k) + "]", out);
+    }
+}
+
+const KeyCandidate * on_line(const std::vector<KeyCandidate> & candidates, const size_t line) {
+    for (const KeyCandidate & c : candidates) {
+        if (line > 0 && (c.line == line || c.table_line == line)) return &c;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+KeyLocation locate_key(const Input & input, const std::string & key, const size_t line) {
+    std::vector<PathPart> parts;
+    if (!input.is_table() || !path_parts(key, parts)) return {};
+    std::vector<KeyCandidate> absolute;
+    follow(input, parts, 0, "", 0, absolute);
+    const KeyCandidate * pick = on_line(absolute, line);
+    std::vector<KeyCandidate> relative;
+    if (!pick && line > 0) {
+        std::vector<std::pair<const Input *, std::string>> tables;
+        collect_tables(input, "", tables);
+        for (const auto & [table, path] : tables) follow(*table, parts, 0, path, line_of(*table), relative);
+        pick = on_line(relative, line);
+    }
+    if (!pick && absolute.size() == 1) pick = &absolute[0];
+    if (!pick) return {};
+    KeyLocation where{pick->key, line > 0 ? line : pick->line, 0};
+    if (pick->line == where.line) where.column = pick->column;
+    return where;
+}
+
+KeyLocation locate_message(const Input & input, const std::string & message) {
+    std::string text = message;
+    size_t line = 0;
+    if (text.rfind("line ", 0) == 0) {
+        size_t end = 5;
+        while (end < text.size() && end < 15 && std::isdigit(static_cast<unsigned char>(text[end]))) end++;
+        if (end > 5 && text.compare(end, 2, ": ") == 0) {
+            line = std::stoul(text.substr(5, end - 5));
+            text = text.substr(end + 2);
+        }
+    }
+    std::vector<std::string> keys;
+    size_t open = 0;
+    while (open < text.size() && open < 2 && text[open] == '[') open++;
+    if (open > 0) {
+        size_t end = open;
+        while (end < text.size() && (key_char(text[end]) || text[end] == '.')) end++;
+        if (end == open || text.compare(end, open, std::string(open, ']')) != 0) return {};
+        const std::string table = text.substr(open, end - open);
+        const size_t after = end + open;
+        size_t name_end = after + 1;
+        while (after < text.size() && text[after] == ' ' && name_end < text.size() && key_char(text[name_end])) name_end++;
+        if (name_end > after + 1) keys.push_back(table + "." + text.substr(after + 1, name_end - after - 1));
+        keys.push_back(table);
+    } else {
+        size_t end = 0;
+        bool path = false;
+        while (end < text.size()) {
+            if (key_char(text[end])) {
+                end++;
+            } else if (text[end] == '.' || text[end] == '[') {
+                const size_t next = text[end] == '[' ? bracket_end(text, end) : end + 1;
+                if (next == std::string::npos) break;
+                path = true;
+                end = next;
+            } else {
+                break;
+            }
+        }
+        while (end > 0 && text[end - 1] == '.') end--;
+        if (end == 0 || end >= text.size()) return {};
+        const bool key = text[end] == ':' || text.compare(end, 2, " =") == 0 || (path && text[end] == ' ');
+        if (!key) return {};
+        keys.push_back(text.substr(0, end));
+    }
+    for (const std::string & key : keys) {
+        KeyLocation where = locate_key(input, key, line);
+        if (!where.key.empty()) return where;
+    }
+    return {};
+}
+
+namespace {
+
+std::string error_list(const std::vector<InputError> & errors) {
+    std::string text = std::to_string(errors.size()) + " errors in the input:";
+    for (const InputError & e : errors) text += "\n  " + std::string(e.what());
+    return text;
+}
+
+} // namespace
+
+InputErrors::InputErrors(std::vector<InputError> errors_in) : InputError(error_list(errors_in)), errors(std::move(errors_in)) {}
+
+void InputErrorList::add(const InputError & e) {
+    if (const auto * several = dynamic_cast<const InputErrors *>(&e)) {
+        errors.insert(errors.end(), several->errors.begin(), several->errors.end());
+    } else {
+        errors.push_back(e);
+    }
+}
+
+void InputErrorList::throw_if_any() const {
+    if (errors.size() == 1) throw errors[0];
+    if (errors.size() > 1) throw InputErrors(errors);
 }
 
 std::string suggest_value(const std::string & value, const std::vector<std::string> & names) {

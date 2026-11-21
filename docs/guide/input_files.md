@@ -480,11 +480,11 @@ The report opens and closes with the result, and the exit status is 1 if there i
 
 ### Diagnostics
 
-Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
+Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. The warnings the setup gives (such as `W-FORMAT-VTU` or `W-PROBE-OUTSIDE`) are diagnostics of the report too, rather than lines printed during the setup. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
 
 | Code | What it means | What to do |
 |---|---|---|
-| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to |
+| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key. The errors of independent entries (every `[[boundaries]]` entry, with the zones none covers, and every `[[write_data]]` entry) are reported together, one diagnostic each | Fix the key; the report covers only what the setup got to |
 | <a id="e-setup"></a>`E-SETUP` | The setup stopped on another error: a file it cannot read, a mesh it cannot partition, memory it cannot allocate | The message says what failed |
 | <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up | Fix or remove it. A run rejects the same keys |
 | <a id="w-key-deprecated"></a>`W-KEY-DEPRECATED` | A key renamed or replaced in a later release, still read for now | `mallard input upgrade input.toml` rewrites it ([Inputs from older releases](#inputs-from-older-releases)) |
@@ -519,7 +519,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | Member | Holds |
 |---|---|
 | `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file` (`null` without an input), `setup_done`, `dim` | The result |
-| `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
+| `diagnostics` | `[{severity, code, message, key, line, column, docs}]`, in the order found. `key` is the full path of the input key the diagnostic is about, with the index of each entry of an array of tables (`boundaries[1].T`, `write_data[0].interval`, `mesh.Nx`; a table, `numerics.error_control`, or an array of tables, `boundaries`, when it is about the whole); `line` and `column` are where it is in the input file (`column` where the value starts; a key the input leaves out has its table's line). Each is `null` where unknown or where the diagnostic is about no key (mesh quality, memory, the environment); a syntax error has a line and column but no key |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |

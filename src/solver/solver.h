@@ -853,7 +853,9 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        /** @brief "zone a (12 faces), zone b (3 faces)": the boundary zones with faces of no condition, but those of skip. */
+        std::string zones_without_condition(const std::vector<int32_t> & face_bc,
+                                            const std::vector<std::string> & skip = {}) const;
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */

@@ -853,10 +853,12 @@ void Solver::init_physics() {
     init_radiation();
 }
 
-std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc) const {
+std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc,
+                                            const std::vector<std::string> & skip) const {
     std::vector<int32_t> local;  // "zone=faces;" of this rank's owned boundary faces, as characters
     for (const FaceZone & zone : *mesh->face_zones()) {
         if (zone.get_type() != FaceZoneType::BOUNDARY) continue;
+        if (std::find(skip.begin(), skip.end(), zone.get_name()) != skip.end()) continue;
         uint64_t n = 0;
         for (uint32_t i = 0; i < zone.n_faces(); i++) {
             const uint32_t f = zone.h_faces(i);
@@ -939,7 +941,10 @@ void Solver::init_boundaries() {
         return *default_walls;
     };
 
-    for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
+    // The entries are independent: setup reports the errors of all of them, and the zones none covers
+    InputErrorList entry_errors;
+    std::vector<std::string> failed_zones = {PARTITION_ZONE};
+    for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) try {
         const Input & bound = input_boundaries[i_bc];
         const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
         if (!bound.contains("name")) {
@@ -1232,6 +1237,25 @@ void Solver::init_boundaries() {
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
         if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
+    } catch (const InputError & e) {
+        entry_errors.add(e);
+        const Input & bound = input_boundaries[i_bc];
+        if (bound.is_table() && bound.as_table().entries().count("name") &&
+            bound.as_table().entries().at("name").is_string()) {
+            failed_zones.push_back(bound.as_table().entries().at("name").as_string());
+        }
+    }
+    const auto no_condition = [](const std::string & uncovered) {
+        return InputError({.key = "boundaries",
+                           .message = "no condition for " + uncovered + "; every boundary face needs one",
+                           .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
+                                  "\"symmetry\" or \"outlet_pressure\") for each zone",
+                           .docs = "docs/guide/boundary_conditions.md#available-boundary-conditions"});
+    };
+    if (!entry_errors.empty()) {
+        const std::string uncovered = zones_without_condition(face_bc, failed_zones);
+        if (!uncovered.empty()) entry_errors.add(no_condition(uncovered));
+        entry_errors.throw_if_any();
     }
     on_every_rank([&] {
         for (size_t k = 0; k < profiled_faces.size(); k++) {
@@ -1260,14 +1284,7 @@ void Solver::init_boundaries() {
         bcs.push_back(bc);
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
-    const std::string uncovered = zones_without_condition(face_bc);
-    if (!uncovered.empty()) {
-        throw InputError({.key = "boundaries",
-                          .message = "no condition for " + uncovered + "; every boundary face needs one",
-                          .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
-                                 "\"symmetry\" or \"outlet_pressure\") for each zone",
-                          .docs = "docs/guide/boundary_conditions.md#available-boundary-conditions"});
-    }
+    if (const std::string uncovered = zones_without_condition(face_bc); !uncovered.empty()) throw no_condition(uncovered);
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
@@ -2000,9 +2017,12 @@ void Solver::init_output(region::Regions & regions) {
         run_log::close();
     }
     if (contains_optional(input, "write_data")) {
+        // The writers are independent: setup reports the errors of all of them
+        InputErrorList writer_errors;
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            add_data_writers(output, regions, async_output, io_threads);
+            writer_errors.attempt([&] { add_data_writers(output, regions, async_output, io_threads); });
         }
+        writer_errors.throw_if_any();
     }
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);

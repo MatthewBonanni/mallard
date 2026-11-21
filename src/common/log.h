@@ -128,6 +128,31 @@ void set_verbose(bool on);
  */
 void warning(std::string_view code, std::string_view message);
 
+/** @brief A warning that a WarningCapture kept. */
+struct CapturedWarning {
+    std::string code;
+    std::string message;
+};
+
+/**
+ * @brief While one lives, warning() keeps its warnings for it to take instead of printing them, on every rank:
+ *        mallard check reports the warnings of the setup with its own.
+ */
+class WarningCapture {
+    public:
+        WarningCapture();
+        ~WarningCapture();
+        WarningCapture(const WarningCapture &) = delete;
+        WarningCapture & operator=(const WarningCapture &) = delete;
+        /** @brief The warnings kept since the last call, in order. */
+        std::vector<CapturedWarning> take();
+
+    private:
+        WarningCapture * outer;
+        std::vector<CapturedWarning> kept;
+        friend void warning(std::string_view code, std::string_view message);
+};
+
 /**
  * @brief Error on stderr from the calling rank, as warning, prefixed with the rank in parallel runs; also a record
  *        of the run log (rank 0).

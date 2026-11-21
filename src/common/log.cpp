@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 
 #include <unistd.h>
 
@@ -357,7 +358,37 @@ std::string diagnostic(const bool is_error, std::string_view code, std::string_v
            " " + std::string(message) + "\n  " + paint(diagnostic_code::docs(code), Style::DIM, color);
 }
 
+namespace {
+
+WarningCapture * capture = nullptr;
+std::mutex capture_mutex;
+
+} // namespace
+
+WarningCapture::WarningCapture() {
+    const std::lock_guard<std::mutex> lock(capture_mutex);
+    outer = capture;
+    capture = this;
+}
+
+WarningCapture::~WarningCapture() {
+    const std::lock_guard<std::mutex> lock(capture_mutex);
+    capture = outer;
+}
+
+std::vector<CapturedWarning> WarningCapture::take() {
+    const std::lock_guard<std::mutex> lock(capture_mutex);
+    return std::exchange(kept, {});
+}
+
 void warning(std::string_view code, std::string_view message) {
+    {
+        const std::lock_guard<std::mutex> lock(capture_mutex);
+        if (capture) {
+            capture->kept.push_back({std::string(code), std::string(message)});
+            return;
+        }
+    }
     if (!comm::is_root()) return;
     close_phase();
     std::cout << std::flush;

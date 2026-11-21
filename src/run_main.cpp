@@ -97,7 +97,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 } catch (const InputError & e) {
                     if (resolve) throw;
                     report.input_file = input_file;
-                    report.error(diagnostic_code::INPUT, input_file + ": " + error_text(e));
+                    report.input_error(e, input_file, Input());
                 }
                 if (!resolve) check_environment(report);
                 if (resolve && report.ok()) {
