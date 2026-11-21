@@ -217,20 +217,31 @@ $$
 \begin{equation}
 \phi_i =
 \begin{cases}
-1 & \nabla\cdot\mathbf{u} < 0 \ \text{and}\ (\nabla\cdot\mathbf{u})^2 > \theta_D\left((\nabla\cdot\mathbf{u})^2 + \lvert\nabla\times\mathbf{u}\rvert^2\right), \\
+1 & \nabla\cdot\mathbf{u} < 0 \ \text{and}\ (\nabla\cdot\mathbf{u})^2 > \theta_D\left((\nabla\cdot\mathbf{u})^2 + \lvert\nabla\times\mathbf{u}\rvert^2 + \epsilon_i\right), \\
 \phi_\mathrm{floor} & \text{otherwise},
 \end{cases}
 \label{eq:hybrid-central-upwind-flux-2}
 \end{equation}
 $$
 
-with $\theta_D$ = `[numerics.hybrid] sensor_threshold` (default 0.65) and
-$\phi_\mathrm{floor}$ = `upwind_floor` (default 0).
+with $\theta_D$ = `[numerics.hybrid] sensor_threshold` (default 0.65),
+$\phi_\mathrm{floor}$ = `upwind_floor` (default 0) and
+$\epsilon_i = (\kappa\, c_i / h_i)^2$, from the cell's sound speed $c_i$ and
+size $h_i = V_i^{1/d}$, with $\kappa$ = `dilatation_scale` (default $10^{-5}$).
+Without $\epsilon_i$ every compression with little vorticity would be a shock,
+round-off compressions of uniform flow included; with it a compression must
+reach $\lvert\nabla\cdot\mathbf{u}\rvert > \kappa \sqrt{\theta_D/(1-\theta_D)}\, c_i/h_i$.
+The default stays far below the compressions of grid-scale noise, whose
+upwinding damps it (a larger $\kappa$, as in
+[Hendrickson et al. 2018](../references.md#hendrickson-2018), keeps acoustic
+noise central but makes Sod's problem less accurate; see the
+[design](../design/les.md#43-low-dissipation-convective-flux-decision-7)).
 
 ![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-light.svg#gh-light-mode-only)
 ![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-dark.svg#gh-dark-mode-only)
 
-*A cell is upwind where it compresses and $\lvert\nabla\times\mathbf{u}\rvert < \lvert\nabla\cdot\mathbf{u}\rvert\sqrt{(1 - \theta_D)/\theta_D}$:
+*A cell is upwind where it compresses and $\lvert\nabla\times\mathbf{u}\rvert < \lvert\nabla\cdot\mathbf{u}\rvert\sqrt{(1 - \theta_D)/\theta_D}$
+(for $\lvert\nabla\cdot\mathbf{u}\rvert \gg \epsilon_i^{1/2}$):
 shocks, not vortices or expansions. A larger threshold narrows the wedge.*
 
 A face takes the larger
