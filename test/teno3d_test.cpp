@@ -685,6 +685,31 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     }
 }
 
+TEST(TENO3DSetup, TheSearchAloneFindsTheGatherDepthOfTheFullSetup) {
+    // Mixed cells with walls, and a periodic box whose searches meet its cells again in other periods;
+    // at order 3 the sector stencils' search goes deeper than the central one's
+    auto box = std::make_shared<Mesh>();
+    box->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+                         "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+                         "[[periodic]]\nzones = [\"back\", \"front\"]\n"));
+    box->copy_host_to_device();
+    for (const auto & mesh : {make_mesh_3d("cartesian_mixed", 4, 4, 4), box}) {
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        for (const int order : {3, 6}) {
+            for (const bool sectors : {true, false}) {
+                auto full = make_teno_with(mesh, bd, order, [&](TENO & t) { t.sector_stencils = sectors; });
+                TENO search;
+                search.set_mesh(mesh);
+                search.set_boundaries(bd);
+                search.sector_stencils = sectors;
+                search.find_gather_depth(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+                EXPECT_EQ(search.gather_depth, full->gather_depth)
+                    << mesh->n_cells << " cells, order " << order << (sectors ? "" : ", central stencils alone");
+            }
+        }
+    }
+}
+
 TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
     // The wall degree is 3, whose pseudo-inverse has no rows of degrees 4 and
     // 5. Pyramids at order 6 start from 208 entries, other cells from 110. The

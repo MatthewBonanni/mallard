@@ -1114,7 +1114,12 @@ class Solver {
         HaloExchange halo;
 
         int base_halo_layers() const;
-        bool halo_too_shallow();
+        /** @brief A TENO with only the gather_depth of the stencil searches on this mesh (null without TENO, or serial). */
+        std::unique_ptr<TENO> stencil_reach();
+        /** @brief Whether the halo misses layers that teno's stencil searches (if any), image neighbors or the wall model need; deepens halo_layers to them. */
+        bool halo_too_shallow(const TENO * teno);
+        /** @brief Mesh, boundaries and options of a TENO before its init(), as this run sets it up. */
+        void configure_teno(TENO & teno) const;
         void trim_halo();
         uint32_t n_gradient_cells() const;
         void describe_partition_surface();
