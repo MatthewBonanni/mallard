@@ -374,6 +374,9 @@ class DataWriter {
          *        (collective on a distributed mesh).
          */
         void record_hashed(bool wait);
+        struct InFlight;
+        /** @brief The files of a hashed snapshot, every rank's (collective), each with its hash. */
+        void gather_hashes(InFlight & w, bool collective) const;
         /**
          * @brief Rename the restart file written under a temporary name once
          *        every rank has written its part: at once if wait, else only if done.
@@ -476,16 +479,25 @@ class DataWriter {
         unsigned io_threads = 1;
         std::future<void> pending;
         // A snapshot's output record: this rank's files to hash (read under file, recorded under name; contents:
-        // hashed, else only sized), and once hashed in the background, their sizes and SHA-256
+        // hashed, else only sized; shared: written by every rank, each hashing its share of the chunks), and once
+        // hashed in the background, their sizes and chunks' SHA-256, those of a shared file from chunk first on
         struct ToHash {
             std::string file, name;
             bool contents = true;
+            bool shared = false;
+        };
+        struct Hashed {
+            WrittenFile file;
+            bool shared = false;
+            uint64_t first = 0;
         };
         struct InFlight {
             uint64_t step = 0;
             double t = 0.0;
             std::string kind, path, reason;
+            uint64_t chunk_bytes = 0;
             std::vector<ToHash> hash;
+            std::vector<Hashed> hashed_files;
             std::vector<WrittenFile> files;
             std::future<void> hashed;
             double seconds = 0.0;

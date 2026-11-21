@@ -790,14 +790,16 @@ the global order), which an HDF5 mesh can carry.
 
 ### Data and transfers
 
-- **Hashes in parallel.** Today rank 0 hashes every shared output file (VTKHDF,
-  XDMF, restart) in one background thread by reading it back: about 25 s for a
-  40 GB restart at 1.6 GB/s, minutes for a 200 GB one, a queue that a run
-  writing often outgrows. Object ids for large files become a **chunk tree**:
-  SHA-256 of every 64 MiB chunk, computed by all ranks in parallel once the
-  file is closed (each reading its share of the chunks), and the object id is the SHA-256 of that list (files of one chunk keep
-  their plain SHA-256). Chunks are also the unit of resume, verification and
-  parallel transfer ([#1329](https://github.com/MatthewBonanni/mallard/issues/1329)).
+- **Hashes in parallel.** Object ids for large files are a **chunk tree**:
+  the SHA-256 of every 64 MiB chunk, computed by all ranks in parallel once the
+  file is closed (each reading its share of the chunks), and the object id is
+  the SHA-256 of that list (files of one chunk keep their plain SHA-256),
+  `sha256_tree` with `chunk_bytes` and `chunks` in the output record. Rank 0
+  alone reading back every shared file (about 25 s for a 40 GB restart at
+  1.6 GB/s, minutes for a 200 GB one, a queue that a run writing often
+  outgrew) is gone. Chunks are also the unit of resume, verification and
+  parallel transfer ([#1329](https://github.com/MatthewBonanni/mallard/issues/1329),
+  [design](output_objects.md#chunk-tree-hashes)).
 - **Manifests of millions of files.** `mallard files` streams JSON lines rather
   than one document, built from the run log (O(records)), listing directories
   only for what the log does not record, all in one process on the remote. It
