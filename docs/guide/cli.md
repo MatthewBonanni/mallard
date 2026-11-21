@@ -613,7 +613,9 @@ FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5), a series file (.vtkhdf) or index
 file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 mesh).
 Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
-does.
+does. For a restart file it says whether this build continues from it, and if
+not why (precision, dimension, flow variables, compression without zlib):
+continuable and incompatibilities in --format json (mallard-file-info).
 
 RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
 the same records as its report.html, its outcome, health (lowest values,

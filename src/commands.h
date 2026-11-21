@@ -38,6 +38,13 @@ int reactor_main(const cli::Args & args);
 /** @brief `mallard info FILE|RUN_DIR`: what a file or a run directory holds. */
 int info_main(const cli::Args & args);
 
+/**
+ * @brief The JSON of mallard info FILE --format json and of the session's file.info, for an output or restart
+ *        file: what it holds (mallard-file-info), and for a restart whether this build continues from it.
+ * @throws std::runtime_error for a file that cannot be read
+ */
+std::string file_info_json(const std::string & path);
+
 /** @brief `mallard list fields [INPUT]`: the output fields there are, or those of a case. */
 int list_fields_main(const cli::Args & args);
 

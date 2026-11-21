@@ -1,0 +1,1 @@
+- `mallard info FILE.restart` says whether this build continues from the restart, and if not why (precision, dimension, flow variables, compression without zlib): `continuable` and `incompatibilities` in `--format json`, whose output now names its schema, `mallard-file-info`. The session's `file.info` answers the same. See [Restarts](docs/guide/initialization.md#restarts).

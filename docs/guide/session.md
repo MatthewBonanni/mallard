@@ -29,6 +29,7 @@ Each request with a one-shot command runs the same code as that command, so its 
 | `case.boundary_values` | `dir`: where to write them | `mallard-boundary-values`: per `[[boundaries]]` entry, the file of its values at each face and each column's range; estimated inflow of stagnation and mass-flow inlets ([Boundary values](input_files.md#boundary-values)) | `mallard check INPUT --boundary-values DIR --format json` (its `boundary_values`) |
 | `case.keys` | `section` (optional) | `mallard-key-catalog` | `mallard list keys [SECTION] INPUT --format json` |
 | `keys.catalog` | `section` (optional) | `mallard-key-catalog`, with each table's `form` ([The key catalog](input_files.md#the-key-catalog)) | `mallard list keys [SECTION] --format json` |
+| `file.info` | `file`: an output or restart file | `mallard-file-info`: what it holds; for a restart, `continuable` by this build and its `incompatibilities` ([Restarts](initialization.md#restarts)) | `mallard info FILE --format json` |
 | `units.catalog` | none | `mallard-unit-catalog`: every unit with its dimension (as the key catalog's `dimension` names it), exponents and exact factor, the SI prefixes and the named dimensions ([Units](input_files.md#units)) | `mallard list units --format json` |
 | `run.launch` | `input` (default: the open case's file, which must be saved), `run_dir` (default: the session's working directory), `restart`, `launcher` (e.g. `["mpirun", "-n", "4"]`: `mpirun`, `mpiexec` or `srun`), `options` (more arguments of `mallard -i`), `timeout` | `mallard-run-launch`: run ID, directory, PID, endpoint record | `mallard -i INPUT --detach` |
 | `run.control` | `run` (directory or run ID), `action` (`status`, `checkpoint`, `stop`, `set`), `settings` (object), `id`, `wait` (`accepted` or `done`), `timeout`, `allow_files` | `mallard-run-control` | `mallard ctl RUN ACTION [KEY=VALUE...] --format json` |
@@ -74,6 +75,7 @@ Every result has its schema's `version`, the session's own results also its name
 | `mallard-case-view.v1` | `case.view`, and the `view` of `mallard check --view DIR --format json` |
 | `mallard-boundary-values.v1` | `case.boundary_values`, and the `boundary_values` of `mallard check --boundary-values DIR --format json` |
 | `mallard-key-catalog.v1` | `mallard list keys --format json`, `case.keys` and `keys.catalog` |
+| `mallard-file-info.v1` | `mallard info FILE --format json` (an output or restart file) and `file.info`; its `version` is the file's format version, as it always was |
 | `mallard-unit-catalog.v1` | `mallard list units --format json` and `units.catalog` |
 | `mallard-diagnostic.v1` | one diagnostic, as the others list them |
 | `mallard-run-control.v2` | `mallard ctl --format json` and `run.control`; `$defs` has the socket's requests and replies and the run log's `control` records |
