@@ -88,6 +88,7 @@ void Solver::init_solution() {
     if (is_mixture() && (!from_file || layered)) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
+    if (mixture.tabulated()) check_table_pressure();
 }
 
 void Solver::init_solution_restart() {

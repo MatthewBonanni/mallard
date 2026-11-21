@@ -11,6 +11,7 @@
 
 #include "flamelet.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <type_traits>
 
@@ -78,7 +79,21 @@ Gas<Space> make_gas(const Table & table) {
 
 FlameletModel::FlameletModel(std::shared_ptr<const Table> table, const bool viscous) :
     m_table(std::move(table)), gas(make_gas<Kokkos::DefaultExecutionSpace::memory_space>(*m_table)),
-    host_gas(make_gas<Kokkos::HostSpace>(*m_table)), m_viscous(viscous) {}
+    host_gas(make_gas<Kokkos::HostSpace>(*m_table)), m_viscous(viscous) {
+    m_output_names.push_back("T_TABLE");
+    const int32_t hrr = m_table->field("HRR");
+    m_heat_release = hrr >= 0;
+    if (m_heat_release) {
+        m_output_names.push_back("HRR");
+        m_output_fields.push_back(static_cast<uint32_t>(hrr));
+    }
+    const std::vector<std::string> scalars = scalar_names();
+    for (const std::string & s : m_table->species()) {
+        if (std::find(scalars.begin(), scalars.end(), s) != scalars.end()) continue;
+        m_output_names.push_back("Y_" + s);
+        m_output_fields.push_back(static_cast<uint32_t>(m_table->field("Y_" + s)));
+    }
+}
 
 FlameletModel FlameletModel::from_input(const Input & input) {
     const Input & physics = input.at("physics");
@@ -134,6 +149,16 @@ void FlameletModel::surrogates(const double T, const double Z, const double C, d
     const Thermo th = thermo(Z, C);
     gamma = th.gamma(T);
     e0 = th.energy(T) - th.cv(T) * T;
+}
+
+void FlameletModel::outputs(const double rho, const double Z, const double C, double * out) const {
+    const Point<3> p = host_gas.locate(Z, 0.0, C);
+    out[0] = host_gas.thermo(p).T0;
+    for (size_t i = 0; i < m_output_fields.size(); i++) out[1 + i] = host_gas.field(p, m_output_fields[i]);
+    if (m_heat_release) {
+        const double r = rho / host_gas.field(p, host_gas.source_fields[1]);
+        out[1] *= r * r;
+    }
 }
 
 report::Summary FlameletModel::summary() const {
