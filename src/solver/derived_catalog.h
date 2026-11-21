@@ -34,7 +34,7 @@ enum Field : uint8_t {
     CP,
     MIXTURE_FRACTION,
     PROGRESS_VARIABLE,
-    FPV_LAMBDA,
+    C_NORM,
     FLAME_INDEX,
     SCALAR_DISSIPATION,
     N_FIELDS
@@ -91,7 +91,7 @@ inline constexpr Definition FIELDS[N_FIELDS] = {
      "a mixture with [output.mixture] fuel and oxidizer, or gas = \"flamelet\" (its Z)"},
     {"PROGRESS_VARIABLE", dim::none, "progress variable", detail::MIXTURE, need::MIXTURE | need::PROGRESS,
      "a mixture with [output.mixture] progress"},
-    {"FPV_LAMBDA", dim::none, "normalized progress variable Lambda of the flamelet table", detail::MIXTURE,
+    {"C_NORM", dim::none, "normalized progress variable Lambda of the flamelet table", detail::MIXTURE,
      need::FLAMELET, "gas = \"flamelet\""},
     {"FLAME_INDEX", dim::none, "Takeno flame index", detail::MIXTURE,
      need::MIXTURE | need::SPECIES_PAIR | need::SPECIES_GRADIENTS,
