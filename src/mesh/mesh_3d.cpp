@@ -225,9 +225,9 @@ void Mesh::compute_geometry() {
             for (size_t i = 0; i < 3; i++) x[i] += w * (c[i] + p[k][i] + q[i]) / 3.0;
             w_sum += w;
         }
-        h_face_area(f) = static_cast<rtype>(area);
+        h_face_area.table(f, 0) = static_cast<rtype>(area);
         FOR_I_DIM {
-            h_face_normals(f, i) = static_cast<rtype>(A[i]);
+            h_face_normals.table(f, i) = static_cast<rtype>(A[i]);
             h_face_coords(f, i) = static_cast<rtype>(x[i] / w_sum);
         }
     }

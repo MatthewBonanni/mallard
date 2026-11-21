@@ -25,6 +25,7 @@
 
 #include "cell_order.h"
 #include "curved.h"
+#include "face_weights.h"
 #include "periodic_maps.h"
 #include "zone.h"
 
@@ -372,6 +373,15 @@ class Mesh {
         void copy_host_to_device();
 
         /**
+         * @brief Stores the normals and areas once per bitwise distinct row, on
+         *        the device and the host (copy_host_to_device does).
+         */
+        void share_face_geometry();
+
+        /** @brief The normals and areas back per face, writable through table(f, k). */
+        void unshare_face_geometry();
+
+        /**
          * @brief Copy mesh data from device to host.
          */
         void copy_device_to_host();
@@ -577,9 +587,9 @@ class Mesh {
         // cell_volume and face_area
         bool axisymmetric = false;
         Kokkos::View<rtype *> cell_measure;
-        Kokkos::View<rtype *> face_measure;
+        FaceRows<> face_measure;
         Kokkos::View<rtype *>::host_mirror_type h_cell_measure;
-        Kokkos::View<rtype *>::host_mirror_type h_face_measure;
+        FaceRows<Kokkos::HostSpace> h_face_measure;
         // Axisymmetric runs: r-weighted second central moments of each cell
         // [xx, xy, yy] about its center (empty otherwise)
         Kokkos::View<rtype *[3]> cell_covariance;
@@ -587,8 +597,10 @@ class Mesh {
         Kokkos::View<rtype *[N_DIM]> node_coords;
         Kokkos::View<rtype *[N_DIM]> cell_coords;
         Kokkos::View<rtype *> cell_volume;
-        Kokkos::View<rtype *> face_area;
-        Kokkos::View<rtype *[N_DIM]> face_normals;
+        // Faces with bitwise equal normals and areas share a row of them
+        // (share_face_geometry); the setup writes them per face (table(f, k))
+        FaceRows<> face_area;
+        FaceRows<> face_normals;
         Kokkos::View<rtype *[N_DIM]> face_coords;
         Kokkos::View<uint32_t *> nodes_of_cell;
         Kokkos::View<uint32_t *> offsets_nodes_of_cell;
@@ -609,8 +621,9 @@ class Mesh {
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_node_coords;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_cell_coords;
         Kokkos::View<rtype *>::host_mirror_type h_cell_volume;
-        Kokkos::View<rtype *>::host_mirror_type h_face_area;
-        Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_face_normals;
+        FaceRows<Kokkos::HostSpace> h_face_area;
+        FaceRows<Kokkos::HostSpace> h_face_normals;
+        bool share_rows = true;  // false keeps the normals and areas per face (tests)
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_face_coords;
         Kokkos::View<uint32_t *>::host_mirror_type h_nodes_of_cell;
         Kokkos::View<uint32_t *>::host_mirror_type h_offsets_nodes_of_cell;

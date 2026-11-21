@@ -1159,11 +1159,12 @@ void Mesh::apply_curved(const curved::Surfaces & surfaces) {
         throw InputError("mesh.curved: the zone's nodes are " + std::to_string(offset) +
                          " edge lengths away from its shape (center or radius?).");
     }
+    unshare_face_geometry();
     for (uint32_t f = 0; f < n_faces; f++) {
         if (!geometry->face_is_curved(f) || N_DIM == 2) continue;
         const curved::Vec3 A = geometry->area_vector(f);
-        FOR_I_DIM h_face_normals(f, i) = rtype(A[i]);
-        h_face_area(f) = rtype(std::sqrt(A[0] * A[0] + A[1] * A[1] + A[2] * A[2]));
+        FOR_I_DIM h_face_normals.table(f, i) = rtype(A[i]);
+        h_face_area.table(f, 0) = rtype(std::sqrt(A[0] * A[0] + A[1] * A[1] + A[2] * A[2]));
     }
     std::vector<curved::Vec3> x;
     std::vector<double> w;

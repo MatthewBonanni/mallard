@@ -396,13 +396,13 @@ void Mesh::allocate_and_fill(std::vector<std::array<rtype, N_DIM>> && nodes, Cel
 void Mesh::allocate_geometry() {
     cell_coords = Kokkos::View<rtype *[N_DIM]>("cell_coords", n_cells);
     cell_volume = Kokkos::View<rtype *>("cell_volume", n_cells);
-    face_area = Kokkos::View<rtype *>("face_area", n_faces);
-    face_normals = Kokkos::View<rtype *[N_DIM]>("face_normals", n_faces);
+    face_area = per_face_rows("face_area", n_faces, 1);
+    face_normals = per_face_rows("face_normals", n_faces, N_DIM);
     face_coords = Kokkos::View<rtype *[N_DIM]>("face_coords", n_faces);
     h_cell_coords = Kokkos::create_mirror_view(cell_coords);
     h_cell_volume = Kokkos::create_mirror_view(cell_volume);
-    h_face_area = Kokkos::create_mirror_view(face_area);
-    h_face_normals = Kokkos::create_mirror_view(face_normals);
+    h_face_area = face_area.host();
+    h_face_normals = face_normals.host();
     h_face_coords = Kokkos::create_mirror_view(face_coords);
     axisymmetric = false;
     cell_measure = cell_volume;
