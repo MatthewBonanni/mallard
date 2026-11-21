@@ -8,6 +8,7 @@
 #include "setup_cache.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <system_error>
@@ -127,7 +128,9 @@ std::string stamp(const std::string & path) {
     if (e) return "";
     const auto time = fs::last_write_time(path, e);
     if (e) return "";
-    return std::to_string(bytes) + "@" + std::to_string(time.time_since_epoch().count());
+    // libc++'s file_clock counts in __int128, which std::to_string does not take
+    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(time.time_since_epoch()).count();
+    return std::to_string(bytes) + "@" + std::to_string(ns);
 }
 
 bool lookups_empty(const StageRecord::Lookups & l) {
