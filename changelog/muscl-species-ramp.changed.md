@@ -1,0 +1,1 @@
+- MUSCL mass-fraction bounds: a species' cut to stay in [0, 1] moves from its own slope to the shared limiter of the cell along a ramp in the cut from 3e-5 to 3e-4, instead of jumping at 1e-4, so that the limiter is continuous in the data; front errors of the propane flame fronts are unchanged and the H2/air examples are bitwise unchanged (#1242).
