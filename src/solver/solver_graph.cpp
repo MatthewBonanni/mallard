@@ -1277,6 +1277,10 @@ step_queue::Horizon Solver::step_horizon() const {
     if (n_steps > 0) h.at_step(n_steps);
     if (t_stop > 0) h.at_time(t_stop_reached());
     if (!triggers.empty() && !triggers_on_device()) h.at_step(step + 1);
+    // The host takes up the next landing time once a step reaches it
+    if (const rtype landing = next_landing_time(); landing < std::numeric_limits<rtype>::infinity()) {
+        h.at_time(landing - precision_tol(1e-9, 1e-5) * Kokkos::abs(landing));
+    }
     if (!monitors_on_device()) {
         for (const auto & monitor : force_monitors) h.at_multiple(step, monitor.interval);
         h.at_multiple(step, integral_monitor.interval);
