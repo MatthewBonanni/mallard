@@ -22,6 +22,8 @@
 #include "commands.h"
 #include "common_typedef.h"
 #include "log.h"
+#include "run_control.h"
+#include "run_ctl.h"
 #include "session.h"
 
 namespace session {
@@ -161,6 +163,72 @@ std::string keys_catalog(Context &, const json::Value & params) {
     }
 }
 
+std::vector<std::string> strings_param(const json::Value & params, const std::string & name) {
+    std::vector<std::string> out;
+    const json::Value * v = params.find(name);
+    if (!v || v->is_null()) return out;
+    if (v->type != json::Value::Type::ARRAY) throw Error(code::INVALID_PARAMS, name + " takes an array of strings");
+    for (const json::Value & item : v->array) {
+        if (item.type != json::Value::Type::STRING) throw Error(code::INVALID_PARAMS, name + " takes an array of strings");
+        out.push_back(item.string);
+    }
+    return out;
+}
+
+double number_param(const json::Value & params, const std::string & name, double fallback) {
+    const json::Value * v = params.find(name);
+    if (!v || v->is_null()) return fallback;
+    if (v->type != json::Value::Type::NUMBER || v->number < 0) throw Error(code::INVALID_PARAMS, name + " takes a non-negative number");
+    return v->number;
+}
+
+void only(const json::Value & params, std::initializer_list<std::string_view> names) {
+    for (const std::string & name : params.names) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) throw Error(code::INVALID_PARAMS, "no parameter " + name);
+    }
+}
+
+std::string control_run(Context &, const json::Value & params) {
+    only(params, {"run", "action", "settings", "id", "wait", "timeout", "allow_files"});
+    run_ctl::Request request;
+    request.run = string_param(params, "run");
+    if (request.run.empty()) throw Error(code::INVALID_PARAMS, "run.control takes run, a run directory or run ID");
+    request.action = string_param(params, "action");
+    if (const json::Value * settings = params.find("settings"); settings && settings->type == json::Value::Type::OBJECT) {
+        for (size_t i = 0; i < settings->names.size(); i++) {
+            const json::Value & v = settings->members[i];
+            request.settings.push_back(settings->names[i] + "=" + (v.type == json::Value::Type::STRING ? v.string : json::dump(v)));
+        }
+    } else if (settings && !settings->is_null()) {
+        throw Error(code::INVALID_PARAMS, "settings takes an object of key: value");
+    }
+    request.id = string_param(params, "id");
+    request.wait = string_param(params, "wait", "done");
+    request.timeout = number_param(params, "timeout", -1.0);
+    request.allow_files = bool_param(params, "allow_files", false);
+    return run_ctl::control(request);
+}
+
+std::string launch_run(Context & context, const json::Value & params) {
+    only(params, {"input", "run_dir", "restart", "launcher", "options", "timeout"});
+    run_ctl::Launch launch;
+    launch.input = string_param(params, "input");
+    if (launch.input.empty()) {
+        if (!context.is_open()) throw Error(code::INVALID_PARAMS, "run.launch takes input, or runs the open case");
+        if (context.unsaved()) {
+            throw Error(code::UNSAVED, "the case's text differs from " + context.path() + ": save it, so that the run runs a file",
+                        json::Object().add("path", context.path()).str());
+        }
+        launch.input = context.path();
+    }
+    launch.run_dir = string_param(params, "run_dir");
+    launch.restart = string_param(params, "restart");
+    launch.launcher = strings_param(params, "launcher");
+    launch.options = strings_param(params, "options");
+    launch.timeout = number_param(params, "timeout", 60.0);
+    return run_ctl::launch(launch);
+}
+
 constexpr Method METHODS[] = {
     {"initialize", "", SCHEMA, false, initialize},
     {"shutdown", "", "", false, shutdown},
@@ -170,6 +238,8 @@ constexpr Method METHODS[] = {
     {"case.check", "mallard check INPUT --format json", "mallard-check", true, case_check},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
+    {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},
+    {"run.control", "mallard ctl RUN ACTION [KEY=VALUE...] --format json", run_control::SCHEMA, false, control_run},
 };
 
 } // namespace

@@ -20,6 +20,7 @@ set(MALLARD_TEST_SOURCES
     front_end_test.cpp
     cli_test.cpp
     session_test.cpp
+    run_ctl_test.cpp
     json_schema.cpp
     time_integrator_test.cpp
     binding_test.cpp
@@ -75,6 +76,7 @@ set(MALLARD_TEST_SOURCES
     inlet_test.cpp
     step_queue_test.cpp
     statistical_convergence_test.cpp
+    viscous_order_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

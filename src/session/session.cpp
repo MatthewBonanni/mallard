@@ -12,6 +12,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -102,6 +103,12 @@ void Context::close() {
 }
 
 Input Context::fresh_input() const { return text ? parse_input_string(*text, input_path) : parse_input(input_path); }
+
+bool Context::unsaved() const {
+    if (!text) return false;
+    std::ifstream in(input_path, std::ios::binary);
+    return !in || std::string(std::istreambuf_iterator<char>(in), {}) != *text;
+}
 
 uint64_t Context::mesh_files_read() const { return mesh_files ? mesh_files->files_read() : 0; }
 

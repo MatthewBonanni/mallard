@@ -18,11 +18,13 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "json.h"
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
@@ -185,8 +187,9 @@ void Solver::diverged() {
     message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
                                             : " " + evidence.report_file + " has the evidence and other causes.";
     message += " See docs/guide/running.md#divergence.";
-    for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
-    for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
+    const run_control::Done refused{.ok = false, .message = "error: " + message, .step = step, .t = double(t), .result = "null"};
+    for (auto & command : checkpoint_replies) run_control::finish(command, refused);
+    for (auto & command : stop_replies) run_control::finish(command, refused);
     checkpoint_replies.clear();
     stop_replies.clear();
     // Collective, as is the divergence: every rank's part of the last files is written and recorded first
@@ -204,17 +207,29 @@ void Solver::act_on_requests() {
     if (acted & run_control::COMMAND) apply_commands();
     if (acted & run_control::CHECKPOINT) {
         checkpoint_requested = true;
+        run_control::Command command;
+        command.text = "checkpoint";
+        command.source = std::exchange(checkpoint_file_seen, false) ? "file" : "signal";
+        run_control::record_accepted(command, step, double(t));
+        checkpoint_replies.push_back(command);
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
         // The signal that reached any rank, so that rank 0 records it
         const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        const bool file = !signo && !stop_file_note.empty();
         if (signo) {
             const std::string name = run_control::signal_name(signo);
             control_stop = {"signal", name, name + " received"};
         } else {
-            const bool file = !stop_file_note.empty();
             control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        if (signo || file) {
+            run_control::Command command;
+            command.text = "stop";
+            command.source = signo ? "signal" : "file";
+            run_control::record_accepted(command, step, double(t));
+            stop_replies.push_back(command);
         }
         logging::event(step, double(t), "stop", control_stop.reason);
     }
@@ -242,7 +257,7 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            std::string reply;
+            std::string reply, settings = "[";
             bool ok = true;
             for (const std::string & assignment : split(line.substr(4), ' ')) {
                 const size_t eq = assignment.find('=');
@@ -252,13 +267,24 @@ void Solver::apply_commands() {
                 ok = ok && accepted;
                 reply += (accepted ? "" : "error: ") + what + "\n";
                 if (accepted) logging::event(step, double(t), "set", what);
+                settings += std::string(settings.size() > 1 ? "," : "") +
+                            json::Object()
+                                .add("key", assignment.substr(0, eq))
+                                .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
+                                .add("applied", accepted)
+                                .add("message", what)
+                                .str();
             }
-            run_control::reply(command, ok ? reply : "error: not all settings were applied\n" + reply);
+            run_control::finish(command, {.ok = ok,
+                                          .message = ok ? reply : "error: not all settings were applied\n" + reply,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = json::Object().raw("settings", settings + "]").str()});
         }
     }
 }
 
-std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value) {
+std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value, const bool apply) {
     const comm::SelfScope scope = communication_scope();
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
@@ -278,18 +304,20 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
             old = logging::real(double(target));
             target = x > 0.0 ? static_cast<rtype>(x) : rtype(-1);
         }
-        if (n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0)) {
+        const bool none = n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0);
+        if (none || !apply) {
             n_steps = old_n_steps;
             t_stop = old_t_stop;
             t_wall_stop = old_t_wall_stop;
-            return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
         }
+        // Checked at the time it applies, as another setting may have added a limit by then
+        if (none && apply) return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     if (key == "check_interval") {
         if (!is_uint || n == 0 || n > std::numeric_limits<uint32_t>::max()) return rejected("expected a positive integer");
         const std::string old = std::to_string(check_interval);
-        check_interval = static_cast<uint32_t>(n);
+        if (apply) check_interval = static_cast<uint32_t>(n);
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     const size_t dot = key.rfind('.');
@@ -306,18 +334,18 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
         // Surfaces, curves and points of a [[write_data]] are written as probes, by their prefix
-        const std::string error = writer ? (field == "interval" ? writer->set_interval(n)
-                                                                : writer->set_time_interval(static_cast<rtype>(x), t))
-                                         : field == "interval" ? probes.set_interval(name, n, true)
-                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true);
+        const std::string error = writer ? (field == "interval" ? writer->set_interval(n, apply)
+                                                                : writer->set_time_interval(static_cast<rtype>(x), t, apply))
+                                         : field == "interval" ? probes.set_interval(name, n, true, apply)
+                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
     if (table == "probes" && !name.empty() && (field == "interval" || field == "time_interval")) {
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
-        const std::string error = field == "interval" ? probes.set_interval(name, n)
-                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t);
+        const std::string error = field == "interval" ? probes.set_interval(name, n, false, apply)
+                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t, false, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
@@ -326,13 +354,13 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         auto monitor = std::find_if(force_monitors.begin(), force_monitors.end(),
                                     [&](const ForceMonitor & m) { return m.zone == name; });
         if (monitor == force_monitors.end()) return rejected("no [[forces]] on zone " + name);
-        monitor->interval = n;
+        if (apply) monitor->interval = n;
         return {true, key + " = " + value};
     }
     if (key == "integrals.interval") {
         if (integral_monitor.interval == 0) return rejected("the run has no [integrals]");
         if (!is_uint || n == 0) return rejected("expected a positive integer");
-        integral_monitor.interval = n;
+        if (apply) integral_monitor.interval = n;
         return {true, key + " = " + value};
     }
     return rejected(std::string("cannot be changed while the run goes on; settable: ") + SETTABLE);
@@ -366,8 +394,12 @@ void Solver::write_checkpoint() {
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {
-        run_control::reply(command, "checkpoint at step " + std::to_string(step) + ", t = " +
-                                        logging::real(double(t)) + ": " + file);
+        run_control::finish(command, {.ok = true,
+                                      .message = "checkpoint at step " + std::to_string(step) + ", t = " +
+                                                 logging::real(double(t)) + ": " + file,
+                                      .step = step,
+                                      .t = double(t),
+                                      .result = run_control::restart_result(file)});
     }
     checkpoint_replies.clear();
 }
@@ -377,7 +409,10 @@ void Solver::poll_control_files() {
     if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
     control_files_polled = step / control_file_interval;
     std::error_code error;
-    if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
+    if (std::filesystem::remove("CHECKPOINT", error)) {
+        checkpoint_file_seen = true;
+        run_control::request(run_control::CHECKPOINT);
+    }
     if (std::filesystem::remove("STOP", error)) {
         stop_file_note = "STOP file found";
         run_control::request(run_control::STOP);
@@ -411,5 +446,6 @@ void Solver::publish_status() {
 #endif
     s.stop_conditions = stop_conditions();
     s.monitors = monitor_values;
+    for (const auto & [name, state] : triggers.states()) s.triggers.emplace_back("trigger " + name, state);
     run_control::publish(s);
 }

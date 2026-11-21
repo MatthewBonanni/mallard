@@ -27,6 +27,8 @@ Each request with a one-shot command runs the same code as that command, so its 
 | `case.check` | the options of `mallard check` by name: `partial`, `ranks`, `memory`, `throughput`, `steps`, `mesh_fields`, `stencils`, `cells`, `region`, `weights`, `catalog`, `view`, `restart` | `mallard-check` | `mallard check INPUT --format json` |
 | `case.keys` | `section` (optional) | `mallard-key-catalog` | `mallard list keys [SECTION] INPUT --format json` |
 | `keys.catalog` | `section` (optional) | `mallard-key-catalog` | `mallard list keys [SECTION] --format json` |
+| `run.launch` | `input` (default: the open case's file, which must be saved), `run_dir` (default: the session's working directory), `restart`, `launcher` (e.g. `["mpirun", "-n", "4"]`: `mpirun`, `mpiexec` or `srun`), `options` (more arguments of `mallard -i`), `timeout` | `mallard-run-launch`: run ID, directory, PID, endpoint record | `mallard -i INPUT --detach` |
+| `run.control` | `run` (directory or run ID), `action` (`status`, `checkpoint`, `stop`, `set`), `settings` (object), `id`, `wait` (`accepted` or `done`), `timeout`, `allow_files` | `mallard-run-control` | `mallard ctl RUN ACTION [KEY=VALUE...] --format json` |
 | `shutdown` | | `null`, then the session exits | |
 
 Params are always by name. A flag is `true` (`{"partial": true}`); other values are numbers or strings as on the command line. Relative paths are relative to the session's working directory, as for the one-shot commands.
@@ -51,6 +53,10 @@ A problem of the case is not an error of the request: `case.check` succeeds and 
 | -32800 | Canceled |
 | -32001 | No case is open: send `case.open` first |
 | -32003 | A file cannot be read; `data.path` names it |
+| -32004 | Timeout: `data.phase` says what was awaited (`accepted`, `done`) |
+| -32005 | No such run, or it ended (`data.outcome`) |
+| -32006 | No route reached the run: `data.tried` says why, and `data.route_hint.argv` is the command to run where it can (e.g. `kubectl exec ...`) |
+| -32010 | `run.launch` of an open case whose text differs from its file: save it first |
 
 ## Schemas
 
@@ -63,7 +69,10 @@ Every result has its schema's `version`, the session's own results also its name
 | `mallard-check.v1` | `mallard check --format json` and `case.check` |
 | `mallard-key-catalog.v1` | `mallard list keys --format json`, `case.keys` and `keys.catalog` |
 | `mallard-diagnostic.v1` | one diagnostic, as the others list them |
+| `mallard-run-control.v2` | `mallard ctl --format json` and `run.control`; `$defs` has the socket's requests and replies and the run log's `control` records |
+| `mallard-run-launch.v1` | `mallard -i INPUT --detach` and `run.launch` |
+| `mallard-run-endpoint.v1` | a run's `mallard.run.json` and its copy in the run registry |
 
 A version changes only when a member is removed or changes meaning; new members may appear in any release, so a client should ignore members it does not know. The test suite checks every result, from the session and from the one-shot commands, against its schema.
 
-The requests still to come (run launch and control, case views, cuts and picks) are described in the design notes, `docs/design/session.md`.
+The requests still to come (case views, cuts and picks, following a run's log) are described in the design notes, `docs/design/session.md`.

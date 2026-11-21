@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-run-launch.v1.schema.json",
+  "title": "A run started detached: the output of mallard -i INPUT --detach and the result of the session's run.launch",
+  "type": "object",
+  "required": ["schema", "version", "run_id", "directory", "pid", "launcher_pid", "endpoint", "output", "argv"],
+  "properties": {
+    "schema": {"const": "mallard-run-launch"},
+    "version": {"const": 1},
+    "run_id": {"type": "string"},
+    "directory": {"type": "string"},
+    "pid": {"type": "integer", "minimum": 1, "description": "rank 0's process, from the endpoint record"},
+    "launcher_pid": {"type": "integer", "minimum": 1, "description": "the process started: the run, or its launcher (mpirun)"},
+    "endpoint": {"type": "string"},
+    "output": {"type": "string", "description": "the run's standard output and error"},
+    "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+  },
+  "additionalProperties": true
+}

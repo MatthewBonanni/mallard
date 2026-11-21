@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "interfaces.h"
 #include "run_status.h"
 
 namespace run_control {
@@ -70,17 +71,55 @@ int stop_signal();
 /** @brief "SIGTERM" etc. */
 std::string signal_name(int signal);
 
-/** @brief A command received on the control socket. */
+/** @brief Name and version of the control protocol's JSON requests and replies (version 1: text lines). */
+inline constexpr const char * SCHEMA = interfaces::RUN_CONTROL.name;
+inline constexpr int VERSION = interfaces::RUN_CONTROL.version;
+
+/** @brief A control request: from the socket, or from a signal or control file (no connection, no ID). */
 struct Command {
-    std::string text;  // "checkpoint", "stop" or "set key=value ..."
-    int fd = -1;       // connection to answer, closed by reply()
+    std::string text;              // "checkpoint", "stop" or "set key=value ..."
+    int fd = -1;                   // connection to answer, closed by reply() or finish()
+    std::string id;                // the client's request ID (protocol version 2), else empty
+    bool json = false;             // answered with JSON lines (version 2)
+    std::string source = "socket"; // socket, signal or file
+    /** @brief "checkpoint", "stop" or "set". */
+    std::string action() const;
 };
+
+/** @brief How a request ended, for its reply and its control record of the run log. */
+struct Done {
+    bool ok = true;
+    std::string message;           // the text reply of protocol version 1
+    uint64_t step = 0;
+    double t = 0.0;
+    std::string result = "null";   // JSON: {"restart": {...}} for a checkpoint or stop, {"settings": [...]} for set
+};
+
+/**
+ * @brief Answers the request (version 1: the message; version 2: a done or refused line) and closes its
+ *        connection; rank 0 also writes the request's control record to the run log.
+ */
+void finish(Command & command, const Done & done);
+
+/** @brief The result of a checkpoint or stop: {"restart": {"path": file}}, or {"restart": null} without one. */
+std::string restart_result(const std::string & file);
+
+/** @brief A control record of the run log for a request accepted (signals and control files, which have no
+ *         connection to answer). */
+void record_accepted(const Command & command, uint64_t step, double t);
 
 /** @brief Commands received since the last call; clears the COMMAND request. */
 std::vector<Command> take_commands();
 
 /** @brief Queues a command as the socket would, without a connection (tests). */
 void submit(const std::string & text);
+
+/**
+ * @brief A request line of protocol version 2 as a command: {"schema": "mallard-run-control", "version": 2,
+ *        "id": ..., "action": "stop"|"checkpoint"|"status"|"set", "settings": {...}}. @throws std::runtime_error
+ *        saying what is wrong
+ */
+Command parse_request(const std::string & line);
 
 /** @brief Sends the reply and closes the connection. */
 void reply(Command & command, const std::string & text);
@@ -93,6 +132,7 @@ struct Status {
     int device = -1;               // CUDA or HIP device of rank 0, -1 for other backends
     std::string stop_conditions;
     std::vector<std::pair<std::string, std::string>> monitors;  // last progress row's diagnostics
+    std::vector<std::pair<std::string, std::string>> triggers;  // "trigger <name>" and its state
 };
 
 void publish(const Status & status);

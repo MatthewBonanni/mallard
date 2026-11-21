@@ -6,7 +6,7 @@ A running `mallard` takes requests from signals, from `mallard ctl` and, optiona
 |---|---|
 | `SIGUSR1` | Write a restart after the current step and continue |
 | `SIGTERM`, `SIGINT`, `SIGUSR2` | Write a restart and the final output after the current step, then exit with status 3. A second `SIGINT` (Ctrl-C twice) exits at once. Before the time loop starts, these signals end the run at once |
-| `mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's process (and of its GPU), and the diagnostics of the last progress row |
+| `mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's process (and of its GPU), the diagnostics of the last progress row, and the state of each [trigger](#triggers) |
 | `mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once it is written |
 | `mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
 | `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
@@ -26,7 +26,37 @@ $ mallard ctl runs/cylinder stop
 stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 ```
 
-Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
+Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. On rank 0's node, `mallard ctl` talks to the run through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only; from anywhere else it finds its own way to the run (below). `[run] control_socket = false` turns the socket off.
+
+### Controlling a run from anywhere
+
+`mallard ctl` takes a run directory or a run ID, and needs neither a login on rank 0's node nor control files:
+
+```bash
+$ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop
+stopped at step 20481, t = 1.2742; restart: solut/restart_020481.restart
+$ mallard ctl runs/cylinder checkpoint --wait accepted --format json
+{"schema":"mallard-run-control","version":2,"id":"c1a7...","route":"srun","status":"accepted",...}
+```
+
+<a id="the-endpoint-record"></a>**The endpoint record.** At start, before its setup, rank 0 writes `mallard.run.json` in the run directory: the run ID, the `mallard` executable, rank 0's host and PID, the number of ranks, the socket, the scheduler job (Slurm job and step, PBS or LSF job, or the Kubernetes pod and namespace, from `MALLARD_POD` and `MALLARD_NAMESPACE` or the pod's own), the run log, and the state: `setup`, `running`, then `ended` with the outcome. A copy goes to the run registry, `$XDG_STATE_HOME/mallard/runs/<run_id>.json` (`~/.local/state/mallard/runs`, shared by a cluster's nodes with the home directory), so that the run ID alone finds the run; entries of runs ended more than 30 days ago are removed. `MALLARD_RUN_REGISTRY` names another directory, or `off`.
+
+**Routes.** `mallard ctl` tries these in order and takes the first that reaches the run:
+
+| Route | When | How |
+|---|---|---|
+| Socket | on rank 0's host | `mallard.sock` |
+| Slurm | a Slurm job, `srun` here | `srun --jobid=JOB --overlap -w NODE mallard ctl --direct DIR ...` |
+| Kubernetes | a pod, `kubectl` here | `kubectl exec -n NAMESPACE POD -- mallard ctl --direct DIR ...` |
+| SSH | a PBS or LSF job on another node | `ssh NODE mallard ctl --direct DIR ...` |
+| Signal | `stop` (`SIGUSR2`) and `checkpoint` (`SIGUSR1`) | `kill` on rank 0's host, else `scancel --signal`, `qsig -s`, `bkill -s` |
+| Control file | only with `--allow-files`, and `[run] control_file_interval` set | `STOP`, `CHECKPOINT` in the run directory |
+
+When the program of a route is not where `mallard ctl` runs (a GUI on a laptop, a run in a pod), the error names the command to run where it is (`route_hint`).
+
+**Acknowledgments.** Each request has an ID (`--id`, or a new UUID). The run answers on the socket at once (`accepted`, with the step), then once it has acted (`done`, with the restart file or each setting's result) or `refused` (with the reason). `--wait accepted` returns after the first answer; the default waits for the second. Every request is a `control` record of the run log, with its ID, action, source (`socket`, `signal`, `file`), status, step, `t` and result; for a signal or file, which carry no ID, `mallard ctl` waits for the record of that action after it sent it. `--timeout` bounds the wait (default 30 s for `accepted`, none for `done`). The JSON (`--format json`, and the session's [`run.control`](session.md#requests)) follows the schema `mallard-run-control`, version 2.
+
+**Detached runs.** `mallard -i input.toml --detach` starts the run in a session of its own, with its output in `mallard.out`, and returns once the endpoint record is written, printing the run ID, directory and PID as JSON (schema `mallard-run-launch`). The session's [`run.launch`](session.md#requests) does the same, also under `mpirun`, `mpiexec` or `srun`.
 
 Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request. The run record's [end record](output.md#run-record-mallardjsonl) says which, as its `outcome`, with the last snapshot and restart file written; `mallard info <run-dir>` shows it. `t_wall_stop` is reached on whichever rank gets there first, and every rank stops after the same next step.
 
@@ -35,8 +65,9 @@ Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [
 A `[[triggers]]` entry is a request the run makes of itself: a condition on
 the run, and what to do once it is true. Use one to stop a run when it has
 reached what it was for (a temperature, a force that has settled), to keep a
-restart or a snapshot of the moment something happens, or to start the
-statistics once the flow has developed.
+restart or a snapshot of the moment something happens, to start the
+statistics once the flow has developed and stop them at a time, or to note an
+event in the log or change a setting (an output's interval) when it happens.
 
 ```toml
 [[probes]]
@@ -55,12 +86,17 @@ name = "settled"
 when = "t > 0.02 and abs(forces_cylinder_Fx_pressure) < 1e-3"
 for = 0.005                       # held this long (seconds of simulated time)
 do = "stop"
+
+[[triggers]]
+name = "window"
+when = "t >= 0.05"                # a step lands on t = 0.05 exactly
+do = ["stop statistics", "log averages from 0 to {t} s", "set write_data.flow.time_interval=1e-3"]
 ```
 
 | Key | Meaning |
 |---|---|
 | `when` | The condition, in [kexpr](expressions.md); true when not 0. Required |
-| `do` | An action, or a list of them done in order: `"stop"`, `"checkpoint"`, `"write <prefix>"` (that `[[write_data]]` entry, now), `"start statistics"`. Required |
+| `do` | An action, or a list of them done in order: `"stop"`, `"checkpoint"`, `"write <prefix>"` (that `[[write_data]]` entry, now), `"start statistics"`, `"stop statistics"`, `"log <message>"`, `"set <key>=<value> ..."`. Required |
 | `name` | In the log, the run record and restart files; letters, digits and `_`. Default `trigger_<index>` (from 0) |
 | `for` | Seconds of simulated time the condition must hold before the trigger fires, counted from the step it last turned true. Default 0 |
 | `repeat` | `false` fires once; `true` fires again each time the condition turns true after being false. Default `false` |
@@ -81,6 +117,15 @@ front:
 Characters other than letters, digits and `_` in these names become `_`.
 A misspelled name is an input error (also of `mallard check`) that lists
 the names the run has.
+
+**Steps land on the times a condition names.** Every number a condition
+compares `t` with (`t >= 0.05`, `0.05 <= t`, `t == 0.05`, also inside a longer
+condition) is a time a step ends at, as `t_stop` and time-based outputs are:
+the step before it is shortened to end there, so `t >= 0.05` holds at
+`t = 0.05` exactly, not at whichever step passes it. Only comparisons of `t`
+itself with a number count (not `t - 0.05 >= 0`), and only while the trigger
+can still fire. In single precision the step ends at the first `float` at or
+after the number.
 
 **When conditions are evaluated.** After every step, once that step's
 monitors and probes are written, from the values they wrote: a monitor
@@ -103,6 +148,18 @@ checkpoint`). `write <prefix>` writes that `[[write_data]]` entry's file at
 once, besides its own schedule. `start statistics` discards the averages so
 far and starts them at that step, in `[statistics]` and its `spectra` and
 `phase`: they wait for the trigger, so `t_start` cannot be given as well.
+`stop statistics` stops their sampling after that step: the averages keep
+the values they had there, the same bit for bit as those of a run that ended
+at that step, and later output and restart files carry them (also of a run
+resumed from those files). A later `start statistics` starts them afresh.
+Time-averaged probes follow neither. `log <message>` writes the message as a
+line of the log and an `event` record of kind `log` (with the `trigger`'s
+name); `{<name>}` in it is replaced by the value of any name a condition can
+read, e.g. `"log outlet at {outlet_T} K"`. `set <key>=<value> ...` changes
+settings from the next step on, exactly as [`mallard ctl set`](#running-and-controlling-jobs)
+does and with the same keys (`n_steps`, `t_stop`, an output's or probe's
+`interval` or `time_interval`, ...), each recorded as an `event` of kind
+`set`; a key or value `mallard ctl set` would refuse is an input error.
 
 **Record.** Each firing is a line of the log and an `event` record of kind
 `trigger` in [`mallard.jsonl`](output.md#run-record-mallardjsonl), with the
@@ -111,9 +168,24 @@ condition read. Restart files carry each trigger's state (fired, how many
 times, since when its condition has held), so a resumed run neither fires a
 `repeat = false` trigger again nor restarts a `for` clock.
 
+**State.** `mallard ctl <run-dir> status` ends with a line per trigger:
+`trigger <name>: armed` (with `condition true since t = ... s` while a `for`
+clock runs, and when it will fire), `fired 2x, last at step 1200, t = 0.012
+s; armed` for one with `repeat`, `...; done` once a `repeat = false` trigger
+has fired. It is the state at the last step the host took; with the steps
+queued on a GPU, the clock of a holding condition can lag by the queue.
+
+**Checks.** `mallard check` reports a misspelled name or action, a `set` it
+would refuse and a `{<name>}` of a `log` that is not a name as input errors,
+and warns (`W-TRIGGER-NEVER`) of a trigger that cannot fire before `t_stop`:
+one whose `for` is longer than the run, or whose condition reads only `t`,
+compared with numbers, and is false at every time to `t_stop` (`t >= 5` in a
+run to 0.5 s: milliseconds meant?).
+
 Pitfalls: a run still needs `n_steps`, `t_stop` or `t_wall_stop` in
 `[run]`, the limit if no trigger fires; `wall` is only as reproducible as
-the machine's speed; `==` on `t` rarely holds exactly (use `>=`).
+the machine's speed; `==` on `t` holds only for a number the condition
+compares `t` with (a landing time), so prefer `>=`.
 
 ## MPI launchers and Slurm
 
@@ -248,7 +320,8 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
-| <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made; or the endpoint record `mallard.run.json` cannot be written | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="e-control"></a>`E-CONTROL` | A control request was refused (an unknown action or setting), or the run ended before acting on it | The reply's message says which; see [Controlling a run from anywhere](#controlling-a-run-from-anywhere) |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
 | <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |

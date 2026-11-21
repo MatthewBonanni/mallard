@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
@@ -151,7 +152,15 @@ const json_schema::Schemas & schemas() {
     return s;
 }
 
-std::string schema_file(const std::string & name) { return name + ".v1.schema.json"; }
+const json_schema::Schemas & schemas();
+
+/** @brief The file of the schema named, of whatever version schemas/ has. */
+std::string schema_file(const std::string & name) {
+    for (const std::string & file : schemas().files()) {
+        if (file.rfind(name + ".v", 0) == 0) return file;
+    }
+    return name + ".v1.schema.json";
+}
 
 const std::string MESSAGE = "mallard-session.v1.schema.json#/$defs/message";
 
@@ -326,7 +335,7 @@ TEST(SessionTest, EveryRequestNamesAOneShotCommandAndASchemaThatExist) {
         std::string word, name;
         words >> word;
         ASSERT_EQ(word, "mallard") << m.command;
-        while (words >> word && word.find_first_of("[]") == std::string::npos && word != "INPUT") {
+        while (words >> word && word.find_first_of("[]-") != 0 && !std::isupper(static_cast<unsigned char>(word[0]))) {
             name += (name.empty() ? "" : " ") + word;
         }
         EXPECT_NE(cli::command(name), nullptr) << m.name << ": " << m.command;
