@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <fstream>
 #include <numeric>
 #include <sstream>
 
@@ -24,7 +23,6 @@
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
-#include "provenance.h"
 
 namespace {
 
@@ -130,19 +128,6 @@ rtype unit_random(uint64_t seed, uint64_t stream, uint64_t component, int64_t i0
 KOKKOS_INLINE_FUNCTION
 int64_t positive_mod(int64_t a, int64_t n) { return ((a % n) + n) % n; }
 
-/** @brief Axis named by name ("x", "Y", ...), or -1. */
-int axis_of(const std::string & name) {
-    if (name.size() != 1) return -1;
-    const int a = std::tolower(static_cast<unsigned char>(name[0])) - 'x';
-    return (a >= 0 && a < N_DIM) ? a : -1;
-}
-
-std::string trim(const std::string & s) {
-    const size_t a = s.find_first_not_of(" \t\r\n");
-    const size_t b = s.find_last_not_of(" \t\r\n");
-    return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
-}
-
 std::string stress_names() {
     const char * XYZ = "xyz";
     std::string names;
@@ -169,7 +154,7 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
             throw InputError(where + ".u depends on t, but " + where + ".turbulence.profile gives the mean velocity "
                              "too: remove the profile and give reynolds_stress, or remove u to take the profile's mean.");
         }
-        read_table(*turbulence, where);
+        read_profile(boundary, where, variables);
         return;
     }
     if (!boundary.contains("u")) throw InputError(where + ": missing u.");
@@ -201,119 +186,88 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     }
 }
 
-void InletProfile::read_table(const Input & turbulence, const std::string & where) {
+std::vector<std::string> InletProfile::profile_columns(const std::vector<std::string> & header) {
+    if (header.empty()) return {};
+    const auto has = [&](const std::string & c) { return std::find(header.begin(), header.end(), c) != header.end(); };
+    const char * XYZ = "XYZ";
+    std::vector<std::string> columns;
+    FOR_I_DIM columns.push_back(std::string("MEAN_U_") + XYZ[i]);
+    for (uint8_t k = 0; k < N_STRESS; k++) {
+        uint8_t r, c;
+        stress_entry(k, r, c);
+        const std::string name = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
+        const std::string swapped = std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r];
+        if (r == c || has(name)) {
+            columns.push_back(name);
+        } else if (has(swapped)) {
+            columns.push_back(swapped);
+        }
+    }
+    return columns;
+}
+
+void InletProfile::read_profile(const Input & boundary, const std::string & where,
+                                const std::vector<std::string> & variables) {
+    const Input & turbulence = boundary.at("turbulence");
     const std::string key = where + ".turbulence.profile";
     if (turbulence.contains("reynolds_stress")) {
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
     }
     uniform_ = false;
-    const std::string file = find_value<std::string>(turbulence, "profile");
-    std::ifstream in(file);
-    if (!in.good()) throw InputError(key + ": cannot open " + file + ".");
-    provenance::read_file("inflow_profile", file);
-    std::string line;
-    std::getline(in, line);
-    std::vector<std::string> header;
-    {
-        std::stringstream s(line);
-        std::string item;
-        while (std::getline(s, item, ',')) header.push_back(trim(item));
-    }
-    if (header.empty() || (axis = axis_of(header[0])) < 0) {
-        throw InputError(key + ": the first column of " + file + " must be a coordinate (x, y" +
-                         std::string(N_DIM == 3 ? ", z" : "") + ").");
-    }
-    auto column_of = [&](const std::string & name) {
-        for (size_t c = 0; c < header.size(); c++) {
-            if (header[c] == name) return static_cast<int>(c);
-        }
-        return -1;
+    const std::string given = find_value<std::string>(turbulence, "profile");
+    const std::string name = BoundaryValue::profile_data(boundary);
+    const auto has = [&](const std::string & c) {
+        return std::find(variables.begin(), variables.end(), name + "_" + c) != variables.end();
+    };
+    const auto value = [&](const std::string & c, const Dimension & dimension) {
+        return BoundaryValue(Input(name + "_" + c), key, dimension, variables);
+    };
+    const auto missing = [&](const std::string & c) {
+        return InputError({.key = key,
+                           .line = line_of(turbulence, "profile"),
+                           .message = "the data of \"" + given + "\" have no column " + c,
+                           .fix = "Give the precursor's mean velocity MEAN_U_* and Reynolds stresses COV_U_*_U_*, as "
+                                  "mallard post average --statistics writes them",
+                           .docs = "docs/guide/boundary_conditions.md#synthetic-turbulence-turbulence"});
     };
     const char * XYZ = "XYZ";
-    std::vector<int> use;  // N_DIM mean columns, then N_STRESS stress columns (-1: zero)
     FOR_I_DIM {
-        const std::string name = std::string("MEAN_U_") + XYZ[i];
-        use.push_back(column_of(name));
-        if (use.back() < 0) throw InputError(key + ": " + file + " has no column " + name + ".");
+        const std::string c = std::string("MEAN_U_") + XYZ[i];
+        if (!has(c)) throw missing(c);
+        u.push_back(value(c, dim::velocity));
     }
     for (uint8_t k = 0; k < N_STRESS; k++) {
         uint8_t r, c;
         stress_entry(k, r, c);
-        const std::string name = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
-        int col = column_of(name);
-        if (col < 0) col = column_of(std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r]);
-        if (col < 0 && r == c) throw InputError(key + ": " + file + " has no column " + name + ".");
-        use.push_back(col);
+        const std::string column = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
+        const std::string swapped = std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r];
+        if (has(column)) {
+            stress.push_back(value(column, dim::velocity_squared));
+        } else if (has(swapped)) {
+            stress.push_back(value(swapped, dim::velocity_squared));
+        } else if (r == c) {
+            throw missing(column);
+        } else {
+            stress.push_back(BoundaryValue(Input(std::string("0")), key, dim::velocity_squared, variables));
+        }
     }
-    columns.assign(use.size(), {});
-    size_t line_number = 1;
-    while (std::getline(in, line)) {
-        line_number++;
-        if (trim(line).empty()) continue;
-        const std::string at = key + ": " + file + ":" + std::to_string(line_number) + ": ";
-        std::vector<double> row;
-        std::vector<std::string> items;
-        std::stringstream s(line);
-        std::string item;
-        while (std::getline(s, item, ',')) {
-            try {
-                row.push_back(std::stod(item));
-            } catch (const std::exception &) {
-                throw InputError(at + "not a number: \"" + item + "\".");
-            }
-            items.push_back(trim(item));
-        }
-        if (row.size() != header.size()) {
-            throw InputError(at + logging::count(row.size(), "value") + " for " +
-                             logging::count(header.size(), "column") + ".");
-        }
-        std::vector<int> checked = {0};
-        checked.insert(checked.end(), use.begin(), use.end());
-        for (const int c : checked) {
-            const size_t i = static_cast<size_t>(c);
-            if (c >= 0 && !std::isfinite(row[i])) {
-                throw InputError(at + "column " + header[i] + " is \"" + items[i] + "\", not a finite number.");
-            }
-        }
-        if (!coordinate.empty() && !(row[0] > coordinate.back())) {
-            throw InputError(at + "the coordinate must increase from row to row.");
-        }
-        coordinate.push_back(row[0]);
-        for (size_t c = 0; c < use.size(); c++) columns[c].push_back(use[c] < 0 ? 0.0 : row[static_cast<size_t>(use[c])]);
-    }
-    if (coordinate.size() < 2) throw InputError(key + ": " + file + " needs at least two rows.");
-}
-
-double InletProfile::table(size_t column, double s) const {
-    const auto it = std::upper_bound(coordinate.begin(), coordinate.end(), s);
-    if (it == coordinate.begin()) return columns[column].front();
-    if (it == coordinate.end()) return columns[column].back();
-    const size_t i = static_cast<size_t>(it - coordinate.begin());
-    const double f = (s - coordinate[i - 1]) / (coordinate[i] - coordinate[i - 1]);
-    return (1.0 - f) * columns[column][i - 1] + f * columns[column][i];
 }
 
 std::array<double, N_DIM> InletProfile::velocity(const FacePoint & x, const Point & n_in) const {
     std::array<double, N_DIM> v{};
-    if (axis < 0 && speed) {
+    if (speed) {
         const double s = u[0].at(x, 0.0);
         const Point d = directed ? direction.at(x, 0.0) : n_in;
         FOR_I_DIM v[i] = s * d[i];
         return v;
     }
-    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x, 0.0);
+    FOR_I_DIM v[i] = u[i].at(x, 0.0);
     return v;
 }
 
 std::array<double, N_STRESS> InletProfile::stress_at(const FacePoint & x) const {
     std::array<double, N_STRESS> s{};
-    for (uint8_t k = 0; k < N_STRESS; k++) {
-        if (axis >= 0) {
-            s[k] = table(N_DIM + k, x[static_cast<size_t>(axis)]);
-        } else if (!stress.empty()) {
-            s[k] = stress[k].at(x, 0.0);
-        }
-    }
+    for (uint8_t k = 0; k < N_STRESS && !stress.empty(); k++) s[k] = stress[k].at(x, 0.0);
     return s;
 }
 

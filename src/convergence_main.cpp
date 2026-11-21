@@ -28,6 +28,7 @@
 #include "convergence.h"
 #include "expression.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
@@ -980,7 +981,7 @@ std::string estimate_json(const convergence::Estimate & e) {
 
 std::string study_json(const Study & s, const int exit_status) {
     json::Object o;
-    o.add("schema", std::string("mallard-convergence")).add("version", 1);
+    o.add("schema", interfaces::CONVERGENCE.name).add("version", interfaces::CONVERGENCE.version);
     o.add("status", std::string(report::status_name(s.status))).add("exit_status", exit_status);
     std::string runs = "[";
     for (const Run & r : s.runs) {
