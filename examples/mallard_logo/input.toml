@@ -26,7 +26,7 @@
 # positive (at least 0.14, at the duck's tail at t = 1.03), and mass, momentum
 # and energy balance the boundary fluxes to 2e-15.
 #
-# Generate the mesh and the table first (gmsh, scipy and pillow: pip install
+# Generate the mesh and the table first (gmsh, scipy and pillow: uv pip install
 # gmsh scipy pillow):
 #   python ../mallard/make_mallard_mesh.py logo.msh --order 3 --domain -0.5 6.5 -0.85 0.7
 #   python make_logo_table.py logo.csv
