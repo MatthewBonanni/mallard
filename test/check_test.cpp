@@ -753,16 +753,17 @@ TEST(MeshQualityMetrics, HistogramsCountEveryCellFromTheSmallestValueToTheLarges
     const auto s = summarize(stretched, q, 1);
     const QualitySummary & aspect = s[2];
     ASSERT_EQ(aspect.counts.size(), QualitySummary::N_BINS);
-    EXPECT_EQ(std::accumulate(aspect.counts.begin(), aspect.counts.end(), uint64_t(0)), 80u);
-    EXPECT_EQ(aspect.min, *std::min_element(q.cells[2].begin(), q.cells[2].end()));
-    EXPECT_EQ(aspect.max, *std::max_element(q.cells[2].begin(), q.cells[2].end()));
+    const uint64_t cells = comm::allreduce(uint64_t(stretched.n_owned()), comm::Op::SUM);
+    EXPECT_EQ(std::accumulate(aspect.counts.begin(), aspect.counts.end(), uint64_t(0)), cells);
+    EXPECT_EQ(aspect.min, -comm::allreduce(-*std::min_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
+    EXPECT_EQ(aspect.max, comm::allreduce(*std::max_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
     const double width = (aspect.max - aspect.min) / double(QualitySummary::N_BINS);
     for (size_t k = 0; k < QualitySummary::N_BINS; k++) {
         const auto n = std::count_if(q.cells[2].begin(), q.cells[2].end(), [&](double v) {
             const double lo = aspect.min + width * double(k);
             return v >= lo - 1e-12 && (k + 1 == QualitySummary::N_BINS ? true : v < lo + width - 1e-12);
         });
-        EXPECT_EQ(aspect.counts[k], uint64_t(n)) << k;
+        EXPECT_EQ(aspect.counts[k], comm::allreduce(uint64_t(n), comm::Op::SUM)) << k;
     }
     const std::string json = histogram_json(aspect);
     EXPECT_EQ(json.rfind("{\"edges\": [", 0), 0u) << json;
