@@ -17,6 +17,7 @@
 #include "input.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <cmath>
 #include <cstddef>
 #include <iomanip>
@@ -758,8 +759,11 @@ void Solver::init_rhs_split() {
         }
         local_faces = IndexSet::of(local, "local_faces");
         partition_faces = IndexSet::of(remote, "partition_faces");
-        face_exchange = FaceExchange(plan_face_exchange(distribution, *mesh, needed),
-                                     static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+        const FacePlan plan = plan_face_exchange(distribution, *mesh, needed);
+        face_exchange = FaceExchange(plan, static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
+        if (polynomial_viscous) init_polynomial_exchange(plan, needed);
+    } else if (polynomial_viscous) {
+        allocate_polynomials(mesh->n_reconstructed());
     }
 
     // Early: the cells independent of the halo among [0, n_interior()), where the numbering puts them
@@ -783,6 +787,54 @@ void Solver::init_rhs_split() {
                                        : Kokkos::DefaultExecutionSpace();
         if (own_faces) comm_space = comm::high_priority_space();
     }
+}
+
+void Solver::allocate_polynomials(const uint32_t n_cells) {
+    auto & teno = dynamic_cast<TENO &>(*face_reconstruction);
+    teno.polynomials = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("viscous_polynomials", (n_cells + 1) / 2,
+                                                                 teno.n_dof_large);
+}
+
+void Solver::init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed) {
+    // Rows of cell c are (c / 2, side c % 2) of the polynomials: a FaceExchange of NK points per side sends them
+    uint32_t n = mesh->n_reconstructed();
+    for (const RemoteFaceSide & r : needed) n = std::max(n, r.cell + 1);
+    allocate_polynomials(n);
+    auto rows = [&](const std::vector<std::vector<uint32_t>> & face_lists,
+                    const std::vector<std::vector<uint8_t>> & side_lists, std::vector<std::vector<uint32_t>> & row_lists,
+                    std::vector<std::vector<uint8_t>> & lane_lists, std::vector<std::vector<uint64_t>> & global) {
+        row_lists.assign(face_lists.size(), {});
+        lane_lists.assign(face_lists.size(), {});
+        global.assign(face_lists.size(), {});
+        // Both ends list a neighbor's cells in the same order, so each keeps the first of repeated cells
+        for (size_t k = 0; k < face_lists.size(); k++) {
+            std::unordered_set<uint32_t> seen;
+            for (size_t j = 0; j < face_lists[k].size(); j++) {
+                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(face_lists[k][j], side_lists[k][j]));
+                if (!seen.insert(c).second) continue;
+                row_lists[k].push_back(c >> 1);
+                lane_lists[k].push_back(static_cast<uint8_t>(c & 1u));
+                global[k].push_back(mesh->h_global_cell(c));
+            }
+        }
+    };
+    FacePlan plan;
+    plan.neighbors = faces.neighbors;
+    std::vector<std::vector<uint64_t>> send_cells, recv_cells;
+    rows(faces.send_faces, faces.send_sides, plan.send_faces, plan.send_sides, send_cells);
+    rows(faces.recv_faces, faces.recv_sides, plan.recv_faces, plan.recv_sides, recv_cells);
+    // That order is the plan's: check once that each neighbor sends the cells, in the order, this rank expects
+    std::vector<std::vector<uint64_t>> to_rank(static_cast<size_t>(comm::size()));
+    for (size_t k = 0; k < plan.neighbors.size(); k++) to_rank[static_cast<size_t>(plan.neighbors[k])] = send_cells[k];
+    const auto from_rank = comm::alltoallv(to_rank);
+    for (size_t k = 0; k < plan.neighbors.size(); k++) {
+        if (from_rank[static_cast<size_t>(plan.neighbors[k])] != recv_cells[k]) {
+            throw std::logic_error("init_polynomial_exchange: rank " + std::to_string(plan.neighbors[k]) +
+                                   " sends other cells than rank " + std::to_string(comm::rank()) + " expects");
+        }
+    }
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    polynomial_exchange = FaceExchange(plan, teno.n_dof_large, halo.uses_nccl(), 2);
 }
 
 void Solver::init_physics() {
@@ -1708,6 +1760,7 @@ void Solver::init_numerics() {
         throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
+    init_viscous_gradients(teno);
     if (hybrid_flux && simpler) {
         throw InputError({.key = "numerics.convective_flux",
                           .line = line_of(input.at("numerics"), "convective_flux"),
@@ -1742,6 +1795,48 @@ void Solver::init_numerics() {
                           .fix = "The defaults are sensor_threshold = 0.65 and upwind_floor = 0.0"});
     }
     init_error_control();
+}
+
+void Solver::init_viscous_gradients(const TENO * teno) {
+    const std::string gradients = find_value_or<std::string>(input, "numerics", "viscous_gradients", "least_squares");
+    record_options("numerics.viscous_gradients", {"least_squares", "reconstruction"});
+    if (gradients != "least_squares" && gradients != "reconstruction") {
+        throw not_accepted(input.at("numerics"), "numerics.viscous_gradients", gradients,
+                           {"least_squares", "reconstruction"});
+    }
+    polynomial_viscous = gradients == "reconstruction";
+    if (!polynomial_viscous) return;
+    auto unavailable = [&](const std::string & why, const std::string & fix) {
+        return InputError({.key = "numerics.viscous_gradients",
+                           .line = line_of(input.at("numerics"), "viscous_gradients"),
+                           .message = "\"reconstruction\" " + why,
+                           .fix = fix + ", or remove viscous_gradients",
+                           .docs = "docs/guide/numerics.md#viscous-gradients"});
+    };
+    if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
+    if (!physics.is_viscous()) {
+        throw unavailable("has no effect without viscosity", "Set type = \"navier_stokes\" in [physics]");
+    }
+    if (teno == nullptr) {
+        throw unavailable("needs the TENO reconstruction, whose polynomials it differentiates",
+                          "Set type = \"TENO\" in [numerics.face_reconstruction]");
+    }
+    if (teno->degree < 3) {
+        throw unavailable("gains nothing with TENO of order 3, whose face gradients are second order as the "
+                          "least-squares ones",
+                          "Set order = 4 or more in [numerics.face_reconstruction]");
+    }
+    if (axisymmetric) throw unavailable("is not available for axisymmetric runs yet", "Use a planar run");
+    if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
+    if (hybrid_flux) {
+        throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");
+    }
+    if (mesh->curved_geometry) {
+        throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
+    }
+    if (mesh->is_rotational()) {
+        throw unavailable("is not available with rotational periodicity yet", "Use translational periodicity");
+    }
 }
 
 void Solver::describe_block_path() {
@@ -3506,6 +3601,7 @@ void Solver::update_p_max() {
 
 rtype Solver::next_target_time(const bool unstaged) const {
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
+    t_target = std::min(t_target, next_landing_time());
     for (const auto & writer : data_writers) {
         if (!(unstaged && staged_outputs)) t_target = std::min(t_target, writer->next_time());
     }
@@ -3569,6 +3665,7 @@ struct TimeStepFunctor {
     BoundaryData boundaries;
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
+    rtype viscous_stiffness = 1.0_r;  // the viscous operator's spectral radius over the compact one's
 
     KOKKOS_INLINE_FUNCTION
     void cell_W(const int32_t i_cell, rtype * W) const {
@@ -3629,7 +3726,7 @@ struct TimeStepFunctor {
                 coeff = Kokkos::fmax(4.0_r / 3.0_r * (mu + mu_t), physics.gamma * (mu / physics.Pr + mu_t / Pr_t)) /
                         W[0];
             }
-            sum += 4.0_r * coeff * sum_area2 / cell_volume(i_cell);
+            sum += 4.0_r * viscous_stiffness * coeff * sum_area2 / cell_volume(i_cell);
             if (radius_coords.extent(0) > 0) {
                 // Decay of u_r by the hoop stress
                 const rtype r = radius_coords(i_cell, 1);
@@ -3660,6 +3757,9 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                             boundary_data,
                             mesh->periodic_maps(),
                             mesh->face_shift};
+    // Reconstruction gradients: 1D symbol up to 8.2 / h^2 (central stencils fitted exactly; 5.5 by least squares)
+    // against the compact gradients' 4 / h^2, with the jump damping of 4/3
+    if (polynomial_viscous) functor.viscous_stiffness = 2.05_r;
     if (les_on) {
         eddy_viscosity_of_state(mesh->n_owned());
         if (les.dynamic) {

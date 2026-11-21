@@ -5,7 +5,7 @@ from its own output, light and dark, into docs/images/tools/.
 
 Every figure runs the tool it shows (as a command, like a user would) and
 draws what it wrote. Needs numpy, scipy, matplotlib, gmsh and cantera
-(pip install gmsh cantera); the figures from Mallard runs (plot_vtu.py,
+(uv pip install gmsh cantera); the figures from Mallard runs (plot_vtu.py,
 compare_png.py, animate.py, animate_cartesian.py) need --mallard, a 2D
 build, and take about a minute on a few CPU threads. --work keeps the
 tools' output between invocations (default: a temporary directory).

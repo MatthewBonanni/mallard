@@ -218,8 +218,11 @@ class Solver {
          */
         void enable_control(bool on) { control_enabled = on; }
 
-        /** @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not. */
-        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value);
+        /**
+         * @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not;
+         *        without apply, whether it would be (a trigger's set action, checked at setup).
+         */
+        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value, bool apply = true);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -422,6 +425,8 @@ class Solver {
         /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;
         void act_on_triggers();
+        /** @brief The next time a condition compares t with, where a step lands: at it or the next rtype after. */
+        rtype next_landing_time() const;
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
         /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
@@ -845,6 +850,14 @@ class Solver {
         void add_radiation(StateView rhs, SpeciesView rhoY);
         void init_physics();
         void init_numerics();
+        /** @brief [numerics] viscous_gradients, checked against the reconstruction (teno: null unless TENO). */
+        void init_viscous_gradients(const TENO * teno);
+        /** @brief The functor's polynomial face gradients (viscous_gradients = "reconstruction"). */
+        void set_polynomial_flux(ViscousFluxFunctor & functor) const;
+        /** @brief TENO::polynomials for cells [0, n_cells). */
+        void allocate_polynomials(uint32_t n_cells);
+        /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
+        void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
@@ -1177,6 +1190,8 @@ class Solver {
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
         FaceExchange face_exchange;
+        // viscous_gradients = "reconstruction": the polynomials of halo cells next to those faces, from their owners
+        FaceExchange polynomial_exchange;
         IndexSet local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
@@ -1273,6 +1288,7 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
+        bool polynomial_viscous = false;    // [numerics] viscous_gradients = "reconstruction"
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;

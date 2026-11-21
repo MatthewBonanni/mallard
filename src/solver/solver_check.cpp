@@ -599,6 +599,22 @@ void Solver::check_settings(CheckReport & r) const {
                                                          "limit of %s for smooth flow: lower run.cfl (or run.dt)",
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
     }
+    const double t0 = static_cast<double>(t);
+    const double t_end = t_stop > 0 ? static_cast<double>(t_stop) : std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const std::string which = "triggers[" + std::to_string(i) + "] (" + trigger.name + ")";
+        if (trigger.hold > t_end - t0) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + " must hold for " + logging::real(trigger.hold) + " s, longer than the run's " +
+                          logging::real(t_end - t0) + " s to t_stop: lower its for, or raise run.t_stop");
+        } else if (triggers.never_true(i, t0, t_end)) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + ": \"" + trigger.when + "\" is false at every t from " + logging::real(t0) +
+                          (std::isfinite(t_end) ? " s to t_stop = " + logging::real(t_end) + " s" : " s on") +
+                          ": check its numbers and their units (seconds)");
+        }
+    }
 }
 
 namespace {
