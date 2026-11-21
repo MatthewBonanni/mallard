@@ -1003,6 +1003,11 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         const std::vector<std::string> files = case_view::write_view(options.view_dir, blocks, title);
         r.view_file = files[0];
         r.view_images.assign(files.begin() + 1, files.end());
+        static const char * const KINDS[] = {"mesh", "boundary", "cell_zone", "region", "probe", "snapshot", "periodic"};
+        for (const case_view::Block & b : blocks) {
+            r.view_blocks.push_back({b.name, KINDS[static_cast<size_t>(b.kind)], b.condition, b.label.empty() ? b.name : b.label});
+        }
+        check_frames(r);
     }
 }
 

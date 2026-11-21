@@ -76,4 +76,21 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
                                          const std::string & where, const std::vector<uint16_t> & used,
                                          const WallDistance & walls, bool distributed, std::string & summary);
 
+/** @brief Where the local coordinates u, v of a [[boundaries]] entry start, and which way u grows (the case view). */
+struct BoundaryFrame {
+    std::string shape;                  // "curve" (2D), "four-sided", "ring" or "disk"
+    std::array<double, 3> origin{};     // 2D: the end u starts from; 3D: the face center nearest to u = v = 0
+    std::array<double, 3> u_direction{};  // unit vector along which u grows at origin, tangent to the boundary
+    std::array<double, 3> normal{};     // the area-weighted mean of the inward unit normals
+    double length = 0.0;                // 2D: the length of the curve; 3D: the largest u_m of a face center
+    double width = 0.0;                 // 3D: the largest v_m of a face center; 2D: 0
+};
+
+/**
+ * @brief The frame of the local coordinates of an entry's faces (all of them, from this rank's), the same on every
+ *        rank. Collective. @throws InputError where the faces have no u (not one curve or patch)
+ */
+BoundaryFrame boundary_frame(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
+                             const std::string & where, bool distributed);
+
 #endif // BOUNDARY_COORDINATES_H

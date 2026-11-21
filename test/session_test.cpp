@@ -13,6 +13,7 @@
 #include <csignal>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -286,6 +287,72 @@ TEST(SessionTest, InitializeAnswersAsVersionJsonWithTheDevicesAndTheSettingsOfCo
     std::vector<std::string> methods;
     for (const json::Value & m : one_shot["methods"].array) methods.push_back(m["name"].string);
     EXPECT_EQ(methods.size(), session::methods().size());
+}
+
+TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
+                                                             request(2, "case.view") + request(3, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-case-view"}});
+    EXPECT_EQ(response(list, 2)["error"]["code"].number, session::code::INVALID_PARAMS);
+    const json::Value view = response(list, 1)["result"];
+    const Result check = run({"check", "case.toml", "--view", "view", "--format", "json"});
+    ASSERT_EQ(check.status, 0) << check.err;
+    EXPECT_EQ(json::dump(view), json::dump(json::parse(check.out)["view"]));
+    EXPECT_EQ(violations("mallard-check", json::parse(check.out)), "");
+    for (const json::Value & f : view["files"].array) EXPECT_TRUE(fs::exists(f.string)) << f.string;
+
+    std::map<std::string, json::Value> frames;
+    for (const json::Value & f : view["frames"].array) frames[f["zone"].string] = f;
+    ASSERT_EQ(frames.size(), Mallard_DIM == 3 ? 6u : 4u) << json::dump(view);
+    for (const auto & [zone, f] : frames) {
+        if (!f["error"].is_null()) continue;
+        double along = 0.0, u2 = 0.0, n2 = 0.0;
+        for (size_t d = 0; d < 3; d++) {
+            along += f["u_direction"].array[d].number * f["normal"].array[d].number;
+            u2 += f["u_direction"].array[d].number * f["u_direction"].array[d].number;
+            n2 += f["normal"].array[d].number * f["normal"].array[d].number;
+        }
+        EXPECT_NEAR(u2, 1.0, 1e-9) << zone;
+        EXPECT_NEAR(n2, 1.0, 1e-9) << zone;
+        EXPECT_NEAR(along, 0.0, 1e-3) << zone;  // u runs along the boundary
+        EXPECT_GT(f["length"].number, 0.0) << zone;
+    }
+    // The inlet, at the domain's low x, faces +x
+    ASSERT_TRUE(frames["inlet"]["error"].is_null()) << json::dump(frames["inlet"]);
+    EXPECT_NEAR(frames["inlet"]["normal"].array[0].number, 1.0, 1e-9);
+    EXPECT_FALSE(frames["cylinder"]["error"].is_null() && Mallard_DIM == 2) << "a closed curve has no start";
+
+    if (Mallard_DIM == 2) {
+        // origin sets the end u starts from
+        std::string flipped = cylinder_input("cyl.msh");
+        const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = [0.2, 0.0]\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+        ASSERT_NE(flipped.find(inlet), std::string::npos);
+        flipped.replace(flipped.find(inlet), inlet.size(),
+                        "name = \"inlet\"\ntype = \"farfield\"\nu = [0.2, 0.0]\np = 0.7142857142857143\n"
+                        "T = \"0.7142857142857143 * (1 + 0.1 * u)\"\norigin = [0.0, 1.0]\n");
+        const Result edited = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
+                                                                request(2, "case.update", "{\"text\":" + json::quote(flipped) + "}") +
+                                                                request(3, "case.view", "{\"dir\":\"view\"}"));
+        ASSERT_EQ(edited.status, 0) << edited.err;
+        const std::vector<json::Value> edits = messages(edited.out);
+        const auto inlet_frame = [&](int id) {
+            const json::Value r = response(edits, id);
+            for (const json::Value & f : r["result"]["frames"].array) {
+                if (f["zone"].string == "inlet") return f;
+            }
+            return json::Value();
+        };
+        const json::Value before = inlet_frame(1), after = inlet_frame(3);
+        ASSERT_FALSE(before.is_null() || after.is_null()) << edited.out;
+        EXPECT_EQ(json::dump(after["normal"]), json::dump(before["normal"]));
+        EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-12);
+        EXPECT_NEAR(after["origin"].array[1].number - before["origin"].array[1].number,
+                    before["u_direction"].array[1].number * before["length"].number, 1e-9);
+    }
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {

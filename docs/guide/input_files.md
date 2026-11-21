@@ -526,7 +526,7 @@ An input still being written fails on what it does not have yet: a required key 
 | `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
+| `regions`, `case_view`, `case_view_images`, `view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, its images, and with `--view` its files, blocks and boundary frames (`mallard-case-view`; [The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
@@ -714,6 +714,17 @@ at a glance. It writes, without running the case:
 mallard check input.toml --view view
 mallard info mesh.msh --view view   # the mesh alone: its cells, zones and periodic pairs
 ```
+
+With `--format json`, the report's `view` (schema `mallard-case-view`, the
+result of the [session](session.md)'s `case.view`) lists the files written,
+every block with its `kind` and `condition`, and under `frames` where each
+`[[boundaries]]` entry's [local coordinates](boundary_conditions.md#local-coordinates)
+start: its `shape` (`curve` in 2D; `four-sided`, `ring` or `disk` in 3D),
+`origin` (2D: the end where u = 0; 3D: the face center nearest to u = v = 0),
+`u_direction` (the unit vector along which u grows there), `normal` (the mean
+inward unit normal), `length` and, in 3D, `width` (the largest u_m and v_m).
+An entry whose faces have no u (a closed curve, a zone of several pieces) has
+`shape` `null` and says why in `error`.
 
 ![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-light.svg#gh-light-mode-only)
 ![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-dark.svg#gh-dark-mode-only)

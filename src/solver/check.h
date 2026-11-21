@@ -145,6 +145,21 @@ struct CheckEnvironment {
     bool nccl_used = false;             // halo exchanges by NCCL (several ranks, [parallel] halo_exchange)
 };
 
+/** @brief Where the local coordinates of a [[boundaries]] entry start and which way u grows (BoundaryFrame). */
+struct CheckFrame {
+    std::string entry;  // "boundaries[name = \"inlet\"]"
+    std::string zone;
+    std::string shape;  // curve, four-sided, ring, disk; empty with error
+    std::array<double, 3> origin{}, u_direction{}, normal{};
+    double length = 0.0, width = 0.0;
+    std::string error;  // why the faces have no u, or empty
+};
+
+/** @brief A block of the case view: its name, what it shows and, for boundary zones, their condition. */
+struct CheckViewBlock {
+    std::string name, kind, condition, label;
+};
+
 struct CheckReport {
     std::vector<CheckDiagnostic> diagnostics;
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
@@ -157,6 +172,8 @@ struct CheckReport {
     std::vector<CheckRegion> regions;
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
+    std::vector<CheckViewBlock> view_blocks;
+    std::vector<CheckFrame> frames;        // of each [[boundaries]] entry, with the view
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 
@@ -294,6 +311,9 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics);
 
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
 std::string check_json(const CheckReport & report);
+
+/** @brief The case view written (mallard-case-view): its files, blocks and boundary frames; null without one. */
+std::string case_view_json(const CheckReport & report);
 
 /**
  * @brief The parts of the report a run records at setup (docs/guide/output.md#the-check-at-setup): status,
