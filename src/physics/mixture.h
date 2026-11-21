@@ -92,6 +92,27 @@ struct Mixture {
         cv = th.cv(T);
     }
 
+    /** @brief Specific enthalpy (formation included) at T. */
+    template <typename F_Y>
+    KOKKOS_INLINE_FUNCTION double h_mass(const double T, const F_Y & y) const {
+        return tabulated() ? table_thermo(y).enthalpy(T) : thermo.h_mass(T, y);
+    }
+
+    /** @brief Specific entropy at T and the reference pressure, up to a constant of the composition. */
+    template <typename F_Y>
+    KOKKOS_INLINE_FUNCTION double s0_mass(const double T, const F_Y & y) const {
+        return tabulated() ? table_thermo(y).entropy(T) : thermo.s0_mass(T, y);
+    }
+
+    /**
+     * @brief The conducted variable at T: T itself, or for a flamelet gas the enthalpy h(T), whose
+     *        gradient times kappa / cp is the heat flux at unity Lewis number.
+     */
+    template <typename F_Y>
+    KOKKOS_INLINE_FUNCTION double conducted(const double T, const F_Y & y) const {
+        return tabulated() ? h_mass(T, y) : T;
+    }
+
     /** @brief Temperature of internal energy e (T_guess seeds the mixture's Newton iteration). */
     template <typename F_Y>
     KOKKOS_INLINE_FUNCTION double T_from_e(const double e, const F_Y & y, const double T_guess) const {
