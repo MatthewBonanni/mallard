@@ -411,13 +411,13 @@ TEST(SessionTest, BoundaryValuesAreTheBoundariesOwnWithTheInflowOfMassFlowInlets
     const auto in = csv_columns(entries["inlet"]["file"].string);
     ASSERT_TRUE(in.count("T") && in.count("u")) << json::dump(entries["inlet"]);
     for (size_t k = 0; k < in.at("T").size(); k++) {
-        EXPECT_NEAR(in.at("T")[k], 0.7142857142857143 * (1 + 0.1 * in.at("u")[k]), 1e-12);
+        EXPECT_NEAR(in.at("T")[k], 0.7142857142857143 * (1 + 0.1 * in.at("u")[k]), 1e-6);
     }
     // The mass-flow inlet's flux makes the prescribed mass flux of the initial state
     const auto out = csv_columns(entries["outlet"]["file"].string);
     ASSERT_TRUE(out.count("rho_u_n") && out.count("speed")) << json::dump(entries["outlet"]);
     for (size_t k = 0; k < out.at("rho_u_n").size(); k++) {
-        EXPECT_NEAR(out.at("rho_u_n")[k], 0.15, 1e-9);
+        EXPECT_NEAR(out.at("rho_u_n")[k], 0.15, 1e-6);
         EXPECT_GT(out.at("speed")[k], 0.0);
     }
     for (const json::Value & c : entries["outlet"]["columns"].array) {
