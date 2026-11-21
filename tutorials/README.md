@@ -25,7 +25,7 @@ cmake --install build --prefix install && cmake --install build-3d --prefix inst
 tutorials/ci.sh install/bin/mallard /tmp/tutorials
 ```
 
-Python packages: `pip install -r tutorials/requirements.txt -e tools` (which also
+Python packages: `uv pip install -r tutorials/requirements.txt -e tools` (which also
 installs the `gmsh` command and the [Python package](../docs/guide/python.md), whose
 library a build makes by default). The figure scripts write light and dark SVGs to
 `docs/images/tutorials/`, or to the directory given with `--out`.
