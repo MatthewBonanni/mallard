@@ -1,0 +1,1 @@
+- Probes of moving and `where` regions that a trigger or `[statistics.convergence]` reads are reduced in the step graph, over the cells covered at each write (time-averaged ones over the cells their averages hold), with the host's results bit for bit, so the step queue no longer stops at their writes. Isosurface probes that triggers read still stop it.
