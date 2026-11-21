@@ -1644,9 +1644,10 @@ uses (dependencies), the dimensions of the solvers installed with it (mallard
 interfaces the schema name and version of every machine-readable output: the key
 catalog, the check report, the run log, the run, snapshot and probe sampling
 blocks of output files, the run directory report, run control (with its commands
-and control files), the grid convergence report and the pack manifest. Each of
-these carries the same schema and version fields; an addition keeps the version,
-a change that breaks a reader increments it.
+and control files), the run endpoint record, run launch results, the grid
+convergence report and the pack manifest. Each of these carries the same schema
+and version fields; an addition keeps the version, a change that breaks a reader
+increments it.
 
 Options:
   --format text|json  text: the version alone, as mallard --version prints it;
