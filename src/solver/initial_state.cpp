@@ -315,10 +315,20 @@ struct Evaluator {
         }
     }
 
-    /** @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted). */
+    /**
+     * @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted); a flamelet
+     *        gas's scalars [Z, C] as given.
+     */
     KOKKOS_INLINE_FUNCTION void composition(const Layer & L, const double * x, double * Y,
                                             const double * lanes = nullptr) const {
         for (uint32_t k = 0; k < n_species; k++) Y[k] = 0.0;
+        if (gas.tabulated()) {
+            for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
+                const double v = value(static_cast<int32_t>(fractions(i, 1)), x, lanes);
+                Y[fractions(i, 0)] = v > 0.0 ? v : 0.0;
+            }
+            return;
+        }
         double total = 0.0;
         for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
             const uint32_t k = fractions(i, 0);
@@ -346,7 +356,7 @@ struct Evaluator {
     }
 
     KOKKOS_INLINE_FUNCTION double gas_constant(const double * Y) const {
-        return mixture ? gas.thermo.gas_constant(chemistry::MassFractions{Y}) : static_cast<double>(physics.R);
+        return mixture ? gas.gas_constant(chemistry::MassFractions{Y}) : static_cast<double>(physics.R);
     }
 
     /** @brief Pressure and temperature of a state from its pair. */
@@ -455,14 +465,14 @@ struct Evaluator {
         rtype cons[N_CONSERVATIVE];
         if (mixture) {
             const chemistry::MassFractions y{Y};
-            const double R = gas.thermo.gas_constant(y);
+            const double R = gas.gas_constant(y);
             double p = (s.mask & PRESSURE) ? s.p : 0.0;
             double T = (s.mask & TEMPERATURE) ? s.T : 0.0;
             if (!(s.mask & PRESSURE)) p = s.rho * R * T;
             if (!(s.mask & TEMPERATURE)) T = p / (s.rho * R);
             const double rho = p / (R * T);
             double e, cv, u2 = 0.0;
-            gas.thermo.e_cv(T, y, e, cv);
+            gas.e_cv(T, y, e, cv);
             rtype u[N_DIM];
             FOR_I_DIM {
                 u[i] = static_cast<rtype>(s.u[i]);
@@ -864,9 +874,9 @@ struct Evaluator {
             FOR_I_DIM u2 += b[1 + i] * b[1 + i];
             const double e = static_cast<double>(U[N_DIM + 1]) / rho - 0.5 * u2;
             const chemistry::MassFractions y{Y};
-            const double T = gas.thermo.T_from_e(e, y, base_cells(row, n_vars));
+            const double T = gas.T_from_e(e, y, base_cells(row, n_vars));
             b[5] = T;
-            b[4] = rho * gas.thermo.gas_constant(y) * T;
+            b[4] = rho * gas.gas_constant(y) * T;
         } else {
             rtype W[N_CONSERVATIVE];
             physics.compute_W_from_conservatives(W, U);
@@ -1289,6 +1299,30 @@ struct InitialState::Impl {
             return;
         }
         L.fractions = static_cast<uint32_t>(fractions.size());
+        if (mixture->tabulated() && !constant) {
+            // Z and C, each a number or an expression; C defaults to fresh (0) where Z is given
+            for (const char * key : {"X", "Y", "balance"}) {
+                if (t.contains(key)) {
+                    throw invalid(t, where + "." + key, key, "sets species, but a flamelet gas carries Z and C",
+                                  "Give the composition as Z = ... and C = ...", REGIONS_DOCS);
+                }
+            }
+            if (!t.contains("Z") && !t.contains("C")) {
+                if (base) {
+                    throw InputError({.key = where, .line = line_of(t), .message = "has no composition",
+                                      .fix = "Give Z (mixture fraction) and C (progress variable)"});
+                }
+                return;
+            }
+            const char * keys[2] = {"Z", "C"};
+            for (uint32_t k = 0; k < 2; k++) {
+                const std::string text = t.contains(keys[k]) ? quantity_or_expression(t.at(keys[k]), keys[k], dim::none)
+                                                             : std::string("0");
+                fractions.push_back({k, static_cast<uint32_t>(add_program(where + "." + keys[k], text, names))});
+            }
+            L.n_fractions = 2;
+            return;
+        }
         if (constant) {
             const std::vector<double> Y = mixture->mass_fractions(t, where);
             for (uint32_t k = 0; k < Y.size(); k++) {

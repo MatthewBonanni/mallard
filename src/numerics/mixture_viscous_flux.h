@@ -53,6 +53,10 @@ struct MixtureTransportFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
+        if (gas.tabulated()) {
+            flamelet(c);
+            return;
+        }
         const ScalarMassFractions y{&scalars(c, 0)};
         const double rho = static_cast<double>(W(c, 0)), p = static_cast<double>(W(c, N_DIM + 1));
         const double R = gas.thermo.gas_constant(y);
@@ -76,6 +80,32 @@ struct MixtureTransportFunctor {
         for (uint32_t k = 0; k < gas.n_species; k++) {
             values(c, N_DIM + 1 + k) = static_cast<rtype>(y(k) / gas.transport.W(k) * W_mean);
         }
+    }
+
+    /**
+     * @brief A flamelet gas: mu, kappa and cp from the table. With unity Lewis
+     *        number the heat and enthalpy diffusion fluxes sum to -(kappa / cp)
+     *        grad h, so the conducted variable is h = e + p / rho in place of T,
+     *        with LAMBDA = kappa / cp, and every scalar diffuses with rho D =
+     *        kappa / cp along the gradient of its own value.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void flamelet(const uint32_t c) const {
+        const ScalarMassFractions y{&scalars(c, 0)};
+        const double rho = static_cast<double>(W(c, 0)), p = static_cast<double>(W(c, N_DIM + 1));
+        const flamelet::Point<3> point = gas.flamelet.locate(y(flamelet::Gas<>::Z), 0.0, y(flamelet::Gas<>::C));
+        const flamelet::Thermo th = gas.flamelet.thermo(point);
+        const flamelet::Transport tr = gas.flamelet.transport(point);
+        const double T = p / (rho * th.R);
+        const double rho_D = tr.kappa / tr.cp;
+        const double nu = Kokkos::fmax(Kokkos::fmax(4.0 / 3.0 * tr.mu / rho, tr.kappa / (rho * th.cv(T))), rho_D / rho);
+        for (uint32_t k = 0; k < gas.n_species; k++) diffusion(c, k) = rho_D;
+        coefficients(c, MU) = static_cast<rtype>(tr.mu);
+        coefficients(c, LAMBDA) = static_cast<rtype>(rho_D);
+        coefficients(c, NU_EFF) = static_cast<rtype>(nu);
+        FOR_I_DIM values(c, i) = W(c, 1 + i);
+        values(c, N_DIM) = static_cast<rtype>(th.energy(T) + p / rho);
+        for (uint32_t k = 0; k < gas.n_species; k++) values(c, N_DIM + 1 + k) = static_cast<rtype>(y(k));
     }
 };
 
@@ -474,7 +504,9 @@ struct MixtureViscousFluxFunctor {
                 correction += c * dX;
                 sum_Y += Y_k(k);
             }
-            correction /= sum_Y;
+            // A flamelet gas's scalars are not mass fractions: no correction velocity, and h is conducted
+            const bool tabulated = gas.tabulated();
+            correction = tabulated ? 0.0 : correction / sum_Y;
             const auto p = chemistry::ThermoTable<>::powers(static_cast<double>(q_f[N_DIM]));
             const double RT = chemistry::GAS_CONSTANT * p.T;
             // Soret: -D^T_k (dT/dn) / T, molecular
@@ -489,7 +521,7 @@ struct MixtureViscousFluxFunctor {
                 const double c = k < KEPT ? kept_c[k] : c_k(k), dX = k < KEPT ? kept_dX[k] : dX_dn(k);
                 double j = -c * dX + Y_k(k) * correction;
                 if (soret) j -= DT_k(k) * dlnT_dn;
-                enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
+                if (!tabulated) enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
                 out.species(k, A, j);
             }
             energy -= static_cast<rtype>(enthalpy);

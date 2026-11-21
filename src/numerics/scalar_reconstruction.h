@@ -21,6 +21,7 @@
 #include "face_reconstruction.h"
 #include "mesh.h"
 #include "teno.h"
+#include "mixture.h"
 #include "thermo.h"
 
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
@@ -138,10 +139,10 @@ struct ScalarFaceValues {
 class ScalarReconstruction {
     public:
         /**
-         * @param thermo Species thermodynamics (the scalars are its n_species + 2).
+         * @param gas The gas (the scalars are its n_species + 2; a flamelet gas's are bounded independently).
          * @param flow Face reconstruction of the flow block, whose stencils TENO shares.
          */
-        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const chemistry::ThermoTable<> & thermo,
+        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const Mixture & gas,
                   const FaceReconstruction & flow);
 
         /**
@@ -197,6 +198,7 @@ class ScalarReconstruction {
         const TENO * teno = nullptr;
         chemistry::ThermoTable<> thermo;
         uint32_t n_species = 0;
+        bool independent = false;
         bool linear = false;
         LimiterType limiter_type = LimiterType::NONE;
         rtype venkat_K = 5.0;

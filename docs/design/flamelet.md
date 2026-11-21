@@ -6,7 +6,9 @@ generators) and Mallard's reader and device lookup. Mallard does not generate
 tables. Tables come from an external generator library, **`<generator, name
 TBD>`**: a separate project that starts from FPVgen (IhmeGroup/FPVgen), credited
 in its README. The [open questions](#12-open-questions) of the first draft are
-resolved. Stage 2 couples the tables to the solver.
+resolved. Stage 2 couples the tables to the solver; its laminar part is built
+([section 5.5](#55-stage-2-as-built)); the LES closures and the counterflow
+validation are next.
 
 Mallard's reacting flows today carry every species of a mechanism and integrate
 finite-rate chemistry in each cell ([chemistry.md](chemistry.md)); in LES the
@@ -345,6 +347,43 @@ fresh streams, or the burnt value for a pilot: `C_max` at that `Z`), instead of
 species; walls are zero-flux for all scalars. Initial states use the same keys,
 through the existing expression machinery (`Z = "x < 0 ? 1 : 0"`). A pilot or an
 equilibrium region is `C = "burnt"`, resolved through the table.
+
+### 5.5 Stage 2 as built
+
+The laminar coupling (`src/physics/flamelet.{h,cpp}`,
+`src/solver/solver_flamelet.cpp`, user guide [flamelet.md](../guide/flamelet.md))
+settles four points the sections above left open:
+
+- **Dispatch.** `Mixture` holds a `flamelet::Gas` and branches at run time on
+  `tabulated()` in `cell_state`, the gas constant, `cp`, `e(T)` and `T(e)`,
+  instead of templating the mixture path's functors on the gas model
+  (decision 6). The branch is uniform across a launch (one gas per run), so it
+  costs no divergence, and it avoids instantiating every mixture kernel twice.
+  Runs without `gas = "flamelet"` take the untaken branch only.
+- **Source scaling.** `omega_C` is tabulated with the flamelet density `rho0`
+  per node and scaled by `(rho / rho0)^2`, the scaling of a second-order rate
+  (Saghafian et al. 2015), so compression and expansion change the rate
+  consistently.
+- **Heat flux.** With unity Lewis number the conduction and the enthalpy
+  carried by diffusion combine to `-(kappa / cp) grad h`, `h = e + p / rho`;
+  the solver conducts `h` with `kappa / cp` and drops the species enthalpy flux
+  and the correction velocity (`Z` and `C` are not mass fractions). Conducting
+  along `grad T` instead would heat a mixing layer of streams at one
+  temperature by hundreds of kelvin.
+- **float32 tables** are widened to float64 when copied to the solver's
+  device view: stage 2 reads few fields per lookup and keeps one lookup path.
+
+Each scalar is limited on its own in reconstruction, without the mass-fraction
+coupling (major species, shared bound) of mixtures. The tests
+(`test/flamelet_gas_test.cpp`, `test/flamelet_solver_test.cpp`) use synthetic
+tables with exact answers: the closed-form `T(e)` against a quadrature of
+`cv`, device lookups against the multilinear source, the error-function
+mixing of `Z` at uniform `T`, a closed reactor following the tabulated source,
+and the exact traveling front of `C_t = D C_xx + k C^2 (1 - C)`, which checks
+diffusivity, source and the map `C -> c` together. Still to come in stage 2: the
+table's species, `T` and `HRR` as derived fields, the table-pressure warning,
+isothermal walls and the other boundary types, and the 2D counterflow against
+Cantera with a generator-made table.
 
 ## 6. Interaction with the existing models
 
