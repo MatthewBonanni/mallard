@@ -130,7 +130,7 @@ struct CharacteristicStateFunctor {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;  // Gas mixtures: [gamma, e0]; empty for a single gas
     Kokkos::View<rtype *> quad_weights;        // 2D
-    FaceWeights<> face_weights;       // 3D: (face, q)
+    FaceWeights<> face_weights;                // 3D: (face, q)
     rtype dt_host;
     bool initialize;
     const rtype * dt_device = nullptr;  // the step's dt on the device, inside a step graph
