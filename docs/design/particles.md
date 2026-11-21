@@ -286,7 +286,7 @@ removes a particle that crossed it and counts it in the third removal counter
 is taken to move as dv/dt = (u - v) / tau + a with u, a, tau of the step's
 start, for which position and velocity are closed form in phi functions of
 z = b / tau. The time b before the step's end at which it reached the wall is
-the root of the normal distance travelled, by a few fixed-point passes; the
+the root of the normal distance traveled, by a few fixed-point passes; the
 particle's normal velocity is reversed times e_n and its tangential velocity
 scaled by e_t at that time, and it relaxes on for b. That is exact for drag
 in a uniform gas and for constant acceleration, so bounce timing is
