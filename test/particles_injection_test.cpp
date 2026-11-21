@@ -346,7 +346,9 @@ TEST(ParticleInjectionTest, ARegionInjectorFillsItsShapeUniformly) {
             ASSERT_LE(r.x[i], length[i]);
             u.push_back(r.x[i] / length[i]);
         }
-        EXPECT_LT(ks_distance(u, [](double x) { return std::clamp(x, 0.0, 1.0); }), ks_critical(u.size()));
+        // At the 0.1% level: three axes, and the disk's three checks above
+        EXPECT_LT(ks_distance(u, [](double x) { return std::clamp(x, 0.0, 1.0); }),
+                  1.95 / std::sqrt(static_cast<double>(u.size())));
     }
 }
 
