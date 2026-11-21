@@ -514,7 +514,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 
 ### The report as JSON
 
-`--format json` prints the same report as one JSON object on stdout, and nothing else; the setup's sections are left out. The exit status is the same. Its `version` is 1: a version gains members, and changes only when an existing member changes meaning. Numbers are SI (bytes, seconds, meters) and read back exactly; a number that is not estimated is `null`, and a section that was not reached is `null`.
+`--format json` prints the same report as one JSON object on stdout, and nothing else; the setup's sections are left out. The exit status is the same. Its `schema` is `"mallard-check"` and its `version` 1: a version gains members, and changes only when an existing member changes meaning. Numbers are SI (bytes, seconds, meters) and read back exactly; a number that is not estimated is `null`, and a section that was not reached is `null`.
 
 | Member | Holds |
 |---|---|
