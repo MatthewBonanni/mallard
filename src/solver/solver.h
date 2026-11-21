@@ -218,8 +218,11 @@ class Solver {
          */
         void enable_control(bool on) { control_enabled = on; }
 
-        /** @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not. */
-        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value);
+        /**
+         * @brief Applies one runtime setting on every rank: whether it was accepted, and what changed or why not;
+         *        without apply, whether it would be (a trigger's set action, checked at setup).
+         */
+        std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value, bool apply = true);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -422,6 +425,8 @@ class Solver {
         /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;
         void act_on_triggers();
+        /** @brief The next time a condition compares t with, where a step lands: at it or the next rtype after. */
+        rtype next_landing_time() const;
         /** @brief Whether the step graph evaluates the triggers. */
         bool triggers_on_device() const;
         /** @brief Whether the step graph's triggers read a value of probe k: the step graph reduces it at its writes,
