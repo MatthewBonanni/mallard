@@ -54,6 +54,49 @@ std::string point(const std::array<double, N_DIM> & x) { return quality_point(x)
 
 } // namespace
 
+void Solver::report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const {
+    std::string text, code = diagnostic_code::SETUP;
+    Diagnostic about;
+    try {
+        std::rethrow_exception(e.error);
+    } catch (const InputError & error) {
+        text = error_text(error);
+        code = diagnostic_code::INPUT;
+        about = error.diagnostic;
+    } catch (const std::exception & error) {
+        text = error_text(error);
+    }
+    if (about.key.empty()) about.key = key_in_text(text);
+    // A key read from its element of an array of tables ("T", "write_data.format") is completed with the element
+    if (!e.element.empty() && !about.key.empty()) {
+        const std::string array = e.element.substr(0, e.element.find('['));
+        const std::string first = about.key.substr(0, about.key.find_first_of(".["));
+        if (first == array && about.key[array.size()] == '.') {
+            about.key = e.element + about.key.substr(array.size());
+        } else if (first != array && !input.as_table().entries().count(first)) {
+            about.key = e.element + "." + about.key;
+        }
+    }
+    const std::string message = (code == diagnostic_code::INPUT && !input_file.empty() ? input_file + ": " : "") + text;
+    r.error(code, message, about);
+}
+
+void Solver::locate_diagnostics(CheckReport & r, const std::string & input_file) const {
+    for (CheckDiagnostic & d : r.diagnostics) {
+        Diagnostic about{.key = d.key, .line = d.line};
+        const bool from_text = about.key.empty();
+        if (from_text) {
+            const std::string prefix = input_file + ": ";
+            const bool named = !input_file.empty() && d.message.rfind(prefix, 0) == 0;
+            about.key = key_in_text(named ? d.message.substr(prefix.size()) : d.message);
+        }
+        if (about.key.empty() || (!locate(input, about) && from_text)) continue;
+        d.key = about.key;
+        d.line = about.line;
+        d.column = about.column;
+    }
+}
+
 CheckReport Solver::check(const Input & input_in, const CheckOptions & options) {
     const comm::SelfScope scope = communication_scope();
     CheckReport r;
@@ -70,18 +113,26 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_only = true;
 
     memory::Tracker tracker;
-    try {
-        init(input_in);
-        r.setup_done = true;
-    } catch (const InputError & e) {
-        r.error(diagnostic_code::INPUT, (options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
-    } catch (const std::exception & e) {
-        r.error(diagnostic_code::SETUP, error_text(e));
+    setup_errors.clear();
+    std::exception_ptr stopped;
+    {
+        logging::WarningCapture setup_warnings;
+        try {
+            init(input_in);
+        } catch (const SetupStopped &) {
+        } catch (const std::exception &) {
+            stopped = std::current_exception();
+        }
+        for (const auto & [code, message] : setup_warnings.warnings) r.warning(code, message);
     }
+    r.setup_done = !stopped && setup_errors.empty();
+    if (stopped) setup_errors.push_back({stopped, ""});
+    for (const SetupError & e : setup_errors) report_setup_error(r, e, options.input_file);
+    setup_errors.clear();
     for (const Diagnostic & key : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
-        r.error(diagnostic_code::KEY_UNUSED, describe(key));
+        r.error(diagnostic_code::KEY_UNUSED, describe(key), key);
     }
     for (const auto & finding : deprecated_keys) r.warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     const ResolvedInput resolved = resolve_input(input);
@@ -91,7 +142,10 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         file << key_catalog(resolved);
         if (!file) r.error(diagnostic_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
-    if (!r.setup_done || !mesh) return r;
+    if (!r.setup_done || !mesh) {
+        locate_diagnostics(r, options.input_file);
+        return r;
+    }
 
     check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
@@ -105,6 +159,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
+    locate_diagnostics(r, options.input_file);
     return r;
 }
 

@@ -167,6 +167,27 @@ void Solver::timed_phase(const std::string & name, F && f) {
     logging::end_phase(seconds);
 }
 
+template <typename F>
+bool Solver::independently(const std::string & element, F && f) {
+    if (!check_only) {
+        f();
+        return true;
+    }
+    try {
+        f();
+        return true;
+    } catch (const SetupStopped &) {
+        throw;
+    } catch (const std::exception &) {
+        setup_errors.push_back({std::current_exception(), element});
+        return false;
+    }
+}
+
+void Solver::stop_if_failed() const {
+    if (!setup_errors.empty()) throw SetupStopped();
+}
+
 int Solver::init(const Input & input_in) {
     const comm::SelfScope scope = communication_scope();
     this->input = input_in;
@@ -225,13 +246,16 @@ void Solver::setup_from_input() {
     run_health.setup_phases.clear();
 
     logging::section("Setup");
-    init_run_parameters();
+    independently("", [&] { init_run_parameters(); });
     timed_phase("mesh", [&] {
-        init_mesh();
-        record_mesh_provenance();
+        independently("", [&] {
+            init_mesh();
+            record_mesh_provenance();
+        });
     });
     timed_phase("physics and boundaries", [&] {
-        init_physics();
+        independently("", [&] { init_physics(); });
+        stop_if_failed();
         init_boundaries();
     });
     timed_phase("numerics", [&] { init_numerics(); });
@@ -817,7 +841,8 @@ void Solver::init_physics() {
         throw InputError({.key = "physics",
                           .message = "the [physics] table is missing; every input needs one",
                           .fix = "Add [physics] with type = \"euler\" (inviscid) or \"navier_stokes\" (viscous) "
-                                 "and the gas properties, e.g. gamma = 1.4"});
+                                 "and the gas properties, e.g. gamma = 1.4",
+                          .missing = true});
     }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
     record_options("physics.gas", {"perfect", "mixture"});
@@ -945,46 +970,51 @@ void Solver::init_boundaries() {
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
         const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
-        if (!bound.contains("name")) {
-            throw missing_key(bound, entry + ".name",
-                              "Add name = \"...\": the mesh zone this condition applies to");
-        }
-        const std::string name = find_value<std::string>(bound, "name");
-        const std::string where_name = "boundaries[name = \"" + name + "\"]";
-        if (!bound.contains("type")) {
-            std::vector<std::string> types;
-            for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
-            std::sort(types.begin(), types.end());
-            Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
-            d.valid = types;
-            d.fix = "Add type = \"...\"";
-            d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
-            throw InputError(d);
-        }
-        const auto & periodic = mesh->periodic_zones;
-        if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
-            throw InputError({.key = where_name,
-                              .line = line_of(bound),
-                              .message = "zone \"" + name + "\" is periodic, so it takes no condition",
-                              .fix = "Remove this [[boundaries]] entry, or the periodic pairing of the zone",
-                              .docs = "docs/guide/meshes.md#periodic-boundaries"});
-        }
-        FaceZone * zone = mesh->get_face_zone(name);
-        if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
-        // A rank's part of the mesh may not touch every zone
-        if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
-            throw InputError({.key = where_name + ".name",
-                              .line = line_of(bound, "name"),
-                              .message = "the mesh has no boundary zone \"" + name + "\"",
-                              .valid = names,
-                              .suggestion = suggest_value(name, names),
-                              .fix = "Use a zone of the mesh: the physical names of a mesh file, or left, right, "
-                                     "bottom, top (back, front in 3D) for generated meshes",
-                              .docs = "docs/guide/boundary_conditions.md"});
-        }
+        std::string name, where_name;
+        FaceZone * zone = nullptr;
+        const bool read = independently(entry, [&] {
+            if (!bound.contains("name")) {
+                throw missing_key(bound, entry + ".name",
+                                  "Add name = \"...\": the mesh zone this condition applies to");
+            }
+            name = find_value<std::string>(bound, "name");
+            where_name = "boundaries[name = \"" + name + "\"]";
+            if (!bound.contains("type")) {
+                std::vector<std::string> types;
+                for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
+                std::sort(types.begin(), types.end());
+                Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
+                d.valid = types;
+                d.fix = "Add type = \"...\"";
+                d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
+                throw InputError(d);
+            }
+            const auto & periodic = mesh->periodic_zones;
+            if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
+                throw InputError({.key = where_name,
+                                  .line = line_of(bound),
+                                  .message = "zone \"" + name + "\" is periodic, so it takes no condition",
+                                  .fix = "Remove this [[boundaries]] entry, or the periodic pairing of the zone",
+                                  .docs = "docs/guide/meshes.md#periodic-boundaries"});
+            }
+            zone = mesh->get_face_zone(name);
+            if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
+            // A rank's part of the mesh may not touch every zone
+            if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
+                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+                throw InputError({.key = where_name + ".name",
+                                  .line = line_of(bound, "name"),
+                                  .message = "the mesh has no boundary zone \"" + name + "\"",
+                                  .valid = names,
+                                  .suggestion = suggest_value(name, names),
+                                  .fix = "Use a zone of the mesh: the physical names of a mesh file, or left, right, "
+                                         "bottom, top (back, front in 3D) for generated meshes",
+                                  .docs = "docs/guide/boundary_conditions.md"});
+            }
+            bcs.push_back(BoundaryCondition::from_input(bound, physics));
+        });
+        if (!read) continue;
         const BoundaryProfiles profiles(bound, where_name);
-        bcs.push_back(BoundaryCondition::from_input(bound, physics));
         WallModelSpec wall_model_spec;
         if (bound.contains("wall_model")) {
             wall_model_spec = WallModelSpec::from_input(bound.at("wall_model"), bcs.back(),
@@ -1236,6 +1266,7 @@ void Solver::init_boundaries() {
         if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
+    stop_if_failed();
     on_every_rank([&] {
         for (size_t k = 0; k < profiled_faces.size(); k++) {
             const auto [i_bc, i_face] = profiled_faces[k];
@@ -1826,7 +1857,8 @@ void Solver::init_run_parameters() {
     if (!input.contains("run")) {
         throw InputError({.key = "run",
                           .message = "the [run] table is missing; it sets the time step and when the run stops",
-                          .fix = "Add [run] with cfl = 0.5 (or a fixed dt) and t_stop or n_steps"});
+                          .fix = "Add [run] with cfl = 0.5 (or a fixed dt) and t_stop or n_steps",
+                          .missing = true});
     }
     const Input & run = input.at("run");
     if (run.contains("dt") == run.contains("cfl")) {
@@ -1835,13 +1867,15 @@ void Solver::init_run_parameters() {
                           .message = run.contains("dt") ? "sets both dt and cfl; specify exactly one"
                                                         : "specify exactly one of dt and cfl",
                           .fix = "Use cfl (e.g. cfl = 0.5) for a time step that adapts to the flow, or dt for a "
-                                 "fixed one"});
+                                 "fixed one",
+                          .missing = !run.contains("dt")});
     }
     if (!run.contains("n_steps") && !run.contains("t_stop") && !run.contains("t_wall_stop")) {
         throw InputError({.key = "run",
                           .line = line_of(run),
                           .message = "nothing stops the run: specify at least one of n_steps, t_stop and t_wall_stop",
-                          .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)"});
+                          .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)",
+                          .missing = true});
     }
     use_cfl = contains_optional(run, "cfl");
     if (use_cfl) {
@@ -2012,9 +2046,12 @@ void Solver::init_output(region::Regions & regions) {
         run_log::close();
     }
     if (contains_optional(input, "write_data")) {
-        for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            add_data_writers(output, regions, async_output, io_threads);
+        const auto outputs = find_value<std::vector<Input>>(input, "write_data");
+        for (size_t i = 0; i < outputs.size(); i++) {
+            independently("write_data[" + std::to_string(i) + "]",
+                          [&] { add_data_writers(outputs[i], regions, async_output, io_threads); });
         }
+        stop_if_failed();
     }
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);

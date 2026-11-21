@@ -483,6 +483,10 @@ The report opens and closes with the result, and the exit status is 1 if there i
 
 Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
 
+The check goes on past an error where the next part of the setup does not need the part that failed: `[run]`, the mesh and `[physics]` are checked independently, and so is each `[[boundaries]]` and `[[write_data]]` entry, so a single check reports their errors together. Warnings printed during the setup (`W-FORMAT-VTU`, `W-KEY-IGNORED`) are part of the report.
+
+An input still being written fails on what it does not have yet: a required key or table, or its mesh file. These errors are *missing pieces* (`"missing": true` in the JSON). `--partial` makes the exit status 0 when they are the only errors, for an editor that checks the input after each change; [`mallard list keys input.toml`](#the-key-catalog) lists the keys of such an input as far as its setup got.
+
 | Code | What it means | What to do |
 |---|---|---|
 | <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to |
@@ -521,7 +525,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | Member | Holds |
 |---|---|
 | `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file` (`null` without an input), `setup_done`, `dim` | The result |
-| `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
+| `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
@@ -671,7 +675,12 @@ match it.
 `mallard list keys` shows that catalog as tables, one per input table, with
 each key's type, units, default and accepted values; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
-whether the input sets each key), and a section keeps one table or key path:
+whether the input sets each key), and a section keeps one table or key path.
+For an input still being written it lists the keys the setup read before it
+stopped, with exit status 0 when the only errors are
+[missing pieces](#diagnostics); its JSON then has `complete: false`, `missing`
+(the required keys not set) and `diagnostics` (as in
+[the report as JSON](#the-report-as-json)):
 
 ```bash
 mallard list keys numerics                  # every [numerics] key there is

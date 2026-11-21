@@ -14,6 +14,7 @@
 
 #include <array>
 #include <deque>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -979,6 +980,14 @@ class Solver {
         Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
+        /**
+         * @brief Runs a part of the setup the next parts do not depend on. Within check(), an error is recorded in
+         *        setup_errors and the setup goes on; element ("boundaries[1]") completes the error's key.
+         */
+        template <typename F>
+        bool independently(const std::string & element, F && f);
+        /** @brief Within check(), ends the setup if a part run independently failed: what follows needs them all. */
+        void stop_if_failed() const;
         void write_data(bool force = false);
         void write_forces();
         void write_integrals();
@@ -1195,6 +1204,19 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        struct SetupError {
+            std::exception_ptr error;
+            std::string element;  // of an array of tables ("write_data[2]"), or empty
+        };
+        std::vector<SetupError> setup_errors;  // within check(): of the parts run independently
+        /** @brief Adds an error of the setup to the report, with the key it is about, completed by its element. */
+        void report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const;
+        /** @brief Gives each diagnostic of the report its key (from its text if it has none), line and column. */
+        void locate_diagnostics(CheckReport & r, const std::string & input_file) const;
+        /** @brief Thrown by stop_if_failed: the errors are in setup_errors. */
+        struct SetupStopped : std::runtime_error {
+            SetupStopped() : std::runtime_error("the setup stopped at the errors of independent parts") {}
+        };
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;

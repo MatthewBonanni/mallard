@@ -642,6 +642,117 @@ size_t line_of(const Input & table, const std::string & key) {
     return line_of(table);
 }
 
+namespace {
+
+/** @brief A part of a key path: a name, or the element of an array by index ([2]) or by a key's value ([name = "x"]). */
+struct PathPart {
+    std::string name{};
+    bool element = false;
+    size_t index = std::string::npos;  // npos: by field and value
+    std::string field{}, value{};
+};
+
+bool name_start(const char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }
+bool name_char(const char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+
+/** @brief The key path of text from at, with at moved past it; empty if none starts there. */
+std::vector<PathPart> parse_path(const std::string & text, size_t & at) {
+    std::vector<PathPart> parts;
+    size_t i = at;
+    auto name = [&](size_t & j) {
+        const size_t begin = j;
+        if (j >= text.size() || !name_start(text[j])) return std::string();
+        while (j < text.size() && name_char(text[j])) j++;
+        return text.substr(begin, j - begin);
+    };
+    PathPart first;
+    first.name = name(i);
+    if (first.name.empty()) return {};
+    parts.push_back(first);
+    while (i < text.size()) {
+        if (text[i] == '.' && i + 1 < text.size() && name_start(text[i + 1])) {
+            i++;
+            parts.push_back({.name = name(i)});
+        } else if (text[i] == '[' && i + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[i + 1]))) {
+            size_t j = i + 1;
+            while (j < text.size() && std::isdigit(static_cast<unsigned char>(text[j]))) j++;
+            if (j >= text.size() || text[j] != ']') break;
+            parts.push_back({.element = true, .index = std::stoul(text.substr(i + 1, j - i - 1))});
+            i = j + 1;
+        } else if (text[i] == '[') {
+            size_t j = i + 1;
+            PathPart part{.element = true};
+            part.field = name(j);
+            if (part.field.empty() || text.compare(j, 4, " = \"") != 0) break;
+            const size_t close = text.find("\"]", j + 4);
+            if (close == std::string::npos) break;
+            part.value = text.substr(j + 4, close - j - 4);
+            parts.push_back(part);
+            i = close + 2;
+        } else {
+            break;
+        }
+    }
+    at = i;
+    return parts;
+}
+
+} // namespace
+
+std::string key_in_text(const std::string & text) {
+    size_t at = 0;
+    if (text.rfind("line ", 0) == 0) {
+        at = 5;
+        while (at < text.size() && std::isdigit(static_cast<unsigned char>(text[at]))) at++;
+        if (at == 5 || text.compare(at, 2, ": ") != 0) return "";
+        at += 2;
+    }
+    const bool bracketed = at < text.size() && text[at] == '[';
+    const size_t begin = at + bracketed;
+    size_t end = begin;
+    const std::vector<PathPart> parts = parse_path(text, end);
+    if (parts.empty()) return "";
+    const std::string key = text.substr(begin, end - begin);
+    if (bracketed) return end < text.size() && text[end] == ']' ? key : "";
+    const char next = end < text.size() ? text[end] : '\0';
+    return next == ':' || (parts.size() > 1 && (next == ' ' || next == '\0')) ? key : "";
+}
+
+bool locate(const Input & input, Diagnostic & d) {
+    size_t end = 0;
+    const std::vector<PathPart> parts = parse_path(d.key, end);
+    if (parts.empty() || end != d.key.size() || !input.is_table()) return false;
+    const auto & root = input.as_table();
+    if (!root.entries().count(parts[0].name) && !root.lookups_made().keys.contains(parts[0].name)) return false;
+    const Input * v = &input;
+    const Input * found = nullptr;
+    for (const PathPart & part : parts) {
+        const Input * next = nullptr;
+        if (part.element && v->is_array()) {
+            const auto & array = v->as_array();
+            if (part.index != std::string::npos) {
+                if (part.index < array.size()) next = &array[part.index];
+            } else {
+                for (const Input & item : array) {
+                    if (!item.is_table() || !item.as_table().entries().count(part.field)) continue;
+                    const Input & field = item.as_table().entries().at(part.field);
+                    if (field.is_string() && field.as_string() == part.value) next = &item;
+                }
+            }
+        } else if (!part.element && v->is_table() && v->as_table().entries().count(part.name)) {
+            next = &v->as_table().entries().at(part.name);
+        }
+        if (!next) break;
+        v = found = next;
+    }
+    if (!found) return true;
+    const auto location = found->location();
+    if (!location.is_ok()) return true;
+    if (d.line == 0) d.line = location.first_line_number();
+    if (d.line == location.first_line_number()) d.column = location.first_column_number();
+    return true;
+}
+
 std::string suggest_value(const std::string & value, const std::vector<std::string> & names) {
     std::string best;
     size_t best_distance = std::max<size_t>(1, value.size() / 3) + 1;
@@ -674,6 +785,7 @@ InputError missing_key(const Input & table, const std::string & key, const std::
     const size_t dot = key.rfind('.');
     const std::string name = dot == std::string::npos ? key : key.substr(dot + 1);
     d.message = "missing; this key is required here";
+    d.missing = true;
     d.fix = !fix.empty() ? fix
             : dot == std::string::npos
                 ? "Add " + name + " = ... to the input"

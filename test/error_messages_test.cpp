@@ -23,10 +23,12 @@
 #include <vector>
 
 #include "check.h"
+#include "comm.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "input_upgrade.h"
+#include "json.h"
 #include "mixture.h"
 #include "scratch.h"
 #include "solver.h"
@@ -467,4 +469,109 @@ TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {
     const CheckReport report = solver.check(parse_input_string(input), options);
     ASSERT_EQ(report.errors().size(), 1u);
     EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+}
+
+namespace {
+
+/** @brief The diagnostics of a check of the input, as check_json writes them. */
+json::Value check_diagnostics(const std::string & input) {
+    Solver solver;
+    return json::parse(check_json(solver.check(parse_input_string(input), {})))["diagnostics"];
+}
+
+/** @brief The diagnostics of severity "error", but for the possibly misspelled keys an incomplete setup lists. */
+std::vector<json::Value> errors_of(const json::Value & diagnostics) {
+    std::vector<json::Value> out;
+    for (const json::Value & d : diagnostics.array) {
+        if (d["severity"].string == "error" && d["code"].string != "E-KEY-UNUSED") out.push_back(d);
+    }
+    return out;
+}
+
+std::string messages(const std::vector<json::Value> & diagnostics) {
+    std::string out;
+    for (const json::Value & d : diagnostics) out += d["code"].string + " " + d["message"].string + "\n";
+    return out;
+}
+
+} // namespace
+
+TEST(ErrorMessages, KeyPathsAreFoundInTheTextOfErrors) {
+    EXPECT_EQ(key_in_text("line 3: boundaries[0].T: missing"), "boundaries[0].T");
+    EXPECT_EQ(key_in_text("write_data[prefix = \"out/a\"].region contains no cell"), "write_data[prefix = \"out/a\"].region");
+    EXPECT_EQ(key_in_text("mesh.transform must be a table."), "mesh.transform");
+    EXPECT_EQ(key_in_text("[mesh] angle must be nonzero"), "mesh");
+    EXPECT_EQ(key_in_text("run: nothing stops the run"), "run");
+    EXPECT_EQ(key_in_text("nothing stops the run"), "");
+    EXPECT_EQ(key_in_text("Setup. Then"), "");
+}
+
+TEST(ErrorMessages, CheckDiagnosticsNameTheirKeyLineAndColumn) {
+    const std::string input = replaced(box(), "Nx = 16", "Nx = 16.0");
+    const std::vector<json::Value> errors = errors_of(check_diagnostics(input));
+    ASSERT_EQ(errors.size(), 1u) << messages(errors);
+    EXPECT_EQ(errors[0]["key"].string, "mesh.Nx");
+    EXPECT_EQ(errors[0]["line"].number, double(line_number(input, "Nx = 16.0")));
+    EXPECT_EQ(errors[0]["column"].number, 6.0);
+    EXPECT_FALSE(errors[0]["missing"].boolean);
+    // A warning of the setup is in the report, with the key its text starts with (rank 0's, which prints it)
+    const std::string source = box() + "[source]\nrhoE = \"0.0\"\ntime_dependent = true\n";
+    const json::Value diagnostics = check_diagnostics(source);
+    if (!comm::is_root()) return;
+    const auto ignored = std::find_if(diagnostics.array.begin(), diagnostics.array.end(),
+                                      [](const json::Value & d) { return d["code"].string == "W-KEY-IGNORED"; });
+    ASSERT_NE(ignored, diagnostics.array.end());
+    EXPECT_EQ((*ignored)["severity"].string, "warning");
+    EXPECT_EQ((*ignored)["key"].string, "source.time_dependent");
+    EXPECT_EQ((*ignored)["line"].number, double(line_number(source, "time_dependent")));
+    EXPECT_EQ((*ignored)["column"].number, 18.0);
+}
+
+TEST(ErrorMessages, CheckReportsErrorsOfIndependentPartsTogether) {
+    const std::string input = replaced(replaced(box("cfl = 0.8\n"), "Nx = 16", "Nx = 16.0"), "gamma = 1.4\n", "");
+    const std::vector<json::Value> setup = errors_of(check_diagnostics(input));
+    ASSERT_EQ(setup.size(), 3u) << messages(setup);
+    EXPECT_EQ(setup[0]["key"].string, "run");
+    EXPECT_TRUE(setup[0]["missing"].boolean);
+    EXPECT_EQ(setup[1]["key"].string, "mesh.Nx");
+    EXPECT_EQ(setup[1]["element"].type, json::Value::Type::NUL);
+    EXPECT_FALSE(setup[1]["missing"].boolean);
+    EXPECT_EQ(setup[2]["key"].string, "physics.gamma");
+    EXPECT_TRUE(setup[2]["missing"].boolean);
+
+    std::vector<std::string> zones = {"lefft", "right", "bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const std::string boundaries = box("t_stop = 0.5\ncfl = 0.8\n", "", zones) + "[[boundaries]]\nname = \"top\"\n";
+    const std::vector<json::Value> entries = errors_of(check_diagnostics(boundaries));
+    ASSERT_EQ(entries.size(), 2u) << messages(entries);
+    EXPECT_EQ(entries[0]["key"].string, "boundaries[name = \"lefft\"].name");
+    EXPECT_EQ(entries[0]["element"].string, "boundaries[name = \"lefft\"]");
+    EXPECT_EQ(entries[0]["line"].number, double(line_number(boundaries, "\"lefft\"")));
+    EXPECT_FALSE(entries[0]["missing"].boolean);
+    EXPECT_EQ(entries[1]["key"].string, "boundaries[name = \"top\"].type");
+    EXPECT_TRUE(entries[1]["missing"].boolean);
+
+    const std::string writers = box() + "[[write_data]]\nprefix = \"a\"\nformat = \"bogus\"\ninterval = 5\n" +
+                                "[[write_data]]\nprefix = \"b\"\ninterval = 0\n";
+    const std::vector<json::Value> outputs = errors_of(check_diagnostics(writers));
+    ASSERT_EQ(outputs.size(), 2u) << messages(outputs);
+    EXPECT_EQ(outputs[0]["key"].string, "write_data[0].format");
+    EXPECT_EQ(outputs[0]["element"].string, "write_data[0]");
+    EXPECT_EQ(outputs[0]["line"].number, double(line_number(writers, "bogus")));
+    EXPECT_EQ(outputs[1]["key"].string, "write_data[1].interval");
+    EXPECT_EQ(outputs[1]["line"].number, double(line_number(writers, "interval = 0")));
+}
+
+TEST(ErrorMessages, MissingPiecesAreTheOnlyErrorsOfAnInputStillBeingWritten) {
+    const std::string mesh = "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 8\nLx = 2.0\nLy = 1.0\n" +
+                             std::string(N_DIM == 3 ? "Nz = 2\nLz = 0.25\n" : "");
+    Solver solver;
+    const CheckReport report = solver.check(parse_input_string(mesh), {});
+    EXPECT_FALSE(report.ok());
+    EXPECT_TRUE(report.only_missing());
+    std::vector<std::string> keys;
+    for (const CheckDiagnostic & d : report.diagnostics) keys.push_back(d.key);
+    EXPECT_EQ(keys, (std::vector<std::string>{"run", "physics"}));
+    Solver wrong;
+    EXPECT_FALSE(wrong.check(parse_input_string(replaced(mesh, "Nx = 16", "Nx = 16.0")), {}).only_missing());
 }
