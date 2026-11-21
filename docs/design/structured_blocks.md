@@ -348,10 +348,41 @@ nodes' coordinates, so one set per direction would change the reconstruction
 in the last bits; computing them in the kernels from the nodes would round
 differently on the device than in the host's setup. Normals and areas could
 share rows the same way, but `face_normals` and `face_area` have about a
-hundred readers. Fusing reconstruction and flux on block faces is still open:
-the troubled passes overwrite the smooth pass's face states of some cells after
-it, and the boundary, sponge, partition-face and species reconstructions read
-`face_solution` too.
+hundred readers.
+
+**Fused block-face flux (#965, deferred to 0.12.0).** A prototype computes the
+convective flux of the faces inside tiles of block cells (4×4×2 in 3D, 4×8 in
+2D: one GPU team, one thread per cell, so parallelism is unchanged) in the TENO
+smooth pass: each cell puts the points of its upper face in team scratch, the
+cell above turns them and its own into weighted point fluxes, and one thread
+per face sums them in `ConvectiveFluxFunctor`'s order, which then skips the
+fused faces. Faces with a troubled or inadmissible side, image faces, mixtures,
+hybrid fluxes and curved faces keep the stored path. Its arithmetic is the
+stored path's: on a $32^3$ Taylor-Green box at TENO5 its results are bit for
+bit those of the stored path once the Riemann solvers compile without
+contraction everywhere, which main has done since #1253, so a port would be
+bitwise identical to main. It does not reach the goal, though:
+
+- **No memory is saved.** The fused faces (2/3 of a 3D block's faces, 81% in
+  2D, up to 1.46 kB per cell of `face_solution` at TENO5) still have rows,
+  because which of them fall back is decided per stage by the troubled and
+  admissibility checks, and `face_solution` is indexed by face id in about 130
+  places in 18 files (boundaries, characteristic conditions, sponges, partition
+  exchange, species reconstruction, the troubled passes).
+- **CPU throughput was not shown to hold:** between 1% and 17% below the base
+  in its runs (the face points staged in team scratch, a barrier per axis); GPU
+  occupancy with that scratch is unmeasured.
+
+Saving the memory needs two pieces the prototype lacks, each a refactor of
+its own: (1) tiles fixed at mesh build, with their inside faces numbered last
+(cells are already block-ordered there), so `face_solution` covers only the
+other faces and its readers keep their indexing, since boundary, partition and
+image faces never lie inside a tile; (2) a fallback for fused faces with a
+troubled side that needs no row per face: the troubled pass computes their
+flux itself from per-slot face states in the troubled queue's scratch (the
+smooth neighbor writing its side into the troubled cell's slot, both being in
+the same team), with the queue's rounds when it overflows. Both keep results
+bitwise and parallelism per cell; neither fits the 0.11.0 window.
 
 ## Documentation
 
