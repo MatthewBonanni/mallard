@@ -307,7 +307,11 @@ TEST(RegionMotionTest, MovingFractionsAreTheFractionsOfTheRegionWhereItIs) {
           ball(point(0.4, 0.5), 0.2) + ", rotate = " + (N_DIM == 2 ? "\"30 * t\"" : "{axis = [0, 0, 1], angle = \"30 * t\"}") +
               ", pivot = " + point(0.5, 0.5) + ", scale = \"1 + 0.5 * t\", edge = 0.05}",
           std::string("{type = \"difference\", a = ") + ball(center, 0.25) + "}, b = {type = \"implicit\", f = \"y - 0.4 - 0.1 * t\"}}",
-          ball(center, 0.1) + ", repeat = {count = 3, translate = " + point(0.2, 0.0, 0.0) + "}}"}) {
+          ball(center, 0.1) + ", repeat = {count = 3, translate = " + point(0.2, 0.0, 0.0) + "}}",
+          // Cut along its faces (region_clip.h)
+          std::string(N_DIM == 2 ? "{type = \"rectangle\", size = [0.3, 0.2]" : "{type = \"box\", size = [0.3, 0.2, 0.25]") +
+              ", center = " + center + ", rotate = " +
+              (N_DIM == 2 ? "\"30 * t\"" : "{axis = [1, 2, 3], angle = \"30 * t\"}") + ", pivot = " + point(0.5, 0.5) + "}"}) {
         const region::Region r = read(table);
         ASSERT_TRUE(r.moving()) << table;
         const region::MovingFractions moving(*mesh, r);

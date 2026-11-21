@@ -19,6 +19,7 @@
 #include "curved.h"
 #include "region_cut.h"
 #include "mesh.h"
+#include "region_clip.h"
 #include "region_sampler.h"
 #include "units.h"
 
@@ -128,9 +129,10 @@ constexpr bool GPU_SAMPLING = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecuti
  *        straight cells' is split again: SMOOTH samples the shapes with a
  *        smooth edge, or all in an axisymmetric run, and the other the rest,
  *        so that sharp shapes do not carry the registers and stack of sums
- *        of smooth terms.
+ *        of smooth terms; CLIP cuts them along planar faces (region_clip.h),
+ *        so that no kernel carries clipping where no shape clips.
  */
-template <bool CURVED, bool IMPLICIT, bool SMOOTH = false>
+template <bool CURVED, bool IMPLICIT, bool SMOOTH = false, bool CLIP = false>
 struct ShapeSampler {
     Kokkos::View<Node *> nodes;
     Kokkos::View<const double *> vertices;
@@ -185,7 +187,15 @@ struct ShapeSampler {
                         const uint32_t q = cell_nodes(first + k);
                         for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                     };
-                    if constexpr (GPU_SAMPLING) {
+                    if constexpr (CLIP) {
+                        const sampler::Planes planes{nodes.data() + leaf.first, leaf.count, vertices.data()};
+                        if constexpr (GPU_SAMPLING) {
+                            sampler::team_clipped_cell<SMOOTH>(member, scratch, shape, planes, axisymmetric, n, node,
+                                                               inside, total);
+                        } else {
+                            sampler::clipped_cell(shape, planes, axisymmetric, n, node, inside, total);
+                        }
+                    } else if constexpr (GPU_SAMPLING) {
                         sampler::team_straight_cell<SMOOTH>(member, scratch, shape, axisymmetric, n, node, inside, total);
                     } else {
                         sampler::straight_cell(shape, axisymmetric, n, node, inside, total);
@@ -199,9 +209,11 @@ struct ShapeSampler {
 };
 
 /** @brief Launches a ShapeSampler: 8 teams per SM where its shared memory holds them, otherwise as many as it does. */
-template <bool CURVED, bool IMPLICIT, bool SMOOTH>
-void launch(const ShapeSampler<CURVED, IMPLICIT, SMOOTH> & sample, const uint32_t n_cells) {
-    const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
+template <bool CURVED, bool IMPLICIT, bool SMOOTH, bool CLIP>
+void launch(const ShapeSampler<CURVED, IMPLICIT, SMOOTH, CLIP> & sample, const uint32_t n_cells) {
+    const char * name = CURVED ? "region_moving_shapes_curved"
+                        : CLIP ? "region_moving_shapes_clipped"
+                               : "region_moving_shapes";
     Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
     if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
     if (!GPU_SAMPLING || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
@@ -636,6 +648,9 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
         if (f.kind == Filled::Kind::SHAPES) {
             h_ops.push_back({Op::Kind::SHAPES, static_cast<uint32_t>(h_leaves.size())});
             h_leaves.push_back({f.first, f.count, i == region.root() ? region.edge() : 0.0});
+            const sampler::Planes planes{region.nodes().data() + f.first, f.count, region.vertices().data()};
+            const sampler::Shape<NoImplicit> shape{{}, h_leaves.back().edge, bounded};
+            clipping = clipping || sampler::clips(shape, planes);
             return;
         }
         if (f.kind == Filled::Kind::CONDITION) {
@@ -827,8 +842,13 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
             if (smooth_leaves) sample(ShapeSampler<false, true, true>{});
             if (has_curved) sample(ShapeSampler<true, true>{});
         } else {
-            if (sharp_leaves) sample(ShapeSampler<false, false, false>{});
-            if (smooth_leaves) sample(ShapeSampler<false, false, true>{});
+            if (clipping) {
+                if (sharp_leaves) sample(ShapeSampler<false, false, false, true>{});
+                if (smooth_leaves) sample(ShapeSampler<false, false, true, true>{});
+            } else {
+                if (sharp_leaves) sample(ShapeSampler<false, false, false>{});
+                if (smooth_leaves) sample(ShapeSampler<false, false, true>{});
+            }
             if (has_curved) sample(ShapeSampler<true, false>{});
         }
     }
