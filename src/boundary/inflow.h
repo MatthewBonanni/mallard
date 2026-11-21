@@ -159,6 +159,68 @@ KOKKOS_INLINE_FUNCTION void stagnation_state(const Gas & gas, const double gamma
     T_b = T;
 }
 
+/** @brief Isentrope of a calorically perfect gas (gamma, R). */
+struct PerfectGas {
+    double gamma, R;
+
+    KOKKOS_INLINE_FUNCTION double cp(const double) const { return gamma * R / (gamma - 1.0); }
+    KOKKOS_INLINE_FUNCTION double h(const double T) const { return cp(T) * T; }
+    KOKKOS_INLINE_FUNCTION double log_p_ratio(const double T, const double T0) const {
+        return gamma / (gamma - 1.0) * Kokkos::log(T / T0);
+    }
+};
+
+/**
+ * @brief The state a subsonic stagnation inlet (T0, p0, direction d as in
+ *        stagnation_state) settles at once the pressure p inside reaches it:
+ *        on the isentrope through (T0, p0) at p, at rest when p >= p0.
+ */
+template <typename Gas>
+KOKKOS_INLINE_FUNCTION void stagnation_state_at(const Gas & gas, const double T0, const double p0, const rtype * d,
+                                                const rtype * n, const double p, rtype * W_g, double & T_b) {
+    constexpr uint8_t E = N_DIM + 1;
+    double dir[N_DIM], d2 = 0.0;
+    FOR_I_DIM d2 += double(d[i]) * double(d[i]);
+    FOR_I_DIM dir[i] = (d2 > 0.0) ? double(d[i]) : -double(n[i]);
+    const double target = Kokkos::log(Kokkos::fmin(p / p0, 1.0));
+    double lo = 1e-3 * T0, hi = T0, T = T0;
+    if (target < 0.0) {
+        for (int it = 0; it < 100; it++) {
+            const double f = gas.log_p_ratio(T, T0) - target;
+            if (f > 0.0) hi = T; else lo = T;
+            double T_new = T - f * gas.R * T / gas.cp(T);
+            if (!(T_new > lo && T_new < hi)) T_new = 0.5 * (lo + hi);
+            const bool done = Kokkos::fabs(T_new - T) <= 1e-13 * T0;
+            T = T_new;
+            if (done) break;
+        }
+    }
+    const double V = Kokkos::sqrt(Kokkos::fmax(2.0 * (gas.h(T0) - gas.h(T)), 0.0));
+    const double p_b = p0 * Kokkos::exp(gas.log_p_ratio(T, T0));
+    W_g[0] = static_cast<rtype>(p_b / (gas.R * T));
+    FOR_I_DIM W_g[1 + i] = static_cast<rtype>(V * dir[i]);
+    W_g[E] = static_cast<rtype>(p_b);
+    T_b = T;
+}
+
+/**
+ * @brief The state a subsonic mass-flow inlet (G, T, direction d as in
+ *        mass_flow_state) settles at once the pressure p inside reaches it.
+ */
+KOKKOS_INLINE_FUNCTION void mass_flow_state_at(const double R, const double T, const double G, const rtype * d,
+                                               const rtype * n, const double p, rtype * W_g) {
+    constexpr uint8_t E = N_DIM + 1;
+    double dir[N_DIM], d2 = 0.0, c_dn = 0.0;
+    FOR_I_DIM d2 += double(d[i]) * double(d[i]);
+    FOR_I_DIM dir[i] = (d2 > 0.0) ? double(d[i]) : -double(n[i]);
+    FOR_I_DIM c_dn += dir[i] * double(n[i]);
+    const double rho = p / (R * T);
+    const double V = G / (rho * -c_dn);
+    W_g[0] = static_cast<rtype>(rho);
+    FOR_I_DIM W_g[1 + i] = static_cast<rtype>(V * dir[i]);
+    W_g[E] = static_cast<rtype>(p);
+}
+
 /**
  * @brief Subsonic inflow state of mass flux G (rho u . -n, per unit area)
  *        at temperature T and gas constant R, flowing along the unit vector d

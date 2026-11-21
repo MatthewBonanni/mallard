@@ -119,7 +119,8 @@ constexpr Option CHECK_OPTIONS[] = {
      "time: DIR/boundaries_<index>_<zone>.csv with each face's center, inward normal, the local coordinates "
      "its expressions read, every key it prescribes (u, p, T, p0, T0, mass_flux, q) and the velocity it "
      "prescribes; for inlet_stagnation and inlet_mass_flow, the density, velocity, speed, mass flux into the domain (rho_u_n) and "
-     "pressure its flux makes of the initial state, estimated (the state at the first step differs). With "
+     "pressure it settles at against the initial pressure inside, estimated (the first steps' transient "
+     "differs). With "
      "--format json, the report's boundary_values gives each file and each column's min, area mean and "
      "max. Default: none."},
     KOKKOS,
