@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Mallard">
+<title>Run report: tools/dev/catalog_inputs/2d/solid_particles.toml</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfbfa;--fg:#1d1f21;--dim:#5f6368;--line:#d9dadc;--panel:#ffffff;
+--accent:#2a6fdb;--band:rgba(42,111,219,.18);--ok:#1e7d3a;--warn:#a05a00;--error:#b3261e;--code:#f2f3f4}
+@media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e6e7e8;--dim:#9aa0a6;--line:#33373c;--panel:#1d2024;
+--accent:#7aa7f0;--band:rgba(122,167,240,.22);--ok:#6cc487;--warn:#e0a24a;--error:#f28b82;--code:#23272b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1060px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6em;margin:0 0 4px}
+h2{font-size:1.25em;margin:36px 0 10px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+h3{font-size:1.02em;margin:20px 0 6px}
+.sub,.note,figcaption,.readout{color:var(--dim)}.note{font-size:.92em}
+nav{margin:14px 0;font-size:.92em}nav a{margin-right:14px;color:var(--accent);text-decoration:none}
+.banner{border:1px solid var(--line);border-left:6px solid var(--dim);background:var(--panel);padding:12px 16px;
+margin:16px 0;border-radius:4px}
+.banner.ok{border-left-color:var(--ok)}.banner.warning{border-left-color:var(--warn)}
+.banner.error{border-left-color:var(--error)}
+.banner strong{font-size:1.1em}
+.status{font-weight:600;font-size:.85em;letter-spacing:.03em}
+.status.ok{color:var(--ok)}.status.warning{color:var(--warn)}.status.error{color:var(--error)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;margin:6px 0 10px;font-size:.92em}
+th,td{text-align:left;padding:3px 12px 3px 0;vertical-align:top;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:500}td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.kv th{width:12em}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
+pre{background:var(--code);padding:10px;overflow-x:auto;border-radius:4px}
+.plots{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px}
+figcaption{font-size:.9em;margin-bottom:2px}.readout{font-size:.8em;min-height:1.3em}
+svg{width:100%;height:auto;display:block}
+svg .grid{stroke:var(--line);stroke-width:1}svg .frame{fill:none;stroke:var(--line)}
+svg .tick{fill:var(--dim);font-size:11px}svg .axis{fill:var(--fg);font-size:12px}
+svg .line{fill:none;stroke:var(--accent);stroke-width:1.6}
+svg .band{fill:var(--band);stroke:none}svg .cursor{stroke:var(--dim);stroke-dasharray:3 3}
+details summary{cursor:pointer;color:var(--accent)}
+@media print{nav,.plots,#plots-nojs{display:none}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Run report</h1><p class="sub">tools/dev/catalog_inputs/2d/solid_particles.toml &middot; run b91f9a27-aa5f-4d4b-afca-efade05bff65</p></header>
+<nav><a href="#outcome">Outcome</a><a href="#run">Run</a><a href="#configuration">Configuration</a><a href="#check">Check</a><a href="#health">Health</a><a href="#monitors">Monitors</a><a href="#cost">Cost</a><a href="#output">Output</a></nav>
+<section id="outcome"><div class="banner ok"><strong>finished (n_steps)</strong> at step 1, t = 0.0173088<p>n_steps = 1 reached</p><div class="scroll"><table class="kv"><tr><th>Wall time</th><td>5.19 ms</td></tr><tr><th>Warnings</th><td>none</td></tr></table></div>
+</div></section>
+<section id="run"><h2>Run</h2>
+<div class="scroll"><table class="kv"><tr><th>Run id</th><td>b91f9a27-aa5f-4d4b-afca-efade05bff65</td></tr><tr><th>Started</th><td>2026-11-21T07:46:20Z</td></tr><tr><th>Mallard</th><td>v0.10.0-190-g18b59d595-dirty (18b59d595518), uncommitted changes</td></tr><tr><th>Build</th><td>2D, double, Threads</td></tr><tr><th>Ranks</th><td>1 on 1 host(s)</td></tr><tr><th>Host</th><td>mbonanni-mac</td></tr><tr><th>Device</th><td>Apple M4 Pro</td></tr><tr><th>Directory</th><td>/Users/mbonanni/local/mallard-particles-heat</td></tr><tr><th>Input</th><td>tools/dev/catalog_inputs/2d/solid_particles.toml, SHA-256 6c89952a6c7b3c2432ecd4745ea173af4ae6ad4e4eb79d3fe807b681398dcacb</td></tr><tr><th>Mesh</th><td>cartesian</td></tr><tr><th>Cells</th><td>64</td></tr></table></div>
+</section>
+<section id="configuration"><h2>Configuration</h2>
+<div class="scroll"><table class="kv"><tr><th>Physics</th><td>navier_stokes</td></tr><tr><th>Units</th><td>nondimensional</td></tr><tr><th>Ratio of specific heats</th><td>1.4</td></tr><tr><th>Gas</th><td>perfect</td></tr><tr><th>Mesh</th><td>cartesian</td></tr><tr><th>Numerics preset</th><td>first_order</td></tr><tr><th>Reconstruction</th><td>FO</td></tr><tr><th>Riemann solver</th><td>HLL</td></tr><tr><th>Time integrator</th><td>SSPRK3</td></tr><tr><th>CFL</th><td>0.5</td></tr><tr><th>Steps</th><td>1</td></tr><tr><th>Initial state</th><td>constant</td></tr></table></div>
+<h3>Boundaries</h3><div class="scroll"><table><tr><th>zone</th><th>type</th></tr><tr><td>left</td><td>wall_adiabatic</td></tr><tr><td>right</td><td>wall_adiabatic</td></tr><tr><td>bottom</td><td>wall_adiabatic</td></tr><tr><td>top</td><td>symmetry</td></tr></table></div>
+<details><summary>The resolved input: every key the run read, defaults filled in</summary><pre>[[boundaries]]
+name = &quot;left&quot;
+type = &quot;wall_adiabatic&quot;
+
+[[boundaries]]
+name = &quot;right&quot;
+type = &quot;wall_adiabatic&quot;
+
+[[boundaries]]
+name = &quot;bottom&quot;
+type = &quot;wall_adiabatic&quot;
+
+[[boundaries]]
+name = &quot;top&quot;
+type = &quot;symmetry&quot;
+
+[initialize]
+T = 1.0
+p = 1.0
+type = &quot;constant&quot;
+u = [0.0, 0.0]
+
+[mesh]
+Lx = 1.0
+Ly = 1.0
+Nx = 8
+Ny = 8
+cell_order = &quot;auto&quot;
+curved_geometry = true
+type = &quot;cartesian&quot;
+
+[numerics]
+check_nan = false
+convective_flux = &quot;riemann&quot;
+double_flux = false
+low_mach_cutoff = 0.1
+preset = &quot;first_order&quot;
+riemann_solver = &quot;HLL&quot;
+time_integrator = &quot;SSPRK3&quot;
+viscous_gradients = &quot;least_squares&quot;
+
+[numerics.face_reconstruction]
+type = &quot;FO&quot;
+
+[particles]
+capacity = 0
+density = 1000.0
+diameter = 0.01
+drag = &quot;singh&quot;
+file = &quot;&quot;
+forces = [&quot;pressure_gradient&quot;, &quot;added_mass&quot;, &quot;saffman_lift&quot;]
+gravity = [0.0, -1.0]
+points = [[0.5, 0.5]]
+specific_heat = 1.0
+temperature = 1.2
+type = &quot;solid&quot;
+velocity = [0.1, 0.0]
+
+[[particles.walls]]
+interaction = &quot;rebound&quot;
+restitution = 0.8
+tangential_restitution = 0.9
+zones = [&quot;bottom&quot;]
+
+[[particles.walls]]
+interaction = &quot;stick&quot;
+zones = [&quot;left&quot;, &quot;right&quot;]
+
+[physics]
+Pr = 0.72
+T_ref = 1.0
+axisymmetric = false
+gamma = 1.4
+gas = &quot;perfect&quot;
+mu = 0.01
+p_ref = 1.0
+rho_ref = 1.0
+type = &quot;navier_stokes&quot;
+units = &quot;nondimensional&quot;
+viscosity_model = &quot;constant&quot;
+
+[run]
+cfl = 0.5
+control_file_interval = 0
+control_socket = true
+cuda_graphs = true
+keep_last_good = true
+n_steps = 1
+step_queue = 3
+t_stop = -1.0
+t_wall_stop = -1.0
+</pre></details>
+</section>
+<section id="check"><h2>Check at setup <span class="status ok">ok</span></h2>
+<p class="note">What the setup measured of the mesh and the case, in the terms of <code>mallard check</code>, which also estimates the memory and cost of other partitions.</p>
+<h3>Mesh quality <span class="status ok">ok</span></h3><p class="note">Over every cell, as mallard check measures it; a cell above the limit is questionable. Worst: the cell with the largest value, by its global id and center.</p><div class="scroll"><table><tr><th>status</th><th>metric</th><th>units</th><th>max</th><th>mean</th><th>limit</th><th>cells over limit</th><th>worst</th></tr><tr><td><span class="status ok">ok</span></td><td>non-orthogonality</td><td>deg</td><td>0</td><td>0</td><td>70</td><td>0</td><td>cell 0 at (0.0625, 0.0625) m</td></tr><tr><td><span class="status ok">ok</span></td><td>skewness</td><td>dimensionless</td><td>0</td><td>0</td><td>0.5</td><td>0</td><td>cell 0 at (0.0625, 0.0625) m</td></tr><tr><td><span class="status ok">ok</span></td><td>aspect ratio</td><td>dimensionless</td><td>1</td><td>1</td><td>1000</td><td>0</td><td>cell 0 at (0.0625, 0.0625) m</td></tr><tr><td><span class="status ok">ok</span></td><td>volume ratio</td><td>dimensionless</td><td>1</td><td>1</td><td>10</td><td>0</td><td>cell 0 at (0.0625, 0.0625) m</td></tr></table></div>
+<h3>Time step <span class="status ok">ok</span></h3><p class="note">The CFL number against the time integrator's stability limit for smooth flow: the requested one, and the largest at any progress row so far.</p><div class="scroll"><table><tr><th>status</th><th>quantity</th><th>value</th><th>units</th><th>target</th><th>basis</th></tr><tr><td><span class="status ok">ok</span></td><td>CFL number, run.cfl</td><td>0.5</td><td>dimensionless</td><td>&lt;= 1.2</td><td>SSPRK3's stability limit for smooth flow</td></tr><tr><td><span class="status ok">ok</span></td><td>CFL number, largest so far</td><td>0.5</td><td>dimensionless</td><td>&lt;= 1.2</td><td>over 2 progress rows; SSPRK3's stability limit for smooth flow</td></tr></table></div>
+<h3>Resolution <span class="status ok">ok</span></h3><p class="note">Estimates from the initial state against the targets of the case's regime (DNS, or LES with [les]), as mallard check makes them; value -: not estimated, for the reason its basis gives.</p><div class="scroll"><table><tr><th>status</th><th>quantity</th><th>value</th><th>units</th><th>target</th><th>basis</th></tr><tr><td><span class="status none"></span></td><td>cell size V^(1/2), smallest</td><td>0.125</td><td>m</td><td></td><td>over every cell</td></tr><tr><td><span class="status none"></span></td><td>cell size V^(1/2), mean</td><td>0.125</td><td>m</td><td></td><td>volume-weighted</td></tr><tr><td><span class="status none"></span></td><td>cell size V^(1/2), largest</td><td>0.125</td><td>m</td><td></td><td>over every cell, at (0.0625, 0.0625) m</td></tr><tr><td><span class="status none"></span></td><td>friction velocity u_tau</td><td>-</td><td></td><td></td><td>not estimated, nor wall units: no flow at the initial state, no forcing and no previous run's wall shear</td></tr><tr><td><span class="status none"></span></td><td>Kolmogorov length eta</td><td>-</td><td></td><td></td><td>not estimated: no forcing, and the initial field's velocity has no gradients</td></tr></table></div>
+<h3>Memory</h3><p class="note">After setup, of the rank that uses the most.</p><div class="scroll"><table><tr><th>status</th><th>quantity</th><th>value</th><th>units</th><th>target</th><th>basis</th></tr><tr><td><span class="status none"></span></td><td>host memory</td><td>10.7</td><td>MB</td><td></td><td>resident set of the process</td></tr><tr><td><span class="status none"></span></td><td>host memory, peak</td><td>10.7</td><td>MB</td><td></td><td>during setup</td></tr></table></div>
+</section>
+<section id="health"><h2>Health</h2>
+<h3>Lowest values</h3><p class="note">The lowest density, pressure and temperature over the cells at any progress row so far, with the step and the cell center where each occurred. A value falling toward zero is the usual first sign of a run about to fail.</p><div class="scroll"><table><tr><th>quantity</th><th>value</th><th>units</th><th>step</th><th>at</th></tr><tr><td>rho</td><td class="num">1</td><td>-</td><td class="num">0</td><td>(0.0625, 0.0625, 0)</td></tr><tr><td>p</td><td class="num">1</td><td>-</td><td class="num">0</td><td>(0.0625, 0.0625, 0)</td></tr><tr><td>T</td><td class="num">1</td><td>-</td><td class="num">0</td><td>(0.0625, 0.0625, 0)</td></tr></table></div>
+<h3>Conservation</h3><p class="note">The conservation ledger: the change of each total over the run that the boundary fluxes, sources and repairs do not explain, relative to the total's scale. A healthy run keeps it at round-off; Mallard warns above 1e5 machine epsilons, and a value near that is a bug to report, not a setting to tune.</p><div class="scroll"><table><tr><th>total</th><th>unexplained change [-]</th><th>note</th></tr><tr><td>mass</td><td class="num">0.0e+00</td><td></td></tr><tr><td>momentum_x</td><td class="num">0.0e+00</td><td></td></tr><tr><td>momentum_y</td><td class="num">0.0e+00</td><td></td></tr><tr><td>energy</td><td class="num">0.0e+00</td><td></td></tr></table></div>
+<h3>Warnings</h3><p><span class="status ok">ok</span> None.</p></section>
+<section id="monitors"><h2>Monitors</h2>
+<p class="note">The quantities of every progress row against simulated time. A long run's rows are combined in up to 512 points per plot: the line goes through the last value of each point's rows, the shaded band spans their least and largest, so a short spike still shows. Hover over a plot to read its values.</p>
+<p id="plots-nojs" class="note">The plots need JavaScript; the table of last values below does not.</p>
+<h3>Time step</h3><p class="note">The time step and the CFL number it was taken at.</p><div class="plots" id="plots-0"></div>
+<h3>Extremes over the cells</h3><p class="note">The lowest and highest values over the cells at each progress row: what fails first in a run that diverges.</p><div class="plots" id="plots-1"></div>
+<h3>Throughput and memory</h3><p class="note">The cost of each step and the memory in use.</p><div class="plots" id="plots-2"></div>
+<h3>Conservation</h3><p class="note">The conservation ledger's unexplained change of each total, relative to its scale (see Health).</p><div class="plots" id="plots-3"></div>
+<h3>Last values</h3><p class="note">Each plotted quantity's value at the last progress row, and its least and largest over the run.</p><div class="scroll"><table><tr><th>group</th><th>quantity</th><th>what it is</th><th>units</th><th>last</th><th>least</th><th>largest</th><th>rows</th></tr><tr><td>Time step</td><td>dt</td><td>time step</td><td>-</td><td class="num">0.0173088</td><td class="num">0.0173088</td><td class="num">0.0173088</td><td class="num">2</td></tr><tr><td>Time step</td><td>cfl</td><td>CFL number: the time step over the largest stable one</td><td>-</td><td class="num">0.5</td><td class="num">0.5</td><td class="num">0.5</td><td class="num">2</td></tr><tr><td>Extremes over the cells</td><td>min_rho</td><td>lowest density over the cells</td><td>-</td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td class="num">2</td></tr><tr><td>Extremes over the cells</td><td>min_p</td><td>lowest pressure over the cells</td><td>-</td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td class="num">2</td></tr><tr><td>Extremes over the cells</td><td>max_mach</td><td>highest Mach number over the cells</td><td>-</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr><tr><td>Throughput and memory</td><td>memory_host</td><td>host memory of the largest rank</td><td>B</td><td class="num">1.2501e+07</td><td class="num">1.18784e+07</td><td class="num">1.2501e+07</td><td class="num">2</td></tr><tr><td>Conservation</td><td>mass</td><td>unexplained change of the mass total, relative to its scale</td><td>-</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr><tr><td>Conservation</td><td>momentum_x</td><td>unexplained change of the momentum_x total, relative to its scale</td><td>-</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr><tr><td>Conservation</td><td>momentum_y</td><td>unexplained change of the momentum_y total, relative to its scale</td><td>-</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr><tr><td>Conservation</td><td>energy</td><td>unexplained change of the energy total, relative to its scale</td><td>-</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">2</td></tr><tr><td>Throughput and memory</td><td>wall_per_step</td><td>wall time per time step</td><td>s</td><td class="num">0.000345708</td><td class="num">0.000345708</td><td class="num">0.000345708</td><td class="num">1</td></tr><tr><td>Throughput and memory</td><td>cells_per_second</td><td>throughput: cell updates per second of time stepping</td><td>s-1</td><td class="num">185127</td><td class="num">185127</td><td class="num">185127</td><td class="num">1</td></tr></table></div>
+</section>
+<section id="cost"><h2>Cost</h2>
+<div class="scroll"><table class="kv"><tr><th>Wall time</th><td>5.19 ms</td></tr><tr><th>Setup</th><td>1.66 ms (32.0%)</td></tr><tr><th>Time stepping</th><td>346 us (6.7%)</td></tr><tr><th>Diagnostics</th><td>- (0.0%)</td></tr><tr><th>Output</th><td>91.5 us (1.8%)</td></tr><tr><th>Steps</th><td>1</td></tr><tr><th>Throughput</th><td>1.85e+05 cells/s</td></tr></table></div>
+<div class="scroll"><table class="kv"><tr><th>Host memory, peak</th><td>12.5MB</td></tr></table></div>
+</section>
+<section id="output"><h2>Output</h2>
+<p class="note">No output recorded.</p></section>
+<script type="application/json" id="mallard-series">{"groups":[{"title":"Time step","series":[{"name":"dt","unit":"-","label":"dt [-]","title":"time step","axis":0,"y":[0.017309,0.017309]},{"name":"cfl","unit":"-","label":"cfl [-]","title":"CFL number: the time step over the largest stable one","axis":0,"y":[0.5,0.5]}]},{"title":"Extremes over the cells","series":[{"name":"min_rho","unit":"-","label":"min_rho [-]","title":"lowest density over the cells","axis":0,"y":[1,1]},{"name":"min_p","unit":"-","label":"min_p [-]","title":"lowest pressure over the cells","axis":0,"y":[1,1]},{"name":"max_mach","unit":"-","label":"max_mach [-]","title":"highest Mach number over the cells","axis":0,"y":[0,0]}]},{"title":"Throughput and memory","series":[{"name":"memory_host","unit":"B","label":"memory_host [B]","title":"host memory of the largest rank","axis":0,"y":[1.1878e+07,1.2501e+07]},{"name":"wall_per_step","unit":"s","label":"wall_per_step [s]","title":"wall time per time step","axis":1,"y":[0.00034571]},{"name":"cells_per_second","unit":"s-1","label":"cells_per_second [s-1]","title":"throughput: cell updates per second of time stepping","axis":1,"y":[1.8513e+05]}]},{"title":"Conservation","series":[{"name":"mass","unit":"-","label":"mass [-]","title":"unexplained change of the mass total, relative to its scale","axis":0,"y":[0,0]},{"name":"momentum_x","unit":"-","label":"momentum_x [-]","title":"unexplained change of the momentum_x total, relative to its scale","axis":0,"y":[0,0]},{"name":"momentum_y","unit":"-","label":"momentum_y [-]","title":"unexplained change of the momentum_y total, relative to its scale","axis":0,"y":[0,0]},{"name":"energy","unit":"-","label":"energy [-]","title":"unexplained change of the energy total, relative to its scale","axis":0,"y":[0,0]}]}],"xlabel":"t [-]","axes":[{"t":[0,0.0173088],"step":[0,1]},{"t":[0.0173088],"step":[1]}]}</script>
+<script>// The plots of a Mallard run report: one SVG per series of the embedded data, drawn in the browser.
+// Each series is a line through the last value of each bucket of progress rows and, where a bucket holds more
+// than one row, a band between their least and largest values.
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var W = 460, H = 230, L = 62, R = 12, T = 26, B = 40;
+
+  function el(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function fmt(v) {
+    if (v === null || !isFinite(v)) return "-";
+    var a = Math.abs(v);
+    if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
+    return String(Number(v.toPrecision(4)));
+  }
+
+  function ticks(lo, hi, n) {
+    if (!(hi > lo)) return [lo];
+    var step = Math.pow(10, Math.floor(Math.log10((hi - lo) / n)));
+    var err = (hi - lo) / n / step;
+    step *= err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1;
+    var out = [];
+    for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * step; v += step) out.push(Math.abs(v) < 1e-12 * step ? 0 : v);
+    return out;
+  }
+
+  function finite(a) { return a.filter(function (v) { return v !== null && isFinite(v); }); }
+
+  function plot(s, parent) {
+    var lo = s.lo || s.y, hi = s.hi || s.y;
+    var ys = finite(lo.concat(hi)), ts = finite(s.t);
+    if (!ys.length || !ts.length) return;
+    var ymin = Math.min.apply(null, ys), ymax = Math.max.apply(null, ys);
+    var log = ymin > 0 && ymax / ymin > 1e3;
+    var f = log ? Math.log10 : function (v) { return v; };
+    var a = f(ymin), b = f(ymax);
+    if (a === b) { var d = a === 0 ? 1 : Math.abs(a) * 0.05; a -= d; b += d; }
+    var t0 = Math.min.apply(null, ts), t1 = Math.max.apply(null, ts);
+    if (t0 === t1) t1 = t0 + 1;
+    var X = function (t) { return L + (t - t0) / (t1 - t0) * (W - L - R); };
+    var Y = function (v) { return T + (b - f(v)) / (b - a) * (H - T - B); };
+
+    var fig = document.createElement("figure");
+    var cap = document.createElement("figcaption");
+    cap.textContent = (s.title || s.name) + (log ? " (log scale)" : "");
+    fig.appendChild(cap);
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": cap.textContent + ": " + s.label }, fig);
+    var yt = log ? ticks(Math.ceil(a), Math.floor(b), 4) : ticks(a, b, 4);
+    yt.forEach(function (v) {
+      var y = T + (b - v) / (b - a) * (H - T - B);
+      el("line", { x1: L, x2: W - R, y1: y, y2: y, "class": "grid" }, svg);
+      el("text", { x: L - 6, y: y + 4, "class": "tick", "text-anchor": "end" }, svg).textContent = fmt(log ? Math.pow(10, v) : v);
+    });
+    ticks(t0, t1, 4).forEach(function (v) {
+      var x = X(v);
+      el("line", { x1: x, x2: x, y1: T, y2: H - B, "class": "grid" }, svg);
+      el("text", { x: x, y: H - B + 15, "class": "tick", "text-anchor": "middle" }, svg).textContent = fmt(v);
+    });
+    el("text", { x: (L + W - R) / 2, y: H - 6, "class": "axis", "text-anchor": "middle" }, svg).textContent = s.xlabel;
+    el("text", { x: 4, y: 14, "class": "axis", "text-anchor": "start" }, svg).textContent = s.label;
+    el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, "class": "frame" }, svg);
+
+    var ok = function (i) { return s.t[i] !== null && lo[i] !== null && hi[i] !== null && (!log || lo[i] > 0); };
+    if (s.lo) {
+      var top = [], bottom = [];
+      for (var i = 0; i < s.t.length; i++) {
+        if (!ok(i)) continue;
+        top.push(X(s.t[i]).toFixed(1) + "," + Y(hi[i]).toFixed(1));
+        bottom.unshift(X(s.t[i]).toFixed(1) + "," + Y(lo[i]).toFixed(1));
+      }
+      el("polygon", { points: top.concat(bottom).join(" "), "class": "band" }, svg);
+    }
+    var pts = [];
+    for (var j = 0; j < s.t.length; j++) {
+      if (s.t[j] !== null && s.y[j] !== null && (!log || s.y[j] > 0)) pts.push(X(s.t[j]).toFixed(1) + "," + Y(s.y[j]).toFixed(1));
+    }
+    el("polyline", { points: pts.join(" "), "class": "line" }, svg);
+
+    var cursor = el("line", { y1: T, y2: H - B, "class": "cursor", visibility: "hidden" }, svg);
+    var readout = document.createElement("div");
+    readout.className = "readout";
+    readout.textContent = " ";
+    fig.appendChild(readout);
+    svg.addEventListener("mousemove", function (ev) {
+      var r = svg.getBoundingClientRect();
+      var t = t0 + ((ev.clientX - r.left) / r.width * W - L) / (W - L - R) * (t1 - t0);
+      var best = -1, dist = Infinity;
+      for (var k = 0; k < s.t.length; k++) {
+        if (s.t[k] === null) continue;
+        var dd = Math.abs(s.t[k] - t);
+        if (dd < dist) { dist = dd; best = k; }
+      }
+      if (best < 0) return;
+      cursor.setAttribute("x1", X(s.t[best]));
+      cursor.setAttribute("x2", X(s.t[best]));
+      cursor.setAttribute("visibility", "visible");
+      var text = "step " + s.step[best] + ", t = " + fmt(s.t[best]) + ": " + fmt(s.y[best]);
+      if (s.lo && lo[best] !== hi[best]) text += " (" + fmt(lo[best]) + " to " + fmt(hi[best]) + " over the bucket)";
+      readout.textContent = text;
+    });
+    svg.addEventListener("mouseleave", function () {
+      cursor.setAttribute("visibility", "hidden");
+      readout.textContent = " ";
+    });
+    parent.appendChild(fig);
+  }
+
+  var node = document.getElementById("mallard-series");
+  if (!node) return;
+  var data = JSON.parse(node.textContent);
+  data.groups.forEach(function (g, i) {
+    var parent = document.getElementById("plots-" + i);
+    if (!parent) return;
+    g.series.forEach(function (s) {
+      var axis = data.axes[s.axis];
+      s.t = axis.t;
+      s.step = axis.step;
+      s.xlabel = data.xlabel;
+      plot(s, parent);
+    });
+  });
+  var note = document.getElementById("plots-nojs");
+  if (note) note.hidden = true;
+})();
+</script>
+</main>
+</body>
+</html>

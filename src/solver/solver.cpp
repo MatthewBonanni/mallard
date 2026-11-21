@@ -2767,9 +2767,9 @@ int Solver::run_loop() {
         // A restart's pending half step, where this run does not fuse it into its first step
         if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
         if (!reacting || simpler) chemistry_pending = 0.0;
-        if (particles && particles->starts_at_gas_velocity()) {
+        if (particles && particles->starts_at_gas()) {
             update_cell_W();
-            particles->start_velocity(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+            particles->start_from_gas(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
         }
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
