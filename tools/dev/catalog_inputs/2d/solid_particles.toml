@@ -1,5 +1,5 @@
 # For the key catalog only (tools/dev/input_catalog.py): solid particles with
-# every key of [particles] and [[particles.walls]] given.
+# every key of [particles], [[particles.walls]] and [[particles.crossings]] given.
 
 [run]
 n_steps = 1
@@ -65,3 +65,13 @@ tangential_restitution = 0.9
 [[particles.walls]]
 zones = ["left", "right"]
 interaction = "stick"
+
+[[particles.crossings]]
+name = "caught"
+region = "left"
+fields = ["V", "T_P"]
+file = "caught.csv"
+
+[[particles.crossings]]
+name = "ring"
+region = {type = "boundary", of = {type = "disk", center = [0.5, 0.5], radius = 0.2}}

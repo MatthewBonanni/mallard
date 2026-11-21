@@ -12,7 +12,8 @@ statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas, and
 [dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
 [Snapshots](#particle-snapshots) write every particle, with the mesh or
-alone. Sprays and injection during the run follow in later releases
+alone, and [crossings](#particle-crossings) record the particles leaving
+through a boundary or crossing a surface. Sprays and injection during the run follow in later releases
 ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 ## Tracers: `[particles]`
@@ -436,5 +437,57 @@ particles are two blocks of one file, which ParaView 6.0 and later open;
 and later; `region` keeps the particles in a volume. Files, layout and
 pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
 carry every particle and quantity whatever the snapshots write.
+
+## Particle crossings
+
+```toml
+[[particles.crossings]]        # each particle leaving through the outlet, once
+name = "outlet"
+region = "outlet"
+fields = ["V", "residence"]
+
+[[particles.crossings]]        # each crossing of the plane x = 0.2, either way
+name = "station"
+region = {type = "boundary", of = {type = "half_space", point = [0.2, 0, 0], normal = [-1, 0, 0]}}
+```
+
+A `[[particles.crossings]]` entry writes a row to its CSV file
+(`particle_crossings_<name>.csv`) for each particle that leaves through a
+boundary zone, or that crosses a surface: `step`, `t`, `id`, the point where
+it crossed (`x`, `y`, `z`), for a surface its `direction` (`1` out of the
+region the surface bounds, `-1` into it), then the `fields`.
+
+- **A boundary zone** (`region = "outlet"`): inlets, outlets and far-field
+  boundaries remove the particles that reach them, and walls of
+  [`[[particles.walls]]`](#solid-particles) that catch them; each is
+  recorded once, as it is removed, where its path met the boundary.
+- **A surface** (a curve in 2D): the boundary of a region of shapes,
+  `{type = "boundary", of = ...}`, a closed surface or, from a `half_space`,
+  a plane; an `intersection` or `difference` clips it (at most 2 regions per
+  piece, 8 pieces in all), e.g. the boundary of a sphere in a half space is a
+  cap and a disk. A particle is recorded at every crossing, either way.
+
+The crossing point lies on the particle's straight path through the step and
+`t` is the step's time at that fraction of the path. The `fields` take the
+variables of [snapshots](#particle-snapshots): the particle's velocity,
+temperature and quantities at the end of the step, and the gas at its last
+stage. Rows are sorted by step, then by id, so the files are bitwise the same
+on any number of ranks and with or without step graphs. A restarted run
+appends to them, after the run's `# mallard-run` line.
+
+**Pitfalls.**
+
+- The host writes the crossings after every step, so a run with crossings
+  takes one step per step graph launch (GPU runs lose some of the graphs'
+  speed).
+- Each particle is recorded at most once per surface piece per step: a path
+  that crosses the same piece twice within a step (a grazing pass) is not.
+- Surfaces are not repeated across periodic boundaries, and a particle
+  crossing one in the step it wraps around a periodic boundary is found from
+  its unwrapped path.
+- A restart from an earlier restart file than the last appends the steps after
+  it again; take the rows of the last `# mallard-run` block for those steps.
+- The events of a step are held on the device: up to `capacity` per surface
+  piece, plus `capacity` for the boundary zones.
 
 *Design notes:* [particles](../design/particles.md).

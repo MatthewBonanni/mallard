@@ -1632,6 +1632,20 @@ Statistics of particle expressions over the particles in a region
 | `interval` | Steps between rows, default 1 |
 | `file` | Its CSV file, default `particle_probe_<name>.csv` |
 
+### `[[particles.crossings]]`
+
+The particles leaving through a boundary zone, once each, or crossing a
+surface, at each crossing ([Particle crossings](guide/particles.md#particle-crossings)):
+per row `step`, `t` (of the crossing), `id`, the crossing point `x`, `y`, (`z`),
+for a surface `direction`, then the fields. At most 8 entries.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | A boundary zone (by name) particles leave through, or a surface (a curve in 2D) of regions of shapes that does not move: the boundary of a filled region, clipped to at most 2 others (`intersection`, `difference`), at most 8 pieces over every entry. Required |
+| `fields` | Particle variables (`RHO`, `U`, `P`, `T`, `V`, `T_P`) and names of `[[particles.quantities]]`, vectors by name, default none |
+| `file` | Its CSV file, default `particle_crossings_<name>.csv` |
+
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every

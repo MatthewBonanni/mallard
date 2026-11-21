@@ -14,6 +14,7 @@
 #ifndef PARTICLES_H
 #define PARTICLES_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -30,6 +31,7 @@
 #include "input.h"
 #include "particle_cloud.h"
 #include "particle_coupling.h"
+#include "particle_crossings.h"
 #include "particle_forces.h"
 #include "particle_probes.h"
 #include "particle_quantities.h"
@@ -331,14 +333,29 @@ class Particles {
         /** @brief Whether some probe samples after this step. */
         bool probes_due(uint64_t step) const { return probes.due(step); }
 
-        /** @brief Lower step_limit to the next step after step that some probe samples. */
-        void probe_limits(uint64_t step, uint64_t & step_limit) const { probes.due_limits(step, step_limit); }
+        /**
+         * @brief Lower step_limit to the next step after step that some probe samples, or to the next step with
+         *        [[particles.crossings]], which the host writes after every step.
+         */
+        void probe_limits(uint64_t step, uint64_t & step_limit) const {
+            probes.due_limits(step, step_limit);
+            if (!crossings.empty()) step_limit = std::min(step_limit, step + 1);
+        }
 
         /** @brief Evaluate and write the probes due at step, from the gas state sample() left (collective). */
         void write_probes(uint64_t step, double t);
 
         /** @brief The files of the probes. */
         std::vector<std::string> probe_files() const { return probes.files(); }
+
+        /**
+         * @brief Write the crossings of the step that ended at t, of length dt, which relocate() recorded
+         *        (collective); nothing without [[particles.crossings]].
+         */
+        void write_crossings(uint64_t step, double t, double dt);
+
+        /** @brief The files of [[particles.crossings]]. */
+        std::vector<std::string> crossing_files() const;
 
         /**
          * @brief After a step: the cell holding each particle, reflections off
@@ -413,6 +430,15 @@ class Particles {
                           FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
 
+        /** @brief Record the crossings of surfaces between the step's start and the positions before relocation. */
+        void detect_crossings();
+
+        /** @brief The fields of the crossings of this step, from the particles' slots. */
+        void evaluate_crossings();
+
+        /** @brief Keep each slot's position and id, where the next step starts (crossings of surfaces). */
+        void remember_positions();
+
     private:
         /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
         uint32_t persistent() const { return width + quantities.n_aux(); }
@@ -439,6 +465,29 @@ class Particles {
         uint64_t n_seeded = 0;
         uint64_t n_restored = 0;
         bool distributed = false;
+
+        /** @brief Particle variables and quantities a list of names gives (snapshots, crossings). */
+        struct Resolved {
+            std::vector<ParticleField> fields;
+            std::vector<uint32_t> columns;  // the particle variable of each column
+            bool gas = false;               // some field reads the gas at the particle
+        };
+        Resolved resolve_fields(const std::vector<std::string> & names, const std::string & key, size_t line,
+                                const std::string & docs) const;
+
+        /** @brief Read [[particles.crossings]] and set up their files and device events. */
+        void init_crossings(const Input & input, const Input & table, region::Regions & regions);
+
+        // [[particles.crossings]]
+        std::vector<particles::Crossing> crossings;
+        particles::CrossingEvents events;
+        std::vector<particles::Surface> surfaces;
+        Kokkos::View<uint32_t *> exit_mask;         // (face): bit e for entry e on its zone, empty without exits
+        Kokkos::View<double *[3]> crossing_start;   // (slot): position at the step's start
+        Kokkos::View<uint64_t *> crossing_id;       // (slot): its particle then, EMPTY if none
+        Kokkos::View<uint32_t **> crossing_columns; // (entry, j): particle variable of field column j
+        Kokkos::View<uint32_t *> crossing_width;    // (entry): its columns
+        Kokkos::View<double **, Kokkos::LayoutRight> crossing_values;  // (event, column)
 
         struct Snapshot {
             std::vector<ParticleField> fields;

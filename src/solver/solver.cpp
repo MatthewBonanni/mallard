@@ -2964,6 +2964,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
     write_integrals();
     // Probes first, so that triggers read this step's values and restarts carry their state
     write_probes();
+    if (particles) particles->write_crossings(step, static_cast<double>(t), static_cast<double>(dt));
     write_particle_probes();
     update_convergence();
     act_on_triggers();
@@ -3333,6 +3334,7 @@ void Solver::print_summary(const RunEnd & end) const {
     for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
     if (particles) {
         for (const auto & file : particles->probe_files()) s.files.push_back({"particle probes", 0, file});
+        for (const auto & file : particles->crossing_files()) s.files.push_back({"particle crossings", 0, file});
     }
     report::Text text(logging::color_stdout());
     summary_section(text, s);

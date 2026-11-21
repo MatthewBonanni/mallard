@@ -144,6 +144,7 @@ add_library(MallardCore STATIC
     particles/particle_probes.cpp
     particles/particle_quantities.cpp
     particles/particle_snapshots.cpp
+    particles/particle_crossings.cpp
     particles/particles.cpp
 )
 
