@@ -8,6 +8,8 @@
 #ifndef INDEX_SET_H
 #define INDEX_SET_H
 
+#include "gated.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -52,9 +54,9 @@ struct OverList {
 template <typename... Traits, typename F>
 void parallel_for_set(const char * label, const IndexSet & set, const F & f) {
     if (set.list.extent(0) == 0) {
-        Kokkos::parallel_for(label, Kokkos::RangePolicy<Traits...>(set.begin, set.end), f);
+        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(set.begin, set.end), f);
     } else {
-        Kokkos::parallel_for(label, Kokkos::RangePolicy<Traits...>(0, set.list.extent(0)), OverList<F>{f, set.list});
+        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(0, set.list.extent(0)), OverList<F>{f, set.list});
     }
 }
 
