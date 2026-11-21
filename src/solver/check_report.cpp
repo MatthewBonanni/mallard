@@ -813,6 +813,7 @@ std::string check_json(const CheckReport & r) {
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
     o.raw("view", case_view_json(r));
+    o.raw("boundary_values", r.boundary_values.empty() ? "null" : r.boundary_values);
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));

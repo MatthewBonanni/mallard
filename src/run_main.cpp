@@ -243,7 +243,7 @@ int check_main(const cli::Args & args) {
         args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
     if (input_file.empty()) {
         for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--quality",
-                                    "--catalog", "--view", "--partial"}) {
+                                    "--catalog", "--view", "--boundary-values", "--partial"}) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
@@ -260,6 +260,7 @@ std::string check_options(const cli::Args & args, CheckOptions & options) {
     options.catalog_file = args.value_or("--catalog", "");
     options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
+    options.boundary_values_dir = args.value_or("--boundary-values", "");
     std::string error = mesh_field_options(args, options);
     if (error.empty() && args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
     if (!error.empty()) return error;

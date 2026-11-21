@@ -107,7 +107,7 @@ std::string case_check(Context & context, const json::Value & params) {
     if (const std::optional<std::string> known = context.remembered(key)) return *known;
     const cli::Args args =
         as_options(params, {"partial", "ranks", "memory", "throughput", "steps", "mesh_fields", "stencils", "cells",
-                            "region", "weights", "catalog", "view", "restart"});
+                            "region", "weights", "catalog", "view", "boundary_values", "restart"});
     CheckOptions options;
     options.input_file = context.path();
     if (const std::string error = check_options(args, options); !error.empty()) throw Error(code::INVALID_PARAMS, error);
@@ -133,6 +133,24 @@ std::string case_view(Context & context, const json::Value & params) {
     }
     context.remember(key, view);
     return view;
+}
+
+std::string case_boundary_values(Context & context, const json::Value & params) {
+    as_options(params, {"dir"});
+    const std::string dir = string_param(params, "dir");
+    if (dir.empty()) throw Error(code::INVALID_PARAMS, "case.boundary_values takes dir, the directory to write them in");
+    const std::string key = "case.boundary_values " + json::dump(params);
+    if (const std::optional<std::string> known = context.remembered(key)) return *known;
+    CheckOptions options;
+    options.input_file = context.path();
+    options.boundary_values_dir = dir;
+    const CheckReport report = check_case(context, options).report;
+    if (report.boundary_values.empty()) {
+        throw Error(code::INVALID_PARAMS, "the case cannot be set up, so its boundaries have no values",
+                    json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
+    }
+    context.remember(key, report.boundary_values);
+    return report.boundary_values;
 }
 
 std::string listing(const json::Value & catalog, const json::Value & params, const KeyCase * per_case) {
@@ -247,6 +265,8 @@ constexpr Method METHODS[] = {
     {"case.close", "", "", false, case_close},
     {"case.check", "mallard check INPUT --format json", "mallard-check", true, case_check},
     {"case.view", "mallard check INPUT --view DIR --format json", interfaces::CASE_VIEW.name, true, case_view},
+    {"case.boundary_values", "mallard check INPUT --boundary-values DIR --format json", interfaces::BOUNDARY_VALUES.name,
+     true, case_boundary_values},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
     {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},

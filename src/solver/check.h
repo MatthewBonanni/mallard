@@ -46,6 +46,7 @@ struct CheckOptions {
     bool stencil_weights = false;         // with the pseudo-inverse rows (--weights)
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
+    std::string boundary_values_dir;  // directory of the boundaries' values at their faces, or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
     bool partial = false;       // an input still being written (--partial): only missing pieces is no failure
     uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
@@ -174,6 +175,7 @@ struct CheckReport {
     std::vector<std::string> view_images;  // and its images
     std::vector<CheckViewBlock> view_blocks;
     std::vector<CheckFrame> frames;        // of each [[boundaries]] entry, with the view
+    std::string boundary_values;           // mallard-boundary-values, with boundary_values_dir; else empty
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 

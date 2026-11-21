@@ -552,6 +552,20 @@ Options:
                             the frame of each boundary's local coordinates:
                             where u starts, which way it grows, the inward
                             normal and the length. Default: none.
+  --boundary-values DIR     Write each [[boundaries]] entry's values at its
+                            faces, as the boundary evaluates them at the initial
+                            time: DIR/boundaries_<index>_<zone>.csv with each
+                            face's center, inward normal, the local coordinates
+                            its expressions read, every key it prescribes (u, p,
+                            T, p0, T0, mass_flux, q) and the velocity it
+                            prescribes; for inlet_stagnation and
+                            inlet_mass_flow, the density, velocity, speed, mass
+                            flux into the domain (rho_u_n) and pressure it
+                            settles at against the initial pressure inside,
+                            estimated (the first steps' transient differs). With
+                            --format json, the report's boundary_values gives
+                            each file and each column's min, area mean and max.
+                            Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).

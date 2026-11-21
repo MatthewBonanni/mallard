@@ -114,6 +114,15 @@ constexpr Option CHECK_OPTIONS[] = {
      "json, the report's view lists the files, every block with its kind and condition, and the frame of each "
      "boundary's local coordinates: where u starts, which way it grows, the inward normal and the length. "
      "Default: none."},
+    {"--boundary-values", "", "DIR",
+     "Write each [[boundaries]] entry's values at its faces, as the boundary evaluates them at the initial "
+     "time: DIR/boundaries_<index>_<zone>.csv with each face's center, inward normal, the local coordinates "
+     "its expressions read, every key it prescribes (u, p, T, p0, T0, mass_flux, q) and the velocity it "
+     "prescribes; for inlet_stagnation and inlet_mass_flow, the density, velocity, speed, mass flux into the domain (rho_u_n) and "
+     "pressure it settles at against the initial pressure inside, estimated (the first steps' transient "
+     "differs). With "
+     "--format json, the report's boundary_values gives each file and each column's min, area mean and "
+     "max. Default: none."},
     KOKKOS,
 };
 
@@ -1410,6 +1419,7 @@ std::string capabilities_json() {
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
                                  .raw("case_view", entry(interfaces::CASE_VIEW))
+                                 .raw("boundary_values", entry(interfaces::BOUNDARY_VALUES))
                                  .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
                                  .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
                                  .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))

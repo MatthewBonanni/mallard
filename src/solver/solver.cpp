@@ -1411,7 +1411,8 @@ void Solver::init_boundaries() {
     init_inlets(input_boundaries, inlets);
     const bool timed = !timed_fields.empty() || !dirichlet_states.empty() || !timed_inlets.empty();
     timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
-    boundary_points.clear();
+    // A check keeps them for the boundaries' values at their faces
+    if (!check_only) boundary_points.clear();
 }
 
 FacePoint Solver::boundary_point(const uint32_t f) const {
