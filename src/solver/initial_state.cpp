@@ -1133,7 +1133,7 @@ struct InitialState::Impl {
         count = static_cast<uint32_t>(h.nodes.extent(0));
         for (uint32_t i = 0; i < count; i++) {
             region::Node n = h.nodes(i);
-            if (n.kind == region::Kind::POLYGON) n.first += vertex_offset;
+            if (n.kind == region::Kind::POLYGON || n.kind == region::Kind::TRIANGLES) n.first += vertex_offset;
             if (n.kind == region::Kind::IMPLICIT) n.first += program_offset;
             nodes.push_back(n);
         }

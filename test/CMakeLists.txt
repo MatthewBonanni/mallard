@@ -12,6 +12,7 @@ set(MALLARD_TEST_SOURCES
     region_mesh_test.cpp
     region_motion_test.cpp
     region_sampler_test.cpp
+    region_surface_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
@@ -61,6 +62,7 @@ set(MALLARD_TEST_SOURCES
     post_extract_test.cpp
     post_derive_test.cpp
     post_average_test.cpp
+    post_flame_test.cpp
     post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp

@@ -42,6 +42,10 @@ A100,ndodecane,0.0156,warp ordered wide,sparse,1e-8,3.07e5
 A100,ndodecane,0.0156,warp ordered wide,sparse,1e-6,6.02e4
 A100,nhexane,0.047,warp ordered wide,sparse,1e-8,6.28e3
 A100,nhexane,0.047,warp ordered wide,sparse,1e-6,1.28e3
+A100,ndodecane,0.0156,warp ordered wide bdf,sparse,1e-8,4.33e5
+A100,ndodecane,0.0156,warp ordered wide bdf,sparse,1e-6,6.28e4
+A100,nhexane,0.047,warp ordered wide bdf,sparse,1e-8,5.71e3
+A100,nhexane,0.047,warp ordered wide bdf,sparse,1e-6,2.47e3
 EPYC7763-16c,h2o2,0.375,thread,dense,1e-8,9.52e5
 EPYC7763-16c,h2o2,0.375,thread,dense,1e-6,4.38e5
 EPYC7763-16c,gri30,0.0625,thread,sparse,1e-8,7.97e4
@@ -50,6 +54,10 @@ EPYC7763-16c,ndodecane,0.0156,thread,sparse,1e-8,6.07e4
 EPYC7763-16c,ndodecane,0.0156,thread,sparse,1e-6,2.47e4
 EPYC7763-16c,nhexane,0.047,thread,sparse,1e-8,2.93e3
 EPYC7763-16c,nhexane,0.047,thread,sparse,1e-6,8.77e2
+EPYC7763-16c,ndodecane,0.0156,thread bdf,sparse,1e-8,1.03e5
+EPYC7763-16c,ndodecane,0.0156,thread bdf,sparse,1e-6,2.79e4
+EPYC7763-16c,nhexane,0.047,thread bdf,sparse,1e-8,3.91e3
+EPYC7763-16c,nhexane,0.047,thread bdf,sparse,1e-6,1.97e3
 MI355X,h2o2,0.375,thread ordered,dense,1e-8,1.27e7
 MI355X,h2o2,0.375,thread ordered,dense,1e-6,3.62e6
 MI355X,gri30,0.0625,warp ordered wide,sparse,1e-8,8.11e5

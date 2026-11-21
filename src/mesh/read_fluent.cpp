@@ -473,7 +473,6 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
     });
 
     MeshBlock block;
-    parallel_read::cells_of_faces(layout.n_cells, face_ids, faces, face_cells, source, block);
 
     // Boundary faces: by zone id, then section in file order, then face id
     {
@@ -527,11 +526,12 @@ MeshBlock read_fluent_block(const std::string & filename, uint64_t mark_spacing,
                                  faces.words.begin() + std::ptrdiff_t(faces.offsets[k + 1]));
             records.end_record();
         }
-        release(faces.words);
-        release(faces.offsets);
         block.zone_names = zone_names;
-        parallel_read::place_faces(position, records, n_faces, false, block);
+        parallel_read::place_faces(position, std::move(records), n_faces, false, block);
     }
+    release(section_of);
+    release(face_section);
+    parallel_read::cells_of_faces(layout.n_cells, std::move(face_ids), std::move(faces), std::move(face_cells), source, block);
 
     // Cell zones: the last cell section that lists a cell
     for (const auto & [zone, first, last] : layout.cell_sections) {
