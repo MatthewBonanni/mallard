@@ -62,7 +62,7 @@ struct Contract {
 
 const Contract & fpv_contract() {
     static const Contract c{"fpv",
-                            {"Z", "S", "c"},
+                            {"Z", "Sz", "Lambda"},
                             {{"C", "1", Bound::NON_NEGATIVE},
                              {"omega_C", "kg m-3 s-1", Bound::ANY},
                              {"rho0", "kg m-3", Bound::POSITIVE}}};
@@ -242,22 +242,22 @@ void Table::check_contract() const {
         });
     }
     if (&model == &fpv_contract()) {
-        // C linear in c at each (Z, S), so that the FPV map returns the transported C exactly; float32
+        // C linear in Lambda at each (Z, Sz), so that the FPV map returns the transported C exactly; float32
         // tables to their rounding
         const size_t C = static_cast<size_t>(field("C"));
-        const std::vector<double> & c = m_axes[2].nodes;
-        const size_t n_c = c.size(), n_zs = m_axes[0].nodes.size() * m_axes[1].nodes.size();
+        const std::vector<double> & Lambda = m_axes[2].nodes;
+        const size_t n_Lambda = Lambda.size(), n_zs = m_axes[0].nodes.size() * m_axes[1].nodes.size();
         const double tolerance = m_single ? 1e-6 : 1e-9;
         with_values([&](const auto * v) {
             double scale = 0.0;
             for (uint64_t i = C; i < m_n_values; i += n_fields) scale = std::max(scale, std::abs(static_cast<double>(v[i])));
             for (size_t zs = 0; zs < n_zs; zs++) {
-                const auto * row = v + zs * n_c * n_fields + C;
-                const double lo = static_cast<double>(row[0]), hi = static_cast<double>(row[(n_c - 1) * n_fields]);
-                if (hi < lo) fail(where, "C decreases from c = 0 to c = 1 at (Z, S) node " + std::to_string(zs));
-                for (size_t k = 0; k < n_c; k++) {
-                    if (std::abs(static_cast<double>(row[k * n_fields]) - (lo + c[k] * (hi - lo))) > tolerance * scale) {
-                        fail(where, "C is not linear in c at (Z, S) node " + std::to_string(zs));
+                const auto * row = v + zs * n_Lambda * n_fields + C;
+                const double lo = static_cast<double>(row[0]), hi = static_cast<double>(row[(n_Lambda - 1) * n_fields]);
+                if (hi < lo) fail(where, "C decreases from Lambda = 0 to Lambda = 1 at (Z, Sz) node " + std::to_string(zs));
+                for (size_t k = 0; k < n_Lambda; k++) {
+                    if (std::abs(static_cast<double>(row[k * n_fields]) - (lo + Lambda[k] * (hi - lo))) > tolerance * scale) {
+                        fail(where, "C is not linear in Lambda at (Z, Sz) node " + std::to_string(zs));
                     }
                 }
             }
