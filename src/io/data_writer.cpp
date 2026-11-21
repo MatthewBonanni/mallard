@@ -195,13 +195,16 @@ void DataWriter::init(const Input & input,
     }
 
     if (input.contains("particle_fields") && format != DataFormat::VTKHDF) {
+        const bool chosen = input.contains("format");
         throw InputError({.key = "write_data.particle_fields",
                           .line = line_of(input, "particle_fields"),
-                          .message = have_hdf5() ? "is written as format = \"vtkhdf\" only, not \"" +
-                                                       FORMAT_NAMES.at(format) + "\""
-                                                 : "needs a build with HDF5 (VTKHDF files), and this one has none",
-                          .fix = have_hdf5() ? "Set format = \"vtkhdf\", or write the particles from another [[write_data]]"
-                                             : "Rebuild with -DMallard_ENABLE_HDF5=ON; restart files carry the particles",
+                          .message = chosen ? "is written as format = \"vtkhdf\" only, not \"" +
+                                                  FORMAT_NAMES.at(format) + "\""
+                                     : have_hdf5() ? "is written as VTKHDF, which needs parallel HDF5 on several ranks"
+                                                   : "is written as VTKHDF, which needs a build with HDF5",
+                          .fix = chosen ? "Set format = \"vtkhdf\", or write the particles from another [[write_data]]"
+                                 : have_hdf5() ? "Rebuild with a parallel HDF5, or run on one rank"
+                                               : "Rebuild with -DMallard_ENABLE_HDF5=ON",
                           .docs = "docs/guide/output.md#particle-snapshots"});
     }
     record_options("write_data.particles", {"combined", "separate"});

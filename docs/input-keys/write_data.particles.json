@@ -1,0 +1,13 @@
+{
+ "default": "\"combined\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [],
+ "type": "string",
+ "values": [
+  "combined",
+  "separate"
+ ]
+}
