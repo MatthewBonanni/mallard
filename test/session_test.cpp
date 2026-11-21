@@ -31,6 +31,7 @@
 #include "data_paths.h"
 #include "json.h"
 #include "json_schema.h"
+#include "provenance.h"
 #include "run_control.h"
 #include "session/session.h"
 
@@ -479,6 +480,35 @@ TEST(SessionTest, FileInfoAnswersAsInfoJsonWithWhetherThisBuildContinuesARestart
     for (size_t k = 0; k < expected.size(); k++) EXPECT_EQ(info["incompatibilities"].array[k].string, expected[k]);
     const Result text = run({"info", restart});
     EXPECT_NE(text.out.find(expected.empty() ? "yes, by this build" : "no, by this build"), std::string::npos) << text.out;
+}
+
+TEST(SessionTest, CaseFilesAnswersAsFilesJsonWithEveryFileTheSetupRead) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"}, request(1, "case.files", "{\"sha256\":true}") +
+                                                             request(2, "case.files") + request(3, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-case-files"}, {2, "mallard-case-files"}});
+    const Result one_shot = run({"files", "case.toml", "--sha256", "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value files = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(files));
+    EXPECT_EQ(violations("mallard-case-files", files), "");
+    EXPECT_TRUE(files["complete"].boolean);
+    const auto & entries = files["files"].array;
+    ASSERT_EQ(entries.size(), 2u) << one_shot.out;
+    EXPECT_EQ(entries[0]["role"].string, "input");
+    EXPECT_EQ(entries[0]["path"].string, "case.toml");
+    EXPECT_EQ(entries[1]["role"].string, "mesh");
+    EXPECT_EQ(entries[1]["path"].string, "cyl.msh");
+    EXPECT_EQ(entries[1]["resolved"].string, fs::absolute("cyl.msh").lexically_normal().string());
+    EXPECT_EQ(entries[1]["bytes"].number, static_cast<double>(fs::file_size("cyl.msh")));
+    EXPECT_EQ(entries[1]["sha256"].string, provenance::sha256_file("cyl.msh"));
+    // Without sha256, the same files unhashed
+    const json::Value plain = response(list, 2)["result"];
+    EXPECT_TRUE(plain["files"].array[1]["sha256"].is_null());
+    EXPECT_EQ(plain["files"].array[1]["bytes"].number, entries[1]["bytes"].number);
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {

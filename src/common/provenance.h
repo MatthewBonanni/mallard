@@ -115,6 +115,14 @@ void read_large_file(const std::string & kind, const std::string & path);
  */
 void set_read_files();
 
+/** @brief A file this rank's setup read: its kind (mesh, mechanism, profile, ...) and its path as given. */
+struct FileRead {
+    std::string kind, path;
+};
+
+/** @brief The files this rank's setup read since start_run: the mesh file, then the others, each once. */
+std::vector<FileRead> files_read();
+
 /** @brief The input with every key explicit, as setup used it (ResolvedInput::toml). */
 void set_resolved(const std::string & toml);
 

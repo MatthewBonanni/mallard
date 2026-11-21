@@ -152,6 +152,12 @@ constexpr Option LIST_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option FILES_OPTIONS[] = {
+    {"--sha256", "", "", "Also each file's SHA-256 (reads every file)."},
+    {"--format", "", "text|json", "text: a table; json: one JSON object (mallard-case-files), for scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option NEW_OPTIONS[] = {
     {"--list", "-l", "", "Deprecated: mallard list templates. List the templates."},
     {"--quick", "", "",
@@ -950,6 +956,27 @@ constexpr Command COMMANDS[] = {
         .run = list_keys_main,
     },
     {
+        .name = "files",
+        .group = "Inspect",
+        .summary = "The files a case reads, for copying it to another machine",
+        .synopsis = "mallard files INPUT [--sha256] [--format text|json]",
+        .description =
+            "Sets the case up as mallard check does (writing nothing) and lists the input and every file its setup "
+            "read: the mesh, mechanisms, tables and profiles, probe points, surfaces, the restart or remap source it "
+            "starts from. Each with its role, its path as written and resolved, whether it exists and its size; "
+            "--sha256 adds its SHA-256. The list comes from what the setup read, so a file named by a new key is "
+            "never missed. An input still being written lists the files the setup read before it stopped.",
+        .options = FILES_OPTIONS,
+        .arguments = INPUT_ARGUMENT,
+        .examples = "$ mallard files input.toml\n"
+                    "$ mallard files input.toml --sha256 --format json",
+        .exit_status = "0  listed, also of an input whose only errors are missing pieces\n"
+                       "1  the case cannot be set up (the errors are printed)\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = files_main,
+    },
+    {
         .name = "list units",
         .group = "Inspect",
         .summary = "The units quantities in input files take, with their dimensions and exact SI values",
@@ -1437,6 +1464,8 @@ std::string capabilities_json() {
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("unit_catalog", entry(interfaces::UNIT_CATALOG))
+                                 .raw("case_files", entry(interfaces::CASE_FILES))
+                                 .raw("file_info", entry(interfaces::FILE_INFO))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
                                  .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("boundary_values", entry(interfaces::BOUNDARY_VALUES))

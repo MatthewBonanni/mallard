@@ -335,6 +335,48 @@ int list_units_main(const cli::Args & args) {
     return 0;
 }
 
+int files_main(const cli::Args & args) {
+    int argc = args.argc;
+    char ** argv = args.argv;
+    comm::Session session(argc, argv);
+    if (const int e = format_error(args, "files")) return e;
+    const std::string & input_file = args.positional[0];
+    session::CheckResult result;
+    const CaseFields failed = quietly(input_file, args, [&](Solver &, CaseFields &) {
+        session::Context context;
+        context.open(input_file);
+        CheckOptions options;
+        options.input_file = input_file;
+        result = session::check_case(context, options, "", false);
+    });
+    if (!failed.errors.empty()) return report_errors(failed);
+    const std::string files = session::case_files_json(input_file, result, args.has("--sha256"));
+    const int status = result.report.setup_done || result.report.only_missing() ? 0 : 1;
+    if (json_format(args)) {
+        std::cout << files << "\n";
+        return status;
+    }
+    std::vector<std::vector<std::string>> rows;
+    for (const json::Value & f : json::parse(files)["files"].array) {
+        rows.push_back({f["role"].string, f["path"].string, f["exists"].boolean ? "yes" : "no",
+                        f["bytes"].is_null() ? "-" : json::number(f["bytes"].number),
+                        f["sha256"].is_null() ? "" : f["sha256"].string});
+    }
+    logging::section(input_file + ": files", logging::count(rows.size(), "file"));
+    if (args.has("--sha256")) {
+        logging::table({"role", "path", "exists", "bytes", "SHA-256"}, rows);
+    } else {
+        for (auto & row : rows) row.pop_back();
+        logging::table({"role", "path", "exists", "bytes"}, rows);
+    }
+    if (!result.report.setup_done) {
+        std::cout << "\nThe files the setup read before it stopped at the errors below; more apply once they are "
+                     "fixed.\n";
+        for (const auto & e : result.report.errors()) logging::error(diagnostic_code::LIST, "mallard files: " + e);
+    }
+    return status;
+}
+
 int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
 namespace {

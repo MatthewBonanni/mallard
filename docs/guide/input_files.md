@@ -820,6 +820,7 @@ Every command's options, examples and exit status: [Command line](cli.md).
 |---|---|---|
 | `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `mallard input resolve input.toml` | The input as the run uses it, every key explicit | [The resolved input](#the-resolved-input) |
+| `mallard files input.toml` | The input and every file its setup reads (mesh, mechanisms, tables, probe points, restart), with sizes and, with `--sha256`, hashes: what to copy to run the case elsewhere | [Command line](cli.md#mallard-files) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |
