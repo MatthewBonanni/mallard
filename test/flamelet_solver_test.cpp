@@ -173,6 +173,22 @@ TEST(FlameletSolverTest, ReactionDiffusionFrontMovesAtItsExactSpeed) {
     EXPECT_LT(err, 2e-3);
 }
 
+// C = "burnt" in an initial region takes the table's burnt progress variable (C_max = 0.2 in the
+// reactor table) while the expression of Z holds: catches a region whose "burnt" is read as fresh.
+TEST(FlameletSolverTest, BurntRegionsTakeTheTablesBurntState) {
+    std::ostringstream input;
+    input << "[run]\nn_steps = 1\ncfl = 0.5\n" << strip(8, 1.0) << "[initialize]\ntype = \"analytical\"\np = \"1e5\"\n"
+          << "T = \"300\"\nu = " << zero_velocity() << "\nZ = \"0.3\"\nC = \"0\"\n"
+          << "[[initialize.regions]]\nregion = { type = \"half_space\", point = [0.5, 0.0, 0.0], normal = [1.0, 0.0, 0.0] }\n"
+          << "cells = \"center\"\nZ = \"0.1 + 0.5 * x\"\nC = \"burnt\"\n" << flamelet_physics("solver_reactor.h5", "euler");
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input.str()));
+    solver.copy_device_to_host();
+    for (const auto & [x, C] : column(solver, 0, 1)) EXPECT_NEAR(C, x < 0.5 ? 0.2 : 0.0, tol(1e-12, 1e-6)) << x;
+    for (const auto & [x, Z] : column(solver, 0, 0)) EXPECT_NEAR(Z, x < 0.5 ? 0.1 + 0.5 * x : 0.3, tol(1e-12, 1e-6)) << x;
+}
+
 #endif
 
 // Inputs the flamelet gas does not take are refused with the key: catches a run that silently

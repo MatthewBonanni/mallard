@@ -5,6 +5,8 @@
  ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml",
-  "examples/turbulent_hot_spot_2d/input.toml"
+  "examples/turbulent_hot_spot_2d/input.toml",
+  "tools/dev/catalog_inputs/2d/flamelet.toml",
+  "tools/dev/catalog_inputs/3d/flamelet.toml"
  ]
 }

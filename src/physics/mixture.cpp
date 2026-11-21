@@ -171,6 +171,7 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
 bool MixtureModel::composition_varies(const Input & table) {
     if (table.contains("balance")) return true;
     for (const char * key : {"Z", "C"}) {
+        if (table.contains("X") || table.contains("Y")) break;
         if (table.contains(key) && table.at(key).is_string() && table.at(key).as_string() != "burnt") return true;
     }
     for (const char * key : {"X", "Y"}) {

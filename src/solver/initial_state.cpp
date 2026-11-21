@@ -76,6 +76,7 @@ struct Layer {
     uint32_t fractions = 0, n_fractions = 0;  // composition: (species, program) pairs; none: unset
     int32_t balance = -1;
     uint8_t mole = 0;
+    uint8_t burnt = 0;  // flamelet: C is the table's burnt value at Z
     uint32_t modes = 0, n_modes = 0;  // synthetic turbulence added to the velocity
 };
 
@@ -327,6 +328,7 @@ struct Evaluator {
                 const double v = value(static_cast<int32_t>(fractions(i, 1)), x, lanes);
                 Y[fractions(i, 0)] = v > 0.0 ? v : 0.0;
             }
+            if (L.burnt) Y[1] = gas.flamelet.burnt(Y[0]);
             return;
         }
         double total = 0.0;
@@ -1314,10 +1316,12 @@ struct InitialState::Impl {
                 }
                 return;
             }
+            L.burnt = t.contains("C") && t.at("C").is_string() && find_value<std::string>(t, "C") == "burnt";
             const char * keys[2] = {"Z", "C"};
             for (uint32_t k = 0; k < 2; k++) {
-                const std::string text = t.contains(keys[k]) ? quantity_or_expression(t.at(keys[k]), keys[k], dim::none)
-                                                             : std::string("0");
+                const std::string text = t.contains(keys[k]) && !(k == 1 && L.burnt)
+                                             ? quantity_or_expression(t.at(keys[k]), keys[k], dim::none)
+                                             : std::string("0");
                 fractions.push_back({k, static_cast<uint32_t>(add_program(where + "." + keys[k], text, names))});
             }
             L.n_fractions = 2;
@@ -1445,7 +1449,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             const std::string name = find_value_or<std::string>(e, "name", where);
             impl->add_state(e, where, L, "region");
             std::string fields;
-            for (const char * key : {"u", "rho", "p", "T", "X", "Y"}) {
+            for (const char * key : {"u", "rho", "p", "T", "X", "Y", "Z", "C"}) {
                 if (e.contains(key)) fields += (fields.empty() ? "" : ", ") + std::string(key);
             }
             if (e.contains("turbulence")) {
