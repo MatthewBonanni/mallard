@@ -42,6 +42,32 @@ inline std::string with_halo_exchange(const std::string & input, const std::stri
 }
 
 /**
+ * @brief Every halo cell's centroid, volume and (axisymmetric) measure and covariance equal its owner's bit for bit.
+ */
+inline void expect_halo_geometry_matches_owners(const Solver & solver) {
+    const Mesh & mesh = *solver.get_mesh();
+    const uint32_t width = N_DIM + 1 + (mesh.axisymmetric ? 4 : 0);
+    const auto geometry = [&](const uint32_t c, double * v) {
+        FOR_I_DIM v[i] = double(mesh.h_cell_coords(c, i));
+        v[N_DIM] = double(mesh.h_cell_volume(c));
+        if (!mesh.axisymmetric) return;
+        v[N_DIM + 1] = double(mesh.h_cell_measure(c));
+        for (uint32_t k = 0; k < 3; k++) v[N_DIM + 2 + k] = double(mesh.h_cell_covariance(c, k));
+    };
+    const uint64_t n_global = comm::allreduce(uint64_t(mesh.n_owned()), comm::Op::SUM);
+    std::vector<double> owned(n_global * width, 0.0);
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) geometry(c, owned.data() + mesh.h_global_cell(c) * width);
+    comm::allreduce(std::span<double>(owned), comm::Op::SUM);
+    uint64_t n_differ = 0;
+    std::vector<double> v(width);
+    for (uint32_t c = mesh.n_owned(); c < mesh.n_cells; c++) {
+        geometry(c, v.data());
+        n_differ += !std::equal(v.begin(), v.end(), owned.begin() + std::ptrdiff_t(mesh.h_global_cell(c) * width));
+    }
+    EXPECT_EQ(n_differ, 0u) << "halo cells whose geometry differs from the owner's, on rank " << comm::rank();
+}
+
+/**
  * @brief Run the input distributed and serially, the serial run in the
  *        global numbering; every rank compares the gathered distributed
  *        solution with its serial one. NCCL builds exchange halos with NCCL
