@@ -108,6 +108,16 @@ class BoundaryValue {
          */
         static std::vector<std::string> variables(const Input & entry);
 
+        /**
+         * @brief The data entries of a [[boundaries]] entry: its [[boundaries.data]],
+         *        then, if its turbulence.profile names a file, the entry it stands for
+         *        (name "profile", the columns of the precursor's mean and stresses).
+         */
+        static std::vector<Input> data_entries(const Input & entry);
+
+        /** @brief The name of the data entry turbulence.profile reads, or "" if it has none. */
+        static std::string profile_data(const Input & entry);
+
         /** @brief Adds to the error for an unknown symbol: a local coordinate of the other dimension, or a unit. */
         static std::string hint(const std::string & symbol);
 
