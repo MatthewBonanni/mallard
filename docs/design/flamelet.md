@@ -127,19 +127,20 @@ What Mallard needs from the generator, for `fpv` tables:
   delta(C_st - C_st_mean)`. For a field piecewise linear in `Z` on a fine
   grid, the beta mean is a fixed linear combination of the nodal values:
 
-  $$
-  \int_0^1 \phi(Z) P(Z) \mathrm{d}Z = \sum_i \frac{z_{i+1} \Delta F_i - \Delta G_i}{h_i} \phi_i + \frac{\Delta G_i - z_i \Delta F_i}{h_i} \phi_{i+1},
-  $$
+    $$
+    \int_0^1 \phi(Z) P(Z) \mathrm{d}Z = \sum_i \frac{z_{i+1} \Delta F_i - \Delta G_i}{h_i} \phi_i + \frac{\Delta G_i - z_i \Delta F_i}{h_i} \phi_{i+1},
+    $$
 
-  with `F = I(Z; a, b)` the regularized incomplete beta function, `G = Z_mean
-  I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/Sz - 1)`,
-  `b = (1 - Z_mean)(1/Sz - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
-  exact for any singularity of the PDF at 0 and 1. `Sz = 0` is the laminar
-  value, and `Sz = 1` gives the two pure streams. FPVgen today fills the
-  variance axis with copies of the laminar flamelet; the generator replaces
-  that with this integration. A first implementation, verified against an
-  independent integration by parts, is in the history of #1222 and can seed
-  the generator.
+    with `F = I(Z; a, b)` the regularized incomplete beta function, `G = Z_mean
+    I(Z; a + 1, b)` the partial first moment, `a = Z_mean (1/Sz - 1)`,
+    `b = (1 - Z_mean)(1/Sz - 1)` and `Delta` the change over `[z_i, z_i+1]`. It is
+    exact for any singularity of the PDF at 0 and 1. `Sz = 0` is the laminar
+    value, and `Sz = 1` gives the two pure streams. FPVgen today fills the
+    variance axis with copies of the laminar flamelet; the generator replaces
+    that with this integration. A first implementation, verified against an
+    independent integration by parts, is in the history of #1222 and can seed
+    the generator.
+
 - **The `C_st -> Lambda` remap (decision 3).** After integration, each `(Z, Sz)`
   column is retabulated against `Lambda`, with `C` exactly linear in `Lambda` (a checked
   part of the format). `C` must increase with `C_st` at each `(Z, Sz)`. Where
