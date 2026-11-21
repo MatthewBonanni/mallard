@@ -1,0 +1,1 @@
+- Releases attach relocatable archives of Mallard for Linux CPUs (x86-64 and ARM, glibc 2.28 and newer, the MPICH ABI for site MPIs) with their SHA-256, and a `release-manifest.json` listing every archive and image, which the GUI installs from; `docker/mallard.def` builds an Apptainer image with a self-test (#1322, #1323).

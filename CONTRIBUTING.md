@@ -307,12 +307,13 @@ A maintainer releases version X.Y.Z in three steps:
    (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
    `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
 2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
-   container images and the Spack package from `main`, pushes the images, and only then
-   creates the tag `vX.Y.Z`. A failed build leaves no tag: fix it on `main` and dispatch
-   again.
-3. `gh release create vX.Y.Z --verify-tag --title "Mallard X.Y.Z"` publishes the release
-   notes (starting from `python3 tools/dev/changelog.py notes X.Y.Z`), which also
-   publishes the website.
+   container images, the relocatable archives and the Spack package from `main`, pushes
+   the images, and only then creates the tag `vX.Y.Z` and a draft release holding the
+   archives and `release-manifest.json`. A failed build leaves no tag: fix it on `main`
+   and dispatch again.
+3. `gh release edit vX.Y.Z --draft=false --notes-file notes.md` publishes the draft with
+   the release notes (`python3 tools/dev/changelog.py notes X.Y.Z > notes.md`, then
+   edited), which also publishes the website.
 
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).
