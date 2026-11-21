@@ -146,18 +146,14 @@ void DataWriter::resume_vtkhdf(rtype t) {
     vtkhdf_steps = kept_steps(prefix + ".vtkhdf", combined ? MESH_BLOCK : "VTKHDF", t);
 }
 
-namespace {
-
-// The snapshot blocks of the particles of a file of the mesh and its particles
-constexpr const char * PARTICLE_SNAPSHOT_DATASET = "mallard_particle_snapshot";
-
-} // namespace
-
 #ifdef Mallard_HAS_HDF5
 
 using namespace h5;
 
 namespace {
+
+// The snapshot blocks of the particles of a file of the mesh and its particles
+constexpr const char * PARTICLE_SNAPSHOT_DATASET = "mallard_particle_snapshot";
 
 using curved::Vec3;
 
