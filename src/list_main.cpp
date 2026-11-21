@@ -357,7 +357,8 @@ int files_main(const cli::Args & args) {
         return status;
     }
     std::vector<std::vector<std::string>> rows;
-    for (const json::Value & f : json::parse(files)["files"].array) {
+    const json::Value listed = json::parse(files);
+    for (const json::Value & f : listed["files"].array) {
         rows.push_back({f["role"].string, f["path"].string, f["exists"].boolean ? "yes" : "no",
                         f["bytes"].is_null() ? "-" : json::number(f["bytes"].number),
                         f["sha256"].is_null() ? "" : f["sha256"].string});
