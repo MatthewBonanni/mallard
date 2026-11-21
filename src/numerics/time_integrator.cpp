@@ -49,6 +49,18 @@ const rtype * scale(const rtype * dt_device, const DtScale k) { return dt_device
 
 } // namespace
 
+double cfl_limit(const TimeIntegratorType type) {
+    switch (type) {
+        case TimeIntegratorType::FE: return 1.0;
+        case TimeIntegratorType::SSPRK3: return 1.2;
+        case TimeIntegratorType::RK4: return 1.35;
+        case TimeIntegratorType::SSPRK54:
+        case TimeIntegratorType::CK45:
+        case TimeIntegratorType::RDPK3SP35: return 2.2;
+    }
+    return 0.0;
+}
+
 FE::FE() {
     type = TimeIntegratorType::FE;
     n_solution_vectors = 1;

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -113,6 +114,58 @@ uint32_t steady_state_changes(TimeIntegrator & integrator) {
 }
 
 } // namespace
+
+namespace {
+
+/** @brief R(z), the factor by which one step of dt = 1 multiplies the solution of dU/dt = z U. */
+double amplification(TimeIntegrator & integrator, const double z) {
+    std::vector<State> solution_vec, rhs_vec;
+    for (uint8_t i = 0; i < integrator.get_n_solution_vectors(); i++) solution_vec.emplace_back("U", 1, 0);
+    for (uint8_t i = 0; i < integrator.get_n_rhs_vectors(); i++) rhs_vec.emplace_back("rhs", 1, 0);
+    Kokkos::deep_copy(solution_vec[0].flow, 1.0_r);
+    const rtype lambda = static_cast<rtype>(z);
+    RHSFunction rhs = [=](State U_state, State R_state, rtype, rtype) {
+        StateView U = U_state.flow, R = R_state.flow;
+        Kokkos::parallel_for(U.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE R(c, i) = lambda * U(c, i);
+        });
+    };
+    integrator.take_step(0.0_r, 1.0_r, solution_vec, rhs_vec, rhs);
+    auto h_U = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solution_vec[0].flow);
+    return double(h_U(0, 0));
+}
+
+/** @brief The extent of the stability region on the negative real axis: the first x > 0 with |R(-x)| > 1. */
+double negative_real_extent(TimeIntegrator & integrator) {
+    const auto stable = [&](const double x) { return std::abs(amplification(integrator, -x)) <= 1.0 + 1e-5; };
+    double lo = 0.0, hi = 0.1;
+    while (stable(hi)) lo = hi, hi += 0.1;
+    for (int k = 0; k < 30; k++) {
+        const double mid = 0.5 * (lo + hi);
+        (stable(mid) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+} // namespace
+
+TEST(TimeIntegratorTest, CflLimitsLieInsideTheStabilityRegionsNegativeRealAxis) {
+    // The checkerboard acoustic mode of quads and hexahedra has the eigenvalue -2 cfl in
+    // docs/numerics/overview.md's normalization, so a limit must keep -2 cfl_limit inside the stability
+    // region, and the limits measured on the other cells stay within 20% of that extent
+    FE fe;
+    RK4 rk4;
+    SSPRK3 ssprk3;
+    SSPRK54 ssprk54;
+    CK45 ck45;
+    RDPK3Sp35 rdpk;
+    for (TimeIntegrator * integrator : std::vector<TimeIntegrator *>{&fe, &rk4, &ssprk3, &ssprk54, &ck45, &rdpk}) {
+        const double limit = cfl_limit(integrator->get_type()), extent = negative_real_extent(*integrator);
+        const std::string name = TIME_INTEGRATOR_NAMES.at(integrator->get_type());
+        EXPECT_LE(2.0 * limit, extent) << name;
+        EXPECT_GE(2.0 * limit, 0.8 * extent) << name;
+    }
+}
 
 TEST(TimeIntegratorTest, SSPRK3KeepsASteadyStateExactly) {
     // In single precision the rounded weights 2/3 and 1/3 add up to more than
