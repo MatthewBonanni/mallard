@@ -117,9 +117,9 @@ Commands:
     mallard list species      The species of a case
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
+    mallard list templates    The case templates of mallard new
     mallard session           Hold a case and answer JSON-RPC requests on stdin
                               and stdout: the interface for the GUI and scripts
-    mallard list templates    The case templates of mallard new
     mallard diff              Compare two solutions field by field: norms of the
                               difference, where it is largest, bitwise
   Mesh
@@ -735,6 +735,27 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
 ```
 
+### mallard list templates
+
+```text
+Usage: mallard list templates
+
+Lists the templates mallard new creates cases from, with what each shows and
+what it costs.
+
+Options:
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard list templates
+  $ mallard new cylinder
+
+Exit status:
+  0  listed
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-templates
+```
+
 ### mallard session
 
 ```text
@@ -770,27 +791,6 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-session
-```
-
-### mallard list templates
-
-```text
-Usage: mallard list templates
-
-Lists the templates mallard new creates cases from, with what each shows and
-what it costs.
-
-Options:
-  -h, --help  Show this page.
-
-Examples:
-  $ mallard list templates
-  $ mallard new cylinder
-
-Exit status:
-  0  listed
-
-Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-templates
 ```
 
 ### mallard diff
