@@ -4,7 +4,8 @@
   2
  ],
  "set_in": [
-  "examples/particle_cloud/input.toml"
+  "examples/particle_cloud/input.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml"
  ],
  "type": "string",
  "values": [

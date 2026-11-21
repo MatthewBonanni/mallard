@@ -49,7 +49,7 @@ constexpr const char * STENCILS = "stencils";
 constexpr const char * WALLS = "[[probes]] on a wall zone";
 constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
 constexpr const char * PARTICLES = "particles";
-constexpr const char * SOLID_PARTICLES = "[particles] type = \"solid\"";
+constexpr const char * SOLID_PARTICLES = "[particles] type = \"solid\" or \"droplet\"";
 
 // Vectors (RHOU, U, VORTICITY in 3D) also name their components <name>_X, _Y, _Z
 const Entry VECTORS[] = {
