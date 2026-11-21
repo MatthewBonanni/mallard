@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -31,6 +32,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "vtkhdf_series.h"
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
@@ -98,14 +100,20 @@ std::vector<Snapshot> read_particles(const std::string & filename, const std::ve
     h5::Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
     h5::Handle top(H5Gopen2(file, group.c_str(), H5P_DEFAULT), H5Gclose, group);
     EXPECT_EQ(h5::read_string_attribute(top, "Type"), "PolyData");
-    h5::Handle steps(H5Gopen2(top, "Steps", H5P_DEFAULT), H5Gclose, "Steps");
     h5::Handle data(H5Gopen2(top, "PointData", H5P_DEFAULT), H5Gclose, "PointData");
     h5::Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "FieldData");
-    const uint64_t n_steps = h5::n_rows(steps, "Values");
-    const auto times = h5::read_rows<double>(steps, "Values", 0, n_steps, 1, H5P_DEFAULT);
+    // A series index has steps; a snapshot's own file is its one step
+    const bool series = H5Lexists(top, "Steps", H5P_DEFAULT) > 0;
+    const uint64_t n_steps = h5::n_rows(field_data, "TIME");
+    const auto times = h5::read_rows<double>(field_data, "TIME", 0, n_steps, 1, H5P_DEFAULT);
     const auto step_numbers = h5::read_rows<int64_t>(field_data, "STEP", 0, n_steps, 1, H5P_DEFAULT);
     const auto counts = h5::read_rows<int64_t>(top, "NumberOfPoints", 0, n_steps, 1, H5P_DEFAULT);
-    const auto offsets = h5::read_rows<int64_t>(steps, "PointOffsets", 0, n_steps, 1, H5P_DEFAULT);
+    std::vector<int64_t> offsets(n_steps, 0);
+    if (series) {
+        h5::Handle steps(H5Gopen2(top, "Steps", H5P_DEFAULT), H5Gclose, "Steps");
+        EXPECT_EQ(h5::read_rows<double>(steps, "Values", 0, n_steps, 1, H5P_DEFAULT), times);
+        offsets = h5::read_rows<int64_t>(steps, "PointOffsets", 0, n_steps, 1, H5P_DEFAULT);
+    }
     const uint64_t n_rows = h5::n_rows(top, "Points");
     const auto points = h5::read_rows<double>(top, "Points", 0, n_rows, 3, H5P_DEFAULT);
     const auto ids = h5::read_rows<int64_t>(data, "ID", 0, n_rows, 1, H5P_DEFAULT);
@@ -274,8 +282,9 @@ TEST(ParticleSnapshotsTest, OneEntryWritesWhatAMeshEntryAndAParticleEntryWrite) 
     }
 }
 
-TEST(ParticleSnapshotsTest, ACombinedFileHoldsTheSeparateFilesAsBlocks) {
-    // A PartitionedDataSetCollection of the mesh file's datasets and the particle file's, each block with its steps
+TEST(ParticleSnapshotsTest, ACombinedSeriesIndexesTheSeparateSeriesAsBlocks) {
+    // A PartitionedDataSetCollection of the mesh series' datasets and the particle series', each block with its
+    // steps; without a series both write the same files
     if (!can_write_vtkhdf()) GTEST_SKIP() << "needs HDF5, parallel on several ranks";
     const std::filesystem::path dir = scratch_dir() / "mallard_particle_snapshots_combined";
     for (const bool series : {true, false}) {
@@ -290,18 +299,25 @@ TEST(ParticleSnapshotsTest, ACombinedFileHoldsTheSeparateFilesAsBlocks) {
                                      "[[write_data]]\nprefix = \"" + apart + "\"\nparticles = \"separate\"\n" + keys)));
         separate.run();
         comm::barrier();
-        const std::string last = series ? "" : "_000012";
-        std::map<std::string, std::vector<double>> expected;
-        for (const auto & [name, values] : datasets(apart + last + ".vtkhdf")) {
-            expected["VTKHDF/mesh" + name.substr(6)] = values;
+        if (!series) {
+            for (const char * suffix : {"_000012.vtkhdf", "_particles_000012.vtkhdf"}) {
+                const auto a = datasets(both + suffix);
+                EXPECT_FALSE(a.empty()) << suffix;
+                EXPECT_EQ(a, datasets(apart + suffix)) << suffix;
+            }
+            EXPECT_TRUE(std::filesystem::exists(both + "_particles.vtkhdf.series"));
+            continue;
         }
-        const std::string particle_file = series ? apart + "_particles.vtkhdf" : apart + "_particles_000012.vtkhdf";
-        for (const auto & [name, values] : datasets(particle_file)) expected["VTKHDF/particles" + name.substr(6)] = values;
-        EXPECT_EQ(datasets(both + last + ".vtkhdf"), expected) << (series ? "series" : "one file per snapshot");
-        if (!comm::is_root()) continue;
-        {
+        std::map<std::string, std::vector<double>> expected;
+        for (const auto & [name, values] : datasets(apart + ".vtkhdf")) expected["VTKHDF/mesh" + name.substr(6)] = values;
+        for (const auto & [name, values] : datasets(apart + "_particles.vtkhdf")) {
+            expected["VTKHDF/particles" + name.substr(6)] = values;
+        }
+        EXPECT_EQ(datasets(both + ".vtkhdf"), expected);
+        EXPECT_FALSE(std::filesystem::exists(both + "_particles.vtkhdf"));
+        if (comm::is_root()) {
             const std::lock_guard<std::mutex> lock(h5::mutex());
-            const std::string filename = both + last + ".vtkhdf";
+            const std::string filename = both + ".vtkhdf";
             h5::Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, filename);
             h5::Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "VTKHDF");
             EXPECT_EQ(h5::read_string_attribute(top, "Type"), "PartitionedDataSetCollection");
@@ -309,12 +325,17 @@ TEST(ParticleSnapshotsTest, ACombinedFileHoldsTheSeparateFilesAsBlocks) {
                 EXPECT_GT(H5Oexists_by_name(file, block, H5P_DEFAULT), 0) << block;
             }
         }
-        // Mallard's reader reads the mesh block as it reads a mesh file
-        const output::Contents a = output::open(both + last + ".vtkhdf"), b = output::open(apart + last + ".vtkhdf");
+        // Mallard's reader reads the mesh block as it reads a mesh series, and lists every file of both blocks
+        const output::Contents a = output::open(both + ".vtkhdf"), b = output::open(apart + ".vtkhdf");
         ASSERT_EQ(a.snapshots.size(), b.snapshots.size());
         EXPECT_EQ(output::read(a, "RHO", a.snapshots.size() - 1), output::read(b, "RHO", b.snapshots.size() - 1));
-        const auto particles = read_particles(both + last + ".vtkhdf", {"U", "RHO"}, "VTKHDF/particles");
+        const auto members = vtkhdf_series::members(both + ".vtkhdf");
+        EXPECT_NE(std::find(members.begin(), members.end(), both + "_particles_000012.vtkhdf"), members.end());
+        EXPECT_NE(std::find(members.begin(), members.end(), both + "_000012.vtkhdf"), members.end());
+        const auto particles = read_particles(both + ".vtkhdf", {"U", "RHO"}, "VTKHDF/particles");
+        ASSERT_EQ(particles.size(), 4u);
         EXPECT_EQ(particles.back().particles.size(), 16u);
+        EXPECT_EQ(particles.back().particles, read_particles(both + "_particles_000012.vtkhdf", {"U", "RHO"})[0].particles);
     }
 }
 

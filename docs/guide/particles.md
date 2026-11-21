@@ -433,8 +433,8 @@ particle_fields = ["V", "T_P", "turns"]
 entry writes the particles at each of its snapshots: their positions, `ID`,
 and the variables listed (`RHO`, `U`, `P`, `T` of the gas at each particle,
 `V`, `T_P`, and quantities by name). With `fields` too, the mesh and the
-particles are two blocks of one file, which ParaView 6.0 and later open;
-`particles = "separate"` writes them as two files instead, for ParaView 5.12
+particles are two blocks of one series, which ParaView 6.0 and later open;
+`particles = "separate"` writes them as two series instead, for ParaView 5.12
 and later; `region` keeps the particles in a volume. Files, layout and
 pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
 carry every particle and quantity whatever the snapshots write.
