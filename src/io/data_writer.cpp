@@ -681,14 +681,15 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            if ((root || collective) && !hdf5_mesh_written) {
+            const bool new_mesh = !hdf5_mesh_written && !hdf5_reuse_mesh;
+            if ((root || collective) && new_mesh) {
                 in_flight->hash.push_back({prefix + "_mesh.h5", prefix + "_mesh.h5", true, collective});
             }
             if (root || collective) in_flight->hash.push_back({last_file, last_file, true, collective});
-            auto job = [this, stem, block, root, values = capture(mesh->n_owned()), series = history]() {
+            auto job = [this, stem, block, root, new_mesh, values = capture(mesh->n_owned()), series = history]() {
                 if (!hdf5_mesh_written) {
                     write_hdf5_mesh();
-                    if (root) {
+                    if (root && new_mesh) {
                         publish_file("the HDF5 mesh file", prefix + "_mesh.h5");
                         n_bytes += file_bytes(prefix + "_mesh.h5");
                     }
@@ -703,23 +704,30 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             if (!run(std::move(job), !collective)) hash_written();
         }
     } else if (format == DataFormat::VTKHDF) {
-        const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
+        // A file per snapshot, written once; with series, an index of them as the series file
+        const std::string filename = stem + ".vtkhdf";
         last_file = filename;
         history.push_back({double(t), static_cast<int64_t>(step), filename});
         start_record(step, double(t), "vtkhdf", filename, block.reason);
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            // A series in one file is appended to in place: its size, but no hash of the whole file at every step
-            if (root || collective) in_flight->hash.push_back({filename, filename, !one_file, collective});
-            auto job = [this, filename, block, root,
-                        values = capture(mesh->n_owned(), subset), list = history]() {
-                const uint64_t before = one_file ? file_bytes(filename) : 0;
-                const bool created = !(one_file && vtkhdf_steps > 0);
+            const bool mesh_file = writes_vtkhdf_mesh();
+            if (root || collective) {
+                if (mesh_file) in_flight->hash.push_back({vtkhdf_mesh_file(), vtkhdf_mesh_file(), true, collective});
+                in_flight->hash.push_back({filename, filename, true, collective});
+            }
+            auto job = [this, filename, block, root, mesh_file, values = capture(mesh->n_owned(), subset),
+                        list = history]() {
                 write_vtkhdf(filename, block, values);
                 if (root) {
-                    if (created) publish_file("the VTKHDF file", filename);
-                    n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
-                    if (!one_file) write_vtkhdf_series(list);
+                    publish_file("the VTKHDF file", filename);
+                    n_bytes += file_bytes(filename) + (mesh_file ? file_bytes(vtkhdf_mesh_file()) : 0);
+                    if (one_file) {
+                        series_steps.push_back(vtkhdf_series::describe(filename).at(0));
+                        vtkhdf_series::write_index(prefix + ".vtkhdf", series_steps);
+                    } else {
+                        write_vtkhdf_series(list);
+                    }
                 }
             };
             if (!run(std::move(job), !collective)) hash_written();
@@ -822,6 +830,8 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     }
     history.clear();
     if (format == DataFormat::HDF5) {
+        hdf5_mesh_written = false;
+        hdf5_reuse_mesh = std::filesystem::exists(prefix + "_mesh.h5");
         resume_xdmf(t);
     } else if (format == DataFormat::VTKHDF) {
         resume_vtkhdf(t);
@@ -829,7 +839,7 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
         resume_pvd(t);
     }
     n_snapshots = history.size();
-    if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots || one_file) return;
+    if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots) return;
     // The index lost entries: never overwrite a snapshot still on disk
     n_snapshots = static_cast<uint64_t>(*n_before);
     while (snapshot_exists(n_snapshots)) n_snapshots++;

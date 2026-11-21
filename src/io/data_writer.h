@@ -33,6 +33,7 @@
 #include "output_clock.h"
 #include "pinned_mirrors.h"
 #include "snapshot_block.h"
+#include "vtkhdf_series.h"
 
 enum class DataFormat {
     VTU,
@@ -408,14 +409,17 @@ class DataWriter {
         /**
          * @brief VTKHDF output: an UnstructuredGrid of the owned cells (curved
          *        cells as quadratic ones), or of the subset's, written by
-         *        every rank in global order; one file per snapshot, or with
-         *        series, one file of every snapshot.
+         *        every rank in global order; one file per snapshot, with
+         *        series its mesh arrays linked to the series' mesh file.
          */
         void write_vtkhdf(const std::string & filename, const Block & block, const Values & values);
         void build_vtkhdf_cells();
         /** @brief The subset of these owned cells, with these fractions of every cell, numbered in global order (collective). */
         void select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions);
         void write_vtkhdf_series(const Index & series) const;
+        /** @brief Whether this snapshot writes the series' mesh file. */
+        bool writes_vtkhdf_mesh() const { return one_file && !subset_update && !vtkhdf_mesh_ready && !vtkhdf_reuse_mesh; }
+        std::string vtkhdf_mesh_file() const { return prefix + "_mesh.vtkhdf"; }
         void resume_vtkhdf(rtype t);
         void resume_pvd(rtype t);
         std::string snapshot_stem(uint64_t number) const;
@@ -516,6 +520,7 @@ class DataWriter {
         // HDF5 output: owned cells in global order, and the sizes of the mesh written
         GlobalOrder cell_order;
         bool hdf5_mesh_written = false;
+        bool hdf5_reuse_mesh = false;  // a continued series: check the mesh file rather than write it
         uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
         // VTKHDF output: this rank's block of the topology, in global order, built by the first snapshot
         struct VtkhdfMesh {
@@ -527,10 +532,12 @@ class DataWriter {
             std::vector<uint8_t> types;                      // cells only
             GlobalOrder order;                               // of the cells
         } vtkhdf;
-        bool one_file = false;  // vtkhdf with series = true (the default): every snapshot in one file
-        uint64_t vtkhdf_steps = 0;  // snapshots in the series file
-        bool vtkhdf_resumed = false;
-        bool vtkhdf_run_written = false;  // this run's block is in the series file
+        // vtkhdf with series = true (the default): a file per snapshot, the mesh in <prefix>_mesh.vtkhdf unless
+        // it changes, and the series file <prefix>.vtkhdf, an index of them (vtkhdf_series.h) built by rank 0
+        bool one_file = false;
+        std::vector<vtkhdf_series::Step> series_steps;
+        bool vtkhdf_mesh_ready = false;  // the mesh file is written, or checked
+        bool vtkhdf_reuse_mesh = false;  // a continued series: check the mesh file rather than write it
 };
 
 #endif // DATA_WRITER_H
