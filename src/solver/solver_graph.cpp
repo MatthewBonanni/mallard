@@ -289,7 +289,7 @@ void Solver::record_step() {
     }
     // After a rejected step the positions are those of its start, where they stay
     if (particles) {
-        particles->remove_evaporated(state(), [this](const State & s) { halo.exchange(s); });
+        particles->remove_evaporated(state(), [this](const State & exchanged) { halo.exchange(exchanged); });
         particles->relocate();
     }
     if (double_flux) {
