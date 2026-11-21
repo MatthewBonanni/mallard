@@ -80,6 +80,7 @@ fields = ["RHO", "U_X", "P", "T"]
 | `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]` | no | [Output](output.md) |
 | `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
+| `[particles]` | no | [Particles](particles.md) |
 | `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 

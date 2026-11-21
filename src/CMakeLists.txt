@@ -140,6 +140,7 @@ add_library(MallardCore STATIC
     parallel/halo_exchange.cpp
     parallel/lock_arrays.cpp
     parallel/partition.cpp
+    particles/particles.cpp
 )
 
 target_include_directories(MallardCore PUBLIC
@@ -153,6 +154,7 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/solver
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
+    ${CMAKE_CURRENT_SOURCE_DIR}/particles
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
