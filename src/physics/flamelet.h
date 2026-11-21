@@ -113,6 +113,15 @@ struct Gas {
 
     /** @brief Field f of the table at point p, for output. */
     KOKKOS_INLINE_FUNCTION double field(const Point<3> & p, const uint32_t f) const { return fpv.table(p, f); }
+
+    /** @brief The normalized progress variable c = (C - C_min) / (C_max - C_min) of the laminar table at Z, in [0, 1]. */
+    KOKKOS_INLINE_FUNCTION double progress(const double Z_mean, const double C_mean) const {
+        const Point<3> p = locate(Z_mean, 0.0, 0.0);
+        const double C_min = fpv.table.at_last_node(p, 0, fpv.field_C);
+        const double span = fpv.table.at_last_node(p, fpv.table.n_nodes[2] - 1, fpv.field_C) - C_min;
+        const double c = span > 0.0 ? (C_mean - C_min) / span : 0.0;
+        return c < 0.0 ? 0.0 : (c > 1.0 ? 1.0 : c);
+    }
 };
 
 /**
@@ -154,6 +163,20 @@ class FlameletModel {
         /** @brief The Riemann surrogates (gamma, e0 = e - cv T) at T, Z and C. */
         void surrogates(double T, double Z, double C, double & gamma, double & e0) const;
 
+        /**
+         * @brief The table fields written as output, in the order of outputs(): T_TABLE (the
+         *        tabulated temperature T0), HRR if the table has it, and Y_<species> of the
+         *        table's species but those named as a transported scalar (Z, C).
+         */
+        const std::vector<std::string> & output_names() const { return m_output_names; }
+
+        /**
+         * @brief The output fields at density rho and scalars (Z, C) into out, in the order of
+         *        output_names(); HRR is scaled from the table's density rho0 by (rho / rho0)^2, as
+         *        the source of C.
+         */
+        void outputs(double rho, double Z, double C, double * out) const;
+
         /** @brief Display lines for the run log. */
         report::Summary summary() const;
 
@@ -163,6 +186,9 @@ class FlameletModel {
         Gas<Kokkos::HostSpace> host_gas;
         bool m_viscous = false;
         std::string m_file;
+        std::vector<std::string> m_output_names;
+        std::vector<uint32_t> m_output_fields;  // after T_TABLE: the fields of m_output_names
+        bool m_heat_release = false;            // the first of m_output_fields is HRR
 };
 
 } // namespace flamelet

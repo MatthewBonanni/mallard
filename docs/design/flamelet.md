@@ -380,10 +380,42 @@ tables with exact answers: the closed-form `T(e)` against a quadrature of
 `cv`, device lookups against the multilinear source, the error-function
 mixing of `Z` at uniform `T`, a closed reactor following the tabulated source,
 and the exact traveling front of `C_t = D C_xx + k C^2 (1 - C)`, which checks
-diffusivity, source and the map `C -> c` together. Still to come in stage 2: the
-table's species, `T` and `HRR` as derived fields, the table-pressure warning,
-isothermal walls and the other boundary types, and the 2D counterflow against
-Cantera with a generator-made table.
+diffusivity, source and the map `C -> c` together.
+
+- **Output.** The table's species, `T0` (as `T_TABLE`) and the optional `HRR`
+  field are computed on the host when the output is staged, from the host copy
+  of the table: output is infrequent, so they add no device kernel and nothing
+  to the step. `HRR` is scaled by `(rho / rho0)^2` like `omega_C`, since both
+  are rates of the same reactions. `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`
+  are the derived fields of the catalog, `Z` and the table's normalized `c`.
+  Probes and statistics of the table fields are left for later.
+- **Table pressure.** The setup compares the initial pressure field (its
+  extremes over all ranks) and the prescribed pressures of `inlet_state`,
+  `inlet_stagnation` and `outlet_pressure` with the table's, and warns
+  (`W-TABLE-PRESSURE`) beyond 10%. It is a warning, not an error: a run may
+  pass through other pressures on purpose, and acoustics or a shock move the
+  pressure without invalidating the table.
+
+Still to come in stage 2: isothermal walls and the other boundary types, and
+the 2D counterflow against Cantera.
+
+**The counterflow validation needs a generator.** It compares Mallard's 2D
+counterflow (`examples/counterflow_diffusion`) with Cantera's
+`CounterflowDiffusionFlame` and with Mallard's finite-rate run on the same
+mesh, which needs a table made from Cantera flamelets of the same mechanism
+and transport. Mallard has no generator (section 2), and FPVgen is not used
+from Mallard. The validation waits for the generator library to provide:
+
+1. an `fpv` / `saghafian2015` table in this format of the S-curve of the
+   example's counterflow (H2/N2 against air, `mechanisms/h2o2.yaml`, 300 K,
+   1 atm), with unity Lewis number, `HRR` and at least `Y_OH` and `Y_H2O`;
+2. its own check that table flamelets match Cantera (section 10, first row);
+3. the table, small enough to commit (a few MB), and the generator input in its
+   `/provenance/input`.
+
+The case then runs `gas = "flamelet"` beside the finite-rate example, with the
+targets of section 10: `T_max`, flame position and the `Y_OH` peak within 2% of
+Cantera.
 
 ## 6. Interaction with the existing models
 

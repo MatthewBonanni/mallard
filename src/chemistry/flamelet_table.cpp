@@ -220,6 +220,10 @@ void Table::check_contract() const {
     std::vector<std::string> y_names;
     for (const auto & s : m_species) y_names.push_back("Y_" + s);
     for (const auto & y : y_names) needs.push_back({y.c_str(), "1", Bound::FRACTION});
+    // Optional fields, checked where present
+    for (const Need & need : {Need{"HRR", "W m-3", Bound::ANY}}) {
+        if (field(need.name) >= 0) needs.push_back(need);
+    }
     const size_t n_fields = m_fields.size();
     for (const Need & need : needs) {
         const int32_t f = field(need.name);

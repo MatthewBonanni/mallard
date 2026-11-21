@@ -111,14 +111,15 @@ other fields.
 |  | `LAMBDA` | `kg m s-3 K-1` | thermal conductivity | a mixture with navier_stokes | write_data |
 |  | `D_<s>` | `m2 s-1` | diffusion coefficient of species s | a mixture with navier_stokes | write_data |
 |  | `DT_<s>` | `kg m-1 s-1` | thermal diffusion coefficient of species s | a mixture with navier_stokes and soret = true | write_data |
-| mixture | `MIXTURE_FRACTION` | `1` | Bilger mixture fraction | a mixture with [output.mixture] fuel and oxidizer | write_data, post derive |
-|  | `PROGRESS_VARIABLE` | `1` | progress variable | a mixture with [output.mixture] progress | write_data, post derive |
+| mixture | `MIXTURE_FRACTION` | `1` | Bilger mixture fraction | a mixture with [output.mixture] fuel and oxidizer, or gas = "flamelet" (its Z) | write_data, post derive |
+|  | `PROGRESS_VARIABLE` | `1` | progress variable | a mixture with [output.mixture] progress, or gas = "flamelet" (the table's c) | write_data, post derive |
 |  | `FLAME_INDEX` | `1` | Takeno flame index | a mixture with [output.mixture] fuel and oxidizer, or fuel_species and oxidizer_species | write_data, post derive |
 |  | `SCALAR_DISSIPATION` | `s-1` | scalar dissipation rate of the mixture fraction | a mixture with navier_stokes and [output.mixture] fuel and oxidizer | write_data, post derive |
 |  | `T_SEED` | `K` | temperature guess of the thermodynamic state | a mixture | write_data |
+|  | `T_TABLE` | `K` | temperature of the flamelet table at the cell's Z and C | gas = "flamelet" | write_data |
 |  | `Y_<s>` | `1` | mass fraction of species s | a mixture | write_data, probes, statistics |
 |  | `X_<s>` | `1` | mole fraction of species s | a mixture | write_data |
-| chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry] | write_data |
+| chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry], or gas = "flamelet" with a table that has HRR | write_data |
 |  | `CHEM_H` | `s` | last chemistry sub-step, negated after a failed explicit step | a mixture with [chemistry] | write_data |
 |  | `CHEM_COST` | `1` | chemistry sub-steps in the last step | a mixture with [chemistry] | write_data |
 |  | `QRAD` | `kg m-1 s-3` | radiative heat source | [radiation] | write_data |

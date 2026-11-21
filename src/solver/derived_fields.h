@@ -18,6 +18,7 @@
 
 #include "common_typedef.h"
 #include "derived_catalog.h"
+#include "flamelet.h"
 #include "gradient.h"
 #include "input.h"
 #include "physics.h"
@@ -291,6 +292,7 @@ struct Inputs {
     Kokkos::View<rtype *[N_PRIMITIVE]> primitives{};          ///< u, p, T, h of each cell
     Kokkos::View<rtype **, Kokkos::LayoutRight> Y{};          ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
     chemistry::ThermoTable<> thermo{};                        ///< mixtures: species thermodynamics
+    flamelet::Gas<> flamelet{};                               ///< a flamelet gas: its table (Y holds Z, C)
     Kokkos::View<rtype *[3]> transport{};                     ///< viscous mixtures: (cell, [mu, lambda, -])
     Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients{};  ///< Workspace::gradients
 };

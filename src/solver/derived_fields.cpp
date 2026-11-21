@@ -258,6 +258,7 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
 bool Settings::available(const Field f) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
+    if (tabulated && (f == MIXTURE_FRACTION || f == PROGRESS_VARIABLE)) return true;
     if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) return false;
     return !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
            !(needs(need::VISCOUS) && !viscous) && !(needs(need::REFERENCE) && !reference) &&
@@ -379,6 +380,8 @@ void compute(const Selection & selection, const Settings & settings, const Input
     const Kokkos::View<rtype **, Kokkos::LayoutRight> weights = settings.scalar_weights;
     const Kokkos::View<rtype *> progress_weights = settings.progress_weights;
     const bool mixture = settings.mixture;
+    const flamelet::Gas<> flamelet = inputs.flamelet;
+    const bool tabulated = settings.tabulated;
     const bool progress_T = settings.progress == Settings::Progress::TEMPERATURE;
     const rtype cp = settings.cp, R = settings.R, T_ref = settings.T_ref, p_ref = settings.p_ref;
     const rtype p_inf = settings.p_inf, q_inf = settings.q_inf, z_offset = settings.z_offset;
@@ -443,12 +446,18 @@ void compute(const Selection & selection, const Settings & settings, const Input
             FOR_I_DIM g2 += g(c, 0, i) * g(c, 0, i);
             put(SCHLIEREN, Kokkos::sqrt(g2));
         }
-        if (wants(MIXTURE_FRACTION)) {
+        if (tabulated) {
+            put(MIXTURE_FRACTION, Y(c, flamelet::Gas<>::Z));
+            if (wants(PROGRESS_VARIABLE)) {
+                put(PROGRESS_VARIABLE, static_cast<rtype>(flamelet.progress(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
+                                                                            static_cast<double>(Y(c, flamelet::Gas<>::C)))));
+            }
+        } else if (wants(MIXTURE_FRACTION)) {
             rtype z = z_offset;
             for (uint32_t k = 0; k < n_species; k++) z += weights(Z, k) * Y(c, k);
             put(MIXTURE_FRACTION, z);
         }
-        if (wants(PROGRESS_VARIABLE)) {
+        if (wants(PROGRESS_VARIABLE) && !tabulated) {
             rtype value = 0.0;
             if (progress_T) {
                 value = (P(c, N_DIM + 1) - T_unburnt) / (T_burnt - T_unburnt);
