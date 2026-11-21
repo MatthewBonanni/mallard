@@ -181,7 +181,7 @@ TEST(ParticleCrossingsTest, ParticlesCrossACircleInThenOutAndAClippedPieceOfIt) 
     solver.run();
     comm::barrier();
     const double tol = roundoff(1e-12);
-    const double half = std::sqrt(0.04 - 0.15 * 0.15);
+    const double half_chord = std::sqrt(0.04 - 0.15 * 0.15);
     // Per row: the seeds at x = 0.05 and 0.35 cross in and out, 0.65 wraps around and enters, 0.95 enters and
     // leaves after wrapping
     std::map<uint64_t, std::vector<std::vector<double>>> by_id;
@@ -200,7 +200,7 @@ TEST(ParticleCrossingsTest, ParticlesCrossACircleInThenOutAndAClippedPieceOfIt) 
         const double y0 = 0.05 + 0.3 * static_cast<double>((id - 1) / 4 % 4);
         EXPECT_NEAR(std::abs(y0 - 0.5), 0.15, 1e-12) << "particle " << id;
         for (const auto & r : list) {
-            EXPECT_NEAR(std::abs(r[3] - 0.5), half, tol);
+            EXPECT_NEAR(std::abs(r[3] - 0.5), half_chord, tol);
             EXPECT_EQ(r[3 + N_DIM], r[3] < 0.5 ? -1.0 : 1.0);
         }
     }
