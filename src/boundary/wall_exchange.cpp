@@ -91,10 +91,12 @@ enum Walk : int32_t { OUTSIDE = -1, FRONTIER = -2, ROTATED = -3 };
  *        each cell entered across a periodic seam. OUTSIDE if the walk leaves
  *        the domain, FRONTIER if it reaches the edge of the halo, ROTATED if
  *        it crosses a rotational seam (the sampled velocity would need turning).
+ *        Appends the cells it passes through to walked.
  */
 int32_t locate(const Mesh & mesh, const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs,
-               uint32_t c, rtype * p) {
+               uint32_t c, rtype * p, std::vector<uint32_t> & walked) {
     for (int step = 0; step < 100000; step++) {
+        walked.push_back(c);
         const rtype V = mesh.h_cell_volume(c);
         rtype worst = precision_tol(1e-10, 1e-5) * (N_DIM == 3 ? std::cbrt(V) : std::sqrt(V));
         int32_t f_worst = -1;
@@ -191,7 +193,7 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
             if (!(heights[s] > 0.0_r)) continue;
             rtype p[N_DIM];
             FOR_I_DIM p[i] = mesh.h_face_coords(f, i) + heights[s] * n_in[i];
-            const int32_t found = locate(mesh, face_bc, bcs, c, p);
+            const int32_t found = locate(mesh, face_bc, bcs, c, p, points.walked);
             if (found == OUTSIDE) {
                 std::ostringstream msg;
                 msg << "wall model: the " << (s == 0 ? "exchange" : "edge") << " point at height " << heights[s]
@@ -221,6 +223,8 @@ WallModelData make_wall_model_data(const Mesh & mesh, const std::vector<int32_t>
     }
     std::sort(points.cells.begin(), points.cells.end());
     points.cells.erase(std::unique(points.cells.begin(), points.cells.end()), points.cells.end());
+    std::sort(points.walked.begin(), points.walked.end());
+    points.walked.erase(std::unique(points.walked.begin(), points.walked.end()), points.walked.end());
     Kokkos::deep_copy(data.faces, h_faces);
     Kokkos::deep_copy(data.cells, h_cells);
     Kokkos::deep_copy(data.offsets, h_offsets);

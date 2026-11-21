@@ -1229,6 +1229,21 @@ void download_tables(const TENO & scheme, const HostIndex & large_index, const H
     small_rows(scheme).download(scheme.stencil_small, small_index, c0, n_small, tables);
 }
 
+/** @brief Renumber the cells of the entries of packed stencils that are no images by new_cell; the entries it maps to -1. */
+uint64_t renumber_cells(const teno::PackedStencils & packed, const Kokkos::View<int32_t *> & new_cell) {
+    auto slots = packed.cells;
+    uint64_t dropped = 0;
+    Kokkos::parallel_reduce("teno_renumber_cells", Kokkos::RangePolicy<>(0, slots.extent(0)),
+                            KOKKOS_LAMBDA(const uint64_t k, uint64_t & n) {
+        const int32_t e = slots(k);
+        if (e < 0) return;
+        const int32_t d = new_cell(e);
+        n += d < 0 ? 1u : 0u;
+        slots(k) = d;
+    }, dropped);
+    return dropped;
+}
+
 } // namespace
 
 TENO::TENO() {
@@ -1336,8 +1351,9 @@ void TENO::init(const Input & input) {
         Kokkos::deep_copy(entry_rotations, h_rotations);
     }
     choose_rows();
-    cache_loaded = !cache_file.empty() && load_cache();
-    if (!cache_loaded) {
+    const bool took_tables = carry_tables();
+    cache_loaded = !took_tables && !cache_file.empty() && load_cache();
+    if (!took_tables && !cache_loaded) {
         compute_stencils_and_matrices();
         // Runs that write the cache use the tables as they will be read back
         if (single_tables || (cache_single && !cache_file.empty())) round_to_single();
@@ -3779,5 +3795,80 @@ bool TENO::load_cache() {
     cache_status = "loaded from " + cache_file + " (set up on " +
                    std::string(header.producer, strnlen(header.producer, sizeof(header.producer))) + ")";
     setup_producer = std::string(header.producer, strnlen(header.producer, sizeof(header.producer)));
+    return true;
+}
+
+bool TENO::carry_tables() {
+    if (!carried) return false;
+    TENO & from = *carried->from;
+    const std::vector<int32_t> & new_cell = carried->new_cell;
+    const std::vector<int32_t> & new_face = carried->new_face;
+    const uint32_t n_table_rows = n_rows();
+    bool same_rows = n_table_rows == from.n_rows();
+    for (uint32_t r = 0; same_rows && r < n_table_rows; r++) {
+        same_rows = new_cell[from.cell_of_row(r)] == int32_t(cell_of_row(r));
+    }
+    if (!same_rows) throw std::logic_error("TENO: the carried tables are for other cells");
+    // Boundary ordinals of the faces that rotated entries mirror across
+    const auto old_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), from.boundary_faces);
+    std::vector<int32_t> new_ordinal;
+    if (mesh->is_rotational()) {
+        const auto faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_faces);
+        const int32_t * begin = faces.data();
+        const int32_t * end = begin + faces.extent(0);
+        for (size_t b = 0; b < old_faces.extent(0); b++) {
+            const int32_t f = new_face[static_cast<size_t>(old_faces(b))];
+            const int32_t * it = std::lower_bound(begin, end, f);
+            new_ordinal.push_back(f >= 0 && it != end && *it == f ? static_cast<int32_t>(it - begin) : -1);
+        }
+    }
+    auto cell = [&](const int32_t c) {
+        const int32_t d = new_cell[static_cast<size_t>(c)];
+        if (d < 0) throw std::logic_error("TENO: a carried stencil reads a dropped cell");
+        return d;
+    };
+    auto face = [&](const int32_t code) {
+        int32_t row, rel_row;
+        const int32_t f = teno::entry_face(code, old_faces, row, rel_row);
+        const int32_t g = f < 0 ? -1 : new_face[static_cast<size_t>(f)];
+        if (f >= 0 && g < 0) throw std::logic_error("TENO: a carried stencil mirrors across a dropped face");
+        if (code >= -1) return g;
+        const int32_t x = -2 - code;
+        const int32_t b = x / teno::ROTATION_SPAN - 1;
+        return teno::entry_code(g, b < 0 ? -1 : new_ordinal[static_cast<size_t>(b)], row - teno::TURN_BIAS,
+                                (x / teno::TURN_SPAN) % teno::REL_SPAN - teno::REL_BIAS);
+    };
+    // Rows keep their indices, so the tables move over as they are and only the cells and faces their entries name
+    // are renumbered: in place on the device, and the few images on the host
+    Kokkos::View<int32_t *> d_new_cell(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_new_cell"), new_cell.size());
+    Kokkos::deep_copy(d_new_cell, HostUnmanaged<const int32_t>(new_cell.data(), new_cell.size()));
+    for (teno::PackedStencils * packed : {&from.stencil_large, &from.stencil_small}) {
+        if (renumber_cells(*packed, d_new_cell) > 0) throw std::logic_error("TENO: a carried stencil reads a dropped cell");
+        if (packed->images.extent(0) == 0) continue;
+        auto h_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), packed->images);
+        for (size_t k = 0; k < h_images.extent(0); k += 2) {
+            h_images(k) = cell(h_images(k));
+            h_images(k + 1) = face(h_images(k + 1));
+        }
+        Kokkos::deep_copy(packed->images, h_images);
+    }
+    scale = from.scale;
+    cell_shape = from.cell_shape;
+    cell_shape_owner = std::move(from.cell_shape_owner);
+    basis_mean = from.basis_mean;
+    si_matrix = from.si_matrix;
+    moments = from.moments;
+    stencil_large_size = from.stencil_large_size;
+    stencil_small_size = from.stencil_small_size;
+    stencil_large = from.stencil_large;
+    stencil_small = from.stencil_small;
+    gather_depth = std::move(from.gather_depth);
+    table_memory = std::move(from.table_memory);
+    largest_stencil = from.largest_stencil;
+    n_sector_unavailable = from.n_sector_unavailable;
+    setup_status = from.setup_status;
+    setup_producer = from.setup_producer;
+    cache_status = from.cache_status;
+    carried.reset();
     return true;
 }

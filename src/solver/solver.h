@@ -1101,6 +1101,8 @@ class Solver {
         bool distribute = true;
         int halo_layers = 0;
         std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
+        curved::Surfaces curved_surfaces;               // of the local mesh, during init only
+        std::optional<TENO::Carried> carried_tables;    // for the next init_numerics (drop_unread_halo)
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;
@@ -1108,6 +1110,11 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        /**
+         * @brief Rebuild the local mesh with the owned and received cells only, and set the boundaries and
+         *        numerics up on it again, carrying the TENO tables over.
+         */
+        void drop_unread_halo();
         uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();
