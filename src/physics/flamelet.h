@@ -94,8 +94,8 @@ struct Gas {
 
     KOKKOS_INLINE_FUNCTION bool active() const { return fpv.table.values.extent(0) > 0; }
 
-    /** @brief Scalars given as Z and C, completed with the second moment Z2 = Z^2 of zero variance if transported. */
-    template <typename Scalars> KOKKOS_INLINE_FUNCTION void complete(Scalars & y) const {
+    /** @brief Scalars given as Z and C (host), completed with Z2 = Z^2 of zero variance if transported. */
+    void complete(std::vector<double> & y) const {
         if (second_moment) y[Z2] = y[Z] * y[Z];
     }
 
