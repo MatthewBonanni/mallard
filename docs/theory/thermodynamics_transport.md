@@ -287,6 +287,7 @@ exact energy conservation (`src/solver/solver_mixture.cpp`,
     Riemann solver. With the hybrid flux, each of the two is blended with the
     central flux computed with the same pair ([Numerical fluxes](fluxes.md#hybrid-central-upwind-flux)). The
     species fluxes use the mean mass flux ([Numerical fluxes](fluxes.md#species-fluxes)).
+
 3. After the step, $\rho E$ of each cell is reset to the true equation of
     state at the pressure the frozen pair gives, keeping $\rho$, $\rho\mathbf{u}$
     and the composition: $T = p/(\rho R)$ and

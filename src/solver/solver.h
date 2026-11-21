@@ -139,6 +139,9 @@ template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
 struct CentralStates;
 
+/** @brief Default [numerics.hybrid] dilatation_scale (docs/design/les.md, section 4.3). */
+inline constexpr double DEFAULT_DILATATION_SCALE = 1e-5;
+
 /** @brief Whether some [[write_data]] of the input writes the variable. */
 bool writes_variable(const Input & input, const std::string & name);
 
@@ -1286,6 +1289,7 @@ class Solver {
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
+        rtype hybrid_dilatation_scale = static_cast<rtype>(DEFAULT_DILATATION_SCALE);
         CentralFlux hybrid_central = CentralFlux::RECONSTRUCTED;  // [numerics.hybrid] central
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
