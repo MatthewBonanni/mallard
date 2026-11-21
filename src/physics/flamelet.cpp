@@ -108,6 +108,45 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     if (type != "euler" && type != "navier_stokes") {
         throw not_accepted(physics, "physics.type", type, {"euler", "navier_stokes"});
     }
+    // The variance keys before the table, which a build without HDF5 cannot read
+    const bool les = input.contains("les");
+    for (const char * key : {"variance", "C_Z", "C_chi"}) {
+        if (!les && physics.contains(key)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(physics, key),
+                              .message = "closes the subgrid variance of Z, which exists only in LES",
+                              .fix = "Remove it, or add [les]",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
+    Variance variance = Variance::NONE;
+    double C_Z = 0.1, C_chi = 2.0;
+    if (les) {
+        const std::string name = find_value_or<std::string>(physics, "variance", "algebraic");
+        if (name != "algebraic" && name != "transported") {
+            throw not_accepted(physics, "physics.variance", name, {"algebraic", "transported"});
+        }
+        const bool transported = name == "transported";
+        const char * other = transported ? "C_Z" : "C_chi";
+        if (physics.contains(other)) {
+            throw InputError({.key = std::string("physics.") + other,
+                              .line = line_of(physics, other),
+                              .message = std::string("is a constant of variance = \"") +
+                                         (transported ? "algebraic" : "transported") + "\", not of \"" + name + "\"",
+                              .fix = std::string("Remove ") + other,
+                              .docs = "docs/guide/flamelet.md"});
+        }
+        variance = transported ? Variance::TRANSPORTED : Variance::ALGEBRAIC;
+        const char * key = transported ? "C_chi" : "C_Z";
+        double & constant = transported ? C_chi : C_Z;
+        constant = static_cast<double>(find_real_or(physics, key, dim::none, static_cast<rtype>(constant)));
+        if (!(transported ? constant > 0.0 : constant >= 0.0)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(physics, key),
+                              .message = transported ? "must be positive" : "must not be negative",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
     std::shared_ptr<const Table> table;
     try {
         table = std::make_shared<const Table>(Table::read(file));
@@ -122,44 +161,10 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     }
     FlameletModel model(table, type == "navier_stokes");
     model.m_file = file;
-    const bool les = input.contains("les");
-    for (const char * key : {"variance", "C_Z", "C_chi"}) {
-        if (!les && physics.contains(key)) {
-            throw InputError({.key = std::string("physics.") + key,
-                              .line = line_of(physics, key),
-                              .message = "closes the subgrid variance of Z, which exists only in LES",
-                              .fix = "Remove it, or add [les]",
-                              .docs = "docs/guide/flamelet.md"});
-        }
-    }
-    if (les) {
-        const std::string variance = find_value_or<std::string>(physics, "variance", "algebraic");
-        if (variance != "algebraic" && variance != "transported") {
-            throw not_accepted(physics, "physics.variance", variance, {"algebraic", "transported"});
-        }
-        const bool transported = variance == "transported";
-        const char * other = transported ? "C_Z" : "C_chi";
-        if (physics.contains(other)) {
-            throw InputError({.key = std::string("physics.") + other,
-                              .line = line_of(physics, other),
-                              .message = std::string("is a constant of variance = \"") +
-                                         (transported ? "algebraic" : "transported") + "\", not of \"" + variance +
-                                         "\"",
-                              .fix = std::string("Remove ") + other,
-                              .docs = "docs/guide/flamelet.md"});
-        }
-        model.m_variance = transported ? Variance::TRANSPORTED : Variance::ALGEBRAIC;
-        model.gas.second_moment = model.host_gas.second_moment = transported;
-        const char * key = transported ? "C_chi" : "C_Z";
-        double & constant = transported ? model.m_C_chi : model.m_C_Z;
-        constant = static_cast<double>(find_real_or(physics, key, dim::none, static_cast<rtype>(constant)));
-        if (!(transported ? constant > 0.0 : constant >= 0.0)) {
-            throw InputError({.key = std::string("physics.") + key,
-                              .line = line_of(physics, key),
-                              .message = transported ? "must be positive" : "must not be negative",
-                              .docs = "docs/guide/flamelet.md"});
-        }
-    }
+    model.m_variance = variance;
+    model.m_C_Z = C_Z;
+    model.m_C_chi = C_chi;
+    model.gas.second_moment = model.host_gas.second_moment = variance == Variance::TRANSPORTED;
     return model;
 }
 
