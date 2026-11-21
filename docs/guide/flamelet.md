@@ -41,9 +41,10 @@ C = 0.0
 
 The transported scalars are `rho Z` and `rho C`, in the species block
 (output `Y_Z`, `Y_C`, restart and probes as any species). The table's axes are
-`(Z, S, c)` with `c = (C - C_min) / (C_max - C_min)` the normalized progress
-variable at `Z`; Mallard finds `c` from the transported `C`, exactly, because
-the format requires `C` to be linear in `c`.
+`(Z, Sz, Lambda)`, named as in FPVgen: `Sz` the normalized variance of `Z`
+and `Lambda = (C - C_min) / (C_max - C_min)` the normalized progress variable
+at `(Z, Sz)`. Mallard finds `Lambda` from the transported `C`, exactly,
+because the format requires `C` to be linear in `Lambda`.
 
 - **Thermodynamics** (Saghafian et al. 2015): the table holds, per node, `T0`,
   `e0 = e(T0)`, `R`, `gamma0` and `a_gamma`, with `gamma(T) = gamma0 +

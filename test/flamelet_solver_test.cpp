@@ -108,7 +108,7 @@ TEST(FlameletSolverTest, MixingDiffusesZAndEnthalpyTogether) {
     EXPECT_LT(err_T, tol(1e-6, 1e-1));
 }
 
-// A closed box at rest, uniform in Z and C: rho and e stay constant while omega_C = A (1 - c),
+// A closed box at rest, uniform in Z and C: rho and e stay constant while omega_C = A (1 - Lambda),
 // tabulated at rho0 = 2 rho and scaled by (rho / rho0)^2, drives C = C_max (1 - exp(-t / tau)) with
 // tau = rho C_max (rho0 / rho)^2 / A; the temperature and pressure follow the table's closed-form
 // T(e) at the new C. Catches a source scaled other than (rho / rho0)^2, a source on the wrong scalar
@@ -147,10 +147,10 @@ TEST(FlameletSolverTest, ClosedReactorFollowsTheTabulatedSource) {
     }
 }
 
-// The exact traveling front of C_t = D C_xx + k C^2 (1 - C) (omega_C = k rho0 c^2 (1 - c), C = c,
+// The exact traveling front of C_t = D C_xx + k C^2 (1 - C) (omega_C = k rho0 Lambda^2 (1 - Lambda), C = Lambda,
 // constant density): C = 1 / (1 + exp((x - x0 - s t) / delta)), s = sqrt(k D / 2), delta =
 // sqrt(2 D / k), with D = kappa / (rho cp) from the table. Catches a wrong diffusivity or source
-// magnitude (each moves the front at the wrong speed) and a wrong map from C to the table's c.
+// magnitude (each moves the front at the wrong speed) and a wrong map from C to the table's Lambda.
 TEST(FlameletSolverTest, ReactionDiffusionFrontMovesAtItsExactSpeed) {
     const double p = 1.0e5, T = 200.0, rho = p / (50.0 * T), k = 6.0e4, D = 0.12 / rho;
     const double s = std::sqrt(k * D / 2.0), delta = std::sqrt(2.0 * D / k);

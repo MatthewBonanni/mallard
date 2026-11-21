@@ -391,7 +391,7 @@ tables with exact answers: the closed-form `T(e)` against a quadrature of
 `cv`, device lookups against the multilinear source, the error-function
 mixing of `Z` at uniform `T`, a closed reactor following the tabulated source,
 and the exact traveling front of `C_t = D C_xx + k C^2 (1 - C)`, which checks
-diffusivity, source and the map `C -> c` together. Still to come in stage 2: the
+diffusivity, source and the map `C -> Lambda` together. Still to come in stage 2: the
 table's species, `T` and `HRR` as derived fields, the table-pressure warning,
 isothermal walls and the other boundary types, and the 2D counterflow against
 Cantera with a generator-made table.
