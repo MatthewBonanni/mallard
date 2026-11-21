@@ -10,7 +10,7 @@ linearly with the distance from the body from h_wall to h_far. Physical curves:
 "duck" (the body), "inflow" (left), "outflow" (right), "top" and "bottom".
 With --order 2 or 3 the elements are curved onto the spline, so Mallard's
 curved boundaries follow the duck exactly instead of its straight edges.
-Needs the gmsh Python module (pip install gmsh).
+Needs the gmsh Python module (uv pip install gmsh).
 """
 import argparse
 
