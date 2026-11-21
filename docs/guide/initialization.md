@@ -21,7 +21,7 @@ T = 1.0
 [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid),
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct)
-and 11 more.
+and 13 more.
 
 ## Expressions
 
@@ -45,7 +45,7 @@ p = """\
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 21 more.
+and 22 more.
 
 | Key | Default | Meaning |
 |---|---|---|

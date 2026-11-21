@@ -193,6 +193,18 @@
 "MPI3DTest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3", "curved"]
 "MPI3DTest.RemapDoesNotDependOnTheRankCount" = ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"]
 
+[particles_test]
+# Only the features each study verifies: in the studies in time the gas is uniform and exact
+"ParticleTimeOrder.TracerPathlinesInATurningFlow" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleTimeOrder.DragRelaxationInATurningFlow" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleTimeOrder.DragRelaxationNearTheStiffLimit" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleOrder.StokesSettlingFromRest" = ["particles", "ssprk3"]
+"ParticleOrder.SchillerNaumannResponseToAStepInGasVelocity" = ["particles", "rk4"]
+"ParticleOrder.StiffLimitConvergesToTheInertialTrajectoryAsTauVanishes" = ["particles", "rk4"]
+"ParticleOrder.ABounceUnderGravityIsFirstOrderInTheStep" = ["particles", "rk4"]
+"ParticleSpaceOrder.GasVelocityAtTheParticles" = [["particles", "fo"], ["particles", "muscl"], ["particles", "teno3"], ["particles", "teno4"], ["particles", "teno5"]]
+"ParticleSpaceOrder.TracerPathlinesInACompactVortex" = [["particles", "euler", "fo"], ["particles", "euler", "muscl"], ["particles", "euler", "teno3"], ["particles", "euler", "teno4"], ["particles", "euler", "teno5"]]
+
 [periodic_test]
 "PeriodicBox2D.PreservesUniformFlowAndConservesMassMomentumAndEnergy" = ["euler", "fo", "muscl", "teno5", "hllc", "ssprk3", "periodic"]
 "PeriodicAdvection2D.SmoothWaveConvergesAtDesignOrder" = [

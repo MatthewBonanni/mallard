@@ -1,0 +1,93 @@
+# Particles bouncing in a closed box (2D build): walls with restitution
+# coefficients against the exact trajectories.
+#
+# Three heavy particles (relaxation time tau = 5, Stokes drag) are thrown
+# sideways at 0.6 from heights 0.3, 0.5 and 0.7 of a unit box of gas at rest,
+# under gravity 1. The floor returns 0.8 of the normal velocity and 0.9 of the
+# tangential one (each bounce loses 36% of the vertical kinetic energy); the
+# other walls rebound elastically, by default; the ceiling, which no particle
+# reaches, would catch them (stick). Between bounces the motion is exact
+# exponentials (drag is linear in the velocity), so
+# check_particle_bounce.py computes the exact trajectories, bounce times
+# included, and compares.
+#
+# Run (seconds on one CPU thread):
+#   ../../build/src/mallard -i input.toml
+#   python check_particle_bounce.py particles.csv
+#
+# Result: after t = 4, three to six bounces each (one off the right wall),
+# the particles are within 8e-3 of their exact positions. Mallard applies a
+# bounce at the end of the step in which the particle reached the wall, which
+# is first order in the step under gravity: with cfl = 0.4 they are within
+# 6e-3, by an amount that depends on where in its step each impact falls.
+
+[run]
+t_stop = 4.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 32
+Ny = 32
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.01
+
+[particles]
+type = "solid"
+diameter = 0.03          # tau = density diameter^2 / (18 mu) = 5
+density = 1000.0
+drag = "stokes"
+gravity = [0.0, -1.0]
+velocity = [0.6, 0.0]
+points = [[0.1, 0.3], [0.1, 0.5], [0.1, 0.7]]
+file = "particles.csv"
+
+[[particles.walls]]
+zones = ["bottom"]
+restitution = 0.8
+tangential_restitution = 0.9
+
+[[particles.walls]]
+zones = ["top"]
+interaction = "stick"
+
+[output]
+check_interval = 100
