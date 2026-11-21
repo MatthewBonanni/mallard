@@ -328,10 +328,12 @@ TEST(RunControlTest, ControlSocketIsPrivateAnswersStatusAndQueuesCommands) {
         run_control::Status status;
         status.run.step = 42;
         status.monitors = {{"min_p", "0.5"}};
+        status.triggers = {{"trigger hot", "armed"}};
         run_control::publish(status);
         const std::string text = run_control::send(dir, "status");
         EXPECT_NE(text.find("step: 42\n"), std::string::npos) << text;
         EXPECT_NE(text.find("min_p: 0.5\n"), std::string::npos) << text;
+        EXPECT_NE(text.find("trigger hot: armed\n"), std::string::npos) << text;
         EXPECT_EQ(run_control::send(dir, "frobnicate").rfind("error", 0), 0u);
 
         std::string answer;

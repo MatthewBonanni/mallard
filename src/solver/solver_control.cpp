@@ -262,7 +262,7 @@ void Solver::apply_commands() {
     }
 }
 
-std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value) {
+std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value, const bool apply) {
     const comm::SelfScope scope = communication_scope();
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
@@ -282,18 +282,20 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
             old = logging::real(double(target));
             target = x > 0.0 ? static_cast<rtype>(x) : rtype(-1);
         }
-        if (n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0)) {
+        const bool none = n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0);
+        if (none || !apply) {
             n_steps = old_n_steps;
             t_stop = old_t_stop;
             t_wall_stop = old_t_wall_stop;
-            return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
         }
+        // Checked at the time it applies, as another setting may have added a limit by then
+        if (none && apply) return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     if (key == "check_interval") {
         if (!is_uint || n == 0 || n > std::numeric_limits<uint32_t>::max()) return rejected("expected a positive integer");
         const std::string old = std::to_string(check_interval);
-        check_interval = static_cast<uint32_t>(n);
+        if (apply) check_interval = static_cast<uint32_t>(n);
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     const size_t dot = key.rfind('.');
@@ -310,18 +312,18 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
         // Surfaces, curves and points of a [[write_data]] are written as probes, by their prefix
-        const std::string error = writer ? (field == "interval" ? writer->set_interval(n)
-                                                                : writer->set_time_interval(static_cast<rtype>(x), t))
-                                         : field == "interval" ? probes.set_interval(name, n, true)
-                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true);
+        const std::string error = writer ? (field == "interval" ? writer->set_interval(n, apply)
+                                                                : writer->set_time_interval(static_cast<rtype>(x), t, apply))
+                                         : field == "interval" ? probes.set_interval(name, n, true, apply)
+                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
     if (table == "probes" && !name.empty() && (field == "interval" || field == "time_interval")) {
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
-        const std::string error = field == "interval" ? probes.set_interval(name, n)
-                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t);
+        const std::string error = field == "interval" ? probes.set_interval(name, n, false, apply)
+                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t, false, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
@@ -330,13 +332,13 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         auto monitor = std::find_if(force_monitors.begin(), force_monitors.end(),
                                     [&](const ForceMonitor & m) { return m.zone == name; });
         if (monitor == force_monitors.end()) return rejected("no [[forces]] on zone " + name);
-        monitor->interval = n;
+        if (apply) monitor->interval = n;
         return {true, key + " = " + value};
     }
     if (key == "integrals.interval") {
         if (integral_monitor.interval == 0) return rejected("the run has no [integrals]");
         if (!is_uint || n == 0) return rejected("expected a positive integer");
-        integral_monitor.interval = n;
+        if (apply) integral_monitor.interval = n;
         return {true, key + " = " + value};
     }
     return rejected("cannot be changed while the run goes on; settable: " + run_control::settable());
@@ -422,5 +424,6 @@ void Solver::publish_status() {
 #endif
     s.stop_conditions = stop_conditions();
     s.monitors = monitor_values;
+    for (const auto & [name, state] : triggers.states()) s.triggers.emplace_back("trigger " + name, state);
     run_control::publish(s);
 }
