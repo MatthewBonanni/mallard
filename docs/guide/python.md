@@ -289,8 +289,9 @@ differ from the archive's manifest. `mallard.command` runs any other command tha
 - **Cell order.** Values of a region snapshot or a VTU piece are not in the
   mesh's global order; line them up with their own `geometry()`, not with the
   whole mesh's.
-- **Memory.** A field is read whole: `read_all` of a large series holds every
-  snapshot at once. Loop over `read(field, k)` to hold one.
+- **Memory.** A field is read whole, into the array returned without a copy:
+  `read_all` of a large series holds every snapshot at once. Loop over
+  `read(field, k)` to hold one.
 - **Old builds.** The library reads the format versions of its own Mallard and
   earlier, and refuses newer files with a message saying so: use the package and
   library of the newer Mallard.
