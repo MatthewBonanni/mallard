@@ -38,10 +38,20 @@ struct MeshRegions {
     int rotation = -1;                                  // the direction that rotates, or -1
     double angle = 0.0;                                 // its angle (degrees) about axis through center
     std::array<double, 3> center = {0.0, 0.0, 0.0}, axis = {0.0, 0.0, 1.0};
+    bool any_cell_zone = false;  // without the mesh: any other name may be a cell zone of the mesh file
 
     MeshRegions() = default;
     /** @brief The automatic regions of the mesh. Collective. */
     explicit MeshRegions(const Mesh & mesh);
+
+    /**
+     * @brief Before the mesh is read: its boundary zones (those of the
+     *        input's conditions), and any other name a cell zone, so that
+     *        the regions' keys are read and checked. Surfaces count as
+     *        closed, and nothing wraps across periodic boundaries; the mesh
+     *        decides those.
+     */
+    static MeshRegions without_mesh(std::vector<std::string> boundary_zones);
 
     /** @brief The automatic region names: domain, the boundary zones, the cell zones. */
     std::vector<std::string> names() const;
@@ -102,6 +112,9 @@ class Regions {
          */
         Regions(const Input & input, const Mesh & mesh);
 
+        /** @brief Before the mesh is read (MeshRegions::without_mesh): get() only. */
+        Regions(const Input & input, MeshRegions automatic);
+
         /** @brief The region a key gives: an inline table or a name. Collective. */
         const Region & get(const Input & value, const std::string & where);
 
@@ -123,7 +136,7 @@ class Regions {
         Entry & entry(const Input & value, const std::string & where);
 
         const Input * m_names;
-        const Mesh & m_mesh;
+        const Mesh * m_mesh;
         MeshRegions m_automatic;
         std::vector<std::unique_ptr<Entry>> m_entries;
         std::map<std::string, size_t> m_by_name;  // names, and the keys of inline regions

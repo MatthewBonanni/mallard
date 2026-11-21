@@ -890,8 +890,8 @@ class Solver {
     protected:
         /**
          * @brief The input phase of the setup, before the mesh is read: reads [run], [physics] (and the
-         *        mechanism), [mesh], [parallel], [[periodic]], [[boundaries]], [numerics] and [les], and
-         *        decides from them.
+         *        mechanism), [mesh], [parallel], [[periodic]], [[boundaries]], [numerics], [les],
+         *        [[sources]], [source] and [[sponges]] (and the regions they name), and decides from them.
          *        The mesh phase that follows applies the decisions.
          */
         void read_input();
@@ -984,8 +984,14 @@ class Solver {
                                                    BoundaryCondition & bc, MassFlowProfile & timed) const;
         /** @brief The mdot and profile of an inlet_mass_flow entry. */
         static MassFlowInput read_mass_flow(const Input & bound, const BoundaryCondition & bc, const std::string & where);
+        /** @brief Reads [[sources]] and [source] (gravity, mass_flow), without the mesh. */
+        void read_sources(region::Regions & regions);
         void init_sources(region::Regions & regions);
+        /** @brief Reads and checks [[sponges]] without the mesh; init_sponges reads them again. */
+        void read_sponges(region::Regions & regions) const;
         void init_sponges(region::Regions & regions);
+        /** @brief Reads and checks a composition table (numbers or expressions), without the mesh. */
+        void read_composition(const Input & table, const std::string & where) const;
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;

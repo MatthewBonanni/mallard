@@ -384,8 +384,9 @@ namespace {
 
 /** @brief The key catalog's entries of the tables the setup's input phase reads (Solver::read_input). */
 std::map<std::string, std::string> input_phase_entries(const Input & input) {
-    static const std::vector<std::string> tables = {"run",      "physics",  "chemistry",  "radiation", "mesh",
-                                                    "parallel", "periodic", "boundaries", "numerics",  "les"};
+    static const std::vector<std::string> tables = {"run",      "physics",  "chemistry", "radiation", "mesh",
+                                                    "parallel", "periodic", "boundaries", "numerics", "les",
+                                                    "sources",  "source",   "sponges"};
     // One line per key: "  \"path\": {...},"
     std::istringstream lines(key_catalog(resolve_input(input)));
     std::map<std::string, std::string> out;
@@ -402,7 +403,7 @@ std::map<std::string, std::string> input_phase_entries(const Input & input) {
 
 // The input phase of the setup reads every key of its tables that the whole setup reads, so it can tell
 // them without the mesh. Fails if a key of [run], [physics], [mesh], [parallel], [[periodic]],
-// [[boundaries]], [numerics] or [les] is read only once the mesh is there.
+// [[boundaries]], [numerics], [les], [[sources]], [source] or [[sponges]] is read only once the mesh is there.
 TEST_P(ExampleUnderPreset, InputPhaseReadsEveryKeyOfItsTables) {
     const Input input = example_under_preset(GetParam(), 1, N_DIM == 3 ? 8 : 16);
     Solver whole;

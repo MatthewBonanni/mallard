@@ -27,7 +27,43 @@ Expression number_or_expression(const Input & value, const std::string & name, c
     return Expression(name, quantity_or_expression(value, name, dimension));
 }
 
+/** @brief The strength and target state of a [[sponges]] entry. */
+struct SpongeState {
+    Expression sigma;
+    std::vector<Expression> u;
+    Expression p, T;
+};
+
+SpongeState read_state(const Input & sponge, const std::string & where) {
+    for (const char * key : {"strength", "u", "p", "T"}) {
+        if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");
+    }
+    Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength", dim::rate);
+    const auto & u_in = sponge.at("u").as_array();
+    if (u_in.size() != N_DIM) throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components.");
+    std::vector<Expression> u;
+    FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]", dim::velocity));
+    Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
+    Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
+    return {std::move(sigma), std::move(u), std::move(p), std::move(T)};
+}
+
 } // namespace
+
+void Solver::read_sponges(region::Regions & regions) const {
+    if (!contains_optional(input, "sponges")) return;
+    const std::vector<Input> sponges = find_value<std::vector<Input>>(input, "sponges");
+    for (size_t i_s = 0; i_s < sponges.size(); i_s++) {
+        const Input & sponge = sponges[i_s];
+        const std::string where = "sponges[" + std::to_string(i_s) + "]";
+        read_state(sponge, where);
+        if (sponge.contains("region")) {
+            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), sponge.at("region"),
+                                           where + ".region");
+        }
+        if (is_mixture()) read_composition(sponge, where);
+    }
+}
 
 void Solver::init_sponges(region::Regions & regions) {
     sponge_cells = Kokkos::View<uint32_t *>();
@@ -44,16 +80,7 @@ void Solver::init_sponges(region::Regions & regions) {
     for (size_t i_s = 0; i_s < sponges.size(); i_s++) {
         const Input & sponge = sponges[i_s];
         const std::string where = "sponges[" + std::to_string(i_s) + "]";
-        for (const char * key : {"strength", "u", "p", "T"}) {
-            if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");
-        }
-        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength", dim::rate);
-        const auto & u_in = sponge.at("u").as_array();
-        if (u_in.size() != N_DIM) throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components.");
-        std::vector<Expression> u;
-        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]", dim::velocity));
-        const Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
-        const Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
+        const auto [sigma, u, p, T] = read_state(sponge, where);
 
         const std::vector<double> * fractions = nullptr;
         std::shared_ptr<region::MovingFractions> moving;
