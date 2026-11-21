@@ -490,6 +490,22 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
 }
 
+TEST(CheckSettings, TriggerThatCannotFireBeforeTStopIsAWarning) {
+    auto warned = [](const std::string & trigger) {
+        const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[triggers]]\nname = \"late\"\n" + trigger +
+                                                                                  "do = \"checkpoint\"\n"));
+        EXPECT_TRUE(r.ok()) << first_error(r);
+        return mentions(r.warnings(), "triggers[0] (late)");
+    };
+    EXPECT_TRUE(warned("when = \"t >= 5\"\n"));  // ms meant
+    EXPECT_TRUE(warned("when = \"t > 0.6 or t < 0\"\n"));
+    EXPECT_TRUE(warned("when = \"0\"\n"));
+    EXPECT_TRUE(warned("when = \"t >= 0.25\"\nfor = 1.0\n"));
+    EXPECT_FALSE(warned("when = \"t >= 0.25\"\n"));
+    EXPECT_FALSE(warned("when = \"t > 0.6 or t == 0.5\"\n"));
+    EXPECT_FALSE(warned("when = \"step >= 1000000\"\n"));  // reads more than t: not decided
+}
+
 namespace {
 
 /** @brief A periodic box of n^d cells and side 2 pi with viscosity mu, rho = 1; velocity components as expressions. */
