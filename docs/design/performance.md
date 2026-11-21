@@ -350,8 +350,8 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
-  rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
+- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+  further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
 - The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
@@ -1022,6 +1022,40 @@ Setup and step times are within the run-to-run spread (Taylor-Green, 10 steps: 1
 bitwise those of `main` on every rank (a hash of every array), and `mallard diff` finds the states of 10-step runs
 (inviscid and viscous, 2D and 3D, hexahedra and tetrahedra, dynamic Smagorinsky LES) the same bit for bit on 1 and
 3 ranks.
+
+### 19. Troubled scratch for a quarter of the cells (#978)
+
+The troubled passes' scratch (central coefficients and the sector coefficients of every face) had room for half
+the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond it are done in further
+rounds. Every round below a capacity of 1 recomputes its cells' central coefficients, so results do not depend
+on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02 against 1 and 0.5).
+
+The cases of section 15 (perfect gas on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra, LES, the propane
+flame on $48 \times 24^2$ / $24 \times 12^2 \times 6$, GRI-Mech 3.0 on $32 \times 16^2$), 3D TENO5 unless
+stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell and the cells that fit
+on an A100-80GB.
+
+| bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
+|---|---|---|---|---|---|---|---|
+| capacity 0.5 | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,212 / 8,419,977 | 8,383 / 9,252,886 | 12,046 / 6,432,167 |
+| capacity 0.25 | 6,678 / 11,773,594 | 6,534 / 12,031,826 | 6,718 / 11,703,485 | 6,574 / 11,958,618 | 8,332 / 9,309,270 | 7,503 / 10,338,158 | 11,413 / 6,789,351 |
+
+| perfect gas, bytes per cell, cells per A100-80GB | TENO3, hexahedra | tetrahedra | TENO4, hexahedra | tetrahedra | TENO6, hexahedra | tetrahedra |
+|---|---|---|---|---|---|---|
+| capacity 0.5 | 4,973 / 15,808,529 | 5,740 / 13,696,969 | 5,371 / 14,636,220 | 6,183 / 12,715,675 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
+| capacity 0.25 | 4,343 / 18,101,651 | 5,110 / 15,385,696 | 4,641 / 16,938,167 | 5,453 / 14,418,008 | 7,292 / 10,781,086 | 7,684 / 10,230,998 |
+
+880 bytes less per cell at TENO5 (630 at TENO3, 730 at TENO4, 1,090 at TENO6): 13% more cells per A100-80GB
+for a perfect gas at TENO5, 11-12% for the 6-species flame, 6% with GRI-Mech (whose setup peak binds).
+Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps, on a CPU). On one A100-80GB
+(CUDA 13.5), restart files after 100 steps are bitwise identical with capacities 0.25 and 0.125 on the $96^3$
+Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex, and on the
+2D Riemann problem with 0.25 and 0.125 against 1.
+
+The smaller scratch adds two rounds of the five troubled kernels per stage, which find no work in smooth flows:
+under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), and a capacity of 0.125 is within
+1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
+recomputes the central coefficients, so 2D keeps 1.
 
 ## Scaling (one node)
 

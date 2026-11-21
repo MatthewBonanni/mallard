@@ -5,7 +5,7 @@
 # bound-preserving TENO5 keep the near-vacuum lee side of the impulsive start
 # positive.
 #
-# Generate the mesh first (needs the gmsh Python module, pip install gmsh):
+# Generate the mesh first (needs the gmsh Python module, uv pip install gmsh):
 #   python make_mallard_mesh.py mallard.msh --order 3    # 1.05M cubic triangles, curved on the duck
 # Run (89,000 steps, 1h 15m on one A100; 251 snapshots, 20 GB), then animate:
 #   mallard -i input.toml
