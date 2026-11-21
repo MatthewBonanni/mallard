@@ -10,6 +10,7 @@
  */
 
 #include "face_exchange.h"
+#include "gated.h"
 
 #include <stdexcept>
 #include <unordered_map>
@@ -138,7 +139,7 @@ void FaceExchange::start(const Kokkos::DefaultExecutionSpace & exec,
     Kokkos::View<uint32_t *> f_list = send_faces;
     Kokkos::View<uint8_t *> s_list = send_sides;
     Kokkos::View<rtype *> buf = send_buffer;
-    Kokkos::parallel_for("face_pack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
+    gated::parallel_for("face_pack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
                          KOKKOS_LAMBDA(const uint32_t idx) {
         const uint32_t k = idx / n_quad, q = idx % n_quad;
         FOR_I_CONSERVATIVE buf(k * stride + q * N_CONSERVATIVE + i) = face_solution(f_list(k), q, s_list(k), i);
@@ -200,7 +201,7 @@ void FaceExchange::finish(const Kokkos::DefaultExecutionSpace & exec,
     Kokkos::View<uint32_t *> f_list = recv_faces;
     Kokkos::View<uint8_t *> s_list = recv_sides;
     Kokkos::View<rtype *> buf = recv_buffer;
-    Kokkos::parallel_for("face_unpack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
+    gated::parallel_for("face_unpack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
                          KOKKOS_LAMBDA(const uint32_t idx) {
         const uint32_t k = idx / n_quad, q = idx % n_quad;
         FOR_I_CONSERVATIVE face_solution(f_list(k), q, s_list(k), i) = buf(k * stride + q * N_CONSERVATIVE + i);

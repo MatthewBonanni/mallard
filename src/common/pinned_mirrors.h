@@ -21,6 +21,8 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "gated.h"
+
 /**
  * @brief Owns host mirrors in pinned memory, never the device's own arrays
  *        (also off GPUs, where create_mirror_view would return them). The
@@ -55,7 +57,7 @@ class PinnedMirrors {
 
 /**
  * @brief Enqueues a copy of a device array into its pinned mirror: a kernel,
- *        so that step graphs capture it (also under conditional nodes).
+ *        so that step graphs capture it and gate it (gated.h).
  */
 template <class M, class V>
 void copy_to_pinned(const PinnedMirrors & mirrors, const M & mirror, const V & v) {
@@ -67,7 +69,7 @@ void copy_to_pinned(const PinnedMirrors & mirrors, const M & mirror, const V & v
     }
     T * const dst = mirror.data();
     const T * const src = v.data();
-    Kokkos::parallel_for("copy_to_pinned", n, KOKKOS_LAMBDA(const size_t i) { dst[i] = src[i]; });
+    gated::parallel_for("copy_to_pinned", n, KOKKOS_LAMBDA(const size_t i) { dst[i] = src[i]; });
 }
 
 #endif // PINNED_MIRRORS_H
