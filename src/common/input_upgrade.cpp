@@ -775,8 +775,8 @@ std::vector<std::string> notices(const std::string & text) {
             }
             const std::string prefix =
                 entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
-            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
-                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output writes the series file " + prefix +
+                          ".vtkhdf over a file per snapshot by default; add series = false for each snapshot whole, " +
                           prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
         }
     }

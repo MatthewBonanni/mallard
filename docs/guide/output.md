@@ -8,8 +8,8 @@ its progress on the terminal and in a machine-readable run record.
 
 | Output | File(s) | Turned on by | Details |
 |---|---|---|---|
-| Solution snapshots | `PREFIX.vtkhdf`, every snapshot in one file; with `series = false` `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index) and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
-| Particle snapshots | a block of `PREFIX.vtkhdf` with the mesh; alone, or with `particles = "separate"`, `PREFIX_particles.vtkhdf` (`series = false`: `PREFIX_particles_<n>.vtkhdf` and `PREFIX_particles.vtkhdf.series`) | `[[write_data]]` with `particle_fields` | [Particle snapshots](#particle-snapshots) |
+| Solution snapshots | `PREFIX.vtkhdf`, the series, which indexes `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index), a file per snapshot, and the mesh in `PREFIX_mesh.vtkhdf`; with `series = false` `PREFIX_<n>.vtkhdf` and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
+| Particle snapshots | `PREFIX_particles_<n>.vtkhdf`, a file per snapshot, indexed with the mesh's as blocks of `PREFIX.vtkhdf`; alone, or with `particles = "separate"`, by `PREFIX_particles.vtkhdf` (`series = false`: `PREFIX_particles.vtkhdf.series`) | `[[write_data]]` with `particle_fields` | [Particle snapshots](#particle-snapshots) |
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
 | Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
@@ -56,8 +56,8 @@ and 57 more.
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
-| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, every snapshot in `PREFIX.vtkhdf`), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
-| `series` | `true` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf`; `false` writes one file per snapshot, `PREFIX_<n>.vtkhdf`, indexed by `PREFIX.vtkhdf.series` |
+| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, the series opened as `PREFIX.vtkhdf`), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
+| `series` | `true` | `vtkhdf`: `true` writes `PREFIX.vtkhdf`, which opens as one file of every snapshot, over a file per snapshot, `PREFIX_<n>.vtkhdf`, and the mesh once, `PREFIX_mesh.vtkhdf`; `false` writes each snapshot whole, mesh included, `PREFIX_<n>.vtkhdf`, indexed by `PREFIX.vtkhdf.series` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
@@ -308,7 +308,7 @@ quicker and lighter, with a lower-order gradient
 
 | `format` | Opens in | Files |
 |---|---|---|
-| `vtkhdf` (default) | ParaView 5.12+ (6.0+ for a file of the mesh and its [particles](#particle-snapshots)), PyVista, the [Python package](python.md), h5py | One file for the series, or one per snapshot (`series = false`) |
+| `vtkhdf` (default) | ParaView 5.12+ (6.0+ for a series of the mesh and its [particles](#particle-snapshots)), PyVista, the [Python package](python.md), h5py | One file per snapshot, the mesh once, and a series file that opens as one file of every snapshot; or each snapshot whole (`series = false`) |
 | `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); the [Python package](python.md), h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot), the [Python package](python.md); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
@@ -319,15 +319,24 @@ VTKHDF is HDF5 too; `mallard input upgrade` rewrites it to `"vtkhdf"`.
 
 **VTKHDF, the default.** `format = "vtkhdf"` writes VTK's HDF5 format, which
 ParaView 5.12 and later open directly: open `PREFIX.vtkhdf` for the time
-series. The mesh is stored once and every snapshot goes into that one file; a
-restarted run drops the snapshots after its restart time and continues the
-file. Every rank writes its part with collective I/O (parallel HDF5 on several
+series. Each snapshot is a file of its own, `PREFIX_<n>.vtkhdf`, written once
+and never changed; its mesh arrays are HDF5 external links to the mesh, stored
+once in `PREFIX_mesh.vtkhdf` (in each snapshot instead where the cells change,
+as for a region of the solution). `PREFIX.vtkhdf` holds no arrays of its own:
+it is an index of HDF5 virtual datasets over the snapshots' files, rewritten
+after each snapshot, that ParaView, h5py and Mallard read as one temporal VTKHDF
+file. Keep the files together: the index and the links name them relative to
+their directory, so the directory can move as a whole. A restarted run keeps
+the snapshots up to its restart time and continues the index; a series written
+in one file by Mallard 0.11 or earlier is renamed `PREFIX_legacy.vtkhdf` and
+indexed as the series' first snapshots. Every rank writes its part with collective I/O (parallel HDF5 on several
 ranks), each array in global cell order, so the files are the same on any
 number of ranks. Cells touching a curved wall are written as quadratic Lagrange
 cells, so ParaView shows the curved geometry. `series = false` writes one file
-per snapshot, `PREFIX_<n>.vtkhdf`, and the index `PREFIX.vtkhdf.series` that
-ParaView opens for the time series: for scripts that take one snapshot file at
-a time, or that delete snapshots once they are processed. Read the files in
+per snapshot with its mesh, `PREFIX_<n>.vtkhdf`, and the index
+`PREFIX.vtkhdf.series` that ParaView opens for the time series: for scripts
+that take one snapshot file at a time, or that move or delete snapshots once
+they are processed. Read the files in
 Python with the [Python package](python.md) (`mallard.open("PREFIX.vtkhdf")`),
 or with h5py alone.
 
@@ -336,8 +345,13 @@ numbers its next snapshot after the snapshots up to the restart time, which the
 restart file counts, and keeps those entries of the `.vtkhdf.series`, `.pvd` or
 `.xmf` index; this holds for every `time_interval` writer, regions included
 (`interval` writers are numbered by step). Resuming from an earlier restart file
-than the last one rewinds: the entries after the restart time are dropped and
-their snapshots are overwritten as the run reaches them again. If the index is
+than the last one rewinds: the entries after the restart time are dropped, and
+the files the [run record](#run-record-mallardjsonl) lists for the later steps
+of the run's own writers (snapshots, restart files, boundary snapshots) are
+moved, before the run writes anything, to `.rewound/<run_id>/` in their
+directory (`run_id`: the rewinding run's), so no file is ever written twice
+under one name; the `start` record lists them. A probe's HDF5 or VTKHDF file,
+which the rewind cuts back to the restart step, is copied there first. If the index is
 missing, the run says so, still never overwrites an earlier snapshot, and lists
 only the snapshots it writes. Restart files older than this count number from
 the index, as before.
@@ -429,8 +443,10 @@ What a snapshot holds depends on the region's dimension:
 A volume is written by every rank in global order, like the whole mesh;
 `compression`, `relative_error` and `series` apply as they do there. A boundary
 zone, cut plane, surface, curve or points is written as a probe writes it, by
-the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
-snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
+the same code: `vtkhdf` writes one PolyData file per snapshot,
+`PREFIX_<step>.vtkhdf`, its geometry in `PREFIX_mesh.vtkhdf` unless it changes,
+and the series file `PREFIX.vtkhdf` over them (`series` is always on), `vtu`
+one VTK PolyData file per snapshot,
 `PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
@@ -470,7 +486,7 @@ the start and end of the run, a stop or checkpoint request, a trigger, the last
 valid state of a diverging run):
 
 ```toml
-[[write_data]]                # the gas and the particles in one file
+[[write_data]]                # the gas and the particles in one series
 prefix = "solut/flow"
 time_interval = 0.1
 fields = ["RHO", "U", "P"]
@@ -493,32 +509,31 @@ keeps the particles inside it, as it keeps the cells; it must be analytic and
 not move. A surface or curve has no particles in it: count the particles
 crossing it with `[[particles.crossings]]`.
 
-What an entry writes depends on what it lists:
+Each snapshot's particles are a file of their own,
+`PREFIX_particles_<n>.vtkhdf` (`<n>` numbered as the mesh's snapshots), and a
+series file indexes them, as for the mesh:
 
-| Entry | Files |
+| Entry | Series file |
 |---|---|
 | `fields` and `particle_fields` | `PREFIX.vtkhdf`, a VTKHDF `PartitionedDataSetCollection` of two blocks, `mesh` and `particles`, each with its own steps: ParaView 6.0 and later open it as one dataset over time (`mallard check` warns, `W-PARAVIEW-VERSION`) |
 | the same with `particles = "separate"` | `PREFIX.vtkhdf`, the mesh as without `particle_fields`, and `PREFIX_particles.vtkhdf`, the particles: ParaView 5.12 and later |
 | `particle_fields` alone | `PREFIX_particles.vtkhdf` |
 
-With `series = false`, each is one file per snapshot, `PREFIX_<n>.vtkhdf` and
-`PREFIX_particles_<n>.vtkhdf`, indexed by `PREFIX.vtkhdf.series` and
-`PREFIX_particles.vtkhdf.series`. An entry with `particles = "separate"` writes
-exactly what two entries of the same prefix write, one with its `fields`, one
-with its `particle_fields`.
+With `series = false`, the particles are indexed by
+`PREFIX_particles.vtkhdf.series` and the mesh by `PREFIX.vtkhdf.series`. An
+entry with `particles = "separate"` writes exactly what two entries of the same
+prefix write, one with its `fields`, one with its `particle_fields`.
 
-The particles of a snapshot are a VTKHDF `PolyData` of one vertex per particle,
-with `PointData/ID` and a `PointData` array per variable, units and
-descriptions as attributes, as for the mesh. Their number changes from one
-snapshot to the next as particles leave, so each step stores its own points
-(`Steps/PointOffsets`, `NumberOfPoints` per step). Each rank writes its own
-particles with collective I/O, after those of the ranks before it, so the order
-of the particles in a snapshot depends on the rank count and step graphs:
-match particles across snapshots or runs by `ID`, which is the same on any
-rank count, as every value is. The snapshot block is the root dataset
-`mallard_snapshot` of a particle file, and the root dataset
-`mallard_particle_snapshot` of a combined file, next to the mesh's
-`mallard_snapshot`.
+A particle file is a VTKHDF `PolyData` of one vertex per particle, with
+`PointData/ID` and a `PointData` array per variable, units and descriptions as
+attributes, as for the mesh; its number of particles changes from one snapshot
+to the next as particles leave. Each rank writes its own particles with
+collective I/O, after those of the ranks before it, so the order of the
+particles in a snapshot depends on the rank count and step graphs: match
+particles across snapshots or runs by `ID`, which is the same on any rank
+count, as every value is. A particle file's snapshot block is its root dataset
+`mallard_snapshot`; a collection's are listed under
+[Snapshot metadata](#snapshot-metadata).
 
 Particles are written as `vtkhdf` only, which needs HDF5 (parallel HDF5 on
 several ranks), and asynchronously as the mesh is. A restarted run continues
@@ -526,7 +541,7 @@ the particle series as it continues the mesh's. Restart files always carry
 every particle, with or without `particle_fields`. In Python, h5py reads the
 particle files (`f["VTKHDF/Points"]`, `f["VTKHDF/PointData/ID"]`), and
 `mallard info`, `mallard diff` and the [Python package](python.md) read the
-mesh block of a combined file as they read a mesh file.
+mesh block of a collection as they read a mesh series.
 
 ## Mesh and stencil fields
 
@@ -747,14 +762,14 @@ A run starting from a restart file appends to the record, so a case continued
 several times keeps one history, each part led by its own `start` record, which
 names the restart file. Resuming from an earlier restart file than the last one
 (a rewind) keeps the records after the restart step, and the `start` record says
-which step the record had reached.
+which step the record had reached and where it moved the files of those steps.
 Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals`, `forces_<zone>` and by probe `probes`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity), `check` (the [check at setup](#the-check-at-setup)); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals`, `forces_<zone>` and by probe `probes`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity), `check` (the [check at setup](#the-check-at-setup)); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it, and `superseded`, the files of the later steps it [set aside](#which-format): `path`, as recorded, and `to`, where the file is now) |
 | `progress` | Every progress row | as below |
-| `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`, `particles` (a [particle file](#particle-snapshots); the particles of a combined file are in its `vtkhdf` record); probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
+| `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`, `particles` (a [particle file](#particle-snapshots); in a series of the mesh and its particles, the particle files are in the `vtkhdf` records); probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; a file over one chunk (64 MiB) `sha256_tree`, `chunk_bytes` and `chunks` instead, its [chunk-tree hash](#complete-files); no hash for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot`, `units` (of `t`, `dt`, `x`, `rho`, `speed`, `p` and `T`, as the CSV files' units lines write them; `"1"` for each in a nondimensional case) |
 | `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `code` (stable: [Warnings and errors](running.md#warnings-and-errors)), `message`, `docs` (the page and anchor that explain the code) |
@@ -791,24 +806,43 @@ find a run's files through them.
 
 A file is written under the name `NAME.partial` and gets its name `NAME`
 once complete, as restart files always were: snapshots (each rank's piece
-too), their indexes (`.pvd`, `.vtkhdf.series`, `.xmf`), XDMF data and mesh
-files, probe snapshots and spectra. A file under its own name is therefore
+too), their indexes (`.pvd`, `.vtkhdf.series`, `.xmf`, a VTKHDF series
+file), XDMF and VTKHDF data and mesh files, probe snapshots and spectra. A file under its own name is therefore
 never cut short by a job killed while writing it, and a `NAME.partial` left
 behind is one whose write did not finish: `mallard info`, `mallard diff` and
 `mallard post extract` refuse it and say so, and `--restart latest` never
 picks it.
 
 The `output` record of a snapshot is written once all its files are
-complete, with each file's size and SHA-256, so a snapshot without a record
-was not completely written. One thread hashes the files after their write, on
-the CPU's SHA instructions where it has them (over 1 GB/s); a run that writes
-faster than that waits for it, and the run summary says how long.
-`mallard info DIR` checks every recorded file against its record (its size;
-`--verify` also its SHA-256) and reports one that is missing or differs.
+complete, with each file's size and hash, so a snapshot without a record
+was not completely written. A file of up to 64 MiB has its SHA-256
+(`sha256`). A larger one has a chunk-tree hash: the SHA-256 of each 64 MiB
+chunk (`chunks`, in order; `chunk_bytes` gives the chunk size) and
+`sha256_tree`, the SHA-256 of those chunks' 32-byte digests one after the
+other. Any chunk of a copy verifies on its own, so a transfer can resume,
+check and parallelize by chunk; in Python:
 
-Files appended to in place cannot be renamed: a series in one file
-(`series = true`), a probe's HDF5 or VTKHDF series and the CSV files of
-probes, forces and integrals. A job killed while appending can leave such a
+```python
+import hashlib
+def sha256_tree(path, chunk_bytes):
+    tree = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(chunk_bytes):
+            tree.update(hashlib.sha256(chunk).digest())
+    return tree.hexdigest()
+```
+
+Each rank hashes its files after their write in one background thread, on
+the CPU's SHA instructions where it has them (over 1 GB/s): its VTU pieces
+whole, and a share of the chunks of each file every rank writes (VTKHDF and
+XDMF snapshots, restart files), so a shared file is hashed in a time that
+falls with the rank count. A run that writes faster than it hashes waits for
+it, and the run summary says how long.
+`mallard info DIR` checks every recorded file against its record (its size;
+`--verify` also its hash) and reports one that is missing or differs.
+
+Files appended to in place cannot be renamed: a probe's HDF5 or VTKHDF file
+and the CSV files of probes, forces and integrals. A job killed while appending can leave such a
 file damaged (HDF5 files are not safe against it) or ending in a partial
 row; the step's missing `output` record says that step was not completely
 written. Their records give the size after each step and no SHA-256, which
@@ -1077,7 +1111,7 @@ after it are that run's), and the run record's `start` record.
 | `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`, and `snapshot` for each snapshot `mallard post extract` read, once per step of a file of several), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file, remap source or snapshot is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
+| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`, and `snapshot` for each snapshot `mallard post extract` read, once per step of a file of several), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file, remap source or snapshot is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` (or `sha256_tree` and `chunk_bytes`) from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
 | `preset` | The `[numerics] preset` (`null` without one): `name`, `default` (`true` when the input names no preset and gets the default, `high_order`), and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
 
 Before 0.10 the block was named the provenance block: schema
@@ -1107,8 +1141,8 @@ a snapshot block, one JSON object per snapshot:
 | PVTU | its pieces' | XML comment, as VTU |
 | PVD index | `timestep` and `step` of each `DataSet` | its members' |
 | VTKHDF, one snapshot per file (`series = false`) | field data `TIME` and `STEP` | dataset `mallard_snapshot` of the root group |
-| VTKHDF of the mesh and its particles | each block's, as a series file's | root datasets `mallard_snapshot` (the mesh) and `mallard_particle_snapshot` |
-| VTKHDF series file (`series = true`, the default), and probe VTKHDF | `Steps/Values`, and field data `TIME` and `STEP` per step | dataset `mallard_snapshot`, one row per step |
+| VTKHDF series file (`series = true`, the default), and probe VTKHDF | `Steps/Values`, and field data `TIME` and `STEP` per step | dataset `mallard_snapshot`, one row per step; a series file also `mallard_series_files`, the file of each step |
+| VTKHDF series of the mesh and its particles | each block's, as a series file's | root datasets `mallard_snapshot` and `mallard_series_files` (the mesh), `mallard_snapshot_particles` and `mallard_series_files_particles` |
 | `.vtkhdf.series` index | `time` and `step` of each entry | its members' |
 | XDMF | `<Time>` and `<Information Name="step">` of each grid; root attributes `time` and `step` of each `.h5` | dataset `mallard_snapshot` of each `.h5` |
 | Restart | header `step` and `t` | trailer before the run block's |
@@ -1265,7 +1299,7 @@ build reads. It is never misread.
 |---|---|---|---|
 | Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all; `tools/mallard/restart.py`: 2 on |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
-| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0, 2.1 for version 2) | 1 (0.9), 2: the mesh and its [particles](#particle-snapshots) as blocks of one file (0.12; files of the mesh alone stay version 1) | ParaView 5.12+ (version 2: 6.0+), the [Python package](python.md) |
+| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0, 2.1 for version 2) | 1 (0.9), 2: a series file indexing the mesh and its [particles](#particle-snapshots) as two blocks (0.12; other files stay version 1) | ParaView 5.12+ (version 2: 6.0+), the [Python package](python.md) |
 | Particle snapshots (`particle_fields`) | root attribute `version`, and `content` = `"particles"` | 1 (0.12) | ParaView 5.12+, h5py |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, the [Python package](python.md) |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, the [Python package](python.md) |

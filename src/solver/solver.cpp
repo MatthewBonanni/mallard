@@ -331,6 +331,7 @@ void Solver::write_provenance() {
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
         const std::optional<uint64_t> recorded = run_log::last_step();
         if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
+        if (!run_log::superseded().empty()) restart.raw("superseded", run_log::superseded());
         start.raw("restart", restart.str());
     }
     run_log::release(start);
@@ -2145,7 +2146,7 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                 throw InputError({.key = "write_data.format",
                                   .line = line_of(output, "format"),
                                   .message = "\"" + format + "\" does not hold surfaces, curves or points",
-                                  .fix = "Use format = \"vtkhdf\" (one file of every snapshot) or \"vtu\" (VTK PolyData "
+                                  .fix = "Use format = \"vtkhdf\" (a series file of every snapshot) or \"vtu\" (VTK PolyData "
                                          "files and a .pvd series)"});
             }
             if (format == "vtkhdf" && !have_hdf5()) {
