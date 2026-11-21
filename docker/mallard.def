@@ -1,7 +1,7 @@
 # Mallard as an Apptainer (Singularity) image, from the release's container image:
 #
 #   apptainer build mallard.sif docker/mallard.def                                  # the latest release
-#   apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.12.0 mallard.sif docker/mallard.def
+#   apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.11.0 mallard.sif docker/mallard.def
 #   apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard@sha256:<digest> mallard.sif docker/mallard.def
 #   apptainer build --build-arg bootstrap=docker-daemon --build-arg image=mallard:test mallard.sif docker/mallard.def
 #
