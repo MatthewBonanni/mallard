@@ -38,15 +38,32 @@ using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
 constexpr rtype SPECIES_NOISE = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
 
 /**
- * @brief Change of a mass fraction at a face (absolute, not relative to the
- *        species' value) above which its cut to stay in [0, 1] goes to the
- *        shared limiter of all scalars instead of its own slope: a cut of one
+ * @brief Changes of a mass fraction at a face (absolute, not relative to the
+ *        species' value) between which its cut to stay in [0, 1] moves from
+ *        its own slope to the shared limiter of all scalars: a cut of one
  *        species alone acts as numerical diffusion of that species only,
  *        harmless when it is small but a differential diffusion of order
- *        u dx when it is large. The limiter of the whole cell jumps where a
- *        cut crosses it.
+ *        u dx when it is large. Cuts up to OWN_CUT_LO stay on the species'
+ *        own slope, cuts from OWN_CUT_HI go to the shared limiter, and those
+ *        in between are split by shared_cut_weight, so that the limiter is
+ *        continuous in the data.
  */
-constexpr rtype OWN_CUT_MAX = 1.0e-4_r;
+constexpr rtype OWN_CUT_LO = 3.0e-5_r;
+constexpr rtype OWN_CUT_HI = 3.0e-4_r;
+
+/**
+ * @brief Share of a species' bound cut that goes to the shared limiter: 0 up
+ *        to OWN_CUT_LO, 1 from OWN_CUT_HI, and a smoothstep in log(cut) in
+ *        between (C1, as smooth per decade at both ends).
+ * @param cut Largest change of the mass fraction at a face that the cut makes.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype shared_cut_weight(const rtype cut) {
+    if (cut <= OWN_CUT_LO) return 0.0_r;
+    if (cut >= OWN_CUT_HI) return 1.0_r;
+    const rtype t = Kokkos::log(cut / OWN_CUT_LO) / Kokkos::log(OWN_CUT_HI / OWN_CUT_LO);
+    return t * t * (3.0_r - 2.0_r * t);
+}
 
 /** @brief Per-face storage of scalar values at a face's quadrature points. */
 using FacePointValues = rtype[teno::MAX_FACE_QUAD];
@@ -119,14 +136,15 @@ struct ScalarFaceValues {
  *        - first order;
  *        - MUSCL: least-squares gradients and one limiter value per cell, the
  *          minimum over all scalars of the flow block's limiter type. A mass
- *          fraction that would leave [0, 1] at a face by at most OWN_CUT_MAX
+ *          fraction that would leave [0, 1] at a face by at most OWN_CUT_LO
  *          then scales its own slope to stay in, the cell's most abundant
  *          species taking what the others give up (the slopes still sum to
  *          zero); the slopes of gamma and e0, and the face density, change
  *          with that composition at the cell's p and T, so the face state
- *          stays that of its composition. A larger cut reduces the limiter
- *          value of all scalars instead, as does keeping the most abundant
- *          species in [0, 1] and gamma above 1;
+ *          stays that of its composition. A cut from OWN_CUT_HI reduces the
+ *          limiter value of all scalars instead (one in between is split
+ *          between the two, see shared_cut_weight), as does keeping the most
+ *          abundant species in [0, 1] and gamma above 1;
  *        - TENO: the flow block's linear weights (TENOScalarValues) with one
  *          bound-preserving factor theta per cell (Zhang & Shu 2010), the
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at

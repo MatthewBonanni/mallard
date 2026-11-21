@@ -1,0 +1,1 @@
+- Python installs use uv throughout the documentation, the examples and the hints that `mallard case` prints (`uv venv`, `uv pip install`, `uv tool install cmake`) in place of `python3 -m venv` and `pip`.
