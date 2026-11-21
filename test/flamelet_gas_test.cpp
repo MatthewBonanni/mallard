@@ -82,6 +82,18 @@ void coordinates(const double Z, const double Zvar, const double C, double & S, 
     c = C / exact(0, Z, S, 1.0);
 }
 
+/** @brief The fields at each point q, from a device kernel. */
+void look_up(const flamelet::Gas<> & gas, const Kokkos::View<double *[4]> & q, const Kokkos::View<double *[10]> & out) {
+    Kokkos::parallel_for("flamelet_gas", q.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        const flamelet::Point<3> p = gas.locate(q(i, 0), q(i, 1), q(i, 2));
+        const flamelet::Thermo th = gas.thermo(p);
+        const flamelet::Transport tr = gas.transport(p);
+        const double v[10] = {th.T0, th.e0, th.R, th.gamma0, th.a_gamma, tr.mu, tr.kappa, tr.cp,
+                              gas.source(p, q(i, 3)), gas.field(p, gas.fpv.field_C)};
+        for (int k = 0; k < 10; k++) out(i, k) = v[k];
+    });
+}
+
 } // namespace
 
 // The closed-form T(e) and its inverse e(T) are the integral of cv = R / (gamma(T) - 1) with gamma
@@ -120,14 +132,7 @@ TEST(FlameletGasTest, DeviceLookupsReturnTheTabulatedFields) {
         h_q(i, 3) = 0.5 + u(rng);  // rho
     }
     Kokkos::deep_copy(q, h_q);
-    Kokkos::parallel_for("flamelet_gas", n, KOKKOS_LAMBDA(const uint32_t i) {
-        const flamelet::Point<3> p = gas.locate(q(i, 0), q(i, 1), q(i, 2));
-        const flamelet::Thermo th = gas.thermo(p);
-        const flamelet::Transport tr = gas.transport(p);
-        const double v[10] = {th.T0, th.e0, th.R, th.gamma0, th.a_gamma, tr.mu, tr.kappa, tr.cp,
-                              gas.source(p, q(i, 3)), gas.field(p, gas.fpv.field_C)};
-        for (int k = 0; k < 10; k++) out(i, k) = v[k];
-    });
+    look_up(gas, q, out);
     auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
     for (uint32_t i = 0; i < n; i++) {
         double S, c;
