@@ -314,6 +314,27 @@ class CompositionExpressions {
                                const std::vector<std::string> & variables = {"x", "y", "z", "t"},
                                const size_t first_shadowable = SIZE_MAX) :
             mixture(mixture_model), where(name), names(variables), shadowable(first_shadowable) {
+            if (mixture.tabulated()) {
+                // Z and C (default 0), each a number or an expression; C = "burnt" follows Z
+                for (const char * key : {"X", "Y", "balance"}) {
+                    if (table.contains(key)) {
+                        throw InputError(where + "." + key + ": a flamelet gas takes its composition as Z and C, "
+                                         "not species.");
+                    }
+                }
+                const char * keys[2] = {"Z", "C"};
+                for (int32_t k = 0; k < 2; k++) {
+                    const bool given = table.contains(keys[k]);
+                    if (k == 1 && given && table.at("C").is_string() && table.at("C").as_string() == "burnt") {
+                        burnt = true;
+                        continue;
+                    }
+                    listed.push_back(k);
+                    texts.push_back(given ? quantity_or_expression(table.at(keys[k]), keys[k], dim::none) : "0");
+                    values.emplace_back(where + "." + keys[k], texts.back(), variables, shadowable);
+                }
+                return;
+            }
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }
@@ -333,6 +354,9 @@ class CompositionExpressions {
                 if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
         }
+
+        /** @brief Whether C is the table's burnt value at Z (a flamelet gas), which the device does not evaluate. */
+        bool burnt_progress() const { return burnt; }
 
         /** @brief The fractions compiled as expressions of x, y, z, t, for the device. */
         std::shared_ptr<CompositionPrograms> compiled() const {
@@ -376,6 +400,11 @@ class CompositionExpressions {
         /** @brief Mass fractions from the listed species' values. */
         std::vector<double> mass_fractions(const double * value) const {
             std::vector<double> f(mixture.n_species(), 0.0);
+            if (mixture.tabulated()) {
+                for (size_t i = 0; i < listed.size(); i++) f[static_cast<size_t>(listed[i])] = std::max(value[i], 0.0);
+                if (burnt) f[flamelet::Gas<>::C] = mixture.flamelet().burnt_progress(f[flamelet::Gas<>::Z]);
+                return f;
+            }
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
                 f[static_cast<size_t>(listed[i])] = std::max(value[i], 0.0);
@@ -395,6 +424,7 @@ class CompositionExpressions {
         std::vector<std::string> names;  // the variables of the expressions
         size_t shadowable;
         bool mole = false;
+        bool burnt = false;
         int32_t balance = -1;
         std::vector<int32_t> listed;
         std::vector<std::string> texts;
@@ -460,7 +490,7 @@ void Solver::update_transport() {
         Kokkos::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
                                  viscous_gradient, transport_values, transport_gradients, bc_transport_values,
-                                 mixture.n_species, cell_transport});
+                                 mixture.n_species, cell_transport, mixture.flamelet});
     });
 }
 
@@ -662,27 +692,11 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
         const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         auto unsupported = [&](const std::string & what) {
-            if (mixture.tabulated()) {
-                throw InputError(where + ": " + what + " is not yet supported with gas = \"flamelet\" (it is with "
-                                 "outlet_extrapolation, symmetry, wall_adiabatic, inlet_state and outlet_pressure "
-                                 "without average, with numbers for T, Z and C).");
-            }
-            throw InputError(where + ": " + what + " is not yet supported with gas = \"mixture\" (it is with "
-                             "outlet_extrapolation, symmetry, the wall_* types, inlet_state, inlet_stagnation, "
-                             "inlet_mass_flow and outlet_pressure without average).");
+            throw InputError(where + ": " + what + " is not yet supported with gas = \"" +
+                             (mixture.tabulated() ? "flamelet" : "mixture") +
+                             "\" (it is with outlet_extrapolation, symmetry, the wall_* types, inlet_state, "
+                             "inlet_stagnation, inlet_mass_flow and outlet_pressure without average).");
         };
-        if (mixture.tabulated()) {
-            // The ghost states of these conditions, and boundary values that vary, evaluate species thermodynamics
-            const BoundaryType type = bcs[i_bc].type;
-            if (type == BoundaryType::WALL_ISOTHERMAL || type == BoundaryType::WALL_HEAT_FLUX ||
-                type == BoundaryType::INLET_STAGNATION || type == BoundaryType::INLET_MASS_FLOW) {
-                unsupported("type = \"" + BOUNDARY_NAMES.at(type) + "\"");
-            }
-            if (type == BoundaryType::INLET_STATE &&
-                (BoundaryValue::is_expression(bound.at("T")) || MixtureModel::composition_varies(bound))) {
-                unsupported("an expression for T, Z or C");
-            }
-        }
         switch (bcs[i_bc].type) {
             case BoundaryType::OUTLET_EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
@@ -707,6 +721,10 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                                                                            BoundaryValue::variables(bound),
                                                                            boundary_variable::FIRST_LOCAL);
                     const auto programs = composition->compiled();
+                    if (programs->depends_on_time() && composition->burnt_progress()) {
+                        throw InputError(where + ".C: \"burnt\" with Z varying in time is not supported; give C "
+                                         "as an expression of t too.");
+                    }
                     if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
                 } else {
                     Y_uniform = mixture_model->mass_fractions(bound, where);

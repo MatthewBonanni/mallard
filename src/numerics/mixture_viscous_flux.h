@@ -128,8 +128,18 @@ struct MixtureGradientFunctor {
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of inlet_state
     uint32_t n_species;
     Kokkos::View<rtype *[3]> coefficients;  // (cell, [mu, lambda, -]), for heat-flux walls
+    flamelet::Gas<> flamelet{};             // a flamelet gas, whose conducted variable is h: walls convert T_w
 
     static constexpr uint32_t CHUNK = 16;  // variables per pass over the stencil
+
+    /** @brief The conducted variable of cell c at temperature T: T, or a flamelet gas's h(T) at c's Z and C. */
+    KOKKOS_INLINE_FUNCTION
+    double conducted(const uint32_t c, const double T) const {
+        if (!flamelet.active()) return T;
+        const double Z = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::Z));
+        const double C = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::C));
+        return flamelet.thermo(flamelet.locate(Z, 0.0, C)).enthalpy(T);
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -183,7 +193,7 @@ struct MixtureGradientFunctor {
             if (bc.type == BoundaryType::WALL_ISOTHERMAL || bc.type == BoundaryType::WALL_HEAT_FLUX) {
                 rtype dT;
                 if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
-                    dT = 2.0_r * (bc.data[0] - values(c, N_DIM));
+                    dT = 2.0_r * (static_cast<rtype>(conducted(c, static_cast<double>(bc.data[0]))) - values(c, N_DIM));
                 } else {
                     rtype n_vec[N_DIM], n[N_DIM];
                     FOR_I_DIM n_vec[i] = f.face_normals(i_face, i);
@@ -427,7 +437,10 @@ struct MixtureViscousFluxFunctor {
             rtype dn = 0.0;
             FOR_I_DIM dn += (face_coords(i_face, i) - cell_coords(c0, i)) * n[i];
             isothermal = bc->type == BoundaryType::WALL_ISOTHERMAL;
-            if (isothermal) q_f[N_DIM] = bc->data[0];
+            if (isothermal) {
+                const ScalarMassFractions y{&scalars(c0, 0)};
+                q_f[N_DIM] = static_cast<rtype>(gas.conducted(static_cast<double>(bc->data[0]), y));
+            }
             for (uint8_t k = 0; k < (isothermal ? NQ : N_DIM); k++) {
                 if (k < N_DIM) q_f[k] = bc->data[1 + k];
                 const rtype correction = (q_f[k] - values(c0, k)) / dn - dot<N_DIM>(g_f[k], n);
@@ -457,9 +470,11 @@ struct MixtureViscousFluxFunctor {
         FOR_I_DIM out.momentum(i, A, tau_n[i]);
         rtype energy = dot<N_DIM>(q_f, tau_n);
         if (isothermal) {
+            // A flamelet table's kappa / cp depends on Z and C alone, not on T
             const ScalarMassFractions y{&scalars(c0, 0)};
-            const double ratio = gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
-                                 gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
+            const double ratio = gas.tabulated() ? 1.0
+                                                 : gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
+                                                       gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
             const rtype lambda = coefficients(c0, LAMBDA) * static_cast<rtype>(0.5 * (1.0 + ratio));
             energy += molecular * lambda * dot<N_DIM>(g_f[N_DIM], n);
         } else if (wall && bc->type == BoundaryType::WALL_HEAT_FLUX) {

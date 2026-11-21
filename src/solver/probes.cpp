@@ -1297,7 +1297,9 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                 }
             }
             mu = transport.extent(0) > 0 ? transport(c, 0) : physics.viscosity(T);
-            const rtype kappa = transport.extent(0) > 0 ? transport(c, 1) : physics.conductivity(mu);
+            rtype kappa = transport.extent(0) > 0 ? transport(c, 1) : physics.conductivity(mu);
+            // A flamelet gas's column is kappa / cp, the conductivity of enthalpy
+            if (boundaries.mixture_gas.tabulated()) kappa *= g / (g - 1.0_r) * R_c;
             viscous_traction(mu, gu, nv, tau_n,
                              axisymmetric ? hoop_divergence(face_coords(face(s), 1), Wf + 1, gu) : 0.0_r);
             q_n = kappa * dot<N_DIM>(gT, nv);

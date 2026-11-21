@@ -52,6 +52,19 @@ struct Thermo {
         const double y = a_gamma * (T - T0) / (gamma0 - 1.0);
         return e0 + linear * (Kokkos::fabs(y) > 1e-6 ? Kokkos::log1p(y) / y : 1.0 - y * (0.5 - y / 3.0));
     }
+
+    /** @brief h(T) = e(T) + R T. */
+    KOKKOS_INLINE_FUNCTION double enthalpy(const double T) const { return energy(T) + R * T; }
+
+    /**
+     * @brief int_T0^T cp / T dT, the entropy at T relative to T0 at one pressure: with cp = R + R / (b + a T),
+     *        b = gamma0 - 1 - a T0, it is R ln(T / T0) + R / b (ln(T / T0) - ln((gamma(T) - 1) / (gamma0 - 1))).
+     */
+    KOKKOS_INLINE_FUNCTION double entropy(const double T) const {
+        const double log_T = Kokkos::log(T / T0);
+        return R * log_T + R / (gamma0 - 1.0 - a_gamma * T0) *
+                               (log_T - Kokkos::log1p(a_gamma * (T - T0) / (gamma0 - 1.0)));
+    }
 };
 
 /** @brief Transport of a table point; every control variable diffuses with rho D = kappa / cp (unity Lewis). */

@@ -103,12 +103,34 @@ or a boundary's prescribed pressure (`inlet_state`, `inlet_stagnation`,
 the tabulated source, transport and composition are those of the table's
 pressure. Generate the table at the run's pressure.
 
+## Boundaries
+
+`Z` and `C` take the place of `X` or `Y` at `inlet_state`, `inlet_stagnation`
+and `inlet_mass_flow`: numbers, expressions of `x`, `y`, `z`, `t` (as other
+boundary values), or `C = "burnt"`, the table's burnt value at `Z`. A `"burnt"`
+`C` may follow a `Z` that varies in space, but not one that varies in time:
+give `C` as an expression of `t` too. The inlets' gas constant, energy and, for
+`inlet_stagnation`, isentrope are the table's at their `Z` and `C`.
+
+```toml
+[[boundaries]]
+name = "pilot"
+type = "inlet_stagnation"
+p0 = 1.1e5
+T0 = 1800.0
+Z = "0.27 + 0.02 * sin(2000 * t)"
+C = "0.12"
+```
+
+Walls pass no flux of `Z` or `C`. `wall_isothermal` conducts heat with
+`(kappa / cp) dh/dn`, `h` the enthalpy at the wall temperature and the
+cell's `Z` and `C`; `wall_heat_flux` passes its `q`; `wall_adiabatic`
+nothing.
+
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:
 `[les]` (LES closures and the subgrid variance are the next stage),
 `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
-mixture's other derived fields, nondimensional units, `wall_isothermal`,
-`wall_heat_flux`, `inlet_stagnation`, `inlet_mass_flow`, expressions of `T`,
-`Z` or `C` at `inlet_state`, and boundary values that vary in time. Walls are
-adiabatic and pass no scalar flux.
+mixture's other derived fields, and nondimensional units. Probes and statistics
+do not sample the table fields (`T_TABLE`, `HRR`, the table's `Y_<species>`).
