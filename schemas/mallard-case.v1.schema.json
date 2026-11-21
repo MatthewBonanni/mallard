@@ -3,13 +3,15 @@
   "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-case.v1.schema.json",
   "title": "The case a session holds: the result of case.open and case.update",
   "type": "object",
-  "required": ["schema", "version", "input", "dimension", "mesh_files_read"],
+  "required": ["schema", "version", "input", "dimension", "mesh_files_read", "meshes_built", "setups_run"],
   "properties": {
     "schema": {"const": "mallard-case"},
     "version": {"const": 1},
     "input": {"type": "string"},
     "dimension": {"enum": [2, 3]},
     "mesh_files_read": {"type": "integer", "minimum": 0, "description": "mesh files the session's setups read from disk so far"},
+    "meshes_built": {"type": "integer", "minimum": 0, "description": "meshes the session's setups built so far; a setup takes the last one instead when nothing the mesh stage read changed"},
+    "setups_run": {"type": "integer", "minimum": 0, "description": "setups the session ran past the mesh so far; a check reuses the last one instead when nothing its stages read changed"},
     "changed": {"type": "array", "items": {"type": "string"}, "description": "case.update: the key paths whose values differ"}
   },
   "additionalProperties": true

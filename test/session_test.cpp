@@ -172,6 +172,13 @@ std::string comparable(json::Value report) {
 
 std::string quoted(const std::string & text) { return json::quote(text); }
 
+/** @brief text with the first from replaced by to. */
+std::string replaced(std::string text, const std::string & from, const std::string & to) {
+    const size_t at = text.find(from);
+    if (at != std::string::npos) text.replace(at, from.size(), to);
+    return text;
+}
+
 /** @brief A flow past a cylinder read from mesh. */
 std::string cylinder_input(const std::string & mesh, double cfl = 0.5) {
     const bool three = Mallard_DIM == 3;
@@ -274,6 +281,55 @@ TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {
     ASSERT_EQ(check.status, 0) << check.err;
     EXPECT_EQ(comparable(response(list, 4)["result"]), comparable(json::parse(check.out)));
     EXPECT_NE(comparable(response(list, 2)["result"]), comparable(json::parse(check.out)));
+}
+
+TEST(SessionTest, EditsSetUpOnlyTheStagesWhoseReadsChanged) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const std::string original = cylinder_input("cyl.msh");
+    const std::string slower = cylinder_input("cyl.msh", 0.25);
+    const std::string faster_start = replaced(slower, "[initialize]\ntype = \"constant\"\nu = [0.2", "[initialize]\ntype = \"constant\"\nu = [0.3");
+    ASSERT_NE(faster_start, slower);
+    // Edits that leave every key the setup read on its line: of [run] alone (init_run_parameters runs again); an
+    // unused key; a [run] error; the initial state (the setup past the mesh); the mesh
+    const std::vector<std::string> edits = {slower, slower + "[bogus]\nx = 1\n", cylinder_input("cyl.msh", -1.0),
+                                            faster_start, faster_start + "[mesh.transform]\nscale = 2.0\n"};
+    std::string requests = request(1, "case.open", "{\"input\":\"case.toml\"}") + request(2, "case.check") +
+                           request(3, "case.keys");
+    for (size_t i = 0; i < edits.size(); i++) {
+        const int id = 10 * static_cast<int>(i + 1);
+        requests += request(id, "case.update", "{\"text\":" + quoted(edits[i]) + "}") + request(id + 1, "case.check");
+    }
+    const Result session = run({"session"}, requests + request(99, "initialize"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    for (const json::Value & m : list) EXPECT_EQ(violations(MESSAGE, m), "") << json::dump(m).substr(0, 400);
+    // Counts after each check, as the next update reports them: meshes built, setups run past the mesh
+    const std::vector<std::pair<int, int>> counts = {{1, 1}, {1, 1}, {1, 1}, {1, 1}, {1, 2}};
+    for (size_t i = 0; i < counts.size(); i++) {
+        const json::Value c = response(list, 10 * static_cast<int>(i + 1))["result"];
+        EXPECT_EQ(c["meshes_built"].number, counts[i].first) << "before edit " << i;
+        EXPECT_EQ(c["setups_run"].number, counts[i].second) << "before edit " << i;
+    }
+    const json::Value last = response(list, 99)["result"]["case"];
+    EXPECT_EQ(last["meshes_built"].number, 2);
+    EXPECT_EQ(last["setups_run"].number, 3);
+
+    // Each check is the one-shot check of its text, and case.keys the one-shot list keys
+    std::ofstream("case.toml") << original;
+    const Result keys = run({"list", "keys", "case.toml", "--format", "json"});
+    ASSERT_EQ(keys.status, 0) << keys.err;
+    EXPECT_EQ(json::dump(response(list, 3)["result"]), json::dump(json::parse(keys.out)));
+    for (size_t i = 0; i < edits.size(); i++) {
+        std::ofstream("case.toml") << edits[i];
+        const Result check = run({"check", "case.toml", "--format", "json"});
+        ASSERT_FALSE(check.out.empty()) << check.err;
+        const json::Value answer = response(list, 10 * static_cast<int>(i + 1) + 1)["result"];
+        EXPECT_EQ(comparable(answer), comparable(json::parse(check.out))) << "edit " << i;
+        // so that a stage kept wrongly shows
+        const json::Value before = response(list, i == 0 ? 2 : 10 * static_cast<int>(i) + 1)["result"];
+        EXPECT_NE(comparable(answer), comparable(before)) << "edit " << i;
+    }
 }
 
 TEST(SessionTest, AnswersEveryMessageOfItsProtocol) {

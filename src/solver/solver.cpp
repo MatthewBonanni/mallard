@@ -15,6 +15,7 @@
 
 #include "diagnostic_code.h"
 #include "input.h"
+#include "setup_cache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -67,18 +68,6 @@ Solver::~Solver() {
 }
 
 namespace {
-
-/** @brief A copy of an input whose reads (e.g. formatting it) do not count as reads of the original. */
-Input unrecorded(Input value) {
-    if (value.is_table()) {
-        auto & table = value.as_table();
-        table.forget_lookups();
-        for (auto & entry : table.entries()) entry.second = unrecorded(entry.second);
-    } else if (value.is_array()) {
-        for (auto & element : value.as_array()) element = unrecorded(element);
-    }
-    return value;
-}
 
 /**
  * @brief The names of the mesh's boundary zones, sorted, on every rank (collective if
@@ -246,14 +235,22 @@ void Solver::setup_from_input() {
 
     logging::section("Setup");
     independently("", [&] { init_run_parameters(); });
+    SetupStages stages(setup_cache, *this);
+    if (stages.resume()) {
+        stop_if_failed();
+        return;
+    }
     timed_phase("mesh", [&] {
         independently("", [&] {
+            if (stages.restore_mesh()) return;
             init_mesh();
             record_mesh_provenance();
         });
+        stages.end_mesh();
     });
     timed_phase("physics and boundaries", [&] {
         independently("", [&] { init_physics(); });
+        stages.end_physics();
         stop_if_failed();
         init_boundaries();
     });
@@ -292,9 +289,11 @@ void Solver::setup_from_input() {
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
+    stages.end_rest();
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
-    mesh->release_setup_data();
+    // A kept mesh keeps its setup data for the setups that take it
+    if (!setup_cache) mesh->release_setup_data();
     if (!check_only) used_regions.reset();
     // glibc keeps what the setup freed in its arenas; hand it back to the system
 #ifdef __GLIBC__
@@ -304,7 +303,7 @@ void Solver::setup_from_input() {
     logging::end_phase(t_wall_setup);
 }
 
-void Solver::record_mesh_provenance() const {
+void Solver::record_mesh_provenance() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     std::string file, hash;
     if (type == "file") {
@@ -314,6 +313,7 @@ void Solver::record_mesh_provenance() const {
             hash = provenance::sha256_file(file);
         }
     }
+    mesh_provenance = {type, file, hash};
     provenance::set_mesh(type, file, hash);
 }
 
@@ -2258,6 +2258,8 @@ void Solver::allocate_time_stepping() {
     face_storage = Kokkos::View<rtype *>("face_solution", std::max(n_states, n_slots));
     face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>(face_storage.data(), n_faces, n_quad);
     face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", n_faces);
+    // Read here too, so that the setup's stages record the key (init_run_parameters runs before them)
+    keep_last_good = find_value_or<bool>(input, "run", "keep_last_good", true);
     if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (is_mixture()) {
         species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>(face_storage.data(), n_faces, 2, n_species);

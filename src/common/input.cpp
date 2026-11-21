@@ -166,8 +166,8 @@ namespace {
 void forget_lookups(Input & v) {
     if (v.is_table()) {
         auto & table = v.as_table();
-        table.forget_lookups();
         for (auto & entry : table.entries()) forget_lookups(entry.second);
+        table.forget_lookups();
     } else if (v.is_array()) {
         for (auto & item : v.as_array()) forget_lookups(item);
     }
@@ -568,6 +568,11 @@ Input parse_input_string(const std::string & text, const std::string & name) {
     check_nesting(input);
     forget_lookups(input);
     return input;
+}
+
+Input unrecorded(Input value) {
+    forget_lookups(value);
+    return value;
 }
 
 std::vector<Diagnostic> unused_keys(const Input & input) {
