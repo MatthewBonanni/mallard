@@ -20,7 +20,6 @@
 
 #include "json.h"
 #include "mesh_quality.h"
-#include "time_integrator.h"
 
 namespace divergence {
 
@@ -29,9 +28,6 @@ enum Quantity { DENSITY = 0, PRESSURE, TEMPERATURE, MASS_FRACTION, VELOCITY, N_Q
 
 /** @brief Names of the quantities, for the report ("density", ...). */
 extern const std::array<const char *, N_QUANTITIES> QUANTITY_NAMES;
-
-/** @brief The largest cfl of the integrator that is safe for smooth flow on any cell type (docs/guide/numerics.md). */
-double cfl_limit(TimeIntegratorType type);
 
 constexpr double UNKNOWN = std::numeric_limits<double>::quiet_NaN();
 
