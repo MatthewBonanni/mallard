@@ -25,7 +25,7 @@ Particles live on the device as a structure of arrays over a fixed number of
 
 | Array | Per slot | |
 |---|---|---|
-| `x` | `width` reals | position, in the frame of the cell that holds it, then the integrated quantities (#756) |
+| `x` | `width` reals | position, in the frame of the cell that holds it, the velocity of solid particles (#757), then the integrated quantities (#756) |
 | `aux` | `n_aux` reals | extrema and first times of quantities (#756) |
 | `id` | `uint64_t` | global id in injection order; `EMPTY` (all bits set) marks a free slot |
 | `cell` | `uint32_t` | local cell holding the particle at the start of the step |
@@ -220,6 +220,48 @@ Quantities travel with their particle in migration (as raw bits, like the
 position) and restart files carry each as `PARTICLE_Q_<name>`, so a restarted
 run continues them bit for bit; a quantity added on restart starts afresh.
 
+## Solid particles (#757)
+
+Solid particles add their velocity to the block, after the position:
+`width = 2 N_DIM + n_integrated`. The same `particle_rhs` kernel writes
+dx/dt = v and dv/dt = (u - v) / tau + g (1 - rho / rho_p) from the stage's gas
+state at the particle (`particles::Solid`, `particle_forces.h`), so drag and
+gravity are integrated at the integrator's order with the flow, and each
+stage's drag reads that stage's gas and velocity. tau = rho_p d^2 / (18 mu f)
+with the viscosity at the particle's temperature and the drag correlation f at
+the slip Reynolds number.
+
+**Stiff limit.** Particles of a micron in air have tau of microseconds, far
+below an acoustic step. An explicit integrator is unstable for dt / tau above
+about 2 to 2.8, and limiting dt by the particles would tie the flow's step to
+its smallest particle. A particle with tau < dt therefore takes its
+equilibrium velocity: dx/dt = u + tau g' (the first term of the expansion of
+the velocity in tau) and dv/dt = (v_eq - v) / dt, which every integrator damps
+stably (amplification 0 for FE, 3/8 for RK4 per step). The switch is per
+particle and per stage; dt is the host's step, or inside a captured step the
+device scalar the step graph computes it in (`step_dt_device`), so graphed
+steps read the step's own dt. Exponential (or implicit) integration of the
+drag would keep the order at tau ~ dt; it needs stage weights the integrators
+do not expose, and the error of the switch is O(tau / dt) only near it.
+
+**Walls.** The face action table gains `STICK`, and a per-face pair of
+restitution coefficients (`[[particles.walls]]` by zone). A particle past a
+wall at the end of the step is reflected with the normal depth times e_n, and
+its velocity becomes e_t v_t - e_n v_n n if it moves into the wall; a sticking
+wall removes it and counts it in the third removal counter (deposited). The
+bounce is applied at the step's end, so its timing is first order; locating
+the crossing within the step is the same problem as in-stage crossings for
+quantities. Across rotational periodic faces the velocity rotates with the
+position (`Walker::cross`).
+
+**Starting velocity.** Seeded particles start at the gas velocity at their
+seed unless `velocity` is given: before the first step the solver samples the
+gas at the particles (`update_cell_W`, `Particles::start_velocity`), once, on
+the host's step path rather than in a captured step.
+
+Restart files carry the velocities as `PARTICLE_V` and three removal counts
+(older files with two are read with zero deposited).
+
 ## Particle probes (#756)
 
 A probe samples on the host after a step it is due at: the gas at the
@@ -237,9 +279,10 @@ every few steps of a large run.
 
 Restart files carry the particles as named arrays (version 6), written by rank
 0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
-holding each particle), `PARTICLE_X` (positions, exact in double precision) and
-`PARTICLE_REMOVED` (the counts of particles that left the domain and that were
-lost). The device copies them into pinned host mirrors with the other restart
+holding each particle), `PARTICLE_X` (positions, exact in double precision),
+`PARTICLE_V` (velocities of solid particles), `PARTICLE_Q_<name>` (quantities)
+and `PARTICLE_REMOVED` (the counts of particles that left the domain, that
+were lost, and that stuck to walls). The device copies them into pinned host mirrors with the other restart
 data (`Particles::stage_output`, capturable), so a restart staged by the step
 graph holds the particles of its own step. On a restart each rank takes the
 particles of the cells it owns, so the file restarts on any rank count, and a
@@ -268,6 +311,10 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   particles (or sorting them by cell, for memory locality) matters at the
   scale of #291 and comes with injection.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
+- **Further forces and models** (#757 follow-ups): Saffman lift, added mass,
+  pressure gradient and Basset forces, drag correlations beyond
+  Schiller-Naumann, splashing, heat and mass transfer, and drag in mixtures.
+- **Two-way coupling** (#758): the particles' forces on the gas.
 - **Of #756:** probes through surfaces (fluxes of particles), histograms, the
   residence time per visit and visit counts, crossings located within a stage,
   and probes staged in the step graph.

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <fstream>
 #include <limits>
 #include <numbers>
@@ -116,7 +117,7 @@ TEST(ParticlesTest, UniformFlowCarriesTracersExactlyAcrossPeriodicSidesAndRanks)
     auto check = [&](const Solver & s) {
         const Particles & p = *s.get_particles();
         EXPECT_EQ(p.count(), exact.size());
-        EXPECT_EQ(p.removed(), (std::array<uint64_t, 2>{0, 0}));
+        EXPECT_EQ(p.removed(), (std::array<uint64_t, 3>{0, 0, 0}));
         expect_pathlines(p, exact, roundoff(1e-12));
     };
     if (comm::size() == 1) {
@@ -216,7 +217,10 @@ void expect_same_particles(const Particles & a, const Particles & b) {
     ASSERT_EQ(ra.size(), rb.size());
     for (size_t k = 0; k < ra.size(); k++) {
         EXPECT_EQ(ra[k].id, rb[k].id);
-        for (size_t d = 0; d < N_DIM; d++) EXPECT_EQ(ra[k].x[d], rb[k].x[d]) << "particle " << ra[k].id << ", direction " << d;
+        for (size_t d = 0; d < N_DIM; d++) {
+            EXPECT_EQ(ra[k].x[d], rb[k].x[d]) << "particle " << ra[k].id << ", direction " << d;
+            EXPECT_EQ(ra[k].v[d], rb[k].v[d]) << "particle " << ra[k].id << ", direction " << d;
+        }
     }
     EXPECT_EQ(a.removed(), b.removed());
 }
@@ -310,7 +314,7 @@ TEST(ParticlesTest, RestartedRunContinuesTheTrajectoriesExactly) {
     straight.init(parse_toml(vortex(16, 0.01, 40, TENO4, "SSPRK3") + q));
     straight.run();
     const std::vector<particles::Record> expected = straight.get_particles()->gather();
-    const std::array<uint64_t, 2> removed = straight.get_particles()->removed();
+    const std::array<uint64_t, 3> removed = straight.get_particles()->removed();
     Solver first;
     first.init(parse_toml(vortex(16, 0.01, 20, TENO4, "SSPRK3", "", writer) + q));
     first.run();
@@ -369,7 +373,7 @@ TEST(ParticlesTest, WallsReflectTracers) {
     EXPECT_NEAR(records[0].x[1], 0.03, roundoff(1e-14));
     EXPECT_NEAR(records[1].x[0], 0.3, roundoff(1e-14));
     EXPECT_NEAR(records[1].x[1], 0.96, roundoff(1e-14));
-    EXPECT_EQ(p.removed(), (std::array<uint64_t, 2>{0, 0}));
+    EXPECT_EQ(p.removed(), (std::array<uint64_t, 3>{0, 0, 0}));
 }
 
 TEST(ParticlesTest, TracersLeaveThroughOutlets) {
@@ -384,7 +388,7 @@ TEST(ParticlesTest, TracersLeaveThroughOutlets) {
     const Particles & p = *solver.get_particles();
     // Columns at x = 0.1 and 0.3667 stay, those at 0.6333 and 0.9 leave
     EXPECT_EQ(p.count(), 8u);
-    EXPECT_EQ(p.removed(), (std::array<uint64_t, 2>{8, 0}));
+    EXPECT_EQ(p.removed(), (std::array<uint64_t, 3>{8, 0, 0}));
     for (const auto & r : p.gather()) {
         const double x0 = 0.1 + 0.8 * static_cast<double>(r.id % 4) / 3.0;
         EXPECT_NEAR(r.x[0], x0 + 0.5, roundoff(1e-12)) << "particle " << r.id;
@@ -626,5 +630,261 @@ TEST(ParticleQuantitiesTest, AQuantityGivesExactlyOneKind) {
         FAIL() << "no error";
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("gives 2 kinds"), std::string::npos) << e.what();
+    }
+}
+
+namespace {
+
+constexpr double MU = 0.01;
+
+/**
+ * @brief The input with solid particles of the given density, diameter, drag and extra [particles] keys in
+ *        place of its tracers, in a viscous gas (mu = MU); gravity in [particles] only, so the gas is unchanged.
+ */
+std::string solid(const std::string & input, double density, double diameter, const std::string & drag,
+                  const std::string & keys) {
+    std::string s = input;
+    const std::string tracer = "type = \"tracer\"\n";
+    std::ostringstream p;
+    p.precision(17);
+    p << "type = \"solid\"\ndensity = " << density << "\ndiameter = " << diameter << "\ndrag = \"" << drag << "\"\n"
+      << keys;
+    s.replace(s.find(tracer), tracer.size(), p.str());
+    const std::string euler = "type = \"euler\"";
+    s.replace(s.find(euler), euler.size(), "type = \"navier_stokes\"\nmu = 0.01");
+    return s;
+}
+
+/** @brief The diameter of particles of density rho_p whose Stokes relaxation time in the gas of solid() (rho = 1) is tau. */
+double diameter_for(double tau, double density) { return std::sqrt(18.0 * MU * tau / density); }
+
+/**
+ * @brief The largest errors of position and velocity of particles of relaxation time tau = 0.2 (Stokes drag)
+ *        in the turning flow of turning_error, which start at the gas velocity: with w = v_x + i v_y and the
+ *        gas U e^{iKt}, w = A e^{iKt} + (U - A) e^{-t/tau} with A = U / (1 + iK tau), and the position moves
+ *        by A (e^{iKt} - 1) / (iK) + (U - A) tau (1 - e^{-t/tau}).
+ */
+std::array<double, 2> inertial_turning_error(const std::string & integrator, uint32_t n_steps) {
+    using C = std::complex<double>;
+    const double K = 2.0 * std::numbers::pi, t = 1.0, tau = 0.2, density = 1000.0;
+    std::ostringstream run;
+    run.precision(17);
+    run << "n_steps = " << n_steps << "\ndt = " << t / n_steps << "\n";
+    std::string input = solid(box(12, vec("0.3", "-0.2", "0.0"), "xy", "", run.str(), lattice(0.3, 0.7), TENO4, integrator),
+                              density, diameter_for(tau, density), "stokes", "");
+    input.insert(input.find("[numerics]"), "[source]\nrhou = " + vec("-2 * pi * rho * u_y", "2 * pi * rho * u_x", "0.0") + "\n");
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const C U(0.3, -0.2), I(0.0, 1.0);
+    const C A = U / (1.0 + I * K * tau);
+    const C w = A * std::exp(I * K * t) + (U - A) * std::exp(-t / tau);
+    const C dz = A * (std::exp(I * K * t) - 1.0) / (I * K) + (U - A) * tau * (1.0 - std::exp(-t / tau));
+    const auto seeds = lattice_points(0.3, 0.7);
+    std::array<double, 2> error{0.0, 0.0};
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    EXPECT_EQ(records.size(), seeds.size());
+    for (const auto & r : records) {
+        error[0] = std::max({error[0], std::abs(r.x[0] - wrap(seeds[r.id][0] + dz.real(), 1.0)),
+                             std::abs(r.x[1] - wrap(seeds[r.id][1] + dz.imag(), 1.0))});
+        error[1] = std::max({error[1], std::abs(r.v[0] - w.real()), std::abs(r.v[1] - w.imag())});
+    }
+    return error;
+}
+
+/** @brief Solid particles starting at rest in gas at rest, under gravity (0, -g) in [particles], for n_steps of dt. */
+std::string settling(double tau, double g, const std::string & drag, uint32_t n_steps, double dt,
+                     const std::string & integrator = "RK4") {
+    std::ostringstream run;
+    run.precision(17);
+    run << "n_steps = " << n_steps << "\ndt = " << dt << "\n";
+    const double density = 100.0;
+    return solid(box(12, vec("0.0", "0.0", "0.0"), "xy", "", run.str(), lattice(0.1, 0.9), TENO4, integrator), density,
+                 diameter_for(tau, density), drag, "gravity = " + numbers(0.0, -g, 0.0) + "\n");
+}
+
+/** @brief Solid particles of relaxation time 0.05 in the vortex, which flings them out across the partitions. */
+std::string solid_vortex(uint32_t n_steps, const std::string & init = "", const std::string & extra = "") {
+    return solid(vortex(16, 0.01, n_steps, TENO4, "SSPRK3", init, extra), 1000.0, diameter_for(0.05, 1000.0),
+                 "schiller_naumann", "");
+}
+
+} // namespace
+
+TEST(SolidParticlesTest, DragRelaxationConvergesAtTheIntegratorOrder) {
+    SKIP_IN_SINGLE_PRECISION("RK4's error with 80 steps is near single-precision round-off");
+    // Each stage reads the gas of its own time and the particle's own velocity
+    for (const auto & [integrator, steps, order] :
+         {std::tuple{"FE", 80u, 0.9}, std::tuple{"SSPRK3", 40u, 2.8}, std::tuple{"RK4", 40u, 3.8}}) {
+        const auto coarse = inertial_turning_error(integrator, steps), fine = inertial_turning_error(integrator, 2 * steps);
+        EXPECT_GT(std::log2(coarse[0] / fine[0]), order) << integrator << " position";
+        EXPECT_GT(std::log2(coarse[1] / fine[1]), order) << integrator << " velocity";
+    }
+}
+
+TEST(SolidParticlesTest, StokesSettlingIsExact) {
+    // v(t) = v_t (1 - e^{-t/tau}) with v_t = -tau g (1 - rho / rho_p), from rest in gas at rest
+    const double tau = 0.1, g = 1.0, t = 0.5;
+    const double v_t = -tau * g * (1.0 - 1.0 / 100.0);
+    const double v = v_t * (1.0 - std::exp(-t / tau)), dy = v_t * (t - tau * (1.0 - std::exp(-t / tau)));
+    auto check = [&](const Solver & s) {
+        const auto seeds = lattice_points(0.1, 0.9);
+        const std::vector<particles::Record> records = s.get_particles()->gather();
+        ASSERT_EQ(records.size(), seeds.size());
+        for (const auto & r : records) {
+            EXPECT_NEAR(r.x[0], seeds[r.id][0], roundoff(1e-14));
+            EXPECT_NEAR(r.x[1], wrap(seeds[r.id][1] + dy, 1.0), roundoff(1e-9));
+            EXPECT_NEAR(r.v[0], 0.0, roundoff(1e-14));
+            EXPECT_NEAR(r.v[1], v, roundoff(1e-8));
+        }
+    };
+    const std::string input = settling(tau, g, "stokes", 100, 0.005);
+    if (comm::size() == 1) {
+        expect_matches_serial_with_and_without_step_graphs(input, check);
+    } else {
+        expect_matches_serial(input, check);
+    }
+}
+
+TEST(SolidParticlesTest, SchillerNaumannTerminalVelocity) {
+    // At Re of order 1 the drag is 1 + 0.15 Re^0.687 times Stokes drag: v_t = tau g' / f(Re(v_t))
+    const double tau = 0.1, g = 10.0, density = 100.0;
+    const double d = diameter_for(tau, density), g_eff = g * (1.0 - 1.0 / density);
+    double v_t = tau * g_eff;
+    for (int i = 0; i < 200; i++) v_t = tau * g_eff / (1.0 + 0.15 * std::pow(v_t * d / MU, 0.687));
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(settling(tau, g, "schiller_naumann", 300, 0.01)));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 16u);
+    for (const auto & r : records) EXPECT_NEAR(r.v[1], -v_t, roundoff(1e-10) * v_t);
+    EXPECT_LT(v_t, 0.9 * tau * g_eff);  // the correction is not negligible
+}
+
+TEST(SolidParticlesTest, TinyParticlesTrackTheGasAtAnyStep) {
+    // tau = 1e-5 is a thousandth of the step, where explicit integration diverges. The particles move at
+    // their equilibrium velocity u + tau g' exactly, and their velocity relaxes to it
+    const double tau = 1e-5, g = 1000.0, t = 0.5;
+    const double v_t = -tau * g * (1.0 - 1.0 / 100.0);
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(settling(tau, g, "stokes", 50, t / 50)));
+    solver.run();
+    const auto seeds = lattice_points(0.1, 0.9);
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), seeds.size());
+    for (const auto & r : records) {
+        EXPECT_NEAR(r.x[1], seeds[r.id][1] + v_t * t, roundoff(1e-14));
+        EXPECT_NEAR(r.v[1], v_t, roundoff(1e-12) * std::abs(v_t));
+    }
+}
+
+TEST(SolidParticlesTest, WallsReboundWithTheRestitutionCoefficientsOrStick) {
+    // In gas at rest Stokes drag slows both components by one factor, so v_y / v_x changes only at the
+    // bounce, by -e_n / e_t
+    const double e_n = 0.5, e_t = 0.8;
+    const auto run = [&](const std::string & wall) {
+        const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+                                  "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
+        const std::string keys = "velocity = " + numbers(0.3, -0.4, 0.0) + "\npoints = [" + numbers(0.5, 0.06, 0.25) +
+                                 "]\n[[particles.walls]]\nzones = [\"bottom\"]\n" + wall;
+        auto solver = std::make_unique<Solver>();
+        solver->set_distributed(false);
+        solver->init(parse_toml(solid(box(12, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 50\ndt = 0.01\n", "",
+                                          TENO4, "RK4"),
+                                      1000.0, diameter_for(5.0, 1000.0), "stokes", keys)));
+        solver->run();
+        return solver;
+    };
+    std::ostringstream rebound;
+    rebound << "restitution = " << e_n << "\ntangential_restitution = " << e_t << "\n";
+    const auto bounced = run(rebound.str());
+    const std::vector<particles::Record> records = bounced->get_particles()->gather();
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_GT(records[0].v[1], 0.0);
+    EXPECT_GT(records[0].x[1], 0.0);
+    EXPECT_NEAR(records[0].v[1] / records[0].v[0], (e_n / e_t) * (0.4 / 0.3), roundoff(1e-12));
+    const auto stuck = run("interaction = \"stick\"\n");
+    EXPECT_EQ(stuck->get_particles()->count(), 0u);
+    EXPECT_EQ(stuck->get_particles()->removed(), (std::array<uint64_t, 3>{0, 0, 1}));
+}
+
+TEST(SolidParticlesTest, VelocitiesTurnAcrossRotationalPeriodicSides) {
+    // In gas at rest a particle moves straight on, slowing by e^{-t/tau}; crossing the side of a quarter
+    // annulus at 90 degrees it continues in the sector turned back by 90 degrees, its velocity turned too
+    const double tau = 5.0, t = 0.5, s0 = 0.5, theta0 = 85.0 * std::numbers::pi / 180.0;
+    std::ostringstream input;
+    input.precision(17);
+    input << "[run]\nn_steps = 50\ndt = 0.01\n"
+          << "[mesh]\ntype = \"annulus\"\nNtheta = 12\nNr = 6\nNz = 2\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\n"
+          << "angle = 90.0\n[[periodic]]\nzones = [\"start\", \"end\"]\n"
+          << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+          << "[initialize]\ntype = \"constant\"\nu = " << numbers(0.0, 0.0, 0.0) << "\np = 1.0\nT = 1.0\n"
+          << "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+          << "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"RK4\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n" << PHYSICS
+          << "[output]\ncheck_interval = 1000000\n[particles]\ntype = \"tracer\"\n"
+          << "points = [" << numbers(1.5 * std::cos(theta0), 1.5 * std::sin(theta0), 0.3) << "]\n"
+          << "velocity = " << numbers(-s0 * std::sin(theta0), s0 * std::cos(theta0), 0.0) << "\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(solid(input.str(), 1000.0, diameter_for(tau, 1000.0), "stokes", "")));
+    solver.run();
+    const double L = s0 * tau * (1.0 - std::exp(-t / tau)), s = s0 * std::exp(-t / tau);
+    const double x = 1.5 * std::cos(theta0) - L * std::sin(theta0), y = 1.5 * std::sin(theta0) + L * std::cos(theta0);
+    ASSERT_GT(std::atan2(y, x), std::numbers::pi / 2.0);  // it crossed
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 1u);
+    // (x, y) turned by -90 degrees is (y, -x)
+    EXPECT_NEAR(records[0].x[0], y, roundoff(1e-12));
+    EXPECT_NEAR(records[0].x[1], -x, roundoff(1e-12));
+    EXPECT_NEAR(records[0].v[0], s * std::cos(theta0), roundoff(1e-12));
+    EXPECT_NEAR(records[0].v[1], s * std::sin(theta0), roundoff(1e-12));
+}
+
+TEST(SolidParticlesTest, TrajectoriesAreBitwiseIndependentOfTheRankCount) {
+    if (comm::size() == 1) GTEST_SKIP() << "compares distributed runs with serial ones";
+    const std::string input = solid_vortex(40);
+    Solver distributed;
+    distributed.init(parse_toml(input));
+    distributed.run();
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input));
+    serial.run();
+    expect_same_particles(*distributed.get_particles(), *serial.get_particles());
+}
+
+TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
+    // A restart's particles keep their velocities instead of starting at the gas's
+    const std::string dir = (scratch_dir() / "mallard_solid_particles_restart").string();
+    const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 20\n";
+    Solver straight;
+    straight.init(parse_toml(solid_vortex(40)));
+    straight.run();
+    Solver first;
+    first.init(parse_toml(solid_vortex(20, "", writer)));
+    first.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    Solver second;
+    second.set_distributed(false);
+    second.init(parse_toml(solid_vortex(40, "type = \"restart\"\nfile = \"" + dir + "/restart_000020.restart\"\n")));
+    second.run();
+    expect_same_particles(*second.get_particles(), *straight.get_particles());
+}
+
+TEST(SolidParticlesTest, SolidParticlesNeedAViscousGas) {
+    Solver solver;
+    std::string input = solid(uniform(lattice(0.07, 0.93), 1), 1000.0, 1e-3, "stokes", "");
+    input.replace(input.find("type = \"navier_stokes\"\nmu = 0.01"), 32, "type = \"euler\"");
+    try {
+        solver.init(parse_toml(input));
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("needs the gas viscosity"), std::string::npos) << e.what();
     }
 }

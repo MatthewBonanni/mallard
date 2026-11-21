@@ -13,11 +13,12 @@
 #include "particles.h"
 
 #include <algorithm>
-#include <type_traits>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include "comm.h"
 #include "distribution.h"
@@ -107,22 +108,87 @@ struct LinearW {
 
 constexpr int MAX_BOUNCES = 8;
 
+const std::string SOLID_DOCS = "docs/guide/particles.md#solid-particles";
+
+/** @brief A vector of N_DIM components of [particles]. */
+std::vector<rtype> read_vector(const Input & table, const std::string & key, const Dimension & dimension) {
+    const std::vector<rtype> v = find_real_vector(table, key, dimension);
+    if (v.size() != N_DIM) {
+        throw InputError(Diagnostic{.key = "particles." + key,
+                                    .line = line_of(table, key),
+                                    .message = "has " + logging::count(v.size(), "component") + ", but this build is " +
+                                               std::to_string(N_DIM) + "D",
+                                    .docs = SOLID_DOCS});
+    }
+    return v;
+}
+
+rtype positive(const Input & table, const std::string & key, const Dimension & dimension) {
+    const rtype value = find_real(table, key, dimension);
+    if (!(value > 0.0_r) || !std::isfinite(value)) {
+        throw InputError(Diagnostic{.key = "particles." + key, .line = line_of(table, key), .message = "must be positive",
+                                    .docs = SOLID_DOCS});
+    }
+    return value;
+}
+
+/** @brief The solid particles of [particles] in the gas, with gravity from [source] unless [particles] gives it. */
+particles::Solid read_solid(const Input & input, const Input & table, const Euler * gas) {
+    if (!gas || !gas->is_viscous()) {
+        throw InputError(Diagnostic{.key = "particles.type",
+                                    .line = line_of(table, "type"),
+                                    .message = gas ? "\"solid\" needs the gas viscosity for the drag, but physics.type is \"euler\""
+                                                   : "\"solid\" is for a single gas; the drag of mixtures is not available yet",
+                                    .fix = gas ? "Set type = \"navier_stokes\" and mu in [physics]" : "",
+                                    .docs = SOLID_DOCS});
+    }
+    particles::Solid solid;
+    solid.gas = *gas;
+    solid.diameter = positive(table, "diameter", dim::length);
+    solid.density = positive(table, "density", dim::density);
+    record_options("particles.drag", {"schiller_naumann", "stokes"});
+    const std::string drag = find_value_or<std::string>(table, "drag", "schiller_naumann");
+    if (drag != "stokes" && drag != "schiller_naumann") throw not_accepted(table, "particles.drag", drag, {"schiller_naumann", "stokes"});
+    solid.drag = drag == "stokes" ? particles::Drag::STOKES : particles::Drag::SCHILLER_NAUMANN;
+    if (contains_optional(table, "gravity")) {
+        const std::vector<rtype> g = read_vector(table, "gravity", dim::acceleration);
+        FOR_I_DIM solid.gravity[i] = g[i];
+    } else if (input.contains("source") && contains_optional(input.at("source"), "gravity")) {
+        // [source] reports a gravity of the wrong size
+        const std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
+        if (g.size() == N_DIM) FOR_I_DIM solid.gravity[i] = g[i];
+    }
+    return solid;
+}
+
 } // namespace
 
 void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, const BoundaryData & boundaries,
                      const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
-                     const double gas_constant) {
+                     const Euler * gas) {
     mesh = std::move(mesh_in);
     const Input & table = input.at("particles");
-    record_options("particles.type", {"tracer"});
+    record_options("particles.type", {"solid", "tracer"});
     const std::string type = find_value<std::string>(table, "type");
-    if (type != "tracer") throw not_accepted(table, "particles.type", type, {"tracer"});
+    if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
+    is_solid = type == "solid";
     file = find_value_or<std::string>(table, "file", "");
     distributed = distribution != nullptr;
-    R = gas_constant;
-    quantities.init(table, regions, N_DIM, R > 0.0);
+    R = gas ? static_cast<double>(gas->R) : 0.0;
+    std::array<rtype, N_DIM> v_seed{};
+    bool v_given = false;
+    if (is_solid) {
+        solid = read_solid(input, table, gas);
+        if (contains_optional(table, "velocity")) {
+            const std::vector<rtype> v = read_vector(table, "velocity", dim::velocity);
+            FOR_I_DIM v_seed[i] = v[i];
+            v_given = true;
+        }
+    }
+    const uint32_t first_quantity = is_solid ? 2 * N_DIM : N_DIM;
+    quantities.init(table, regions, first_quantity, R > 0.0);
     probes.init(table, regions, quantities);
-    width = N_DIM + quantities.n_integrated();
+    width = first_quantity + quantities.n_integrated();
     const uint32_t n_aux = quantities.n_aux();
     n_owned = mesh->n_owned();
 
@@ -152,6 +218,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
                 h_action(f) = particles::EXIT;
             }
         }
+        read_walls(table, h_action);
         Kokkos::deep_copy(action, h_action);
     }
     walker = Walker{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->face_normals,
@@ -178,10 +245,11 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     std::vector<rtype> new_values;  // persistent() per particle
     const auto fresh = [&](const Point & p) {
         for (size_t d = 0; d < N_DIM; d++) new_values.push_back(static_cast<rtype>(p[d]));
-        for (uint32_t k = N_DIM; k < width; k++) new_values.push_back(0.0_r);
+        if (is_solid) FOR_I_DIM new_values.push_back(v_seed[i]);
+        for (uint32_t k = first_quantity; k < width; k++) new_values.push_back(0.0_r);
         for (uint32_t j = 0; j < n_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
     };
-    std::array<uint64_t, 2> removed_before{0, 0};
+    std::array<uint64_t, 3> removed_before{0, 0, 0};
     const auto find_array = [&](const char * name) -> const std::vector<double> * {
         if (!restart) return nullptr;
         for (const auto & [key, values] : *restart) {
@@ -197,9 +265,15 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         const std::vector<double> * restored_removed = find_array("PARTICLE_REMOVED");
         n_restored = restored_id->size();
         if (!restored_cell || !restored_x || !restored_removed || restored_cell->size() != n_restored ||
-            restored_x->size() != N_DIM * n_restored || restored_removed->size() != 2) {
+            restored_x->size() != N_DIM * n_restored || restored_removed->size() < 2 || restored_removed->size() > 3) {
             throw std::runtime_error("particles: the restart file's particle arrays are inconsistent.");
         }
+        // Tracers continuing as solid particles start at the gas velocity
+        const std::vector<double> * restored_v = is_solid ? find_array("PARTICLE_V") : nullptr;
+        if (restored_v && restored_v->size() != N_DIM * n_restored) {
+            throw std::runtime_error("particles: the restart file's particle velocities are inconsistent.");
+        }
+        start_at_gas = is_solid && !restored_v && !v_given;
         // Quantities the file has continue; others start afresh
         std::vector<const std::vector<double> *> restored_q(quantities.size(), nullptr);
         for (uint32_t q = 0; q < quantities.size(); q++) {
@@ -218,6 +292,9 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             for (size_t d = 0; d < N_DIM; d++) p[d] = (*restored_x)[N_DIM * k + d];
             const size_t at = new_values.size();
             fresh(p);
+            if (restored_v) {
+                for (size_t d = 0; d < N_DIM; d++) new_values[at + N_DIM + d] = static_cast<rtype>((*restored_v)[N_DIM * k + d]);
+            }
             for (uint32_t q = 0; q < quantities.size(); q++) {
                 if (!restored_q[q]) continue;
                 const particles::QuantitySpec & spec = quantities.spec(q);
@@ -227,11 +304,12 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             }
         }
         if (!distributed || comm::is_root()) {
-            removed_before = {static_cast<uint64_t>((*restored_removed)[0]), static_cast<uint64_t>((*restored_removed)[1])};
+            for (size_t k = 0; k < restored_removed->size(); k++) removed_before[k] = static_cast<uint64_t>((*restored_removed)[k]);
         }
         n_global = n_restored;
     } else {
         // Seeds: each point goes to the rank owning the cell that holds it
+        start_at_gas = is_solid && !v_given;
         std::vector<uint8_t> contained;
         const std::vector<int32_t> located = locate_points(*mesh, points, &contained);
         for (size_t p = 0; p < points.size(); p++) {
@@ -273,7 +351,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     x = ParticleView("particle_x", n_values());
     id = Kokkos::View<uint64_t *>("particle_id", capacity);
     cell = Kokkos::View<uint32_t *>("particle_cell", capacity);
-    n_removed = Kokkos::View<uint64_t[2]>("particle_removed");
+    n_removed = Kokkos::View<uint64_t[3]>("particle_removed");
     point_cell = Kokkos::View<uint32_t *>("particle_point_cell", capacity);
     offsets = Kokkos::View<rtype *[N_DIM]>("particle_offsets", capacity);
     W_point = Kokkos::View<rtype *[N_CONSERVATIVE]>("particle_W", capacity);
@@ -300,8 +378,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         for (uint32_t j = 0; j < width; j++) h_x(width * k + j) = v[j];
         for (uint32_t j = 0; j < n_aux; j++) h_aux(k, j) = v[width + j];
     }
-    h_removed(0) = removed_before[0];
-    h_removed(1) = removed_before[1];
+    for (uint32_t k = 0; k < 3; k++) h_removed(k) = removed_before[k];
     Kokkos::deep_copy(id, h_id);
     Kokkos::deep_copy(cell, h_cell);
     Kokkos::deep_copy(x, h_x);
@@ -351,7 +428,7 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
 void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                          FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
                          Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const bool first_stage,
-                         const Kokkos::View<rtype> & time) {
+                         const Kokkos::View<rtype> & time, const rtype dt, const rtype * dt_device) {
     if (capacity == 0) return;
     evaluate_gas(x_stage, W, reconstruction, gradient, gradients);
     const auto ids = id;
@@ -364,22 +441,29 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const particles::QuantityFunctor q = quantities.functor();
     const bool observe = first_stage && q.size() > 0;
     const uint32_t n_aux = quantities.n_aux();
+    const bool inertia = is_solid;
+    const particles::Solid sphere = solid;
     Kokkos::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype * rate = dxdt.data() + size_t(w) * s;
         if (ids(s) == EMPTY) {
             for (uint32_t k = 0; k < w; k++) rate[k] = 0.0_r;
             return;
         }
-        rtype Ws[N_CONSERVATIVE], u[N_DIM];
-        FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
-        FOR_I_DIM u[i] = Ws[1 + i];
-        FOR_I_DIM rate[i] = u[i];
-        if (q.size() == 0) return;
         const rtype * values = xs.data() + size_t(w) * s;
+        rtype Ws[N_CONSERVATIVE], v[N_DIM];
+        FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
+        if (inertia) {
+            FOR_I_DIM v[i] = values[N_DIM + i];
+            sphere.rates(Ws, v, dt_device ? *dt_device : dt, rate, rate + N_DIM);
+        } else {
+            FOR_I_DIM v[i] = Ws[1 + i];
+            FOR_I_DIM rate[i] = v[i];
+        }
+        if (q.size() == 0) return;
         rtype * row = a.data() + size_t(n_aux) * s;
         const double t = timed ? static_cast<double>(time()) : 0.0;
         double vars[particles::MAX_VARIABLES];
-        particles::fill_base(vars, values, t, Ws, u, gas_R);
+        particles::fill_base(vars, values, t, Ws, v, gas_R);
         q.fill(vars, values, row, rate);
         if (observe) q.observe(vars, t, row);
     });
@@ -389,6 +473,93 @@ void Particles::sample(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
                        const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
     if (capacity == 0) return;
     evaluate_gas(x, W, reconstruction, gradient, gradients);
+}
+
+void Particles::start_velocity(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                               const LSQVertexGradientFunctor & gradient,
+                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
+    start_at_gas = false;
+    if (capacity == 0) return;
+    sample(W, reconstruction, gradient, gradients);
+    const auto ids = id;
+    const auto values = x;
+    const auto Wp = W_point;
+    const uint32_t w = width;
+    Kokkos::parallel_for("particle_start_velocity", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        if (ids(s) == EMPTY) return;
+        FOR_I_DIM values(w * s + N_DIM + i) = Wp(s, 1 + i);
+    });
+}
+
+void Particles::read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action) {
+    const uint32_t n_faces = mesh->n_faces;
+    if (!is_solid) {
+        if (contains_optional(table, "walls")) {
+            throw InputError(Diagnostic{.key = "particles.walls",
+                                        .line = line_of(table, "walls"),
+                                        .message = "is for solid particles; tracers follow the gas, which walls turn",
+                                        .fix = "Remove [[particles.walls]], or set type = \"solid\"",
+                                        .docs = SOLID_DOCS});
+        }
+        return;
+    }
+    restitution = Kokkos::View<rtype *[2]>("particle_restitution", n_faces);
+    auto h_restitution = Kokkos::create_mirror_view(restitution);
+    Kokkos::deep_copy(h_restitution, 1.0_r);
+    if (contains_optional(table, "walls")) {
+        const auto entries = find_value<std::vector<Input>>(table, "walls");
+        record_options("particles.walls.interaction", {"rebound", "stick"});
+        for (size_t k = 0; k < entries.size(); k++) {
+            const Input & e = entries[k];
+            const std::string where = "particles.walls[" + std::to_string(k) + "]";
+            const auto zones = find_value<std::vector<std::string>>(e, "zones");
+            const std::string interaction = find_value_or<std::string>(e, "interaction", "rebound");
+            if (interaction != "rebound" && interaction != "stick") {
+                throw not_accepted(e, where + ".interaction", interaction, {"rebound", "stick"});
+            }
+            const bool stick = interaction == "stick";
+            rtype coefficients[2] = {1.0_r, 1.0_r};
+            if (!stick) {
+                const char * keys[2] = {"restitution", "tangential_restitution"};
+                for (int j = 0; j < 2; j++) {
+                    coefficients[j] = find_real_or(e, keys[j], dim::none, 1.0_r);
+                    if (!(coefficients[j] >= 0.0_r && coefficients[j] <= 1.0_r)) {
+                        throw InputError(Diagnostic{.key = where + "." + keys[j], .line = line_of(e, keys[j]),
+                                                    .message = "must be in [0, 1]", .docs = SOLID_DOCS});
+                    }
+                }
+            }
+            for (const std::string & name : zones) {
+                // [walls, other boundary faces] of the zone on all ranks
+                std::array<uint64_t, 2> faces{0, 0};
+                for (const FaceZone & zone : mesh->h_face_zones()) {
+                    if (zone.get_name() != name) continue;
+                    for (uint32_t i = 0; i < zone.n_faces(); i++) {
+                        const uint32_t f = zone.h_faces(i);
+                        if (action(f) == particles::REFLECT || action(f) == particles::STICK) {
+                            faces[0]++;
+                            action(f) = stick ? particles::STICK : particles::REFLECT;
+                            h_restitution(f, 0) = coefficients[0];
+                            h_restitution(f, 1) = coefficients[1];
+                        } else if (action(f) == particles::EXIT) {
+                            faces[1]++;
+                        }
+                    }
+                }
+                if (distributed) faces = comm::allreduce(faces, comm::Op::SUM);
+                if (faces[0] == 0 || faces[1] > 0) {
+                    throw InputError(Diagnostic{.key = where + ".zones",
+                                                .line = line_of(e, "zones"),
+                                                .message = "\"" + name + "\" " +
+                                                           (faces[0] + faces[1] == 0
+                                                                ? "is not a boundary of the mesh"
+                                                                : "is not a wall or symmetry boundary"),
+                                                .docs = SOLID_DOCS});
+                }
+            }
+        }
+    }
+    Kokkos::deep_copy(restitution, h_restitution);
 }
 
 void Particles::write_probes(const uint64_t step, const double t) {
@@ -443,14 +614,17 @@ void Particles::relocate() {
     const auto pos = x;
     const auto removed = n_removed;
     const uint32_t wd = width;
+    const bool inertia = is_solid;
+    const auto e = restitution;
     Kokkos::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
-        rtype p[N_DIM];
+        rtype p[N_DIM], v[N_DIM];
         FOR_I_DIM p[i] = pos(wd * s + i);
+        FOR_I_DIM v[i] = inertia ? pos(wd * s + N_DIM + i) : 0.0_r;
         for (int bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
             int32_t face = -1;
-            const Walker::Outcome outcome = w.walk(c, p, face);
+            const Walker::Outcome outcome = w.walk(c, p, face, inertia ? v : nullptr);
             if (outcome == Walker::INSIDE) break;
             if (outcome == Walker::STUCK || bounce == MAX_BOUNCES) {
                 Kokkos::atomic_inc(&removed(1));
@@ -461,14 +635,24 @@ void Particles::relocate() {
             if (action == particles::REFLECT) {
                 rtype n[N_DIM];
                 const rtype d = w.distance(c, static_cast<uint32_t>(face), p, n);
-                FOR_I_DIM p[i] -= 2.0_r * d * n[i];
+                rtype v_n = 0.0_r;
+                FOR_I_DIM v_n += v[i] * n[i];
+                // A solid particle bounced at the step's end: the normal velocity reverses times e_n, the
+                // tangential velocity scales by e_t, and the depth past the wall comes back times e_n
+                const rtype e_n = inertia && v_n > 0.0_r ? e(static_cast<uint32_t>(face), 0) : 1.0_r;
+                if (inertia && v_n > 0.0_r) {
+                    const rtype e_t = e(static_cast<uint32_t>(face), 1);
+                    FOR_I_DIM v[i] = e_t * (v[i] - v_n * n[i]) - e_n * v_n * n[i];
+                }
+                FOR_I_DIM p[i] -= (1.0_r + e_n) * d * n[i];
                 continue;
             }
-            Kokkos::atomic_inc(&removed(action == particles::EXIT ? 0 : 1));
+            Kokkos::atomic_inc(&removed(action == particles::EXIT ? 0 : action == particles::STICK ? 2 : 1));
             ids(s) = EMPTY;
             return;
         }
         FOR_I_DIM pos(wd * s + i) = p[i];
+        if (inertia) FOR_I_DIM pos(wd * s + N_DIM + i) = v[i];
         start(s) = c;
     });
 }
@@ -574,9 +758,9 @@ uint64_t Particles::count() const {
     return distributed ? comm::allreduce(n, comm::Op::SUM) : n;
 }
 
-std::array<uint64_t, 2> Particles::removed() const {
+std::array<uint64_t, 3> Particles::removed() const {
     auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), n_removed);
-    const std::array<uint64_t, 2> local{h(0), h(1)};
+    const std::array<uint64_t, 3> local{h(0), h(1), h(2)};
     return distributed ? comm::allreduce(local, comm::Op::SUM) : local;
 }
 
@@ -584,13 +768,14 @@ std::vector<particles::Record> Particles::gather() const {
     auto g_id = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), id);
     auto g_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), x);
     auto g_aux = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), aux);
-    const size_t n_q = quantities.size(), stride = N_DIM + n_q;
+    const size_t n_q = quantities.size(), stride = 2 * N_DIM + n_q;
     std::vector<uint64_t> ids;
-    std::vector<double> xs;  // position, quantities
+    std::vector<double> xs;  // position, velocity, quantities
     for (uint32_t i = 0; i < capacity; i++) {
         if (g_id(i) == EMPTY) continue;
         ids.push_back(g_id(i));
         for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(width * i + d)));
+        for (size_t d = 0; d < N_DIM; d++) xs.push_back(is_solid ? static_cast<double>(g_x(width * i + N_DIM + d)) : 0.0);
         for (uint32_t q = 0; q < n_q; q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -605,8 +790,11 @@ std::vector<particles::Record> Particles::gather() const {
     std::vector<particles::Record> records(ids.size());
     for (size_t k = 0; k < ids.size(); k++) {
         records[k].id = ids[k];
-        for (size_t d = 0; d < N_DIM; d++) records[k].x[d] = xs[stride * k + d];
-        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + N_DIM),
+        for (size_t d = 0; d < N_DIM; d++) {
+            records[k].x[d] = xs[stride * k + d];
+            records[k].v[d] = xs[stride * k + N_DIM + d];
+        }
+        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + 2 * N_DIM),
                             xs.begin() + static_cast<std::ptrdiff_t>(stride * (k + 1)));
     }
     std::sort(records.begin(), records.end(), [](const auto & a, const auto & b) { return a.id < b.id; });
@@ -624,11 +812,17 @@ void Particles::write(const uint64_t step, const double t) const {
     const char * names[] = {"x", "y", "z"};
     out << "id";
     for (size_t d = 0; d < N_DIM; d++) out << "," << names[d];
+    if (is_solid) {
+        for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
+    }
     for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {
         out << r.id;
         for (size_t d = 0; d < N_DIM; d++) out << "," << r.x[d];
+        if (is_solid) {
+            for (size_t d = 0; d < N_DIM; d++) out << "," << r.v[d];
+        }
         for (const double q : r.q) out << "," << q;
         out << "\n";
     }
@@ -652,7 +846,7 @@ RestartArrays Particles::restart_arrays() const {
         for (uint32_t j = 0; j < width; j++) local.push_back(static_cast<double>(h_x(width * s + j)));
         for (uint32_t j = 0; j < n_aux; j++) local.push_back(static_cast<double>(h_aux(s, j)));
     }
-    std::array<uint64_t, 2> removed{h_removed(0), h_removed(1)};
+    std::array<uint64_t, 3> removed{h_removed(0), h_removed(1), h_removed(2)};
     std::vector<double> all = local;
     if (distributed) {
         // Every rank lays out the file's header, arrays included
@@ -664,13 +858,16 @@ RestartArrays Particles::restart_arrays() const {
     std::vector<size_t> order(n);
     for (size_t k = 0; k < n; k++) order[k] = k;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[WIDTH * a] < all[WIDTH * b]; });
-    std::vector<double> ids(n), cells(n), xs(N_DIM * n);
+    std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0);
     std::vector<std::vector<double>> qs(quantities.size(), std::vector<double>(n));
     for (size_t k = 0; k < n; k++) {
         const double * p = all.data() + WIDTH * order[k];
         ids[k] = p[0];
         cells[k] = p[1];
         for (size_t d = 0; d < N_DIM; d++) xs[N_DIM * k + d] = p[2 + d];
+        if (is_solid) {
+            for (size_t d = 0; d < N_DIM; d++) vs[N_DIM * k + d] = p[2 + N_DIM + d];
+        }
         for (uint32_t q = 0; q < quantities.size(); q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -681,7 +878,10 @@ RestartArrays Particles::restart_arrays() const {
     RestartArrays arrays = {{"PARTICLE_ID", std::move(ids)},
                             {"PARTICLE_CELL", std::move(cells)},
                             {"PARTICLE_X", std::move(xs)},
-                            {"PARTICLE_REMOVED", {static_cast<double>(removed[0]), static_cast<double>(removed[1])}}};
+                            {"PARTICLE_REMOVED",
+                             {static_cast<double>(removed[0]), static_cast<double>(removed[1]),
+                              static_cast<double>(removed[2])}}};
+    if (is_solid) arrays.emplace_back("PARTICLE_V", std::move(vs));
     for (uint32_t q = 0; q < quantities.size(); q++) {
         arrays.emplace_back("PARTICLE_Q_" + quantities.names()[q], std::move(qs[q]));
     }
@@ -689,11 +889,20 @@ RestartArrays Particles::restart_arrays() const {
 }
 
 std::vector<std::pair<std::string, std::string>> Particles::settings() const {
-    std::string text = n_restored > 0 ? logging::count(n_restored, "tracer") + " from the restart file"
-                                      : logging::count(n_seeded, "tracer");
+    const char * noun = is_solid ? "solid particle" : "tracer";
+    std::string text = n_restored > 0 ? logging::count(n_restored, noun) + " from the restart file"
+                                      : logging::count(n_seeded, noun);
     text += ", " + logging::count(capacity, "slot") + " per rank";
     if (!file.empty()) text += ", positions at the end in " + file;
     std::vector<std::pair<std::string, std::string>> lines = {{"Particles", text}};
+    if (is_solid) {
+        std::string g;
+        FOR_I_DIM g += (i ? ", " : "") + logging::real(static_cast<double>(solid.gravity[i]));
+        lines.emplace_back("Solid particles", "diameter " + logging::real(static_cast<double>(solid.diameter)) +
+                                                  ", density " + logging::real(static_cast<double>(solid.density)) +
+                                                  ", " + (solid.drag == particles::Drag::STOKES ? "Stokes" : "Schiller-Naumann") +
+                                                  " drag, gravity (" + g + ")");
+    }
     for (const auto & q : quantities.summary()) lines.emplace_back("Particle quantity", q);
     for (const auto & p : probes.summary()) lines.emplace_back("Particle probe", p);
     return lines;

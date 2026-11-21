@@ -27,6 +27,7 @@
 #include "common.h"
 #include "gradient.h"
 #include "input.h"
+#include "particle_forces.h"
 #include "particle_probes.h"
 #include "particle_quantities.h"
 #include "periodic_maps.h"
@@ -43,8 +44,11 @@ namespace particles {
 /** @brief Id of an empty slot. */
 inline constexpr uint64_t EMPTY = UINT64_MAX;
 
-/** @brief What a particle does on reaching a face: cross it, reflect off it, leave the domain, or get lost. */
-enum FaceAction : uint8_t { CROSS = 0, REFLECT = 1, EXIT = 2, LOST = 3 };
+/**
+ * @brief What a particle does on reaching a face: cross it, reflect off it
+ *        (rebound, for solid particles), leave the domain, get lost, or stick to it.
+ */
+enum FaceAction : uint8_t { CROSS = 0, REFLECT = 1, EXIT = 2, LOST = 3, STICK = 4 };
 
 /**
  * @brief Finds the cell holding a point by walking across faces from a cell
@@ -93,9 +97,12 @@ struct Walker {
         return d * inv;
     }
 
-    /** @brief Move from cell c across interior face f into its other cell, with x into that cell's frame. */
+    /**
+     * @brief Move from cell c across interior face f into its other cell, with
+     *        x, and the velocity v if not null, into that cell's frame.
+     */
     KOKKOS_INLINE_FUNCTION
-    void cross(uint32_t & c, const uint32_t f, rtype * x) const {
+    void cross(uint32_t & c, const uint32_t f, rtype * x, rtype * v = nullptr) const {
         const bool side1 = cells_of_face(f, 0) != static_cast<int32_t>(c);
         const uint8_t s = face_shift(f);
         if (s) {
@@ -106,17 +113,24 @@ struct Walker {
                 maps.backward(s, x, y);
             }
             FOR_I_DIM x[i] = y[i];
+            if (v && maps.rotated()) {
+                if (side1) {
+                    maps.rotate(s, v);
+                } else {
+                    maps.unrotate(s, v);
+                }
+            }
         }
         c = static_cast<uint32_t>(cells_of_face(f, side1 ? 0 : 1));
     }
 
     /**
      * @brief Walk from cell c to the cell holding x (in c's frame), updating
-     *        both. Stops at the first face whose action is not CROSS
-     *        (BOUNDARY, face set), or after MAX_STEPS.
+     *        both, and the velocity v if not null. Stops at the first face
+     *        whose action is not CROSS (BOUNDARY, face set), or after MAX_STEPS.
      */
     KOKKOS_INLINE_FUNCTION
-    Outcome walk(uint32_t & c, rtype * x, int32_t & face) const {
+    Outcome walk(uint32_t & c, rtype * x, int32_t & face, rtype * v = nullptr) const {
         for (uint32_t step = 0; step < MAX_STEPS; step++) {
             const rtype h = Kokkos::pow(cell_volume(c), 1.0_r / static_cast<rtype>(N_DIM));
             rtype best = precision_tol(1e-10, 1e-5) * h;
@@ -135,16 +149,17 @@ struct Walker {
                 face = exit;
                 return BOUNDARY;
             }
-            cross(c, static_cast<uint32_t>(exit), x);
+            cross(c, static_cast<uint32_t>(exit), x, v);
         }
         return STUCK;
     }
 };
 
-/** @brief A particle as output reports it: its id, position and quantities. */
+/** @brief A particle as output reports it: its id, position, velocity (solid particles, else 0) and quantities. */
 struct Record {
     uint64_t id;
     std::array<double, N_DIM> x;
+    std::array<double, N_DIM> v;
     std::vector<double> q;
 };
 
@@ -153,15 +168,17 @@ struct Record {
 /**
  * @brief The particles of a run ([particles]): massless tracers whose velocity
  *        is the gas velocity of the reconstruction polynomial at their
- *        position, with their quantities ([[particles.quantities]]) and probes
- *        ([[particles.probes]]). Their positions and integrated quantities are
- *        a block of the solver's State, so every time integrator advances them
- *        with the flow, at its order.
+ *        position, or solid spheres that drag and gravity accelerate, with
+ *        their quantities ([[particles.quantities]]) and probes
+ *        ([[particles.probes]]). Their positions, velocities and integrated
+ *        quantities are a block of the solver's State, so every time
+ *        integrator advances them with the flow, at its order.
  *
  * Storage is a fixed number of slots per rank (structure of arrays on the
  * device); an empty slot has id particles::EMPTY. Kernels run over every slot.
- * Each slot has width() values in the block, its position first, and n_aux()
- * values outside it (extrema and first times).
+ * Each slot has width() values in the block, its position first, then its
+ * velocity (solid particles), and n_aux() values outside it (extrema and
+ * first times).
  */
 class Particles {
     public:
@@ -175,16 +192,16 @@ class Particles {
          * @param restart The arrays of the restart file the run starts from, or
          *        null; the particles are seeded when it holds none.
          * @param regions The regions expressions and probes read.
-         * @param gas_constant R of a single gas (the temperature at a particle), 0 for a mixture.
+         * @param gas The single gas (the temperature at a particle, the drag on solid particles), or null for a mixture.
          */
         void init(const Input & input, std::shared_ptr<const Mesh> mesh, const BoundaryData & boundaries,
                   const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
-                  double gas_constant);
+                  const Euler * gas);
 
         /** @brief The values of the particle block of a State: width() per slot. */
         size_t n_values() const { return size_t(capacity) * width; }
 
-        /** @brief Values per slot in the block: the position, then the integrated quantities. */
+        /** @brief Values per slot in the block: the position, the velocity of solid particles, the integrated quantities. */
         uint32_t get_width() const { return width; }
 
         /** @brief The particle block of the solver's state. */
@@ -196,14 +213,27 @@ class Particles {
         /** @brief Whether the right-hand side reads the stage time (set_stage_time before velocity()). */
         bool reads_time() const { return quantities.reads_time(); }
 
+        /** @brief Whether the particles are solid, with a velocity of their own. */
+        bool inertial() const { return is_solid; }
+
+        /** @brief Whether start_velocity() has yet to give solid particles the gas velocity. */
+        bool starts_at_gas_velocity() const { return start_at_gas; }
+
+        /** @brief Give solid particles the gas velocity at their positions, from the cell states W (halo included). */
+        void start_velocity(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                            const LSQVertexGradientFunctor & gradient,
+                            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+
         /**
-         * @brief dx/dt of a stage: the gas velocity at the stage positions x,
+         * @brief The rates of a stage. Tracers: dx/dt is the gas velocity at the stage positions x,
          *        from the reconstruction polynomial of the cell that held each
          *        particle at the start of the step
          *        (FaceReconstruction::point_values) where the scheme has one,
          *        else from that cell's least-squares gradient. Within a step
          *        the velocity is one smooth function of the position, so the
-         *        integrator keeps its order.
+         *        integrator keeps its order. Solid particles: dx/dt = v and dv/dt
+         *        from drag and gravity at the same gas state (particles::Solid,
+         *        with its stiff limit for relaxation times below the step dt).
          *        The rates of the integrated quantities follow from the same
          *        state, and at the first stage of a step (the step's start) the
          *        extrema and first times are updated.
@@ -211,11 +241,12 @@ class Particles {
          * @param reconstruction The face reconstruction of the stage.
          * @param gradient Least-squares gradients of W, written to gradients(c).
          * @param time The stage time on the device, if reads_time().
+         * @param dt The step's dt, or if dt_device is not null the device scalar holding it (captured steps).
          */
         void velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                       FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
                       Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, bool first_stage,
-                      const Kokkos::View<rtype> & time);
+                      const Kokkos::View<rtype> & time, rtype dt, const rtype * dt_device);
 
         /**
          * @brief The gas state W = [rho, u, p] at the particles' positions, as
@@ -238,8 +269,10 @@ class Particles {
 
         /**
          * @brief After a step: the cell holding each particle, reflections off
-         *        walls and symmetry planes, removal of those that left the
-         *        domain. On the device only, capturable in a step graph.
+         *        walls and symmetry planes (rebounds with the restitution
+         *        coefficients of [[particles.walls]] for solid particles),
+         *        removal of those that left the domain or stuck to a wall. On
+         *        the device only, capturable in a step graph.
          */
         void relocate();
 
@@ -252,8 +285,8 @@ class Particles {
         /** @brief Live particles on all ranks (collective). */
         uint64_t count() const;
 
-        /** @brief Particles that left the domain, and that were lost, on all ranks (collective). */
-        std::array<uint64_t, 2> removed() const;
+        /** @brief Particles that left the domain, that were lost, and that stuck to walls, on all ranks (collective). */
+        std::array<uint64_t, 3> removed() const;
 
         /** @brief Every particle, by increasing id, on every rank (collective). */
         std::vector<particles::Record> gather() const;
@@ -264,8 +297,9 @@ class Particles {
         /**
          * @brief The particles as stage_output() last staged them, by
          *        increasing id, on every rank (collective): PARTICLE_ID,
-         *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle)
-         *        and PARTICLE_REMOVED (left the domain, lost).
+         *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle),
+         *        PARTICLE_V (solid particles, likewise), PARTICLE_Q_<name> (per
+         *        quantity) and PARTICLE_REMOVED (left the domain, lost, stuck).
          */
         RestartArrays restart_arrays() const;
 
@@ -287,12 +321,18 @@ class Particles {
         /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
         uint32_t persistent() const { return width + quantities.n_aux(); }
 
+        /** @brief Read [[particles.walls]] into the face actions and restitution coefficients. */
+        void read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action);
+
         std::shared_ptr<const Mesh> mesh;
         particles::Walker walker;
         uint32_t capacity = 0;
         uint32_t width = N_DIM;
         uint32_t n_owned = 0;
         double R = 0.0;
+        bool is_solid = false;
+        bool start_at_gas = false;
+        particles::Solid solid;
         particles::Quantities quantities;
         particles::ParticleProbes probes;
         uint64_t n_seeded = 0;
@@ -300,11 +340,12 @@ class Particles {
         bool distributed = false;
         std::string file;
 
-        ParticleView x;                     // (width slot + k): position, integrated quantities
+        ParticleView x;                     // (width slot + k): position, velocity (solid), integrated quantities
         Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
-        Kokkos::View<uint64_t[2]> n_removed;  // left the domain, lost
+        Kokkos::View<uint64_t[3]> n_removed;  // left the domain, lost, stuck
+        Kokkos::View<rtype *[2]> restitution;  // (face): normal and tangential, at walls solid particles rebound off
 
         // Stage scratch
         Kokkos::View<uint32_t *> point_cell;  // cell, 0 in empty slots
@@ -318,7 +359,7 @@ class Particles {
         Kokkos::View<uint32_t *>::host_mirror_type h_cell;
         ParticleView::host_mirror_type h_x;
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_aux;
-        Kokkos::View<uint64_t[2]>::host_mirror_type h_removed;
+        Kokkos::View<uint64_t[3]>::host_mirror_type h_removed;
 
         // Migration (host)
         std::vector<int> halo_owner;        // (halo cell - n_owned): owner rank, -1 if unknown
