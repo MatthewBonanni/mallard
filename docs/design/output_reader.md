@@ -94,7 +94,10 @@ in [The Python package](python_package.md)) therefore reads through this reader.
 C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
 with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,
 and errors as a message, so that no C++ exception or type crosses it. The
-package loads it with ctypes and copies the arrays into numpy:
+package loads it with ctypes, and its numpy arrays view the library's arrays
+without a copy: each holds the library's result, which the last of them to go
+frees. A read peaks at the size of what it returns
+([measurements](python_package.md#performance)):
 
 - **C and ctypes, not a binding library.** pybind11 or nanobind would give
   richer types, but add a build dependency and tie the library to one Python
@@ -250,32 +253,38 @@ by the run's own reconstruction, gradients and kernels.
 `mallard post derive` and with the equivalent `pvbatch` pipeline: ParaView's
 `Gradient` filter on the cell data (with its Q-criterion and vorticity),
 `Calculator` for `MACH` and `SCHLIEREN`, and numpy for λ₂, reading the same
-VTKHDF snapshots and writing VTKHDF. Apple M4 Pro, macOS, 2 threads each
-(Kokkos Threads; `VTK_SMP_MAX_THREADS=2`), ParaView 6.0.1; wall time and peak
-memory (`/usr/bin/time -l`), the best of 3 (2D) or 2 (3D) runs:
+VTKHDF snapshots and writing VTKHDF. One CPU-only Linux container on an AMD
+EPYC 7763, 2 threads each (Kokkos Threads; `VTK_SMP_MAX_THREADS=2`), `mallard`
+built with GCC 15.2 (Release, HDF5), ParaView 6.0.1's Linux binaries; wall
+time and peak resident memory (`/usr/bin/time`), the best of 3 (2D) or 2 (3D)
+runs:
 
 | Case | Files | `post derive` | `post derive`, TENO cache | `pvbatch` |
 |---|---|---|---|---|
-| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 3.2 s, 0.21 GB | 1.3 s, 0.24 GB | 4.3 s, 0.21 GB |
-|  | 11 | 3.3 s, 0.22 GB | 1.6 s, 0.24 GB | 5.3 s, 0.24 GB |
-| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 47 s, 1.1 GB | 10 s, 1.2 GB | 3.8 s, 0.32 GB |
-|  | 11 | 35 s, 1.1 GB | 11 s, 1.2 GB | 6.4 s, 0.37 GB |
+| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 5.4 s, 0.17 GB | 2.2 s, 0.18 GB | 3.2 s, 0.42 GB |
+|  | 11 | 6.0 s, 0.18 GB | 2.6 s, 0.18 GB | 5.2 s, 0.44 GB |
+| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 56 s, 0.96 GB | 22 s, 0.97 GB | 3.9 s, 0.51 GB |
+|  | 11 | 58 s, 0.96 GB | 24 s, 0.97 GB | 10.1 s, 0.55 GB |
 
-`mallard` built with GCC 16. Both programs ran while the machine ran other
-jobs (load average 10-50), which slows them and spreads repeated 3D runs by
-up to a third.
-
-- **Setup dominates.** Without a cache, the TENO setup is about 3 s in 2D and
-  half a minute or more in 3D, against ParaView's 4 s start (Python, the
-  reader and the pipeline). In 2D `post derive` is faster from the first
-  snapshot on, in 3D not at all.
+- **Setup dominates.** Without a cache, the TENO setup takes about 5 s in 2D
+  and 55 s in 3D, against ParaView's 3 to 4 s start (Python, the reader and
+  the pipeline). Each further snapshot costs `post derive` 0.05 s in 2D and
+  0.2 s in 3D, `pvbatch` 0.2 and 0.6 s, so `post derive` is the faster one
+  from about 15 snapshots on in 2D, and from about 130 in 3D.
+- **What the 3D setup is.** Of its CPU time, about half fits each cell's
+  central stencil (pseudo-inverses and Lebesgue constants), a fifth packs the
+  shared tables and a tenth computes the cells' moments, which host backends
+  do four cells at a time, each with the operations it has alone (a quarter
+  of the time before). Fitting each stencil shape once (#986) and packing
+  each shape's table once (#1079) remove most of the rest.
 - **With the run's cache.** Reading the TENO cache (0.76 GB in 2D, 8.4 GB in
-  3D) instead of computing it makes `post derive` 3 times faster than
-  `pvbatch` in 2D; in 3D it is 2 to 3 times slower.
+  3D) instead of computing it makes `post derive` faster than `pvbatch` from
+  the first snapshot in 2D; in 3D it takes 22 s, mostly ranking every cell's
+  table again to share them (#1079).
 - **Memory.** `post derive` sets TENO up with its central stencils alone, the
   only tables the gradient reads, so its memory is mostly the mesh's (face
-  quadrature and vertex gradient weights): ParaView's in 2D, 3 to 4 times it
-  in 3D.
+  quadrature and vertex gradient weights): less than ParaView's in 2D, about
+  twice it in 3D.
 
 Agreement, as relative L2 norms of the difference over the norm of
 `post derive`'s field:

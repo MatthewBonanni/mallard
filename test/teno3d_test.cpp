@@ -575,6 +575,47 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
     ::testing::Values(IncrementalParam{"cartesian_prism", 4}, IncrementalParam{"cartesian_mixed", 4},
                       IncrementalParam{"cartesian_tet", 3}));
 
+TEST(TENO3DSetup, EveryCellsMomentsAreThoseOfItsOwnBox) {
+    // Stretched boxes all differ in size and aspect ratio; host backends compute the moments of
+    // several cells at once, and 7 x 5 x 3 cells leave a last group short of them
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 7\nNy = 5\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n"
+                          "stretching = [1.5, 0.8, 1.2]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    for (const int order : {3, 5}) {
+        auto teno = make_teno_with(mesh, bd, order, [](TENO & t) { t.share_tables = false; });
+        auto moments = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->moments);
+        ASSERT_EQ(moments.extent(0), mesh->n_cells);
+        // Mean of ((x - x_c) / h)^a over the box's extent along x, by a, then b, then c
+        const int nm = 2 * order - 3;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+            for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
+                for (uint32_t d = 0; d < 3; d++) {
+                    lo[d] = std::min(lo[d], double(mesh->h_node_coords(mesh->h_node_of_cell(c, k), d)));
+                    hi[d] = std::max(hi[d], double(mesh->h_node_coords(mesh->h_node_of_cell(c, k), d)));
+                }
+            }
+            const double h = std::cbrt(double(mesh->h_cell_volume(c)));
+            auto mean = [&](const uint32_t d, const int a) {
+                return a % 2 != 0 ? 0.0 : std::pow(0.5 * (hi[d] - lo[d]) / h, a) / (a + 1);
+            };
+            size_t k = 0;
+            for (int a = 0; a < nm; a++) {
+                for (int b = 0; a + b < nm; b++) {
+                    for (int e = 0; a + b + e < nm; e++, k++) {
+                        const double exact = mean(0, a) * mean(1, b) * mean(2, e);
+                        EXPECT_NEAR(moments(c, k), exact, roundoff(1e-13)) << "order " << order << ", cell " << c
+                                                                         << ", moment (" << a << ", " << b << ", " << e << ")";
+                    }
+                }
+            }
+            ASSERT_EQ(k, moments.extent(1));
+        }
+    }
+}
+
 TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
     // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
     // batches split the cells differently, and the host setup is the fallback
@@ -945,7 +986,7 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
     }
 }
 
-TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesAndPolynomialsBitwise) {
     // A blast in a box with walls: smooth and troubled cells, cells with mirror images along the walls
     auto mesh = make_mesh_3d("cartesian", 12, 12, 12);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
@@ -970,16 +1011,22 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
                 teno->block_path = block_path;
                 teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
                 teno->smooth_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
+                teno->polynomials =
+                    Kokkos::View<rtype **[2][N_CONSERVATIVE]>("polynomials", (mesh->n_cells + 1) / 2, teno->n_dof_large);
                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
                 teno->calc_face_values(W, face_W);
                 auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
                 auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->smooth_gradients);
+                auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->polynomials);
                 std::vector<rtype> out(h.data(), h.data() + h.span());
                 out.insert(out.end(), g.data(), g.data() + g.span());
-                return std::make_pair(out, teno->n_block_cells);
+                // NaN marks troubled cells' polynomials, so compare their bits
+                std::vector<uint8_t> polynomial_bits(reinterpret_cast<const uint8_t *>(p.data()),
+                                                     reinterpret_cast<const uint8_t *>(p.data() + p.span()));
+                return std::make_tuple(out, polynomial_bits, teno->n_block_cells);
             };
-            const auto [unstructured, none] = results(false);
-            const auto [block, n_block] = results(true);
+            const auto [unstructured, unstructured_polynomials, none] = results(false);
+            const auto [block, block_polynomials, n_block] = results(true);
             const std::string at = "order " + std::to_string(order) + ", slices of " + std::to_string(1 << shift);
             EXPECT_EQ(none, 0u) << at;
             // Every cell whose stencil stays clear of the walls; those near them read mirror images
@@ -987,6 +1034,7 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
             EXPECT_GE(n_block, uint64_t(std::pow(12 - 2 * depth, 3))) << at;
             EXPECT_LT(n_block, uint64_t(mesh->n_cells)) << at;
             EXPECT_TRUE(block == unstructured) << at;
+            EXPECT_TRUE(block_polynomials == unstructured_polynomials) << at;
         }
     }
 }

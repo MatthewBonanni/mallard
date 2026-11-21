@@ -184,7 +184,7 @@ takes 1-3 s per million cells; it is part of the mesh setup, not of the step.
 The search matches the faces of the candidate cells by sorting one record per
 face (its sorted keyed nodes, cell and side: 24 B in 3D), allocated once, and
 keeps 8 B per face for the neighbor across it, so it holds about 200 B per
-hexahedron, well under the finished mesh (about 500 B), which sets the build's
+hexahedron, well under the finished mesh (about 400 B), which sets the build's
 peak.
 
 ## Data layout
@@ -256,10 +256,12 @@ block cell they read its shape's table set and find its entries by offset,
 through the same template parameter; troubled cells are a few percent of the
 cells, so a branch per cell costs little.
 
-**MUSCL.** Per block cell: the six face neighbors by offset; the gradient from
-the shape's least-squares weights; the limiter from the shape's face-centroid
-offsets and $h$; face states through `faces_of_cell`. Cells on characteristic
-boundaries (vertex gradients) are not eligible.
+**MUSCL.** One kernel body: every cell with a row (MUSCL tables, below) reads
+its least-squares weights and face-centroid offsets from the row, and each face
+neighbor's state once, for both the fit and the limiter's extrema. The cells of
+a block whose faces all have a neighbor take them at $c + o_k$, one offset per
+face slot; every other cell reads its faces. Cells on characteristic
+boundaries (vertex gradients) have no row.
 
 **Mirror images.** A cell near one straight boundary plane has the stencil
 shape of the interior with mirror images in place of the cells beyond the plane
@@ -308,9 +310,9 @@ Bytes per cell after setup, `mallard check` on $64^3$ boxes (Kokkos
 allocations; with CUDA the pseudo-inverses live outside Kokkos, change 2 in
 [performance.md](performance.md#2-teno-setup-stencil-tables-streamed-to-the-device-host-memory)):
 
-| | TENO5, today | TENO5, block cell | MUSCL, today and block cell |
+| | TENO5, today | TENO5, block cell | MUSCL |
 |---|---:|---:|---:|
-| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 0 |
+| reconstruction tables | 32.0 kB | 0 (one table set per shape: 36.8 kB per block) | 12 B (row indices and block shape; 0.29 kB per distinct row) |
 | faces and gradients (face states 2.2 kB, troubled-pass scratch) | 4.20 kB | 4.20 kB | 0.65 kB |
 | mesh and geometry | 2.29 kB | 2.29 kB | 2.26 kB |
 | solution and stages, boundaries | 0.28 kB | 0.28 kB | 0.28 kB |
@@ -321,7 +323,10 @@ A 3D TENO5 hexahedron measured 40.7 kB on an A100 (`cudaMemGetInfo`,
 TENO5 box at about 1.8M cells on 80 GB; at 6.8 kB per block cell, about
 10M. What remains is the face states and the mesh: fusing reconstruction and
 fluxes on block faces, and dropping per-face geometry inside blocks, is
-filed as a follow-up (#965). MUSCL gains throughput, not memory.
+filed as a follow-up (#965). MUSCL's rows add 8 B per cell and 0.29 kB per
+distinct row (hexahedra); on meshes where fewer than 8 cells share each row
+(no lattice), MUSCL keeps no rows and fits every step as before. Its block shapes add 4 B per cell with a row
+when the mesh has blocks.
 
 ## Documentation
 
@@ -388,17 +393,16 @@ Decided by the maintainer on this note (#967), recorded on #440:
 4. **Mirror images** at straight walls are in Stage 1.
 5. **Order.** The shared table store (canonical entry order, a table set per
    stencil shape, the cells' index) is #431's and lands first. #440 adds the
-   block numbering, the $(i, j, k)$ to shape map and the kernels.
+   block numbering, the block shapes and the kernels.
 
 ## Implementation
 
 One pull request per step, as a stack on #431:
 
 1. Detection and the block numbering.
-2. The $(i, j, k)$ to stencil shape map, on #431's table store.
-3. The TENO block kernel (below). The MUSCL block kernel, which needs a
-   least-squares table per stencil shape, is #1035; keyed tables and one fit
+2. Block shapes from each cell's own stencil (below); keyed tables and one fit
    per shape at setup are #986.
+3. The TENO block kernel and MUSCL's shared rows (below).
 4. Mirror images at straight walls.
 5. `mallard check` reporting.
 6. The documentation of [Documentation](#documentation).
@@ -415,9 +419,39 @@ partition changes which cells take the block path, never what they compute.
 A periodic box that is one block on its rank keeps its cells along the seams on
 the block path too: their offsets wrap the index, and each position along the
 seam is one more block shape. The shapes are found from the packed stencils at
-setup and after `rebuild_cells`. They do not use the keys of step 2, which
-depend on the partition near partition faces (#986).
+setup and after `rebuild_cells`. Keys from the block indices would depend on
+the partition near partition faces (#986).
 
 On GPUs the team pass gives each thread its own cell's row, by offsets or
 packed, so a team that straddles the edge of the block path stays on it for
 its block cells.
+
+**MUSCL tables.** MUSCL's face-neighbor fit, limiter and face extrapolation
+read, per face slot, the gradient weights and the offset to the face centroid
+from a table row (`MUSCLTables`). Every reconstructed cell (owned or in the
+first halo layer) of the face-neighbor fit (not a tetrahedron, no face on a
+characteristic boundary) without a rotational periodic face has a row, unless
+it lies in the outermost halo layer, whose missing faces would look like
+boundary faces; the states across its boundary faces still come from those
+faces. Rows equal on #994's grid (about $10^{-9}$ of
+their magnitude; $2^{-18}$ in single precision, above its round-off) are
+shared, each taking the row of its lowest global id, agreed over the ranks, so
+a cell's row depends on its own geometry alone and not on the partition. When
+fewer than 8 cells share each distinct row, over the ranks (counted by the
+rows' hashes before any is stored), no cell has a row: the rows would cost
+memory without sharing. The rows give 4-5% more cells/s on lattices on an
+A100, far from the CPU prototype's 3.5 times: on the GPU the fused kernel's
+time is the neighbors' states it reads, not the least-squares solve.
+
+**MUSCL's neighbor pass (#1119).** The fused kernel makes one pass over a
+row cell's face slots that sums the fit ($g = \mathrm{fma}(w_k, W_j - W_i,
+g)$) and keeps the extrema, then limits and extrapolates from registers: each
+neighbor's state is read once, not twice, and the cell's gradient is not
+written. The cells of a block whose faces all have a neighbor take them as the
+cell plus their block shape's offsets (`MUSCLTables::block`, a
+`teno::BlockStencils`) instead of through `faces_of_cell` and `cells_of_face`.
+The separate kernels call the same pass, so the fused and separate kernels
+and the block and face paths are bitwise equal.
+On an A100 against the rows alone: +4.8% cells/s on the walled MUSCL
+Taylor-Green $96^3$, +5.8% on the periodic one, +15% on `muscl_2d` ($1024^2$)
+and +3% on `air_3d`; the fused kernel takes 24-37% less time (nsys).

@@ -32,14 +32,14 @@
  */
 KOKKOS_INLINE_FUNCTION
 void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtype M_cut) {
-    const rtype M_l2 = dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma * W_l[N_DIM + 1]);
-    const rtype M_r2 = dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma * W_r[N_DIM + 1]);
+    const rtype M_l2 = fma_dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma * W_l[N_DIM + 1]);
+    const rtype M_r2 = fma_dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma * W_r[N_DIM + 1]);
     const rtype z = Kokkos::fmin(1.0_r, Kokkos::fmax(M_cut, Kokkos::sqrt(Kokkos::fmax(M_l2, M_r2))));
     FOR_I_DIM {
         const rtype mean = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
         const rtype half_jump = 0.5_r * (W_l[1 + i] - W_r[1 + i]);
-        W_l[1 + i] = mean + z * half_jump;
-        W_r[1 + i] = mean - z * half_jump;
+        W_l[1 + i] = fmadd(z, half_jump, mean);
+        W_r[1 + i] = fmadd(-z, half_jump, mean);
     }
 }
 
@@ -231,11 +231,11 @@ struct ConvectiveFluxFunctor {
                     low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
                 }
                 T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, gamma);
-                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
+                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = fmadd(phi, flux_q[i] - central[i], central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
-            FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
+            FOR_I_CONSERVATIVE total[i] = fmadd(w_q, flux_q[i], total[i]);
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces

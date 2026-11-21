@@ -744,6 +744,14 @@ class Solver {
          *        "step_graph_capture"). Call before run().
          */
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
+        /**
+         * @brief Tests only: every Solver initialized afterwards runs as with
+         *        [run] cuda_graphs = false, whatever its input, for
+         *        compute-sanitizer, which misreports the step graph's kernels
+         *        (#1076). Set from MALLARD_TEST_CUDA_GRAPHS=off.
+         */
+        static void set_cuda_graphs_off(bool off) { cuda_graphs_off = off; }
+        static bool are_cuda_graphs_off() { return cuda_graphs_off; }
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
@@ -839,6 +847,14 @@ class Solver {
         void add_radiation(StateView rhs, SpeciesView rhoY);
         void init_physics();
         void init_numerics();
+        /** @brief [numerics] viscous_gradients, checked against the reconstruction (teno: null unless TENO). */
+        void init_viscous_gradients(const TENO * teno);
+        /** @brief The functor's polynomial face gradients (viscous_gradients = "reconstruction"). */
+        void set_polynomial_flux(ViscousFluxFunctor & functor) const;
+        /** @brief TENO::polynomials for cells [0, n_cells). */
+        void allocate_polynomials(uint32_t n_cells);
+        /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
+        void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
@@ -941,6 +957,8 @@ class Solver {
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
+        void ledger_boundary_flux(const ViscousFluxFunctor * viscous);
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
         /** @brief The columns of a forces file after step and t (Q: modeled walls), and their dimensions. */
@@ -1000,6 +1018,7 @@ class Solver {
         bool use_device_steps = false;
         bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        static inline bool cuda_graphs_off = false;
         bool shared_stage_scratch = true;
         CaptureFault capture_fault = CaptureFault::NONE;
         uint32_t queue_depth = 1;              // launches ahead of the host
@@ -1125,6 +1144,10 @@ class Solver {
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
         void launch_flux_functor(const IndexSet & faces);
+        /** @brief The single gas's convective fluxes of faces into face_flux, by the chosen Riemann solver. */
+        void launch_convective_flux(const IndexSet & faces);
+        /** @brief The mixture's convective fluxes (double flux or not) of rhs_faces, by the chosen Riemann solver. */
+        void launch_mixture_convective_flux();
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
         bool exchanges_partition_faces() const;
         /**
@@ -1152,6 +1175,8 @@ class Solver {
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
         FaceExchange face_exchange;
+        // viscous_gradients = "reconstruction": the polynomials of halo cells next to those faces, from their owners
+        FaceExchange polynomial_exchange;
         IndexSet local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
@@ -1234,6 +1259,7 @@ class Solver {
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
+        bool polynomial_viscous = false;    // [numerics] viscous_gradients = "reconstruction"
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;

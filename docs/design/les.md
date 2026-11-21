@@ -1527,7 +1527,7 @@ benchmark keep `charlette` with `eddy_viscosity`.
 H2:N2 = 1:1 against air at 300 K, 1 atm, h2o2.yaml, mixture-averaged
 transport, MUSCL, HLLC, SSPRK3, `efficiency = "none"`, the table of
 `tools/setup/flame_table.py` (51 flames, `Z` = 0.144 to 0.644, `Z_st` =
-0.304). Speeds from `tools/post/flame_speed.py` against the table's `s_L`.
+0.304). Speeds from `mallard post flame` against the table's `s_L`.
 
 Planar premixed flames (`tools/setup/flame_restart.py`, strips 3 cells wide,
 square cells, 30 flame times), consumption speed error:
