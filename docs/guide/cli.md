@@ -1377,7 +1377,7 @@ Usage: mallard install verify [--format text|json] [--launcher COMMAND] [--keep 
 Checks an install where it is, for each solver it has (mallard2d, mallard3d):
 the environment, as mallard check without an input reports it (the build,
 devices, MPI), with no error; and a quick run, the Sod shock tube of mallard new
-sod --quick (a slab four cells thick in 3D) to t = 0.2, which must finish and
+sod --quick (a slab one cell thick in 3D) to t = 0.2, which must finish and
 match the exact solution: the undisturbed state ahead of the shock (rho 0.125, p
 0.1, within 2%) and the largest Mach number (0.929, within 0.05), from the run
 log's monitors.

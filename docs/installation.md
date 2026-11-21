@@ -212,7 +212,7 @@ It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRAR
 
 ## Checking an install
 
-`mallard install verify` checks an install where it is, whichever way it was installed: for each solver it has, the environment (as `mallard check` without an input reports it: the build, devices and MPI, with no error) and a quick run, the Sod shock tube of `mallard new sod --quick` (a slab four cells thick in 3D) to t = 0.2, which must finish and match the exact solution ahead of the shock and at its largest Mach number. It takes a few seconds per solver on a CPU. Run it where the runs will run, as a short job on their partition; `--launcher` runs each check under the job's launcher:
+`mallard install verify` checks an install where it is, whichever way it was installed: for each solver it has, the environment (as `mallard check` without an input reports it: the build, devices and MPI, with no error) and a quick run, the Sod shock tube of `mallard new sod --quick` (a slab one cell thick in 3D) to t = 0.2, which must finish and match the exact solution ahead of the shock and at its largest Mach number. It takes a few seconds per solver on a CPU. Run it where the runs will run, as a short job on their partition; `--launcher` runs each check under the job's launcher:
 
 ```sh
 srun -n 1 -c 4 mallard install verify --kokkos-num-threads=4

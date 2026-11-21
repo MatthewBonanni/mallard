@@ -152,7 +152,10 @@ Check environment(int dim, const fs::path & solver, const std::vector<std::strin
     return c;
 }
 
-/** @brief The Sod shock tube of `mallard new sod --quick`, made three-dimensional (a slab four cells thick) for 3D. */
+/**
+ * @brief The Sod shock tube of `mallard new sod --quick`, made three-dimensional for 3D: extruded one cubic cell
+ *        thick, so it takes the steps of the 2D case.
+ */
 bool make_case(int dim, const fs::path & front_end, const fs::path & dir, std::string & why) {
     // --dim: the template is 2D, and a build may have mallard3d alone
     const Exit e = run_in({front_end.string(), "--dim", std::to_string(dim), "new", "sod", dir.string(), "--quick",
@@ -165,8 +168,8 @@ bool make_case(int dim, const fs::path & front_end, const fs::path & dir, std::s
     }
     if (dim == 2) return true;
     std::string text = read_text(dir / "input.toml");
-    text = case_template::set_key(text, "mesh.Nz", "4");
-    text = case_template::set_key(text, "mesh.Lz", "0.02");
+    text = case_template::set_key(text, "mesh.Nz", "1");
+    text = case_template::set_key(text, "mesh.Lz", "0.005");
     text = case_template::set_key(text, "initialize.u", "[\"0.0\", \"0.0\", \"0.0\"]");
     text += "\n[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
     std::ofstream(dir / "input.toml") << text;
