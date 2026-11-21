@@ -1,10 +1,8 @@
 """Schematics of the inlet conditions: the waves at a subsonic inflow face,
 which the condition imposes (flame) and which come from the interior (teal),
-and how the boundary state follows from them; and the local coordinates of a
-boundary's faces."""
-from matplotlib.patches import Arc, Circle, FancyArrowPatch, Rectangle
+and how the boundary state follows from them."""
+from matplotlib.patches import FancyArrowPatch, Rectangle
 import matplotlib.pyplot as plt
-import numpy as np
 
 import figstyle
 from figstyle import bare, label
@@ -72,69 +70,10 @@ def inlet(P, spec):
     return fig
 
 
-def boundary_frame(P):
-    """Left: a 2D inlet above a wall, its frame (origin, inward normal, tangent) and a face's n, xi and s.
-    Right: a 3D inlet seen along its normal, with xi, eta, r and theta."""
-    fig, (ax, bx) = plt.subplots(1, 2, figsize=(9.0, 4.0), gridspec_kw=dict(width_ratios=[1.15, 1.0], wspace=0.08))
-    H = 2.0
-    ax.add_patch(Rectangle((0.0, 0.0), 2.4, H, facecolor=P["teal"], alpha=0.07, edgecolor="none"))
-    ax.add_patch(Rectangle((-0.2, -0.18), 2.6, 0.18, facecolor="none", edgecolor=P["muted"], hatch="///", lw=0))
-    ax.plot([-0.2, 2.4], [0, 0], color=P["fg"], lw=2.5)
-    label(ax, 2.05, -0.36, "wall", P, size=11, color=P["muted"])
-    faces = np.linspace(0.0, H, 9)
-    ax.plot([0, 0], [0, H], color=P["flame"], lw=3.5)
-    ax.plot(np.zeros_like(faces), faces, "_", color=P["flame"], ms=10, mew=2)
-    label(ax, -0.12, H + 0.16, "inlet faces", P, size=11, color=P["flame"], ha="left")
-    origin = (0.0, 0.5 * H)
-    ax.add_patch(Circle(origin, 0.05, color=P["fg"], zorder=5))
-    label(ax, -0.14, origin[1] + 0.12, "origin", P, size=11, ha="right")
-    arrow(ax, origin, (0.85, origin[1]), P["plum"])
-    label(ax, 0.92, origin[1] + 0.02, "normal", P, size=11, color=P["plum"], ha="left")
-    arrow(ax, (0.14, origin[1]), (0.14, origin[1] + 0.75), P["blue"])
-    label(ax, 0.22, origin[1] + 0.62, r"tangent ($\xi$)", P, size=11, color=P["blue"], ha="left")
-    yf = faces[2] + 0.5 * (faces[3] - faces[2])
-    ax.add_patch(Circle((0.0, yf), 0.045, color=P["flame"], zorder=5))
-    arrow(ax, (0.55, yf), (0.55, 0.0), P["teal"], lw=1.6)
-    ax.plot([0.0, 0.55], [yf, yf], ls=":", color=P["muted"], lw=1.2)
-    label(ax, 0.62, 0.5 * yf, r"$n$", P, size=13, color=P["teal"], ha="left")
-    ax.annotate("", xy=(-0.42, yf), xytext=(-0.42, origin[1]),
-                arrowprops=dict(arrowstyle="<->", color=P["blue"], lw=1.4, shrinkA=0, shrinkB=0))
-    label(ax, -0.5, 0.5 * (yf + origin[1]), r"$\xi < 0$", P, size=12, color=P["blue"], ha="right")
-    ax.annotate("", xy=(-0.95, yf), xytext=(-0.95, 0.0),
-                arrowprops=dict(arrowstyle="<->", color=P["gold"], lw=1.4, shrinkA=0, shrinkB=0))
-    label(ax, -1.03, 0.5 * yf, r"$s$ (2D)", P, size=12, color=P["gold"], ha="right")
-    bare(ax)
-    ax.set_xlim(-1.75, 2.45)
-    ax.set_ylim(-0.5, H + 0.35)
-
-    R = 1.0
-    bx.add_patch(Circle((0, 0), R, facecolor=P["flame"], alpha=0.10, edgecolor=P["flame"], lw=2.5))
-    arrow(bx, (0, 0), (1.35, 0), P["blue"])
-    arrow(bx, (0, 0), (0, 1.35), P["blue"])
-    label(bx, 1.45, 0.0, r"$\xi$", P, size=13, color=P["blue"], ha="left")
-    label(bx, 0.0, 1.47, r"$\eta$", P, size=13, color=P["blue"])
-    th = np.deg2rad(35.0)
-    q = (0.72 * np.cos(th), 0.72 * np.sin(th))
-    bx.plot([0, q[0]], [0, q[1]], color=P["fg"], lw=1.4)
-    bx.add_patch(Circle(q, 0.04, color=P["flame"], zorder=5))
-    label(bx, 0.5 * q[0] - 0.06, 0.5 * q[1] + 0.1, r"$r$", P, size=13)
-    bx.add_patch(Arc((0, 0), 0.6, 0.6, theta1=0, theta2=35, color=P["fg"], lw=1.2))
-    label(bx, 0.42, 0.11, r"$\theta$", P, size=12)
-    bx.add_patch(Circle((0, 0), 0.05, color=P["fg"], zorder=5))
-    label(bx, -0.08, -0.14, "origin", P, size=11, ha="right")
-    label(bx, 0.0, -1.32, "3D inlet seen along its normal", P, size=11, color=P["muted"])
-    bare(bx)
-    bx.set_xlim(-1.4, 1.75)
-    bx.set_ylim(-1.5, 1.65)
-    return fig
-
-
 def figures(names=None):
     for name, spec in INLETS.items():
         if not names or name in names:
             figstyle.save(name, lambda P, spec=spec: inlet(P, spec))
-    if not names or "boundary_frame" in names:
-        figstyle.save("boundary_frame", boundary_frame)
 
 
 if __name__ == "__main__":

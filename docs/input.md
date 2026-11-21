@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `frame.origin`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -553,12 +553,22 @@ Tables and point clouds from CSV files, read by the expressions of
 | `name` | Prefix of the variables (required) |
 | `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
 | `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
-| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
-| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the coordinates, if named `x`, `y`, `z`) |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the file's metadata, else the coordinates, if named `x`, `y`, `z`) |
 | `region` | Instead of `at`, one coordinate: the signed distance to this [region](#regions) |
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
-| `units` | Units of columns, e.g. `{x = "mm"}` (default SI) |
+| `units` | Units of columns, e.g. `{x = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales: `length`, `velocity`, `density`, `temperature`, e.g. `{length = 0.02, velocity = 15}`; each column by its dimension (velocities by the velocity ratio, Reynolds stresses by its square, pressures as `rho U^2`), so every column needs a unit (`"1"` if dimensionless). Default none |
+| `reference` | With `scale`: the scales of the data, e.g. `{length = 0.01, velocity = 30}` (default: the file's metadata) |
+
+A file's metadata is a comment line `# mallard-profile {...}` before its
+header, a JSON object of `coordinates`, `at`, `units` (an object of columns
+and units), `reference` (an object of scales, numbers in SI or quantities
+such as `"10 mm"`), `source` and `transforms` (a list of strings): defaults
+of the entry's keys and a record of where the data come from. See
+[profile files](guide/boundary_conditions.md#profile-files-metadata-and-rescaling).
 
 ### `[initialize.turbulence]`
 
@@ -637,7 +647,8 @@ without `direction` (a wall moving along its normal).
 
 Every number of a condition may be a number, a quantity with a unit
 (`"300 K"`, a quantity, not an expression) or an expression of `x`, `y`,
-`z`, `t` and the [local coordinates](#local-coordinates) in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
+`z`, `t`, the [local coordinates](#local-coordinates) and the
+[data](#boundariesdata) in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
 and `T0`, `mass_flux` and `T` of `inlet_mass_flow`, the wall velocity, `T`
 of `wall_isothermal`, `q` of `wall_heat_flux`, `p` of `outlet_pressure`, and
 for mixtures the inflow composition. They are evaluated at each face center,
@@ -664,24 +675,51 @@ face; at inlets it must point into the domain at every face and time.
 
 ### Local coordinates
 
-Expressions of an entry also read its faces' local coordinates: `n`, the
-distance to the nearest wall face; `xi`, the coordinate along the tangent of
-the entry's frame from its origin; in 3D `eta` (along the second tangent),
-`r` and `theta` (polar about the origin in the boundary's plane); in 2D `s`,
-the arc length along the boundary from its end with the lowest `xi`.
+Expressions of an entry also read its faces' local coordinates: `u` and `v`
+(3D), from 0 to 1 across the patch the entry's faces form (four-sided, a
+ring or a disk; in 2D `u` along the boundary), and `n`, the distance to the
+nearest wall face over its largest value on the boundary. Each has a twin in
+meters measured along the boundary: `u_m`, `v_m`, `n_m`. On rings and disks
+`r`, `r_m` are other names for `v`, `v_m` and `theta` is `2 * pi * u`.
 They are computed once at setup from all of the entry's faces, the same on
 every rank count. `where`, `mdot` and an `average` outlet `p` do not read
-them. A local variable of the same name (`var s := ...`) hides a coordinate
-in its expression. `walls` and `frame` are errors on an entry that reads no
-coordinate they set. Guide:
+them. A local variable of the same name (`var u := ...`) hides a coordinate
+in its expression. `walls`, `corners`, `origin` and `toward` are errors on an
+entry that reads no coordinate they set. Guide:
 [local coordinates](guide/boundary_conditions.md#local-coordinates).
 
 | Key | Default | Meaning |
 |---|---|---|
-| `frame.origin` | the area-weighted center of the entry's faces | Origin of `xi`, `eta`, `r`, `theta` [m] |
-| `frame.normal` | the area-weighted mean inward normal of the entry's faces | Normal of the frame (normalized) |
-| `frame.tangent` | the coordinate axis after the normal's dominant one (x to y, y to x in 2D; x to y, y to z, z to x in 3D) | Direction of `xi`, made perpendicular to the normal; in 3D the span (`eta`) is perpendicular to both, its largest component positive |
-| `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` measures the distance from, of any type (a non-empty list) |
+| `corners` | found from the patch's outline, where it turns by more than 30 degrees | 3D: the four corners of the patch [m], where `(u, v)` is (0, 0), (1, 0), (1, 1) and (0, 1), each moved to the nearest node of the outline; `[]` for a patch without corners (a disk) |
+| `origin` | from the coordinate axes ([guide](guide/boundary_conditions.md#local-coordinates)) | A point [m] where `u` starts: `(u, v)` is (0, 0) at the corner of a four-sided patch nearest to it, `u` is 0 at the face of a ring or a disk nearest to it, or at the end of a 2D boundary nearest to it, at any distance; a point as near to two of them (within 1% of the patch's size) is an error. Not with four `corners` |
+| `toward` | from the coordinate axes | 3D, with `origin`: a point [m] `u` grows toward: along the side to the corner next to the origin's that is nearest to it, or around a ring or a disk the way that reaches it sooner |
+| `walls` | the faces of every `wall_adiabatic`, `wall_isothermal` and `wall_heat_flux` entry | Zones `n` and `n_m` measure the distance from, of any type (a non-empty list) |
+
+### `[[boundaries.data]]`
+
+Tables and point clouds from CSV files in the format of
+[`[[initialize.data]]`](#initializedata), read once at each face of the
+`[[boundaries]]` entry they follow and given to its expressions as the
+variables `<name>_<column>` (at most 16 value columns per entry). They are
+not read by `where`, `mdot` or an `average` outlet `p`; data no expression
+reads are an error. The run log shows the range of each coordinate and
+variable at the faces and the faces outside a table. Guide:
+[profiles from data](guide/boundary_conditions.md#profiles-from-data).
+
+| Key | Description |
+|---|---|
+| `name` | Prefix of the variables (required) |
+| `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
+| `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the file's metadata, else the coordinates, if named `x`, `y`, `z` (or `X`, `Y`, `Z`) or like a local coordinate) |
+| `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
+| `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
+| `units` | Units of columns, e.g. `{y = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales, as in [`[[initialize.data]]`](#initializedata) (default none) |
+| `reference` | With `scale`: the scales of the data (default: the file's metadata) |
+| `outside` | (tables) Faces beyond a coordinate column's range: `hold` (default), the column's end values; `error`, an input error saying how many |
 
 ### Characteristic boundaries (`nscbc`)
 
@@ -766,7 +804,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: the statistics of a precursor run, the columns `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ... (missing off-diagonal covariances are zero) of the entry's [`[[boundaries.data]]`](#boundariesdata) of this name, read at the faces in any coordinates; or a CSV file of plane averages as `mallard post average --homogeneous` writes them, read as such an entry with its defaults (its first column the coordinate: `x`, `y`, `z`, `X`, `Y`, `Z` or a local coordinate such as `n_m`; linear) |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -877,13 +915,13 @@ cell over `dt` under its chemistry plus that constant source, then lets
 the flow correct over the second half of the step with `T(U) - T(U^n)`:
 steady states of chemistry and transport stay exactly steady at any `dt`
 (see the [thermochemistry guide](guide/thermochemistry.md#finite-rate-chemistry)). The integrator
-is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
-double precision in every build.
+is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, or a
+variable-order BDF, in double precision in every build.
 
 | Key | Description |
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
-| `integrator` | `rosenbrock` (the default and only choice so far) |
+| `integrator` | `rosenbrock` (default; RODAS) or `bdf` (variable-order BDF, orders 1-5, with the Jacobian and its factorization kept over many sub-steps; CVODE's strategy). BDF is faster where cells take one or a few sub-steps per call, as at the small time steps of detonations and compressible flames (n-dodecane and n-hexane at `dt` = 1e-8 s: 1.4-1.7 times RODAS's throughput on CPUs, up to 1.4 on an A100), and gains less at larger time steps, since every call restarts it at order 1 (1.1-1.5 times at 1e-6 s). Its error estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate than RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`, within 2e-5 at `1e-14`); see the [design notes](design/chemistry.md#bdf-integrator-issue-143) |
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
@@ -1634,6 +1672,7 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)) |
 | `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, `Y_<species>`, `MACH`, `H`, `X_<species>`, `VORTICITY` (3D: `VORTICITY_X`, `_Y`, `_Z`) and `Q_CRITERION` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
 | `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
@@ -1714,7 +1753,8 @@ curve with filled regions clip it: the parts inside them (outside the
 subtracted ones), keeping its dimension and orientation; the surface or curve
 comes first in a `difference`.
 
-The surfaces of primitives (and 3D flat surfaces and curves) are exact: their
+The surfaces of primitives (and 3D flat surfaces and curves) are exact (`stl`
+and `obj`: their triangles; 2D: the segments of their section): their
 parameters cut into patches about half a cell wide with Gauss points; planes,
 boundary zones and the faces around regions of the mesh are cut or taken
 exactly from the cells; boundaries of booleans and `implicit` regions are

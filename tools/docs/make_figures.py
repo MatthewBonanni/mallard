@@ -8,6 +8,7 @@ With --mallard (a 2D build; an MPI build for the partitions) the figures from
 short runs and the sample run report are redrawn too (the Python package's with a
 build that has its library, the default).
 With --mallard3d the 3D region, probe and mesh-field figures are drawn too.
+With either, the local coordinates of boundary faces are checked against Mallard's.
 MALLARD_FIGURE_PREVIEW=dir also writes PNGs on the site's backgrounds there, for
 review.
 
@@ -16,10 +17,12 @@ Each module's figures are drawn by one call below, in alphabetical order.
 import argparse
 import sys
 
+import boundary_coordinates
 import case_view
 import domains
 import effective_resolution
 import geometry
+import gui_mockups
 import high_order_cost
 import inlets
 import les_models
@@ -43,9 +46,11 @@ def main():
     ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D region, probe and mesh-field figures")
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
+    boundary_coordinates.figures(args.mallard, args.mallard3d)
     domains.figures()
     effective_resolution.figures()
     geometry.figures(args.mallard, args.mallard3d)
+    gui_mockups.figures()
     high_order_cost.figures()
     inlets.figures()
     les_models.figures()

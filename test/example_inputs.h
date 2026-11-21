@@ -136,6 +136,11 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
     auto & physics = input.at("physics").as_table();
     if (physics.count("mechanism")) physics["mechanism"] = (dir / physics.at("mechanism").as_string()).string();
     for (auto & b : input.at("boundaries").as_array()) {
+        if (b.contains("data")) {
+            for (auto & d : b.as_table().at("data").as_array()) {
+                d.as_table()["file"] = (dir / d.at("file").as_string()).string();
+            }
+        }
         if (b.contains("turbulence") && b.at("turbulence").contains("profile")) {
             auto & turbulence = b.as_table().at("turbulence").as_table();
             turbulence["profile"] = (dir / turbulence.at("profile").as_string()).string();

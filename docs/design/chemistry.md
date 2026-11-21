@@ -702,7 +702,8 @@ consecutive steps are not fused yet (each half restarts RODAS from the
 cell's last sub-step, so the cost of the split is one extra Jacobian per
 cell and step; fusing is an optimization for later). Owned cells are
 processed in chunks sized to keep the per-cell work memory (mass fractions,
-RODAS vectors and two `(Ns + 1)^2` matrices) under 1 GiB; in each chunk a
+RODAS vectors, two `(Ns + 1)^2` matrices, pivots and the audit's clipped
+species masses) under 1 GiB; in each chunk a
 kernel flags the cells that need chemistry (`T >= T_frozen` and
 `dt/2 max_k |W_k omega_k / rho| > atol / 100` at the current state), a scan
 compacts them into a queue, and one thread per queued cell integrates.
@@ -1040,7 +1041,8 @@ constant-volume reactor over the splitting step:
 A variable-order BDF integrator (CVODE-like, reusing the Jacobian over many
 steps) is more efficient for large mechanisms with loose tolerances and is a
 later milestone behind the same interface, either our own or Kokkos Kernels'
-batched BDF if it proves adequate. An explicit stabilized integrator (RKC/ROCK)
+batched BDF if it proves adequate (our own, as an option:
+[BDF integrator](#bdf-integrator-issue-143)). An explicit stabilized integrator (RKC/ROCK)
 is an option for mildly stiff cases (preheat zones, very small `dt`).
 
 ```cpp
@@ -1532,6 +1534,128 @@ of `T`, against RODAS's own 5e-5 from Cantera;
 failed step leaves RODAS's state and proposal bitwise as without the option,
 with `CHEM_H` negated, and that an ignition's short sub-steps clear it.
 
+### BDF integrator (issue #143)
+
+`[chemistry] integrator = "bdf"` (RODAS stays the default). `integrate_bdf`
+in `src/chemistry/bdf.h` has `integrate()`'s interface: the same system
+(`rhs`, `rhs_jacobian`, `atol`, `admissible`), dense or sparse LU, error norm,
+options and result. It runs one cell per thread or per team, on the device,
+and `advance_reactor` picks one of the two from `ReactorOptions::method`.
+Only the work memory changes: `(BDF_MAX_ORDER + 8) Ns` doubles of vectors
+against RODAS's `16 Ns`. RODAS's code paths are untouched. `mallard reactor`
+on n-dodecane, H2 and CH4 writes the same CSVs on `main` and on this branch,
+to every digit printed, with the same sub-step counts.
+
+The method follows CVODE, in the backward-difference form of
+Shampine & Reichelt (SciPy's `BDF`):
+
+- **Orders 1 to 5, quasi-constant step.** The differences are rescaled by
+  `(R U)^T` when `h` changes. `h` changes only by a factor of at least 1.5,
+  at most 10, or after a failure. The order is reconsidered after
+  `order + 1` steps at the same `h`: it moves to `k - 1`, `k` or `k + 1`,
+  whichever allows the largest step.
+- **Simplified Newton.** At most 3 iterations, CVODE's convergence-rate
+  test and divergence check, and the correction damped by
+  `2 / (1 + c / c_factored)` when `h / alpha` has drifted since the
+  factorization. The tolerance is 0.1 of the error test's budget.
+- **Jacobian and factorization reuse.** The Jacobian is kept for 50 steps,
+  or until Newton fails with a stale one. The factorization is kept while
+  `h / alpha` changes by less than 30%.
+- **Step factors** are `(bias err)^(-1 / (k + 1))` with biases 2, 2 and 3
+  for order down, same and up. CVODE uses 6, 6 and 10. The smaller biases
+  took 10-30% less time on n-dodecane and n-hexane ignitions: fewer sub-steps,
+  though more of them are rejected.
+- **Rejections.** A step that is accurate but inadmissible (a few species
+  past `-atol` that the RMS norm passes) retries at order 1 with half the
+  step. Order 1 damps decaying species, so they stop overshooting zero.
+  Without this, n-hexane underflowed. Three failures in a row restart at
+  order 1.
+
+**Accuracy.** BDF's error estimate is that of the solution it keeps. RODAS
+keeps its fourth-order solution and estimates the error of the third-order
+one. At the same `rtol` and `atol`, BDF is therefore less accurate wherever
+species below `atol` matter, as H2's radical pool does during induction:
+
+| Case | RODAS | BDF |
+|---|---|---|
+| H2/air ignition delay (h2o2, 1000 K, 1 atm, phi 1), `atol` 1e-10 | +1.4e-4 | -2.3% |
+| the same, `atol` 1e-14 | | -1.3e-5 |
+| V1 h2o2 cases, largest delay error, test (`atol` 1e-10 / 1e-14) | 1.4e-4 | 5.9e-5 |
+| V2 GRI-3.0 cases, largest delay error, test (as above) | 3e-6 | 8.9e-6 |
+| n-dodecane, sparse LU, `atol` 1e-10 (test criterion 5e-3) | 5.4e-6 | 2.9e-4 |
+| V3 n-hexane (1268 species), 1000/1200/1400 K, delay | 0 / -2e-6 / -4e-6 | -5.8e-5 / -4.5e-5 / -8.2e-5 |
+| V3 `T` at 0.5 and 2 delays | < 1e-5 | < 1e-5 |
+
+`ChemistryReactorTest.BdfIgnitionDelaysAndEquilibriumMatchCantera` runs V1 and
+V2 with BDF at `atol` 1e-14, with RODAS's criteria. Other tests:
+
+- `LargeMechanismIgnitesLikeCanteraWithBdf` (n-dodecane, sparse LU,
+  `atol` 1e-10);
+- `BdfSolvesTheStiffRobertsonProblem`;
+- `BdfRescaledDifferencesAreThoseOfTheNewStep`, which checks the rescaling
+  on a polynomial of each order;
+- `BdfVectorLanesIntegrateLikeOneThread`. Lanes reorder sums, and BDF's
+  discrete decisions amplify that more than RODAS's do, so it allows 25%
+  more sub-steps against RODAS's 10%.
+
+All of them pass on an A100 (CUDA 13.5, sm_80) as on CPUs.
+
+**Flame speed.** Neither large mechanism has transport data, here or in
+Cantera's copies, so the flame speed is compared on the largest mechanism
+that has it: CH4/air with GRI-3.0 (53 species), phi 1, 300 K, 1 atm, with
+mixture-averaged transport. The run is V8's setup (20 cells per thermal
+thickness, two flame times, `tools/post/flame_speed.py`) on 8 OpenMP threads
+each, against Cantera's 0.37312 m/s:
+
+| | Consumption speed | Displacement speed | Chemistry time | Time stepping |
+|---|---|---|---|---|
+| RODAS | 0.37146 m/s (-0.44%) | 0.36993 m/s | 23.6 min | 50.5 min |
+| BDF | 0.37158 m/s (-0.41%) | 0.36992 m/s | 21.1 min | 48.5 min |
+
+The two speeds differ by 3e-4 of each other, well inside the discretization
+error.
+
+**Speed.** `benchmarks/chemistry` throughput in cells per second, at the
+default tolerances and sparse LU. The A100 uses the default execution (a
+warp per cell, wide teams for the expensive cells, ordered by cost). The
+CPU is an EPYC 7763 on 16 OpenMP threads, one thread per cell. Each figure
+is the best of two runs.
+
+| Case | Hardware | `dt` | RODAS | BDF | BDF / RODAS |
+|---|---|---|---|---|---|
+| n-dodecane | A100 | 1e-8 s | 3.13e5 | 4.33e5 | 1.38 |
+| | | 1e-6 s | 5.57e4 | 6.28e4 | 1.13 |
+| | CPU | 1e-8 s | 6.09e4 | 1.03e5 | 1.69 |
+| | | 1e-6 s | 2.54e4 | 2.79e4 | 1.10 |
+| n-hexane | A100 | 1e-8 s | 5.91e3 | 5.71e3 | 0.97 |
+| | | 1e-6 s | 1.81e3 | 2.47e3 | 1.36 |
+| | CPU | 1e-8 s | 2.81e3 | 3.91e3 | 1.39 |
+| | | 1e-6 s | 1.34e3 | 1.97e3 | 1.47 |
+
+Where it gains:
+
+- At 1e-8 s nearly every cell finishes in one or two sub-steps either way.
+  BDF's sub-steps are cheaper: one Jacobian per call and a factorization
+  only when `h / alpha` moves, then one to three right-hand sides and solves
+  per step, against RODAS's six
+  stages.
+- At 1e-6 s its sub-step histogram is wider (n-dodecane: 8.3 to 8.9 sub-steps
+  per cell on average against 2.7), and every call restarts it at order 1 with a
+  fresh Jacobian. So it gains little where most cells are cheap
+  (n-dodecane), and gains most where the igniting cells dominate
+  (n-hexane).
+- n-hexane at 1e-8 s on the A100 is even: RODAS takes a single sub-step
+  and BDF 1.05, and both pay for a Jacobian and factorization of 57k
+  entries. On the CPU, where a cell's work is serial, BDF's cheaper sub-step
+  shows (1.39).
+
+The rows are in `benchmarks/baselines.csv` (execution `... bdf`). BDF
+stays an option and not the default. Its throughput gains depend on the regime:
+1.0 to 1.7 times. At the default `atol`, its ignition delays
+are a few times further from the reference than RODAS's, and 2.3% early for
+H2. Making it the default would need the tighter `atol`, which costs part
+of the gain.
+
 ## 6. Transport
 
 ### Models
@@ -1673,7 +1797,7 @@ end. Isothermal and heat-flux walls with chemistry and Soret, and with
 double flux (inert), are bitwise identical on 1-4 ranks.
 
 V8 (`examples/premixed_flame`, `tools/setup/flame_reference.py`,
-`flame_restart.py`, `flame_speed.py`): a 1D strip in
+`flame_restart.py`, `mallard post flame`): a 1D strip in
 the flame's frame, started from Cantera's flame (`FreeFlame`, same mechanism
 and transport model) shifted to 6 thermal
 thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
@@ -1961,7 +2085,7 @@ lewis = { H2 = 0.3, H = 0.18 }    # constant_lewis; others default to 1
 
 [chemistry]
 enabled = true                    # false: non-reacting multicomponent flow
-integrator = "rosenbrock"         # later "bdf", "rkc"
+integrator = "rosenbrock"         # or "bdf"; later "rkc"
 coupling = "strang"               # later "sdc"
 rtol = 1.0e-6
 atol = 1.0e-10
@@ -2086,7 +2210,7 @@ until milestone 8 (the 0D tool arrives in milestone 7).
     [section 5](#as-implemented-milestone-11); partition weights not added.
 12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures
     (done);
-    BDF integrator; SDC coupling; mechanism-specialized (code-generated)
+    BDF integrator (done: [section 5](#bdf-integrator-issue-143)); SDC coupling; mechanism-specialized (code-generated)
     kernels; 2D cellular detonation, counterflow flame and mixing-layer
     cases.
 

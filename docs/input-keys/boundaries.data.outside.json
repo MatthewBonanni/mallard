@@ -1,0 +1,14 @@
+{
+ "default": "\"hold\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/profile_files.toml"
+ ],
+ "type": "string",
+ "values": [
+  "error",
+  "hold"
+ ]
+}
