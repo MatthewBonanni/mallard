@@ -6,7 +6,8 @@
  ],
  "required": true,
  "set_in": [
-  "tools/dev/catalog_inputs/2d/check.toml"
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/particle_injectors.toml"
  ],
  "type": "number"
 }
