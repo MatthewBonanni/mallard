@@ -64,6 +64,7 @@
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
   "tools/dev/catalog_inputs/3d/mesh_file.toml",
   "tools/dev/catalog_inputs/3d/sector.toml",

@@ -3,7 +3,8 @@
   2
  ],
  "set_in": [
-  "examples/shock_bubble_2d/input.toml"
+  "examples/shock_bubble_2d/input.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml"
  ],
  "type": "array"
 }
