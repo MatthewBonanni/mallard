@@ -259,7 +259,9 @@ TEST(ParticleInjectionTest, AZoneInjectorSpreadsByAreaAlongItsInwardNormal) {
     }
     const auto uniform = [](double x) { return std::clamp(x, 0.0, 1.0); };
     EXPECT_LT(ks_distance(y, uniform), ks_critical(y.size()));
-    if (N_DIM == 3) EXPECT_LT(ks_distance(z, uniform), ks_critical(z.size()));
+    if (N_DIM == 3) {
+        EXPECT_LT(ks_distance(z, uniform), ks_critical(z.size()));
+    }
 }
 
 TEST(ParticleInjectionTest, VelocitiesFillTheirCone) {
@@ -294,12 +296,14 @@ TEST(ParticleInjectionTest, VelocitiesFillTheirCone) {
     }
     const auto uniform = [](double x) { return std::clamp(x, 0.0, 1.0); };
     EXPECT_LT(ks_distance(u, uniform), ks_critical(u.size()));
-    for (size_t i = 0; i < N_DIM; i++) EXPECT_LT(std::abs(side[i]) / static_cast<double>(records.size()), 4.0 * 0.5 / std::sqrt(1000.0));
+    for (size_t i = 0; i < N_DIM; i++) {
+        EXPECT_LT(std::abs(side[i]) / static_cast<double>(records.size()), 4.0 * 0.5 / std::sqrt(1000.0));
+    }
 }
 
 TEST(ParticleInjectionTest, ARegionInjectorFillsItsShapeUniformly) {
     // Tracers in gas at rest stay where they enter: inside the disk (sphere), with the mean and the mean square
-    // radius of a uniform one
+    // radius of a uniform one; and inside the mesh, uniform along each axis
     const double R = 0.2, c[3] = {0.5, 0.5, 0.25};
     const std::string shape = N_DIM == 3 ? "sphere" : "disk";
     const std::string keys = "[[particles.injectors]]\nname = \"cloud\"\nregion = {type = \"" + shape +
@@ -324,7 +328,26 @@ TEST(ParticleInjectionTest, ARegionInjectorFillsItsShapeUniformly) {
     // r^2 / R^2 is uniform (2D) or Beta(5/2, 1) (3D)
     const double expected = N_DIM == 3 ? 0.6 : 0.5, sd = N_DIM == 3 ? std::sqrt(12.0 / 175.0) : std::sqrt(1.0 / 12.0);
     EXPECT_NEAR(r2, expected, 4.0 * sd / std::sqrt(static_cast<double>(N)));
-    for (size_t i = 0; i < N_DIM; i++) EXPECT_NEAR(mean[i], c[i], 4.0 * R / 2.0 / std::sqrt(static_cast<double>(N)));
+    for (size_t i = 0; i < N_DIM; i++) {
+        EXPECT_NEAR(mean[i], c[i], 4.0 * R / 2.0 / std::sqrt(static_cast<double>(N)));
+    }
+    // The whole mesh, cell by cell: in the box, uniformly along each axis
+    Solver whole;
+    whole.init(parse_toml(box(0.0, "n_steps = 10\ndt = 0.005\n",
+                              "[[particles.injectors]]\nname = \"fill\"\nregion = \"domain\"\nrate = 20000.0\n")));
+    whole.run();
+    const std::vector<particles::Record> filled = whole.get_particles()->gather();
+    ASSERT_EQ(filled.size(), 1000u);
+    const double length[3] = {1.0, 1.0, 0.5};
+    for (size_t i = 0; i < N_DIM; i++) {
+        std::vector<double> u;
+        for (const auto & r : filled) {
+            ASSERT_GE(r.x[i], 0.0);
+            ASSERT_LE(r.x[i], length[i]);
+            u.push_back(r.x[i] / length[i]);
+        }
+        EXPECT_LT(ks_distance(u, [](double x) { return std::clamp(x, 0.0, 1.0); }), ks_critical(u.size()));
+    }
 }
 
 namespace {
@@ -333,13 +356,13 @@ namespace {
 std::string mixed_injectors(const std::string & run) {
     const std::string keys =
         "coupling = \"two-way\"\ndensity = 1000.0\ndiameter = 2e-3\nweight = 3.0\n"
-        "[[particles.injectors]]\nname = \"inlet\"\nregion = \"left\"\nrate = 1500.0\nspeed = 1.5\ncone_angle = 20.0\n"
+        "[[particles.injectors]]\nname = \"inlet\"\nregion = \"left\"\nrate = 1530.0\nspeed = 1.5\ncone_angle = 20.0\n"
         "diameter = {distribution = \"rosin_rammler\", size = 1e-3, spread = 2.5, basis = \"mass\", min = 2e-4, "
         "max = 3e-3}\n"
         "[[particles.injectors]]\nname = \"cloud\"\nregion = {type = \"" + std::string(N_DIM == 3 ? "sphere" : "disk") +
         "\", center = " + numbers(0.6, 0.3, 0.25) + ", radius = 0.15}\n"
-        "rate = 800.0\nvelocity = " + numbers(0.0, 0.5, 0.0) + "\nweight = 10.0\n"
-        "[[particles.injectors]]\nname = \"nozzle\"\npoint = " + numbers(0.3, 0.8, 0.1) + "\nrate = 600.0\nspeed = 3.0\n"
+        "rate = 830.0\nvelocity = " + numbers(0.0, 0.5, 0.0) + "\nweight = 10.0\n"
+        "[[particles.injectors]]\nname = \"nozzle\"\npoint = " + numbers(0.3, 0.8, 0.1) + "\nrate = 610.0\nspeed = 3.0\n"
         "direction = " + numbers(1.0, -1.0, 0.5) + "\ncone_angle = 45.0\nstart = 0.02\n";
     return box(1.0, run, keys, "solid");
 }
@@ -367,6 +390,7 @@ TEST(ParticleInjectionTest, InjectedParticlesAreBitwiseIndependentOfRanksAndStep
 
 TEST(ParticleInjectionTest, RestartedRunContinuesTheInjectionExactly) {
     // The injectors' counts, fractions of a parcel and the next id continue: the same parcels enter
+    // (at the restart every injector owes a fraction of a parcel)
     const std::string dir = (scratch_dir() / "mallard_particles_injection_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 15\n";
     Solver straight;
