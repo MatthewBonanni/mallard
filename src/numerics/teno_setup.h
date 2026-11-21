@@ -294,6 +294,12 @@ class SetupHandle {
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;
 };
 
+/**
+ * @brief The vertex-neighbor layers the stencil search of each of cells visits (TableBatch::gather_depth),
+ *        from the search alone, on the host: no stencils or tables. Reads options.nk, nss and sector_stencils.
+ */
+std::vector<uint8_t> search_depths(const Mesh & mesh, const Options & options, const std::vector<uint32_t> & cells);
+
 /** @brief The terms of every smoothness-matrix entry of the given degree, in the order the setup sums them. */
 teno::SmoothnessTerms smoothness_terms(uint8_t degree);
 
