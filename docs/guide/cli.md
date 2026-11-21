@@ -137,6 +137,8 @@ Commands:
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
     mallard list templates    The case templates of mallard new
+    mallard session           Hold a case and answer JSON-RPC requests on stdin
+                              and stdout: the interface for the GUI and scripts
     mallard diff              Compare two solutions field by field: norms of the
                               difference, where it is largest, bitwise
   Mesh
@@ -774,6 +776,43 @@ Exit status:
   0  listed
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-templates
+```
+
+### mallard session
+
+```text
+Usage: mallard session [INPUT] [Kokkos options]
+
+Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON
+object per line, on standard input; responses and notifications go to standard
+output, one per line, and nothing else does (the setup's text goes to standard
+error). Requests: initialize, case.open, case.update, case.close, case.check,
+case.keys, keys.catalog and shutdown; $/cancel stops a request at its next setup
+phase. Each request that has a one-shot command runs the same code: case.check
+is mallard check INPUT --format json, case.keys and keys.catalog are mallard
+list keys --format json.
+
+The session keeps the mesh file it read: a check after an edit outside [mesh]
+(case.update with the whole text, which the session never writes back) reads the
+file again only if it changed. It listens on no network port: run it on another
+machine through ssh or kubectl exec -i. It ends at shutdown or when standard
+input closes.
+
+Options:
+  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
+              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard session input.toml
+  $ ssh hpc mallard session cases/cylinder/input.toml
+  $ echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize"}' | mallard session
+
+Exit status:
+  0  shutdown, or standard input closed
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-session
 ```
 
 ### mallard diff

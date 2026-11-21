@@ -1,0 +1,2 @@
+- `mallard session [INPUT]` holds a case and answers JSON-RPC 2.0 requests, one per line, on standard input and output: `case.check`, `case.keys` and `keys.catalog` give exactly what `mallard check --format json` and `mallard list keys --format json` give, after edits sent with `case.update` and without reading an unchanged mesh file again. See [Sessions](docs/guide/session.md).
+- JSON Schemas of the machine-readable output, in `schemas/`: the check report, the key catalog, diagnostics and the session's messages.

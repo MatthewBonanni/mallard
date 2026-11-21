@@ -425,6 +425,7 @@ install(DIRECTORY templates examples mechanisms tools tutorials
     PATTERN solut EXCLUDE)
 # The key catalog of mallard list keys
 install(DIRECTORY docs/input-keys DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/docs)
+install(DIRECTORY schemas DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard)
 install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 

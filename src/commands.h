@@ -10,10 +10,11 @@
 
 #include "cli.h"
 
-struct CheckReport;
-namespace json {
-struct Value;
-}
+#include <string>
+#include <vector>
+
+#include "check.h"
+#include "json.h"
 
 /** @brief `mallard -i input.toml`: runs a case. */
 int run_main(const cli::Args & args);
@@ -51,6 +52,39 @@ int list_keys_main(const cli::Args & args);
  *        it), from Mallard's data directories. @throws std::runtime_error if none has it
  */
 json::Value general_key_catalog();
+
+/** @brief A case's side of a key listing: whether its setup read every key, and what stopped it. */
+struct KeyCase {
+    std::string input;
+    bool complete = false;
+    std::vector<CheckDiagnostic> diagnostics;
+};
+
+/**
+ * @brief The catalog's keys in section (a table or key path; empty: all), in order.
+ * @throws std::invalid_argument if there is none (and per_case, if given, completed its setup)
+ */
+std::vector<std::string> keys_in_section(const json::Value & catalog, const std::string & section,
+                                         const KeyCase * per_case);
+
+/**
+ * @brief The JSON of mallard list keys --format json and of case.keys and keys.catalog: the keys with their
+ *        catalog entries; with a case, complete, missing (required keys not set) and its diagnostics.
+ */
+std::string key_listing_json(const json::Value & catalog, const std::vector<std::string> & keys,
+                             const std::string & section, const KeyCase * per_case);
+
+/** @brief SECTION of mallard list keys without brackets: "numerics" of "[numerics]". */
+std::string section_argument(std::string section);
+
+/**
+ * @brief The options of mallard check (and of the session's case.check, whose parameters are named as them) into
+ *        options. @return a usage error, or empty
+ */
+std::string check_options(const cli::Args & args, CheckOptions & options);
+
+/** @brief `mallard session [INPUT]`: answers JSON-RPC requests on stdin and stdout (session.h). */
+int session_main(const cli::Args & args);
 
 /** @brief `mallard list templates`: the case templates of mallard new. */
 int list_templates_main(const cli::Args & args);
