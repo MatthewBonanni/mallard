@@ -292,6 +292,7 @@ struct Outcome {
     uint64_t rejected = 0;
     uint64_t queued = 0;
     uint64_t graph_steps = 0;
+    bool gated = false;  // step graphs gated their bodies
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
@@ -337,7 +338,9 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
+        const bool captures = c.capture_fault == Solver::CaptureFault::NONE ||
+                              c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES;
+        if (depth > 0 && captures) expect_capturable(guard, solver);
         solver.copy_device_to_host();
         const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
@@ -345,6 +348,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             for (size_t k = 0; k < n_species; k++) o.U.push_back(solver.h_species(i, k));
         }
         o.graph_steps = solver.get_graph_steps();
+        o.gated = solver.get_gate_steps();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -410,6 +414,10 @@ Outcome expect_queue_invariant(const std::string & name, const Case & c, const b
         expect_same(host, queued, name + ", step_queue = " + std::to_string(depth));
         if (depth > 1 && runs_ahead) {
             EXPECT_GT(queued.queued, 0u) << name << ": no step ran ahead of the host";
+        }
+        if (c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES && !Solver::are_cuda_graphs_off()) {
+            EXPECT_TRUE(queued.gated) << name << ": step graphs did not gate their bodies";
+            EXPECT_GT(queued.graph_steps, 0u) << name;
         }
     }
     return host;
@@ -549,16 +557,13 @@ TEST(StepQueueTest, OutputsByStep) {
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     const Outcome o = expect_queue_invariant("by_step", c);
     EXPECT_EQ(o.step, 30u);
-    // Where conditional nodes fail (NCCL across a network), the steps run kernel by kernel to the same results
+#ifdef KOKKOS_ENABLE_CUDA
+    // Where conditional nodes fail (NCCL across a network), gated step graphs reach the same results
     Case unconditional = c;
     unconditional.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
-    expect_queue_invariant("by_step_unconditional", unconditional, false);
-#ifdef KOKKOS_ENABLE_CUDA
-    const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
-    EXPECT_EQ(fallback.graph_steps, 0u);
-    if (comm::is_root() && !Solver::are_cuda_graphs_off()) {
-        ASSERT_EQ(fallback.warnings.size(), 1u);
-        EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
+    expect_queue_invariant("by_step_unconditional", unconditional);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_TRUE(run_case("by_step_unconditional", unconditional, 3).warnings.empty());
     }
 #endif
     // Serial runs on several ranks write their files and log on the root rank only
@@ -684,7 +689,7 @@ std::string reacting_body(const std::string & chemistry, const std::string & T =
 } // namespace
 
 TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
-    // Means and conditional statistics of derived fields, computed under the sampling's conditional node
+    // Means and conditional statistics of derived fields, computed under the sampling's gate
     const std::string restarts = "check_interval = 1000\n"
                                  "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
     Case c;
@@ -756,9 +761,11 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+#ifdef KOKKOS_ENABLE_CUDA
     // Without conditional nodes the flushes and samples happen at the same steps
     c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
-    expect_queue_invariant("fused_unconditional", c, false);
+    expect_queue_invariant("fused_unconditional", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -871,6 +878,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("moving_probes_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfWhereRegionsAreStagedWithoutStoppingTheDevice) {
@@ -1001,6 +1012,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
     EXPECT_LT(queued, unstopped);
     // Each stop regrows the staging to twice the cells covered then
     EXPECT_GE(queued + 3, unstopped);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("growing_probe_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
@@ -1739,6 +1754,46 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     c.distributed = true;
     const Outcome o = expect_queue_invariant("distributed", c);
     EXPECT_EQ(o.step, 24u);
+}
+
+TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
+    // Where conditional nodes cannot hold NCCL operations (NCCL over a network), step graphs gate their bodies and
+    // launch them also when they are not due: a line's reductions, reduced every 3 steps and read by a trigger that
+    // stops at step 19, give the run of conditional nodes bit for bit
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "off CUDA every step graph gates its bodies";
+#else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
+    if (comm::size() == 1) GTEST_SKIP() << "MPI runs on several ranks only";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+        "reductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
+    c.extra = probes;
+    c.distributed = true;
+    const Outcome reference = run_case("gated_reference", c, 0);
+    const std::string when =
+        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        " and step % 3 == 1";
+    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
+    // Names of one length: restarts carry their run's record, with its length, in binary
+    const Outcome nodes = run_case("nodes", c, 3);
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    const Outcome gated = run_case("gated", c, 3);
+    expect_same(nodes, gated, "gated step graphs");
+    EXPECT_EQ(gated.step, 19u);
+    EXPECT_EQ(gated.queued, nodes.queued);
+    EXPECT_GT(gated.graph_steps, 0u);
+    EXPECT_FALSE(nodes.gated);
+    EXPECT_TRUE(gated.gated);
+#endif
 }
 
 TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {

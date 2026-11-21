@@ -10,6 +10,7 @@
  */
 
 #include "step_control.h"
+#include "gated.h"
 
 #include "log.h"
 #include "units.h"
@@ -39,7 +40,7 @@ struct ErrorFunctor {
 };
 
 void restore_rejected(const Kokkos::View<rtype *> & s, rtype * y, const rtype * y0, const size_t n) {
-    Kokkos::parallel_for("step_control_restore", n, KOKKOS_LAMBDA(const size_t j) {
+    gated::parallel_for("step_control_restore", n, KOKKOS_LAMBDA(const size_t j) {
         if (s(StepController::ACCEPTED) == 0.0_r) y[j] = y0[j];
     });
 }
@@ -66,14 +67,14 @@ void StepController::estimate(const State & u0, const State & u, const State & e
     const ErrorFunctor functor{u0.flow, u.flow, e.flow, u0.species, u.species, e.species, u.n_species(),
                                abs_tol, rel_tol};
     const Kokkos::View<rtype, Kokkos::MemoryTraits<Kokkos::Unmanaged>> error(state.data() + ERROR);
-    Kokkos::parallel_reduce("step_control_error", n_owned, functor,
+    gated::parallel_reduce("step_control_error", n_owned, functor,
                             Kokkos::Max<rtype, Kokkos::DefaultExecutionSpace::memory_space>(error));
 }
 
 void StepController::update(const rtype dt_host, const rtype * dt_device, const State & u, const State & u0) {
     const Kokkos::View<rtype *> s = state;
     const rtype b1 = beta[0] / order, b2 = beta[1] / order, b3 = beta[2] / order;
-    Kokkos::parallel_for("step_control", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_control", 1, KOKKOS_LAMBDA(const int) {
         const rtype dt = dt_device ? *dt_device : dt_host;
         const rtype error = s(ERROR);
         // A non-finite error (a blown-up step) shrinks the step by kappa(0)

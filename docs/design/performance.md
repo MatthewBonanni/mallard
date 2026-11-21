@@ -498,10 +498,29 @@ which the reduction's minimum gives every rank for the triggers that read `wall`
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4, a failed capture of NCCL operations under one, tried on every rank before the first step, and
-HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
-would run every IF body at every step: the statistics' samples, the fused chemistry's flushes and the staged
-probes would then happen at steps that are not due.
+before 12.4, and HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host
+reading each IF node's flag.
+
+Where NCCL communicates over a network, it adds host nodes to the operations it captures, which a conditional
+node's body cannot hold; a capture of NCCL operations under one is tried on every rank before the first step.
+If it fails, the step graph gates every IF body instead. Gating only the bodies with NCCL operations and keeping
+IF nodes for the others does not capture: an IF node inside a gated body ends the capture of the graph around it
+and starts another one of it, and NCCL (2.32) fails the next operation captured there ("dependency created on
+uncaptured work in another stream"). A gated body runs in every
+launch: a kernel copies its flag, and the gate of the code around it, into a gate of its own, which every kernel
+of the body tests, so the body's kernels follow the flag as it was when the body began even where the body clears
+it. Every top-level kernel launches through `src/common/gated.h` (a CMake check rejects Kokkos's own launches),
+which tests the innermost gate; a reduction that does nothing leaves its destination as it was, by copying it
+into the result in the reduction's final step. Copies and fills there are kernels too (the tests'
+`StepGraphGuard` reports others). On CUDA a thread of a parallel_for that does nothing exits rather than
+returns: a return would leave the rest of the kernel in a divergent region, which costs TENO's kernels about
+0.4% of a step also where nothing is gated. The NCCL operations always run, on the same buffers on every rank,
+since the flags come from values reduced over the ranks. Nothing outside a gated body may therefore read a buffer
+that an NCCL collective reduces in place: while the body is gated, a `SUM` buffer that its kernels no longer refill
+grows by the rank count at each launch. A gated body costs its kernel launches (and its NCCL
+latency) whether or not it is due: in every step for an output due only every few steps (a probe's reductions,
+say), and in each launch after a stop, `step_queue` - 1 times per stop, instead of nothing. Off CUDA, the tests'
+launches of the code a capture records gate every body.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the

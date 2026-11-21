@@ -11,6 +11,7 @@
  */
 
 #include "spectra.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -432,7 +433,7 @@ void Spectra::move(const Route & route, uint32_t width, const rtype * src_ptr, r
     const auto from = route.send_from;
     const auto to = route.recv_to;
     const auto send = send_buffer;
-    Kokkos::parallel_for("spectra_pack", n_send, KOKKOS_LAMBDA(const size_t i) {
+    gated::parallel_for("spectra_pack", n_send, KOKKOS_LAMBDA(const size_t i) {
         for (uint32_t k = 0; k < width; k++) send(i * width + k) = src_ptr[size_t(from(i)) * width + k];
     });
     Kokkos::View<rtype *> recv = send;
@@ -443,7 +444,7 @@ void Spectra::move(const Route & route, uint32_t width, const rtype * src_ptr, r
         recv = recv_buffer;
         comm::alltoallv_device(send, send_counts, recv, recv_counts, use_nccl);
     }
-    Kokkos::parallel_for("spectra_unpack", n_recv, KOKKOS_LAMBDA(const size_t i) {
+    gated::parallel_for("spectra_unpack", n_recv, KOKKOS_LAMBDA(const size_t i) {
         for (uint32_t k = 0; k < width; k++) dst_ptr[size_t(to(i)) * width + k] = recv(i * width + k);
     });
 }
@@ -464,7 +465,7 @@ void Spectra::fft(const Layout & layout, size_t axis) {
     const uint64_t rest = layout.rest;
     const uint64_t lines = rest / n;
     const uint64_t total = uint64_t(layout.count) * fields.size() * lines;
-    Kokkos::parallel_for("spectra_fft", total, KOKKOS_LAMBDA(const uint64_t i) {
+    gated::parallel_for("spectra_fft", total, KOKKOS_LAMBDA(const uint64_t i) {
         const uint64_t pf = i / lines, l = i % lines;
         const uint64_t base = pf * rest + (l / stride) * n * stride + l % stride;
         bool in_data = true;
@@ -543,7 +544,7 @@ void Spectra::sum_planes(const Layout & layout) {
     const uint32_t spec = spec_width;
 
     // Spectra: one thread per (row, pair, direction, n)
-    Kokkos::parallel_for("spectra_sums", uint64_t(rows) * n_pairs * g.per_pair / 2, KOKKOS_LAMBDA(const uint64_t i) {
+    gated::parallel_for("spectra_sums", uint64_t(rows) * n_pairs * g.per_pair / 2, KOKKOS_LAMBDA(const uint64_t i) {
         const uint32_t row = static_cast<uint32_t>(i / (n_pairs * g.per_pair / 2));
         uint32_t s = static_cast<uint32_t>(i % (n_pairs * g.per_pair / 2));
         const uint32_t p = s / (g.per_pair / 2);
@@ -580,7 +581,7 @@ void Spectra::sum_planes(const Layout & layout) {
     });
 
     // Plane means: the mode with every homogeneous rest index 0
-    Kokkos::parallel_for("spectra_means", uint64_t(rows) * F, KOKKOS_LAMBDA(const uint64_t i) {
+    gated::parallel_for("spectra_means", uint64_t(rows) * F, KOKKOS_LAMBDA(const uint64_t i) {
         const uint32_t row = static_cast<uint32_t>(i / F), f = static_cast<uint32_t>(i % F);
         const uint32_t plane = row / pos_per_plane, pos = row % pos_per_plane;
         uint64_t r = 0;
@@ -595,7 +596,7 @@ void Spectra::sum_planes(const Layout & layout) {
     // axis runs only over the indices whose |k| may fall in the shell
     const uint32_t shells = n_shells;
     const double delta = dk;
-    Kokkos::parallel_for("spectra_shells", uint64_t(rows) * n_pairs * shells, KOKKOS_LAMBDA(const uint64_t i) {
+    gated::parallel_for("spectra_shells", uint64_t(rows) * n_pairs * shells, KOKKOS_LAMBDA(const uint64_t i) {
         const uint32_t row = static_cast<uint32_t>(i / (uint64_t(n_pairs) * shells));
         const uint32_t p = static_cast<uint32_t>((i / shells) % n_pairs), s = static_cast<uint32_t>(i % shells);
         const double k_plane = slab_dk * double(signed_index(slab_first + row, slab_n));
@@ -666,7 +667,7 @@ void Spectra::copy_to_staging(const uint64_t * const seq) const {
     for (const Kokkos::View<double *> & values : {d_spec, d_mean, d_shell}) {
         const Kokkos::View<double *> v = values;
         const size_t offset = at;
-        Kokkos::parallel_for("spectra_staged", v.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        gated::parallel_for("spectra_staged", v.extent(0), KOKKOS_LAMBDA(const size_t i) {
             st((*seq - 1) % n_records, offset + i) = v(i);
         });
         at += v.extent(0);
@@ -688,7 +689,7 @@ void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) 
     const uint32_t F = static_cast<uint32_t>(fields.size());
     const auto values = cell_values;
     const auto code = codes;
-    Kokkos::parallel_for("spectra_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("spectra_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         for (uint32_t f = 0; f < F; f++) values(size_t(c) * F + f) = sampler(c, code(f));
     });
     // The real cell values land in the work buffer, then in the real parts of the slab
@@ -696,7 +697,7 @@ void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) 
                                                                               slab.extent(0));
     move(to_first, 1, cell_values.data(), real.data());
     const auto s = slab;
-    Kokkos::parallel_for("spectra_complex", slab.extent(0), KOKKOS_LAMBDA(const size_t i) { s(i) = Complex(real(i), 0.0_r); });
+    gated::parallel_for("spectra_complex", slab.extent(0), KOKKOS_LAMBDA(const size_t i) { s(i) = Complex(real(i), 0.0_r); });
     for (size_t d : directions) {
         if (d != first.axis) fft(first, d);
     }
@@ -717,14 +718,14 @@ void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) 
     const auto spec = s_spec, mean_ = s_mean, shell_ = s_shell;
     if (!two_stage) {
         if (rows != n_pos) throw std::logic_error("spectra: missing rows");
-        Kokkos::parallel_for("spectra_rows", rows, KOKKOS_LAMBDA(const size_t row) {
+        gated::parallel_for("spectra_rows", rows, KOKKOS_LAMBDA(const size_t row) {
             for (uint32_t c = 0; c < sw; c++) spec(row * sw + c) = all(row * width + c) * norm2;
             for (uint32_t f = 0; f < F; f++) mean_(row * F + f) = all(row * width + sw + f) / modes;
         });
     } else {
         const size_t n_shell = shell_.extent(0);
         // Sums over the rows in their order
-        Kokkos::parallel_for("spectra_plane_sums", sw + n_shell, KOKKOS_LAMBDA(const size_t i) {
+        gated::parallel_for("spectra_plane_sums", sw + n_shell, KOKKOS_LAMBDA(const size_t i) {
             const size_t c = i < sw ? i : sw + F + (i - sw);
             double v = 0.0;
             for (size_t row = 0; row < rows; row++) v += all(row * width + c);
@@ -734,13 +735,13 @@ void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) 
                 shell_(i - sw) = v * norm2;
             }
         });
-        Kokkos::parallel_for("spectra_plane_means", F, KOKKOS_LAMBDA(const uint32_t f) {
+        gated::parallel_for("spectra_plane_means", F, KOKKOS_LAMBDA(const uint32_t f) {
             mean_(f) = all(sw + f) / modes;
         });
     }
     const Kokkos::View<Clock> k = clock;
     const bool averaged = average;
-    Kokkos::parallel_for("spectra_clock", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("spectra_clock", 1, KOKKOS_LAMBDA(const int) {
         Clock & c = k();
         const double w = double(*t - c.t_last);
         c.t_last = *t;
@@ -751,7 +752,7 @@ void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) 
     // Unaveraged: the sample itself
     for (const auto & [acc, smp] : {std::pair{d_spec, s_spec}, std::pair{d_mean, s_mean}, std::pair{d_shell, s_shell}}) {
         const Kokkos::View<double *> A = acc, S = smp;
-        Kokkos::parallel_for("spectra_accumulate", A.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        gated::parallel_for("spectra_accumulate", A.extent(0), KOKKOS_LAMBDA(const size_t i) {
             A(i) = averaged ? A(i) + k().a * (S(i) - A(i)) : S(i);
         });
     }

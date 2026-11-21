@@ -236,6 +236,32 @@ foreach(source ${mallard_sources})
                             "find_value_or<T>.")
     endif()
 endforeach()
+# Top-level kernels launch through gated.h, so that a step graph's launches after a stop do nothing
+foreach(source ${mallard_sources})
+    file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+    if(path MATCHES "^test/" OR path STREQUAL "src/common/gated.h")
+        continue()
+    endif()
+    file(STRINGS ${source} launches REGEX "Kokkos::parallel_(for|reduce|scan)")
+    if(NOT launches)
+        continue()
+    endif()
+    file(READ ${source} content)
+    if(content MATCHES "using[ \t\r\n]+Kokkos::parallel_(for|reduce|scan)")
+        message(FATAL_ERROR "${path} names Kokkos::parallel_${CMAKE_MATCH_1} with using: launch kernels with "
+                            "gated::parallel_${CMAKE_MATCH_1} (src/common/gated.h), whose kernels do nothing in a "
+                            "step graph's launches after a stop.")
+    endif()
+    string(REGEX MATCHALL "Kokkos::parallel_(for|reduce|scan)[ \t\r\n]*(<[^;()]*>)?[ \t\r\n]*\\([ \t\r\n]*[A-Za-z_:]*"
+           calls "${content}")
+    foreach(call ${calls})
+        if(NOT call MATCHES "(Team|Thread)[A-Za-z]*Range$")
+            string(REGEX REPLACE "^Kokkos::([a-z_]*).*" "\\1" name "${call}")
+            message(FATAL_ERROR "${path} launches a kernel with Kokkos::${name}: use gated::${name} (src/common/gated.h), "
+                                "whose kernels do nothing in a step graph's launches after a stop.")
+        endif()
+    endforeach()
+endforeach()
 # The expression and geometry engines know nothing of inputs or of each other:
 # what they need from them (unit hints, implicit shapes) is passed in
 foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")

@@ -487,8 +487,11 @@ class Solver {
         /** @brief Enqueues one step, which does nothing once the device stopped for the host. */
         void launch_device_step();
         void step_prologue();
-        /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
-        void captured_launch();
+        /**
+         * @brief The launch a step graph captures, in the profiling section "step_graph_capture"; gated: every
+         *        device_if body gated (gated.h) instead of under a conditional node.
+         */
+        void captured_launch(bool gated);
         void device_step_body();
         /**
          * @brief Fused chemistry: applies the pending half step under a conditional node if any of the n device
@@ -498,8 +501,12 @@ class Solver {
         /** @brief Puts back the state flush_chemistry_if kept, if the launch flushed. */
         void unflush_chemistry_on_device();
         void capture_step_graph();
-        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
+        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried once on every rank). */
         bool conditional_nodes_work();
+        /**
+         * @brief Runs body if the device flag is set: in a step graph's capture, under a conditional node, or gated
+         *        by the flag and every enclosing one as they were when it began (gating); else as the host reads it.
+         */
         template <typename F>
         void device_if(const uint32_t * flag, F && body);
         /** @brief The record of the oldest launch not yet taken, once it ran; passes on requests while waiting. */
@@ -760,7 +767,7 @@ class Solver {
             NONE,
             FENCE,             // fails while the stream captures
             LEGACY_STREAM,     // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
-            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: no step graph
+            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: step graphs gate their bodies
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
         /**
@@ -785,6 +792,8 @@ class Solver {
         uint64_t get_step() const { return step; }
         /** @brief Steps launched as a captured CUDA graph so far. */
         uint64_t get_graph_steps() const { return graph_steps; }
+        /** @brief Whether the last step graphs gated their bodies (conditional nodes cannot hold NCCL there). */
+        bool get_gate_steps() const { return gate_steps; }
         /** @brief Steps the host took from their records without acting on them (steps run ahead of it). */
         uint64_t get_queued_steps() const { return n_queued_steps; }
         /** @brief Launches the host keeps ahead of the device's steps. */
@@ -1038,6 +1047,11 @@ class Solver {
         uint64_t n_launched = 0, n_taken = 0;
         uint64_t n_queued_steps = 0;
         bool conditional_steps = false;        // launches after a stop do nothing
+        bool gate_steps = false;               // step graphs gate their bodies: conditional nodes cannot hold NCCL
+        std::optional<bool> conditional_nodes_tried;  // conditional_nodes_work, once tried
+        bool gating = false;                   // in a gated launch
+        uint32_t gate_depth = 0;               // gated device_if's nesting
+        Kokkos::View<uint32_t *> step_gates;   // device: each nesting level's gate
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests, outputs written, -wall], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction

@@ -10,6 +10,7 @@
  */
 
 #include "probes.h"
+#include "gated.h"
 #include "probe_cells.h"
 #include "probe_fluxes.h"
 
@@ -1140,7 +1141,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const bool on_faces = faces.extent(0) > 0;
     const bool has_normals = normals.extent(0) > 0;
     if (sampling == Sampling::CELL && !has_normals) {
-        Kokkos::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
+        gated::parallel_for("probe_cell_values", n, KOKKOS_LAMBDA(const uint32_t i) {
             if (counted && i >= *counted) return;
             for (uint32_t v = 0; v < n_vars; v++) out(i, v) = sampler(cell(i), code(v));
         });
@@ -1152,14 +1153,14 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         const auto gradient = fields.gradient;
         const auto unique = unique_cells;
         const uint32_t * n_unique = unique_count.data();
-        Kokkos::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
+        gated::parallel_for("probe_gradients", unique.extent(0), KOKKOS_LAMBDA(const uint32_t i) {
             if (n_unique && i >= *n_unique) return;
             gradient(unique(i));
         });
     }
     // The trace: the cell average (from the current conservatives), or the reconstruction at the sample
     const auto Ws = W;
-    Kokkos::parallel_for("probe_cell_W", n, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("probe_cell_W", n, KOKKOS_LAMBDA(const uint32_t s) {
         if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
         Ws(s, 0) = sampler.U(c, 0);
@@ -1171,7 +1172,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         const auto in_offsets = inside_offsets;
         const auto in_W = inside_W;
         // Linear least squares, kept where the reconstruction has no admissible polynomial value
-        Kokkos::parallel_for("probe_linear_values", in_cells.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+        gated::parallel_for("probe_linear_values", in_cells.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             if (counted && j >= *counted) return;
             const uint32_t c = in_cells(j);
             rtype Wq[N_CONSERVATIVE];
@@ -1184,7 +1185,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         });
         if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
         const auto in = inside;
-        Kokkos::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+        gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             if (counted && j >= *counted) return;
             FOR_I_CONSERVATIVE Ws(in(j), i) = in_W(j, i);
         });
@@ -1200,7 +1201,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const bool viscous = fields.viscous;
     if (on_faces) {
         // The state the boundary condition sets on the face
-        Kokkos::parallel_for("probe_face_state", n, KOKKOS_LAMBDA(const uint32_t s) {
+        gated::parallel_for("probe_face_state", n, KOKKOS_LAMBDA(const uint32_t s) {
             const uint32_t c = cell(s), f = face(s);
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
             rtype Wf[N_CONSERVATIVE], nv[N_DIM];
@@ -1232,14 +1233,14 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         // The scheme's diffusive fluxes of each face, out of the domain
         if (mixture) {
             const MixtureViscousFluxFunctor<true> mixture_flux = fields.fluxes->mixture;
-            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+            gated::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
                 const DiffusiveColumns columns{out, code, s, n_vars};
                 columns.clear();
                 mixture_flux.flux(face(s), columns);
             });
         } else {
             const ViscousFluxFunctor viscous_flux = fields.fluxes->viscous;
-            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+            gated::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
                 const DiffusiveColumns columns{out, code, s, n_vars};
                 const uint32_t f = face(s);
                 rtype F[N_CONSERVATIVE] = {};
@@ -1255,7 +1256,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const ProbeReference ref = reference;
     const WallModelFunctor wall_model = fields.wall_model;
     const bool modeled = wall_model.wm.active();
-    Kokkos::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
         if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
         const rtype g = mixture ? cell_gamma(c) : physics.gamma;
@@ -1457,7 +1458,7 @@ void Probes::Samples::fill_columns(const std::vector<std::pair<uint32_t, Statist
     for (const auto & entry : columns) {
         const uint32_t column = entry.first;
         const auto field = entry.second;
-        Kokkos::parallel_for("probe_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        gated::parallel_for("probe_cell_field", c.extent(0), KOKKOS_LAMBDA(const size_t i) {
             if (counted && i >= *counted) return;
             v(i, column) = field(c(i));
         });
@@ -1471,7 +1472,7 @@ void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
     const uint32_t n_vars = static_cast<uint32_t>(values.extent(1));
     const uint32_t * counted = count.data();
     const size_t n_rows = n_vars > 0 ? staging.extent(1) / n_vars : 0;
-    Kokkos::parallel_for("probe_staged", n_rows, KOKKOS_LAMBDA(const size_t i) {
+    gated::parallel_for("probe_staged", n_rows, KOKKOS_LAMBDA(const size_t i) {
         if (counted && i >= *counted) return;
         const uint64_t slot = (*seq - 1) % n_records;
         for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
@@ -2572,7 +2573,7 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
             q.count = iso.cut->total();
             q.inside = Kokkos::View<uint32_t *>("probe_cut_inside", capacity);
             const auto inside = q.inside;
-            Kokkos::parallel_for("probe_cut_inside", capacity, KOKKOS_LAMBDA(const uint32_t i) { inside(i) = i; });
+            gated::parallel_for("probe_cut_inside", capacity, KOKKOS_LAMBDA(const uint32_t i) { inside(i) = i; });
             q.inside_cells = q.cells;
             q.inside_offsets = Kokkos::View<rtype *[N_DIM]>("probe_cut_offsets", capacity);
             q.inside_W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_cut_inside_W", capacity);
@@ -2674,7 +2675,7 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         const auto values = r.values;
         const bool weighted = weights.extent(0) > 0, moments = positions.extent(0) > 0;
         const uint32_t n_terms = static_cast<uint32_t>(terms.extent(0));
-        Kokkos::parallel_for("probe_reduction_terms", n_local, KOKKOS_LAMBDA(const uint32_t i) {
+        gated::parallel_for("probe_reduction_terms", n_local, KOKKOS_LAMBDA(const uint32_t i) {
             double x[3] = {0.0, 0.0, 0.0};
             if (moments) {
                 for (int d = 0; d < 3; d++) x[d] = positions(i, d);
@@ -2692,12 +2693,12 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         const auto nodes = p.nodes.values;
         const uint32_t n_nodes = points || !p.samples_nodes() ? 0 : static_cast<uint32_t>(p.nodes.cells.extent(0));
         for (uint32_t v = 0; v < lo.extent(0); v++) {
-            Kokkos::parallel_reduce("probe_reduction_min", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+            gated::parallel_reduce("probe_reduction_min", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
                 const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
                                           : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x < m) m = x;
             }, Kokkos::Min<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(lo.data() + v)));
-            Kokkos::parallel_reduce("probe_reduction_max", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+            gated::parallel_reduce("probe_reduction_max", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
                 const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
                                           : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x > m) m = x;
@@ -2713,14 +2714,14 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         // Its one sample's values, from the rank that holds it
         const auto nodes = p.nodes.values;
         const bool held = p.nodes.cells.extent(0) == 1;
-        Kokkos::parallel_for("probe_reduction_point", static_cast<uint32_t>(point.extent(0)), KOKKOS_LAMBDA(const uint32_t v) {
+        gated::parallel_for("probe_reduction_point", static_cast<uint32_t>(point.extent(0)), KOKKOS_LAMBDA(const uint32_t v) {
             point(v) = held ? Kokkos::bit_cast<int64_t>(averaged ? mn(0, v) : static_cast<double>(nodes(0, v))) : 0;
         });
         if (p.nodes.distributed) comm::allreduce_device(point, comm::Op::SUM, r.use_nccl);
     }
     const auto outputs = r.outputs;
     const auto sums = r.sums.sums();
-    Kokkos::parallel_for("probe_reduction_values", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("probe_reduction_values", 1, KOKKOS_LAMBDA(const int) {
         if (*due == 0) return;
         const uint32_t n_outputs = static_cast<uint32_t>(outputs.extent(0));
         for (uint32_t j = 0; j < n_outputs; j++) out[j] = probe_output(outputs(j), sums.data(), lo.data(), hi.data());
@@ -2741,7 +2742,7 @@ void Probes::average_staged(const size_t k, const uint32_t * sampled, const doub
         const auto q = S->values;
         const auto m = mean;
         const uint32_t n_cols = static_cast<uint32_t>(m.extent(1));
-        Kokkos::parallel_for("probe_mean", m.extent(0) * n_cols, KOKKOS_LAMBDA(const size_t j) {
+        gated::parallel_for("probe_mean", m.extent(0) * n_cols, KOKKOS_LAMBDA(const size_t j) {
             if (*sampled == 0) return;
             const size_t i = j / n_cols, v = j % n_cols;
             m(i, v) += rounded_product(*a, static_cast<double>(q(i, v)) - m(i, v));
@@ -2801,7 +2802,7 @@ void Probes::select_staged(const size_t k, const Kokkos::View<const rtype> & tim
         point_capacity = p.isosurface->cut->capacity();
     }
     const bool cut = points.is_allocated();
-    Kokkos::parallel_for("probe_staged_capacity", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("probe_staged_capacity", 1, KOKKOS_LAMBDA(const int) {
         *overflow = count() > capacity || (cut && points() > point_capacity) ? 1 : 0;
     });
 }
@@ -3586,7 +3587,7 @@ void covered_cells(const Kokkos::View<const double *> & f, const Kokkos::View<co
                    const Kokkos::View<uint32_t *> & cells, const Kokkos::View<double *> & weights,
                    const Kokkos::View<uint32_t> & count) {
     const uint32_t n = static_cast<uint32_t>(volumes.extent(0));
-    Kokkos::parallel_scan("probe_covered_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
+    gated::parallel_scan("probe_covered_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
         const double w = f(c) * volumes(c);
         const bool covered = w > 0.0;
         if (final && covered) {
@@ -3608,7 +3609,7 @@ void stage_cells(const Kokkos::View<const uint32_t *> & cells, const Kokkos::Vie
                  const PinnedWeights & st_weights, const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st_count,
                  const uint64_t * seq) {
     const uint64_t n_records = st_count.extent(0);
-    Kokkos::parallel_for("probe_staged_covered", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("probe_staged_covered", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
         const uint64_t slot = (*seq - 1) % n_records;
         if (i == 0) st_count(slot) = count();
         if (i >= count()) return;
@@ -3702,7 +3703,7 @@ void stage_levels(const region::CrossedLevels & levels, const PinnedCells & st_c
     const auto values = levels.values();
     const uint64_t n_records = st_count.extent(0);
     const uint32_t n_k = levels.size();
-    Kokkos::parallel_for("probe_staged_crossed", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("probe_staged_crossed", st_cells.extent(1), KOKKOS_LAMBDA(const uint32_t i) {
         const uint64_t slot = (*seq - 1) % n_records;
         if (i == 0) st_count(slot) = count();
         if (i >= count()) return;
@@ -3717,7 +3718,7 @@ void stage_levels(const region::CrossedLevels & levels, const PinnedCells & st_c
 void stage_total(const Kokkos::View<const uint32_t> & total, const Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> & st,
                  const uint64_t * seq) {
     const uint64_t n_records = st.extent(0);
-    Kokkos::parallel_for("probe_staged_points", 1, KOKKOS_LAMBDA(const int) { st((*seq - 1) % n_records) = total(); });
+    gated::parallel_for("probe_staged_points", 1, KOKKOS_LAMBDA(const int) { st((*seq - 1) % n_records) = total(); });
 }
 
 /** @brief As Samples::in_cells and set_normals: each point's offset from its cell's centroid, and its normal. */
@@ -3727,7 +3728,7 @@ void cut_samples(const region::LevelCut & cut, const Kokkos::View<const rtype *[
     const auto points = cut.points();
     const auto n = cut.normals();
     const auto total = cut.total();
-    Kokkos::parallel_for("probe_cut_samples", cut.capacity(), KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("probe_cut_samples", cut.capacity(), KOKKOS_LAMBDA(const uint32_t s) {
         if (s >= total()) return;
         for (int d = 0; d < N_DIM; d++) {
             offsets(s, d) = static_cast<rtype>(points(s, d) - static_cast<double>(centroids(cells(s), d)));
