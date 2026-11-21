@@ -811,6 +811,35 @@ TEST(TENOTest, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemU
     }
 }
 
+TEST(TENOTest, TheSearchAloneFindsTheGatherDepthOfTheFullSetup) {
+    // Triangles with walls, and a periodic square whose searches meet its cells again in other periods;
+    // at order 3 the sector stencils' search goes deeper than the central one's
+    auto square = std::make_shared<Mesh>();
+    square->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 5\nNy = 5\nLx = 1.0\nLy = 1.0\n"
+                            "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"));
+    square->copy_host_to_device();
+    for (const auto & mesh : {make_mesh("cartesian_tri", 12, 10), square}) {
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        for (const int order : {3, 6}) {
+            for (const bool sectors : {true, false}) {
+                TENO full;
+                full.set_mesh(mesh);
+                full.set_boundaries(bd);
+                full.sector_stencils = sectors;
+                const Input input = parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n");
+                full.init(input);
+                TENO search;
+                search.set_mesh(mesh);
+                search.set_boundaries(bd);
+                search.sector_stencils = sectors;
+                search.find_gather_depth(input);
+                EXPECT_EQ(search.gather_depth, full.gather_depth)
+                    << mesh->n_cells << " cells, order " << order << (sectors ? "" : ", central stencils alone");
+            }
+        }
+    }
+}
+
 TEST(TENOTest, CentralStencilsAloneAreTheFullSetupsBitForBit) {
     // Output of states read from files sets up only what cell_gradients and point_values read: scale,
     // basis means, and the central stencils' sizes, slices, cells, images and pseudo-inverses. With
