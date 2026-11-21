@@ -1,0 +1,1 @@
+- `json::parse` rejects malformed numbers such as `1-2`, `1.2.3` and `1e` instead of reading a prefix of them (#1114).

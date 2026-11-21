@@ -450,6 +450,32 @@ the smoothest sector, so $\mathcal{K}$ is never empty. The face values
 $\mathbf{U}_q = \mathbf{R}\,\mathbf{v}_q$ return through the right
 eigenvectors.
 
+**Order 4: faces that look away from a discontinuity.** At order 4 the
+central polynomial is also rejected on a face whose own sector has the
+smallest indicator of all the candidates (ties to round-off included, so
+that mirror-image faces decide alike) while another sector is cut
+($\gamma_k/\sum_{k'}\gamma_{k'} < C_T$). The downstream face of the cell a
+shock is crossing is such a face. The cubic's indicator, an integral over the
+cell, stays within the cut-off there (7.6 to 9.9 times the downstream
+sector's for the $u_n + a$ wave of a Mach 3 shock), but at that face the cubic
+undershoots the state ahead (a density of 0.68 and a pressure of 0.29 against
+1.17 and 1.02 ahead), and the Riemann problem with the cell ahead then drains
+it (#977). Lowest values over every step on 200 × 4 quadrilaterals
+(`examples/sod`, `examples/shu_osher`):
+
+| | Order 4 without the rule | Order 4 | Order 5 |
+|---|---|---|---|
+| Sod, density (0.125 ahead) | 0.1236 | 0.1249 | 0.1249 |
+| Shu–Osher, pressure (1 ahead) | 0.9528 | 0.9976 | 0.9988 |
+
+The rule does not act in smooth flow: every convergence study of the
+[verification manual](../verification/index.md) is unchanged to the last
+bit, and so is a convected density wave of 90% amplitude at 16 to 64 cells
+per wavelength, on quadrilaterals and triangles, with 44 to 100% of the cells
+troubled. Orders 3, 5 and 6 do not have the rule. The [order-4 study](../design/teno4_robustness.md#shocks-undershoots)
+compares the orders' undershoots, and gives what the rule changes in order 4's
+errors on shocks and the one undershoot it leaves.
+
 **Adaptive cutoff.** Unless `C_T` fixes it,
 ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025); `teno::adaptive_CT`)
 
@@ -843,13 +869,15 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     field, order 5's drag is as smooth as order 3's
     ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
-- **Order 4.** `high_order` stays at order 5 because order 4 fails three
+- **Order 4.** `high_order` stays at order 5 because order 4 fails two
     robustness checks that order 5 passes
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
-    outgoing acoustic wave on a radially stretched O-grid (#975),
-    undershoots ahead of shocks on quads about 10 times more than order 5
-    (#977), and grows acoustic modes on graded hexahedra from 5%
-    cell-to-cell grading, as order 6 does (#1232). The odd-even wall
+    outgoing acoustic wave on a radially stretched O-grid (#975) and grows
+    acoustic modes on graded hexahedra from 5% cell-to-cell grading, as
+    order 6 does (#1232). Its undershoots ahead of plane shocks, once about
+    10 times order 5's (#977), are down to order 5's on quads
+    ([troubled cells](#troubled-cells)); where shocks start from a corner it
+    still undershoots. The odd-even wall
     pressure it left at the closed trailing edge of the NACA 0012 tutorial
     mesh (#976) came from mirror images past the far side of the body, which
     the setup now rejects ([candidates](#candidates)).

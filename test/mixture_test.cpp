@@ -676,7 +676,7 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                                 "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
                      mixture(H2O2),
                  "farfield");
-    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
+    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"rkc\"\n",
                  "chemistry.integrator");
     expect_error(base + init + "X = { N2 = 1.0 }\n" + bcs + mixture(PERFECT_AIR) + "[chemistry]\n", "no reactions");
     expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\ncoupling = \"sdc\"\n",

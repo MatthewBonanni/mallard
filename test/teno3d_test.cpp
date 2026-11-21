@@ -1022,7 +1022,7 @@ TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTa
     }
 }
 
-TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesBitwise) {
+TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesAndPolynomialsBitwise) {
     // A blast in a box with walls: smooth and troubled cells, cells with mirror images along the walls
     auto mesh = make_mesh_3d("cartesian", 12, 12, 12);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
@@ -1047,16 +1047,22 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
                 teno->block_path = block_path;
                 teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
                 teno->smooth_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
+                teno->polynomials =
+                    Kokkos::View<rtype **[2][N_CONSERVATIVE]>("polynomials", (mesh->n_cells + 1) / 2, teno->n_dof_large);
                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
                 teno->calc_face_values(W, face_W);
                 auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
                 auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->smooth_gradients);
+                auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->polynomials);
                 std::vector<rtype> out(h.data(), h.data() + h.span());
                 out.insert(out.end(), g.data(), g.data() + g.span());
-                return std::make_pair(out, teno->n_block_cells);
+                // NaN marks troubled cells' polynomials, so compare their bits
+                std::vector<uint8_t> polynomial_bits(reinterpret_cast<const uint8_t *>(p.data()),
+                                                     reinterpret_cast<const uint8_t *>(p.data() + p.span()));
+                return std::make_tuple(out, polynomial_bits, teno->n_block_cells);
             };
-            const auto [unstructured, none] = results(false);
-            const auto [block, n_block] = results(true);
+            const auto [unstructured, unstructured_polynomials, none] = results(false);
+            const auto [block, block_polynomials, n_block] = results(true);
             const std::string at = "order " + std::to_string(order) + ", slices of " + std::to_string(1 << shift);
             EXPECT_EQ(none, 0u) << at;
             // Every cell whose stencil stays clear of the walls; those near them read mirror images
@@ -1064,6 +1070,7 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
             EXPECT_GE(n_block, uint64_t(std::pow(12 - 2 * depth, 3))) << at;
             EXPECT_LT(n_block, uint64_t(mesh->n_cells)) << at;
             EXPECT_TRUE(block == unstructured) << at;
+            EXPECT_TRUE(block_polynomials == unstructured_polynomials) << at;
         }
     }
 }
