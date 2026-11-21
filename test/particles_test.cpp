@@ -865,6 +865,9 @@ TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
     Solver straight;
     straight.init(parse_toml(solid_vortex(40)));
     straight.run();
+    // Collective: before the other ranks leave
+    const std::vector<particles::Record> expected = straight.get_particles()->gather();
+    const std::array<uint64_t, 3> removed = straight.get_particles()->removed();
     Solver first;
     first.init(parse_toml(solid_vortex(20, "", writer)));
     first.run();
@@ -874,7 +877,14 @@ TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
     second.set_distributed(false);
     second.init(parse_toml(solid_vortex(40, "type = \"restart\"\nfile = \"" + dir + "/restart_000020.restart\"\n")));
     second.run();
-    expect_same_particles(*second.get_particles(), *straight.get_particles());
+    const std::vector<particles::Record> records = second.get_particles()->gather();
+    ASSERT_EQ(records.size(), expected.size());
+    for (size_t k = 0; k < records.size(); k++) {
+        EXPECT_EQ(records[k].id, expected[k].id);
+        EXPECT_EQ(records[k].x, expected[k].x) << "particle " << k;
+        EXPECT_EQ(records[k].v, expected[k].v) << "particle " << k;
+    }
+    EXPECT_EQ(second.get_particles()->removed(), removed);
 }
 
 TEST(SolidParticlesTest, SolidParticlesNeedAViscousGas) {
