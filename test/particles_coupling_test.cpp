@@ -183,12 +183,14 @@ TEST(ParticleCouplingTest, TemperatureOfAUniformSuspensionEquilibratesAtItsRelax
                                                                                      every_cell(n))));
     solver.run();
     ASSERT_GT(t / tau_T, 1.0);  // the exchange is not negligible
+    // Ranz-Marshall's sqrt(Re) turns the reconstruction's round-off slip into changes of Nu of order sqrt(eps)
+    const double tolerance = 3e-5 * std::sqrt(roundoff(1.0));
     solver.copy_device_to_host();
     for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         const double rho = static_cast<double>(solver.h_conservatives(c, 0));
-        EXPECT_NEAR(static_cast<double>(solver.h_conservatives(c, N_DIM + 1)) / (rho * c_v), T, roundoff(1e-7));
+        EXPECT_NEAR(static_cast<double>(solver.h_conservatives(c, N_DIM + 1)) / (rho * c_v), T, tolerance);
     }
-    for (const auto & r : solver.get_particles()->gather()) EXPECT_NEAR(r.T, Tp, roundoff(1e-7));
+    for (const auto & r : solver.get_particles()->gather()) EXPECT_NEAR(r.T, Tp, tolerance);
 }
 
 namespace {
