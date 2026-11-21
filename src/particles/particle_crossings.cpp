@@ -70,7 +70,7 @@ void Particles::init_crossings(const Input & input, const Input & table, region:
                        "{type = \"boundary\", of = ...}");
         }
         size_t n_zones = 0;
-        for (const auto & piece : region.pieces()) n_zones += piece.zones.empty() ? 0 : 1;
+        for (const auto & piece : region.pieces()) n_zones += piece.zones.empty() ? 0u : 1u;
         if (n_zones != 0 && n_zones != region.pieces().size()) {
             throw fail("mixes boundary zones and other surfaces", "Give each its own entry");
         }
