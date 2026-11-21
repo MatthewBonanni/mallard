@@ -12,7 +12,7 @@ Inspect   mallard check [input.toml] | info <file> | list fields|species|templat
 Mesh      mallard mesh convert | extrude
 Post      mallard post extract|derive|average|convergence|render
 Share     mallard pack
-Maintain  mallard test | completion | --version
+Maintain  mallard test | completion | version
 ```
 
 | Command | Group | Status |
@@ -33,11 +33,11 @@ Maintain  mallard test | completion | --version
 | `post extract` | Post | available; on the [output reader](output_reader.md#mallard-post-extract) |
 | `post derive` | Post | available; on `post extract`'s case setup, with the in-run [derived fields](../guide/output.md#derived-fields) |
 | `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
-| Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
+| `post flame` | Post | available; on `post extract`'s case setup, with the run's production rates through [statistics](../guide/statistics.md); flame surfaces planned ([#942](https://github.com/MatthewBonanni/mallard/issues/942)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack`, `pack --verify` | Share | available; on the run record (the files a run read, the output records) |
-| `test`, `completion`, `--version` | Maintain | available |
+| `test`, `completion`, `version` (`--version`) | Maintain | available |
 
 ## Rules
 

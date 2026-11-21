@@ -61,6 +61,7 @@ class BoundaryProfiles {
             std::vector<std::string> at_text;  // as the run log shows it
             std::vector<std::string> unit;     // " m" where at is a length coordinate
             uint16_t first = 0;  // slot of the first column
+            bool hold = true;    // faces beyond a table's range take its end values, else they are an error
         };
         std::string where;
         tabulated::Data data;

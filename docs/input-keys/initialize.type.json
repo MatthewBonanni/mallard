@@ -72,6 +72,7 @@
   "examples/vortex_ring_3d/input.toml",
   "examples/wedge/input.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tutorials/wedge/input.toml"
  ],
  "type": "string",
